@@ -1,0 +1,41 @@
+# 作業系統
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 編輯器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 日誌與暫存
+*.log
+tmp/
+temp/
+
+# 未來實作階段會加入的忽略項（先預留）
+node_modules/
+dist/
+build/
+target/
+*.pyc
+__pycache__/
+.env
+.env.local
+.env.*.local
+
+# Tauri
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# 資料庫
+*.db
+*.sqlite
+*.sqlite3
+
+# 秘密與憑證
+*.pem
+*.key
+secrets/
