@@ -1,5 +1,7 @@
 # Nous 認知 OS — 開源元件對應表（Component Map）
 
+> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](./06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](./07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
+
 > **目的**：把 12 個月藍圖中的每個自建模組，對應到社群已成熟的 OSS 專案，從「從零打造」轉為「整合 + 薄膠水層」，把時程壓縮到 3 個月。
 >
 > **策略分級**：
@@ -113,6 +115,8 @@ Claude Agent SDK（Python 後端 + TS 前端）作為唯一 agent 框架，其�
 | **Tauri v2 + React 19 模板** | kitlib/tauri-app-template | https://github.com/kitlib/tauri-app-template | - | - | 🔵 Reference |
 
 ### AI Chat UI 元件
+
+2026-09-16 更新：下列元件用於按需展開的對話與成果；不將現成聊天範本直接當作首頁。電子腦、Voice Session、GazeProvider、FocusResolver 與 Presentation Policy 為新的 Shell 整合範圍。視線候選、校正限制與官方來源見 [06 §4](./06_Ambient_Voice_Gaze_Experience.md#4-webcam-視線互動)，正式依賴待 PoC 後決定。
 
 | 元件職責 | OSS 專案 | GitHub | Stars | License | 策略 |
 |---|---|---|---|---|---|

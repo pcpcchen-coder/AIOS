@@ -1,10 +1,20 @@
 # Nous 認知 OS — 完整進度彙總與下一階段規劃
 
+> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](./06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](./07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
+
 > **文件目的**:將專案從啟動到目前的所有思考、決策、產出完整盤點,並基於已完成的基礎,發想下一階段該深化與拓展的方向。
 >
 > **當前里程碑**:4 份核心設計文件已完成,專案從「概念」進化到「可執行藍圖」,準備進入「實作啟動」階段。
 
 ---
+
+## 2026-09-16 最新增補
+
+- **新產品基準**：電子腦動態桌布、無 App、語音優先、webcam 視線指向、按需成果；規格見 [06](./06_Ambient_Voice_Gaze_Experience.md)。
+- **已完成文件**：資料契約、prompt、8 個工作批次、可手算案例與硬體驗收，見 [07](./07_Ambient_Implementation_and_Acceptance.md)。
+- **尚未完成實作**：無可執行桌面、語音、視線或 Agent 端到端測試；下文的進度與月份屬原始設計快照。
+- **下一步**：先實作 PR-01–02 的電子腦與呈現政策，再完成 G1 真實語音任務及 G2 視線驗證。
+- **決策修正**：語音不再延後；常駐 Dashboard／技能側欄改為按需 Surface；原 12 週時程需重新估工。
 
 ## Part 1|從啟動到現在的完整軌跡
 
@@ -107,8 +117,8 @@
 
 **模組 E:Shell / 人機介面**
 - Tauri 2.x(3-10MB vs Electron 的 100MB+)
-- 工作面板 Dashboard 設計:Command Bar + Knowledge Panel + Agent Monitor + Conversation Stream
-- Extended thinking 可摺疊展示
+- 電子腦待機＋按需成果；Command Bar、Knowledge、Agent 進度與對話都依需求叫出
+- 語音表達需求＋webcam 校正後的區塊指向；以語音確認動作
 - TipTap(富文字)+ tldraw(畫布)
 
 **模組 F:身份與安全**
@@ -291,9 +301,9 @@ Month 3: Polish ───── UX 打磨,Alpha 釋出
 **Week 12 — 發布**:文件 + Landing page + Blog + Discord + **Private Alpha(5-10 人)**
 
 #### 3.5 3 個月 vs 12 個月取捨(15 項功能決策)
-砍掉:三層記憶自建、知識圖譜自建、文件解析自建、Chat UI 自建、Tauri shell 自建、MCP connectors 自寫、觀測儀表板自建、Temporal.io、語音、雲端同步、行動端、Plugin marketplace、商業化準備
+砍掉:三層記憶自建、知識圖譜自建、文件解析自建、Chat UI 自建、Tauri shell 自建、MCP connectors 自寫、觀測儀表板自建、Temporal.io、雲端同步、行動端、Plugin marketplace、商業化準備
 
-保留:核心閉環(記憶 + 知識 + Agent + MCP + UI)
+保留:核心閉環(記憶 + 知識 + Agent + MCP + UI)。2026-09-16 新增電子腦待機、語音與 webcam 視線為 Alpha gate；以下舊週次需重新排程。
 
 #### 3.6 五個成功因子
 1. 嚴守「整合優先」紀律
@@ -559,7 +569,7 @@ Claude
 **建議產出**:
 - Token/Cost Dashboard 線框圖(5 個關鍵指標)
 - Agent Trace Visualizer 概念設計
-- 「AI 在想什麼」透明度介面(讓使用者看推理過程)
+- 「工作如何完成」按需檢查介面(顯示任務依據、來源、工具結果與執行摘要)
 
 ---
 

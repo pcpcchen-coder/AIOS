@@ -1,5 +1,7 @@
 # 以 Claude 為核心的認知作業系統：完整技術藍圖與開發時程
 
+> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](./06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](./07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
+
 **認知作業系統（Cognitive OS）是一個以 Claude 作為「認知核心」的個人知識與工作管理平台，它不操控硬體，而是讓 AI 操作知識、記憶、工作流與多 Agent 編排。** 這份藍圖基於對 30+ 個開源專案、學術論文與業界框架的深入研究，為兩人團隊設計了一條可在 12 個月內交付可展示產品的技術路徑。核心洞見是：當前市場上沒有任何產品提供完整的「OS 層抽象」——Claude Desktop 是 Shell、Notion 是檔案系統、Dify 是 Process Builder，但沒有人把它們整合成一個作業系統。這是一個 **$14.89B 市場**（2025 年）中尚未被佔據的架構層級。
 
 ---
@@ -214,17 +216,13 @@ Claude Code 本身就是用 TypeScript + React（Ink 框架）構建的，**~90%
 
 ### 介面設計
 
-Nous 的介面不是另一個聊天框——而是一個**工作面板**（Dashboard）：
+最新 Shell 形態為 **Ambient 電子腦桌面 + 暫態成果 Surface**，詳見 [06](./06_Ambient_Voice_Gaze_Experience.md)。
 
-**主要區域**：
-- **Command Bar**（類似 VS Code 的 Cmd+K）：自然語言為主要輸入，支援結構化命令
-- **Knowledge Panel**：知識庫瀏覽、搜尋、關聯圖視覺化
-- **Agent Monitor**：正在執行的 Agent 狀態、進度、可中斷性
-- **Conversation Stream**：與 Claude 的對話歷史，展示思考過程
-
-**思考過程呈現**：利用 Claude 的 `extended_thinking` API 功能，以可摺疊區塊展示 Claude 的推理過程。每個 Agent 步驟可暫停、修改、回滾。
-
-**多模態支援**（Phase 2）：TipTap 富文字編輯器處理文件撰寫；tldraw 畫布處理知識地圖與視覺化思考；語音輸入透過 Web Speech API 或 Whisper。
+- 待機只有電子腦動態視覺；使用者以語音表達需求，以 webcam 視線選定成果區塊，再說出動作。
+- Command Bar、Knowledge Panel、Agent Monitor、Conversation Stream 是可按需叫出的能力，不作常駐首頁。
+- 呈現由 Presentation Designer 提案，確定性 Presentation Policy 檢查需求來源與可見範圍。
+- 使用者詢問執行依據時，呈現任務步驟、工具結果、來源與摘要；技術 trace 保留於檢查功能。
+- 語音與 webcam 大區塊選取列入新版 Alpha gate；TipTap／tldraw 等編輯能力按任務叫出。
 
 ### 關鍵前端技術
 
@@ -560,7 +558,7 @@ Nous 的核心設計原則是**資料永不離開設備，除非使用者明確�
 
 **絕對必要的核心功能**（沒有這些不算 OS）：Claude 作為 kernel + 記憶系統（三層）+ 知識攝取與檢索 + 基本 Agent 編排 + MCP 工具整合 + 桌面 UI。
 
-**重要但可延後的功能**：知識圖譜視覺化、tldraw 畫布、A2A 協議支援、Temporal.io 整合、視覺化工作流編輯器、語音介面。
+**重要但可延後的功能**：知識圖譜視覺化、tldraw 畫布、A2A 協議支援、Temporal.io 整合、視覺化工作流編輯器。語音介面已於 2026-09-16 更新為 Alpha 必要項，見 06–07。
 
 **Post-v1 的功能**：雲端同步、多人協作、Plugin marketplace、移動端支援、企業功能。
 

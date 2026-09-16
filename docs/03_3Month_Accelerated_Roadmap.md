@@ -1,5 +1,7 @@
 # Nous 認知 OS — 3 個月加速開發時程
 
+> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](./06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](./07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
+
 > **核心哲學**：不重造輪子、不自建底層、專注整合與 UX。**12 個月 → 3 個月**的關鍵在於把每個模組都外包給社群已成熟的 OSS，我們只寫「薄膠水層」與差異化的使用者體驗。
 >
 > **團隊**：1 人類 + Claude Code（pair programmer）
@@ -8,7 +10,13 @@
 
 ---
 
-## 🎯 3 個月的總體節奏
+## 2026-09-16 排程修訂
+
+語音、按需呈現與 webcam 大區塊選取已成核心需求。實作依 [07](./07_Ambient_Implementation_and_Acceptance.md) 的 G0–G3 推進：殼與政策 → 真實語音任務 → 視線融合 → Alpha 驗收。優先削減知識圖譜 UI、白板及公開發布等非必要工作，以騰出硬體驗證時間。
+
+以下週級拆解保留供底層工作參考，不再作固定 12 週交付承諾；其中聊天、知識、成本與工作流畫面一律按需顯示。
+
+## 🎯 原 3 個月的總體節奏
 
 ```
 Month 1: Assemble ────── 把所有零件裝起來，跑通端到端 demo
@@ -44,6 +52,7 @@ Month 3: Polish ──────── UX 打磨、測試、打包、Alpha 釋
 - [ ] 撰寫 `CLAUDE.md`（架構決策、編碼慣例、禁止事項）
 - [ ] Docker Compose 啟動 Letta + LightRAG + Langfuse 三個服務
 - [ ] 最基本的 Claude API 對話能跑起來（TS SDK）
+- [ ] 新版優先項：Ambient 電子腦 Shell、狀態事件與 Presentation Policy（07 PR-01–02）
 
 **Nice-to-have**：
 - GitHub Actions CI（lint / test）
@@ -172,7 +181,7 @@ Month 3: Polish ──────── UX 打磨、測試、打包、Alpha 釋
 ### Week 7 — 知識 UI 與個人化工作流
 
 **Must-have 交付物**：
-- [ ] Knowledge Panel 完整版：搜尋、篩選、預覽、刪除
+- [ ] 按需 Knowledge Surface：搜尋、篩選、預覽、刪除，關閉後回電子腦
 - [ ] LightRAG 知識圖譜視覺化（它自帶 Web UI,用 iframe 或重繪）
 - [ ] 個人 vs 工作知識庫分離（UI + SQLite namespace）
 - [ ] 背景攝取 daemon：監控資料夾自動索引
@@ -190,10 +199,10 @@ Month 3: Polish ──────── UX 打磨、測試、打包、Alpha 釋
 
 **Must-have 交付物**：
 - [ ] Langfuse 完整埋點：trace、token、成本、agent graph 視覺化
-- [ ] 系統內建 Token 儀表板（每日 / 每月 / 每個 Agent）
+- [ ] 按需查詢 Token／成本（每日 / 每月 / 每個 Agent），不常駐顯示
 - [ ] 長時任務持久化：SQLite checkpoint 機制（不上 Temporal）
 - [ ] 對話可回放 / 編輯 / 從任意點重試
-- [ ] Extended thinking 可摺疊顯示
+- [ ] 按需顯示任務依據、來源與執行摘要
 
 **參考整合點**：
 - Langfuse：https://github.com/langfuse/langfuse
@@ -224,7 +233,8 @@ Month 3: Polish ──────── UX 打磨、測試、打包、Alpha 釋
 
 **Nice-to-have**：
 - tldraw 白板整合（知識地圖）
-- 語音輸入（Web Speech API）
+
+語音已移至新版 G1 必做：喚醒、STT、TTS、打斷與備援，不再列入本週 Nice-to-have。
 
 **參考整合點**：
 - TipTap：https://github.com/ueberdosis/tiptap
@@ -311,7 +321,9 @@ Month 3: Polish ──────── UX 打磨、測試、打包、Alpha 釋
 | 觀測儀表板自建 | ✅ | ❌ 用 Langfuse | 省 2-3 週 |
 | Temporal.io 整合 | Phase 2 引入 | ❌ 砍掉,用 SQLite checkpoint | 省 2 週 |
 | tldraw 白板 | ✅ | 🟡 Nice-to-have | 非核心 |
-| 語音介面 | ✅ | ❌ Month 4+ | 非核心 |
+| 語音介面 | ✅ | ✅ 新版 G1 必做 | 主要互動通道 |
+| webcam 視線選取 | 未納入原時程 | ✅ 新版 G2 驗證大區塊 | 接替核心流程的滑鼠指向 |
+| 電子腦＋按需呈現 | 未納入原時程 | ✅ 新版 G0 必做 | 預設產品體驗 |
 | 雲端同步 | ✅ | ❌ Month 4+ | 非核心 |
 | 行動端 | ✅ | ❌ Month 6+ | 非核心 |
 | Plugin marketplace | ✅ | ❌ Month 6+ | 非核心 |
