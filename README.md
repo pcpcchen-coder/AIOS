@@ -42,7 +42,7 @@
 
 ## 專案狀態
 
-🟡 **設計階段（Pre-Alpha）** — Repo 目前是設計文件；2026-09-16 已補充互動規格，尚無可執行 Shell、語音或視線實作。
+🟡 **設計階段（Pre-Alpha）** — Repo 目前是設計文件；2026-09-16 補充互動規格，2026-10-07 完成匯總與生態更新（[08](./docs/08_Consolidation_and_Update_2026-10.md)）。尚無可執行 Shell、語音或視線實作。
 
 **已完成**：
 - ✅ 完整 12 個月技術藍圖（7 大模組架構）
@@ -52,25 +52,28 @@
 - ✅ 進度彙總與下一階段規劃
 - ✅ 電子腦桌面、無 App、語音＋視線互動規格
 - ✅ 開發批次、資料契約、Agent prompt 與可手算驗收案例（待實作驗證）
+- ✅ 2026-10 匯總：決策日誌 v2、生態變化影響、架構修正提案、gate 時程估計
+- ✅ `CLAUDE.md` v0.1 開發規則
 
 **進行中**：
+- 🚧 ADR-001 記憶層定案（Letta V1 server 已退役，見 08 §3.3）
+- 🚧 商標／網域查核、目標測試硬體清單
 - 🚧 敘事文件與定位聲明
-- 🚧 Week 1 PR 清單
-- 🚧 CLAUDE.md 開發者憲法
 
-**未來**：
+**未來**（估計，2026-10-12 開工、每週 20–25 小時；見 08 §6）：
+- ⏳ PR-00：monorepo、CI、Tauri 麥克風／攝影機權限 spike
 - ⏳ G0：電子腦 Shell 與按需呈現政策
 - ⏳ G1：真實語音 → Agent → 成果閉環
 - ⏳ G2：webcam 校正與看＋說操作
 - ⏳ G3：硬體、故障、效能驗收後邀請 Alpha 使用者
 
-原 3 個月路線保留作歷史參考；新增語音與視線工作依上述 gate 重新估工。
+原 3 個月路線保留作歷史參考。G3 估計落在 2027-01 下旬，G2 視線實測是最大變數；未過時以語音版 Alpha 先行。
 
 ---
 
 ## 文件導覽
 
-所有設計文件位於 [`docs/`](./docs) 目錄。**先讀 06–07 掌握最新產品方向**，再讀 01–05 的基礎設計與歷史規劃。
+所有設計文件位於 [`docs/`](./docs) 目錄。**先讀 08 掌握現況與修正，再讀 06–07 的最新產品規格**，最後依需要查閱 01–05。
 
 | # | 文件 | 內容 | 適合誰讀 |
 |---|---|---|---|
@@ -81,6 +84,7 @@
 | **05** | [進度彙總與規劃](./docs/05_Progress_and_Next_Steps.md) | 專案快照與最新需求增補 | 想加入專案者 |
 | **06** | [電子腦、語音與視線體驗](./docs/06_Ambient_Voice_Gaze_Experience.md) | 最新產品規格、狀態機、呈現政策與架構 | 產品與開發者 |
 | **07** | [開發與驗收計畫](./docs/07_Ambient_Implementation_and_Acceptance.md) | 目錄、契約、prompt、批次、驗收案例 | 實作者與驗收者 |
+| **08** | [2026-10 匯總與更新](./docs/08_Consolidation_and_Update_2026-10.md) | 現況、決策日誌 v2、生態變化、修正提案、新時程 | 所有人，先讀 |
 
 ---
 
@@ -98,17 +102,18 @@
 
 ## 技術棧（規劃中）
 
-- **Kernel**: Claude Opus / Sonnet 4.6（Anthropic）
-- **Memory Layer**: [Letta](https://github.com/letta-ai/letta)（MemGPT 官方後繼）
-- **Knowledge Layer**: [LightRAG](https://github.com/HKUDS/LightRAG)（雙層檢索 + 知識圖譜）
+- **Kernel**: Claude Opus 5.5（規劃）＋ Sonnet 系列（worker），型號經 Models API 取得、不寫死
+- **Memory Layer**: 提案改為本地 Markdown 記憶檔 + SQLite FTS5／sqlite-vec 索引；[Mem0](https://github.com/mem0ai/mem0) 備援（原選 Letta 的 V1 server 已退役，見 08）
+- **Knowledge Layer**: [LightRAG](https://github.com/HKUDS/LightRAG)（雙層檢索 + 知識圖譜；G1 後接入）
 - **Agent Framework**: [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)
 - **Desktop Shell**: [Tauri 2.x](https://github.com/tauri-apps/tauri) + React
-- **UI Components**: [assistant-ui](https://github.com/assistant-ui/assistant-ui) + [shadcn/ui](https://github.com/shadcn-ui/ui)（用於暫態成果／按需對話，不作常駐聊天首頁）
-- **Voice / Gaze**: 以 adapter 隔離實作；語音引擎與視線模型須經硬體 PoC，尚未鎖定
-- **Observability**: [Langfuse](https://github.com/langfuse/langfuse)
-- **Tool Protocol**: [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol)
+- **Result Surface**: 提案為 MCP Apps 相容 host（`ui://`、沙盒 iframe、CSP 預設拒絕）；[assistant-ui](https://github.com/assistant-ui/assistant-ui) + [shadcn/ui](https://github.com/shadcn-ui/ui) 只作按需元件
+- **Voice**: 候選 [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)（喚醒、VAD、ASR、TTS）+ [Breeze-ASR-25](https://huggingface.co/MediaTek-Research/Twister)（台灣華語），待 PoC
+- **Gaze**: 候選 MediaPipe Face Landmarker + 自建校正，待 PoC
+- **Observability**: 本地 OpenTelemetry；[Langfuse](https://github.com/langfuse/langfuse) 為可選匯出
+- **Tool Protocol**: [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol) 2026-07-28 規格（含 Apps、Tasks 擴充）
 
-完整清單見 [OSS 元件對應表](./docs/02_OSS_Component_Map.md)。
+選型演進見 [02 OSS 元件對應表](./docs/02_OSS_Component_Map.md) 與 [08 §5](./docs/08_Consolidation_and_Update_2026-10.md#5-更新後的元件對應只列差異)。
 
 ---
 

@@ -1,5 +1,7 @@
 # Nous 認知 OS — 開源元件對應表（Component Map）
 
+> **2026-10-07 更新**：Letta 主 repo 已轉為封存、V1 API server 退役；Langfuse 於 2026-01 被 ClickHouse 收購（維持 MIT）；新增語音與視線候選。修正提案見 [08 §4.5、§5](./08_Consolidation_and_Update_2026-10.md)。本文正文未改，採用前以 08 為準。
+
 > **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](./06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](./07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
 
 > **目的**：把 12 個月藍圖中的每個自建模組，對應到社群已成熟的 OSS 專案，從「從零打造」轉為「整合 + 薄膠水層」，把時程壓縮到 3 個月。
