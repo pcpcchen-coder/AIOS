@@ -1,0 +1,521 @@
+// 電子腦待機視覺：粒子與神經連線組成的雙半球腦，緩慢呼吸與旋轉。
+// 光脈衝只由真實事件觸發（交辦、步驟開始／完成、串流輸出、成功、失敗），
+// 不用循環動畫假裝任務仍在推進。
+
+export type PulseKind = "submit" | "step" | "stream" | "stepDone" | "success" | "error";
+
+export interface BrainVisualState {
+  listening: boolean;
+  /** 有任務正在執行（真實任務狀態）。 */
+  working: boolean;
+  layout: "center" | "top";
+  /** 前景任務的真實完成比例 0–1；未知時為 null，不畫進度環。 */
+  progress: number | null;
+}
+
+interface Node3 {
+  x: number;
+  y: number;
+  z: number;
+  /** 0 左半球、1 右半球、2 小腦、3 腦幹。 */
+  group: number;
+  inner: boolean;
+}
+
+interface Part {
+  group: number;
+  c: readonly [number, number, number];
+  r: readonly [number, number, number];
+  count: number;
+  fold: number;
+}
+
+/** 腦的組成：兩個大腦半球（含顳葉）、小腦與腦幹。z 為前（+）後（−）。 */
+const PARTS: readonly Part[] = [
+  { group: 0, c: [-0.36, 0.1, 0], r: [0.39, 0.6, 0.95], count: 300, fold: 0.07 },
+  { group: 1, c: [0.36, 0.1, 0], r: [0.39, 0.6, 0.95], count: 300, fold: 0.07 },
+  { group: 0, c: [-0.42, -0.3, 0.15], r: [0.3, 0.3, 0.6], count: 80, fold: 0.05 },
+  { group: 1, c: [0.42, -0.3, 0.15], r: [0.3, 0.3, 0.6], count: 80, fold: 0.05 },
+  { group: 2, c: [0, -0.5, -0.68], r: [0.5, 0.24, 0.3], count: 110, fold: 0.03 },
+  { group: 3, c: [0, -0.78, -0.32], r: [0.13, 0.32, 0.13], count: 40, fold: 0 },
+];
+
+function insideEllipsoid(x: number, y: number, z: number, p: Part): boolean {
+  return ((x - p.c[0]) / p.r[0]) ** 2 + ((y - p.c[1]) / p.r[1]) ** 2 + ((z - p.c[2]) / p.r[2]) ** 2 < 0.97;
+}
+
+interface Pulse {
+  path: number[];
+  t: number;
+  speed: number;
+  color: RGB;
+}
+
+type RGB = readonly [number, number, number];
+
+const CYAN: RGB = [92, 225, 255];
+const VIOLET: RGB = [166, 139, 255];
+const MINT: RGB = [92, 242, 176];
+const AMBER: RGB = [255, 179, 92];
+
+const INNER_PER_HEMISPHERE = 30;
+/** 小腦偏紫、腦幹偏青；半球依左右漸層（未列者）。 */
+const GROUP_COLOR: Record<number, RGB | undefined> = { 2: mix(CYAN, VIOLET, 0.8), 3: CYAN };
+/** 從左前上方的 3/4 角度觀看，左右擺動幅度。 */
+const YAW_BASE = 1.95;
+const YAW_SWING = 0.5;
+const PITCH = -0.5;
+/** 腦形本身比外圈光環略小；放大以填滿原本的半徑。 */
+const SHAPE_SCALE = 1.18;
+const NEIGHBORS = 3;
+const FRAME_MS = 1000 / 30;
+const MAX_PULSES = 70;
+
+/** 與 CSS 共用的版面參數：中心高度比例與半徑（相對於 min(寬, 高)）。 */
+export const LAYOUT = {
+  center: { cy: 0.47, r: 0.2 },
+  top: { cy: 0.12, r: 0.07 },
+} as const;
+
+export class Brain {
+  private ctx: CanvasRenderingContext2D;
+  private nodes: Node3[] = [];
+  private edges: [number, number][] = [];
+  private adjacency: number[][] = [];
+  private outerNodes: number[] = [];
+  private pulses: Pulse[] = [];
+  private projected = new Float32Array(0);
+  private sprite: HTMLCanvasElement;
+
+  private state: BrainVisualState = { listening: false, working: false, layout: "center", progress: null };
+  private energy = 0.35;
+  private listenLevel = 0;
+  private yaw = 0;
+  private swing = 0;
+  private time = 0;
+  private tint: { color: RGB; strength: number } = { color: CYAN, strength: 0 };
+  private cx = 0;
+  private cy = 0;
+  private radius = 0;
+  private shownProgress = 0;
+
+  private width = 0;
+  private height = 0;
+  private lastFrame = 0;
+  private raf = 0;
+  private readonly reducedMotion: MediaQueryList;
+
+  constructor(private readonly canvas: HTMLCanvasElement) {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("canvas 2D 不可用");
+    this.ctx = ctx;
+    this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    this.sprite = makeGlowSprite();
+    this.buildBrain();
+    this.resize();
+    const target = this.target();
+    this.cx = target.cx;
+    this.cy = target.cy;
+    this.radius = target.r;
+    window.addEventListener("resize", () => this.resize());
+  }
+
+  start(): void {
+    const loop = (now: number) => {
+      this.raf = requestAnimationFrame(loop);
+      const elapsed = now - this.lastFrame;
+      // 減少動態時降到約 10 FPS 且不旋轉。
+      const minFrame = this.reducedMotion.matches ? 100 : FRAME_MS;
+      if (elapsed < minFrame) return;
+      this.lastFrame = now;
+      this.step(Math.min(elapsed, 100) / 1000);
+      this.draw();
+    };
+    this.raf = requestAnimationFrame(loop);
+  }
+
+  stop(): void {
+    cancelAnimationFrame(this.raf);
+  }
+
+  setState(state: BrainVisualState): void {
+    this.state = state;
+  }
+
+  /** 由真實事件觸發的光脈衝。 */
+  pulse(kind: PulseKind): void {
+    const spec: Record<PulseKind, { count: number; color: RGB }> = {
+      submit: { count: 12, color: CYAN },
+      step: { count: 4, color: CYAN },
+      stream: { count: 1, color: VIOLET },
+      stepDone: { count: 8, color: VIOLET },
+      success: { count: 26, color: MINT },
+      error: { count: 10, color: AMBER },
+    };
+    const { count, color } = spec[kind];
+    for (let i = 0; i < count; i++) this.spawnPulse(color);
+    if (kind === "success") this.tint = { color: MINT, strength: 1 };
+    if (kind === "error") this.tint = { color: AMBER, strength: 1 };
+  }
+
+  /** 點擊座標（CSS 像素）是否落在電子腦上。 */
+  hitTest(x: number, y: number): boolean {
+    return Math.hypot(x - this.cx, y - this.cy) < this.radius * 1.35;
+  }
+
+  private target(): { cx: number; cy: number; r: number } {
+    const l = LAYOUT[this.state.layout];
+    return { cx: this.width / 2, cy: this.height * l.cy, r: Math.min(this.width, this.height) * l.r };
+  }
+
+  private resize(): void {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.width = window.innerWidth;
+    this.height = window.innerHeight;
+    this.canvas.width = Math.round(this.width * dpr);
+    this.canvas.height = Math.round(this.height * dpr);
+    this.canvas.style.width = `${this.width}px`;
+    this.canvas.style.height = `${this.height}px`;
+    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  private buildBrain(): void {
+    const rand = mulberry32(20261019);
+    const golden = Math.PI * (3 - Math.sqrt(5));
+    PARTS.forEach((part, index) => {
+      for (let i = 0; i < part.count; i++) {
+        // 在單位球上均勻取點，再加上腦回皺褶後伸縮成該部位的橢球。
+        const y0 = 1 - (i / (part.count - 1)) * 2;
+        const ring = Math.sqrt(1 - y0 * y0);
+        const u = golden * i;
+        const v = Math.acos(y0);
+        const fold =
+          1 + part.fold * (Math.sin(11 * u + 4 * v) * Math.sin(7 * v) + 0.5 * Math.sin(17 * v + 3 * u)) + (rand() - 0.5) * 0.02;
+        const x = part.c[0] + Math.cos(u) * ring * part.r[0] * fold;
+        const y = part.c[1] + y0 * part.r[1] * fold;
+        const z = part.c[2] + Math.sin(u) * ring * part.r[2] * fold;
+        // 落在其他部位內部的點捨棄，只留下聯集的外表面。
+        if (PARTS.some((other, j) => j !== index && insideEllipsoid(x, y, z, other))) continue;
+        this.nodes.push({ x, y, z, group: part.group, inner: false });
+      }
+    });
+    for (const group of [0, 1]) {
+      const hemi = PARTS[group];
+      for (let i = 0; i < INNER_PER_HEMISPHERE; i++) {
+        const u = rand() * 2 - 1;
+        const t = rand() * Math.PI * 2;
+        const r = 0.2 + rand() * 0.5;
+        const s = Math.sqrt(1 - u * u);
+        this.nodes.push({
+          x: hemi.c[0] + Math.cos(t) * s * r * hemi.r[0],
+          y: hemi.c[1] + u * r * hemi.r[1],
+          z: hemi.c[2] + Math.sin(t) * s * r * hemi.r[2],
+          group,
+          inner: true,
+        });
+      }
+    }
+
+    // 置中並縮放到單位半徑。
+    const axes = ["x", "y", "z"] as const;
+    const mid = axes.map((a) => {
+      const values = this.nodes.map((n) => n[a]);
+      return (Math.max(...values) + Math.min(...values)) / 2;
+    });
+    const extent = Math.max(...this.nodes.map((n) => Math.hypot(n.x - mid[0], n.y - mid[1], n.z - mid[2])));
+    for (const n of this.nodes) {
+      n.x = (n.x - mid[0]) / extent;
+      n.y = (n.y - mid[1]) / extent;
+      n.z = (n.z - mid[2]) / extent;
+    }
+    this.outerNodes = this.nodes.flatMap((n, i) => (n.inner ? [] : [i]));
+
+    const n = this.nodes.length;
+    const seen = new Set<string>();
+    this.adjacency = Array.from({ length: n }, () => []);
+    for (let i = 0; i < n; i++) {
+      const a = this.nodes[i];
+      const dists: [number, number][] = [];
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        const b = this.nodes[j];
+        // 只在同一部位內相連，保留左右半球之間的縱裂與小腦輪廓。
+        if (a.group !== b.group) continue;
+        dists.push([j, (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2]);
+      }
+      dists.sort((p, q) => p[1] - q[1]);
+      for (const [j] of dists.slice(0, NEIGHBORS)) {
+        const key = i < j ? `${i}-${j}` : `${j}-${i}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        this.edges.push([i, j]);
+        this.adjacency[i].push(j);
+        this.adjacency[j].push(i);
+      }
+    }
+    this.projected = new Float32Array(n * 3);
+  }
+
+  private spawnPulse(color: RGB): void {
+    if (this.pulses.length >= MAX_PULSES) this.pulses.shift();
+    let node = this.outerNodes[Math.floor(Math.random() * this.outerNodes.length)];
+    const path = [node];
+    const length = 7 + Math.floor(Math.random() * 8);
+    for (let i = 0; i < length; i++) {
+      const next = this.adjacency[node];
+      if (next.length === 0) break;
+      node = next[Math.floor(Math.random() * next.length)];
+      path.push(node);
+    }
+    this.pulses.push({ path, t: 0, speed: 5 + Math.random() * 4, color });
+  }
+
+  private step(dt: number): void {
+    const reduced = this.reducedMotion.matches;
+    this.time += dt;
+    const targetEnergy = (this.state.working ? 0.8 : 0.35) + (this.state.listening ? 0.2 : 0);
+    this.energy += (targetEnergy - this.energy) * Math.min(1, dt * 2.5);
+    this.listenLevel += ((this.state.listening ? 1 : 0) - this.listenLevel) * Math.min(1, dt * 6);
+    // 左右緩慢擺動（而非整圈旋轉），讓兩個半球與中間的縱裂保持可見。
+    if (!reduced) this.swing += dt * (0.12 + 0.35 * this.energy);
+    this.yaw = YAW_BASE + YAW_SWING * Math.sin(this.swing);
+    this.tint.strength = Math.max(0, this.tint.strength - dt * 0.45);
+
+    const target = this.target();
+    const k = reduced ? 1 : Math.min(1, dt * 5);
+    this.cx += (target.cx - this.cx) * k;
+    this.cy += (target.cy - this.cy) * k;
+    this.radius += (target.r - this.radius) * k;
+
+    if (this.state.progress !== null) {
+      this.shownProgress += (this.state.progress - this.shownProgress) * (reduced ? 1 : Math.min(1, dt * 4));
+    } else {
+      this.shownProgress = 0;
+    }
+
+    for (const p of this.pulses) p.t += dt * (reduced ? 30 : p.speed);
+    this.pulses = this.pulses.filter((p) => p.t < p.path.length - 1);
+  }
+
+  private draw(): void {
+    const { ctx, width, height } = this;
+    ctx.clearRect(0, 0, width, height);
+    const reduced = this.reducedMotion.matches;
+    const breath = reduced ? 1 : 1 + 0.018 * Math.sin(this.time * 0.9);
+    const R = this.radius * breath;
+    const bright = 0.55 + 0.6 * this.energy;
+
+    // 中心光暈
+    const glow = ctx.createRadialGradient(this.cx, this.cy, 0, this.cx, this.cy, R * 1.9);
+    glow.addColorStop(0, rgba(this.tinted(VIOLET), 0.16 * bright));
+    glow.addColorStop(0.45, rgba(this.tinted(CYAN), 0.06 * bright));
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(this.cx - R * 2, this.cy - R * 2, R * 4, R * 4);
+
+    this.drawOrbits(R, bright);
+    this.project(R);
+    ctx.globalCompositeOperation = "lighter";
+    this.drawEdges(bright);
+    this.drawNodes(R, bright);
+    this.drawPulses(R);
+    ctx.globalCompositeOperation = "source-over";
+    this.drawRings(R);
+  }
+
+  private project(R: number): void {
+    const cosY = Math.cos(this.yaw);
+    const sinY = Math.sin(this.yaw);
+    const pitch = PITCH;
+    const cosX = Math.cos(pitch);
+    const sinX = Math.sin(pitch);
+    const f = 3.4;
+    const out = this.projected;
+    for (let i = 0; i < this.nodes.length; i++) {
+      const p = this.nodes[i];
+      const x1 = p.x * cosY + p.z * sinY;
+      const z1 = -p.x * sinY + p.z * cosY;
+      const y2 = p.y * cosX - z1 * sinX;
+      const z2 = p.y * sinX + z1 * cosX;
+      const s = f / (f + z2);
+      out[i * 3] = this.cx + x1 * R * s * SHAPE_SCALE;
+      out[i * 3 + 1] = this.cy - y2 * R * s * SHAPE_SCALE;
+      out[i * 3 + 2] = z2; // -1（近）… 1（遠）
+    }
+  }
+
+  private depthAlpha(z: number): number {
+    return Math.max(0.08, Math.min(1, 0.62 - z * 0.5));
+  }
+
+  private drawEdges(bright: number): void {
+    const { ctx, projected: p } = this;
+    const buckets: [number, number][][] = [[], [], [], []];
+    for (const edge of this.edges) {
+      const z = (p[edge[0] * 3 + 2] + p[edge[1] * 3 + 2]) / 2;
+      const b = Math.min(3, Math.max(0, Math.floor((z + 1.2) / 0.6)));
+      buckets[b].push(edge);
+    }
+    ctx.lineWidth = 0.7;
+    buckets.forEach((edges, b) => {
+      const z = -0.9 + b * 0.6;
+      ctx.strokeStyle = rgba(this.tinted(CYAN), this.depthAlpha(z) * 0.4 * bright);
+      ctx.beginPath();
+      for (const [i, j] of edges) {
+        ctx.moveTo(p[i * 3], p[i * 3 + 1]);
+        ctx.lineTo(p[j * 3], p[j * 3 + 1]);
+      }
+      ctx.stroke();
+    });
+  }
+
+  private drawNodes(R: number, bright: number): void {
+    const { ctx, projected: p } = this;
+    const size = Math.max(0.6, R / 140);
+    for (let i = 0; i < this.nodes.length; i++) {
+      const z = p[i * 3 + 2];
+      const a = this.depthAlpha(z) * bright;
+      const node = this.nodes[i];
+      const color = node.inner ? VIOLET : GROUP_COLOR[node.group] ?? mix(CYAN, VIOLET, (node.x + 1) / 2);
+      ctx.fillStyle = rgba(this.tinted(color), Math.min(1, a));
+      const r = size * (node.inner ? 0.9 : 1.2) * (1.3 - z * 0.4);
+      ctx.fillRect(p[i * 3] - r / 2, p[i * 3 + 1] - r / 2, r, r);
+      if (z < -0.55 && !node.inner && i % 4 === 0) {
+        const g = size * 7;
+        ctx.globalAlpha = 0.25 * a;
+        ctx.drawImage(this.sprite, p[i * 3] - g / 2, p[i * 3 + 1] - g / 2, g, g);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  private drawPulses(R: number): void {
+    const { ctx, projected: p } = this;
+    const g = Math.max(6, R / 9);
+    for (const pulse of this.pulses) {
+      const seg = Math.floor(pulse.t);
+      const frac = pulse.t - seg;
+      const a = pulse.path[seg];
+      const b = pulse.path[seg + 1];
+      const x = p[a * 3] + (p[b * 3] - p[a * 3]) * frac;
+      const y = p[a * 3 + 1] + (p[b * 3 + 1] - p[a * 3 + 1]) * frac;
+      const fade = 1 - pulse.t / (pulse.path.length - 1);
+      ctx.strokeStyle = rgba(pulse.color, 0.55 * fade);
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(p[a * 3], p[a * 3 + 1]);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+      ctx.globalAlpha = 0.9 * fade;
+      ctx.drawImage(tintSprite(this.sprite, pulse.color), x - g / 2, y - g / 2, g, g);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  private drawOrbits(R: number, bright: number): void {
+    const { ctx } = this;
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 2; i++) {
+      ctx.save();
+      ctx.rotate((i === 0 ? 0.35 : -0.5) + (this.reducedMotion.matches ? 0 : this.time * (i === 0 ? 0.03 : -0.02)));
+      ctx.strokeStyle = rgba(i === 0 ? CYAN : VIOLET, 0.09 * bright);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, R * 1.62, R * 0.42, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  private drawRings(R: number): void {
+    const { ctx } = this;
+    // 聆聽光環
+    if (this.listenLevel > 0.01) {
+      ctx.strokeStyle = rgba(CYAN, 0.45 * this.listenLevel);
+      ctx.lineWidth = 2;
+      ctx.shadowColor = rgba(CYAN, 0.8 * this.listenLevel);
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, R * 1.32, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+    // 前景任務的真實進度環（done / total）
+    if (this.state.progress !== null) {
+      const rr = R * 1.45;
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, rr, 0, Math.PI * 2);
+      ctx.stroke();
+      if (this.shownProgress > 0.001) {
+        const grad = ctx.createLinearGradient(this.cx - rr, this.cy - rr, this.cx + rr, this.cy + rr);
+        grad.addColorStop(0, rgba(CYAN, 0.95));
+        grad.addColorStop(1, rgba(VIOLET, 0.95));
+        ctx.strokeStyle = grad;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, rr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * this.shownProgress);
+        ctx.stroke();
+      }
+      ctx.lineCap = "butt";
+    }
+  }
+
+  private tinted(color: RGB): RGB {
+    return this.tint.strength > 0 ? mix(color, this.tint.color, this.tint.strength * 0.7) : color;
+  }
+}
+
+function mix(a: RGB, b: RGB, t: number): RGB {
+  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+}
+
+function rgba(c: RGB, a: number): string {
+  return `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a.toFixed(3)})`;
+}
+
+function makeGlowSprite(): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = c.height = 64;
+  const g = c.getContext("2d")!;
+  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grad.addColorStop(0, "rgba(255,255,255,1)");
+  grad.addColorStop(0.25, "rgba(200,240,255,0.6)");
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  return c;
+}
+
+const tintCache = new Map<string, HTMLCanvasElement>();
+function tintSprite(base: HTMLCanvasElement, color: RGB): HTMLCanvasElement {
+  const key = color.join(",");
+  let c = tintCache.get(key);
+  if (!c) {
+    c = document.createElement("canvas");
+    c.width = c.height = base.width;
+    const g = c.getContext("2d")!;
+    g.drawImage(base, 0, 0);
+    g.globalCompositeOperation = "source-in";
+    g.fillStyle = rgba(color, 1);
+    g.fillRect(0, 0, c.width, c.height);
+    g.globalCompositeOperation = "destination-over";
+    g.drawImage(base, 0, 0);
+    tintCache.set(key, c);
+  }
+  return c;
+}
+
+function mulberry32(seed: number): () => number {
+  let a = seed;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}

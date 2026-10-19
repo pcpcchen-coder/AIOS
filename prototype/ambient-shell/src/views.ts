@@ -1,0 +1,275 @@
+import DOMPurify from "dompurify";
+import { marked } from "marked";
+import { computeProgress, isActive, sortForProgress, summarize } from "../shared/progress.ts";
+import type { Artifact, Task, TaskStep } from "../shared/types.ts";
+import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
+
+export interface ViewActions {
+  cancel(taskId: string): void;
+  retry(taskId: string): void;
+  openArtifact(taskId: string, artifactId: string): void;
+  showProgress(): void;
+  dismiss(): void;
+}
+
+const MAX_LISTED = 8;
+
+type Child = Node | string | null | undefined | false;
+
+function h<K extends keyof HTMLElementTagNameMap>(
+  tag: K,
+  attrs: Record<string, string> = {},
+  ...children: Child[]
+): HTMLElementTagNameMap[K] {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  for (const c of children) if (c) el.append(c);
+  return el;
+}
+
+function button(label: string, onClick: () => void, variant = ""): HTMLButtonElement {
+  const b = h("button", { type: "button", class: `btn ${variant}`.trim() }, label);
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+/** 經過時間只顯示真實時鐘差，由外部每秒刷新。 */
+function elapsed(since: string | null, until: string | null): HTMLElement | null {
+  if (!since) return null;
+  const el = h("span", { class: "elapsed", "data-since": since, "data-until": until ?? "" });
+  refreshElapsed(el);
+  return el;
+}
+
+function refreshElapsed(el: HTMLElement): void {
+  const since = Date.parse(el.dataset.since ?? "");
+  const until = el.dataset.until ? Date.parse(el.dataset.until) : Date.now();
+  el.textContent = formatDuration(until - since);
+}
+
+export function refreshTimers(root: ParentNode): void {
+  root.querySelectorAll<HTMLElement>(".elapsed").forEach(refreshElapsed);
+}
+
+function surfaceShell(kind: string, ...children: Child[]): HTMLElement {
+  return h("section", { class: `surface surface--${kind}`, role: "region" }, ...children);
+}
+
+function footer(actions: ViewActions, ...extra: Child[]): HTMLElement {
+  return h(
+    "footer",
+    { class: "surface-footer" },
+    ...extra,
+    button("收起", actions.dismiss, "btn--ghost"),
+    h("span", { class: "hint" }, "也可以說／打「收起」，任務會在背景繼續"),
+  );
+}
+
+// ───────────── 進度 ─────────────
+
+export function renderProgress(tasks: Task[], message: string | null, actions: ViewActions): HTMLElement {
+  const sorted = sortForProgress(tasks);
+  const s = summarize(sorted);
+  const parts = [
+    s.active && `${s.active} 個進行中`,
+    s.succeeded && `${s.succeeded} 個已完成`,
+    s.failed && `${s.failed} 個失敗`,
+    s.cancelled && `${s.cancelled} 個已停止`,
+  ].filter(Boolean);
+
+  const header = h(
+    "header",
+    { class: "surface-header" },
+    h("p", { class: "eyebrow" }, "任務進度"),
+    h("h2", {}, sorted.length ? parts.join(" · ") : "目前沒有交辦的任務"),
+  );
+
+  const list = h("ol", { class: "task-list" });
+  for (const task of sorted.slice(0, MAX_LISTED)) list.append(renderTaskCard(task, actions));
+  const more =
+    sorted.length > MAX_LISTED ? h("p", { class: "muted" }, `另有 ${sorted.length - MAX_LISTED} 個較早的任務未列出`) : null;
+
+  return surfaceShell(
+    "progress",
+    header,
+    message && h("p", { class: "notice" }, message),
+    sorted.length ? list : h("p", { class: "muted" }, "說出或輸入一件事交辦給我，之後問「進度如何」就會看到這裡。"),
+    more,
+    footer(actions),
+  );
+}
+
+function renderTaskCard(task: Task, actions: ViewActions): HTMLElement {
+  const progress = computeProgress(task);
+  const head = h(
+    "div",
+    { class: "task-head" },
+    h("span", { class: `chip chip--${task.status}` }, TASK_STATUS_LABEL[task.status]),
+    task.mode === "mock" && h("span", { class: "chip chip--mock", title: "未呼叫任何模型" }, "模擬"),
+    h("h3", { class: "task-title" }, task.title),
+  );
+
+  const fill = h("div", { class: "bar-fill" });
+  const bar = h("div", { class: `bar ${progress.total === null ? "bar--unknown" : ""}`.trim() }, fill);
+  if (progress.percent !== null) fill.style.width = `${progress.percent}%`;
+
+  const ratio =
+    progress.total === null
+      ? task.status === "queued"
+        ? "等待開始"
+        : "規劃中：步驟數尚未確定"
+      : `${progress.done} / ${progress.total} 步 · ${progress.percent}%`;
+  const meta = h(
+    "div",
+    { class: "bar-meta" },
+    h("span", { class: "ratio" }, ratio),
+    h(
+      "span",
+      { class: "muted" },
+      `${formatClock(task.created_at)} 交辦 · ${isActive(task) ? "已花" : "共花"} `,
+      elapsed(task.created_at, task.finished_at),
+    ),
+  );
+
+  const steps = h("ol", { class: "steps" });
+  task.steps.forEach((step, i) => steps.append(renderStep(task.task_id, i, step)));
+
+  const buttons: HTMLElement[] = [];
+  if (task.status === "queued" || task.status === "running") {
+    buttons.push(button("停止任務", () => actions.cancel(task.task_id), "btn--danger"));
+  }
+  if (task.status === "succeeded" && task.artifact_id) {
+    const artifactId = task.artifact_id;
+    buttons.push(button("查看成果", () => actions.openArtifact(task.task_id, artifactId), "btn--primary"));
+  }
+  if (task.status === "failed" || task.status === "cancelled") {
+    buttons.push(button("重試", () => actions.retry(task.task_id)));
+  }
+
+  return h(
+    "li",
+    { class: `task-card task-card--${task.status}` },
+    head,
+    bar,
+    meta,
+    task.steps.length > 0 && steps,
+    task.error && h("p", { class: "error-text" }, task.error),
+    task.model && h("p", { class: "muted small" }, `模型：${task.model}`),
+    buttons.length > 0 && h("div", { class: "actions" }, ...buttons),
+  );
+}
+
+function renderStep(taskId: string, index: number, step: TaskStep): HTMLElement {
+  const chars = h("span", { "data-chars": `${taskId}:${index}` }, charsText(step));
+  const time = step.status === "running" || step.status === "done" ? elapsed(step.started_at, step.finished_at) : null;
+  return h(
+    "li",
+    { class: `step step--${step.status}` },
+    h("span", { class: "step-icon", "aria-hidden": "true" }, STEP_ICON[step.status]),
+    h("span", { class: "step-title" }, step.title),
+    h("span", { class: "step-meta" }, chars, time),
+  );
+}
+
+function charsText(step: TaskStep): string {
+  return step.status === "running" && step.output_chars !== null ? `已產生 ${formatCount(step.output_chars)} 字 · ` : "";
+}
+
+/**
+ * 進度面板的結構簽章：只有狀態、步驟或結果改變時才重建 DOM，
+ * 串流字數則用 updateLiveCounts 就地更新，避免按鈕在點擊途中被替換。
+ */
+export function progressStructureKey(tasks: Iterable<Task>): string {
+  return [...tasks]
+    .map((t) => `${t.task_id}:${t.status}:${t.plan_ready}:${t.steps.map((s) => s.status).join(",")}:${t.artifact_id ?? ""}`)
+    .sort()
+    .join("|");
+}
+
+export function updateLiveCounts(root: ParentNode, tasks: ReadonlyMap<string, Task>): void {
+  root.querySelectorAll<HTMLElement>("[data-chars]").forEach((el) => {
+    const [taskId, index] = (el.dataset.chars ?? "").split(":");
+    const step = tasks.get(taskId)?.steps[Number(index)];
+    if (step) el.textContent = charsText(step);
+  });
+}
+
+// ───────────── 成果 ─────────────
+
+DOMPurify.addHook("afterSanitizeAttributes", (node) => {
+  if (node instanceof HTMLAnchorElement) {
+    node.setAttribute("target", "_blank");
+    node.setAttribute("rel", "noopener noreferrer");
+  }
+});
+
+/** 成果是資料不是程式：轉成 HTML 後一律消毒，並禁止會發出網路請求或執行的標籤。 */
+export function renderMarkdown(markdown: string): string {
+  const html = marked.parse(markdown, { async: false, gfm: true });
+  return DOMPurify.sanitize(html, {
+    FORBID_TAGS: ["img", "picture", "video", "audio", "source", "iframe", "object", "embed", "form", "input", "style", "svg", "math"],
+    FORBID_ATTR: ["style", "srcset"],
+  });
+}
+
+export function renderArtifact(
+  task: Task,
+  artifact: Artifact | null,
+  loadError: string | null,
+  actions: ViewActions,
+): HTMLElement {
+  const metaParts = [
+    artifact ? `v${artifact.version}` : null,
+    task.finished_at ? `${formatClock(task.finished_at)} 完成` : null,
+    artifact?.mode === "mock" ? "模擬（未呼叫模型）" : artifact?.model ? `模型 ${artifact.model}` : null,
+  ].filter(Boolean);
+
+  const body = h("article", { class: "markdown" });
+  if (artifact) body.innerHTML = renderMarkdown(artifact.content);
+  else body.append(h("p", { class: loadError ? "error-text" : "muted" }, loadError ?? "載入成果中…"));
+
+  const notes: HTMLElement[] = [];
+  if (artifact && artifact.capability_gaps.length > 0) {
+    notes.push(listBlock("能力缺口／尚未完成", artifact.capability_gaps));
+  }
+  if (artifact && artifact.assumptions.length > 0) notes.push(listBlock("假設", artifact.assumptions));
+
+  return surfaceShell(
+    "artifact",
+    h(
+      "header",
+      { class: "surface-header" },
+      h("p", { class: "eyebrow" }, `成果${metaParts.length ? " · " + metaParts.join(" · ") : ""}`),
+      h("h2", {}, task.title),
+      artifact?.status === "partial" && h("p", { class: "notice" }, "這份成果不完整，請看下方的缺口說明。"),
+    ),
+    body,
+    ...notes,
+    footer(actions, button("看進度", actions.showProgress)),
+  );
+}
+
+function listBlock(title: string, items: string[]): HTMLElement {
+  return h("details", { class: "notes", open: "" }, h("summary", {}, title), h("ul", {}, ...items.map((i) => h("li", {}, i))));
+}
+
+// ───────────── 失敗與提示 ─────────────
+
+export function renderError(task: Task, actions: ViewActions): HTMLElement {
+  return surfaceShell(
+    "error",
+    h(
+      "header",
+      { class: "surface-header" },
+      h("p", { class: "eyebrow" }, "任務失敗"),
+      h("h2", {}, task.title),
+    ),
+    h("p", { class: "error-text" }, task.error ?? "未知原因"),
+    h("p", { class: "muted" }, "沒有產生成果。你可以重試，或改用其他說法交辦。"),
+    footer(actions, button("重試", () => actions.retry(task.task_id), "btn--primary"), button("看進度", actions.showProgress)),
+  );
+}
+
+export function renderNotice(message: string, actions: ViewActions): HTMLElement {
+  return surfaceShell("notice", h("p", { class: "notice-text" }, message), footer(actions));
+}

@@ -42,7 +42,7 @@
 
 ## 專案狀態
 
-🟡 **設計階段（Pre-Alpha）** — Repo 目前是設計文件；2026-09-16 補充互動規格，2026-10-07 完成匯總與生態更新（[08](./docs/08_Consolidation_and_Update_2026-10.md)）。尚無可執行 Shell、語音或視線實作。
+🟡 **設計階段（Pre-Alpha）** — Repo 目前是設計文件；2026-09-16 補充互動規格，2026-10-07 完成匯總與生態更新（[08](./docs/08_Consolidation_and_Update_2026-10.md)）。除獨立原型 [`prototype/ambient-shell`](./prototype/ambient-shell)（漂浮電子腦＋文字／按下說話交辦＋按需看進度，非 gate 驗收）外，尚無正式 Shell、喚醒語音或視線實作。
 
 **已完成**：
 - ✅ 完整 12 個月技術藍圖（7 大模組架構）
@@ -56,6 +56,7 @@
 - ✅ `CLAUDE.md` v0.1 開發規則
 
 **進行中**：
+- 🧪 獨立原型 `prototype/ambient-shell`：電子腦待機、交辦任務、問進度才呈現（Claude 執行或明示的模擬模式）
 - 🚧 ADR-001 記憶層定案（Letta V1 server 已退役，見 08 §3.3）
 - 🚧 商標／網域查核、目標測試硬體清單
 - 🚧 敘事文件與定位聲明
