@@ -1,4 +1,4 @@
-import type { Artifact, ServerEvent, Task } from "../shared/types.ts";
+import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -28,6 +28,11 @@ export const api = {
   retryTask: (taskId: string, request_id: string) =>
     call<Task>("POST", `/api/tasks/${taskId}/retry`, { request_id }),
   getArtifact: (artifactId: string) => call<Artifact>("GET", `/api/artifacts/${artifactId}`),
+  selectProvider: (provider: ExecutorMode) => call<SettingsView>("POST", "/api/settings/provider", { provider }),
+  chatgptLogin: (mode: "auto" | "new") => call<{ authorize_url: string }>("POST", "/api/auth/chatgpt/login", { mode }),
+  chatgptCancel: () => call<SettingsView>("POST", "/api/auth/chatgpt/cancel", {}),
+  chatgptLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/chatgpt/logout", {}),
+  chatgptWelcomeAck: () => call<SettingsView>("POST", "/api/auth/chatgpt/welcome-ack", {}),
 };
 
 export interface EventHandlers {

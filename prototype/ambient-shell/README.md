@@ -48,12 +48,21 @@ npm start                 # 建置前端並啟動本機核心
 - 「已產生 N 字」是串流實際收到的字元數；耗時是真實時鐘差。
 - 電子腦的光脈衝只在真實事件發生時出現（交辦、步驟開始／完成、收到串流輸出、成功、失敗）；沒有事件就沒有脈衝。
 
-## 兩種執行模式
+## AI 引擎（可切換）
 
-| 模式 | 條件 | 行為 |
+說或打「設定」叫出 AI 引擎設定；也可以直接說「改用 ChatGPT」「改用 Claude」「改用模擬模式」。選擇會保存，新交辦的任務用新引擎，已在跑的任務不受影響。
+
+![設定：AI 引擎](./docs/screenshots/06-settings.jpg)
+
+| 引擎 | 怎麼啟用 | 行為 |
 |---|---|---|
-| Claude | `.env` 有 `ANTHROPIC_API_KEY` | 規劃 → 逐步串流執行 → 彙整成 Markdown 成果。沒有任何工具（不上網、不讀寫檔、不寄信），需要這些能力的部分會在成果中列為「能力缺口」 |
-| 模擬 | 沒有 API key，或 `NOUS_EXECUTOR=mock` | 用計時器走固定步驟，**未呼叫任何模型**；畫面、卡片與成果都明確標示「模擬」，成果直接寫明未實際完成 |
+| Claude | `.env` 設 `ANTHROPIC_API_KEY` | 依 API 用量計費。規劃 → 逐步串流執行 → 彙整 |
+| ChatGPT | 設定畫面按 **Continue with ChatGPT**，在瀏覽器登入並同意 | 使用你的 **ChatGPT 方案額度**（不需要 API key）。走 OpenAI 官方的 [Sign in with ChatGPT](https://developers.openai.com/siwc) 開源／本機 app 流程，推論呼叫 `POST /v1/responses`（`store:false`、`stream:true`）。輸入列下方會顯示「使用 ChatGPT 方案 · 管理用量」 |
+| 模擬 | 預設（兩者都沒設定時）或手動選擇 | 用計時器走固定步驟，**未呼叫任何模型**；全程標示「模擬」 |
+
+Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒有工具（不上網、不讀寫檔、不寄信），需要這些能力的部分會在成果中列為「能力缺口」。
+
+**ChatGPT 登入細節**（依官方文件實作）：第一次以 `client_id=dynamic_agent_client` 動態註冊，之後沿用核發的 `client_id`；每台電腦一個 `ext_agent_host_id`（`urn:uuid:…`）；PKCE＋state＋nonce，回呼在 `http://127.0.0.1:1455/auth/callback`；驗證 ID token 簽章（JWKS）、issuer、audience、nonce，並確認取得 `chatgpt.tokens.use.direct` 才允許推論。access token 一小時到期，接近到期自動 refresh；登出時撤銷 refresh token。憑證存在 `~/.config/nous/chatgpt-credentials.json`（權限 0600），不放在 repo、不進瀏覽器儲存。用量上限、登入失效等錯誤會顯示「管理用量」或「開啟設定」。
 
 模型不寫死：有設定 `NOUS_MODEL` 就用它；否則在第一個任務時經 Models API 取最新的 `NOUS_MODEL_FAMILY`（預設 `opus`）系列。預設開啟伺服器端 refusal fallback（beta `server-side-fallback-2026-07-01`），所選模型不支援時設 `NOUS_FALLBACKS=off`。
 
@@ -89,7 +98,11 @@ prototype/ambient-shell/
 │   └── main.ts
 ├── server/                 # 本機核心（Node http + SSE）
 │   ├── runner.ts           # 任務排程、取消、重試、步驟回報
+│   ├── providers.ts        # 可切換的 AI 引擎（Claude／ChatGPT／模擬）
+│   ├── prompts.ts          # 兩個引擎共用的提示詞與計畫格式
 │   ├── claude-executor.ts  # Claude 規劃與串流執行
+│   ├── chatgpt-auth.ts     # Sign in with ChatGPT（OAuth、ID token 驗證、refresh、登出）
+│   ├── chatgpt-executor.ts # ChatGPT 方案用量：/v1/responses 串流
 │   ├── mock-executor.ts
 │   ├── store.ts            # JSON 持久化
 │   └── app.ts / http-guard.ts / config.ts / index.ts
@@ -100,7 +113,7 @@ prototype/ambient-shell/
 ## 測試
 
 ```bash
-npm test          # vitest：77 項
+npm test          # vitest：100 項
 npm run typecheck
 ```
 
@@ -108,7 +121,8 @@ npm run typecheck
 
 ## 已知限制
 
-- 未用真實 API key 跑過完整成功流程（開發環境沒有 key）；只驗證了真實 API 的 401 失敗路徑。
+- 未用真實 API key 或真實 ChatGPT 帳號跑過完整成功流程（開發環境沒有帳號）。已驗證：Claude 與 OpenAI 真實 API 的 401 失敗路徑；ChatGPT 登入流程以本機簽發的 ID token 和假端點做自動化測試；`auth.openai.com` 授權頁在開發環境被 Cloudflare 機器人驗證擋住，未能實際走完登入。
+- ChatGPT 方案用量目前是 OpenAI 的預覽功能，Plus 方案的五小時用量上限與其他 app 共用。
 - 語音用瀏覽器內建的 Web Speech API（雲端辨識）與 speechSynthesis（電腦語音），沒有本地喚醒詞與 VAD；念回覆時會暫停收音以免自我觸發，因此不能用語音插話打斷（請按 Esc）。語音模式只用模擬的語音 API 做過自動化測試，麥克風與喇叭未在實機驗證。
 - 沒有 webcam 視線、沒有 Tauri 桌面殼（瀏覽器頁面）、沒有記憶與知識層。
 - Agent 沒有工具：不能上網、讀寫檔案或對外動作；外部副作用與 Action Gate 尚未實作。

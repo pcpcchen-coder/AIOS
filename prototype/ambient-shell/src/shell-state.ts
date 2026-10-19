@@ -13,7 +13,7 @@ export type VisibilityReason =
   | "sensor_status"
   | "user_pinned";
 
-export type SurfaceKind = "progress" | "artifact" | "error" | "notice";
+export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings";
 
 export interface Surface {
   surface_id: string;
@@ -42,6 +42,7 @@ export type ShellEvent =
   | { type: "show.progress"; request_id: string; message?: string | null }
   | { type: "show.artifact"; request_id: string; task_id: string; artifact_id: string }
   | { type: "show.notice"; request_id: string; message: string }
+  | { type: "show.settings"; request_id: string; message?: string | null }
   | { type: "dismiss" };
 
 export const initialShell: ShellState = {
@@ -126,6 +127,13 @@ export function reduceShell(state: ShellState, event: ShellEvent): ShellState {
         listening: false,
         foreground_task_id: null,
         surface: surface("notice", event.request_id, { message: event.message }),
+      };
+    case "show.settings":
+      return {
+        mode: "presenting",
+        listening: false,
+        foreground_task_id: null,
+        surface: surface("settings", event.request_id, { message: event.message ?? null }),
       };
     case "dismiss":
       // 「收起」只關閉視圖；任務照常在背景執行。

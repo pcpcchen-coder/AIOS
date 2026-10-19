@@ -1,7 +1,7 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { computeProgress, isActive, sortForProgress, summarize } from "../shared/progress.ts";
-import type { Artifact, Task, TaskStep } from "../shared/types.ts";
+import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type SettingsView, type Task, type TaskStep } from "../shared/types.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -10,6 +10,12 @@ export interface ViewActions {
   openArtifact(taskId: string, artifactId: string): void;
   showProgress(): void;
   dismiss(): void;
+  openSettings(): void;
+  selectProvider(provider: ExecutorMode): void;
+  chatgptLogin(mode: "auto" | "new"): void;
+  chatgptCancel(): void;
+  chatgptLogout(): void;
+  ackWelcome(): void;
 }
 
 const MAX_LISTED = 8;
@@ -25,6 +31,10 @@ function h<K extends keyof HTMLElementTagNameMap>(
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
   for (const c of children) if (c) el.append(c);
   return el;
+}
+
+function usageLink(label = "管理用量", variant = ""): HTMLAnchorElement {
+  return h("a", { class: `btn ${variant}`.trim(), href: CHATGPT_USAGE_URL, target: "_blank", rel: "noopener noreferrer" }, label);
 }
 
 function button(label: string, onClick: () => void, variant = ""): HTMLButtonElement {
@@ -106,6 +116,7 @@ function renderTaskCard(task: Task, actions: ViewActions): HTMLElement {
     { class: "task-head" },
     h("span", { class: `chip chip--${task.status}` }, TASK_STATUS_LABEL[task.status]),
     task.mode === "mock" && h("span", { class: "chip chip--mock", title: "未呼叫任何模型" }, "模擬"),
+    task.mode === "chatgpt" && h("span", { class: "chip chip--chatgpt", title: "使用 ChatGPT 方案" }, "ChatGPT"),
     h("h3", { class: "task-title" }, task.title),
   );
 
@@ -221,7 +232,13 @@ export function renderArtifact(
   const metaParts = [
     artifact ? `v${artifact.version}` : null,
     task.finished_at ? `${formatClock(task.finished_at)} 完成` : null,
-    artifact?.mode === "mock" ? "模擬（未呼叫模型）" : artifact?.model ? `模型 ${artifact.model}` : null,
+    artifact?.mode === "mock"
+      ? "模擬（未呼叫模型）"
+      : artifact?.mode === "chatgpt"
+        ? `ChatGPT 方案 · ${artifact.model ?? ""}`
+        : artifact?.model
+          ? `模型 ${artifact.model}`
+          : null,
   ].filter(Boolean);
 
   const body = h("article", { class: "markdown" });
@@ -266,7 +283,81 @@ export function renderError(task: Task, actions: ViewActions): HTMLElement {
     ),
     h("p", { class: "error-text" }, task.error ?? "未知原因"),
     h("p", { class: "muted" }, "沒有產生成果。你可以重試，或改用其他說法交辦。"),
-    footer(actions, button("重試", () => actions.retry(task.task_id), "btn--primary"), button("看進度", actions.showProgress)),
+    footer(
+      actions,
+      task.error_action === "manage_chatgpt_usage" && usageLink("管理用量", "btn--primary"),
+      task.error_action === "chatgpt_sign_in" && button("開啟設定", actions.openSettings, "btn--primary"),
+      button("重試", () => actions.retry(task.task_id), task.error_action ? "" : "btn--primary"),
+      button("看進度", actions.showProgress),
+    ),
+  );
+}
+
+// ───────────── 設定（AI 引擎） ─────────────
+
+export function renderSettings(settings: SettingsView | null, message: string | null, actions: ViewActions): HTMLElement {
+  if (!settings) return surfaceShell("settings", h("p", { class: "muted" }, "正在讀取設定…"), footer(actions));
+  const g = settings.chatgpt;
+
+  const list = h("ul", { class: "provider-list" });
+  for (const p of settings.providers) {
+    const selected = p.id === settings.provider;
+    const item = h(
+      "li",
+      { class: `provider${selected ? " provider--selected" : ""}` },
+      h("div", { class: "provider-text" }, h("strong", {}, p.label), h("span", { class: "muted small" }, p.detail)),
+    );
+    if (selected) item.append(h("span", { class: "chip chip--running" }, "使用中"));
+    else if (p.available) item.append(button("改用", () => actions.selectProvider(p.id)));
+    else if (p.id === "chatgpt") item.append(button("Continue with ChatGPT", () => actions.chatgptLogin("auto"), "btn--primary"));
+    else item.append(h("span", { class: "muted small" }, "不可用"));
+    list.append(item);
+  }
+
+  const account: Child[] = [];
+  if (g.pending_login) {
+    account.push(
+      h("p", { class: "notice" }, "已在新分頁開啟 ChatGPT 登入。完成後會自動回到這裡。"),
+      button("取消登入", actions.chatgptCancel, "btn--ghost"),
+    );
+  } else if (g.signed_in) {
+    account.push(
+      h("p", { class: "small" }, `ChatGPT 帳號：${g.email ?? "已登入"}${g.plan_usage ? "" : "（未授權使用方案額度）"}`),
+      h(
+        "div",
+        { class: "actions" },
+        !g.plan_usage && button("重新授權", () => actions.chatgptLogin("auto"), "btn--primary"),
+        usageLink(),
+        button("使用其他帳號", () => actions.chatgptLogin("new")),
+        button("登出 ChatGPT", actions.chatgptLogout, "btn--ghost"),
+      ),
+    );
+  } else if (g.needs_reauth) {
+    account.push(button("重新登入 ChatGPT", () => actions.chatgptLogin("auto"), "btn--primary"));
+  }
+
+  // 第一次以 ChatGPT 方案使用時的說明（UI/UX guidelines）
+  const welcome =
+    settings.provider === "chatgpt" && g.signed_in && g.plan_usage && !g.welcome_ack
+      ? h(
+          "div",
+          { class: "welcome" },
+          h("strong", {}, "你正在使用 ChatGPT 方案"),
+          h("p", {}, "在 Nous 交辦的 AI 任務會使用你的 ChatGPT 方案額度。可以到 ChatGPT 設定管理用量。"),
+          button("知道了", actions.ackWelcome, "btn--primary"),
+        )
+      : null;
+
+  return surfaceShell(
+    "settings",
+    h("header", { class: "surface-header" }, h("p", { class: "eyebrow" }, "設定"), h("h2", {}, "AI 引擎")),
+    message && h("p", { class: "notice" }, message),
+    g.last_error && h("p", { class: "error-text" }, g.last_error),
+    welcome,
+    list,
+    account.length > 0 && h("div", { class: "account" }, ...account),
+    h("p", { class: "muted small" }, "新交辦的任務會用目前選擇的引擎；已在執行的任務不受影響。"),
+    footer(actions),
   );
 }
 

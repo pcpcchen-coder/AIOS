@@ -22,6 +22,9 @@ describe("classify", () => {
     ["關閉語音模式", "voice_off"],
     ["結束語音", "voice_off"],
     ["語音關掉", "voice_off"],
+    ["設定", "settings"],
+    ["切換引擎", "settings"],
+    ["登入 ChatGPT", "settings"],
   ])("「%s」→ %s", (text, kind) => {
     expect(classify(text).kind).toBe(kind);
   });
@@ -34,6 +37,15 @@ describe("classify", () => {
     "比較三個雲端儲存方案的價格與優缺點，並整理成表格給我看",
   ])("交辦內容「%s」不會被當成控制指令", (text) => {
     expect(classify(text)).toEqual({ kind: "task", text });
+  });
+
+  it.each([
+    ["改用 ChatGPT", "chatgpt"],
+    ["用chatgpt", "chatgpt"],
+    ["切換到 Claude", "claude"],
+    ["改用模擬模式", "mock"],
+  ])("「%s」→ 切換引擎 %s", (text, provider) => {
+    expect(classify(text)).toEqual({ kind: "use_provider", provider });
   });
 
   it("空白輸入", () => {

@@ -1,4 +1,4 @@
-import type { ExecutorMode, Task, TaskStep } from "../shared/types.ts";
+import type { ErrorAction, ExecutorMode, Task, TaskStep } from "../shared/types.ts";
 import type { TaskStore } from "./store.ts";
 
 /** 執行器透過 Reporter 回報真實進度；UI 上的步驟與百分比只來自這些呼叫。 */
@@ -21,16 +21,23 @@ export interface ExecutionResult {
 }
 
 export interface Executor {
+  /** 新任務會記錄並使用的引擎。 */
   readonly mode: ExecutorMode;
-  run(input: { title: string }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult>;
+  /** mode 為任務建立時記錄的引擎；可切換引擎的執行器依此分派。 */
+  run(input: { title: string; mode: ExecutorMode }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult>;
 }
 
-/** 帶有可直接顯示給使用者之說明的錯誤。 */
+/** 帶有可直接顯示給使用者之說明的錯誤；action 為畫面可提供的下一步。 */
 export class ExecutionError extends Error {
-  constructor(readonly userMessage: string, options?: { cause?: unknown }) {
+  constructor(
+    readonly userMessage: string,
+    options?: { cause?: unknown; action?: ErrorAction },
+  ) {
     super(userMessage, options);
     this.name = "ExecutionError";
+    this.action = options?.action ?? null;
   }
+  readonly action: ErrorAction | null;
 }
 
 export const PLANNING_STEP_TITLE = "規劃步驟";
@@ -167,7 +174,7 @@ export class TaskRunner {
     };
 
     try {
-      const result = await this.executor.run({ title: task.title }, reporter, controller.signal);
+      const result = await this.executor.run({ title: task.title, mode: task.mode }, reporter, controller.signal);
       if (controller.signal.aborted) {
         this.finishCancelled(taskId);
         return;
@@ -177,7 +184,7 @@ export class TaskRunner {
         task_id: taskId,
         title: latest.title,
         content: result.content,
-        mode: this.executor.mode,
+        mode: task.mode,
         model: result.model,
         assumptions: result.assumptions,
         capability_gaps: result.capability_gaps,
@@ -199,6 +206,7 @@ export class TaskRunner {
       this.store.update(taskId, (t) => {
         t.status = "failed";
         t.error = message;
+        t.error_action = err instanceof ExecutionError ? err.action : null;
         t.finished_at = now();
         for (const s of t.steps) if (s.status === "running") s.status = "failed";
       });

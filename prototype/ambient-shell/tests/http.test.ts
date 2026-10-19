@@ -1,7 +1,13 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildStatus, createApp } from "../server/app.ts";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createApp } from "../server/app.ts";
+import { ChatGPTAuth } from "../server/chatgpt-auth.ts";
+import { ChatGPTExecutor } from "../server/chatgpt-executor.ts";
+import { ProviderManager } from "../server/providers.ts";
 import { allowedHosts, checkRequest } from "../server/http-guard.ts";
 import { MockExecutor } from "../server/mock-executor.ts";
 import { TaskRunner } from "../server/runner.ts";
@@ -45,11 +51,23 @@ afterEach(async () => {
 async function start() {
   const port = await freePort();
   const store = new TaskStore(null);
-  const runner = new TaskRunner(store, new MockExecutor(5));
+  const dir = mkdtempSync(join(tmpdir(), "nous-http-"));
+  const auth = new ChatGPTAuth({ dir, callbackPort: 0, onChange: () => {} });
+  const providers = new ProviderManager({
+    claude: null,
+    chatgpt: new ChatGPTExecutor(auth, { model: null }),
+    mock: new MockExecutor(5),
+    auth,
+    dir,
+    preferred: "mock",
+    onChange: () => {},
+  });
+  const runner = new TaskRunner(store, providers);
   server = createApp({
     store,
     runner,
-    status: buildStatus("mock", "測試"),
+    settings: providers,
+    auth,
     port,
     devPort: 5173,
     distDir: null,
@@ -103,12 +121,30 @@ describe("HTTP API", () => {
       return JSON.parse(frame.replace(/^data: /, ""));
     };
 
-    expect(await next()).toMatchObject({ type: "hello", status: { mode: "mock" }, tasks: [] });
+    expect(await next()).toMatchObject({ type: "hello", settings: { provider: "mock" }, tasks: [] });
     await post("/api/tasks", { text: "測試事件", request_id: "req_test0002" });
     const first = await next();
     expect(first).toMatchObject({ type: "task.updated", task: { title: "測試事件", status: "queued" } });
     await runner.idle();
     controller.abort();
+  });
+
+  it("切換引擎：Claude 未設定 key 時拒絕，ChatGPT 未登入時任務誠實失敗並提示登入", async () => {
+    const { base, post, runner } = await start();
+    expect((await post("/api/settings/provider", { provider: "claude" })).status).toBe(409);
+    const ok = await post("/api/settings/provider", { provider: "chatgpt" });
+    expect(((await ok.json()) as { provider: string }).provider).toBe("chatgpt");
+
+    const res = await post("/api/tasks", { text: "寫一首詩", request_id: "req_test0003" });
+    const task = (await res.json()) as Task;
+    expect(task.mode).toBe("chatgpt");
+    await runner.idle();
+    const list = (await (await fetch(`${base}/api/tasks`)).json()) as Task[];
+    expect(list.find((t) => t.task_id === task.task_id)).toMatchObject({
+      status: "failed",
+      error_action: "chatgpt_sign_in",
+      artifact_id: null,
+    });
   });
 
   it("前端未建置時回傳說明而不是空白頁", async () => {

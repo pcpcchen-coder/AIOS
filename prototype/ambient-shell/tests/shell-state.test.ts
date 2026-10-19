@@ -68,6 +68,11 @@ describe("reduceShell", () => {
     expect(s.surface).toMatchObject({ kind: "progress", request_id: "req_cccccccc" });
   });
 
+  it("問設定時呈現設定 Surface", () => {
+    const s = run([{ type: "show.settings", request_id: "req_dddddddd", message: "請先登入" }]);
+    expect(s.surface).toMatchObject({ kind: "settings", visibility_reason: "user_request", message: "請先登入" });
+  });
+
   it("無關事件回傳同一個 state 物件", () => {
     expect(reduceShell(initialShell, { type: "input.close" })).toBe(initialShell);
     expect(reduceShell(initialShell, { type: "task.updated", task: succeeded })).toBe(initialShell);

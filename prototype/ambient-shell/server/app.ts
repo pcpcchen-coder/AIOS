@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
-import { SCHEMA_VERSION, type ServerEvent, type ServerStatus } from "../shared/types.ts";
+import type { ExecutorMode, ServerEvent, SettingsView } from "../shared/types.ts";
+import type { ChatGPTAuth } from "./chatgpt-auth.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
@@ -31,7 +32,11 @@ const PAGE_HEADERS = {
 export interface AppOptions {
   store: TaskStore;
   runner: TaskRunner;
-  status: ServerStatus;
+  settings: {
+    view(): SettingsView;
+    select(provider: ExecutorMode): void;
+  };
+  auth: ChatGPTAuth;
   port: number;
   devPort: number;
   distDir: string | null;
@@ -43,17 +48,17 @@ class HttpError extends Error {
   }
 }
 
-export function createApp(options: AppOptions): Server {
-  const { store, runner, status } = options;
+export function createApp(options: AppOptions): Server & { notifySettings(): void } {
+  const { store, runner, settings, auth } = options;
   const hosts = allowedHosts(options.port, options.devPort);
   const clients = new Set<ServerResponse>();
   let sequence = 0;
 
-  store.subscribe((task) => {
-    const event: ServerEvent = { type: "task.updated", sequence: ++sequence, task };
+  const broadcast = (event: ServerEvent) => {
     const frame = `data: ${JSON.stringify(event)}\n\n`;
     for (const res of clients) res.write(frame);
-  });
+  };
+  store.subscribe((task) => broadcast({ type: "task.updated", sequence: ++sequence, task }));
 
   const heartbeat = setInterval(() => {
     for (const res of clients) res.write(": keep-alive\n\n");
@@ -81,7 +86,38 @@ export function createApp(options: AppOptions): Server {
 
   async function handleApi(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
     const method = req.method ?? "GET";
-    if (method === "GET" && path === "/api/status") return sendJson(res, 200, status);
+    if (method === "GET" && path === "/api/settings") return sendJson(res, 200, settings.view());
+    if (method === "POST" && path === "/api/settings/provider") {
+      const body = await readJson(req);
+      const provider = body.provider;
+      if (provider !== "claude" && provider !== "chatgpt" && provider !== "mock") throw new HttpError(400, "unknown provider");
+      try {
+        settings.select(provider);
+      } catch (err) {
+        throw new HttpError(409, (err as Error).message);
+      }
+      return sendJson(res, 200, settings.view());
+    }
+    if (method === "POST" && path === "/api/auth/chatgpt/login") {
+      const body = await readJson(req);
+      const mode = body.mode === "new" ? "new" : "auto";
+      return sendJson(res, 200, await auth.startLogin(mode));
+    }
+    if (method === "POST" && path === "/api/auth/chatgpt/cancel") {
+      await readJson(req);
+      auth.cancelPending();
+      return sendJson(res, 200, settings.view());
+    }
+    if (method === "POST" && path === "/api/auth/chatgpt/logout") {
+      await readJson(req);
+      const result = await auth.logout();
+      return sendJson(res, 200, { ...result, settings: settings.view() });
+    }
+    if (method === "POST" && path === "/api/auth/chatgpt/welcome-ack") {
+      await readJson(req);
+      auth.ackWelcome();
+      return sendJson(res, 200, settings.view());
+    }
     if (method === "GET" && path === "/api/tasks") return sendJson(res, 200, store.list());
     if (method === "GET" && path === "/api/events") return openEvents(req, res);
 
@@ -123,17 +159,16 @@ export function createApp(options: AppOptions): Server {
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
     });
-    const hello: ServerEvent = { type: "hello", sequence: ++sequence, status, tasks: store.list() };
+    const hello: ServerEvent = { type: "hello", sequence: ++sequence, settings: settings.view(), tasks: store.list() };
     res.write(`data: ${JSON.stringify(hello)}\n\n`);
     clients.add(res);
     req.on("close", () => clients.delete(res));
   }
 
-  return server;
-}
-
-export function buildStatus(mode: ServerStatus["mode"], modeReason: string): ServerStatus {
-  return { schema_version: SCHEMA_VERSION, mode, mode_reason: modeReason };
+  return Object.assign(server, {
+    /** 設定或登入狀態改變時呼叫，推送給所有畫面。 */
+    notifySettings: () => broadcast({ type: "settings.updated", sequence: ++sequence, settings: settings.view() }),
+  });
 }
 
 function requestId(body: Record<string, unknown>): string {

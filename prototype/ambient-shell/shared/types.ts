@@ -15,8 +15,11 @@ export type TaskStatus =
 
 export type StepStatus = "pending" | "running" | "done" | "failed" | "cancelled";
 
-/** 執行器種類。mock 一律在 UI 標示為「模擬」。 */
-export type ExecutorMode = "claude" | "mock";
+/** AI 引擎（執行器）種類。mock 一律在 UI 標示為「模擬」。 */
+export type ExecutorMode = "claude" | "chatgpt" | "mock";
+
+/** 任務失敗時，畫面可提供的下一步。 */
+export type ErrorAction = "chatgpt_sign_in" | "manage_chatgpt_usage";
 
 export interface TaskStep {
   title: string;
@@ -44,6 +47,8 @@ export interface Task {
   updated_at: string;
   finished_at: string | null;
   error: string | null;
+  /** 失敗時建議的下一步（例如重新登入 ChatGPT、管理用量）。 */
+  error_action?: ErrorAction | null;
   artifact_id: string | null;
   /** 由哪個任務重試而來。 */
   retry_of: string | null;
@@ -65,13 +70,38 @@ export interface Artifact {
   created_at: string;
 }
 
-export interface ServerStatus {
+export interface ProviderInfo {
+  id: ExecutorMode;
+  label: string;
+  available: boolean;
+  /** 可用與否的說明，例如「未設定 ANTHROPIC_API_KEY」。 */
+  detail: string;
+}
+
+export interface ChatGPTAccountInfo {
+  signed_in: boolean;
+  email: string | null;
+  /** 是否取得 chatgpt.tokens.use.direct（用 ChatGPT 方案額度推論）。 */
+  plan_usage: boolean;
+  /** 登入已失效，需要重新登入。 */
+  needs_reauth: boolean;
+  /** 已看過「你正在使用 ChatGPT 方案」說明。 */
+  welcome_ack: boolean;
+  /** 已開啟瀏覽器登入頁，等待回呼。 */
+  pending_login: boolean;
+  last_error: string | null;
+}
+
+export interface SettingsView {
   schema_version: string;
-  mode: ExecutorMode;
-  /** mock 模式的原因（例如未設定 API key），會顯示給使用者。 */
-  mode_reason: string;
+  provider: ExecutorMode;
+  providers: ProviderInfo[];
+  chatgpt: ChatGPTAccountInfo;
 }
 
 export type ServerEvent =
-  | { type: "hello"; sequence: number; status: ServerStatus; tasks: Task[] }
-  | { type: "task.updated"; sequence: number; task: Task };
+  | { type: "hello"; sequence: number; settings: SettingsView; tasks: Task[] }
+  | { type: "task.updated"; sequence: number; task: Task }
+  | { type: "settings.updated"; sequence: number; settings: SettingsView };
+
+export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";

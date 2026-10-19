@@ -60,7 +60,7 @@ npm install
 
 看到 `found 0 vulnerabilities` 或類似結尾就完成了。
 
-## 4. 設定（選填 API key）
+## 4. 選擇 AI 引擎
 
 複製設定範本：
 
@@ -70,13 +70,16 @@ npm install
 | Windows PowerShell | `Copy-Item .env.example .env` |
 | Windows 命令提示字元 | `copy .env.example .env` |
 
-想讓 Claude 真的執行任務，用文字編輯器打開 `.env`，把這行填上你的 key（到 <https://console.anthropic.com> 申請，使用依量計費）：
+Nous 可以用三種引擎，之後隨時在畫面上說「設定」切換：
+
+- **ChatGPT（用你的 ChatGPT 方案，不需要 key）**：啟動後說或打「設定」，按 **Continue with ChatGPT**，在跳出的分頁登入 ChatGPT 並按同意。完成後回到 Nous 會自動切換成 ChatGPT，輸入列下方顯示「使用 ChatGPT 方案」。登入憑證存在 `~/.config/nous/`。
+- **Claude（API key，依用量計費）**：在 `.env` 填入 key（到 <https://console.anthropic.com> 申請）：
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-不填就是模擬模式：畫面左上角會顯示「模擬模式」，任務只是走流程，不會真的完成。
+- **模擬**：什麼都不設定時的預設。畫面左上角會顯示「模擬模式」，任務只是走流程，不會真的完成。
 
 `.env` 已被 git 排除，不會被上傳。
 
@@ -105,6 +108,7 @@ Nous 原型已啟動：http://localhost:8787
 | 輸入「進度如何」 | 列出所有任務的進度 |
 | 輸入「看結果」 | 打開最新完成的成果 |
 | 輸入「停止任務」 | 停止進行中的任務 |
+| 輸入「設定」／「改用 ChatGPT」 | 切換 AI 引擎、登入或登出 ChatGPT |
 | 輸入「收起」或按 Esc | 回到只有電子腦的畫面，任務在背景繼續 |
 | 麥克風按鈕 | 按下說話（第一次會先詢問是否同意使用瀏覽器的雲端語音辨識） |
 | 說或打「開啟語音模式」／按聲波按鈕 | 語音對話模式：直接開口交辦、問進度，它會用語音回覆；說「關閉語音模式」結束 |
@@ -121,9 +125,14 @@ Nous 原型已啟動：http://localhost:8787
 | 任務失敗顯示「API key 無效或未授權（401）」 | 檢查 `.env` 的 key 是否完整、沒有多餘空白，改完要重新 `npm start` |
 | 任務失敗顯示「超過 API 速率限制（429）」 | 稍等再按「重試」 |
 | 看不到麥克風按鈕 | 瀏覽器不支援語音辨識；請用 Chrome 或 Edge |
+| 按 Continue with ChatGPT 沒有開新分頁 | 瀏覽器擋了彈出視窗；允許 localhost 開彈出視窗後再按一次 |
+| ChatGPT 登入後顯示「沒有核發 client_id」或「未授權使用方案」 | 在同意頁面要允許使用 ChatGPT 方案；到設定按「重新授權」 |
+| ChatGPT 任務失敗「已達用量上限」 | 按「管理用量」到 ChatGPT 設定查看方案或 Nous 的上限 |
+| 公司網路要走 proxy，任務顯示「無法連線到 OpenAI API」 | 啟動時加上 `NODE_USE_ENV_PROXY=1`（例如 `NODE_USE_ENV_PROXY=1 npm start`），讓 Node 使用 `HTTPS_PROXY` 設定 |
 | 麥克風權限被拒 | 點網址列左側的鎖頭圖示，把麥克風改為「允許」後重新整理 |
 
 ## 8. 資料存放位置
 
 - 任務與成果：`prototype/ambient-shell/data/`（本機 JSON 檔，不會上傳）
+- ChatGPT 登入憑證與引擎選擇：`~/.config/nous/`（Windows 為 `C:\Users\你的帳號\.config\nous\`）。要完全移除 ChatGPT 連結：先在設定按「登出 ChatGPT」，再到 ChatGPT 設定中斷開 Nous
 - 想清空紀錄：先停止 `npm start`，刪除 `data` 資料夾，再重新啟動
