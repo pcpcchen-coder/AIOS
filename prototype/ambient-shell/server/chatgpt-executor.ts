@@ -1,6 +1,7 @@
 import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, SYSTEM_PROMPT } from "./prompts.ts";
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 import { RESOURCE, type ChatGPTAuth } from "./chatgpt-auth.ts";
+import type { ChatCapable, ChatMessage } from "./chat.ts";
 
 // 以使用者的 ChatGPT 方案額度執行任務：POST https://api.openai.com/v1/responses，
 // 依 SIWC 預覽限制一律 store:false、stream:true，系統指示放在 instructions。
@@ -17,7 +18,7 @@ interface StreamResult {
   incomplete: boolean;
 }
 
-export class ChatGPTExecutor implements Executor {
+export class ChatGPTExecutor implements Executor, ChatCapable {
   readonly mode = "chatgpt" as const;
   private readonly fetch: typeof fetch;
 
@@ -49,9 +50,12 @@ export class ChatGPTExecutor implements Executor {
     const served = new Set<string>();
 
     const planned = await this.stream(
-      model,
-      planPrompt(input.title),
-      { type: "json_schema", name: "nous_plan", schema: PLAN_SCHEMA, strict: true },
+      {
+        model,
+        instructions: SYSTEM_PROMPT,
+        input: [{ role: "user", content: planPrompt(input.title) }],
+        format: { type: "json_schema", name: "nous_plan", schema: PLAN_SCHEMA, strict: true },
+      },
       signal,
     );
     if (planned.model) served.add(planned.model);
@@ -65,7 +69,12 @@ export class ChatGPTExecutor implements Executor {
       reporter.stepStarted(i);
       let chars = 0;
       let lastReport = 0;
-      const result = await this.stream(model, stepPrompt(input.title, plan, outputs, i), null, signal, (delta) => {
+      const request = {
+        model,
+        instructions: SYSTEM_PROMPT,
+        input: [{ role: "user" as const, content: stepPrompt(input.title, plan, outputs, i) }],
+      };
+      const result = await this.stream(request, signal, (delta) => {
         chars += delta.length;
         const now = Date.now();
         if (now - lastReport >= 700) {
@@ -91,23 +100,32 @@ export class ChatGPTExecutor implements Executor {
     };
   }
 
+  /** 語音對話：串流回覆文字；歷史訊息每次完整送出（不使用 previous_response_id）。 */
+  async chat(
+    input: { system: string; messages: ChatMessage[] },
+    onDelta: (text: string) => void,
+    signal: AbortSignal,
+  ): Promise<{ model: string | null }> {
+    const model = await this.resolveModel(await this.auth.getAccessToken());
+    const result = await this.stream({ model, instructions: input.system, input: input.messages }, signal, onDelta);
+    return { model: result.model ?? model };
+  }
+
   /** 送出一個串流 Responses 請求，直到 response.completed（或錯誤）。 */
   private async stream(
-    model: string,
-    prompt: string,
-    format: Record<string, unknown> | null,
+    request: { model: string; instructions: string; input: ChatMessage[]; format?: Record<string, unknown> },
     signal: AbortSignal,
     onDelta?: (delta: string) => void,
   ): Promise<StreamResult> {
     const token = await this.auth.getAccessToken();
     const body: Record<string, unknown> = {
-      model,
-      instructions: SYSTEM_PROMPT,
-      input: [{ role: "user", content: prompt }],
+      model: request.model,
+      instructions: request.instructions,
+      input: request.input,
       store: false,
       stream: true,
     };
-    if (format) body.text = { format };
+    if (request.format) body.text = { format: request.format };
     let res: Response;
     try {
       res = await this.fetch(`${RESOURCE}/responses`, {

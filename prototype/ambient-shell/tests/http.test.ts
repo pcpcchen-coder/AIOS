@@ -68,6 +68,7 @@ async function start() {
     runner,
     settings: providers,
     auth,
+    chat: providers,
     port,
     devPort: 5173,
     distDir: null,
@@ -145,6 +146,20 @@ describe("HTTP API", () => {
       error_action: "chatgpt_sign_in",
       artifact_id: null,
     });
+  });
+
+  it("語音對話：串流回覆文字並以 done 結束（模擬引擎明示未接模型）", async () => {
+    const { post } = await start();
+    const res = await post("/api/chat", { request_id: "req_test0004", messages: [{ role: "user", content: "你好" }] });
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+    const events = (await res.text())
+      .split("\n\n")
+      .filter(Boolean)
+      .map((f) => JSON.parse(f.replace(/^data: /, "")));
+    const text = events.filter((e) => e.type === "delta").map((e) => e.text).join("");
+    expect(text).toContain("模擬模式");
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+    expect((await post("/api/chat", { request_id: "req_test0005", messages: [] })).status).toBe(400);
   });
 
   it("前端未建置時回傳說明而不是空白頁", async () => {

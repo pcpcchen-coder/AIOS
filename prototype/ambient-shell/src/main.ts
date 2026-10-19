@@ -1,7 +1,7 @@
 import "./style.css";
 import { computeProgress, isActive } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
-import { ApiError, api, newRequestId, subscribeEvents } from "./api.ts";
+import { ApiError, api, newRequestId, streamChat, subscribeEvents, type ChatTurn } from "./api.ts";
 import { Brain } from "./brain.ts";
 import { formatCount } from "./format.ts";
 import { classify } from "./intent.ts";
@@ -85,11 +85,20 @@ const VOICE_IDLE_MS = 90_000;
 const conversation = new VoiceConversation(
   {
     onUtterance: (text) => {
+      chatAbort?.abort(); // 新的一句話取代還在產生的回覆
+      chatAbort = null;
       showSubtitle(`你：${text}`);
       void handleCommand(text);
     },
     onInterim: (text) => showSubtitle(`你：${text}…`, true),
     onStateChange: renderVoiceState,
+    onBargeIn: () => {
+      // 使用者插話：停止念、也停止還在產生的回覆。
+      chatAbort?.abort();
+      chatAbort = null;
+      brain.pulse("step");
+    },
+    onSentenceSpoken: () => brain.pulse("stream"),
     onClosed: (reason) => {
       showSubtitle(reason);
       void speakText(reason);
@@ -98,6 +107,70 @@ const conversation = new VoiceConversation(
   { idleMs: VOICE_IDLE_MS },
 );
 let pendingConsent: ConsentKind = "push";
+
+// 對話記錄只存在這個頁面的記憶體中，不寫檔。
+const CHAT_HISTORY_LIMIT = 20;
+let chatHistory: ChatTurn[] = [];
+let chatAbort: AbortController | null = null;
+
+/** 語音對話：把使用者的話送給目前的 AI 引擎，邊收邊念；需要長時間工作時由 AI 交辦成任務。 */
+async function converse(text: string, requestId: string): Promise<void> {
+  chatAbort?.abort();
+  const controller = new AbortController();
+  chatAbort = controller;
+  chatHistory = [...chatHistory, { role: "user" as const, content: text }].slice(-CHAT_HISTORY_LIMIT);
+  while (chatHistory[0]?.role === "assistant") chatHistory.shift();
+  const reply = conversation.beginReply();
+  let answer = "";
+  showSubtitle("Nous：…", true);
+  try {
+    await streamChat(
+      chatHistory,
+      requestId,
+      (event) => {
+        if (controller.signal.aborted) return;
+        if (event.type === "delta") {
+          answer += event.text;
+          reply.push(event.text);
+          showSubtitle(`Nous：${answer}`, true);
+        } else if (event.type === "delegate") {
+          void delegateTask(event.title, requestId);
+        } else if (event.type === "error") {
+          answer = answer || event.message;
+          reply.push(event.message);
+          showSubtitle(`Nous：${event.message}`);
+        }
+      },
+      controller.signal,
+    );
+  } catch (err) {
+    if (!controller.signal.aborted) {
+      const message = `對話失敗：${(err as Error).message}`;
+      reply.push(message);
+      showSubtitle(message);
+    }
+  } finally {
+    reply.end();
+    if (chatAbort === controller) chatAbort = null;
+    if (answer) {
+      const content = controller.signal.aborted ? `${answer}……（被使用者打斷）` : answer;
+      chatHistory = [...chatHistory, { role: "assistant" as const, content }].slice(-CHAT_HISTORY_LIMIT);
+    }
+    if (!controller.signal.aborted) showSubtitle(answer ? `Nous：${answer}` : "Nous：（沒有回覆）");
+  }
+}
+
+/** AI 在對話中決定交辦的工作：建立背景任務並在電子腦下方顯示進度。 */
+async function delegateTask(title: string, requestId: string): Promise<void> {
+  try {
+    const task = await api.createTask(title, requestId);
+    if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
+    dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
+    dispatch({ type: "task.updated", task: tasks.get(task.task_id)! });
+  } catch (err) {
+    showSubtitle(`交辦失敗：${(err as Error).message}`);
+  }
+}
 
 /** 語音模式開啟時念出回覆並顯示字幕；文字模式下不出聲。 */
 function say(text: string): void {
@@ -117,7 +190,7 @@ function showSubtitle(text: string, sticky = false): void {
 const VOICE_STATE_LABEL: Record<ConversationState, string> = {
   off: "",
   listening: "● 語音模式 · 聆聽中",
-  speaking: "● 語音模式 · 回覆中",
+  speaking: "● 語音模式 · 回覆中（可直接插話）",
 };
 
 function renderVoiceState(state: ConversationState): void {
@@ -145,11 +218,13 @@ function enableVoiceMode(): void {
   voice.abort();
   dispatch({ type: "input.close" });
   conversation.start();
-  say("語音模式已開啟，請說。");
+  say("語音模式已開啟，直接跟我說話就好，我說話時你也可以打斷我。");
 }
 
 function disableVoiceMode(): void {
   if (!conversation.on) return;
+  chatAbort?.abort();
+  chatAbort = null;
   conversation.stop();
   showSubtitle("語音模式已關閉。");
 }
@@ -158,7 +233,7 @@ const CONSENT_TEXT: Record<ConsentKind, string> = {
   push:
     "語音辨識使用瀏覽器內建服務；在 Chrome／Edge 中，音訊會傳到瀏覽器供應商（例如 Google）的雲端辨識。只有在你按下麥克風時才收音，本系統不保存音訊。要啟用嗎？",
   continuous:
-    "語音模式開啟期間會持續收音，你說的話會傳到瀏覽器供應商（例如 Google）的雲端辨識，回覆會用電腦語音念出。說「關閉語音模式」、點右上角指示或 90 秒沒說話就會關閉。本系統不保存音訊。要開啟嗎？",
+    "語音模式是對話：開啟期間會持續收音（包含 Nous 說話時，才能讓你插話），你說的話會傳到瀏覽器供應商（例如 Google）的雲端辨識，並送到目前的 AI 引擎回答，回覆用電腦語音念出。建議戴耳機，插話會更準。說「關閉語音模式」、點右上角指示或 90 秒沒說話就會關閉。本系統不保存音訊。要開啟嗎？",
 };
 
 function askConsent(kind: ConsentKind): void {
@@ -328,7 +403,9 @@ async function handleCommand(text: string): Promise<void> {
       return;
     }
     case "task":
-      await submitTask(intent.text, requestId);
+      // 語音模式是對話：交給 AI 回答，需要時由 AI 自行交辦任務；文字輸入維持直接交辦。
+      if (conversation.on) await converse(intent.text, requestId);
+      else await submitTask(intent.text, requestId);
       return;
   }
 }

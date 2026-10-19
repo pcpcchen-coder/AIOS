@@ -35,6 +35,56 @@ export const api = {
   chatgptWelcomeAck: () => call<SettingsView>("POST", "/api/auth/chatgpt/welcome-ack", {}),
 };
 
+export interface ChatTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export type ChatEvent =
+  | { type: "delta"; text: string }
+  | { type: "delegate"; title: string }
+  | { type: "done"; model: string | null }
+  | { type: "error"; message: string; action: string | null };
+
+/** 語音對話：POST /api/chat，逐筆回傳串流事件；abort 時中斷（插話）。 */
+export async function streamChat(
+  messages: ChatTurn[],
+  request_id: string,
+  onEvent: (event: ChatEvent) => void,
+  signal: AbortSignal,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ messages, request_id }),
+      signal,
+    });
+  } catch (err) {
+    if (signal.aborted) throw err;
+    throw new ApiError(0, "無法連到本機核心（伺服器未啟動或已停止）");
+  }
+  if (!res.ok || !res.body) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let index: number;
+    while ((index = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      if (frame.startsWith("data: ")) onEvent(JSON.parse(frame.slice(6)) as ChatEvent);
+    }
+  }
+}
+
 export interface EventHandlers {
   onEvent(event: ServerEvent): void;
   onConnectionChange(connected: boolean): void;

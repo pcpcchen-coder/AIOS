@@ -2,13 +2,14 @@ import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SCHEMA_VERSION, type ExecutorMode, type ProviderInfo, type SettingsView } from "../shared/types.ts";
 import type { ChatGPTAuth } from "./chatgpt-auth.ts";
+import type { ChatCapable, ChatMessage } from "./chat.ts";
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 
 export interface ProviderManagerOptions {
   /** 沒有 ANTHROPIC_API_KEY 時為 null。 */
-  claude: Executor | null;
-  chatgpt: Executor;
-  mock: Executor;
+  claude: (Executor & ChatCapable) | null;
+  chatgpt: Executor & ChatCapable;
+  mock: Executor & ChatCapable;
   auth: ChatGPTAuth;
   /** 保存使用者選擇的引擎（settings.json）的目錄。 */
   dir: string;
@@ -21,7 +22,7 @@ export interface ProviderManagerOptions {
  * 可切換的 AI 引擎：Claude（API key）、ChatGPT（Sign in with ChatGPT）、模擬。
  * 任務建立時記錄當下的引擎，執行時依任務記錄分派，切換不影響已排隊的任務。
  */
-export class ProviderManager implements Executor {
+export class ProviderManager implements Executor, ChatCapable {
   private current: ExecutorMode;
   private readonly file: string;
 
@@ -78,6 +79,18 @@ export class ProviderManager implements Executor {
       return Promise.reject(new ExecutionError("這個任務指定的 Claude 引擎未設定（缺少 ANTHROPIC_API_KEY）。"));
     }
     return executor.run(input, reporter, signal);
+  }
+
+  /** 語音對話用目前選擇的引擎。 */
+  chat(
+    input: { system: string; messages: ChatMessage[] },
+    onDelta: (text: string) => void,
+    signal: AbortSignal,
+  ): Promise<{ model: string | null }> {
+    const executor =
+      this.current === "claude" ? this.options.claude : this.current === "chatgpt" ? this.options.chatgpt : this.options.mock;
+    if (!executor) return Promise.reject(new ExecutionError("Claude 引擎未設定（缺少 ANTHROPIC_API_KEY）。"));
+    return executor.chat(input, onDelta, signal);
   }
 
   private readSaved(): ExecutorMode | null {

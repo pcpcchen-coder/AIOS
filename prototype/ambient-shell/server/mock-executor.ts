@@ -1,13 +1,29 @@
+import type { ChatCapable, ChatMessage } from "./chat.ts";
 import type { ExecutionResult, Executor, Reporter } from "./runner.ts";
 
 /**
  * 模擬執行器：沒有呼叫任何模型，只用計時器走過固定步驟，讓介面流程可被看見。
  * 產出的成果明確寫明「未實際完成」，UI 也會全程標示「模擬」。
  */
-export class MockExecutor implements Executor {
+export class MockExecutor implements Executor, ChatCapable {
   readonly mode = "mock" as const;
 
   constructor(private readonly stepDelayMs = 1800) {}
+
+  /** 模擬對話：不呼叫模型，明說自己是模擬，讓語音與插話流程可以被測試。 */
+  async chat(
+    input: { system: string; messages: ChatMessage[] },
+    onDelta: (text: string) => void,
+    signal: AbortSignal,
+  ): Promise<{ model: string | null }> {
+    const heard = input.messages[input.messages.length - 1].content.slice(0, 30);
+    const reply = `（模擬）我聽到你說「${heard}」。現在是模擬模式，沒有連接任何 AI 模型，所以沒辦法真的回答。你可以說「設定」切換到 Claude 或 ChatGPT。`;
+    for (const chunk of reply.match(/.{1,6}/gu) ?? []) {
+      await sleep(this.stepDelayMs / 30, signal);
+      onDelta(chunk);
+    }
+    return { model: null };
+  }
 
   async run(input: { title: string }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
     const steps = ["理解需求（模擬）", "拆解工作（模擬）", "整理產出（模擬）"];
