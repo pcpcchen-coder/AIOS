@@ -7,6 +7,8 @@ export type Intent =
   | { kind: "stop" }
   | { kind: "progress" }
   | { kind: "result" }
+  | { kind: "voice_on" }
+  | { kind: "voice_off" }
   | { kind: "task"; text: string };
 
 const MAX_COMMAND_CHARS = 14;
@@ -14,6 +16,8 @@ const POLITE_PREFIX = /^(請你?|麻煩你?|幫我|可以|能不能|我想|我�
 const TRAILING = /[\s，,。.!！?？~～…]+$/;
 const LEADING = /^[\s，,。.!！?？~～…]+/;
 
+const VOICE_ON = /^(開啟|打開|啟動|進入|開)?語音(模式|對話|互動)$/;
+const VOICE_OFF = /^((關閉|關掉|結束|離開|退出|停止)語音(模式|對話|互動)?|語音(模式)?(關閉|關掉))$/;
 const DISMISS = /^(收起(來)?(吧)?|回(到)?桌布(吧)?|關閉(畫面|視窗)?|隱藏|先這樣|close|dismiss|hide)$/i;
 const STOP = /^((停止|取消|中止|終止)(這個|那個|目前的|剛才的)?(任務|工作)?|不要做了|別做了|stop|cancel)$/i;
 const PROGRESS = /(進度|做到哪|做得怎樣|怎麼樣了|好了沒|完成了沒|完成了嗎|狀態|狀況|進展|progress|status)/i;
@@ -30,6 +34,8 @@ export function classify(input: string): Intent {
   if (!text) return { kind: "empty" };
   const command = normalizeCommand(text);
   if (command.length <= MAX_COMMAND_CHARS && !TASK_VERB.test(command)) {
+    if (VOICE_OFF.test(command)) return { kind: "voice_off" };
+    if (VOICE_ON.test(command)) return { kind: "voice_on" };
     if (DISMISS.test(command)) return { kind: "dismiss" };
     if (STOP.test(command)) return { kind: "stop" };
     if (PROGRESS.test(command)) return { kind: "progress" };
