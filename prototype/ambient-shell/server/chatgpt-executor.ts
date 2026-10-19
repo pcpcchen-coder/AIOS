@@ -1,0 +1,229 @@
+import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, SYSTEM_PROMPT } from "./prompts.ts";
+import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
+import { RESOURCE, type ChatGPTAuth } from "./chatgpt-auth.ts";
+
+// 以使用者的 ChatGPT 方案額度執行任務：POST https://api.openai.com/v1/responses，
+// 依 SIWC 預覽限制一律 store:false、stream:true，系統指示放在 instructions。
+
+export interface ChatGPTExecutorOptions {
+  /** 指定模型 slug（NOUS_CHATGPT_MODEL）；未指定時取帳號模型清單的第一個可顯示模型。 */
+  model: string | null;
+  fetch?: typeof fetch;
+}
+
+interface StreamResult {
+  text: string;
+  model: string | null;
+  incomplete: boolean;
+}
+
+export class ChatGPTExecutor implements Executor {
+  readonly mode = "chatgpt" as const;
+  private readonly fetch: typeof fetch;
+
+  constructor(
+    private readonly auth: ChatGPTAuth,
+    private readonly options: ChatGPTExecutorOptions,
+  ) {
+    this.fetch = options.fetch ?? fetch;
+  }
+
+  /** 模型不寫死：用設定值，或向 /v1/models 查詢這個帳號可用的模型。 */
+  async resolveModel(token: string): Promise<string> {
+    if (this.options.model) return this.options.model;
+    let res: Response;
+    try {
+      res = await this.fetch(`${RESOURCE}/models`, { headers: { Authorization: `Bearer ${token}` } });
+    } catch (err) {
+      throw new ExecutionError("無法連線到 OpenAI API（網路中斷或被阻擋）。", { cause: err });
+    }
+    if (!res.ok) throw await this.httpError(res, "取得模型清單");
+    const body = (await res.json()) as { models?: { slug?: string; visibility?: string }[] };
+    const model = body.models?.find((m) => m.visibility === "list" && m.slug)?.slug;
+    if (!model) throw new ExecutionError("這個 ChatGPT 帳號沒有可用的模型。");
+    return model;
+  }
+
+  async run(input: { title: string }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+    const model = await this.resolveModel(await this.auth.getAccessToken());
+    const served = new Set<string>();
+
+    const planned = await this.stream(
+      model,
+      planPrompt(input.title),
+      { type: "json_schema", name: "nous_plan", schema: PLAN_SCHEMA, strict: true },
+      signal,
+    );
+    if (planned.model) served.add(planned.model);
+    const plan = parsePlan(planned.text);
+    const titles = [...plan.steps.map((s) => s.title), SYNTHESIS_TITLE];
+    reporter.planReady(titles, model);
+
+    const outputs: string[] = [];
+    let truncated = false;
+    for (let i = 0; i < titles.length; i++) {
+      reporter.stepStarted(i);
+      let chars = 0;
+      let lastReport = 0;
+      const result = await this.stream(model, stepPrompt(input.title, plan, outputs, i), null, signal, (delta) => {
+        chars += delta.length;
+        const now = Date.now();
+        if (now - lastReport >= 700) {
+          lastReport = now;
+          reporter.stepProgress(i, chars);
+        }
+      });
+      if (result.model) served.add(result.model);
+      if (result.incomplete) truncated = true;
+      reporter.stepProgress(i, chars);
+      outputs.push(result.text);
+      reporter.stepDone(i);
+    }
+
+    const gaps = [...plan.capability_gaps];
+    if (truncated) gaps.push("部分步驟的輸出未完整結束（response.incomplete）。");
+    return {
+      content: outputs[outputs.length - 1],
+      assumptions: plan.assumptions,
+      capability_gaps: gaps,
+      status: truncated ? "partial" : "complete",
+      model: [...served].join(", ") || model,
+    };
+  }
+
+  /** 送出一個串流 Responses 請求，直到 response.completed（或錯誤）。 */
+  private async stream(
+    model: string,
+    prompt: string,
+    format: Record<string, unknown> | null,
+    signal: AbortSignal,
+    onDelta?: (delta: string) => void,
+  ): Promise<StreamResult> {
+    const token = await this.auth.getAccessToken();
+    const body: Record<string, unknown> = {
+      model,
+      instructions: SYSTEM_PROMPT,
+      input: [{ role: "user", content: prompt }],
+      store: false,
+      stream: true,
+    };
+    if (format) body.text = { format };
+    let res: Response;
+    try {
+      res = await this.fetch(`${RESOURCE}/responses`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", Accept: "text/event-stream" },
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (err) {
+      if (signal.aborted) throw err;
+      throw new ExecutionError("無法連線到 OpenAI API（網路中斷或被阻擋）。", { cause: err });
+    }
+    if (!res.ok || !res.body) throw await this.httpError(res, "推論");
+
+    let text = "";
+    let servedModel: string | null = null;
+    for await (const event of readSse(res.body)) {
+      const type = event.type;
+      if (type === "response.output_text.delta" && typeof event.delta === "string") {
+        text += event.delta;
+        onDelta?.(event.delta);
+      } else if (type === "response.created" || type === "response.in_progress") {
+        servedModel = modelOf(event) ?? servedModel;
+      } else if (type === "response.completed") {
+        return { text, model: modelOf(event) ?? servedModel, incomplete: false };
+      } else if (type === "response.incomplete") {
+        return { text, model: modelOf(event) ?? servedModel, incomplete: true };
+      } else if (type === "response.failed") {
+        const err = (event.response as { error?: { code?: string; message?: string } } | undefined)?.error;
+        throw this.codeError(err?.code ?? null, err?.message ?? "推論失敗", null);
+      } else if (type === "error") {
+        throw this.codeError(
+          typeof event.code === "string" ? event.code : null,
+          typeof event.message === "string" ? event.message : "串流錯誤",
+          null,
+        );
+      }
+    }
+    throw new ExecutionError("串流中斷：沒有收到 response.completed，結果不完整，未保存。");
+  }
+
+  private async httpError(res: Response, stage: string): Promise<ExecutionError> {
+    const raw = await res.text().catch(() => "");
+    let code: string | null = null;
+    let message = raw.slice(0, 300);
+    try {
+      const body = JSON.parse(raw) as { error?: { code?: string; message?: string }; detail?: string };
+      code = body.error?.code ?? null;
+      message = body.error?.message ?? body.detail ?? message;
+    } catch {
+      // 保留原文
+    }
+    const requestId = res.headers.get("x-request-id");
+    return this.codeError(code, `${stage}失敗（HTTP ${res.status}）：${message}`, res.status, requestId);
+  }
+
+  /** 依 errors-and-recovery 的錯誤碼給出可讀說明與下一步。 */
+  private codeError(code: string | null, fallback: string, status: number | null, requestId?: string | null): ExecutionError {
+    const suffix = requestId ? `（request id：${requestId}）` : "";
+    switch (code) {
+      case "subscription_sharing_usage_limit_exceeded":
+        return new ExecutionError(`已達 ChatGPT 方案或 Nous 的用量上限，請到 ChatGPT 設定查看。${suffix}`, {
+          action: "manage_chatgpt_usage",
+        });
+      case "subscription_sharing_usage_unavailable":
+      case "subscription_sharing_user_unavailable":
+        return new ExecutionError(`ChatGPT 暫時無法確認用量，請稍後重試。${suffix}`);
+      case "subscription_sharing_user_not_eligible":
+        return new ExecutionError(`這個 ChatGPT 帳號或工作區目前不能在第三方 app 使用方案額度。${suffix}`);
+      case "subscription_sharing_unsupported_capability":
+        return new ExecutionError(`請求含有 ChatGPT 方案用量不支援的功能：${fallback}${suffix}`);
+      case "subscription_sharing_invalid_user":
+        this.auth.invalidate("ChatGPT 無法驗證此登入，請重新登入。");
+        return new ExecutionError(`ChatGPT 無法驗證此登入，請重新登入。${suffix}`, { action: "chatgpt_sign_in" });
+      case "subscription_sharing_route_not_supported":
+      case "chatpass_v2_scope_not_authorized":
+      case "chatpass_v2_invalid_authorization_context":
+        return new ExecutionError(`此登入的權限不允許這個操作（${code}）。${suffix}`, { action: "chatgpt_sign_in" });
+    }
+    if (status === 401) {
+      return new ExecutionError(`ChatGPT 登入未被接受（401），請確認帳號與授權範圍後重新登入。${suffix}`, {
+        action: "chatgpt_sign_in",
+      });
+    }
+    if (status === 403) return new ExecutionError(`請求被政策或權限限制拒絕（403）：${fallback}${suffix}`);
+    if (status === 503) return new ExecutionError(`ChatGPT 方案路由暫時無法使用（503），請稍後重試。${suffix}`);
+    return new ExecutionError(`${fallback}${suffix}`);
+  }
+}
+
+function modelOf(event: Record<string, unknown>): string | null {
+  const model = (event.response as { model?: unknown } | undefined)?.model;
+  return typeof model === "string" ? model : null;
+}
+
+/** 解析 text/event-stream，逐筆回傳 data 的 JSON。 */
+export async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator<Record<string, unknown>> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for await (const chunk of body as unknown as AsyncIterable<Uint8Array>) {
+    buffer += decoder.decode(chunk, { stream: true }).replace(/\r\n/g, "\n");
+    let index: number;
+    while ((index = buffer.indexOf("\n\n")) >= 0) {
+      const frame = buffer.slice(0, index);
+      buffer = buffer.slice(index + 2);
+      const data = frame
+        .split("\n")
+        .filter((l) => l.startsWith("data:"))
+        .map((l) => l.slice(5).trimStart())
+        .join("\n");
+      if (!data || data === "[DONE]") continue;
+      try {
+        yield JSON.parse(data) as Record<string, unknown>;
+      } catch {
+        // 忽略無法解析的事件
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 import "./style.css";
 import { computeProgress, isActive } from "../shared/progress.ts";
-import type { Artifact, ServerEvent, ServerStatus, Task } from "../shared/types.ts";
+import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
 import { ApiError, api, newRequestId, subscribeEvents } from "./api.ts";
 import { Brain } from "./brain.ts";
 import { formatCount } from "./format.ts";
@@ -14,6 +14,7 @@ import {
   renderError,
   renderNotice,
   renderProgress,
+  renderSettings,
   updateLiveCounts,
   type ViewActions,
 } from "./views.ts";
@@ -43,6 +44,7 @@ const consentText = $<HTMLParagraphElement>("voice-consent-text");
 const voiceModeButton = $<HTMLButtonElement>("voice-mode");
 const voicePill = $<HTMLButtonElement>("voice-pill");
 const subtitle = $<HTMLParagraphElement>("subtitle");
+const engineLine = $<HTMLParagraphElement>("engine-line");
 const commandError = $<HTMLParagraphElement>("command-error");
 const surfaceRoot = $<HTMLDivElement>("surface-root");
 const firstHint = $<HTMLParagraphElement>("first-hint");
@@ -56,7 +58,7 @@ const artifactErrors = new Map<string, string>();
 /** 只有真實的使用者輸入會登記在這裡；Presentation Policy 以此驗證 user_request。 */
 const userRequestIds = new Set<string>();
 let shell: ShellState = initialShell;
-let status: ServerStatus | null = null;
+let settings: SettingsView | null = null;
 let connected = false;
 let renderedKey: string | null = null;
 
@@ -192,8 +194,25 @@ function dispatch(event: ShellEvent): void {
 // ───────────── 伺服器事件 ─────────────
 
 function onServerEvent(event: ServerEvent): void {
+  if (event.type === "settings.updated") {
+    const wasPending = settings?.chatgpt.pending_login;
+    settings = event.settings;
+    // 使用者按下的登入剛完成：切換到 ChatGPT，沿用該次點擊的請求顯示設定與說明。
+    if (wasPending && !settings.chatgpt.pending_login && loginRequestId) {
+      const requestId = loginRequestId;
+      loginRequestId = null;
+      if (settings.chatgpt.signed_in && settings.chatgpt.plan_usage && settings.provider !== "chatgpt") {
+        void selectProvider("chatgpt", requestId);
+      } else {
+        dispatch({ type: "show.settings", request_id: requestId });
+      }
+      if (settings.chatgpt.signed_in) say("已登入 ChatGPT。");
+    }
+    render();
+    return;
+  }
   if (event.type === "hello") {
-    status = event.status;
+    settings = event.settings;
     tasks.clear();
     for (const t of event.tasks) tasks.set(t.task_id, t);
     render();
@@ -260,6 +279,15 @@ async function handleCommand(text: string): Promise<void> {
     case "voice_off":
       input.value = "";
       disableVoiceMode();
+      return;
+    case "settings":
+      input.value = "";
+      dispatch({ type: "show.settings", request_id: requestId });
+      say("這是 AI 引擎設定。");
+      return;
+    case "use_provider":
+      input.value = "";
+      await selectProvider(intent.provider, requestId);
       return;
     case "dismiss":
       input.value = "";
@@ -354,7 +382,82 @@ const actions: ViewActions = {
     dispatch({ type: "show.artifact", request_id: userRequest(), task_id: taskId, artifact_id: artifactId }),
   showProgress: () => dispatch({ type: "show.progress", request_id: userRequest() }),
   dismiss: () => dispatch({ type: "dismiss" }),
+  openSettings: () => dispatch({ type: "show.settings", request_id: userRequest() }),
+  selectProvider: (provider) => void selectProvider(provider, userRequest()),
+  chatgptLogin: (mode) => void chatgptLogin(mode, userRequest()),
+  async chatgptCancel() {
+    settings = await api.chatgptCancel().catch(() => settings);
+    render();
+  },
+  async chatgptLogout() {
+    const requestId = userRequest();
+    try {
+      const result = await api.chatgptLogout();
+      settings = result.settings;
+      dispatch({
+        type: "show.settings",
+        request_id: requestId,
+        message: result.revoked ? "已登出 ChatGPT。" : "已在本機登出，但未確認遠端撤銷；可到 ChatGPT 設定中斷開 Nous。",
+      });
+    } catch (err) {
+      dispatch({ type: "show.settings", request_id: requestId, message: `登出失敗：${(err as Error).message}` });
+    }
+    render();
+  },
+  async ackWelcome() {
+    settings = await api.chatgptWelcomeAck().catch(() => settings);
+    render();
+  },
 };
+
+const PROVIDER_LABEL: Record<ExecutorMode, string> = { claude: "Claude", chatgpt: "ChatGPT", mock: "模擬模式" };
+
+/** 切換 AI 引擎；ChatGPT 未登入時改為顯示設定並請使用者按登入（開新分頁需要使用者點擊）。 */
+async function selectProvider(provider: ExecutorMode, requestId: string): Promise<void> {
+  const info = settings?.providers.find((p) => p.id === provider);
+  if (info && !info.available) {
+    const message =
+      provider === "chatgpt"
+        ? "要先登入 ChatGPT：請按「Continue with ChatGPT」，在新分頁完成登入。"
+        : `${info.label} 目前不可用：${info.detail}。`;
+    dispatch({ type: "show.settings", request_id: requestId, message });
+    say(message);
+    return;
+  }
+  try {
+    settings = await api.selectProvider(provider);
+    dispatch({ type: "show.settings", request_id: requestId, message: `已切換到 ${PROVIDER_LABEL[provider]}。` });
+    say(`已切換到 ${PROVIDER_LABEL[provider]}。`);
+  } catch (err) {
+    const message = `無法切換：${(err as Error).message}`;
+    dispatch({ type: "show.settings", request_id: requestId, message });
+    say(message);
+  }
+  render();
+}
+
+/**
+ * 開始 Sign in with ChatGPT：先在點擊當下開空白分頁（避免被擋彈出視窗），
+ * 取得授權網址後再導向；登入結果由伺服器事件回報。
+ */
+let loginRequestId: string | null = null;
+
+async function chatgptLogin(mode: "auto" | "new", requestId: string): Promise<void> {
+  loginRequestId = requestId;
+  const popup = window.open("about:blank", "_blank");
+  try {
+    const { authorize_url } = await api.chatgptLogin(mode);
+    if (popup) {
+      popup.opener = null;
+      popup.location.href = authorize_url;
+    } else {
+      window.location.assign(authorize_url);
+    }
+  } catch (err) {
+    popup?.close();
+    dispatch({ type: "show.settings", request_id: requestId, message: `無法開始登入：${(err as Error).message}` });
+  }
+}
 
 function showCommandError(message: string): void {
   commandError.textContent = message;
@@ -380,6 +483,7 @@ function render(): void {
   form.hidden = !shell.listening;
 
   renderStatusLine();
+  renderEngineLine();
   renderCaption(fg);
   renderSurface();
 }
@@ -389,14 +493,34 @@ function renderStatusLine(): void {
     statusLine.textContent = "與本機核心的連線中斷，正在重新連線…";
     statusLine.className = "status-line status-line--warn";
     statusLine.hidden = false;
-  } else if (status?.mode === "mock") {
+  } else if (settings?.provider === "mock") {
     statusLine.textContent = "模擬模式 · 未呼叫 AI 模型";
-    statusLine.title = status.mode_reason;
+    statusLine.title = "說「設定」可以切換到 Claude 或 ChatGPT";
     statusLine.className = "status-line status-line--mock";
     statusLine.hidden = false;
   } else {
     statusLine.hidden = true;
   }
+}
+
+/** 在輸入列下方標示目前引擎；使用 ChatGPT 方案時依指引顯示並附上管理用量連結。 */
+function renderEngineLine(): void {
+  if (!settings) {
+    engineLine.hidden = true;
+    return;
+  }
+  engineLine.replaceChildren();
+  if (settings.provider === "chatgpt") {
+    const link = document.createElement("a");
+    link.href = CHATGPT_USAGE_URL;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.textContent = "管理用量";
+    engineLine.append("使用 ChatGPT 方案 · ", link);
+  } else {
+    engineLine.append(`引擎：${PROVIDER_LABEL[settings.provider]} · 說「設定」可切換`);
+  }
+  engineLine.hidden = false;
 }
 
 function renderCaption(fg: Task | undefined): void {
@@ -445,7 +569,9 @@ function renderSurface(): void {
 
   const task = s.task_id ? tasks.get(s.task_id) : undefined;
   const key =
-    s.kind === "progress"
+    s.kind === "settings"
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${s.message ?? ""}`
+      : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey(tasks.values())}:${s.message ?? ""}`
       : s.kind === "artifact"
         ? `${s.surface_id}:${artifacts.has(s.artifact_id!)}:${artifactErrors.has(s.artifact_id!)}`
@@ -460,7 +586,8 @@ function renderSurface(): void {
   const scrollTop = sameSurface && previous ? previous.scrollTop : 0;
 
   let el: HTMLElement;
-  if (s.kind === "progress") el = renderProgress([...tasks.values()], s.message, actions);
+  if (s.kind === "settings") el = renderSettings(settings, s.message, actions);
+  else if (s.kind === "progress") el = renderProgress([...tasks.values()], s.message, actions);
   else if (s.kind === "artifact" && task) {
     const artifactId = s.artifact_id!;
     el = renderArtifact(task, artifacts.get(artifactId) ?? null, artifactErrors.get(artifactId) ?? null, actions);

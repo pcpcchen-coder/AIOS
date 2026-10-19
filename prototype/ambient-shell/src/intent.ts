@@ -9,6 +9,8 @@ export type Intent =
   | { kind: "result" }
   | { kind: "voice_on" }
   | { kind: "voice_off" }
+  | { kind: "settings" }
+  | { kind: "use_provider"; provider: "claude" | "chatgpt" | "mock" }
   | { kind: "task"; text: string };
 
 const MAX_COMMAND_CHARS = 14;
@@ -18,12 +20,14 @@ const LEADING = /^[\s，,。.!！?？~～…]+/;
 
 const VOICE_ON = /^(開啟|打開|啟動|進入|開)?語音(模式|對話|互動)$/;
 const VOICE_OFF = /^((關閉|關掉|結束|離開|退出|停止)語音(模式|對話|互動)?|語音(模式)?(關閉|關掉))$/;
+const SETTINGS = /^(設定|打開設定|開啟設定|切換(引擎|模型|AI)|(AI )?引擎(設定)?|模型設定|登入 ?ChatGPT|ChatGPT 登入|settings)$/i;
+const USE_PROVIDER = /^(改用|使用|切換到|換成|用)\s*(ChatGPT|GPT|Claude|模擬模式|模擬)(引擎|模式)?$/i;
 const DISMISS = /^(收起(來)?(吧)?|回(到)?桌布(吧)?|關閉(畫面|視窗)?|隱藏|先這樣|close|dismiss|hide)$/i;
 const STOP = /^((停止|取消|中止|終止)(這個|那個|目前的|剛才的)?(任務|工作)?|不要做了|別做了|stop|cancel)$/i;
 const PROGRESS = /(進度|做到哪|做得怎樣|怎麼樣了|好了沒|完成了沒|完成了嗎|狀態|狀況|進展|progress|status)/i;
 const RESULT = /(成果|結果|剛才那份|剛剛那份|上一份|那份報告|拿出來|給我看)/;
 // 含這些動詞的句子是在交辦工作，即使提到「進度」「結果」也不是查詢。
-const TASK_VERB = /(寫|撰寫|整理|規劃|分析|產生|擬|設計|翻譯|計算|比較|列出|建立|製作|準備|研究|摘要|總結|做一份)/;
+const TASK_VERB = /(寫|撰寫|整理|規劃|分析|產生|擬定|草擬|設計|翻譯|計算|比較|列出|建立|製作|準備|研究|摘要|總結|做一份)/;
 
 export function normalizeCommand(text: string): string {
   return text.replace(TRAILING, "").replace(LEADING, "").replace(POLITE_PREFIX, "").trim();
@@ -36,6 +40,13 @@ export function classify(input: string): Intent {
   if (command.length <= MAX_COMMAND_CHARS && !TASK_VERB.test(command)) {
     if (VOICE_OFF.test(command)) return { kind: "voice_off" };
     if (VOICE_ON.test(command)) return { kind: "voice_on" };
+    const use = command.match(USE_PROVIDER);
+    if (use) {
+      const name = use[2].toLowerCase();
+      const provider = name === "claude" ? "claude" : name.startsWith("模擬") ? "mock" : "chatgpt";
+      return { kind: "use_provider", provider };
+    }
+    if (SETTINGS.test(command)) return { kind: "settings" };
     if (DISMISS.test(command)) return { kind: "dismiss" };
     if (STOP.test(command)) return { kind: "stop" };
     if (PROGRESS.test(command)) return { kind: "progress" };
