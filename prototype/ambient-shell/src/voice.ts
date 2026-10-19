@@ -1,3 +1,12 @@
+import {
+  isLikelyEcho,
+  isStopWord,
+  MIN_ECHO_LENGTH_AFTER_SPEECH,
+  normalizeSpeech,
+  stripEcho,
+  takeSentences,
+} from "./echo.ts";
+
 // 語音輸入：按下說話（PushToTalk）與連續語音對話模式（VoiceConversation）。
 // 使用瀏覽器內建的 Web Speech API：Chrome／Edge 會把音訊送到瀏覽器供應商的雲端辨識，
 // 因此兩種模式第一次使用前都要分別取得同意。不做背景喚醒、不保存音訊。
@@ -125,7 +134,7 @@ export class PushToTalk {
   }
 }
 
-// ───────────── 連續語音對話模式 ─────────────
+// ───────────── 連續語音對話模式（可插話） ─────────────
 
 export type ConversationState = "off" | "listening" | "speaking";
 
@@ -133,6 +142,10 @@ export interface ConversationCallbacks {
   onUtterance(text: string): void;
   onInterim(text: string): void;
   onStateChange(state: ConversationState): void;
+  /** 使用者開口打斷了正在念的回覆。 */
+  onBargeIn(): void;
+  /** 每念完一句（真實播放事件），用來驅動電子腦脈衝。 */
+  onSentenceSpoken?(): void;
   /** 模式因錯誤或閒置而自行關閉時呼叫，reason 會顯示並念出。 */
   onClosed(reason: string): void;
 }
@@ -140,21 +153,36 @@ export interface ConversationCallbacks {
 export interface ConversationOptions {
   /** 多久沒有聽到任何話就自動關閉（毫秒）。 */
   idleMs: number;
+  /** 念完後多久內，聽到與剛念內容相同的話仍視為回音（毫秒）。 */
+  echoTailMs?: number;
+}
+
+/** 一段串流回覆：邊收到文字邊逐句念出。 */
+export interface ReplyHandle {
+  push(text: string): void;
+  end(): void;
+  readonly cancelled: boolean;
+  readonly done: Promise<void>;
 }
 
 const FATAL_ERRORS = new Set(["not-allowed", "service-not-allowed", "audio-capture", "language-not-supported"]);
 
 /**
- * 開啟後輪流「聆聽 → 辨識一句 → 交給呼叫端 → 念出回覆 → 再聆聽」。
- * 念的時候暫停收音，避免把自己的語音當成新指令（AC-17）；閒置逾時自動關閉，
- * 讓雲端辨識不會無限期開著。
+ * 像 ChatGPT 語音模式的對話迴圈：麥克風在念回覆時也持續收音。
+ * 收到的文字若大致就是正在念的內容，視為喇叭回音而忽略；出現新的字就當作使用者插話，
+ * 立刻停止念並改聽使用者說話。戴耳機時沒有回音，插話最靈敏。
  */
 export class VoiceConversation {
   private recognition: RecognitionLike | null = null;
   private state: ConversationState = "off";
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  private speakToken = 0;
   private networkErrors = 0;
+  private reply: Reply | null = null;
+  /** 最近念出（或正在念）的內容與結束時間，用來辨認回音。 */
+  private spoken = "";
+  private spokenEndedAt = 0;
+  /** 插話當下的念出內容，用來清掉該句辨識結果開頭的回音。 */
+  private bargeSpoken: string | null = null;
 
   constructor(
     private readonly callbacks: ConversationCallbacks,
@@ -180,77 +208,126 @@ export class VoiceConversation {
   stop(): void {
     if (!this.on) return;
     this.clearIdle();
-    this.speakToken += 1;
+    this.reply?.cancel();
+    this.reply = null;
     speechSynthesis?.cancel();
     this.setState("off");
-    this.recognition?.abort();
+    const r = this.recognition;
     this.recognition = null;
+    r?.abort();
   }
 
-  /** 念出一段短句；念完（或逾時保護）後恢復聆聽。模式關閉時直接略過。 */
-  speak(text: string): Promise<void> {
-    if (!this.on || !text) return Promise.resolve();
-    const token = ++this.speakToken;
-    this.recognition?.abort();
-    this.recognition = null;
-    this.setState("speaking");
-    return speakText(text).then(() => {
-      if (token !== this.speakToken || !this.on) return;
-      this.setState("listening");
-      this.resetIdle();
-      setTimeout(() => {
-        if (token === this.speakToken && this.state === "listening" && !this.recognition) this.listen();
-      }, 250);
+  /** 開始一段新回覆（會取代尚未念完的上一段）。模式關閉時回傳不會發聲的空回覆。 */
+  beginReply(): ReplyHandle {
+    if (this.reply) {
+      this.reply.cancel();
+      speechSynthesis?.cancel();
+    }
+    if (!this.on) return Reply.noop();
+    const reply = new Reply({
+      onStart: () => {
+        if (this.reply === reply) this.setState("speaking");
+      },
+      onSentence: (sentence) => {
+        this.spoken = `${this.spoken}${sentence}`.slice(-400);
+        this.callbacks.onSentenceSpoken?.();
+      },
+      onFinish: () => {
+        if (this.reply !== reply) return;
+        this.reply = null;
+        this.spokenEndedAt = Date.now();
+        if (this.on) {
+          this.setState("listening");
+          this.resetIdle();
+        }
+      },
     });
+    this.spoken = "";
+    this.reply = reply;
+    return reply;
   }
 
-  /** 中斷正在念的內容（Esc 或點擊），回到聆聽。 */
+  /** 念出一段固定短句。 */
+  speak(text: string): Promise<void> {
+    const reply = this.beginReply();
+    reply.push(text);
+    reply.end();
+    return reply.done;
+  }
+
+  /** 中斷正在念的內容（Esc、點擊或偵測到插話），回到聆聽。 */
   interrupt(): void {
-    if (this.state !== "speaking") return;
-    this.speakToken += 1;
+    if (!this.reply) return;
+    this.bargeSpoken = this.spoken;
+    this.reply.cancel();
+    this.reply = null;
     speechSynthesis?.cancel();
-    this.setState("listening");
-    this.listen();
+    this.spokenEndedAt = Date.now();
+    if (this.on) this.setState("listening");
+    this.callbacks.onBargeIn();
+  }
+
+  private isEcho(text: string): boolean {
+    const speaking = this.reply !== null;
+    if (!speaking) {
+      const recent = Date.now() - this.spokenEndedAt < (this.options.echoTailMs ?? 2500);
+      // 念完後的短回應（「好」「對」）是使用者說的，不當回音。
+      if (!recent || normalizeSpeech(text).length < MIN_ECHO_LENGTH_AFTER_SPEECH) return false;
+    }
+    return isLikelyEcho(text, this.spoken);
   }
 
   private listen(): void {
     const Ctor = recognitionCtor();
-    if (!Ctor || this.state !== "listening") return;
+    if (!Ctor || !this.on) return;
     const r = new Ctor();
     r.lang = "zh-TW";
     r.interimResults = true;
-    r.continuous = false;
+    r.continuous = true;
     r.maxAlternatives = 1;
-    let finalText = "";
     let fatal: string | null = null;
     r.onresult = (e) => {
+      if (this.recognition !== r) return;
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
-        if (res.isFinal) finalText += res[0].transcript;
-        else interim += res[0].transcript;
+        const text = res[0].transcript;
+        if (!res.isFinal) {
+          interim += text;
+          continue;
+        }
+        this.resetIdle();
+        this.networkErrors = 0;
+        const bargeSpoken = this.bargeSpoken;
+        this.bargeSpoken = null;
+        if (bargeSpoken !== null) {
+          const cleaned = stripEcho(text, bargeSpoken);
+          if (normalizeSpeech(cleaned)) this.callbacks.onUtterance(cleaned);
+        } else if (!this.isEcho(text) && normalizeSpeech(text)) {
+          this.callbacks.onUtterance(text.trim());
+        }
       }
+      if (!interim) return;
       this.resetIdle();
-      this.callbacks.onInterim(finalText + interim);
+      const barge = isStopWord(interim) || (normalizeSpeech(interim).length >= 2 && !isLikelyEcho(interim, this.spoken));
+      if (this.reply && barge) {
+        this.interrupt(); // 使用者插話
+      }
+      if (!this.reply && !this.isEcho(interim)) this.callbacks.onInterim(interim);
     };
     r.onerror = (e) => {
       if (FATAL_ERRORS.has(e.error)) fatal = ERROR_TEXT[e.error] ?? `語音辨識失敗（${e.error}）`;
       else if (e.error === "network" && ++this.networkErrors >= 3) fatal = ERROR_TEXT.network;
     };
     r.onend = () => {
-      if (this.recognition !== r) return; // 已被 speak()/stop() 取代
+      if (this.recognition !== r) return; // 已被 stop() 取代
       this.recognition = null;
       if (fatal) {
         this.close(fatal);
         return;
       }
-      const text = finalText.trim();
-      if (text) {
-        this.networkErrors = 0;
-        this.callbacks.onUtterance(text);
-      }
-      // 沒聽到話（no-speech）或呼叫端沒有要念東西時，繼續聆聽。
-      if (this.state === "listening" && !this.recognition) this.listen();
+      // 連續辨識會在靜音或一段時間後自行結束；模式開著就重新開始聽。
+      if (this.on) setTimeout(() => this.on && !this.recognition && this.listen(), 150);
     };
     this.recognition = r;
     try {
@@ -268,7 +345,13 @@ export class VoiceConversation {
 
   private resetIdle(): void {
     this.clearIdle();
-    this.idleTimer = setTimeout(() => this.close("一段時間沒有聽到指令，語音模式已關閉。"), this.options.idleMs);
+    this.idleTimer = setTimeout(() => {
+      if (this.reply) {
+        this.resetIdle(); // 正在念時不算閒置
+        return;
+      }
+      this.close("一段時間沒有聽到指令，語音模式已關閉。");
+    }, this.options.idleMs);
   }
 
   private clearIdle(): void {
@@ -283,8 +366,92 @@ export class VoiceConversation {
   }
 }
 
+interface ReplyEvents {
+  onStart(): void;
+  onSentence(sentence: string): void;
+  onFinish(): void;
+}
+
+/** 逐句排入瀏覽器 TTS；取消時丟掉尚未念的句子。 */
+class Reply implements ReplyHandle {
+  private buffer = "";
+  private queue: string[] = [];
+  private speaking = false;
+  private ended = false;
+  private started = false;
+  private _cancelled = false;
+  private resolve: () => void = () => {};
+  readonly done = new Promise<void>((r) => (this.resolve = r));
+  private events: ReplyEvents | null;
+
+  constructor(events: ReplyEvents | null) {
+    this.events = events;
+  }
+
+  static noop(): Reply {
+    const r = new Reply(null);
+    r._cancelled = true;
+    r.resolve();
+    return r;
+  }
+
+  get cancelled(): boolean {
+    return this._cancelled;
+  }
+
+  push(text: string): void {
+    if (this._cancelled || this.ended) return;
+    const { sentences, rest } = takeSentences(this.buffer + text);
+    this.buffer = rest;
+    this.queue.push(...sentences);
+    this.pump();
+  }
+
+  end(): void {
+    if (this._cancelled || this.ended) return;
+    this.ended = true;
+    if (normalizeSpeech(this.buffer)) this.queue.push(this.buffer.trim());
+    this.buffer = "";
+    this.pump();
+  }
+
+  cancel(): void {
+    if (this._cancelled) return;
+    this._cancelled = true;
+    this.queue = [];
+    this.finish();
+  }
+
+  private pump(): void {
+    if (this._cancelled || this.speaking) return;
+    const sentence = this.queue.shift();
+    if (sentence === undefined) {
+      if (this.ended) this.finish();
+      return;
+    }
+    if (!this.started) {
+      this.started = true;
+      this.events?.onStart();
+    }
+    this.speaking = true;
+    this.events?.onSentence(sentence);
+    void speakText(sentence, { cancelOthers: false }).then(() => {
+      this.speaking = false;
+      this.pump();
+    });
+  }
+
+  private finish(): void {
+    if (!this.events) return;
+    const events = this.events;
+    this.events = null;
+    events.onFinish();
+    this.resolve();
+  }
+}
+
 /** 以瀏覽器 TTS 念出短句；部分瀏覽器不觸發 onend，所以加上依長度估算的逾時保護。 */
-export function speakText(text: string): Promise<void> {
+export function speakText(text: string, options: { cancelOthers?: boolean } = {}): Promise<void> {
   const synth = typeof speechSynthesis === "undefined" ? null : speechSynthesis;
   if (!synth) return Promise.resolve();
   return new Promise((resolve) => {
@@ -302,7 +469,7 @@ export function speakText(text: string): Promise<void> {
     const guard = setTimeout(finish, 2000 + text.length * 300);
     u.onend = finish;
     u.onerror = finish;
-    synth.cancel();
+    if (options.cancelOthers ?? true) synth.cancel();
     synth.speak(u);
   });
 }

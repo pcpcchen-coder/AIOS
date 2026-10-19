@@ -43,6 +43,7 @@ const server = createApp({
   runner,
   settings: providers,
   auth,
+  chat: providers,
   port: config.port,
   devPort: config.devPort,
   distDir: join(root, "dist"),

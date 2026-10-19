@@ -88,6 +88,26 @@ describe("ChatGPTExecutor", () => {
     expect(inference[0].body!.text).toMatchObject({ format: { type: "json_schema", strict: true } });
   });
 
+  it("語音對話：system 放 instructions、歷史放 input，串流回覆", async () => {
+    const t = setup(() => textStream(["你好", "！"]));
+    const ex = new ChatGPTExecutor(
+      { getAccessToken: async () => "oauth-access" } as unknown as ChatGPTAuth,
+      { model: "gpt-x", fetch: (async (_u: string, init?: RequestInit) => {
+        t.requests.push({ url: String(_u), auth: null, body: JSON.parse(String(init!.body)) });
+        return textStream(["你好", "！"]);
+      }) as unknown as typeof fetch },
+    );
+    const deltas: string[] = [];
+    const messages = [
+      { role: "user" as const, content: "嗨" },
+      { role: "assistant" as const, content: "你好" },
+      { role: "user" as const, content: "今天天氣？" },
+    ];
+    await ex.chat({ system: "SYS", messages }, (d) => deltas.push(d), new AbortController().signal);
+    expect(deltas.join("")).toBe("你好！");
+    expect(t.requests.at(-1)!.body).toMatchObject({ model: "gpt-x", instructions: "SYS", input: messages, store: false, stream: true });
+  });
+
   it("用量上限：失敗並提示到 ChatGPT 設定管理用量", async () => {
     const t = setup(() =>
       sse([

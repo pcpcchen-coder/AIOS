@@ -37,7 +37,7 @@ npm start                 # 建置前端並啟動本機核心
 | 「看結果」「剛才那份」 | 叫出最新完成的成果 |
 | 「停止任務」 | 只有一個在跑就直接停止；多個時列出讓你選 |
 | 麥克風按鈕（Chrome／Edge） | 按下說話。第一次會先說明：瀏覽器會把音訊送到其雲端辨識，同意後才啟用 |
-| 說／打「開啟語音模式」，或按輸入框的聲波按鈕 | **語音對話模式**：不用按鍵，說完一句就處理一句，並用電腦語音簡短回覆（交辦確認、進度摘要、前景任務完成）。右上角顯示「語音模式 · 聆聽中」；說「關閉語音模式」、點右上角指示，或 90 秒沒說話就關閉 |
+| 說／打「開啟語音模式」，或按輸入框的聲波按鈕 | **語音對話模式**（類似 ChatGPT 語音模式）：直接和 AI 對談，回覆邊產生邊逐句念出；**它說話時你可以直接插話**，它會停下來聽你說。需要較長時間的工作（寫報告、整理資料）由 AI 自行交辦成背景任務，進度照常顯示。「進度如何」「停止任務」「收起」等指令仍由本機直接處理。說「關閉語音模式」、點右上角指示，或 90 秒沒說話就關閉 |
 
 只有「短句且符合固定語彙」才被當成控制指令（`src/intent.ts`），例如「幫我寫一份專案進度報告」仍是交辦任務，不會被誤判成查進度。
 
@@ -95,11 +95,13 @@ prototype/ambient-shell/
 │   ├── views.ts            # 進度、成果、失敗畫面
 │   ├── voice.ts            # 按下說話與連續語音對話模式（Web Speech API + speechSynthesis，需同意）
 │   ├── speech-text.ts      # 語音模式要念的短句（由任務狀態計算）
+│   ├── echo.ts             # 插話／回音判斷、逐句切分
 │   └── main.ts
 ├── server/                 # 本機核心（Node http + SSE）
 │   ├── runner.ts           # 任務排程、取消、重試、步驟回報
 │   ├── providers.ts        # 可切換的 AI 引擎（Claude／ChatGPT／模擬）
 │   ├── prompts.ts          # 兩個引擎共用的提示詞與計畫格式
+│   ├── chat.ts             # 語音對話：系統提示、交辦標記解析
 │   ├── claude-executor.ts  # Claude 規劃與串流執行
 │   ├── chatgpt-auth.ts     # Sign in with ChatGPT（OAuth、ID token 驗證、refresh、登出）
 │   ├── chatgpt-executor.ts # ChatGPT 方案用量：/v1/responses 串流
@@ -113,7 +115,7 @@ prototype/ambient-shell/
 ## 測試
 
 ```bash
-npm test          # vitest：100 項
+npm test          # vitest：114 項
 npm run typecheck
 ```
 
@@ -123,7 +125,8 @@ npm run typecheck
 
 - 未用真實 API key 或真實 ChatGPT 帳號跑過完整成功流程（開發環境沒有帳號）。已驗證：Claude 與 OpenAI 真實 API 的 401 失敗路徑；ChatGPT 登入流程以本機簽發的 ID token 和假端點做自動化測試；`auth.openai.com` 授權頁在開發環境被 Cloudflare 機器人驗證擋住，未能實際走完登入。
 - ChatGPT 方案用量目前是 OpenAI 的預覽功能，Plus 方案的五小時用量上限與其他 app 共用。
-- 語音用瀏覽器內建的 Web Speech API（雲端辨識）與 speechSynthesis（電腦語音），沒有本地喚醒詞與 VAD；念回覆時會暫停收音以免自我觸發，因此不能用語音插話打斷（請按 Esc）。語音模式只用模擬的語音 API 做過自動化測試，麥克風與喇叭未在實機驗證。
+- 語音用瀏覽器內建的 Web Speech API（雲端辨識）與 speechSynthesis（電腦語音），沒有本地喚醒詞；路線是「語音轉文字 → AI 對話 → 文字轉語音」三段串接，延遲比 ChatGPT 的語音對語音模型長。
+- 插話靠「比對聽到的字和正在念的字」分辨回音與使用者：大多數字都在念的內容裡就當回音，出現新的字或「停／等一下」就打斷。用喇叭時同音異字的回音可能誤觸插話，戴耳機最準。念完 2.5 秒內與剛念內容相同的長句會被忽略。語音模式只用模擬的語音 API（含模擬喇叭回音）做過自動化測試，麥克風與喇叭未在實機驗證。
 - 沒有 webcam 視線、沒有 Tauri 桌面殼（瀏覽器頁面）、沒有記憶與知識層。
 - Agent 沒有工具：不能上網、讀寫檔案或對外動作；外部副作用與 Action Gate 尚未實作。
 - 單一使用者、單一螢幕；資料以明文 JSON 存在本機。

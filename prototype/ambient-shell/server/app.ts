@@ -3,6 +3,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
 import type { ExecutorMode, ServerEvent, SettingsView } from "../shared/types.ts";
 import type { ChatGPTAuth } from "./chatgpt-auth.ts";
+import { buildChatSystem, DelegationFilter, validateMessages, type ChatCapable } from "./chat.ts";
+import { ExecutionError } from "./runner.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
@@ -37,6 +39,8 @@ export interface AppOptions {
     select(provider: ExecutorMode): void;
   };
   auth: ChatGPTAuth;
+  /** 語音對話用的引擎（通常就是 ProviderManager）。 */
+  chat: ChatCapable;
   port: number;
   devPort: number;
   distDir: string | null;
@@ -49,7 +53,7 @@ class HttpError extends Error {
 }
 
 export function createApp(options: AppOptions): Server & { notifySettings(): void } {
-  const { store, runner, settings, auth } = options;
+  const { store, runner, settings, auth, chat } = options;
   const hosts = allowedHosts(options.port, options.devPort);
   const clients = new Set<ServerResponse>();
   let sequence = 0;
@@ -98,6 +102,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       }
       return sendJson(res, 200, settings.view());
     }
+    if (method === "POST" && path === "/api/chat") return streamChat(req, res);
     if (method === "POST" && path === "/api/auth/chatgpt/login") {
       const body = await readJson(req);
       const mode = body.mode === "new" ? "new" : "auto";
@@ -151,6 +156,48 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     }
 
     throw new HttpError(404, "not found");
+  }
+
+  /** 語音對話：以 SSE 串流回覆文字；客戶端中斷（插話）時一併中止上游請求。 */
+  async function streamChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await readJson(req);
+    requestId(body);
+    const messages = validateMessages(body.messages);
+    if (!messages) throw new HttpError(400, "messages must be 1–40 user/assistant turns ending with user");
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    });
+    const controller = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) controller.abort();
+    });
+    const send = (event: Record<string, unknown>) => res.write(`data: ${JSON.stringify(event)}\n\n`);
+    const filter = new DelegationFilter();
+    try {
+      const { model } = await chat.chat(
+        { system: buildChatSystem(store.list()), messages },
+        (delta) => {
+          const { text, delegates } = filter.push(delta);
+          if (text) send({ type: "delta", text });
+          for (const title of delegates) send({ type: "delegate", title });
+        },
+        controller.signal,
+      );
+      const rest = filter.flush();
+      if (rest) send({ type: "delta", text: rest });
+      send({ type: "done", model });
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        send({
+          type: "error",
+          message: err instanceof ExecutionError ? err.userMessage : `對話失敗：${(err as Error).message}`,
+          action: err instanceof ExecutionError ? err.action : null,
+        });
+      }
+    }
+    res.end();
   }
 
   function openEvents(req: IncomingMessage, res: ServerResponse): void {

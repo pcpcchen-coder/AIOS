@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, SYSTEM_PROMPT } from "./prompts.ts";
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
+import type { ChatCapable, ChatMessage } from "./chat.ts";
 
 export { parsePlan } from "./prompts.ts";
 
@@ -15,7 +16,7 @@ export interface ClaudeExecutorOptions {
   client?: Anthropic;
 }
 
-export class ClaudeExecutor implements Executor {
+export class ClaudeExecutor implements Executor, ChatCapable {
   readonly mode = "claude" as const;
   private readonly client: Anthropic;
   private resolvedModel: Promise<string> | null = null;
@@ -47,6 +48,34 @@ export class ClaudeExecutor implements Executor {
     return this.options.fallbacks
       ? { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" }
       : {};
+  }
+
+  /** 語音對話：低 effort 以降低首字延遲，串流回覆文字。 */
+  async chat(
+    input: { system: string; messages: ChatMessage[] },
+    onDelta: (text: string) => void,
+    signal: AbortSignal,
+  ): Promise<{ model: string | null }> {
+    try {
+      const model = await this.resolveModel();
+      const stream = this.client.beta.messages.stream(
+        {
+          model,
+          max_tokens: 2000,
+          system: input.system,
+          output_config: { effort: "low" },
+          messages: input.messages,
+          ...this.extra(),
+        },
+        { signal },
+      );
+      stream.on("text", onDelta);
+      const message = await stream.finalMessage();
+      assertUsable(message, "對話");
+      return { model: message.model };
+    } catch (err) {
+      throw toExecutionError(err);
+    }
   }
 
   async run(input: { title: string }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {

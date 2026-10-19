@@ -128,7 +128,8 @@ body {
   z-index: 5;
 }
 
-body.has-surface .command {
+body.has-surface .command,
+.command:has(.voice-consent:not([hidden])) {
   top: auto;
   bottom: 3vh;
 }
