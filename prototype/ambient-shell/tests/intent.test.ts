@@ -16,6 +16,12 @@ describe("classify", () => {
     ["停止任務", "stop"],
     ["取消這個任務", "stop"],
     ["不要做了", "stop"],
+    ["開啟語音模式", "voice_on"],
+    ["語音模式", "voice_on"],
+    ["打開語音對話", "voice_on"],
+    ["關閉語音模式", "voice_off"],
+    ["結束語音", "voice_off"],
+    ["語音關掉", "voice_off"],
   ])("「%s」→ %s", (text, kind) => {
     expect(classify(text).kind).toBe(kind);
   });

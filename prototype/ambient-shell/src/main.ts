@@ -17,7 +17,17 @@ import {
   updateLiveCounts,
   type ViewActions,
 } from "./views.ts";
-import { PushToTalk, hasVoiceConsent, saveVoiceConsent, speechSupported } from "./voice.ts";
+import { speakFinished, speakProgress, speakSubmitted } from "./speech-text.ts";
+import {
+  PushToTalk,
+  VoiceConversation,
+  hasVoiceConsent,
+  saveVoiceConsent,
+  speakText,
+  speechSupported,
+  type ConsentKind,
+  type ConversationState,
+} from "./voice.ts";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -29,6 +39,10 @@ const input = $<HTMLInputElement>("command-input");
 const micButton = $<HTMLButtonElement>("mic");
 const micIndicator = $<HTMLSpanElement>("mic-indicator");
 const consentBox = $<HTMLDivElement>("voice-consent");
+const consentText = $<HTMLParagraphElement>("voice-consent-text");
+const voiceModeButton = $<HTMLButtonElement>("voice-mode");
+const voicePill = $<HTMLButtonElement>("voice-pill");
+const subtitle = $<HTMLParagraphElement>("subtitle");
 const commandError = $<HTMLParagraphElement>("command-error");
 const surfaceRoot = $<HTMLDivElement>("surface-root");
 const firstHint = $<HTMLParagraphElement>("first-hint");
@@ -63,6 +77,94 @@ const voice = new PushToTalk({
   },
   onError: showCommandError,
 });
+
+// 連續語音對話模式：開啟後不用按鍵，說完一句就處理一句，並用語音簡短回覆。
+const VOICE_IDLE_MS = 90_000;
+const conversation = new VoiceConversation(
+  {
+    onUtterance: (text) => {
+      showSubtitle(`你：${text}`);
+      void handleCommand(text);
+    },
+    onInterim: (text) => showSubtitle(`你：${text}…`, true),
+    onStateChange: renderVoiceState,
+    onClosed: (reason) => {
+      showSubtitle(reason);
+      void speakText(reason);
+    },
+  },
+  { idleMs: VOICE_IDLE_MS },
+);
+let pendingConsent: ConsentKind = "push";
+
+/** 語音模式開啟時念出回覆並顯示字幕；文字模式下不出聲。 */
+function say(text: string): void {
+  if (!conversation.on) return;
+  showSubtitle(`Nous：${text}`);
+  void conversation.speak(text);
+}
+
+let subtitleTimer: ReturnType<typeof setTimeout> | null = null;
+function showSubtitle(text: string, sticky = false): void {
+  subtitle.textContent = text;
+  subtitle.hidden = false;
+  if (subtitleTimer) clearTimeout(subtitleTimer);
+  if (!sticky) subtitleTimer = setTimeout(() => (subtitle.hidden = true), 6000);
+}
+
+const VOICE_STATE_LABEL: Record<ConversationState, string> = {
+  off: "",
+  listening: "● 語音模式 · 聆聽中",
+  speaking: "● 語音模式 · 回覆中",
+};
+
+function renderVoiceState(state: ConversationState): void {
+  voicePill.hidden = state === "off";
+  voicePill.textContent = `${VOICE_STATE_LABEL[state]}（點此關閉）`;
+  voicePill.dataset.state = state;
+  voiceModeButton.classList.toggle("recording", state !== "off");
+  voiceModeButton.setAttribute("aria-label", state === "off" ? "開啟語音對話模式" : "關閉語音對話模式");
+  render();
+}
+
+function enableVoiceMode(): void {
+  if (!speechSupported()) {
+    dispatch({
+      type: "show.notice",
+      request_id: userRequest(),
+      message: "這個瀏覽器不支援語音辨識，請改用 Chrome 或 Edge。",
+    });
+    return;
+  }
+  if (!hasVoiceConsent("continuous")) {
+    askConsent("continuous");
+    return;
+  }
+  voice.abort();
+  dispatch({ type: "input.close" });
+  conversation.start();
+  say("語音模式已開啟，請說。");
+}
+
+function disableVoiceMode(): void {
+  if (!conversation.on) return;
+  conversation.stop();
+  showSubtitle("語音模式已關閉。");
+}
+
+const CONSENT_TEXT: Record<ConsentKind, string> = {
+  push:
+    "語音辨識使用瀏覽器內建服務；在 Chrome／Edge 中，音訊會傳到瀏覽器供應商（例如 Google）的雲端辨識。只有在你按下麥克風時才收音，本系統不保存音訊。要啟用嗎？",
+  continuous:
+    "語音模式開啟期間會持續收音，你說的話會傳到瀏覽器供應商（例如 Google）的雲端辨識，回覆會用電腦語音念出。說「關閉語音模式」、點右上角指示或 90 秒沒說話就會關閉。本系統不保存音訊。要開啟嗎？",
+};
+
+function askConsent(kind: ConsentKind): void {
+  pendingConsent = kind;
+  consentText.textContent = CONSENT_TEXT[kind];
+  dispatch({ type: "input.open" });
+  consentBox.hidden = false;
+}
 
 function userRequest(): string {
   const id = newRequestId();
@@ -100,7 +202,10 @@ function onServerEvent(event: ServerEvent): void {
   const prev = tasks.get(event.task.task_id);
   tasks.set(event.task.task_id, event.task);
   firePulses(prev, event.task);
+  const wasForeground = shell.mode === "working" && shell.foreground_task_id === event.task.task_id;
   dispatch({ type: "task.updated", task: event.task });
+  // 只有前景任務結束才念；收起後的背景任務保持安靜。
+  if (wasForeground && shell.mode !== "working") say(speakFinished(event.task));
   render();
 }
 
@@ -148,21 +253,34 @@ async function handleCommand(text: string): Promise<void> {
   }
   const requestId = userRequest();
   switch (intent.kind) {
+    case "voice_on":
+      input.value = "";
+      enableVoiceMode();
+      return;
+    case "voice_off":
+      input.value = "";
+      disableVoiceMode();
+      return;
     case "dismiss":
       input.value = "";
       dispatch({ type: "dismiss" });
+      say("好。");
       return;
     case "progress":
       input.value = "";
       dispatch({ type: "show.progress", request_id: requestId });
+      say(speakProgress(tasks.values()));
       return;
     case "result": {
       input.value = "";
       const task = latestArtifactTask();
       if (task?.artifact_id) {
         dispatch({ type: "show.artifact", request_id: requestId, task_id: task.task_id, artifact_id: task.artifact_id });
+        say(`這是「${task.title.slice(0, 18)}」的成果。`);
       } else {
-        dispatch({ type: "show.notice", request_id: requestId, message: "還沒有完成的成果。問「進度如何」可以看目前狀態。" });
+        const message = "還沒有完成的成果。問「進度如何」可以看目前狀態。";
+        dispatch({ type: "show.notice", request_id: requestId, message });
+        say(message);
       }
       return;
     }
@@ -171,14 +289,13 @@ async function handleCommand(text: string): Promise<void> {
       const active = [...tasks.values()].filter((t) => t.status === "queued" || t.status === "running");
       if (active.length === 0) {
         dispatch({ type: "show.notice", request_id: requestId, message: "目前沒有進行中的任務。" });
+        say("目前沒有進行中的任務。");
       } else if (active.length === 1) {
         await cancelTask(active[0].task_id, requestId);
       } else {
-        dispatch({
-          type: "show.progress",
-          request_id: requestId,
-          message: `有 ${active.length} 個任務進行中，請在下方選擇要停止哪一個。`,
-        });
+        const message = `有 ${active.length} 個任務進行中，請在下方選擇要停止哪一個。`;
+        dispatch({ type: "show.progress", request_id: requestId, message });
+        say(message);
       }
       return;
     }
@@ -197,8 +314,11 @@ async function submitTask(text: string, requestId: string): Promise<void> {
     dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
     // 若事件比回應先到、任務已有新狀態，立即套用。
     dispatch({ type: "task.updated", task: tasks.get(task.task_id)! });
+    say(speakSubmitted(task));
   } catch (err) {
-    showCommandError(`沒有交辦成功：${(err as Error).message}`);
+    const message = `沒有交辦成功：${(err as Error).message}`;
+    if (conversation.on) say(message);
+    else showCommandError(message);
   } finally {
     form.classList.remove("busy");
   }
@@ -209,8 +329,11 @@ async function cancelTask(taskId: string, requestId: string): Promise<void> {
     const task = await api.cancelTask(taskId);
     tasks.set(task.task_id, task);
     dispatch({ type: "show.progress", request_id: requestId });
+    say(`正在停止：${task.title.slice(0, 18)}。`);
   } catch (err) {
-    dispatch({ type: "show.progress", request_id: requestId, message: `無法停止任務：${(err as Error).message}` });
+    const message = `無法停止任務：${(err as Error).message}`;
+    dispatch({ type: "show.progress", request_id: requestId, message });
+    say(message);
   }
 }
 
@@ -244,7 +367,7 @@ function render(): void {
   const fg = shell.foreground_task_id ? tasks.get(shell.foreground_task_id) : undefined;
   const fgProgress = fg ? computeProgress(fg) : null;
   brain.setState({
-    listening: shell.listening || voice.active,
+    listening: shell.listening || voice.active || conversation.current === "listening",
     working: [...tasks.values()].some(isActive),
     layout: shell.surface ? "top" : "center",
     progress:
@@ -387,7 +510,8 @@ window.addEventListener("keydown", (e) => {
   dismissFirstHint();
   if (e.key === "Escape") {
     e.preventDefault();
-    if (shell.listening) dispatch({ type: "input.close" });
+    if (conversation.current === "speaking") conversation.interrupt();
+    else if (shell.listening) dispatch({ type: "input.close" });
     else if (shell.surface || shell.mode === "working") dispatch({ type: "dismiss" });
     return;
   }
@@ -406,26 +530,35 @@ function dismissFirstHint(): void {
 }
 setTimeout(dismissFirstHint, 9000);
 
-// ───────────── 語音（按下說話） ─────────────
+// ───────────── 語音（按下說話／語音模式） ─────────────
 
 if (speechSupported()) {
   micButton.hidden = false;
+  voiceModeButton.hidden = false;
   micButton.addEventListener("click", () => {
     commandError.hidden = true;
+    if (conversation.on) return; // 語音模式已在收音
     if (voice.active) {
       voice.stop();
       return;
     }
-    if (!hasVoiceConsent()) {
-      consentBox.hidden = false;
+    if (!hasVoiceConsent("push")) {
+      askConsent("push");
       return;
     }
     voice.start();
   });
+  voiceModeButton.addEventListener("click", () => {
+    commandError.hidden = true;
+    if (conversation.on) disableVoiceMode();
+    else enableVoiceMode();
+  });
+  voicePill.addEventListener("click", disableVoiceMode);
   $<HTMLButtonElement>("consent-yes").addEventListener("click", () => {
-    saveVoiceConsent();
+    saveVoiceConsent(pendingConsent);
     consentBox.hidden = true;
-    voice.start();
+    if (pendingConsent === "continuous") enableVoiceMode();
+    else voice.start();
   });
   $<HTMLButtonElement>("consent-no").addEventListener("click", () => {
     consentBox.hidden = true;
