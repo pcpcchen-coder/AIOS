@@ -13,7 +13,7 @@
 
 ## 啟動
 
-需要 Node.js 22.12 以上。
+需要 Node.js 22.12 以上。第一次安裝、Windows 指令與常見問題見 **[INSTALL.md](./INSTALL.md)**。
 
 ```bash
 cd prototype/ambient-shell
