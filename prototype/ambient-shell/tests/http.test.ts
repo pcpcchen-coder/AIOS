@@ -1,0 +1,120 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
+import { afterEach, describe, expect, it } from "vitest";
+import { buildStatus, createApp } from "../server/app.ts";
+import { allowedHosts, checkRequest } from "../server/http-guard.ts";
+import { MockExecutor } from "../server/mock-executor.ts";
+import { TaskRunner } from "../server/runner.ts";
+import { TaskStore } from "../server/store.ts";
+import type { Task } from "../shared/types.ts";
+
+describe("checkRequest", () => {
+  const hosts = allowedHosts(8787, 5173);
+  const json = { "content-type": "application/json" };
+
+  it("拒絕非本機 Host（DNS rebinding）", () => {
+    expect(checkRequest("GET", { host: "evil.example:8787" }, hosts).ok).toBe(false);
+    expect(checkRequest("GET", { host: "localhost:8787" }, hosts).ok).toBe(true);
+  });
+
+  it("拒絕跨站 Origin 的寫入", () => {
+    expect(checkRequest("POST", { host: "localhost:8787", origin: "https://evil.example", ...json }, hosts).ok).toBe(false);
+    expect(checkRequest("POST", { host: "localhost:8787", origin: "http://localhost:5173", ...json }, hosts).ok).toBe(true);
+  });
+
+  it("寫入必須是 JSON（跨站 simple request 無法帶這個 header）", () => {
+    const r = checkRequest("POST", { host: "localhost:8787", "content-type": "text/plain" }, hosts);
+    expect(r).toEqual({ ok: false, status: 415, message: expect.any(String) });
+  });
+});
+
+async function freePort(): Promise<number> {
+  const s = createServer();
+  await new Promise<void>((r) => s.listen(0, "127.0.0.1", r));
+  const { port } = s.address() as AddressInfo;
+  await new Promise((r) => s.close(r));
+  return port;
+}
+
+let server: Server | null = null;
+afterEach(async () => {
+  if (server) await new Promise((r) => server!.close(r));
+  server = null;
+});
+
+async function start() {
+  const port = await freePort();
+  const store = new TaskStore(null);
+  const runner = new TaskRunner(store, new MockExecutor(5));
+  server = createApp({
+    store,
+    runner,
+    status: buildStatus("mock", "測試"),
+    port,
+    devPort: 5173,
+    distDir: null,
+  });
+  await new Promise<void>((r) => server!.listen(port, "127.0.0.1", r));
+  const base = `http://localhost:${port}`;
+  const post = (path: string, body: unknown) =>
+    fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return { base, post, runner, store };
+}
+
+describe("HTTP API", () => {
+  it("交辦 → 完成 → 取回成果", async () => {
+    const { base, post, runner } = await start();
+    const res = await post("/api/tasks", { text: "  整理待辦  ", request_id: "req_test0001" });
+    expect(res.status).toBe(201);
+    const task = (await res.json()) as Task;
+    expect(task).toMatchObject({ title: "整理待辦", mode: "mock" });
+
+    await runner.idle();
+    const list = (await (await fetch(`${base}/api/tasks`)).json()) as Task[];
+    const done = list.find((t) => t.task_id === task.task_id)!;
+    expect(done.status).toBe("succeeded");
+    const artifact = await (await fetch(`${base}/api/artifacts/${done.artifact_id}`)).json();
+    expect(artifact).toMatchObject({ task_id: task.task_id, mode: "mock" });
+  });
+
+  it("驗證輸入：缺文字、缺 request_id、非 JSON", async () => {
+    const { base, post } = await start();
+    expect((await post("/api/tasks", { text: "", request_id: "req_test0001" })).status).toBe(400);
+    expect((await post("/api/tasks", { text: "hi" })).status).toBe(400);
+    const bad = await fetch(`${base}/api/tasks`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not json",
+    });
+    expect(bad.status).toBe(400);
+  });
+
+  it("SSE 先送完整快照，之後推送真實任務事件", async () => {
+    const { base, post, runner } = await start();
+    const controller = new AbortController();
+    const res = await fetch(`${base}/api/events`, { signal: controller.signal });
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const next = async () => {
+      while (!buffer.includes("\n\n")) buffer += decoder.decode((await reader.read()).value);
+      const [frame, ...rest] = buffer.split("\n\n");
+      buffer = rest.join("\n\n");
+      return JSON.parse(frame.replace(/^data: /, ""));
+    };
+
+    expect(await next()).toMatchObject({ type: "hello", status: { mode: "mock" }, tasks: [] });
+    await post("/api/tasks", { text: "測試事件", request_id: "req_test0002" });
+    const first = await next();
+    expect(first).toMatchObject({ type: "task.updated", task: { title: "測試事件", status: "queued" } });
+    await runner.idle();
+    controller.abort();
+  });
+
+  it("前端未建置時回傳說明而不是空白頁", async () => {
+    const { base } = await start();
+    const res = await fetch(`${base}/`);
+    expect(res.status).toBe(503);
+    expect(await res.text()).toContain("npm start");
+  });
+});

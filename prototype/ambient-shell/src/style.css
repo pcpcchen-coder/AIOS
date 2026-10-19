@@ -1,0 +1,684 @@
+:root {
+  --bg: #03050b;
+  --bg-2: #070c1a;
+  --cyan: #5ce1ff;
+  --violet: #a68bff;
+  --mint: #5cf2b0;
+  --amber: #ffb35c;
+  --red: #ff6b7d;
+  --text: #e6f4ff;
+  --muted: #8ba3bd;
+  --panel: rgba(9, 16, 30, 0.74);
+  --panel-border: rgba(110, 210, 255, 0.18);
+  --brain-r: min(20vw, 20vh);
+  --brain-top-r: min(7vw, 7vh);
+  font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 50% 45%, rgba(40, 70, 140, 0.18), transparent 60%),
+    radial-gradient(ellipse at 50% 120%, rgba(110, 70, 200, 0.12), transparent 55%),
+    linear-gradient(180deg, var(--bg-2), var(--bg));
+}
+
+[hidden] {
+  display: none !important;
+}
+
+#brain {
+  position: fixed;
+  inset: 0;
+  display: block;
+  cursor: pointer;
+}
+
+/* ───── 狀態列（只在模擬或斷線時出現） ───── */
+
+.status-line {
+  position: fixed;
+  top: 14px;
+  left: 16px;
+  margin: 0;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  backdrop-filter: blur(8px);
+}
+
+.status-line--mock {
+  color: var(--amber);
+  border: 1px solid rgba(255, 179, 92, 0.35);
+  background: rgba(40, 24, 6, 0.5);
+}
+
+.status-line--warn {
+  color: var(--red);
+  border: 1px solid rgba(255, 107, 125, 0.4);
+  background: rgba(40, 8, 14, 0.55);
+}
+
+/* ───── 前景任務字幕 ───── */
+
+.caption {
+  position: fixed;
+  left: 50%;
+  top: calc(47vh + var(--brain-r) * 1.45 + 28px);
+  transform: translateX(-50%);
+  width: min(640px, 92vw);
+  text-align: center;
+  pointer-events: none;
+}
+
+.caption p {
+  margin: 0 0 6px;
+}
+
+.caption-mock {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--amber);
+  border: 1px solid rgba(255, 179, 92, 0.35);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.caption-title {
+  font-size: 15px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.caption-detail {
+  font-size: 13px;
+  color: var(--cyan);
+  letter-spacing: 0.02em;
+}
+
+.caption-hint {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+/* ───── 指令列 ───── */
+
+.command {
+  position: fixed;
+  left: 50%;
+  top: calc(47vh + var(--brain-r) * 1.45 + 24px);
+  transform: translateX(-50%);
+  width: min(620px, 92vw);
+  z-index: 5;
+}
+
+body.has-surface .command {
+  top: auto;
+  bottom: 3vh;
+}
+
+.command-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 18px;
+  border-radius: 999px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 0 0 1px rgba(92, 225, 255, 0.05), 0 0 32px rgba(92, 225, 255, 0.15);
+  backdrop-filter: blur(14px);
+  animation: rise 180ms ease-out;
+}
+
+.command.busy .command-bar {
+  opacity: 0.6;
+}
+
+.command-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  padding: 8px 0;
+}
+
+.command-input::placeholder {
+  color: var(--muted);
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-btn:hover,
+.icon-btn:focus-visible {
+  color: var(--text);
+  border-color: var(--panel-border);
+  outline: none;
+}
+
+.icon-btn--send {
+  color: var(--bg);
+  background: linear-gradient(135deg, var(--cyan), var(--violet));
+}
+
+.icon-btn--send:hover,
+.icon-btn--send:focus-visible {
+  color: var(--bg);
+}
+
+.icon-btn.recording {
+  color: #fff;
+  background: rgba(255, 107, 125, 0.75);
+}
+
+.mic-indicator {
+  font-size: 12px;
+  color: var(--red);
+  white-space: nowrap;
+}
+
+.command-hint {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.command-error {
+  margin: 10px 0 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--red);
+}
+
+.voice-consent {
+  margin-top: 10px;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.voice-consent p {
+  margin: 0 0 10px;
+}
+
+.voice-consent-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ───── 成果 Surface ───── */
+
+.surface-root {
+  position: fixed;
+  left: 50%;
+  top: calc(12vh + var(--brain-top-r) * 1.45 + 18px);
+  transform: translateX(-50%);
+  width: min(780px, 94vw);
+  z-index: 4;
+}
+
+.surface {
+  max-height: calc(100vh - (12vh + var(--brain-top-r) * 1.45 + 18px) - 4vh);
+  overflow-y: auto;
+  padding: 22px 24px 18px;
+  border-radius: 18px;
+  background: var(--panel);
+  border: 1px solid var(--panel-border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45), 0 0 40px rgba(92, 225, 255, 0.08);
+  backdrop-filter: blur(16px);
+  animation: rise 220ms ease-out;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120, 200, 255, 0.25) transparent;
+}
+
+.surface.no-enter {
+  animation: none;
+}
+
+body.listening .surface {
+  max-height: calc(100vh - (12vh + var(--brain-top-r) * 1.45 + 18px) - 4vh - 120px);
+}
+
+.surface-header h2 {
+  margin: 2px 0 14px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.eyebrow {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: var(--cyan);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.small {
+  font-size: 12px;
+}
+
+.notice {
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--amber);
+  background: rgba(255, 179, 92, 0.08);
+  border: 1px solid rgba(255, 179, 92, 0.25);
+}
+
+.notice-text {
+  margin: 4px 0 16px;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.error-text {
+  color: var(--red);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.surface-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.surface-footer .hint {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.btn:hover,
+.btn:focus-visible {
+  border-color: var(--cyan);
+  outline: none;
+}
+
+.btn--primary {
+  border-color: transparent;
+  color: var(--bg);
+  background: linear-gradient(135deg, var(--cyan), var(--violet));
+}
+
+.btn--danger {
+  color: var(--red);
+  border-color: rgba(255, 107, 125, 0.4);
+}
+
+.btn--ghost {
+  background: transparent;
+}
+
+/* ───── 進度清單 ───── */
+
+.task-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.task-card {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.task-card--running,
+.task-card--queued,
+.task-card--cancelling {
+  border-color: rgba(92, 225, 255, 0.25);
+}
+
+.task-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.task-title {
+  margin: 0;
+  flex: 1;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.chip {
+  flex: none;
+  margin-top: 2px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+}
+
+.chip--queued,
+.chip--cancelling {
+  color: var(--muted);
+}
+
+.chip--running {
+  color: var(--cyan);
+}
+
+.chip--succeeded {
+  color: var(--mint);
+}
+
+.chip--failed {
+  color: var(--red);
+}
+
+.chip--cancelled {
+  color: var(--muted);
+}
+
+.chip--mock {
+  color: var(--amber);
+}
+
+.bar {
+  position: relative;
+  height: 6px;
+  margin: 12px 0 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  width: 0;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--violet));
+  box-shadow: 0 0 12px rgba(92, 225, 255, 0.6);
+  transition: width 400ms ease-out;
+}
+
+/* 步驟數未知：只顯示虛線軌道，不畫假進度。 */
+.bar--unknown {
+  background: repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.1) 0 6px, transparent 6px 12px);
+}
+
+.task-card--succeeded .bar-fill {
+  background: linear-gradient(90deg, var(--mint), var(--cyan));
+}
+
+.task-card--failed .bar-fill {
+  background: var(--red);
+  box-shadow: none;
+}
+
+.task-card--cancelled .bar-fill {
+  background: var(--muted);
+  box-shadow: none;
+}
+
+.bar-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.ratio {
+  color: var(--cyan);
+  font-variant-numeric: tabular-nums;
+}
+
+.steps {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.step {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  gap: 8px;
+  align-items: baseline;
+  color: var(--muted);
+}
+
+.step-icon {
+  text-align: center;
+}
+
+.step--done {
+  color: var(--text);
+}
+
+.step--done .step-icon {
+  color: var(--mint);
+}
+
+.step--running {
+  color: var(--text);
+}
+
+.step--running .step-icon {
+  color: var(--cyan);
+}
+
+.step--failed .step-icon,
+.step--failed {
+  color: var(--red);
+}
+
+.step-meta {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* ───── 成果內容 ───── */
+
+.markdown {
+  font-size: 15px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: 1.2em 0 0.5em;
+  line-height: 1.4;
+}
+
+.markdown h1 {
+  font-size: 20px;
+}
+
+.markdown h2 {
+  font-size: 18px;
+}
+
+.markdown h3 {
+  font-size: 16px;
+}
+
+.markdown a {
+  color: var(--cyan);
+}
+
+.markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.markdown pre {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.35);
+  overflow-x: auto;
+}
+
+.markdown pre code {
+  padding: 0;
+  background: none;
+}
+
+.markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 14px;
+}
+
+.markdown th,
+.markdown td {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.markdown blockquote {
+  margin: 0;
+  padding-left: 14px;
+  border-left: 3px solid var(--violet);
+  color: var(--muted);
+}
+
+.notes {
+  margin-top: 14px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.notes summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+/* ───── 首次提示 ───── */
+
+.first-hint {
+  position: fixed;
+  left: 50%;
+  bottom: 6vh;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+  transition: opacity 1.2s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.first-hint.gone {
+  opacity: 0;
+}
+
+@media (max-width: 560px) {
+  .surface-footer .hint,
+  .command-hint {
+    display: none;
+  }
+  .surface {
+    padding: 18px 16px 14px;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .surface,
+  .command-bar {
+    animation: none;
+  }
+  .bar-fill,
+  .first-hint {
+    transition: none;
+  }
+}
