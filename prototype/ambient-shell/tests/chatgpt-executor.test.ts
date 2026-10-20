@@ -130,6 +130,22 @@ describe("ChatGPTExecutor", () => {
     expect(err).toMatchObject({ action: "manage_chatgpt_usage" });
   });
 
+  it("用量上限：實際串流先送巢狀的 error 事件，仍辨識錯誤碼", async () => {
+    const t = setup(() =>
+      sse([
+        { type: "response.created", response: {} },
+        {
+          type: "error",
+          error: { type: "invalid_request_error", code: "subscription_sharing_usage_limit_exceeded", message: "limit" },
+        },
+        { type: "response.failed", response: { error: { code: "subscription_sharing_usage_limit_exceeded", message: "limit" } } },
+      ]),
+    );
+    const err = await t.run().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ExecutionError);
+    expect(err).toMatchObject({ action: "manage_chatgpt_usage" });
+  });
+
   it("串流前 401：保留原始訊息並提示重新登入", async () => {
     const t = setup(() => new Response(JSON.stringify({ detail: "bad identity" }), { status: 401 }));
     const err = (await t.run().catch((e: unknown) => e)) as ExecutionError;

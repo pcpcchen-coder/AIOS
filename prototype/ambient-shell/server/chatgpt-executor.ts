@@ -161,9 +161,11 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
         const err = (event.response as { error?: { code?: string; message?: string } } | undefined)?.error;
         throw this.codeError(err?.code ?? null, err?.message ?? "推論失敗", null);
       } else if (type === "error") {
+        // 實際串流把錯誤放在 event.error 底下；舊格式在頂層。
+        const err = (event.error as { code?: unknown; message?: unknown } | undefined) ?? event;
         throw this.codeError(
-          typeof event.code === "string" ? event.code : null,
-          typeof event.message === "string" ? event.message : "串流錯誤",
+          typeof err.code === "string" ? err.code : null,
+          typeof err.message === "string" ? err.message : "串流錯誤",
           null,
         );
       }
