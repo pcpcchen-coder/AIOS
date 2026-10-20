@@ -35,6 +35,17 @@ import {
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
+/** macOS App（Electron）的 preload 提供；在一般瀏覽器裡不存在。 */
+interface DesktopBridge {
+  openExternal(url: string): void;
+  reportState(state: { voice: string; activeTasks: number }): void;
+}
+declare global {
+  interface Window {
+    nousDesktop?: DesktopBridge;
+  }
+}
+
 const canvas = $<HTMLCanvasElement>("brain");
 const regionActivity = $<HTMLParagraphElement>("region-activity");
 const statusLine = $<HTMLParagraphElement>("status-line");
@@ -721,9 +732,15 @@ async function chatgptLogin(mode: "auto" | "new", requestId: string): Promise<vo
   session.reset();
   conversation.stop();
   loginRequestId = requestId;
-  const popup = window.open("about:blank", "_blank");
+  // App 內用系統瀏覽器登入（Google 等登入頁會擋內嵌視窗）。
+  const desktop = window.nousDesktop;
+  const popup = desktop ? null : window.open("about:blank", "_blank");
   try {
     const { authorize_url } = await api.chatgptLogin(mode);
+    if (desktop) {
+      desktop.openExternal(authorize_url);
+      return;
+    }
     if (popup) {
       popup.opener = null;
       popup.location.href = authorize_url;
@@ -782,9 +799,37 @@ function render(): void {
 
   renderStatusLine();
   renderEngineLine();
+  reportDesktopState();
   renderCaption(fg);
   renderSurface();
 }
+
+let reportedDesktopState = "";
+/** 告訴 App 目前狀態（選單列圖示在收音時改變樣式）。 */
+function reportDesktopState(): void {
+  const desktop = window.nousDesktop;
+  if (!desktop) return;
+  const state = {
+    voice: realtime.on ? realtime.current : conversation.on ? conversation.current : "off",
+    activeTasks: [...tasks.values()].filter(isActive).length,
+  };
+  const key = JSON.stringify(state);
+  if (key === reportedDesktopState) return;
+  reportedDesktopState = key;
+  desktop.reportState(state);
+}
+
+// App 選單列的指令。
+window.addEventListener("nous:command", (event) => {
+  const command = (event as CustomEvent<string>).detail;
+  dismissFirstHint();
+  if (command === "voice") {
+    if (realtime.on || conversation.on) disableVoiceMode();
+    else openConversation();
+  } else if (command === "progress") actions.showProgress();
+  else if (command === "settings") actions.openSettings();
+  else if (command === "type") dispatch({ type: "input.open" });
+});
 
 function renderRegionActivity(activity: readonly RegionActivity[]): void {
   const ids = DOMAINS.filter((d) => activity.some((a) => a.domain === d)).join(" ");

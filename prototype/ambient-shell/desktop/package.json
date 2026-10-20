@@ -1,0 +1,19 @@
+{
+  "name": "nous-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Nous 電子腦 macOS App：內建本機核心，選單列圖示可快速設定",
+  "type": "module",
+  "license": "UNLICENSED",
+  "scripts": {
+    "icons": "swift scripts/make-icons.swift assets && iconutil -c icns assets/Nous.iconset -o assets/Nous.icns",
+    "build": "node scripts/build.mjs",
+    "start": "node scripts/build.mjs && electron build/app",
+    "package": "node scripts/build.mjs && node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.7.0",
+    "esbuild": "0.28.2"
+  }
+}

@@ -1,0 +1,114 @@
+import { existsSync, readFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { parseEnv } from "node:util";
+import { createApp } from "./app.ts";
+import { ChatGPTAuth } from "./chatgpt-auth.ts";
+import { ChatGPTExecutor } from "./chatgpt-executor.ts";
+import { ClaudeExecutor } from "./claude-executor.ts";
+import { loadConfig } from "./config.ts";
+import { MockExecutor } from "./mock-executor.ts";
+import { ProviderManager } from "./providers.ts";
+import { RealtimeBridge } from "./realtime.ts";
+import { TaskRunner } from "./runner.ts";
+import { TaskStore } from "./store.ts";
+
+// 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
+
+export interface NousOptions {
+  /** .env 檔；不存在時忽略。 */
+  envFile: string | null;
+  dataDir: string;
+  distDir: string;
+  /** 覆寫 .env 與環境變數的設定（例如 App 選單裡選的即時語音模型）。 */
+  overrides?: Record<string, string | undefined>;
+  /** 指定的連接埠被占用時改用其他空閒埠（App 用）；終端機版維持報錯。 */
+  fallbackPort?: boolean;
+  log?: (line: string) => void;
+}
+
+export interface NousHandle {
+  port: number;
+  url: string;
+  close(): Promise<void>;
+}
+
+const LABEL = { claude: "Claude", chatgpt: "ChatGPT（Sign in with ChatGPT）", mock: "模擬（mock）" } as const;
+
+export async function startNous(options: NousOptions): Promise<NousHandle> {
+  const log = options.log ?? console.log;
+  const fileEnv = options.envFile && existsSync(options.envFile) ? parseEnv(readFileSync(options.envFile, "utf8")) : {};
+  const env: NodeJS.ProcessEnv = { ...process.env, ...fileEnv };
+  for (const [key, value] of Object.entries(options.overrides ?? {})) if (value !== undefined) env[key] = value;
+  const config = loadConfig(env);
+  const port = options.fallbackPort ? await freePort(config.port) : config.port;
+
+  let notify = () => {};
+  const auth = new ChatGPTAuth({ dir: config.configDir, callbackPort: config.oauthPort, onChange: () => notify() });
+  const providers = new ProviderManager({
+    claude: config.apiKey
+      ? new ClaudeExecutor({ apiKey: config.apiKey, model: config.model, modelFamily: config.modelFamily, fallbacks: config.fallbacks })
+      : null,
+    chatgpt: new ChatGPTExecutor(auth, { model: config.chatgptModel }),
+    mock: new MockExecutor(),
+    auth,
+    dir: config.configDir,
+    preferred: config.preferred,
+    onChange: () => notify(),
+  });
+  const realtime = new RealtimeBridge({ apiKey: config.openaiApiKey, model: config.realtimeModel, voice: config.realtimeVoice });
+  const store = new TaskStore(options.dataDir);
+  const runner = new TaskRunner(store, providers, config.maxConcurrent);
+  const server = createApp({
+    store,
+    runner,
+    settings: providers,
+    auth,
+    chat: providers,
+    realtime,
+    port,
+    devPort: config.devPort,
+    distDir: options.distDir,
+  });
+  notify = server.notifySettings;
+
+  // 只綁本機位址，不對區域網路開放。
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+
+  const view = providers.view();
+  log(`Nous 原型已啟動：http://localhost:${port}`);
+  log(`目前引擎：${LABEL[view.provider]}（可在畫面上說「設定」切換）`);
+  for (const p of view.providers) log(`  - ${p.label}：${p.available ? "可用" : "不可用"}，${p.detail}`);
+  const live = realtime.info();
+  log(`即時語音：${live.available ? "可用" : "不可用"}，${live.detail}`);
+  log(`憑證與設定目錄：${config.configDir}`);
+
+  return {
+    port,
+    url: `http://localhost:${port}`,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+/** 先試指定的埠；被占用時讓系統分配一個空閒埠。 */
+async function freePort(preferred: number): Promise<number> {
+  const tryListen = (port: number) =>
+    new Promise<number | null>((resolve) => {
+      const probe = createServer();
+      probe.once("error", () => resolve(null));
+      probe.listen(port, "127.0.0.1", () => {
+        const actual = (probe.address() as { port: number }).port;
+        probe.close(() => resolve(actual));
+      });
+    });
+  return (await tryListen(preferred)) ?? (await tryListen(0))!;
+}

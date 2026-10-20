@@ -37,6 +37,26 @@ describe("RealtimeBridge", () => {
     expect(JSON.stringify(call.init)).not.toContain("sk-fixture");
   });
 
+  it("retries once when OpenAI returns a transient 5xx", async () => {
+    const api = fakeOpenAI([
+      new Response(JSON.stringify({ error: { message: "server had an error" } }), { status: 500 }),
+      new Response(JSON.stringify({ value: "ek_fixture" }), { status: 200 }),
+      new Response("v=0 answer", { status: 201 }),
+    ]);
+    const bridge = new RealtimeBridge({ apiKey: "sk-fixture", model: "gpt-realtime", voice: "marin", fetch: api.fetch, retryDelayMs: 0 });
+    await expect(bridge.connect("v=0 offer", [])).resolves.toMatchObject({ sdp: "v=0 answer" });
+    expect(api.calls.map((c) => c.url.split("/").at(-1))).toEqual(["client_secrets", "client_secrets", "calls"]);
+  });
+
+  it("gives up after one retry and explains the error", async () => {
+    const api = fakeOpenAI([
+      new Response(JSON.stringify({ error: { message: "down" } }), { status: 500 }),
+      new Response(JSON.stringify({ error: { message: "still down" } }), { status: 503 }),
+    ]);
+    const bridge = new RealtimeBridge({ apiKey: "sk-fixture", model: "gpt-realtime", voice: "marin", fetch: api.fetch, retryDelayMs: 0 });
+    await expect(bridge.connect("v=0", [])).rejects.toThrow(/HTTP 503.*still down/);
+  });
+
   it("is unavailable without OPENAI_API_KEY and says where to set it", async () => {
     const bridge = new RealtimeBridge({ apiKey: null, model: "gpt-realtime", voice: "marin" });
     expect(bridge.info()).toMatchObject({ available: false, detail: expect.stringContaining("OPENAI_API_KEY") });

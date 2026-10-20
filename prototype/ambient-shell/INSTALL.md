@@ -2,6 +2,8 @@
 
 這份指南帶你在自己的電腦上跑起 Nous 電子腦原型。全程約 10 分鐘。
 
+> **macOS 也可以直接用 App**：下載 Releases 裡的 `Nous.app`，不用裝 Node.js、不用開終端機，選單列有 Nous 圖示可以設定。見 [desktop/README.md](./desktop/README.md)。
+
 ## 0. 需要的東西
 
 | 項目 | 版本／說明 |

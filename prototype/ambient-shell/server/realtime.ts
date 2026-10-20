@@ -7,6 +7,7 @@ import type { RealtimeInfo, Task } from "../shared/types.ts";
 // ChatGPT 方案登入雖然能換到 client secret，實測推論會 server_error，所以這裡只用 API key。
 
 const API = "https://api.openai.com/v1";
+const RETRIES = 1;
 
 export interface RealtimeOptions {
   apiKey: string | null;
@@ -15,6 +16,8 @@ export interface RealtimeOptions {
   /** NOUS_REALTIME_VOICE，預設 marin。 */
   voice: string;
   fetch?: typeof fetch;
+  /** 5xx 重試前的等待（毫秒），測試時設 0。 */
+  retryDelayMs?: number;
 }
 
 /** 模型可以呼叫的工具：交辦工作與查詢進度都由瀏覽器端用既有的任務 API 處理。 */
@@ -83,9 +86,11 @@ export class RealtimeError extends Error {
 
 export class RealtimeBridge {
   private readonly fetch: typeof fetch;
+  private readonly retryDelayMs: number;
 
   constructor(private readonly options: RealtimeOptions) {
     this.fetch = options.fetch ?? fetch;
+    this.retryDelayMs = options.retryDelayMs ?? 400;
   }
 
   info(): RealtimeInfo {
@@ -132,10 +137,20 @@ export class RealtimeBridge {
 
   private async request(url: string, init: RequestInit, stage: string): Promise<Response> {
     let res: Response;
-    try {
-      res = await this.fetch(url, init);
-    } catch (err) {
-      throw new RealtimeError(`${stage}失敗：無法連線到 OpenAI（網路中斷或被阻擋）。`, 502, { cause: err });
+    for (let attempt = 0; ; attempt++) {
+      try {
+        res = await this.fetch(url, init);
+      } catch (err) {
+        if (attempt < RETRIES) continue;
+        throw new RealtimeError(`${stage}失敗：無法連線到 OpenAI（網路中斷或被阻擋）。`, 502, { cause: err });
+      }
+      // OpenAI 偶爾回暫時性的 5xx（實測建立工作階段時出現過），稍等重試一次。
+      if (res.status >= 500 && attempt < RETRIES) {
+        await res.text().catch(() => "");
+        await new Promise((resolve) => setTimeout(resolve, this.retryDelayMs));
+        continue;
+      }
+      break;
     }
     if (res.ok) return res;
     const raw = await res.text().catch(() => "");
