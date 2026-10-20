@@ -1,7 +1,9 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { makeTask, step } from "./fixtures.ts";
+import { DOMAINS } from "../shared/domain.ts";
 import { TaskStore } from "../server/store.ts";
 
 const dirs: string[] = [];
@@ -64,4 +66,17 @@ describe("TaskStore 持久化", () => {
     task.status = "succeeded";
     expect(store.get(task.task_id)!.status).toBe("queued");
   });
+});
+
+
+it("loads six valid saved domains and keeps absent or invalid legacy values neutral", () => {
+  const dir = tempDir();
+  const domains = [...DOMAINS, undefined, "toString"];
+  writeFileSync(join(dir, "tasks.json"), JSON.stringify(domains.map((domain, i) => makeTask({
+    task_id: `task_${i}`, status: "succeeded", plan_ready: true,
+    steps: [{ ...step("計算照片", "done"), domain: domain as typeof DOMAINS[number] }],
+  }))));
+  const store = new TaskStore(dir);
+  expect(store.list().map((t) => t.steps[0].domain)).toEqual([...DOMAINS, undefined, undefined]);
+  expect(JSON.parse(readFileSync(join(dir, "tasks.json"), "utf8"))[7].steps[0]).not.toHaveProperty("domain");
 });

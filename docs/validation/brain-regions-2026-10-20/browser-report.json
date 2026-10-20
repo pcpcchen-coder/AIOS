@@ -1,0 +1,756 @@
+{
+  "fixture": "SIMULATED account/API SSE + browser speech APIs; real built application in Chromium",
+  "limitations": [
+    "No real OAuth/account, AI provider, microphone, TTS hardware, camera, or model neural activity verified."
+  ],
+  "started": "2026-10-20T07:33:35.372Z",
+  "inputHashes": {
+    "dist": {
+      "files": {
+        "assets/index-BoC7x9lh.js": "008ed2411c7f68a4d06f3c0ab7e30aa784376d32d3b5cd457477a32e1e112f76",
+        "assets/index-QEYVqE78.css": "5a15250e488c97f8d91389668fe7d0943fd3312fce3c00d7e9e3773c16217bf4",
+        "index.html": "ee3276579d6f98e2b559a06ac5ad1d7d9e4d73defd69e34e448472f62bd1a0e3"
+      },
+      "sha256": "ed7fc05ffe18fbdfaa91386fc54e914513e97c67e62803cdd99a2e484df71e23"
+    },
+    "src": {
+      "files": {
+        "api.ts": "a67e560ad8a24158b0d784f7d05d9071bcd1c56bd7ca72de9178ebfd8a79e336",
+        "brain.ts": "fb548edc08863bfee4b3cc97a87f37f6c6eb7c2e3839e5da75e85623a95125ae",
+        "conversation.ts": "7fa79beefbba22951ed071ec6234fd4a615cd74982b329fa8d8570b841b8867e",
+        "echo.ts": "874319fc0fd9c60ac88611ab608d9a99adab56b79fc88a1a74c2d34bf6d21626",
+        "format.ts": "30cbce6deadaced340112f5ef91ef340fa9bd8c2aebd9e66f91be4ae091d1772",
+        "intent.ts": "9e592b9824232732525dd2074bd54173a7e01ce34f28f8672c672c108cd60967",
+        "main.ts": "d8cfa3eb2329e0a46c8efc185a81dacee7657250593bf5d99f474d6124a36e11",
+        "presentation-policy.ts": "8375a63f2160c18c719b36d551891fa6ea787b3c6c5a9474e070c60078d5e9c0",
+        "region-activity.ts": "9f1af7be82a9710f19e0e0edf9cbddb099644a1d120b6fc6ab30af2514558843",
+        "shell-state.ts": "771fb5518a9412359109b0f1fc6c21b3d7eff95df47d1cc9046a016e1d77b23f",
+        "speech-text.ts": "7697f1c139902b6cc2839a731c69bb2d387afb5735244211f5db9465fb66f348",
+        "style.css": "ca55c5271c12898e336cd634951a8f7d6d82aabf0830ca0774f133b0fb4b37b1",
+        "views.ts": "1dfc2dd94344325cdde78d1581458e62b73e50f4b712d4449b4744508828497c",
+        "voice.ts": "739760a0244c49afd6c535a29b4e441153214eb42e5768814f9a49f392b4f12e"
+      },
+      "sha256": "9b23ba5ebed85b35e8aac6b19492e5dba7a92928fad459b3582e9ac20801d8cc"
+    },
+    "shared": {
+      "files": {
+        "domain.ts": "b3ff423c9197a52f11c6af32f7a93bfa70670e7784f3d81528b1347ac818b006",
+        "progress.ts": "216e03ff1ceba92c0801d69c1df7df1e08f5d0a4f5263ebaf07ca69cbc8d864c",
+        "types.ts": "5637071276d6997a503667790f9f6634d69f0c82d3f9c017fb955d38a3ccbf0e"
+      },
+      "sha256": "2d498de6998ba971974de2f3f968364c4bce3c1e46948841052959398933654c"
+    },
+    "entry": "c4352e711dcae257e71f578a8774545b3445db61144578aaec6e7211c9768bd4",
+    "harness": "c0db010f27417606b878d024381ff4d0c87811f1c672ee22662b978e2f6859b8"
+  },
+  "servedAssets": {
+    "index.html": "ee3276579d6f98e2b559a06ac5ad1d7d9e4d73defd69e34e448472f62bd1a0e3",
+    "assets/index-BoC7x9lh.js": "008ed2411c7f68a4d06f3c0ab7e30aa784376d32d3b5cd457477a32e1e112f76",
+    "assets/index-QEYVqE78.css": "5a15250e488c97f8d91389668fe7d0943fd3312fce3c00d7e9e3773c16217bf4"
+  },
+  "cases": [
+    {
+      "name": "signed-out-consent-gates",
+      "status": "passed",
+      "screenshot": "/tmp/aios-region-merge/browser-final/signed-out-fixture.png",
+      "observation": {
+        "active": "",
+        "activity": "",
+        "visibility": "",
+        "conversation": "idle",
+        "recognitionStarts": 0
+      }
+    },
+    {
+      "name": "six-task-domains-and-terminal-cleanup",
+      "status": "passed",
+      "renderedPartitionCounts": {
+        "language": 76,
+        "math": 118,
+        "art": 97,
+        "auditory": 45,
+        "visual": 141,
+        "planning": 93
+      },
+      "domains": [
+        {
+          "domain": "language",
+          "active": "language",
+          "activity": "語言區 · 模擬任務",
+          "visibility": "user_request",
+          "requestId": "req_fixture",
+          "conversation": "idle",
+          "recognitionStarts": 0,
+          "screenshot": "/tmp/aios-region-merge/browser-final/partition-language-fixture.png"
+        },
+        {
+          "domain": "math",
+          "active": "math",
+          "activity": "數理區 · 模擬任務",
+          "visibility": "user_request",
+          "requestId": "req_fixture",
+          "conversation": "idle",
+          "recognitionStarts": 0,
+          "screenshot": "/tmp/aios-region-merge/browser-final/partition-math-fixture.png"
+        },
+        {
+          "domain": "art",
+          "active": "art",
+          "activity": "藝術區 · 模擬任務",
+          "visibility": "user_request",
+          "requestId": "req_fixture",
+          "conversation": "idle",
+          "recognitionStarts": 0,
+          "screenshot": "/tmp/aios-region-merge/browser-final/partition-art-fixture.png"
+        },
+        {
+          "domain": "auditory",
+          "active": "auditory",
+          "activity": "聽覺區 · 模擬任務",
+          "visibility": "user_request",
+          "requestId": "req_fixture",
+          "conversation": "idle",
+          "recognitionStarts": 0,
+          "screenshot": "/tmp/aios-region-merge/browser-final/partition-auditory-fixture.png"
+        },
+        {
+          "domain": "visual",
+          "active": "visual",
+          "activity": "視覺區 · 模擬任務",
+          "visibility": "user_request",
+          "requestId": "req_fixture",
+          "conversation": "idle",
+          "recognitionStarts": 0,
+          "screenshot": "/tmp/aios-region-merge/browser-final/partition-visual-fixture.png"
+        },
+        {
+          "domain": "planning",
+          "active": "planning",
+          "activity": "規劃區 · 模擬任務",
+          "visibility": "user_request",
+          "requestId": "req_fixture",
+          "conversation": "idle",
+          "recognitionStarts": 0,
+          "screenshot": "/tmp/aios-region-merge/browser-final/partition-planning-fixture.png"
+        }
+      ],
+      "observation": {
+        "active": "",
+        "activity": "",
+        "visibility": "",
+        "conversation": "idle",
+        "recognitionStarts": 0
+      }
+    },
+    {
+      "name": "six-topic-classifications",
+      "status": "passed",
+      "topics": [
+        {
+          "domain": "language",
+          "text": "翻譯英文郵件",
+          "active": "language",
+          "activity": "語言區 · 主題分類",
+          "visibility": "user_request",
+          "requestId": "req_4512a29ee7ce4e3e957a5edebec58d31",
+          "conversation": "thinking",
+          "reply": "pending",
+          "recognitionStarts": 0
+        },
+        {
+          "domain": "math",
+          "text": "計算成本",
+          "active": "math",
+          "activity": "數理區 · 主題分類",
+          "visibility": "user_request",
+          "requestId": "req_e131bfa7ca414ee18ff504ce04dddf7b",
+          "conversation": "thinking",
+          "reply": "pending",
+          "recognitionStarts": 0
+        },
+        {
+          "domain": "art",
+          "text": "設計海報配色",
+          "active": "art",
+          "activity": "藝術區 · 主題分類",
+          "visibility": "user_request",
+          "requestId": "req_c1ee12d6ee504a6e81acdddcc96bd9ba",
+          "conversation": "thinking",
+          "reply": "pending",
+          "recognitionStarts": 0
+        },
+        {
+          "domain": "auditory",
+          "text": "音樂旋律",
+          "active": "auditory",
+          "activity": "聽覺區 · 主題分類",
+          "visibility": "user_request",
+          "requestId": "req_c1465077589c4759a38ef67219518510",
+          "conversation": "thinking",
+          "reply": "pending",
+          "recognitionStarts": 0
+        },
+        {
+          "domain": "visual",
+          "text": "這3張照片",
+          "active": "visual",
+          "activity": "視覺區 · 主題分類",
+          "visibility": "user_request",
+          "requestId": "req_4c007c88af504a9c941d8dc1d220c7a9",
+          "conversation": "thinking",
+          "reply": "pending",
+          "recognitionStarts": 0
+        },
+        {
+          "domain": "planning",
+          "text": "規劃排程",
+          "active": "planning",
+          "activity": "規劃區 · 主題分類",
+          "visibility": "user_request",
+          "requestId": "req_63a9b6c6f39f47dfa6b5e3b301f56734",
+          "conversation": "thinking",
+          "reply": "pending",
+          "recognitionStarts": 0
+        }
+      ],
+      "observation": {
+        "active": "",
+        "activity": "",
+        "visibility": "",
+        "conversation": "idle",
+        "reply": "complete",
+        "recognitionStarts": 0
+      }
+    },
+    {
+      "name": "topic-provenance-and-late-completion",
+      "status": "passed",
+      "screenshot": "/tmp/aios-region-merge/browser-final/visual-topic-fixture.png",
+      "observation": {
+        "active": "",
+        "activity": "",
+        "visibility": "",
+        "conversation": "idle",
+        "reply": "complete",
+        "recognitionStarts": 0
+      }
+    },
+    {
+      "name": "actual-capture-tts-and-restart-boundaries",
+      "status": "passed",
+      "screenshot": "/tmp/aios-region-merge/browser-final/capture-fixture.png",
+      "observation": {
+        "active": "",
+        "activity": "",
+        "visibility": "",
+        "conversation": "idle",
+        "recognitionStarts": 3
+      }
+    },
+    {
+      "name": "push-to-talk-actual-audio-and-errors",
+      "status": "passed",
+      "observation": {
+        "active": "",
+        "activity": "",
+        "visibility": "",
+        "conversation": "idle",
+        "recognitionStarts": 1
+      }
+    },
+    {
+      "name": "simultaneous-sources-and-close-preserves-task",
+      "status": "passed",
+      "screenshot": "/tmp/aios-region-merge/browser-final/simultaneous-sources-fixture.png",
+      "observation": {
+        "active": "art",
+        "activity": "藝術區 · 模擬任務",
+        "visibility": "user_request",
+        "requestId": "req_fixture",
+        "conversation": "idle",
+        "reply": "interrupted",
+        "recognitionStarts": 1
+      }
+    },
+    {
+      "name": "provider-account-reset-preserves-background-task",
+      "status": "passed",
+      "observation": {
+        "active": "art",
+        "activity": "藝術區 · 模擬任務",
+        "visibility": "user_request",
+        "requestId": "req_fixture",
+        "conversation": "idle",
+        "reply": "interrupted",
+        "recognitionStarts": 0
+      }
+    },
+    {
+      "name": "shared-voice-typed-history-and-stream-errors",
+      "status": "passed",
+      "screenshot": "/tmp/aios-region-merge/browser-final/stream-error-fixture.png",
+      "observation": {
+        "active": "",
+        "activity": "",
+        "visibility": "",
+        "conversation": "listening",
+        "reply": "error",
+        "recognitionStarts": 1
+      }
+    }
+  ],
+  "requests": [
+    {
+      "case": "signed-out-consent-gates",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "signed-in-before-consent",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "six-task-domains-and-terminal-cleanup",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "six-topic-classifications",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "six-topic-classifications",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯英文郵件"
+          }
+        ],
+        "request_id": "req_4512a29ee7ce4e3e957a5edebec58d31"
+      }
+    },
+    {
+      "case": "six-topic-classifications",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯英文郵件"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "計算成本"
+          }
+        ],
+        "request_id": "req_e131bfa7ca414ee18ff504ce04dddf7b"
+      }
+    },
+    {
+      "case": "six-topic-classifications",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯英文郵件"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "計算成本"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "設計海報配色"
+          }
+        ],
+        "request_id": "req_c1ee12d6ee504a6e81acdddcc96bd9ba"
+      }
+    },
+    {
+      "case": "six-topic-classifications",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯英文郵件"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "計算成本"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "設計海報配色"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "音樂旋律"
+          }
+        ],
+        "request_id": "req_c1465077589c4759a38ef67219518510"
+      }
+    },
+    {
+      "case": "six-topic-classifications",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯英文郵件"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "計算成本"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "設計海報配色"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "音樂旋律"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "這3張照片"
+          }
+        ],
+        "request_id": "req_4c007c88af504a9c941d8dc1d220c7a9"
+      }
+    },
+    {
+      "case": "six-topic-classifications",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯英文郵件"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "計算成本"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "設計海報配色"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "音樂旋律"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "這3張照片"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE neutral response。"
+          },
+          {
+            "role": "user",
+            "content": "規劃排程"
+          }
+        ],
+        "request_id": "req_63a9b6c6f39f47dfa6b5e3b301f56734"
+      }
+    },
+    {
+      "case": "topic-provenance-and-late-completion",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "topic-provenance-and-late-completion",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "計算數學公式"
+          }
+        ],
+        "request_id": "req_872ef2ad21f848569250233bd1ee496f"
+      }
+    },
+    {
+      "case": "topic-provenance-and-late-completion",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "照片影像視覺"
+          }
+        ],
+        "request_id": "req_914d23875aad46d8814406a18e144480"
+      }
+    },
+    {
+      "case": "actual-capture-tts-and-restart-boundaries",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "push-to-talk-actual-audio-and-errors",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "simultaneous-sources-and-close-preserves-task",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "simultaneous-sources-and-close-preserves-task",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "計算數學公式"
+          }
+        ],
+        "request_id": "req_5f9040f36f59464fa498c8134e7c8ede"
+      }
+    },
+    {
+      "case": "provider-account-reset-preserves-background-task",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "provider-account-reset-preserves-background-task",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "計算數學公式"
+          }
+        ],
+        "request_id": "req_8060a592bebb4240ace6be3a7b75622d"
+      }
+    },
+    {
+      "case": "provider-account-reset-preserves-background-task",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "照片影像視覺"
+          }
+        ],
+        "request_id": "req_cdef20754d4c4e33bc68f1c373bb318d"
+      }
+    },
+    {
+      "case": "provider-account-reset-preserves-background-task",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯文章"
+          }
+        ],
+        "request_id": "req_e2c00c7a4fe44116b4cc0aac579d49cf"
+      }
+    },
+    {
+      "case": "shared-voice-typed-history-and-stream-errors",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "shared-voice-typed-history-and-stream-errors",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯文章"
+          }
+        ],
+        "request_id": "req_c061a123bbde44ae92635c26899fff21"
+      }
+    },
+    {
+      "case": "shared-voice-typed-history-and-stream-errors",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯文章"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE first answer。"
+          },
+          {
+            "role": "user",
+            "content": "計算數學公式"
+          }
+        ],
+        "request_id": "req_b60ef40411aa47e7bb61fb1797b2473f"
+      }
+    },
+    {
+      "case": "shared-voice-typed-history-and-stream-errors",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯文章"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE first answer。"
+          },
+          {
+            "role": "user",
+            "content": "計算數學公式"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE second answer。"
+          },
+          {
+            "role": "user",
+            "content": "照片影像視覺"
+          }
+        ],
+        "request_id": "req_607843c29ac54a6db0d48e7c01ea4ad8"
+      }
+    },
+    {
+      "case": "shared-voice-typed-history-and-stream-errors",
+      "method": "POST",
+      "path": "/api/chat",
+      "body": {
+        "messages": [
+          {
+            "role": "user",
+            "content": "翻譯文章"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE first answer。"
+          },
+          {
+            "role": "user",
+            "content": "計算數學公式"
+          },
+          {
+            "role": "assistant",
+            "content": "FIXTURE second answer。"
+          },
+          {
+            "role": "user",
+            "content": "計算數學公式"
+          }
+        ],
+        "request_id": "req_f0c20544b02a43b49009de8c08d1c12c"
+      }
+    }
+  ],
+  "browserErrors": [],
+  "runtime": {
+    "node": "v24.19.0",
+    "chromium": "154.0.8037.57"
+  },
+  "finished": "2026-10-20T07:34:21.119Z",
+  "sourceUnchangedDuringRun": true,
+  "distUnchangedDuringRun": true
+}

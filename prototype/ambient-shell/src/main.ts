@@ -4,6 +4,8 @@ import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, 
 import { ApiError, api, newRequestId, streamChat, subscribeEvents } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
 import { Brain } from "./brain.ts";
+import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
+import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
 import { formatCount } from "./format.ts";
 import { classify } from "./intent.ts";
 import { evaluateSurface } from "./presentation-policy.ts";
@@ -33,6 +35,7 @@ import {
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
 const canvas = $<HTMLCanvasElement>("brain");
+const regionActivity = $<HTMLParagraphElement>("region-activity");
 const statusLine = $<HTMLParagraphElement>("status-line");
 const caption = $<HTMLDivElement>("caption");
 const form = $<HTMLFormElement>("command");
@@ -72,6 +75,7 @@ let renderedKey: string | null = null;
 
 // 按下說話的語音輸入（明確啟動，不做背景喚醒）。
 const voice = new PushToTalk({
+  onCaptureChange: () => render(),
   onInterim: (text) => {
     input.value = text;
   },
@@ -92,6 +96,8 @@ const voice = new PushToTalk({
 const VOICE_IDLE_MS = 90_000;
 const conversation = new VoiceConversation(
   {
+    onCaptureChange: () => render(),
+    onPlaybackChange: () => render(),
     onUtterance: (text) => {
       session.interrupt();
       showSubtitle(`你：${text}`);
@@ -103,7 +109,7 @@ const conversation = new VoiceConversation(
       session.interrupt();
       brain.pulse("step");
     },
-    onSentenceSpoken: () => brain.pulse("stream"),
+    onSentenceSpoken: () => brain.pulse("stream", "language"),
     onClosed: (reason) => {
       showSubtitle(reason);
       session.interrupt();
@@ -119,8 +125,9 @@ const session = new ConversationSession({
   stream: streamChat,
   output: () => {
     const reply = conversation.beginReply();
-    return { push: (text) => reply.push(text), end: () => reply.end(), cancel: () => conversation.interrupt() };
+    return { push: (text) => reply.push(text), end: () => reply.end(), cancel: () => reply.cancel() };
   },
+  activity: (kind, _requestId, text) => brain.pulse(kind, classifyDomain(text)),
   changed: () => render(),
   delegated: (title, requestId) => void delegateTask(title, requestId),
 });
@@ -183,7 +190,6 @@ async function converse(text: string, requestId: string): Promise<void> {
     input.value = "";
     dispatch({ type: "dismiss" });
     hideSubtitle();
-    brain.pulse("submit");
     await session.send(text, requestId);
   } catch (error) {
     if (epoch !== conversationEpoch) return;
@@ -393,7 +399,7 @@ function onServerEvent(event: ServerEvent): void {
 /** 把真實狀態變化轉成光脈衝；沒有事件就沒有脈衝。 */
 function firePulses(prev: Task | undefined, next: Task): void {
   if (!prev) {
-    brain.pulse("submit");
+    brain.pulse("submit", next.status === "running" && !next.plan_ready ? "planning" : null);
     return;
   }
   if (prev.status !== next.status) {
@@ -402,11 +408,12 @@ function firePulses(prev: Task | undefined, next: Task): void {
   }
   next.steps.forEach((step, i) => {
     const before = prev.steps[i];
+    const domain = isDomain(step.domain) ? step.domain : null;
     if (step.status !== before?.status) {
-      if (step.status === "running") brain.pulse("step");
-      if (step.status === "done") brain.pulse("stepDone");
+      if (step.status === "running") brain.pulse("step", domain);
+      if (step.status === "done") brain.pulse("stepDone", domain);
     }
-    if (step.output_chars !== null && step.output_chars !== (before?.output_chars ?? null)) brain.pulse("stream");
+    if (step.output_chars !== null && step.output_chars !== (before?.output_chars ?? null)) brain.pulse("stream", domain);
   });
 }
 
@@ -629,9 +636,16 @@ function render(): void {
   canvas.dataset.conversationState = phase;
   conversationStatus.textContent = { idle: "", listening: "正在聆聽，你可以直接說話", thinking: "正在等待回覆，你可以插話", speaking: "正在回覆，你可以直接插話", error: "對話暫時中斷，可重試或開啟設定" }[phase];
   conversationStatus.hidden = phase === "idle";
+  const activity = collectRegionActivity({
+    tasks: [...tasks.values()], reply: session.view.reply,
+    conversationVisible: session.view.visible && shell.surface === null,
+    capture: { push: voice.capturing, continuous: conversation.capturing }, playback: conversation.playing,
+  });
+  renderRegionActivity(activity);
   brain.setState({
+    activity,
     conversation: phase,
-    listening: shell.listening || voice.active || conversation.current === "listening",
+    listening: voice.capturing || conversation.capturing,
     working: [...tasks.values()].some(isActive),
     layout: shell.surface ? "top" : "center",
     progress:
@@ -649,6 +663,20 @@ function render(): void {
   renderEngineLine();
   renderCaption(fg);
   renderSurface();
+}
+
+function renderRegionActivity(activity: readonly RegionActivity[]): void {
+  const ids = DOMAINS.filter((d) => activity.some((a) => a.domain === d)).join(" ");
+  document.body.dataset.activeRegions = ids;
+  canvas.dataset.activeRegions = ids;
+  regionActivity.hidden = activity.length === 0;
+  regionActivity.textContent = [...new Set(activity.map(activityDescription))].join("；");
+  const topic = activity.find((a) => a.source === "topic");
+  const task = activity.find((a) => a.source === "task-step" || a.source === "task-planning");
+  const requestId = topic?.owner ?? (task && "requestId" in task ? task.requestId : undefined);
+  regionActivity.dataset.visibilityReason = activity.length ? requestId ? "user_request" : "sensor_status" : "";
+  if (requestId) regionActivity.dataset.requestId = requestId;
+  else delete regionActivity.dataset.requestId;
 }
 
 function renderConversation(): void {

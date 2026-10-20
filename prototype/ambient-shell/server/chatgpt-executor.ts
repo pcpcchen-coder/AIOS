@@ -61,7 +61,10 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
     if (planned.model) served.add(planned.model);
     const plan = parsePlan(planned.text);
     const titles = [...plan.steps.map((s) => s.title), SYNTHESIS_TITLE];
-    reporter.planReady(titles, model);
+    reporter.planReady(
+      [...plan.steps.map((s) => ({ title: s.title, domain: s.domain })), { title: SYNTHESIS_TITLE, domain: "language" as const }],
+      model,
+    );
 
     const outputs: string[] = [];
     let truncated = false;

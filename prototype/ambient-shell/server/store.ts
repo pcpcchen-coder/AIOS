@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { SCHEMA_VERSION, type Artifact, type ExecutorMode, type Task } from "../shared/types.ts";
+import { isDomain } from "../shared/domain.ts";
 
 type Listener = (task: Task) => void;
 
@@ -27,6 +28,7 @@ export class TaskStore {
     for (const a of artifacts) this.artifacts.set(a.artifact_id, a);
     const now = new Date().toISOString();
     for (const t of tasks) {
+      for (const step of t.steps) if (!isDomain(step.domain)) delete step.domain;
       // 上次未完成的任務不可能還在跑：誠實標為失敗，而不是假裝仍在進行。
       if (t.status === "queued" || t.status === "running" || t.status === "cancelling") {
         t.status = "failed";

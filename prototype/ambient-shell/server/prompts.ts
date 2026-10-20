@@ -1,3 +1,4 @@
+import { classifyDomain, isDomain, DOMAINS, REGIONS, type Domain } from "../shared/domain.ts";
 import { ExecutionError } from "./runner.ts";
 
 // Claude 與 ChatGPT 執行器共用的提示詞與計畫格式：同樣走「規劃 → 逐步執行 → 彙整」。
@@ -20,8 +21,9 @@ export const PLAN_SCHEMA = {
         properties: {
           title: { type: "string" },
           instruction: { type: "string" },
+          domain: { type: "string", enum: DOMAINS },
         },
-        required: ["title", "instruction"],
+        required: ["title", "instruction", "domain"],
         additionalProperties: false,
       },
     },
@@ -33,7 +35,7 @@ export const PLAN_SCHEMA = {
 } as const;
 
 export interface Plan {
-  steps: { title: string; instruction: string }[];
+  steps: { title: string; instruction: string; domain: Domain }[];
   assumptions: string[];
   capability_gaps: string[];
 }
@@ -49,6 +51,7 @@ export function planPrompt(title: string, today = new Date().toISOString().slice
     "",
     `請把任務拆成 1 到 ${MAX_PLAN_STEPS} 個具體執行步驟，每步給一個 15 字以內的標題與給執行者的指示。`,
     "不要加入「彙整」或「總結」步驟，系統會自動在最後加上。",
+    `每一步標記主要用到的能力 domain：${REGIONS.map((r) => `${r.id}（${r.label}：${r.help}）`).join("、")}。`,
     "同時列出你做的假設，以及因為沒有工具而無法完成的部分（能力缺口）。",
   ].join("\n");
 }
@@ -94,7 +97,12 @@ export function parsePlan(text: string): Plan {
     ? obj.steps
         .filter((s) => typeof s?.title === "string" && s.title.trim() && typeof s.instruction === "string")
         .slice(0, MAX_PLAN_STEPS)
-        .map((s) => ({ title: s.title.trim().slice(0, 40), instruction: s.instruction.trim() }))
+        .map((s) => ({
+          title: s.title.trim().slice(0, 40),
+          instruction: s.instruction.trim(),
+          // 模型沒給或給錯時，以關鍵字補判；仍判斷不出來就當語言（撰寫產出）。
+          domain: isDomain(s.domain) ? s.domain : (classifyDomain(`${s.title} ${s.instruction}`) ?? "language"),
+        }))
     : [];
   if (steps.length === 0) throw new ExecutionError("規劃結果沒有任何可執行的步驟。");
   const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);

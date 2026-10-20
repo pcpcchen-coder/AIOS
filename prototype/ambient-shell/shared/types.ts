@@ -2,6 +2,8 @@
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
 // 這裡先用 TS 型別，schema_version 標為 proto-0.1 以免與正式契約混淆。
 
+import type { Domain } from "./domain.ts";
+
 export const SCHEMA_VERSION = "proto-0.1";
 
 /** 任務狀態；與 docs/06 §5 的 Task 狀態對齊（本原型無 awaiting_* 狀態）。 */
@@ -28,6 +30,8 @@ export interface TaskStep {
   finished_at: string | null;
   /** 這一步目前已收到的模型輸出字元數；只有真實串流時才會有值。 */
   output_chars: number | null;
+  /** 這一步屬於哪個象徵腦區，驅動電子腦對應區域亮起。 */
+  domain?: Domain | null;
 }
 
 export interface Task {

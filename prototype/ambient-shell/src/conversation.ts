@@ -21,6 +21,7 @@ interface ConversationOptions {
   stream(messages: ChatTurn[], requestId: string, event: (value: ChatEvent) => void, signal: AbortSignal): Promise<void>;
   output(): ConversationOutput;
   changed(): void;
+  activity?(kind: "submit" | "stream", requestId: string, text: string): void;
   delegated(title: string, requestId: string): void;
 }
 
@@ -66,6 +67,7 @@ export class ConversationSession {
     const turn: ActiveTurn = { controller: new AbortController(), output: this.options.output(), exchange, settled: false };
     this.active = turn;
     this.reply = { ...exchange, kind: "pending" };
+    this.options.activity?.("submit", requestId, exchange.user);
     this.options.changed();
     try {
       await this.options.stream(messages, requestId, (event) => {
@@ -73,6 +75,7 @@ export class ConversationSession {
         switch (event.type) {
           case "delta":
             turn.exchange.answer += event.text;
+            if (event.text) this.options.activity?.("stream", requestId, turn.exchange.user);
             turn.output.push(event.text);
             this.reply = { ...turn.exchange, kind: "pending" };
             break;

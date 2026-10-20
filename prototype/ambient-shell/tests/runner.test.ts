@@ -1,3 +1,4 @@
+import { DOMAINS, type Domain } from "../shared/domain.ts";
 import { describe, expect, it } from "vitest";
 import { ExecutionError, PLANNING_STEP_TITLE, TaskRunner, type Executor, type Reporter } from "../server/runner.ts";
 import { MockExecutor } from "../server/mock-executor.ts";
@@ -55,12 +56,19 @@ describe("TaskRunner", () => {
     expect(t.plan_ready).toBe(false);
     expect(t.steps.map((s) => [s.title, s.status])).toEqual([[PLANNING_STEP_TITLE, "running"]]);
 
-    ex.reporter.planReady(["蒐集", "撰寫"], "model-x");
+    ex.reporter.planReady(
+      [
+        { title: "蒐集", domain: "math" },
+        { title: "撰寫", domain: "language" },
+      ],
+      "model-x",
+    );
     ex.reporter.stepStarted(0);
     ex.reporter.stepProgress(0, 120);
     t = store.get(task.task_id)!;
     expect(t.plan_ready).toBe(true);
     expect(t.steps.map((s) => s.status)).toEqual(["done", "running", "pending"]);
+    expect(t.steps.map((s) => s.domain)).toEqual(["planning", "math", "language"]);
     expect(t.steps[1].output_chars).toBe(120);
 
     ex.reporter.stepDone(0);
@@ -81,7 +89,7 @@ describe("TaskRunner", () => {
     const { store, runner } = setup(ex);
     const task = runner.submit({ title: "查即時股價", request_id: "req_aaaaaaaa" });
     await ex.started;
-    ex.reporter.planReady(["查詢"], null);
+    ex.reporter.planReady([{ title: "查詢", domain: null }], null);
     ex.reporter.stepStarted(0);
     ex.error(new ExecutionError("無法連線到 Anthropic API（網路中斷或被阻擋）。"));
     await runner.idle();
@@ -98,7 +106,13 @@ describe("TaskRunner", () => {
     const { store, runner, events } = setup(ex);
     const task = runner.submit({ title: "長任務", request_id: "req_aaaaaaaa" });
     await ex.started;
-    ex.reporter.planReady(["A", "B"], null);
+    ex.reporter.planReady(
+      [
+        { title: "A", domain: null },
+        { title: "B", domain: null },
+      ],
+      null,
+    );
     ex.reporter.stepStarted(0);
 
     expect(runner.cancel(task.task_id)!.status).toBe("cancelling");
@@ -155,4 +169,15 @@ describe("TaskRunner", () => {
     expect(artifact.status).toBe("partial");
     expect(artifact.content).toContain("沒有實際完成這件事");
   });
+});
+
+
+it("Runner preserves six model domains through snapshots and normalizes invalid reporter values", async () => {
+  const ex = new ControlledExecutor(); const { store, runner, events } = setup(ex);
+  const submitted = runner.submit({ title: "照片", request_id: "req_aaaaaaaa" }); await ex.started;
+  expect(store.get(submitted.task_id)?.steps[0].domain).toBe("planning");
+  ex.reporter.planReady([...DOMAINS.map((domain) => ({ title: domain, domain })), { title: "legacy", domain: "toString" as Domain }], "fixture");
+  expect(events.at(-1)?.steps.map((s) => s.domain)).toEqual(["planning", ...DOMAINS, null]);
+  expect(store.get(submitted.task_id)?.steps.map((s) => s.domain)).toEqual(["planning", ...DOMAINS, null]);
+  ex.finish(); await runner.idle();
 });

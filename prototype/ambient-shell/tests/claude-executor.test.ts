@@ -1,3 +1,4 @@
+import { DOMAINS } from "../shared/domain.ts";
 import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { ClaudeExecutor, parsePlan } from "../server/claude-executor.ts";
@@ -21,7 +22,7 @@ const MODELS = [
 
 const PLAN = {
   steps: [
-    { title: "列出重點", instruction: "整理三個重點" },
+    { title: "列出重點", instruction: "整理三個重點", domain: "math" },
     { title: "撰寫草稿", instruction: "寫成短文" },
   ],
   assumptions: ["讀者是團隊成員"],
@@ -84,7 +85,8 @@ function happyHandler(req: Recorded): Response {
 function recordingReporter() {
   const calls: string[] = [];
   const reporter: Reporter = {
-    planReady: (titles, model) => calls.push(`plan:${titles.join("|")}:${model}`),
+    planReady: (steps, model) =>
+      calls.push(`plan:${steps.map((s) => `${s.title}/${s.domain}`).join("|")}:${model}`),
     stepStarted: (i) => calls.push(`start:${i}`),
     stepProgress: (i, chars) => calls.push(`progress:${i}:${chars}`),
     stepDone: (i) => calls.push(`done:${i}`),
@@ -113,7 +115,8 @@ describe("ClaudeExecutor", () => {
 
     const result = await ex.run({ title: "寫一封週報" }, reporter, new AbortController().signal);
 
-    expect(calls[0]).toBe("plan:列出重點|撰寫草稿|彙整成果:claude-opus-5-5");
+    // 模型標記的 domain 直接採用；沒標記的以關鍵字補判；彙整固定為語言。
+    expect(calls[0]).toBe("plan:列出重點/math|撰寫草稿/language|彙整成果/language:claude-opus-5-5");
     // 三步（兩個規劃步驟＋彙整）各自 start → progress(實際字元數) → done；"第一段，第二段。" 共 8 字
     for (const i of [0, 1, 2]) {
       expect(calls).toContain(`start:${i}`);
@@ -178,8 +181,33 @@ describe("parsePlan", () => {
     expect(plan.steps.map((s) => s.title)).toEqual(["步驟0", "步驟1", "步驟2", "步驟3", "步驟4"]);
   });
 
+  it("domain 不合法時以關鍵字補判", () => {
+    const plan = parsePlan(
+      JSON.stringify({
+        steps: [
+          { title: "計算成本", instruction: "算出每度電價", domain: "music" },
+          { title: "畫草圖", instruction: "設計版面", domain: "art" },
+        ],
+        assumptions: [],
+        capability_gaps: [],
+      }),
+    );
+    expect(plan.steps.map((s) => s.domain)).toEqual(["math", "art"]);
+  });
+
   it("沒有步驟或不是 JSON 時視為失敗", () => {
     expect(() => parsePlan("not json")).toThrow(ExecutionError);
     expect(() => parsePlan(JSON.stringify({ steps: [] }))).toThrow(/沒有任何可執行的步驟/);
   });
+});
+
+
+it.each(DOMAINS)("Claude planner passes %s through Reporter", async (domain) => {
+  const { client } = fakeClient((req) => req.body?.stream
+    ? new Response(sse(["產出。"]), { headers: { "content-type": "text/event-stream" } })
+    : json(message(JSON.stringify({ ...PLAN, steps: [{ title: "主題步驟", instruction: "執行", domain }] }))));
+  const ex = new ClaudeExecutor({ apiKey: "fixture", model: "fixture-model", modelFamily: "opus", fallbacks: false, client });
+  const { reporter, calls } = recordingReporter();
+  await ex.run({ title: "領域契約" }, reporter, new AbortController().signal);
+  expect(calls[0]).toBe(`plan:主題步驟/${domain}|彙整成果/language:fixture-model`);
 });

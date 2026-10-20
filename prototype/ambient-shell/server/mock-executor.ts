@@ -1,3 +1,4 @@
+import { classifyDomain } from "../shared/domain.ts";
 import type { ChatCapable, ChatMessage } from "./chat.ts";
 import type { ExecutionResult, Executor, Reporter } from "./runner.ts";
 
@@ -28,7 +29,11 @@ export class MockExecutor implements Executor, ChatCapable {
   async run(input: { title: string }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
     const steps = ["理解需求（模擬）", "拆解工作（模擬）", "整理產出（模擬）"];
     await sleep(this.stepDelayMs * 0.6, signal);
-    reporter.planReady(steps, null);
+    const domain = classifyDomain(input.title) ?? "language";
+    reporter.planReady(
+      steps.map((title, i) => ({ title, domain: i === steps.length - 1 ? ("language" as const) : domain })),
+      null,
+    );
     for (let i = 0; i < steps.length; i++) {
       reporter.stepStarted(i);
       await sleep(this.stepDelayMs, signal);

@@ -887,3 +887,19 @@ body.has-surface .conversation-status {
 @media (max-height: 600px) {
   .conversation-reply { bottom: 110px; max-height: 25vh; }
 }
+
+/* Active symbolic categories only; no persistent panel. */
+.region-activity {
+  position: fixed;
+  left: 50%;
+  top: 73%;
+  transform: translateX(-50%);
+  max-width: min(90vw, 760px);
+  margin: 0;
+  color: rgba(221, 236, 255, 0.8);
+  font-size: 12px;
+  text-align: center;
+  pointer-events: none;
+}
+body.has-conversation .region-activity { top: 40px; }
+body.has-surface .region-activity { top: 21%; }

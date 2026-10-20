@@ -21,6 +21,8 @@ interface RecognitionLike {
   interimResults: boolean;
   continuous: boolean;
   maxAlternatives: number;
+  onaudiostart: (() => void) | null;
+  onaudioend: (() => void) | null;
   onresult: ((e: { resultIndex: number; results: ArrayLike<RecognitionResultLike> }) => void) | null;
   onerror: ((e: { error: string }) => void) | null;
   onend: (() => void) | null;
@@ -74,6 +76,7 @@ const ERROR_TEXT: Record<string, string> = {
 };
 
 export interface VoiceCallbacks {
+  onCaptureChange?(active: boolean): void;
   onInterim(text: string): void;
   onFinal(text: string): void;
   onListeningChange(listening: boolean): void;
@@ -84,6 +87,16 @@ export class PushToTalk {
   private recognition: RecognitionLike | null = null;
   /** 使用者中止（Esc／關閉輸入）時，已辨識的片段也不送出。 */
   private discard = false;
+  private capture = false;
+  private captureExpected = false;
+
+  get capturing(): boolean { return this.capture; }
+
+  private setCapture(active: boolean): void {
+    if (this.capture === active) return;
+    this.capture = active;
+    this.callbacks.onCaptureChange?.(active);
+  }
 
   constructor(private readonly callbacks: VoiceCallbacks) {}
 
@@ -101,7 +114,11 @@ export class PushToTalk {
     r.maxAlternatives = 1;
     let finalText = "";
     this.discard = false;
+    this.captureExpected = true;
+    r.onaudiostart = () => { if (this.recognition === r && this.captureExpected) this.setCapture(true); };
+    r.onaudioend = () => { if (this.recognition === r) this.setCapture(false); };
     r.onresult = (e) => {
+      if (this.recognition !== r) return;
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
@@ -111,26 +128,45 @@ export class PushToTalk {
       this.callbacks.onInterim(finalText + interim);
     };
     r.onerror = (e) => {
+      if (this.recognition !== r) return;
+      this.captureExpected = false;
+      this.setCapture(false);
       if (e.error !== "aborted") this.callbacks.onError(ERROR_TEXT[e.error] ?? `語音辨識失敗（${e.error}）`);
     };
     r.onend = () => {
+      if (this.recognition !== r) return;
+      this.captureExpected = false;
+      this.setCapture(false);
       this.recognition = null;
       this.callbacks.onListeningChange(false);
       if (!this.discard && finalText.trim()) this.callbacks.onFinal(finalText.trim());
     };
     this.recognition = r;
     this.callbacks.onListeningChange(true);
-    r.start();
+    try { r.start(); } catch {
+      this.recognition = null;
+      this.captureExpected = false;
+      this.setCapture(false);
+      this.callbacks.onListeningChange(false);
+      this.callbacks.onError("無法啟動語音辨識。");
+    }
   }
 
   stop(): void {
+    this.captureExpected = false;
+    this.setCapture(false);
     this.recognition?.stop();
   }
 
   abort(): void {
     if (!this.recognition) return;
     this.discard = true;
-    this.recognition.abort();
+    const r = this.recognition;
+    this.recognition = null;
+    this.captureExpected = false;
+    this.setCapture(false);
+    this.callbacks.onListeningChange(false);
+    r.abort();
   }
 }
 
@@ -139,6 +175,8 @@ export class PushToTalk {
 export type ConversationState = "off" | "listening" | "speaking";
 
 export interface ConversationCallbacks {
+  onCaptureChange?(active: boolean): void;
+  onPlaybackChange?(active: boolean): void;
   onUtterance(text: string): void;
   onInterim(text: string): void;
   onStateChange(state: ConversationState): void;
@@ -161,6 +199,7 @@ export interface ConversationOptions {
 export interface ReplyHandle {
   push(text: string): void;
   end(): void;
+  cancel(): void;
   readonly cancelled: boolean;
   readonly done: Promise<void>;
 }
@@ -175,6 +214,23 @@ const FATAL_ERRORS = new Set(["not-allowed", "service-not-allowed", "audio-captu
 export class VoiceConversation {
   private recognition: RecognitionLike | null = null;
   private state: ConversationState = "off";
+  private capture = false;
+  private playback = false;
+
+  get capturing(): boolean { return this.capture; }
+  get playing(): boolean { return this.playback; }
+
+  private setCapture(active: boolean): void {
+    if (this.capture === active) return;
+    this.capture = active;
+    this.callbacks.onCaptureChange?.(active);
+  }
+
+  private setPlayback(active: boolean): void {
+    if (this.playback === active) return;
+    this.playback = active;
+    this.callbacks.onPlaybackChange?.(active);
+  }
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private networkErrors = 0;
   private reply: Reply | null = null;
@@ -207,13 +263,15 @@ export class VoiceConversation {
 
   stop(): void {
     if (!this.on) return;
-    this.clearIdle();
     this.reply?.cancel();
     this.reply = null;
-    speechSynthesis?.cancel();
+    this.clearIdle();
+    if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
     this.setState("off");
     const r = this.recognition;
     this.recognition = null;
+    this.setCapture(false);
+    this.setPlayback(false);
     r?.abort();
   }
 
@@ -221,23 +279,25 @@ export class VoiceConversation {
   beginReply(): ReplyHandle {
     if (this.reply) {
       this.reply.cancel();
-      speechSynthesis?.cancel();
+      if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
     }
     if (!this.on) return Reply.noop();
     const reply = new Reply({
       onStart: () => {
-        if (this.reply === reply) this.setState("speaking");
+        if (this.reply === reply) { this.setPlayback(true); this.setState("speaking"); }
       },
       onPlaybackEnd: () => {
-        if (this.reply === reply && this.on) this.setState("listening");
+        if (this.reply === reply) { this.setPlayback(false); if (this.on) this.setState("listening"); }
       },
       onSentence: (sentence) => {
+        if (this.reply !== reply) return;
         this.spoken = `${this.spoken}${sentence}`.slice(-400);
         this.callbacks.onSentenceSpoken?.();
       },
       onFinish: () => {
         if (this.reply !== reply) return;
         this.reply = null;
+        this.setPlayback(false);
         this.spokenEndedAt = Date.now();
         if (this.on) {
           this.setState("listening");
@@ -264,7 +324,7 @@ export class VoiceConversation {
     this.bargeSpoken = this.spoken;
     this.reply.cancel();
     this.reply = null;
-    speechSynthesis?.cancel();
+    if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
     this.spokenEndedAt = Date.now();
     if (this.on) this.setState("listening");
     this.callbacks.onBargeIn();
@@ -289,6 +349,9 @@ export class VoiceConversation {
     r.continuous = true;
     r.maxAlternatives = 1;
     let fatal: string | null = null;
+    let acceptingAudio = true;
+    r.onaudiostart = () => { if (this.recognition === r && acceptingAudio) this.setCapture(true); };
+    r.onaudioend = () => { if (this.recognition === r) this.setCapture(false); };
     r.onresult = (e) => {
       if (this.recognition !== r) return;
       let interim = "";
@@ -319,12 +382,16 @@ export class VoiceConversation {
       if (!this.reply && !this.isEcho(interim)) this.callbacks.onInterim(interim);
     };
     r.onerror = (e) => {
+      if (this.recognition !== r) return;
+      acceptingAudio = false;
+      this.setCapture(false);
       if (FATAL_ERRORS.has(e.error)) fatal = ERROR_TEXT[e.error] ?? `語音辨識失敗（${e.error}）`;
       else if (e.error === "network" && ++this.networkErrors >= 3) fatal = ERROR_TEXT.network;
     };
     r.onend = () => {
       if (this.recognition !== r) return; // 已被 stop() 取代
       this.recognition = null;
+      this.setCapture(false);
       if (fatal) {
         this.close(fatal);
         return;
@@ -337,6 +404,7 @@ export class VoiceConversation {
       r.start();
     } catch {
       this.recognition = null;
+      this.setCapture(false);
       this.close("無法啟動語音辨識。");
     }
   }
@@ -381,6 +449,7 @@ class Reply implements ReplyHandle {
   private buffer = "";
   private queue: string[] = [];
   private speaking = false;
+  private playbackAbort: AbortController | null = null;
   private ended = false;
   private _cancelled = false;
   private resolve: () => void = () => {};
@@ -422,6 +491,8 @@ class Reply implements ReplyHandle {
     if (this._cancelled) return;
     this._cancelled = true;
     this.queue = [];
+    this.playbackAbort?.abort();
+    this.playbackAbort = null;
     this.finish();
   }
 
@@ -433,11 +504,14 @@ class Reply implements ReplyHandle {
       return;
     }
     this.speaking = true;
-    void speakText(sentence, { cancelOthers: false, onStart: () => {
+    const controller = new AbortController();
+    this.playbackAbort = controller;
+    void speakText(sentence, { cancelOthers: false, signal: controller.signal, onStart: () => {
       if (this._cancelled) return;
       this.events?.onStart();
       this.events?.onSentence(sentence);
     } }).then(() => {
+      if (this.playbackAbort === controller) this.playbackAbort = null;
       this.events?.onPlaybackEnd();
       this.speaking = false;
       this.pump();
@@ -454,9 +528,9 @@ class Reply implements ReplyHandle {
 }
 
 /** 以瀏覽器 TTS 念出短句；部分瀏覽器不觸發 onend，所以加上依長度估算的逾時保護。 */
-export function speakText(text: string, options: { cancelOthers?: boolean; onStart?: () => void } = {}): Promise<void> {
+export function speakText(text: string, options: { cancelOthers?: boolean; onStart?: () => void; signal?: AbortSignal } = {}): Promise<void> {
   const synth = typeof speechSynthesis === "undefined" ? null : speechSynthesis;
-  if (!synth) return Promise.resolve();
+  if (!synth || options.signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "zh-TW";
@@ -467,13 +541,16 @@ export function speakText(text: string, options: { cancelOthers?: boolean; onSta
       if (done) return;
       done = true;
       clearTimeout(guard);
+      options.signal?.removeEventListener("abort", cancel);
       resolve();
     };
-    const guard = setTimeout(finish, 2000 + text.length * 300);
-    u.onstart = () => options.onStart?.();
+    const cancel = () => { synth.cancel(); finish(); };
+    const guard = setTimeout(cancel, 2000 + text.length * 300);
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    u.onstart = () => { if (!done) options.onStart?.(); };
     u.onend = finish;
     u.onerror = finish;
     if (options.cancelOthers ?? true) synth.cancel();
-    synth.speak(u);
+    try { synth.speak(u); } catch { finish(); }
   });
 }
