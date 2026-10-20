@@ -1,0 +1,22 @@
+{
+  "passed": true,
+  "caseCount": 13,
+  "scripts": [
+    {
+      "src": "/assets/index-CJrLsjcm.js",
+      "sha256": "392310db0bf2359c02003190cf80fb6574b581600f08f72b07bcb584d7b50baa"
+    }
+  ],
+  "mainSourceSha256": "f667d9e416dbfe8e4846d422e4a3a94cb114c21b849ee8a7c2670857a4129c03",
+  "reports": [
+    "browser-report.json",
+    "preflight-report.json",
+    "delegation-report.json"
+  ],
+  "disclosure": "Real built frontend in Chromium; simulated account, ChatGPT HTTP/SSE, speech recognition and speech synthesis. No real account login, model inference, microphone or speaker validation.",
+  "unitTests": {
+    "passed": 130,
+    "files": 16,
+    "evidence": "unit-and-http-report.json"
+  }
+}

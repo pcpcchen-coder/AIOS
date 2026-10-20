@@ -5,6 +5,7 @@
 export type PulseKind = "submit" | "step" | "stream" | "stepDone" | "success" | "error";
 
 export interface BrainVisualState {
+  conversation: "idle" | "listening" | "thinking" | "speaking" | "error";
   listening: boolean;
   /** 有任務正在執行（真實任務狀態）。 */
   working: boolean;
@@ -87,7 +88,7 @@ export class Brain {
   private projected = new Float32Array(0);
   private sprite: HTMLCanvasElement;
 
-  private state: BrainVisualState = { listening: false, working: false, layout: "center", progress: null };
+  private state: BrainVisualState = { conversation: "idle", listening: false, working: false, layout: "center", progress: null };
   private energy = 0.35;
   private listenLevel = 0;
   private yaw = 0;
@@ -139,6 +140,11 @@ export class Brain {
   }
 
   setState(state: BrainVisualState): void {
+    if (this.state.conversation !== state.conversation) {
+      if (state.conversation === "speaking") this.tint = { color: VIOLET, strength: 0.8 };
+      if (state.conversation === "thinking") this.tint = { color: CYAN, strength: 0.5 };
+      if (state.conversation === "error") this.pulse("error");
+    }
     this.state = state;
   }
 
@@ -273,7 +279,8 @@ export class Brain {
   private step(dt: number): void {
     const reduced = this.reducedMotion.matches;
     this.time += dt;
-    const targetEnergy = (this.state.working ? 0.8 : 0.35) + (this.state.listening ? 0.2 : 0);
+    const phaseEnergy = { idle: 0.35, listening: 0.55, thinking: 0.65, speaking: 0.85, error: 0.3 }[this.state.conversation];
+    const targetEnergy = Math.max(this.state.working ? 0.8 : 0, phaseEnergy);
     this.energy += (targetEnergy - this.energy) * Math.min(1, dt * 2.5);
     this.listenLevel += ((this.state.listening ? 1 : 0) - this.listenLevel) * Math.min(1, dt * 6);
     // 左右緩慢擺動（而非整圈旋轉），讓兩個半球與中間的縱裂保持可見。

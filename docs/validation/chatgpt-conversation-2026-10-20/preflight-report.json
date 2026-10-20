@@ -1,0 +1,48 @@
+{
+  "disclosure": "Real built frontend in Chromium; simulated account, ChatGPT HTTP/SSE, speech recognition and speech synthesis. No real account login, model inference, microphone or speaker validation.",
+  "build": {
+    "indexSha256": "7074df9ed90db08957426127710a1297cc3e68f43ae60928bd78364518b71cc5",
+    "scripts": [
+      {
+        "src": "/assets/index-CJrLsjcm.js",
+        "sha256": "392310db0bf2359c02003190cf80fb6574b581600f08f72b07bcb584d7b50baa"
+      }
+    ],
+    "mainSourceSha256AtFixtureStart": "f667d9e416dbfe8e4846d422e4a3a94cb114c21b849ee8a7c2670857a4129c03",
+    "capturedAt": "2026-10-20T06:25:23.177Z"
+  },
+  "passed": true,
+  "checks": [
+    {
+      "name": "usable ChatGPT account auto-selection preserves typed request after SSE",
+      "passed": true
+    },
+    {
+      "name": "Esc during delayed provider selection cancels foreground entry",
+      "passed": true
+    }
+  ],
+  "providerRequests": [
+    {
+      "provider": "chatgpt",
+      "receivedAt": 1792477524759
+    },
+    {
+      "provider": "chatgpt",
+      "receivedAt": 1792477526721
+    }
+  ],
+  "requests": [
+    {
+      "index": 0,
+      "messages": [
+        {
+          "role": "user",
+          "content": "我叫小明。"
+        }
+      ],
+      "request_id": "req_e17c83bdc8be4c8eb31867d40c7230fd",
+      "receivedAt": 1792477524976
+    }
+  ]
+}

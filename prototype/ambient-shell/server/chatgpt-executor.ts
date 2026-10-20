@@ -108,6 +108,7 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
   ): Promise<{ model: string | null }> {
     const model = await this.resolveModel(await this.auth.getAccessToken());
     const result = await this.stream({ model, instructions: input.system, input: input.messages }, signal, onDelta);
+    if (result.incomplete) throw new ExecutionError("ChatGPT 回覆尚未完成（response.incomplete），請再試一次。");
     return { model: result.model ?? model };
   }
 

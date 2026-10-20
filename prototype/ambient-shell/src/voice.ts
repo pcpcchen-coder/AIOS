@@ -144,7 +144,7 @@ export interface ConversationCallbacks {
   onStateChange(state: ConversationState): void;
   /** 使用者開口打斷了正在念的回覆。 */
   onBargeIn(): void;
-  /** 每念完一句（真實播放事件），用來驅動電子腦脈衝。 */
+  /** 每句真正開始播放時回報，用來驅動電子腦脈衝。 */
   onSentenceSpoken?(): void;
   /** 模式因錯誤或閒置而自行關閉時呼叫，reason 會顯示並念出。 */
   onClosed(reason: string): void;
@@ -227,6 +227,9 @@ export class VoiceConversation {
     const reply = new Reply({
       onStart: () => {
         if (this.reply === reply) this.setState("speaking");
+      },
+      onPlaybackEnd: () => {
+        if (this.reply === reply && this.on) this.setState("listening");
       },
       onSentence: (sentence) => {
         this.spoken = `${this.spoken}${sentence}`.slice(-400);
@@ -368,6 +371,7 @@ export class VoiceConversation {
 
 interface ReplyEvents {
   onStart(): void;
+  onPlaybackEnd(): void;
   onSentence(sentence: string): void;
   onFinish(): void;
 }
@@ -378,7 +382,6 @@ class Reply implements ReplyHandle {
   private queue: string[] = [];
   private speaking = false;
   private ended = false;
-  private started = false;
   private _cancelled = false;
   private resolve: () => void = () => {};
   readonly done = new Promise<void>((r) => (this.resolve = r));
@@ -429,13 +432,13 @@ class Reply implements ReplyHandle {
       if (this.ended) this.finish();
       return;
     }
-    if (!this.started) {
-      this.started = true;
-      this.events?.onStart();
-    }
     this.speaking = true;
-    this.events?.onSentence(sentence);
-    void speakText(sentence, { cancelOthers: false }).then(() => {
+    void speakText(sentence, { cancelOthers: false, onStart: () => {
+      if (this._cancelled) return;
+      this.events?.onStart();
+      this.events?.onSentence(sentence);
+    } }).then(() => {
+      this.events?.onPlaybackEnd();
       this.speaking = false;
       this.pump();
     });
@@ -451,7 +454,7 @@ class Reply implements ReplyHandle {
 }
 
 /** 以瀏覽器 TTS 念出短句；部分瀏覽器不觸發 onend，所以加上依長度估算的逾時保護。 */
-export function speakText(text: string, options: { cancelOthers?: boolean } = {}): Promise<void> {
+export function speakText(text: string, options: { cancelOthers?: boolean; onStart?: () => void } = {}): Promise<void> {
   const synth = typeof speechSynthesis === "undefined" ? null : speechSynthesis;
   if (!synth) return Promise.resolve();
   return new Promise((resolve) => {
@@ -467,6 +470,7 @@ export function speakText(text: string, options: { cancelOthers?: boolean } = {}
       resolve();
     };
     const guard = setTimeout(finish, 2000 + text.length * 300);
+    u.onstart = () => options.onStart?.();
     u.onend = finish;
     u.onerror = finish;
     if (options.cancelOthers ?? true) synth.cancel();

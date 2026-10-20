@@ -72,16 +72,31 @@ export async function streamChat(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let index: number;
-    while ((index = buffer.indexOf("\n\n")) >= 0) {
-      const frame = buffer.slice(0, index);
-      buffer = buffer.slice(index + 2);
-      if (frame.startsWith("data: ")) onEvent(JSON.parse(frame.slice(6)) as ChatEvent);
+  let terminal = false;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += decoder.decode(value, { stream: !done });
+      buffer = buffer.replaceAll("\r\n", "\n");
+      let index: number;
+      while ((index = buffer.indexOf("\n\n")) >= 0) {
+        const frame = buffer.slice(0, index);
+        buffer = buffer.slice(index + 2);
+        const data = frame.split("\n").filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n");
+        if (!data) continue;
+        const event = JSON.parse(data) as ChatEvent;
+        onEvent(event);
+        if (event.type === "done" || event.type === "error") {
+          terminal = true;
+          return;
+        }
+      }
+      if (done) break;
     }
+    if (!terminal) throw new ApiError(0, "回覆串流中斷，未收到完成確認。請再試一次。");
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
 }
 

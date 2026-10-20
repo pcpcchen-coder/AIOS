@@ -1,0 +1,68 @@
+{
+  "disclosure": "Real built frontend in Chromium; simulated account, ChatGPT HTTP/SSE, speech recognition and speech synthesis. No real account login, model inference, microphone or speaker validation.",
+  "passed": true,
+  "build": {
+    "indexSha256": "7074df9ed90db08957426127710a1297cc3e68f43ae60928bd78364518b71cc5",
+    "scripts": [
+      {
+        "src": "/assets/index-CJrLsjcm.js",
+        "sha256": "392310db0bf2359c02003190cf80fb6574b581600f08f72b07bcb584d7b50baa"
+      }
+    ],
+    "mainSourceSha256AtFixtureStart": "f667d9e416dbfe8e4846d422e4a3a94cb114c21b849ee8a7c2670857a4129c03",
+    "capturedAt": "2026-10-20T06:25:27.132Z"
+  },
+  "checks": [
+    {
+      "name": "signed-out entry and simulated account login",
+      "passed": true,
+      "detail": "No microphone or model request before sign-in; OAuth popup completion tested only at local fixture boundary."
+    },
+    {
+      "name": "explicit cloud speech consent",
+      "passed": true,
+      "detail": "Recognition remains off before explicit consent, then listens."
+    },
+    {
+      "name": "voice question, response and playback phases",
+      "passed": true,
+      "detail": "Observed real application HTTP request and actual simulated utterance playback-start event, then resumed listening."
+    },
+    {
+      "name": "typed fallback continues voice conversation",
+      "passed": true,
+      "detail": "The next /api/chat request includes the prior voice turn and assistant reply."
+    },
+    {
+      "name": "barge-in cancels stream and prevents stale history",
+      "passed": true,
+      "detail": "Slow old stream closed; delayed tail never reached reply or subsequent history."
+    },
+    {
+      "name": "explicit close ends foreground dialogue",
+      "passed": true,
+      "detail": "Recognition and TTS stopped, HTTP stream aborted, and late output did not resurrect the exchange."
+    },
+    {
+      "name": "unsupported speech browser text fallback",
+      "passed": true,
+      "detail": "Ordinary text uses direct /api/chat without recognition or task creation."
+    },
+    {
+      "name": "truncated SSE reports error and typed retry recovers",
+      "passed": true,
+      "detail": "EOF without a terminal event becomes an explicit error, and a new typed turn completes normally."
+    },
+    {
+      "name": "account error action and typed recovery",
+      "passed": true,
+      "detail": "Simulated authentication error is readable, links to settings, and a subsequent valid fixture request recovers."
+    },
+    {
+      "name": "microphone denial preserves text dialogue",
+      "passed": true,
+      "detail": "Simulated browser permission failure is visible; typed text still sends a direct chat request."
+    }
+  ],
+  "pageErrors": []
+}

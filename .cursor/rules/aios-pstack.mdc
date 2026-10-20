@@ -1,0 +1,6 @@
+---
+description: AIOS project workflow and host adaptations for pstack
+alwaysApply: true
+---
+
+Read and follow the repository root AGENTS.md and CLAUDE.md. For nontrivial engineering work, load vendor/pstack/skills/poteto-mode/SKILL.md and the matching playbook. The project adaptation in AGENTS.md applies to upstream tool names, models, isolation, authorization, and verification. Use .cursor/skills/verify-aios/SKILL.md for the implemented ambient-shell prototype. Read the project pstack-models rule before delegation; it takes precedence over upstream home-directory defaults for this repository.

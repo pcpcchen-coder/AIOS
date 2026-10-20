@@ -23,8 +23,8 @@
           class="command-input"
           type="text"
           maxlength="2000"
-          placeholder="交辦一件事，或問「進度如何」"
-          aria-label="交辦任務或輸入指令"
+          placeholder="直接跟 ChatGPT 說話，或輸入訊息"
+          aria-label="輸入對話訊息或指令"
           enterkeyhint="send"
         />
         <button id="mic" class="icon-btn" type="button" aria-label="按下開始說話" hidden>
@@ -60,6 +60,18 @@
     <button id="voice-pill" class="voice-pill" type="button" hidden></button>
     <p id="subtitle" class="subtitle" aria-live="polite" hidden></p>
 
-    <p id="first-hint" class="first-hint">點一下電子腦、按空白鍵，或直接開始打字交辦任務</p>
+    <p id="conversation-status" class="conversation-status" role="status" hidden></p>
+    <section id="conversation-reply" class="conversation-reply" aria-label="本次對話" hidden>
+      <p id="conversation-user" class="conversation-user"></p>
+      <p id="conversation-answer" class="conversation-answer" aria-live="polite"></p>
+      <div class="conversation-actions">
+        <button id="conversation-type" class="btn btn--ghost" type="button">打字接著聊</button>
+        <button id="conversation-settings" class="btn btn--ghost" type="button">設定</button>
+        <button id="conversation-close" class="btn btn--ghost" type="button">結束對話</button>
+      </div>
+    </section>
+    <button id="start-conversation" class="start-conversation" type="button">開始語音對話</button>
+
+    <p id="first-hint" class="first-hint">點電子腦開始 ChatGPT 語音對話 · 按空白鍵或直接打字也能聊</p>
   </body>
 </html>

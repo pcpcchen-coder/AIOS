@@ -2,6 +2,8 @@
 
 給在本 repo 工作的開發 agent（Claude Code 等）。規格以 `docs/06`、`docs/07` 為準，現況與修正提案見 `docs/08`。
 
+本專案採用 pstack 開發流程。開始非簡單修改前，讀取 [`AGENTS.md`](./AGENTS.md) 的專案適配規則及 [`使用指南`](./docs/development/pstack.md)，再依對應 playbook 工作。
+
 ## 開工前
 
 1. 讀 `README.md`、`docs/08`、`docs/06`、`docs/07`，再讀 01–04 中與本任務相關段落。

@@ -108,6 +108,14 @@ describe("ChatGPTExecutor", () => {
     expect(t.requests.at(-1)!.body).toMatchObject({ model: "gpt-x", instructions: "SYS", input: messages, store: false, stream: true });
   });
 
+  it("does not claim chat completion on response.incomplete", async () => {
+    const executor = new ChatGPTExecutor(
+      { getAccessToken: async () => "fixture-token" } as unknown as ChatGPTAuth,
+      { model: "fixture-model", fetch: (async () => textStream(["部分"], "response.incomplete")) as typeof fetch },
+    );
+    await expect(executor.chat({ system: "SYS", messages: [{ role: "user", content: "你好" }] }, () => {}, new AbortController().signal)).rejects.toThrow(/response.incomplete/);
+  });
+
   it("用量上限：失敗並提示到 ChatGPT 設定管理用量", async () => {
     const t = setup(() =>
       sse([

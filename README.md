@@ -74,6 +74,8 @@
 
 ## 文件導覽
 
+開發流程使用 [pstack 專案指南](./docs/development/pstack.md)，Agent 規則見 [AGENTS.md](./AGENTS.md)。
+
 所有設計文件位於 [`docs/`](./docs) 目錄。**先讀 08 掌握現況與修正，再讀 06–07 的最新產品規格**，最後依需要查閱 01–05。
 
 | # | 文件 | 內容 | 適合誰讀 |

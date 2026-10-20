@@ -1,7 +1,8 @@
 import "./style.css";
 import { computeProgress, isActive } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
-import { ApiError, api, newRequestId, streamChat, subscribeEvents, type ChatTurn } from "./api.ts";
+import { ApiError, api, newRequestId, streamChat, subscribeEvents } from "./api.ts";
+import { ConversationSession } from "./conversation.ts";
 import { Brain } from "./brain.ts";
 import { formatCount } from "./format.ts";
 import { classify } from "./intent.ts";
@@ -18,13 +19,12 @@ import {
   updateLiveCounts,
   type ViewActions,
 } from "./views.ts";
-import { speakFinished, speakProgress, speakSubmitted } from "./speech-text.ts";
+import { speakFinished, speakProgress } from "./speech-text.ts";
 import {
   PushToTalk,
   VoiceConversation,
   hasVoiceConsent,
   saveVoiceConsent,
-  speakText,
   speechSupported,
   type ConsentKind,
   type ConversationState,
@@ -48,6 +48,14 @@ const engineLine = $<HTMLParagraphElement>("engine-line");
 const commandError = $<HTMLParagraphElement>("command-error");
 const surfaceRoot = $<HTMLDivElement>("surface-root");
 const firstHint = $<HTMLParagraphElement>("first-hint");
+const startConversation = $<HTMLButtonElement>("start-conversation");
+const conversationReply = $<HTMLDivElement>("conversation-reply");
+const conversationUser = $<HTMLParagraphElement>("conversation-user");
+const conversationAnswer = $<HTMLParagraphElement>("conversation-answer");
+const conversationStatus = $<HTMLParagraphElement>("conversation-status");
+let developmentProvider: ExecutorMode | null = null;
+let conversationEpoch = 0;
+let pendingProviderSelection: { epoch: number; account: string } | null = null;
 
 const brain = new Brain(canvas);
 brain.start();
@@ -85,90 +93,154 @@ const VOICE_IDLE_MS = 90_000;
 const conversation = new VoiceConversation(
   {
     onUtterance: (text) => {
-      chatAbort?.abort(); // 新的一句話取代還在產生的回覆
-      chatAbort = null;
+      session.interrupt();
       showSubtitle(`你：${text}`);
       void handleCommand(text);
     },
     onInterim: (text) => showSubtitle(`你：${text}…`, true),
     onStateChange: renderVoiceState,
     onBargeIn: () => {
-      // 使用者插話：停止念、也停止還在產生的回覆。
-      chatAbort?.abort();
-      chatAbort = null;
+      session.interrupt();
       brain.pulse("step");
     },
     onSentenceSpoken: () => brain.pulse("stream"),
     onClosed: (reason) => {
       showSubtitle(reason);
-      void speakText(reason);
+      session.interrupt();
+      dispatch({ type: "input.open" });
+      showCommandError(reason);
     },
   },
   { idleMs: VOICE_IDLE_MS },
 );
 let pendingConsent: ConsentKind = "push";
 
-// 對話記錄只存在這個頁面的記憶體中，不寫檔。
-const CHAT_HISTORY_LIMIT = 20;
-let chatHistory: ChatTurn[] = [];
-let chatAbort: AbortController | null = null;
+const session = new ConversationSession({
+  stream: streamChat,
+  output: () => {
+    const reply = conversation.beginReply();
+    return { push: (text) => reply.push(text), end: () => reply.end(), cancel: () => conversation.interrupt() };
+  },
+  changed: () => render(),
+  delegated: (title, requestId) => void delegateTask(title, requestId),
+});
 
-/** 語音對話：把使用者的話送給目前的 AI 引擎，邊收邊念；需要長時間工作時由 AI 交辦成任務。 */
-async function converse(text: string, requestId: string): Promise<void> {
-  chatAbort?.abort();
-  const controller = new AbortController();
-  chatAbort = controller;
-  chatHistory = [...chatHistory, { role: "user" as const, content: text }].slice(-CHAT_HISTORY_LIMIT);
-  while (chatHistory[0]?.role === "assistant") chatHistory.shift();
-  const reply = conversation.beginReply();
-  let answer = "";
-  showSubtitle("Nous：…", true);
-  try {
-    await streamChat(
-      chatHistory,
-      requestId,
-      (event) => {
-        if (controller.signal.aborted) return;
-        if (event.type === "delta") {
-          answer += event.text;
-          reply.push(event.text);
-          showSubtitle(`Nous：${answer}`, true);
-        } else if (event.type === "delegate") {
-          void delegateTask(event.title, requestId);
-        } else if (event.type === "error") {
-          answer = answer || event.message;
-          reply.push(event.message);
-          showSubtitle(`Nous：${event.message}`);
+function accountKey(value: SettingsView): string {
+  return JSON.stringify([value.chatgpt.email, value.chatgpt.signed_in, value.chatgpt.plan_usage, value.chatgpt.needs_reauth]);
+}
+
+function applySettings(value: SettingsView, preserveEntry = false): void {
+  if (settings && (settings.provider !== value.provider || accountKey(settings) !== accountKey(value))) {
+    const expectedSelection = settings.provider !== "chatgpt" && value.provider === "chatgpt"
+      && pendingProviderSelection?.epoch === conversationEpoch
+      && pendingProviderSelection.account === accountKey(value);
+    if (!preserveEntry && !expectedSelection) conversationEpoch++;
+    session.reset();
+    conversation.stop();
+    hideSubtitle();
+  }
+  settings = value;
+}
+
+function chatGPTAvailable(): boolean {
+  return !!settings?.providers.find((provider) => provider.id === "chatgpt")?.available
+    && settings.chatgpt.signed_in && settings.chatgpt.plan_usage && !settings.chatgpt.needs_reauth;
+}
+
+async function prepareConversation(requestId: string, epoch: number): Promise<boolean> {
+  if (!connected || !settings) {
+    dispatch({ type: "input.open" });
+    showCommandError("尚未連線到本機核心，請稍候再試。");
+    return false;
+  }
+  if (settings.provider === developmentProvider && settings.providers.find((provider) => provider.id === developmentProvider)?.available) return true;
+  if (chatGPTAvailable()) {
+    if (settings.provider !== "chatgpt") {
+      const selection = { epoch, account: accountKey(settings) };
+      pendingProviderSelection = selection;
+      try {
+        const next = await api.selectProvider("chatgpt");
+        if (epoch !== conversationEpoch) return false;
+        if (accountKey(next) !== selection.account) {
+          applySettings(next);
+          return false;
         }
-      },
-      controller.signal,
-    );
-  } catch (err) {
-    if (!controller.signal.aborted) {
-      const message = `對話失敗：${(err as Error).message}`;
-      reply.push(message);
-      showSubtitle(message);
+        applySettings(next, true);
+      } finally {
+        if (pendingProviderSelection === selection) pendingProviderSelection = null;
+      }
     }
-  } finally {
-    reply.end();
-    if (chatAbort === controller) chatAbort = null;
-    if (answer) {
-      const content = controller.signal.aborted ? `${answer}……（被使用者打斷）` : answer;
-      chatHistory = [...chatHistory, { role: "assistant" as const, content }].slice(-CHAT_HISTORY_LIMIT);
-    }
-    if (!controller.signal.aborted) showSubtitle(answer ? `Nous：${answer}` : "Nous：（沒有回覆）");
+    return epoch === conversationEpoch;
+  }
+  dispatch({ type: "show.settings", request_id: requestId, message: "請先按 Continue with ChatGPT 登入自己的帳號。完成後按「開始語音對話」，也可直接打字。" });
+  return false;
+}
+
+async function converse(text: string, requestId: string): Promise<void> {
+  const epoch = ++conversationEpoch;
+  try {
+    if (!await prepareConversation(requestId, epoch) || epoch !== conversationEpoch) return;
+    input.value = "";
+    dispatch({ type: "dismiss" });
+    hideSubtitle();
+    brain.pulse("submit");
+    await session.send(text, requestId);
+  } catch (error) {
+    if (epoch !== conversationEpoch) return;
+    dispatch({ type: "input.open" });
+    showCommandError(error instanceof Error ? error.message : "無法開始對話。");
+  }
+}
+
+function closeConversation(): void {
+  conversationEpoch++;
+  session.dismiss();
+  conversation.stop();
+  voice.abort();
+  hideSubtitle();
+  dispatch({ type: "dismiss" });
+  render();
+}
+
+function openConversation(): void {
+  const requestId = userRequest();
+  const epoch = ++conversationEpoch;
+  dismissFirstHint();
+  if (settings?.provider === "chatgpt" && chatGPTAvailable() || settings?.provider === developmentProvider) {
+    enableVoiceMode();
+  } else {
+    void prepareConversation(requestId, epoch).then((ready) => {
+      if (ready && epoch === conversationEpoch) {
+        dispatch({ type: "input.open" });
+        showCommandError("ChatGPT 已就緒。按語音按鈕開始，或直接輸入訊息。");
+      }
+    }).catch((error: unknown) => {
+      if (epoch !== conversationEpoch) return;
+      dispatch({ type: "input.open" });
+      showCommandError(error instanceof Error ? error.message : "無法連線到 ChatGPT。");
+    });
   }
 }
 
 /** AI 在對話中決定交辦的工作：建立背景任務並在電子腦下方顯示進度。 */
 async function delegateTask(title: string, requestId: string): Promise<void> {
+  const epoch = conversationEpoch;
+  const stillCurrent = () => {
+    const { reply, visible } = session.view;
+    return epoch === conversationEpoch && visible
+      && (reply.kind === "pending" || reply.kind === "complete") && reply.requestId === requestId;
+  };
   try {
     const task = await api.createTask(title, requestId);
     if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
+    if (!stillCurrent()) {
+      render();
+      return;
+    }
     dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
     dispatch({ type: "task.updated", task: tasks.get(task.task_id)! });
   } catch (err) {
-    showSubtitle(`交辦失敗：${(err as Error).message}`);
+    if (stillCurrent()) showSubtitle(`交辦失敗：${(err as Error).message}`);
   }
 }
 
@@ -180,6 +252,12 @@ function say(text: string): void {
 }
 
 let subtitleTimer: ReturnType<typeof setTimeout> | null = null;
+function hideSubtitle(): void {
+  if (subtitleTimer) clearTimeout(subtitleTimer);
+  subtitleTimer = null;
+  subtitle.hidden = true;
+}
+
 function showSubtitle(text: string, sticky = false): void {
   subtitle.textContent = text;
   subtitle.hidden = false;
@@ -203,12 +281,15 @@ function renderVoiceState(state: ConversationState): void {
 }
 
 function enableVoiceMode(): void {
+  const ready = settings && (settings.provider === "chatgpt" && chatGPTAvailable()
+    || settings.provider === developmentProvider && settings.providers.some((provider) => provider.id === developmentProvider && provider.available));
+  if (!ready) {
+    void prepareConversation(userRequest(), ++conversationEpoch).catch((error: unknown) => showCommandError(error instanceof Error ? error.message : "無法連線。"));
+    return;
+  }
   if (!speechSupported()) {
-    dispatch({
-      type: "show.notice",
-      request_id: userRequest(),
-      message: "這個瀏覽器不支援語音辨識，請改用 Chrome 或 Edge。",
-    });
+    dispatch({ type: "input.open" });
+    showCommandError("這個瀏覽器不支援語音辨識，仍可直接打字對話。語音請使用 Chrome 或 Edge。");
     return;
   }
   if (!hasVoiceConsent("continuous")) {
@@ -216,15 +297,14 @@ function enableVoiceMode(): void {
     return;
   }
   voice.abort();
-  dispatch({ type: "input.close" });
+  dispatch({ type: "dismiss" });
   conversation.start();
   say("語音模式已開啟，直接跟我說話就好，我說話時你也可以打斷我。");
 }
 
 function disableVoiceMode(): void {
   if (!conversation.on) return;
-  chatAbort?.abort();
-  chatAbort = null;
+  session.interrupt();
   conversation.stop();
   showSubtitle("語音模式已關閉。");
 }
@@ -250,6 +330,11 @@ function userRequest(): string {
 }
 
 function dispatch(event: ShellEvent): void {
+  if (event.type.startsWith("show.")) {
+    conversationEpoch++;
+    session.dismiss();
+    hideSubtitle();
+  }
   const next = reduceShell(shell, event);
   if (next === shell) return;
   const wasListening = shell.listening;
@@ -271,23 +356,25 @@ function dispatch(event: ShellEvent): void {
 function onServerEvent(event: ServerEvent): void {
   if (event.type === "settings.updated") {
     const wasPending = settings?.chatgpt.pending_login;
-    settings = event.settings;
+    applySettings(event.settings);
     // 使用者按下的登入剛完成：切換到 ChatGPT，沿用該次點擊的請求顯示設定與說明。
-    if (wasPending && !settings.chatgpt.pending_login && loginRequestId) {
+    if (wasPending && !event.settings.chatgpt.pending_login && loginRequestId) {
       const requestId = loginRequestId;
       loginRequestId = null;
-      if (settings.chatgpt.signed_in && settings.chatgpt.plan_usage && settings.provider !== "chatgpt") {
+      if (event.settings.chatgpt.signed_in && event.settings.chatgpt.plan_usage && event.settings.provider !== "chatgpt") {
         void selectProvider("chatgpt", requestId);
       } else {
         dispatch({ type: "show.settings", request_id: requestId });
       }
-      if (settings.chatgpt.signed_in) say("已登入 ChatGPT。");
+      if (event.settings.chatgpt.signed_in) {
+        showCommandError("已登入 ChatGPT，按「開始語音對話」後才會收音。");
+      }
     }
     render();
     return;
   }
   if (event.type === "hello") {
-    settings = event.settings;
+    applySettings(event.settings);
     tasks.clear();
     for (const t of event.tasks) tasks.set(t.task_id, t);
     render();
@@ -349,7 +436,7 @@ async function handleCommand(text: string): Promise<void> {
   switch (intent.kind) {
     case "voice_on":
       input.value = "";
-      enableVoiceMode();
+      openConversation();
       return;
     case "voice_off":
       input.value = "";
@@ -366,8 +453,7 @@ async function handleCommand(text: string): Promise<void> {
       return;
     case "dismiss":
       input.value = "";
-      dispatch({ type: "dismiss" });
-      say("好。");
+      closeConversation();
       return;
     case "progress":
       input.value = "";
@@ -403,29 +489,8 @@ async function handleCommand(text: string): Promise<void> {
       return;
     }
     case "task":
-      // 語音模式是對話：交給 AI 回答，需要時由 AI 自行交辦任務；文字輸入維持直接交辦。
-      if (conversation.on) await converse(intent.text, requestId);
-      else await submitTask(intent.text, requestId);
+      await converse(intent.text, requestId);
       return;
-  }
-}
-
-async function submitTask(text: string, requestId: string): Promise<void> {
-  form.classList.add("busy");
-  try {
-    const task = await api.createTask(text, requestId);
-    if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
-    input.value = "";
-    dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
-    // 若事件比回應先到、任務已有新狀態，立即套用。
-    dispatch({ type: "task.updated", task: tasks.get(task.task_id)! });
-    say(speakSubmitted(task));
-  } catch (err) {
-    const message = `沒有交辦成功：${(err as Error).message}`;
-    if (conversation.on) say(message);
-    else showCommandError(message);
-  } finally {
-    form.classList.remove("busy");
   }
 }
 
@@ -463,14 +528,18 @@ const actions: ViewActions = {
   selectProvider: (provider) => void selectProvider(provider, userRequest()),
   chatgptLogin: (mode) => void chatgptLogin(mode, userRequest()),
   async chatgptCancel() {
-    settings = await api.chatgptCancel().catch(() => settings);
+    const next = await api.chatgptCancel().catch(() => null);
+    if (next) applySettings(next);
     render();
   },
   async chatgptLogout() {
     const requestId = userRequest();
+    conversationEpoch++;
+    session.reset();
+    conversation.stop();
     try {
       const result = await api.chatgptLogout();
-      settings = result.settings;
+      applySettings(result.settings);
       dispatch({
         type: "show.settings",
         request_id: requestId,
@@ -482,7 +551,8 @@ const actions: ViewActions = {
     render();
   },
   async ackWelcome() {
-    settings = await api.chatgptWelcomeAck().catch(() => settings);
+    const next = await api.chatgptWelcomeAck().catch(() => null);
+    if (next) applySettings(next);
     render();
   },
 };
@@ -502,8 +572,10 @@ async function selectProvider(provider: ExecutorMode, requestId: string): Promis
     return;
   }
   try {
-    settings = await api.selectProvider(provider);
-    dispatch({ type: "show.settings", request_id: requestId, message: `已切換到 ${PROVIDER_LABEL[provider]}。` });
+    if (provider !== "chatgpt") developmentProvider = provider;
+    else developmentProvider = null;
+    applySettings(await api.selectProvider(provider));
+    dispatch({ type: "show.settings", request_id: requestId, message: `已切換到 ${PROVIDER_LABEL[provider]}。關閉設定後按「開始語音對話」，或直接打字。` });
     say(`已切換到 ${PROVIDER_LABEL[provider]}。`);
   } catch (err) {
     const message = `無法切換：${(err as Error).message}`;
@@ -520,6 +592,9 @@ async function selectProvider(provider: ExecutorMode, requestId: string): Promis
 let loginRequestId: string | null = null;
 
 async function chatgptLogin(mode: "auto" | "new", requestId: string): Promise<void> {
+  conversationEpoch++;
+  session.reset();
+  conversation.stop();
   loginRequestId = requestId;
   const popup = window.open("about:blank", "_blank");
   try {
@@ -546,7 +621,16 @@ function showCommandError(message: string): void {
 function render(): void {
   const fg = shell.foreground_task_id ? tasks.get(shell.foreground_task_id) : undefined;
   const fgProgress = fg ? computeProgress(fg) : null;
+  const phase = conversation.current === "speaking" ? "speaking"
+    : session.view.reply.kind === "pending" ? "thinking"
+    : conversation.on || voice.active ? "listening"
+    : session.view.visible && session.view.reply.kind === "error" ? "error" : "idle";
+  document.body.dataset.conversationState = phase;
+  canvas.dataset.conversationState = phase;
+  conversationStatus.textContent = { idle: "", listening: "正在聆聽，你可以直接說話", thinking: "正在等待回覆，你可以插話", speaking: "正在回覆，你可以直接插話", error: "對話暫時中斷，可重試或開啟設定" }[phase];
+  conversationStatus.hidden = phase === "idle";
   brain.setState({
+    conversation: phase,
     listening: shell.listening || voice.active || conversation.current === "listening",
     working: [...tasks.values()].some(isActive),
     layout: shell.surface ? "top" : "center",
@@ -558,11 +642,32 @@ function render(): void {
   document.body.classList.toggle("listening", shell.listening);
   document.body.classList.toggle("has-surface", shell.surface !== null);
   form.hidden = !shell.listening;
+  startConversation.hidden = conversation.on || shell.listening || shell.surface !== null;
+  renderConversation();
 
   renderStatusLine();
   renderEngineLine();
   renderCaption(fg);
   renderSurface();
+}
+
+function renderConversation(): void {
+  const view = session.view;
+  const reply = view.reply;
+  const allowed = reply.kind !== "idle" && evaluateSurface({
+    surface_id: `conversation_${reply.requestId}`, kind: "conversation", visibility_reason: "user_request",
+    request_id: reply.requestId, task_id: null, artifact_id: null, message: null,
+  }, { userRequestIds, tasks }).allowed;
+  conversationReply.hidden = !view.visible || !allowed || shell.surface !== null;
+  document.body.classList.toggle("has-conversation", !conversationReply.hidden);
+  if (reply.kind === "idle") return;
+  conversationReply.dataset.requestId = reply.requestId;
+  conversationReply.dataset.visibilityReason = "user_request";
+  conversationReply.dataset.status = reply.kind;
+  conversationUser.textContent = `你：${reply.user}`;
+  const provider = settings?.provider ?? "chatgpt";
+  const answer = reply.answer || (reply.kind === "pending" ? "…" : "沒有收到文字回覆。");
+  conversationAnswer.textContent = `${PROVIDER_LABEL[provider]}：${answer}${reply.kind === "error" ? `\n${reply.message}` : reply.kind === "interrupted" ? "\n已打斷回覆。" : ""}`;
 }
 
 function renderStatusLine(): void {
@@ -705,7 +810,7 @@ input.addEventListener("input", () => {
 
 canvas.addEventListener("click", (e) => {
   dismissFirstHint();
-  if (brain.hitTest(e.clientX, e.clientY)) dispatch({ type: "input.open" });
+  if (brain.hitTest(e.clientX, e.clientY)) openConversation();
   else if (shell.listening && !input.value.trim()) dispatch({ type: "input.close" });
 });
 
@@ -715,8 +820,7 @@ window.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     e.preventDefault();
     if (conversation.current === "speaking") conversation.interrupt();
-    else if (shell.listening) dispatch({ type: "input.close" });
-    else if (shell.surface || shell.mode === "working") dispatch({ type: "dismiss" });
+    else closeConversation();
     return;
   }
   if (document.activeElement === input || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -735,6 +839,11 @@ function dismissFirstHint(): void {
 setTimeout(dismissFirstHint, 9000);
 
 // ───────────── 語音（按下說話／語音模式） ─────────────
+
+startConversation.addEventListener("click", openConversation);
+$<HTMLButtonElement>("conversation-close").addEventListener("click", closeConversation);
+$<HTMLButtonElement>("conversation-settings").addEventListener("click", () => dispatch({ type: "show.settings", request_id: userRequest() }));
+$<HTMLButtonElement>("conversation-type").addEventListener("click", () => dispatch({ type: "input.open" }));
 
 if (speechSupported()) {
   micButton.hidden = false;
@@ -755,7 +864,7 @@ if (speechSupported()) {
   voiceModeButton.addEventListener("click", () => {
     commandError.hidden = true;
     if (conversation.on) disableVoiceMode();
-    else enableVoiceMode();
+    else openConversation();
   });
   voicePill.addEventListener("click", disableVoiceMode);
   $<HTMLButtonElement>("consent-yes").addEventListener("click", () => {

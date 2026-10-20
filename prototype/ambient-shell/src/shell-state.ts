@@ -13,7 +13,7 @@ export type VisibilityReason =
   | "sensor_status"
   | "user_pinned";
 
-export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings";
+export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation";
 
 export interface Surface {
   surface_id: string;

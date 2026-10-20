@@ -1,0 +1,82 @@
+{
+  "disclosure": "Real built frontend in Chromium; simulated account, ChatGPT HTTP/SSE, speech recognition and speech synthesis. No real account login, model inference, microphone or speaker validation.",
+  "build": {
+    "indexSha256": "7074df9ed90db08957426127710a1297cc3e68f43ae60928bd78364518b71cc5",
+    "scripts": [
+      {
+        "src": "/assets/index-CJrLsjcm.js",
+        "sha256": "392310db0bf2359c02003190cf80fb6574b581600f08f72b07bcb584d7b50baa"
+      }
+    ],
+    "mainSourceSha256AtFixtureStart": "f667d9e416dbfe8e4846d422e4a3a94cb114c21b849ee8a7c2670857a4129c03",
+    "capturedAt": "2026-10-20T06:25:22.986Z"
+  },
+  "passed": true,
+  "checks": [
+    {
+      "name": "delayed delegated task stays background after closing conversation",
+      "passed": true,
+      "closedAt": 1792477525491,
+      "task": {
+        "schema_version": "proto-0.1",
+        "task_id": "task_fixture_delegation_1",
+        "request_id": "req_90eb4949e6b446f4a3e445c69d2689c3",
+        "title": "SIMULATED 延遲交辦背景任務",
+        "status": "succeeded",
+        "mode": "chatgpt",
+        "model": "SIMULATED-task-model",
+        "plan_ready": true,
+        "steps": [
+          {
+            "title": "SIMULATED 背景任務",
+            "status": "done",
+            "started_at": "2026-10-20T06:25:27.123Z",
+            "finished_at": "2026-10-20T06:25:27.424Z",
+            "output_chars": null
+          }
+        ],
+        "created_at": "2026-10-20T06:25:25.473Z",
+        "updated_at": "2026-10-20T06:25:27.424Z",
+        "finished_at": "2026-10-20T06:25:27.424Z",
+        "error": null,
+        "artifact_id": "artifact_fixture_task_fixture_delegation_1",
+        "retry_of": null
+      }
+    }
+  ],
+  "taskRequests": [
+    {
+      "text": "SIMULATED 延遲交辦背景任務",
+      "request_id": "req_90eb4949e6b446f4a3e445c69d2689c3"
+    }
+  ],
+  "cancelRequests": [],
+  "tasks": [
+    {
+      "schema_version": "proto-0.1",
+      "task_id": "task_fixture_delegation_1",
+      "request_id": "req_90eb4949e6b446f4a3e445c69d2689c3",
+      "title": "SIMULATED 延遲交辦背景任務",
+      "status": "succeeded",
+      "mode": "chatgpt",
+      "model": "SIMULATED-task-model",
+      "plan_ready": true,
+      "steps": [
+        {
+          "title": "SIMULATED 背景任務",
+          "status": "done",
+          "started_at": "2026-10-20T06:25:27.123Z",
+          "finished_at": "2026-10-20T06:25:27.424Z",
+          "output_chars": null
+        }
+      ],
+      "created_at": "2026-10-20T06:25:25.473Z",
+      "updated_at": "2026-10-20T06:25:27.424Z",
+      "finished_at": "2026-10-20T06:25:27.424Z",
+      "error": null,
+      "artifact_id": "artifact_fixture_task_fixture_delegation_1",
+      "retry_of": null
+    }
+  ],
+  "pageErrors": []
+}
