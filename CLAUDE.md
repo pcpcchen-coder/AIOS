@@ -18,6 +18,12 @@
 - 生成 UI 不得直接取得 shell、檔案系統、MCP token 或任意網路。
 - 原始 webcam 影像與未喚醒音訊不得寫檔、進 trace 或外傳。
 
+## 使用者指定的設計要求（必須保留）
+
+- 電子腦分「語言區、數理區、藝術區」；正在處理的思考內容必須連動到對應腦區的動畫（亮起、光脈衝、區名）。
+- 連動來源只能是真實事件：任務步驟的 `domain` 標記或對話主題分類；不得把它說成模型內部神經活動。
+- 原型實作見 `prototype/ambient-shell/shared/domain.ts`、`src/brain.ts`；正式版 Presence 動畫須延續此要求。
+
 ## 誠實規則
 
 - mock、fixture、replay 必須明確標示；不得用來宣稱真實語音、視線或 Agent 能力。

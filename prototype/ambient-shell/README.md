@@ -48,6 +48,20 @@ npm start                 # 建置前端並啟動本機核心
 - 「已產生 N 字」是串流實際收到的字元數；耗時是真實時鐘差。
 - 電子腦的光脈衝只在真實事件發生時出現（交辦、步驟開始／完成、收到串流輸出、成功、失敗）；沒有事件就沒有脈衝。
 
+## 語言區・數理區・藝術區
+
+| 語言區（綠） | 數理區（金） | 藝術區（洋紅） |
+|---|---|---|
+| ![](./docs/screenshots/07-region-language.jpg) | ![](./docs/screenshots/08-region-math.jpg) | ![](./docs/screenshots/09-region-art.jpg) |
+
+電子腦分成三個區，**依正在處理的內容類型亮起**，並在腦外標出區名：
+
+- **任務**：AI 規劃步驟時為每一步標記 `domain`（`language`／`math`／`art`，見 `server/prompts.ts` 的計畫格式）；模型沒標或標錯時，用 `shared/domain.ts` 的關鍵字補判。正在執行的那一步所屬的區持續亮著，步驟開始、完成與每段串流輸出都會從該區發出光脈衝。彙整成果固定是語言區。
+- **語音對話**：依你說的話用關鍵字判斷主題（例如「算一下」→ 數理區、「幫我想海報配色」→ 藝術區），回覆串流時該區亮起；念出回覆時語言區亮起。
+- 沒有任務、沒有對話時三區都不亮；區域亮度只來自上面這些真實事件，事件停止後約 2 秒內淡出。
+
+**誠實說明**：區域代表「這件工作屬於哪類內容」，不是模型內部神經活動的視覺化。模擬模式的步驟也會依交辦內容亮對應區，但仍標示「模擬」。
+
 ## AI 引擎（可切換）
 
 說或打「設定」叫出 AI 引擎設定；也可以直接說「改用 ChatGPT」「改用 Claude」「改用模擬模式」。選擇會保存，新交辦的任務用新引擎，已在跑的任務不受影響。
@@ -88,7 +102,7 @@ Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒
 prototype/ambient-shell/
 ├── index.html
 ├── src/                    # 前端（Vite + TypeScript，無框架）
-│   ├── brain.ts            # 電子腦：Canvas 2D 粒子／神經連線，30 FPS 上限，支援減少動態
+│   ├── brain.ts            # 電子腦：Canvas 2D 粒子／神經連線、語言／數理／藝術三區，30 FPS 上限，支援減少動態
 │   ├── shell-state.ts      # Shell 狀態 reducer（ambient / working / presenting / recoverable_error + 聆聽疊層）
 │   ├── presentation-policy.ts
 │   ├── intent.ts           # 確定性指令判斷
@@ -108,14 +122,14 @@ prototype/ambient-shell/
 │   ├── mock-executor.ts
 │   ├── store.ts            # JSON 持久化
 │   └── app.ts / http-guard.ts / config.ts / index.ts
-├── shared/                 # 前後端共用型別與進度計算
+├── shared/                 # 前後端共用型別、進度計算、腦區分類（domain.ts）
 └── tests/                  # vitest
 ```
 
 ## 測試
 
 ```bash
-npm test          # vitest：114 項
+npm test          # vitest：122 項
 npm run typecheck
 ```
 

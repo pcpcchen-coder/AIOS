@@ -56,7 +56,8 @@ function setup(responses: (body: Record<string, unknown>) => Response) {
   const ex = new ChatGPTExecutor(auth, { model: null, fetch: fakeFetch as typeof fetch });
   const calls: string[] = [];
   const reporter: Reporter = {
-    planReady: (titles, model) => calls.push(`plan:${titles.join("|")}:${model}`),
+    planReady: (steps, model) =>
+      calls.push(`plan:${steps.map((s) => `${s.title}/${s.domain}`).join("|")}:${model}`),
     stepStarted: (i) => calls.push(`start:${i}`),
     stepProgress: (i, n) => calls.push(`progress:${i}:${n}`),
     stepDone: (i) => calls.push(`done:${i}`),
@@ -70,7 +71,7 @@ describe("ChatGPTExecutor", () => {
     const t = setup((body) => (body.text ? textStream([JSON.stringify(PLAN)]) : textStream(["第一段，", "第二段。"])));
     const result = await t.run();
 
-    expect(t.calls[0]).toBe("plan:列出重點|彙整成果:gpt-x");
+    expect(t.calls[0]).toBe("plan:列出重點/language|彙整成果/language:gpt-x");
     expect(t.calls).toEqual(expect.arrayContaining(["start:0", "progress:0:8", "done:0", "start:1", "progress:1:8", "done:1"]));
     expect(result).toMatchObject({ content: "第一段，第二段。", status: "complete", model: "gpt-x-2026" });
 

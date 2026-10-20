@@ -55,12 +55,19 @@ describe("TaskRunner", () => {
     expect(t.plan_ready).toBe(false);
     expect(t.steps.map((s) => [s.title, s.status])).toEqual([[PLANNING_STEP_TITLE, "running"]]);
 
-    ex.reporter.planReady(["蒐集", "撰寫"], "model-x");
+    ex.reporter.planReady(
+      [
+        { title: "蒐集", domain: "math" },
+        { title: "撰寫", domain: "language" },
+      ],
+      "model-x",
+    );
     ex.reporter.stepStarted(0);
     ex.reporter.stepProgress(0, 120);
     t = store.get(task.task_id)!;
     expect(t.plan_ready).toBe(true);
     expect(t.steps.map((s) => s.status)).toEqual(["done", "running", "pending"]);
+    expect(t.steps.map((s) => s.domain)).toEqual(["language", "math", "language"]);
     expect(t.steps[1].output_chars).toBe(120);
 
     ex.reporter.stepDone(0);
@@ -81,7 +88,7 @@ describe("TaskRunner", () => {
     const { store, runner } = setup(ex);
     const task = runner.submit({ title: "查即時股價", request_id: "req_aaaaaaaa" });
     await ex.started;
-    ex.reporter.planReady(["查詢"], null);
+    ex.reporter.planReady([{ title: "查詢", domain: null }], null);
     ex.reporter.stepStarted(0);
     ex.error(new ExecutionError("無法連線到 Anthropic API（網路中斷或被阻擋）。"));
     await runner.idle();
@@ -98,7 +105,13 @@ describe("TaskRunner", () => {
     const { store, runner, events } = setup(ex);
     const task = runner.submit({ title: "長任務", request_id: "req_aaaaaaaa" });
     await ex.started;
-    ex.reporter.planReady(["A", "B"], null);
+    ex.reporter.planReady(
+      [
+        { title: "A", domain: null },
+        { title: "B", domain: null },
+      ],
+      null,
+    );
     ex.reporter.stepStarted(0);
 
     expect(runner.cancel(task.task_id)!.status).toBe("cancelling");

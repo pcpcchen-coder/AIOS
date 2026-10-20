@@ -1,10 +1,11 @@
+import { classifyDomain, type Domain } from "../shared/domain.ts";
 import type { ErrorAction, ExecutorMode, Task, TaskStep } from "../shared/types.ts";
 import type { TaskStore } from "./store.ts";
 
 /** 執行器透過 Reporter 回報真實進度；UI 上的步驟與百分比只來自這些呼叫。 */
 export interface Reporter {
-  /** 規劃完成，步驟總數從此確定。 */
-  planReady(stepTitles: string[], model: string | null): void;
+  /** 規劃完成，步驟總數從此確定；每步帶有腦區領域（可為 null）。 */
+  planReady(steps: { title: string; domain: Domain | null }[], model: string | null): void;
   /** index 為規劃出的步驟序號（0-based，不含「規劃步驟」本身）。 */
   stepStarted(index: number): void;
   /** 真實收到的輸出字元數；沒有串流資料就不要呼叫。 */
@@ -114,12 +115,15 @@ export class TaskRunner {
     const controller = new AbortController();
     this.controllers.set(taskId, controller);
     const now = () => new Date().toISOString();
+    const before = this.store.get(taskId)!;
     const planning: TaskStep = {
       title: PLANNING_STEP_TITLE,
       status: "running",
       started_at: now(),
       finished_at: null,
       output_chars: null,
+      // 規劃時還沒有模型標記，依交辦內容判斷領域。
+      domain: classifyDomain(before.title) ?? "language",
     };
     const task = this.store.update(taskId, (t) => {
       t.status = "running";
@@ -134,18 +138,19 @@ export class TaskRunner {
     };
 
     const reporter: Reporter = {
-      planReady: (titles, model) => {
-        if (titles.length === 0) throw new Error("reporter: empty plan");
+      planReady: (planned, model) => {
+        if (planned.length === 0) throw new Error("reporter: empty plan");
         this.store.update(taskId, (t) => {
           t.steps[0].status = "done";
           t.steps[0].finished_at = now();
           t.steps.push(
-            ...titles.map<TaskStep>((title) => ({
-              title,
+            ...planned.map<TaskStep>((p) => ({
+              title: p.title,
               status: "pending",
               started_at: null,
               finished_at: null,
               output_chars: null,
+              domain: p.domain,
             })),
           );
           t.plan_ready = true;

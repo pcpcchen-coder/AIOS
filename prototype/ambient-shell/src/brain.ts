@@ -1,3 +1,5 @@
+import { DOMAIN_LABEL, DOMAINS, type Domain } from "../shared/domain.ts";
+
 // 電子腦待機視覺：粒子與神經連線組成的雙半球腦，緩慢呼吸與旋轉。
 // 光脈衝只由真實事件觸發（交辦、步驟開始／完成、串流輸出、成功、失敗），
 // 不用循環動畫假裝任務仍在推進。
@@ -11,6 +13,8 @@ export interface BrainVisualState {
   layout: "center" | "top";
   /** 前景任務的真實完成比例 0–1；未知時為 null，不畫進度環。 */
   progress: number | null;
+  /** 各腦區持續亮度 0–1：由執行中步驟的領域與正在進行的對話決定。 */
+  focus?: Partial<Record<Domain, number>>;
 }
 
 interface Node3 {
@@ -20,6 +24,8 @@ interface Node3 {
   /** 0 左半球、1 右半球、2 小腦、3 腦幹。 */
   group: number;
   inner: boolean;
+  /** 所屬腦區；小腦與腦幹不屬於任何區。 */
+  region: Domain | null;
 }
 
 interface Part {
@@ -58,6 +64,22 @@ const VIOLET: RGB = [166, 139, 255];
 const MINT: RGB = [92, 242, 176];
 const AMBER: RGB = [255, 179, 92];
 
+/**
+ * 三個腦區的顏色與位置：語言區在左半球前側與顳葉、數理區在兩側半球頂後方（頂葉）、
+ * 藝術區在右半球前側與顳葉。
+ */
+export const REGION_COLOR: Record<Domain, RGB> = {
+  language: [104, 236, 164],
+  math: [255, 200, 92],
+  art: [255, 110, 210],
+};
+
+function regionOf(n: { x: number; y: number; z: number; group: number }): Domain | null {
+  if (n.group > 1) return null;
+  if (n.y > 0.12 && n.z < -0.02) return "math";
+  return n.group === 0 ? "language" : "art";
+}
+
 const INNER_PER_HEMISPHERE = 30;
 /** 小腦偏紫、腦幹偏青；半球依左右漸層（未列者）。 */
 const GROUP_COLOR: Record<number, RGB | undefined> = { 2: mix(CYAN, VIOLET, 0.8), 3: CYAN };
@@ -83,6 +105,10 @@ export class Brain {
   private edges: [number, number][] = [];
   private adjacency: number[][] = [];
   private outerNodes: number[] = [];
+  private regionNodes: Record<Domain, number[]> = { language: [], math: [], art: [] };
+  private regionEdges: Record<Domain, [number, number][]> = { language: [], math: [], art: [] };
+  /** 各腦區目前亮度（0–1），由真實事件推高、隨時間衰減。 */
+  private activation: Record<Domain, number> = { language: 0, math: 0, art: 0 };
   private pulses: Pulse[] = [];
   private projected = new Float32Array(0);
   private sprite: HTMLCanvasElement;
@@ -143,7 +169,8 @@ export class Brain {
   }
 
   /** 由真實事件觸發的光脈衝。 */
-  pulse(kind: PulseKind): void {
+  /** domain 指定時，光脈衝從該腦區出發、使用該區顏色，並讓該區亮起。 */
+  pulse(kind: PulseKind, domain: Domain | null = null): void {
     const spec: Record<PulseKind, { count: number; color: RGB }> = {
       submit: { count: 12, color: CYAN },
       step: { count: 4, color: CYAN },
@@ -153,7 +180,12 @@ export class Brain {
       error: { count: 10, color: AMBER },
     };
     const { count, color } = spec[kind];
-    for (let i = 0; i < count; i++) this.spawnPulse(color);
+    const pulseColor = domain ? mix(color, REGION_COLOR[domain], 0.75) : color;
+    for (let i = 0; i < count; i++) this.spawnPulse(pulseColor, domain);
+    if (domain) {
+      const boost = kind === "stream" ? 0.15 : kind === "step" || kind === "submit" ? 0.6 : 0.4;
+      this.activation[domain] = Math.min(1, this.activation[domain] + boost);
+    }
     if (kind === "success") this.tint = { color: MINT, strength: 1 };
     if (kind === "error") this.tint = { color: AMBER, strength: 1 };
   }
@@ -196,7 +228,7 @@ export class Brain {
         const z = part.c[2] + Math.sin(u) * ring * part.r[2] * fold;
         // 落在其他部位內部的點捨棄，只留下聯集的外表面。
         if (PARTS.some((other, j) => j !== index && insideEllipsoid(x, y, z, other))) continue;
-        this.nodes.push({ x, y, z, group: part.group, inner: false });
+        this.nodes.push({ x, y, z, group: part.group, inner: false, region: null });
       }
     });
     for (const group of [0, 1]) {
@@ -212,6 +244,7 @@ export class Brain {
           z: hemi.c[2] + Math.sin(t) * s * r * hemi.r[2],
           group,
           inner: true,
+          region: null,
         });
       }
     }
@@ -229,6 +262,11 @@ export class Brain {
       n.z = (n.z - mid[2]) / extent;
     }
     this.outerNodes = this.nodes.flatMap((n, i) => (n.inner ? [] : [i]));
+    for (const d of DOMAINS) this.regionNodes[d] = [];
+    this.nodes.forEach((n, i) => {
+      n.region = regionOf(n);
+      if (n.region && !n.inner) this.regionNodes[n.region].push(i);
+    });
 
     const n = this.nodes.length;
     const seen = new Set<string>();
@@ -254,11 +292,101 @@ export class Brain {
       }
     }
     this.projected = new Float32Array(n * 3);
+    for (const d of DOMAINS) this.regionEdges[d] = [];
+    for (const [i, j] of this.edges) {
+      const r = this.nodes[i].region;
+      if (r && r === this.nodes[j].region) this.regionEdges[r].push([i, j]);
+    }
   }
 
-  private spawnPulse(color: RGB): void {
+  /** 腦區的螢幕中心（投影後的平均位置）與前後深度。 */
+  private regionCenter(d: Domain): { x: number; y: number; z: number } | null {
+    const idx = this.regionNodes[d];
+    if (!idx.length) return null;
+    const p = this.projected;
+    let x = 0;
+    let y = 0;
+    let z = 0;
+    for (const i of idx) {
+      x += p[i * 3];
+      y += p[i * 3 + 1];
+      z += p[i * 3 + 2];
+    }
+    return { x: x / idx.length, y: y / idx.length, z: z / idx.length };
+  }
+
+  private drawRegionGlow(R: number): void {
+    const { ctx } = this;
+    for (const d of DOMAINS) {
+      const a = this.activation[d];
+      if (a < 0.02) continue;
+      const c = this.regionCenter(d);
+      if (!c) continue;
+      const r = R * 0.62;
+      const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r);
+      g.addColorStop(0, rgba(REGION_COLOR[d], 0.32 * a));
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = g;
+      ctx.fillRect(c.x - r, c.y - r, r * 2, r * 2);
+    }
+  }
+
+  private drawRegionEdges(): void {
+    const { ctx, projected: p } = this;
+    ctx.lineWidth = 0.9;
+    for (const d of DOMAINS) {
+      const a = this.activation[d];
+      if (a < 0.02) continue;
+      ctx.strokeStyle = rgba(REGION_COLOR[d], 0.55 * a);
+      ctx.beginPath();
+      for (const [i, j] of this.regionEdges[d]) {
+        if (p[i * 3 + 2] > 0.35 && p[j * 3 + 2] > 0.35) continue; // 背面的連線不加亮
+        ctx.moveTo(p[i * 3], p[i * 3 + 1]);
+        ctx.lineTo(p[j * 3], p[j * 3 + 1]);
+      }
+      ctx.stroke();
+    }
+  }
+
+  /** 亮起的腦區旁標示名稱，讓人看得出現在處理的是哪一類內容。 */
+  private drawRegionLabels(R: number): void {
+    if (R < 60) return; // 縮小到頂端時不放字
+    const { ctx } = this;
+    ctx.font = `500 ${Math.round(Math.max(12, R / 11))}px "Noto Sans TC", "PingFang TC", system-ui, sans-serif`;
+    ctx.textBaseline = "middle";
+    for (const d of DOMAINS) {
+      const a = this.activation[d];
+      if (a < 0.25) continue;
+      const c = this.regionCenter(d);
+      if (!c) continue;
+      // 標籤放在腦外側，以細線連回腦區中心
+      const dx = c.x - this.cx;
+      const dy = c.y - this.cy;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+      const ex = this.cx + ux * R * 1.3;
+      const ey = this.cy + uy * R * 1.2;
+      const alpha = Math.min(1, (a - 0.2) * 1.6);
+      ctx.strokeStyle = rgba(REGION_COLOR[d], 0.45 * alpha);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(c.x, c.y);
+      ctx.lineTo(ex, ey);
+      ctx.stroke();
+      ctx.textAlign = ux >= 0 ? "left" : "right";
+      ctx.shadowColor = "rgba(2,6,16,0.9)";
+      ctx.shadowBlur = 6;
+      ctx.fillStyle = rgba(REGION_COLOR[d], alpha);
+      ctx.fillText(DOMAIN_LABEL[d], ex + (ux >= 0 ? 6 : -6), ey);
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  private spawnPulse(color: RGB, domain: Domain | null = null): void {
     if (this.pulses.length >= MAX_PULSES) this.pulses.shift();
-    let node = this.outerNodes[Math.floor(Math.random() * this.outerNodes.length)];
+    const pool = domain && this.regionNodes[domain].length ? this.regionNodes[domain] : this.outerNodes;
+    let node = pool[Math.floor(Math.random() * pool.length)];
     const path = [node];
     const length = 7 + Math.floor(Math.random() * 8);
     for (let i = 0; i < length; i++) {
@@ -280,6 +408,12 @@ export class Brain {
     if (!reduced) this.swing += dt * (0.12 + 0.35 * this.energy);
     this.yaw = YAW_BASE + YAW_SWING * Math.sin(this.swing);
     this.tint.strength = Math.max(0, this.tint.strength - dt * 0.45);
+    // 腦區亮度：有持續焦點時維持在焦點水準，否則逐漸暗下。
+    for (const d of DOMAINS) {
+      const target = (this.state.focus?.[d] ?? 0) * 0.75;
+      const decayed = this.activation[d] - dt * 0.5;
+      this.activation[d] = Math.max(target, decayed, 0);
+    }
 
     const target = this.target();
     const k = reduced ? 1 : Math.min(1, dt * 5);
@@ -316,10 +450,13 @@ export class Brain {
     this.drawOrbits(R, bright);
     this.project(R);
     ctx.globalCompositeOperation = "lighter";
+    this.drawRegionGlow(R);
     this.drawEdges(bright);
+    this.drawRegionEdges();
     this.drawNodes(R, bright);
     this.drawPulses(R);
     ctx.globalCompositeOperation = "source-over";
+    this.drawRegionLabels(R);
     this.drawRings(R);
   }
 
@@ -376,7 +513,9 @@ export class Brain {
       const z = p[i * 3 + 2];
       const a = this.depthAlpha(z) * bright;
       const node = this.nodes[i];
-      const color = node.inner ? VIOLET : GROUP_COLOR[node.group] ?? mix(CYAN, VIOLET, (node.x + 1) / 2);
+      let color: RGB = node.inner ? VIOLET : (GROUP_COLOR[node.group] ?? mix(CYAN, VIOLET, (node.x + 1) / 2));
+      const act = node.region ? this.activation[node.region] : 0;
+      if (act > 0.01) color = mix(color, REGION_COLOR[node.region!], Math.min(1, act * 1.1));
       ctx.fillStyle = rgba(this.tinted(color), Math.min(1, a));
       const r = size * (node.inner ? 0.9 : 1.2) * (1.3 - z * 0.4);
       ctx.fillRect(p[i * 3] - r / 2, p[i * 3 + 1] - r / 2, r, r);

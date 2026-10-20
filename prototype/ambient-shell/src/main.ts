@@ -1,4 +1,5 @@
 import "./style.css";
+import { classifyDomain, type Domain } from "../shared/domain.ts";
 import { computeProgress, isActive } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
 import { ApiError, api, newRequestId, streamChat, subscribeEvents, type ChatTurn } from "./api.ts";
@@ -98,7 +99,7 @@ const conversation = new VoiceConversation(
       chatAbort = null;
       brain.pulse("step");
     },
-    onSentenceSpoken: () => brain.pulse("stream"),
+    onSentenceSpoken: () => brain.pulse("stream", "language"),
     onClosed: (reason) => {
       showSubtitle(reason);
       void speakText(reason);
@@ -111,6 +112,8 @@ let pendingConsent: ConsentKind = "push";
 // 對話記錄只存在這個頁面的記憶體中，不寫檔。
 const CHAT_HISTORY_LIMIT = 20;
 let chatHistory: ChatTurn[] = [];
+/** 目前對話主題的腦區（依使用者這句話判斷），對話結束後清除。 */
+let chatDomain: Domain | null = null;
 let chatAbort: AbortController | null = null;
 
 /** 語音對話：把使用者的話送給目前的 AI 引擎，邊收邊念；需要長時間工作時由 AI 交辦成任務。 */
@@ -122,6 +125,8 @@ async function converse(text: string, requestId: string): Promise<void> {
   while (chatHistory[0]?.role === "assistant") chatHistory.shift();
   const reply = conversation.beginReply();
   let answer = "";
+  chatDomain = classifyDomain(text) ?? "language";
+  brain.pulse("submit", chatDomain);
   showSubtitle("Nous：…", true);
   try {
     await streamChat(
@@ -132,6 +137,7 @@ async function converse(text: string, requestId: string): Promise<void> {
         if (event.type === "delta") {
           answer += event.text;
           reply.push(event.text);
+          brain.pulse("stream", chatDomain);
           showSubtitle(`Nous：${answer}`, true);
         } else if (event.type === "delegate") {
           void delegateTask(event.title, requestId);
@@ -151,7 +157,13 @@ async function converse(text: string, requestId: string): Promise<void> {
     }
   } finally {
     reply.end();
-    if (chatAbort === controller) chatAbort = null;
+    if (chatAbort === controller) {
+      chatAbort = null;
+      void reply.done.then(() => {
+        if (!chatAbort) chatDomain = null;
+        render();
+      });
+    }
     if (answer) {
       const content = controller.signal.aborted ? `${answer}……（被使用者打斷）` : answer;
       chatHistory = [...chatHistory, { role: "assistant" as const, content }].slice(-CHAT_HISTORY_LIMIT);
@@ -306,7 +318,7 @@ function onServerEvent(event: ServerEvent): void {
 /** 把真實狀態變化轉成光脈衝；沒有事件就沒有脈衝。 */
 function firePulses(prev: Task | undefined, next: Task): void {
   if (!prev) {
-    brain.pulse("submit");
+    brain.pulse("submit", classifyDomain(next.title));
     return;
   }
   if (prev.status !== next.status) {
@@ -315,11 +327,12 @@ function firePulses(prev: Task | undefined, next: Task): void {
   }
   next.steps.forEach((step, i) => {
     const before = prev.steps[i];
+    const domain = step.domain ?? null;
     if (step.status !== before?.status) {
-      if (step.status === "running") brain.pulse("step");
-      if (step.status === "done") brain.pulse("stepDone");
+      if (step.status === "running") brain.pulse("step", domain);
+      if (step.status === "done") brain.pulse("stepDone", domain);
     }
-    if (step.output_chars !== null && step.output_chars !== (before?.output_chars ?? null)) brain.pulse("stream");
+    if (step.output_chars !== null && step.output_chars !== (before?.output_chars ?? null)) brain.pulse("stream", domain);
   });
 }
 
@@ -547,6 +560,7 @@ function render(): void {
   const fg = shell.foreground_task_id ? tasks.get(shell.foreground_task_id) : undefined;
   const fgProgress = fg ? computeProgress(fg) : null;
   brain.setState({
+    focus: regionFocus(),
     listening: shell.listening || voice.active || conversation.current === "listening",
     working: [...tasks.values()].some(isActive),
     layout: shell.surface ? "top" : "center",
@@ -563,6 +577,19 @@ function render(): void {
   renderEngineLine();
   renderCaption(fg);
   renderSurface();
+}
+
+/** 各腦區的持續亮度：執行中步驟的領域、正在進行的對話主題、正在說話（語言區）。 */
+function regionFocus(): Partial<Record<Domain, number>> {
+  const focus: Partial<Record<Domain, number>> = {};
+  for (const t of tasks.values()) {
+    if (t.status !== "running") continue;
+    const step = t.steps.find((s) => s.status === "running");
+    if (step?.domain) focus[step.domain] = 1;
+  }
+  if (chatDomain) focus[chatDomain] = 1;
+  if (conversation.current === "speaking") focus.language = Math.max(focus.language ?? 0, 0.8);
+  return focus;
 }
 
 function renderStatusLine(): void {
