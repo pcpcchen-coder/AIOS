@@ -27,6 +27,23 @@ export function computeProgress(task: Task): Progress {
   return { done, total, percent: Math.round((done / total) * 100), current };
 }
 
+/** 排在這個任務前面、同樣還在排隊的任務數（依交辦時間）。 */
+export function queuedAhead(task: Task, tasks: Iterable<Task>): number {
+  let ahead = 0;
+  for (const t of tasks) {
+    if (t.task_id !== task.task_id && t.status === "queued" && t.created_at < task.created_at) ahead += 1;
+  }
+  return ahead;
+}
+
+/** 排隊中任務的說明：讓使用者知道工作已收到、會自動開始，而不是沒被處理。 */
+export function queueText(task: Task, tasks: Iterable<Task>): string {
+  const ahead = queuedAhead(task, tasks);
+  return ahead > 0
+    ? `排隊中：前面還有 ${ahead} 個工作，輪到時會自動開始`
+    : "排隊中：目前的工作一完成就會自動開始";
+}
+
 export const ACTIVE_STATUSES: readonly TaskStatus[] = ["queued", "running", "cancelling"];
 
 export function isActive(task: Task): boolean {

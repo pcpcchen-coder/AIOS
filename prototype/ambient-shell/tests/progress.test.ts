@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeProgress, sortForProgress, summarize } from "../shared/progress.ts";
+import { computeProgress, queueText, sortForProgress, summarize } from "../shared/progress.ts";
 import { makeTask, step } from "./fixtures.ts";
 
 describe("computeProgress", () => {
@@ -55,5 +55,16 @@ describe("summarize / sortForProgress", () => {
 
   it("進行中的任務排在前面，其餘新到舊", () => {
     expect(sortForProgress(tasks).map((t) => t.task_id)).toEqual(["b", "d", "c", "a", "e"]);
+  });
+});
+
+describe("queueText", () => {
+  it("排隊中的任務說明前面還有幾個，並告知會自動開始", () => {
+    const first = makeTask({ task_id: "q1", status: "queued", created_at: "2026-10-19T10:00:01.000Z" });
+    const second = makeTask({ task_id: "q2", status: "queued", created_at: "2026-10-19T10:00:02.000Z" });
+    const running = makeTask({ task_id: "r1", status: "running", created_at: "2026-10-19T10:00:00.000Z" });
+    const all = [running, first, second];
+    expect(queueText(first, all)).toBe("排隊中：目前的工作一完成就會自動開始");
+    expect(queueText(second, all)).toBe("排隊中：前面還有 1 個工作，輪到時會自動開始");
   });
 });

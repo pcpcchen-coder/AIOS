@@ -43,6 +43,12 @@ export class ExecutionError extends Error {
 
 export const PLANNING_STEP_TITLE = "規劃步驟";
 
+/**
+ * 預設同時執行的任務數。對話中每次交辦都會建立任務，真實引擎一個任務要跑數分鐘；
+ * 上限太低時，第三次交辦起就只會停在「排隊中」，看起來像不再處理工作。
+ */
+export const DEFAULT_MAX_CONCURRENT = 4;
+
 export class TaskRunner {
   private controllers = new Map<string, AbortController>();
   private queue: string[] = [];
@@ -52,7 +58,7 @@ export class TaskRunner {
   constructor(
     private readonly store: TaskStore,
     private readonly executor: Executor,
-    private readonly maxConcurrent = 2,
+    private readonly maxConcurrent = DEFAULT_MAX_CONCURRENT,
   ) {}
 
   get mode(): ExecutorMode {

@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExecutorMode } from "../shared/types.ts";
+import { DEFAULT_MAX_CONCURRENT } from "./runner.ts";
 
 export interface Config {
   port: number;
@@ -41,7 +42,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     chatgptModel: env.NOUS_CHATGPT_MODEL?.trim() || null,
     configDir: env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"),
     oauthPort: intOr(env.NOUS_OAUTH_PORT, 1455),
-    maxConcurrent: Math.max(1, intOr(env.NOUS_MAX_CONCURRENT, 2)),
+    maxConcurrent: Math.max(1, intOr(env.NOUS_MAX_CONCURRENT, DEFAULT_MAX_CONCURRENT)),
   };
 }
 

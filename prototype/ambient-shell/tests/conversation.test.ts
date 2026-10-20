@@ -58,6 +58,22 @@ describe("ConversationSession", () => {
     expect(t.session.view.reply).toMatchObject({ answer: "新回答", user: "插話" });
   });
 
+  it("keeps delegating work on every round of a 4-round conversation", async () => {
+    const t = setup();
+    const rounds = ["你好", "幫我寫報告", "再整理會議紀錄", "幫我規劃行程"];
+    for (const [i, text] of rounds.entries()) {
+      const requestId = `req_multi00${i}`;
+      const pending = t.session.send(text, requestId);
+      expect(t.requests[i].messages).toHaveLength(i * 2 + 1);
+      expect(t.requests[i].messages.at(-1)).toEqual({ role: "user", content: text });
+      if (i > 0) t.requests[i].event({ type: "delegate", title: text });
+      t.finish(i, `第 ${i + 1} 輪回答。`);
+      await pending;
+      expect(t.session.view.reply).toMatchObject({ kind: "complete", requestId });
+    }
+    expect(t.delegated).toEqual(["req_multi001:幫我寫報告", "req_multi002:再整理會議紀錄", "req_multi003:幫我規劃行程"]);
+  });
+
   it("drops unanswered turns and errors rather than fabricating assistant history", async () => {
     const t = setup();
     const first = t.session.send("失敗問題", "req_error001");

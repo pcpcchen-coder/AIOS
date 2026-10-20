@@ -1,6 +1,9 @@
 import { classifyDomain } from "../shared/domain.ts";
-import type { ChatCapable, ChatMessage } from "./chat.ts";
+import { DELEGATE_CLOSE, DELEGATE_OPEN, type ChatCapable, type ChatMessage } from "./chat.ts";
 import type { ExecutionResult, Executor, Reporter } from "./runner.ts";
+
+/** 模擬模式下視為「要它做事」的動詞；真實引擎由模型自行判斷。 */
+const MOCK_WORK = /(寫|撰寫|整理|規劃|分析|翻譯|摘要|總結|製作|準備|做一份)/;
 
 /**
  * 模擬執行器：沒有呼叫任何模型，只用計時器走過固定步驟，讓介面流程可被看見。
@@ -11,14 +14,19 @@ export class MockExecutor implements Executor, ChatCapable {
 
   constructor(private readonly stepDelayMs = 1800) {}
 
-  /** 模擬對話：不呼叫模型，明說自己是模擬，讓語音與插話流程可以被測試。 */
+  /**
+   * 模擬對話：不呼叫模型，明說自己是模擬，讓語音與插話流程可以被測試。
+   * 聽起來像交辦工作時，照真實引擎的格式輸出交辦標記，讓多輪交辦流程也能在模擬模式驗證。
+   */
   async chat(
     input: { system: string; messages: ChatMessage[] },
     onDelta: (text: string) => void,
     signal: AbortSignal,
   ): Promise<{ model: string | null }> {
     const heard = input.messages[input.messages.length - 1].content.slice(0, 30);
-    const reply = `（模擬）我聽到你說「${heard}」。現在是模擬模式，沒有連接任何 AI 模型，所以沒辦法真的回答。你可以說「設定」切換到 Claude 或 ChatGPT。`;
+    const reply = MOCK_WORK.test(heard)
+      ? `（模擬）好，我把「${heard}」交辦成背景任務，進度會顯示在電子腦下方。\n${DELEGATE_OPEN}${heard}${DELEGATE_CLOSE}`
+      : `（模擬）我聽到你說「${heard}」。現在是模擬模式，沒有連接任何 AI 模型，所以沒辦法真的回答。你可以說「設定」切換到 Claude 或 ChatGPT。`;
     for (const chunk of reply.match(/.{1,6}/gu) ?? []) {
       await sleep(this.stepDelayMs / 30, signal);
       onDelta(chunk);
