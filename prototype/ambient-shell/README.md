@@ -91,6 +91,16 @@ Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒
 
 模型不寫死：有設定 `NOUS_MODEL` 就用它；否則在第一個任務時經 Models API 取最新的 `NOUS_MODEL_FAMILY`（預設 `opus`）系列。預設開啟伺服器端 refusal fallback（beta `server-side-fallback-2026-07-01`），所選模型不支援時設 `NOUS_FALLBACKS=off`。
 
+### 即時語音模式（OpenAI Realtime）
+
+`.env` 設了 `OPENAI_API_KEY` 時，「開始語音對話」改用 OpenAI Realtime（預設 `gpt-realtime`，可用 `NOUS_REALTIME_MODEL`、`NOUS_REALTIME_VOICE` 調整），像 ChatGPT 語音模式一樣語音直接對語音：
+
+- 瀏覽器用 WebRTC 把麥克風串流到 OpenAI，由 `semantic_vad` 判斷說完了沒；使用者一開口，OpenAI 會截斷正在播放的回覆（插話）。
+- SDP 交換經本機核心 `POST /api/realtime/call`：核心用 API key 換一把 120 秒的 client secret，再代為送出 SDP。API key 不會送到瀏覽器，頁面 CSP 仍只允許 `connect-src 'self'`。
+- 模型有三個工具：`delegate_task`（交辦背景任務，**由目前選擇的引擎執行**，例如 ChatGPT 方案）、`get_tasks`（查真實進度）、`end_conversation`（道別後結束）。任務完成時會以「（系統通知）」請模型用一句話轉告；多則通知會排隊，一次只要求一個回應。
+- 打字輸入也會進同一段即時對話；有畫面開著時 Esc 只關畫面，2 分鐘沒說話自動結束以免持續計費。
+- ChatGPT 方案登入能換到 Realtime client secret，但實測推論一律 `server_error`，所以這個模式只用 API key。
+
 任務與成果存在 `data/`（已排除於 git），重啟後可喚回；重啟時尚未完成的任務會標為「中斷」失敗，不假裝仍在執行。
 
 ## 與產品紅線的對照

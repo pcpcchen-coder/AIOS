@@ -19,6 +19,10 @@ export interface Config {
   /** Sign in with ChatGPT 的 loopback 回呼埠。 */
   oauthPort: number;
   maxConcurrent: number;
+  /** 即時語音模式用的 OpenAI API key（OPENAI_API_KEY）；只留在本機核心。 */
+  openaiApiKey: string | null;
+  realtimeModel: string;
+  realtimeVoice: string;
 }
 
 const PROVIDERS: readonly ExecutorMode[] = ["claude", "chatgpt", "mock"];
@@ -43,6 +47,9 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     configDir: env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"),
     oauthPort: intOr(env.NOUS_OAUTH_PORT, 1455),
     maxConcurrent: Math.max(1, intOr(env.NOUS_MAX_CONCURRENT, DEFAULT_MAX_CONCURRENT)),
+    openaiApiKey: env.OPENAI_API_KEY?.trim() || null,
+    realtimeModel: env.NOUS_REALTIME_MODEL?.trim() || "gpt-realtime",
+    realtimeVoice: env.NOUS_REALTIME_VOICE?.trim() || "marin",
   };
 }
 

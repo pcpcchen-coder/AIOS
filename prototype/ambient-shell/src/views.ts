@@ -355,6 +355,13 @@ export function renderSettings(settings: SettingsView | null, message: string | 
     g.last_error && h("p", { class: "error-text" }, g.last_error),
     welcome,
     list,
+    settings.realtime &&
+      h(
+        "p",
+        { class: "small" },
+        h("strong", {}, "即時語音："),
+        `${settings.realtime.available ? "可用" : "不可用"} · ${settings.realtime.detail}`,
+      ),
     account.length > 0 && h("div", { class: "account" }, ...account),
     h("p", { class: "muted small" }, "新交辦的任務會用目前選擇的引擎；已在執行的任務不受影響。"),
     footer(actions),

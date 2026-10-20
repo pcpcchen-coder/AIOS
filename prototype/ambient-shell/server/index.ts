@@ -8,6 +8,7 @@ import { ClaudeExecutor } from "./claude-executor.ts";
 import { loadConfig } from "./config.ts";
 import { MockExecutor } from "./mock-executor.ts";
 import { ProviderManager } from "./providers.ts";
+import { RealtimeBridge } from "./realtime.ts";
 import { TaskRunner } from "./runner.ts";
 import { TaskStore } from "./store.ts";
 
@@ -36,6 +37,7 @@ const providers = new ProviderManager({
   onChange: () => notify(),
 });
 
+const realtime = new RealtimeBridge({ apiKey: config.openaiApiKey, model: config.realtimeModel, voice: config.realtimeVoice });
 const store = new TaskStore(join(root, "data"));
 const runner = new TaskRunner(store, providers, config.maxConcurrent);
 const server = createApp({
@@ -44,6 +46,7 @@ const server = createApp({
   settings: providers,
   auth,
   chat: providers,
+  realtime,
   port: config.port,
   devPort: config.devPort,
   distDir: join(root, "dist"),
@@ -58,5 +61,7 @@ server.listen(config.port, "127.0.0.1", () => {
   console.log(`Nous 原型已啟動：http://localhost:${config.port}`);
   console.log(`目前引擎：${LABEL[view.provider]}（可在畫面上說「設定」切換）`);
   for (const p of view.providers) console.log(`  - ${p.label}：${p.available ? "可用" : "不可用"}，${p.detail}`);
+  const live = realtime.info();
+  console.log(`即時語音：${live.available ? "可用" : "不可用"}，${live.detail}`);
   console.log(`憑證與設定目錄：${config.configDir}`);
 });

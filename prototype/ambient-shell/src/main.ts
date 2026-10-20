@@ -1,8 +1,9 @@
 import "./style.css";
-import { computeProgress, isActive, queueText } from "../shared/progress.ts";
+import { computeProgress, isActive, queueText, sortForProgress } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
 import { ApiError, api, newRequestId, streamChat, subscribeEvents } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
+import { browserRealtimeDeps, realtimeSupported, RealtimeVoice, type RealtimePhase } from "./realtime.ts";
 import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
@@ -121,6 +122,27 @@ const conversation = new VoiceConversation(
 );
 let pendingConsent: ConsentKind = "push";
 
+// 即時語音模式（OpenAI Realtime）：有 OPENAI_API_KEY 時，「開始語音對話」改用語音直接對語音。
+const REALTIME_IDLE_MS = 120_000;
+/** 即時語音中交辦的任務：完成時請模型用語音轉告。 */
+const realtimeTaskIds = new Set<string>();
+const realtime = new RealtimeVoice(
+  {
+    onPhase: renderRealtimeState,
+    onUserTranscript: (text) => showSubtitle(`你：${text}`),
+    onAssistantTranscript: (text) => showSubtitle(`Nous：${text}`),
+    onDelegate: delegateFromRealtime,
+    onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
+    onClosed: (reason) => {
+      showSubtitle(reason);
+      dispatch({ type: "input.open" });
+      showCommandError(reason);
+    },
+  },
+  browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp)).sdp),
+  { idleMs: REALTIME_IDLE_MS },
+);
+
 const session = new ConversationSession({
   stream: streamChat,
   output: () => {
@@ -202,6 +224,7 @@ function closeConversation(): void {
   conversationEpoch++;
   session.dismiss();
   conversation.stop();
+  realtime.stop();
   voice.abort();
   hideSubtitle();
   dispatch({ type: "dismiss" });
@@ -209,9 +232,13 @@ function closeConversation(): void {
 }
 
 function openConversation(): void {
+  dismissFirstHint();
+  if (realtimeReady()) {
+    startRealtime();
+    return;
+  }
   const requestId = userRequest();
   const epoch = ++conversationEpoch;
-  dismissFirstHint();
   if (settings?.provider === "chatgpt" && chatGPTAvailable() || settings?.provider === developmentProvider) {
     enableVoiceMode();
   } else {
@@ -308,7 +335,82 @@ function enableVoiceMode(): void {
   say("語音模式已開啟，直接跟我說話就好，我說話時你也可以打斷我。");
 }
 
+// ───────────── 即時語音（OpenAI Realtime） ─────────────
+
+function realtimeReady(): boolean {
+  return !!settings?.realtime?.available && realtimeSupported();
+}
+
+function startRealtime(): void {
+  if (realtime.on) return;
+  if (!hasVoiceConsent("realtime")) {
+    askConsent("realtime");
+    return;
+  }
+  conversationEpoch++;
+  voice.abort();
+  conversation.stop();
+  session.dismiss();
+  hideSubtitle();
+  dispatch({ type: "dismiss" });
+  void realtime.start();
+}
+
+const REALTIME_STATE_LABEL: Record<Exclude<RealtimePhase, "off">, string> = {
+  connecting: "● 即時語音 · 連線中",
+  listening: "● 即時語音 · 聆聽中",
+  hearing: "● 即時語音 · 正在聽你說",
+  thinking: "● 即時語音 · 思考中",
+  speaking: "● 即時語音 · 回覆中（可直接插話）",
+};
+
+function renderRealtimeState(phase: RealtimePhase): void {
+  voicePill.hidden = phase === "off";
+  if (phase !== "off") voicePill.textContent = `${REALTIME_STATE_LABEL[phase]}（點此結束）`;
+  voicePill.dataset.state = phase === "off" ? "off" : phase === "speaking" ? "speaking" : "listening";
+  voiceModeButton.classList.toggle("recording", phase !== "off");
+  voiceModeButton.setAttribute("aria-label", phase === "off" ? "開始語音對話" : "結束即時語音");
+  render();
+}
+
+/** 模型在即時語音中決定交辦的工作：建立任務、顯示進度，並把真實狀態交還給模型。 */
+async function delegateFromRealtime(title: string): Promise<Record<string, unknown>> {
+  const requestId = userRequest();
+  const created = await api.createTask(title, requestId);
+  if (!tasks.has(created.task_id)) tasks.set(created.task_id, created);
+  realtimeTaskIds.add(created.task_id);
+  dispatch({ type: "task.submitted", task_id: created.task_id, request_id: requestId });
+  dispatch({ type: "task.updated", task: tasks.get(created.task_id)! });
+  const task = tasks.get(created.task_id)!;
+  return {
+    ok: true,
+    title: task.title,
+    status: task.status,
+    engine: PROVIDER_LABEL[task.mode],
+    note: task.status === "queued" ? queueText(task, tasks.values()) : "已開始處理，進度顯示在電子腦下方",
+  };
+}
+
+/** get_tasks 工具的回傳：最近的任務與真實進度。 */
+function taskSummary(): Record<string, unknown>[] {
+  return sortForProgress(tasks.values()).slice(0, 8).map((task) => {
+    const p = computeProgress(task);
+    return {
+      title: task.title,
+      status: task.status,
+      progress: p.total === null ? null : `${p.done}/${p.total}`,
+      ...(task.status === "queued" ? { note: queueText(task, tasks.values()) } : {}),
+      ...(task.error ? { error: task.error } : {}),
+    };
+  });
+}
+
 function disableVoiceMode(): void {
+  if (realtime.on) {
+    realtime.stop();
+    showSubtitle("即時語音已結束。");
+    return;
+  }
   if (!conversation.on) return;
   session.interrupt();
   conversation.stop();
@@ -316,6 +418,8 @@ function disableVoiceMode(): void {
 }
 
 const CONSENT_TEXT: Record<ConsentKind, string> = {
+  realtime:
+    "即時語音模式像 ChatGPT 語音模式：開啟期間麥克風音訊會即時串流到 OpenAI（使用你在 .env 設定的 OPENAI_API_KEY，依用量計費），AI 直接用語音回答，你隨時可以插話。要它做較長的工作時會交辦成背景任務，仍用目前選擇的引擎執行。說「再見」或「結束對話」、點右上角指示、按 Esc 或 2 分鐘沒說話就會結束。本系統不保存音訊。要開啟嗎？",
   push:
     "語音辨識使用瀏覽器內建服務；在 Chrome／Edge 中，音訊會傳到瀏覽器供應商（例如 Google）的雲端辨識。只有在你按下麥克風時才收音，本系統不保存音訊。要啟用嗎？",
   continuous:
@@ -391,8 +495,14 @@ function onServerEvent(event: ServerEvent): void {
   firePulses(prev, event.task);
   const wasForeground = shell.mode === "working" && shell.foreground_task_id === event.task.task_id;
   dispatch({ type: "task.updated", task: event.task });
-  // 只有前景任務結束才念；收起後的背景任務保持安靜。
-  if (wasForeground && shell.mode !== "working") say(speakFinished(event.task));
+  if (realtimeTaskIds.has(event.task.task_id) && !isActive(event.task)) {
+    // 即時語音中交辦的任務結束：請模型用一句話轉告（不論是否還在前景）。
+    realtimeTaskIds.delete(event.task.task_id);
+    if (realtime.on) realtime.notify(speakFinished(event.task));
+  } else if (wasForeground && shell.mode !== "working") {
+    // 只有前景任務結束才念；收起後的背景任務保持安靜。
+    say(speakFinished(event.task));
+  }
   render();
 }
 
@@ -465,7 +575,9 @@ async function handleCommand(text: string): Promise<void> {
     case "progress":
       input.value = "";
       dispatch({ type: "show.progress", request_id: requestId });
-      say(speakProgress(tasks.values()));
+      // 即時語音中由 AI 查詢真實進度後用語音回答，對話不中斷。
+      if (realtime.on) realtime.sendText(text);
+      else say(speakProgress(tasks.values()));
       return;
     case "result": {
       input.value = "";
@@ -496,6 +608,12 @@ async function handleCommand(text: string): Promise<void> {
       return;
     }
     case "task":
+      if (realtime.on) {
+        input.value = "";
+        showSubtitle(`你：${intent.text}`);
+        realtime.sendText(intent.text);
+        return;
+      }
       await converse(intent.text, requestId);
       return;
   }
@@ -628,7 +746,10 @@ function showCommandError(message: string): void {
 function render(): void {
   const fg = shell.foreground_task_id ? tasks.get(shell.foreground_task_id) : undefined;
   const fgProgress = fg ? computeProgress(fg) : null;
-  const phase = conversation.current === "speaking" ? "speaking"
+  const live = realtime.current;
+  const phase = live !== "off"
+    ? live === "speaking" ? "speaking" : live === "thinking" || live === "connecting" ? "thinking" : "listening"
+    : conversation.current === "speaking" ? "speaking"
     : session.view.reply.kind === "pending" ? "thinking"
     : conversation.on || voice.active ? "listening"
     : session.view.visible && session.view.reply.kind === "error" ? "error" : "idle";
@@ -639,13 +760,13 @@ function render(): void {
   const activity = collectRegionActivity({
     tasks: [...tasks.values()], reply: session.view.reply,
     conversationVisible: session.view.visible && shell.surface === null,
-    capture: { push: voice.capturing, continuous: conversation.capturing }, playback: conversation.playing,
+    capture: { push: voice.capturing, continuous: conversation.capturing || realtime.capturing }, playback: conversation.playing || realtime.playing,
   });
   renderRegionActivity(activity);
   brain.setState({
     activity,
     conversation: phase,
-    listening: voice.capturing || conversation.capturing,
+    listening: voice.capturing || conversation.capturing || realtime.capturing,
     working: [...tasks.values()].some(isActive),
     layout: shell.surface ? "top" : "center",
     progress:
@@ -656,7 +777,7 @@ function render(): void {
   document.body.classList.toggle("listening", shell.listening);
   document.body.classList.toggle("has-surface", shell.surface !== null);
   form.hidden = !shell.listening;
-  startConversation.hidden = conversation.on || shell.listening || shell.surface !== null;
+  startConversation.hidden = conversation.on || realtime.on || shell.listening || shell.surface !== null;
   renderConversation();
 
   renderStatusLine();
@@ -720,6 +841,7 @@ function renderEngineLine(): void {
     return;
   }
   engineLine.replaceChildren();
+  if (realtime.on) engineLine.append(`即時語音：OpenAI ${settings.realtime?.model ?? "Realtime"}（API key 計費）｜交辦工作：`);
   if (settings.provider === "chatgpt") {
     const link = document.createElement("a");
     link.href = CHATGPT_USAGE_URL;
@@ -847,7 +969,10 @@ window.addEventListener("keydown", (e) => {
   dismissFirstHint();
   if (e.key === "Escape") {
     e.preventDefault();
-    if (conversation.current === "speaking") conversation.interrupt();
+    if (realtime.current === "speaking") realtime.interrupt();
+    // 即時語音中有畫面（進度、成果）開著時，Esc 只關畫面，對話繼續。
+    else if (realtime.on && shell.surface !== null) dispatch({ type: "dismiss" });
+    else if (conversation.current === "speaking") conversation.interrupt();
     else closeConversation();
     return;
   }
@@ -875,10 +1000,9 @@ $<HTMLButtonElement>("conversation-type").addEventListener("click", () => dispat
 
 if (speechSupported()) {
   micButton.hidden = false;
-  voiceModeButton.hidden = false;
   micButton.addEventListener("click", () => {
     commandError.hidden = true;
-    if (conversation.on) return; // 語音模式已在收音
+    if (conversation.on || realtime.on) return; // 語音模式已在收音
     if (voice.active) {
       voice.stop();
       return;
@@ -889,22 +1013,26 @@ if (speechSupported()) {
     }
     voice.start();
   });
+}
+if (speechSupported() || realtimeSupported()) {
+  voiceModeButton.hidden = false;
   voiceModeButton.addEventListener("click", () => {
     commandError.hidden = true;
-    if (conversation.on) disableVoiceMode();
+    if (conversation.on || realtime.on) disableVoiceMode();
     else openConversation();
   });
-  voicePill.addEventListener("click", disableVoiceMode);
-  $<HTMLButtonElement>("consent-yes").addEventListener("click", () => {
-    saveVoiceConsent(pendingConsent);
-    consentBox.hidden = true;
-    if (pendingConsent === "continuous") enableVoiceMode();
-    else voice.start();
-  });
-  $<HTMLButtonElement>("consent-no").addEventListener("click", () => {
-    consentBox.hidden = true;
-    input.focus();
-  });
 }
+voicePill.addEventListener("click", disableVoiceMode);
+$<HTMLButtonElement>("consent-yes").addEventListener("click", () => {
+  saveVoiceConsent(pendingConsent);
+  consentBox.hidden = true;
+  if (pendingConsent === "realtime") startRealtime();
+  else if (pendingConsent === "continuous") enableVoiceMode();
+  else voice.start();
+});
+$<HTMLButtonElement>("consent-no").addEventListener("click", () => {
+  consentBox.hidden = true;
+  input.focus();
+});
 
 render();

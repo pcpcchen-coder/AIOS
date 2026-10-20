@@ -5,6 +5,7 @@ import type { ExecutorMode, ServerEvent, SettingsView } from "../shared/types.ts
 import type { ChatGPTAuth } from "./chatgpt-auth.ts";
 import { buildChatSystem, DelegationFilter, validateMessages, type ChatCapable } from "./chat.ts";
 import { ExecutionError } from "./runner.ts";
+import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
@@ -41,6 +42,8 @@ export interface AppOptions {
   auth: ChatGPTAuth;
   /** 語音對話用的引擎（通常就是 ProviderManager）。 */
   chat: ChatCapable;
+  /** 即時語音模式（OpenAI Realtime）；未提供時不可用。 */
+  realtime?: RealtimeBridge;
   port: number;
   devPort: number;
   distDir: string | null;
@@ -53,7 +56,11 @@ class HttpError extends Error {
 }
 
 export function createApp(options: AppOptions): Server & { notifySettings(): void } {
-  const { store, runner, settings, auth, chat } = options;
+  const { store, runner, auth, chat, realtime } = options;
+  const settings = {
+    view: (): SettingsView => (realtime ? { ...options.settings.view(), realtime: realtime.info() } : options.settings.view()),
+    select: (provider: ExecutorMode) => options.settings.select(provider),
+  };
   const hosts = allowedHosts(options.port, options.devPort);
   const clients = new Set<ServerResponse>();
   let sequence = 0;
@@ -103,6 +110,18 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       return sendJson(res, 200, settings.view());
     }
     if (method === "POST" && path === "/api/chat") return streamChat(req, res);
+    if (method === "POST" && path === "/api/realtime/call") {
+      const body = await readJson(req);
+      const sdp = typeof body.sdp === "string" ? body.sdp : "";
+      if (!sdp.startsWith("v=0")) throw new HttpError(400, "sdp offer is required");
+      if (!realtime) throw new HttpError(409, "即時語音模式未啟用");
+      try {
+        return sendJson(res, 200, await realtime.connect(sdp, store.list()));
+      } catch (err) {
+        if (err instanceof RealtimeError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
+    }
     if (method === "POST" && path === "/api/auth/chatgpt/login") {
       const body = await readJson(req);
       const mode = body.mode === "new" ? "new" : "auto";

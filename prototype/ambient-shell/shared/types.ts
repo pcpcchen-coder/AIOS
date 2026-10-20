@@ -101,6 +101,15 @@ export interface SettingsView {
   provider: ExecutorMode;
   providers: ProviderInfo[];
   chatgpt: ChatGPTAccountInfo;
+  /** 即時語音模式（OpenAI Realtime）；未提供時視為不可用。 */
+  realtime?: RealtimeInfo;
+}
+
+export interface RealtimeInfo {
+  available: boolean;
+  model: string;
+  /** 可用與否的說明，例如「未設定 OPENAI_API_KEY」。 */
+  detail: string;
 }
 
 export type ServerEvent =
