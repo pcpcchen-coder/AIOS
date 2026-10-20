@@ -48,7 +48,7 @@ afterEach(async () => {
   server = null;
 });
 
-async function start() {
+async function start(mockStepMs = 5) {
   const port = await freePort();
   const store = new TaskStore(null);
   const dir = mkdtempSync(join(tmpdir(), "nous-http-"));
@@ -56,7 +56,7 @@ async function start() {
   const providers = new ProviderManager({
     claude: null,
     chatgpt: new ChatGPTExecutor(auth, { model: null }),
-    mock: new MockExecutor(5),
+    mock: new MockExecutor(mockStepMs),
     auth,
     dir,
     preferred: "mock",
@@ -161,6 +161,36 @@ describe("HTTP API", () => {
     expect(events.at(-1)).toMatchObject({ type: "done" });
     expect((await post("/api/chat", { request_id: "req_test0005", messages: [] })).status).toBe(400);
   });
+
+  it("多輪對話（5 輪）：每次交辦的工作都會開始處理，第三件起不會卡在排隊", async () => {
+    // 任務要跑數秒，模擬真實引擎「交辦後還沒做完，使用者就繼續說下一件」的情境。
+    const { base, post, runner } = await start(1000);
+    const rounds = ["你好", "幫我寫一份專案進度報告", "再幫我整理會議紀錄", "幫我規劃下週行程", "幫我寫一封感謝客戶的信"];
+    const history: { role: "user" | "assistant"; content: string }[] = [];
+    const delegated: string[] = [];
+    for (const [i, text] of rounds.entries()) {
+      const requestId = `req_round${String(i).padStart(4, "0")}`;
+      const res = await post("/api/chat", { request_id: requestId, messages: [...history, { role: "user", content: text }] });
+      const events = (await res.text()).split("\n\n").filter(Boolean).map((f) => JSON.parse(f.replace(/^data: /, "")));
+      expect(events.at(-1)).toMatchObject({ type: "done" });
+      const answer = events.filter((e) => e.type === "delta").map((e) => e.text).join("");
+      expect(answer).not.toContain("⟦");
+      for (const e of events.filter((e) => e.type === "delegate")) {
+        const created = await post("/api/tasks", { text: e.title, request_id: requestId });
+        expect(created.status).toBe(201);
+        delegated.push(((await created.json()) as Task).task_id);
+      }
+      history.push({ role: "user", content: text }, { role: "assistant", content: answer.trim() });
+    }
+
+    expect(delegated).toHaveLength(4);
+    const list = (await (await fetch(`${base}/api/tasks`)).json()) as Task[];
+    for (const id of delegated) expect(list.find((t) => t.task_id === id)?.status).toBe("running");
+
+    await runner.idle();
+    const done = (await (await fetch(`${base}/api/tasks`)).json()) as Task[];
+    for (const id of delegated) expect(done.find((t) => t.task_id === id)?.status).toBe("succeeded");
+  }, 20_000);
 
   it("前端未建置時回傳說明而不是空白頁", async () => {
     const { base } = await start();

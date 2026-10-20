@@ -1,5 +1,5 @@
 import "./style.css";
-import { computeProgress, isActive } from "../shared/progress.ts";
+import { computeProgress, isActive, queueText } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
 import { ApiError, api, newRequestId, streamChat, subscribeEvents } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
@@ -740,7 +740,7 @@ function renderCaption(fg: Task | undefined): void {
   }
   const p = computeProgress(fg);
   let detail: string;
-  if (fg.status === "queued") detail = "排隊中，等待開始";
+  if (fg.status === "queued") detail = queueText(fg, tasks.values());
   else if (fg.status === "cancelling") detail = "停止中…";
   else if (p.total === null) detail = "規劃步驟中…";
   else if (p.current) {

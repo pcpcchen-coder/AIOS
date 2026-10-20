@@ -1,4 +1,4 @@
-import { computeProgress, isActive, sortForProgress, summarize } from "../shared/progress.ts";
+import { computeProgress, isActive, queueText, sortForProgress, summarize } from "../shared/progress.ts";
 import type { Task } from "../shared/types.ts";
 
 // 語音模式要念出的短句。全部由真實任務狀態計算，不念長報告全文（docs/06 §3.1）。
@@ -28,11 +28,11 @@ export function speakProgress(tasks: Iterable<Task>): string {
   const head = `目前有 ${counts.join("、")}。`;
   const first = sorted[0];
   if (!isActive(first)) return head;
-  return `${head}${shortTitle(first.title)}：${speakTaskProgress(first)}`;
+  return `${head}${shortTitle(first.title)}：${speakTaskProgress(first, sorted)}`;
 }
 
-export function speakTaskProgress(task: Task): string {
-  if (task.status === "queued") return "排隊中，還沒開始。";
+export function speakTaskProgress(task: Task, tasks: Iterable<Task> = []): string {
+  if (task.status === "queued") return `${queueText(task, tasks)}。`;
   if (task.status === "cancelling") return "正在停止。";
   const p = computeProgress(task);
   if (p.total === null) return "正在規劃步驟。";
