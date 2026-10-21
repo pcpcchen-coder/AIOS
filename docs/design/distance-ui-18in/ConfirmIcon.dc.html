@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>確認圖示元件</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: {{px}}; height: {{px}}; display: flex; align-items: center; justify-content: center">
+<svg viewBox="0 0 64 64" width="100%" height="100%" role="img" aria-label="請確認：用說的確認" style="{{glowStyle}}">
+<path d="M14 6H50Q58 6 58 14V38Q58 46 50 46H29L17 57.5V46H14Q6 46 6 38V14Q6 6 14 6Z" fill="{{bubble}}"></path>
+<path d="M19.5 26.5L28.5 35.5L45 18.5" fill="none" stroke="{{check}}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path>
+</svg>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"size":{"editor":"int","default":320,"min":24,"max":600},"variant":{"editor":"enum","default":"amber","options":["amber","ink"]},"glow":{"editor":"enum","default":"yes","options":["yes","no"]},"$preview":{"width":640,"height":640}}'>
+class Component extends DCLogic {
+renderVals() {
+const size = Number(this.props.size ?? 320);
+const ink = (this.props.variant ?? 'amber') === 'ink';
+const glow = (this.props.glow ?? 'yes') === 'yes';
+return {
+px: size + 'px',
+bubble: ink ? '#070B16' : '#FFB547',
+check: ink ? '#FFB547' : '#070B16',
+glowStyle: glow ? 'filter: drop-shadow(0 0 ' + Math.round(size * 0.12) + 'px rgba(255, 181, 71, 0.5))' : ''
+};
+}
+}
+</script>
+</body>
+</html>
