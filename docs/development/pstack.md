@@ -44,3 +44,14 @@ git diff --check
 - AIOS CI smoke 只證明 Recorder 工作，**不等於** pstack Agent 真正做了功能修改，也不等於 AIOS 產品 Gate 通過。
 - 真實的 pstack 任務需由 Agent 依序呼叫 `start`、`step`（running→完成狀態）、`finish`，記錄真實證據與失敗原因。沒有呼叫就沒有觀測資料。
 - 需使用者另行明確授權公開內容，才可依[中央文件](https://github.com/pcpcchen-coder/CursorPlugins/blob/custom/pstack/docs/fork/PSTACK_DASHBOARD.md)執行 `publish --public-ok`；預設絕不公開。
+
+
+### Public cross-repo Observatory E2E
+
+The AIOS owner approved public **sanitized** pstack workflow metadata. The workflow .github/workflows/pstack-public-e2e.yml runs an actual recorder with a scripted, read-only CI investigation, validates the pinned pstack files and recorder tests, exports a filtered snapshot to the public telemetry/pstack branch and stores an evidence artifact. The CI run is labelled investigation-ci and must not be confused with Cursor/Codex pstack Agents executing development tasks.
+
+Source feed: https://github.com/pcpcchen-coder/AIOS/tree/telemetry/pstack/observability/public
+
+Dashboard: https://pcpcchen-coder.github.io/CursorPlugins/
+
+The Dashboard fetches the source feed directly. It requires no cross-repository PAT, and polls about every 60 seconds while the browser tab is visible. GitHub/CDN caching may delay a response. Actual native Agent-run coverage still requires agents to invoke the recorder for each playbook step. Running the workflow does not imply AIOS UI, microphone, camera or other real hardware gates passed.
