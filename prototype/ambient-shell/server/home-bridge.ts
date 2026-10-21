@@ -23,7 +23,7 @@ export interface HubMetric {
   label: string;
   unit: string;
   precision: number;
-  value: number | string | null;
+  value: number | string | boolean | null;
 }
 
 export type HubDataStatus = "live" | "snapshot" | "stale" | "missing";
@@ -71,7 +71,8 @@ const METRICS: Record<string, string[]> = {
 };
 
 const WHOLE_HOME = new Set(["家", "全家", "家裡", "全部", "所有", "全屋", "家中", "整個家"]);
-const FILLER = /^(的|裡|裡面|裡的|內|中)+|(的|裡|裡面)+$/g;
+/** 句尾的「的、裡、裡面、內」（「客廳裡」「家裡的」）；不動句首，避免吃掉「中庭」「內室」這類名稱。 */
+const TRAILING = /(的|裡|裡面|內)+$/;
 const DATA_TEXT = { live: "即時", snapshot: "快照", stale: "過期資料", missing: "沒有讀值" } as const;
 
 function norm(text: string): string {
@@ -116,16 +117,23 @@ export type Resolution =
  */
 export function resolveTarget(home: HubSnapshot, target: string): Resolution {
   const whole = norm(target);
-  const direct = resolveName(home, whole.replace(FILLER, ""));
+  const direct = resolveVariants(home, whole);
   if (direct.kind === "match") return { ...direct, metric: null };
   if (direct.kind === "ambiguous") return direct;
   const split = splitMetric(whole);
   if (!split.metric) return direct;
-  const rest = resolveName(home, split.rest.replace(FILLER, ""));
+  const rest = resolveVariants(home, split.rest);
   return rest.kind === "match" ? { ...rest, metric: split.metric } : rest;
 }
 
 type NameMatch = { kind: "match"; scope: string; devices: HubDevice[] } | Exclude<Resolution, { kind: "match" }>;
+
+/** 先用原字串比對，找不到再去掉句尾的「的、裡」重找。 */
+function resolveVariants(home: HubSnapshot, t: string): NameMatch {
+  const first = resolveName(home, t);
+  const trimmed = t.replace(TRAILING, "");
+  return first.kind === "not_found" && trimmed !== t ? resolveName(home, trimmed) : first;
+}
 
 function resolveName(home: HubSnapshot, t: string): NameMatch {
   if (!t || WHOLE_HOME.has(t)) return { kind: "match", scope: "全家", devices: home.devices };
@@ -134,26 +142,40 @@ function resolveName(home: HubSnapshot, t: string): NameMatch {
   if (exact.length === 1) return { kind: "match", scope: exact[0].name, devices: exact };
   if (exact.length > 1) return { kind: "ambiguous", candidates: exact };
 
-  const inRoom = (roomId: string) => home.devices.filter((d) => d.roomId === roomId);
-  const room = home.rooms.find((r) => norm(r.name) === t);
-  if (room) return { kind: "match", scope: room.name, devices: inRoom(room.id) };
+  const inRooms = (ids: Set<string>) => home.devices.filter((d) => d.roomId !== null && ids.has(d.roomId));
+  const rooms = home.rooms.filter((r) => norm(r.name) === t);
+  if (rooms.length) return { kind: "match", scope: rooms[0].name, devices: inRooms(new Set(rooms.map((r) => r.id))) };
 
-  const prefix = home.rooms.find((r) => norm(r.name) && t.includes(norm(r.name)));
-  const pool = prefix ? inRoom(prefix.id) : home.devices;
-  const rest = prefix ? t.replace(norm(prefix.name), "").replace(FILLER, "") : t;
-  if (prefix && !rest) return { kind: "match", scope: prefix.name, devices: pool };
+  // 句中出現房間名稱時取最長的那個（「主臥浴室」優先於「主臥」）；同名房間一起算。
+  const longest = Math.max(0, ...home.rooms.map((r) => norm(r.name)).filter((n) => n && t.includes(n)).map((n) => n.length));
+  const named = home.rooms.filter((r) => longest > 0 && norm(r.name).length === longest && t.includes(norm(r.name)));
+  if (named.length) {
+    const rest = t.replace(norm(named[0].name), "").replace(/^的+/, "").replace(TRAILING, "");
+    const pool = inRooms(new Set(named.map((r) => r.id)));
+    if (!rest) return { kind: "match", scope: named[0].name, devices: pool };
+    const inRoom = partialMatch(pool, rest);
+    if (inRoom.kind !== "not_found") return inRoom;
+  }
+  return partialMatch(home.devices, t);
+}
 
-  const partial = pool.filter((d) => names(d).some((n) => n.includes(rest) || rest.includes(n)));
+function partialMatch(pool: HubDevice[], t: string): NameMatch {
+  const partial = pool.filter((d) => names(d).some((n) => n.includes(t) || t.includes(n)));
   if (partial.length === 1) return { kind: "match", scope: partial[0].name, devices: partial };
   if (partial.length > 1) return { kind: "ambiguous", candidates: partial };
   return { kind: "not_found" };
 }
 
-function clock(epochSeconds: number, timeZone: string | undefined): string {
-  return new Date(epochSeconds * 1000).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone });
+/** 中控收到讀值的時間；不是同一天時加上日期，避免把幾天前的資料說成今天。 */
+function clock(epochSeconds: number, nowSeconds: number, timeZone: string | undefined): string {
+  const at = new Date(epochSeconds * 1000);
+  const day = (d: Date) => d.toLocaleDateString("zh-TW", { timeZone });
+  const time = at.toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone });
+  if (day(at) === day(new Date(nowSeconds * 1000))) return time;
+  return `${at.toLocaleDateString("zh-TW", { month: "numeric", day: "numeric", timeZone })} ${time}`;
 }
 
-function round(value: number | string | null, precision: number): number | string | null {
+function round(value: HubMetric["value"], precision: number): HubMetric["value"] {
   if (typeof value !== "number") return value;
   const p = Math.max(0, Math.min(3, precision));
   return Number(value.toFixed(p));
@@ -170,7 +192,7 @@ export function report(home: HubSnapshot, d: HubDevice, metric: string | null, t
     room,
     online,
     data: DATA_TEXT[t.status],
-    time: t.receivedAt === null ? null : clock(t.receivedAt, timeZone),
+    time: t.receivedAt === null ? null : clock(t.receivedAt, home.serverTime, timeZone),
     minutes_ago: t.receivedAt === null ? null : Math.max(0, Math.round((home.serverTime - t.receivedAt) / 60)),
     source: t.source || null,
     readings: metrics.map((m) => ({ name: m.label, value: round(m.value, m.precision), unit: m.unit })),
@@ -211,6 +233,7 @@ export class HomeBridge {
         }),
       };
     }
+    if (metric && !metricKey(metric)) return { ok: true, status: "no_such_reading", scope: resolved.scope, metric };
     const key = (metric ? metricKey(metric) : null) ?? resolved.metric;
     const devices = key ? resolved.devices.filter((d) => d.telemetry?.metrics.some((m) => m.key === key)) : resolved.devices;
     if (key && !devices.length) return { ok: true, status: "no_such_reading", scope: resolved.scope, metric: METRICS[key][0] };
@@ -229,6 +252,7 @@ export class HomeBridge {
     try {
       res = await this.fetch(`${this.base}/api/v1/home`, {
         headers: { Authorization: `Bearer ${this.options.token}`, Accept: "application/json" },
+        redirect: "error",
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch (err) {
@@ -254,6 +278,12 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+/** 中控的資料狀態；不認得的狀態有讀值時當過期資料，不說成即時，也不和讀值互相矛盾。 */
+function dataStatus(status: string, metrics: HubMetric[]): HubDataStatus {
+  if (status === "live" || status === "snapshot" || status === "stale" || status === "missing") return status;
+  return metrics.some((m) => m.value !== null) ? "stale" : "missing";
+}
+
 /** 解析 GET /api/v1/home；只取 AIOS 用得到的欄位。 */
 export function parseHome(body: unknown): HubSnapshot {
   if (!isRecord(body) || !Array.isArray(body.devices)) throw new Error("missing devices");
@@ -266,7 +296,13 @@ export function parseHome(body: unknown): HubSnapshot {
     const state = isRecord(d.state) ? d.state : {};
     const placement = isRecord(d.placement) ? d.placement : {};
     const t = isRecord(d.telemetry) ? d.telemetry : null;
-    const status = str(t?.status);
+    const metrics: HubMetric[] = (Array.isArray(t?.metrics) ? t.metrics : []).filter(isRecord).map((m) => ({
+      key: str(m.key),
+      label: str(m.label) || str(m.key),
+      unit: str(m.unit),
+      precision: num(m.precision) ?? 1,
+      value: typeof m.value === "string" || typeof m.value === "boolean" ? m.value : num(m.value),
+    }));
     return {
       id: str(d.id),
       name: str(d.name),
@@ -276,18 +312,7 @@ export function parseHome(body: unknown): HubSnapshot {
       available: typeof state.available === "boolean" ? state.available : null,
       fresh: state.fresh === true,
       telemetry: t
-        ? {
-            metrics: (Array.isArray(t.metrics) ? t.metrics : []).filter(isRecord).map((m) => ({
-              key: str(m.key),
-              label: str(m.label) || str(m.key),
-              unit: str(m.unit),
-              precision: num(m.precision) ?? 1,
-              value: typeof m.value === "string" ? m.value : num(m.value),
-            })),
-            status: status === "live" || status === "snapshot" || status === "stale" ? status : "missing",
-            receivedAt: num(t.received_at),
-            source: str(t.source_label),
-          }
+        ? { metrics, status: dataStatus(str(t.status), metrics), receivedAt: num(t.received_at), source: str(t.source_label) }
         : null,
     };
   });

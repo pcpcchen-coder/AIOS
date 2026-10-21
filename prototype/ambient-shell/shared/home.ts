@@ -3,7 +3,7 @@
 export interface Reading {
   name: string;
   /** null 表示中控沒有讀值，要說「沒有讀值」。 */
-  value: number | string | null;
+  value: number | string | boolean | null;
   unit: string;
 }
 
@@ -13,7 +13,7 @@ export interface DeviceReport {
   online: "在線" | "離線" | "狀態未知";
   /** 讀值的性質；沒有感測功能的設備為 null。 */
   data: "即時" | "快照" | "過期資料" | "沒有讀值" | null;
-  /** 中控收到讀值的時間（HH:mm），沒有時為 null。 */
+  /** 中控收到讀值的時間（HH:mm；不是今天時為 M/D HH:mm），沒有時為 null。 */
   time: string | null;
   minutes_ago: number | null;
   source: string | null;
@@ -28,7 +28,9 @@ export type HomeStatusResult =
   | { ok: true; status: "no_such_reading"; scope: string; metric: string };
 
 function readingText(r: Reading): string {
-  return r.value === null ? `${r.name}沒有讀值` : `${r.name} ${r.value}${r.unit ? ` ${r.unit}` : ""}`;
+  if (r.value === null) return `${r.name}沒有讀值`;
+  if (typeof r.value === "boolean") return `${r.name}：${r.value ? "是" : "否"}`;
+  return `${r.name} ${r.value}${r.unit ? ` ${r.unit}` : ""}`;
 }
 
 /** 字幕用的一行錨點：房間或設備、讀值與資料時間；快照與過期資料照實標示。 */

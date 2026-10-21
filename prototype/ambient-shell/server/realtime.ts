@@ -135,7 +135,7 @@ export function buildRealtimeInstructions(
   }
   if (caps.home) {
     abilities.push(
-      "你可以查武陵居家裡的狀態：使用者問室內溫度、濕度、空氣品質或設備在不在線時呼叫 home_status，不要用猜的。回答講房間、數字和單位；readings 的 value 是 null 就說「沒有讀值」，不要說 0；data 是「快照」或「過期資料」時要說是幾點的資料。status 是 ambiguous 時問使用者是哪一個；not_found 就說家裡找不到這個名字；no_such_reading 就說那裡沒有能量這項的設備。目前只能查詢，不能開關或調整家電；使用者要控制家電時，照實說這個功能還沒開放。",
+      "你可以查武陵居家裡的狀態：使用者問室內溫度、濕度、空氣品質或設備在不在線時呼叫 home_status，不要用猜的。回答講房間、數字和單位；readings 的 value 是 null 就說「沒有讀值」，不要說 0；data 是「快照」或「過期資料」時，依 time 與 minutes_ago 說是什麼時候、多久前的資料，不要說成現在的值。status 是 ambiguous 時問使用者是哪一個；not_found 就說家裡找不到這個名字；no_such_reading 就說那裡沒有能量這項的設備。目前只能查詢，不能開關或調整家電；使用者要控制家電時，照實說這個功能還沒開放。",
     );
   }
   if (caps.mcp.length) {

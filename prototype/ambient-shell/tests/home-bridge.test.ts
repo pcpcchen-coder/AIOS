@@ -2,14 +2,14 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseHttpUrl } from "../server/config.ts";
-import { HomeBridge, HomeBridgeError, metricKey, parseHome, resolveTarget } from "../server/home-bridge.ts";
+import { HomeBridge, HomeBridgeError, metricKey, parseHome, report, resolveTarget } from "../server/home-bridge.ts";
 import { buildRealtimeInstructions, buildRealtimeTools } from "../server/realtime.ts";
 import { homeStatusLine, type HomeStatusResult } from "../shared/home.ts";
 
 // 假中控（fixture）：欄位名稱照武陵居中控 GET /api/v1/home 的實際回應，設備與讀值是虛構的，不代表真實家裡。
 
 const TOKEN = "hub-token-fixture";
-const NOW = 1_792_560_000; // 2026-10-20 05:20 UTC = 13:20 Asia/Taipei
+const NOW = 1_792_560_000; // 2026-10-21 05:20 UTC = 13:20 Asia/Taipei
 
 const metric = (key: string, label: string, unit: string, precision: number, value: number | string | null) => ({
   key,
@@ -221,6 +221,71 @@ describe("resolveTarget (deterministic name matching until the hub has /resolve)
   it("reports ambiguity and misses instead of picking one", () => {
     expect(scope("燈")).toBe("ambiguous");
     expect(scope("車庫")).toBe("not_found");
+  });
+});
+
+describe("review regressions", () => {
+  const dev = (id: string, name: string, room: string, telemetry: unknown = null) => ({
+    id,
+    name,
+    placement: { room_id: room },
+    state: { available: true, fresh: true },
+    telemetry,
+  });
+  const tele = (metrics: unknown[], status = "live", received_at = NOW - 60) => ({ metrics, status, received_at, source_label: "fixture" });
+  const house = parseHome({
+    layout: {
+      rooms: [
+        { id: "m", name: "主臥" },
+        { id: "mb", name: "主臥浴室" },
+        { id: "m2", name: "主臥室" },
+        { id: "court", name: "中庭" },
+        { id: "inner", name: "內室" },
+      ],
+    },
+    devices: [
+      dev("dh-m", "除濕機", "m"),
+      dev("dh-mb", "除濕機", "mb"),
+      dev("ac-m2", "冷氣", "m2"),
+      dev("court-light", "中庭燈", "court"),
+      dev("court-sensor", "感測器", "court", tele([metric("temperature", "溫度", "°C", 1, 20)])),
+      dev("inner-sensor", "人體感測", "inner", tele([metric("motion", "人體感應", "", 0, true as unknown as number)], "estimated")),
+      dev("old", "舊溫度計", "inner", tele([metric("temperature", "溫度", "°C", 1, 18)], "stale", NOW - 3 * 86400)),
+    ],
+    server_time: NOW,
+  });
+  const ids = (target: string) => {
+    const r = resolveTarget(house, target);
+    return r.kind === "match" ? r.devices.map((d) => d.id) : r.kind;
+  };
+
+  it("prefers the longest room name in the target", () => {
+    expect(ids("主臥浴室除濕機")).toEqual(["dh-mb"]);
+    expect(ids("主臥浴室的除濕機")).toEqual(["dh-mb"]);
+    expect(ids("主臥除濕機")).toEqual(["dh-m"]);
+    expect(ids("主臥室冷氣")).toEqual(["ac-m2"]);
+  });
+
+  it("keeps leading 中／內 in names and matches the room first", () => {
+    expect(ids("中庭")).toEqual(["court-light", "court-sensor"]);
+    expect(ids("內室")).toEqual(["inner-sensor", "old"]);
+    expect(resolveTarget(house, "中庭溫度")).toMatchObject({ kind: "match", scope: "中庭", metric: "temperature" });
+  });
+
+  it("adds the date to readings that are not from today", () => {
+    const r = report(house, house.devices.find((d) => d.id === "old")!, null, "Asia/Taipei");
+    expect(r).toMatchObject({ data: "過期資料", time: "10/18 13:20", minutes_ago: 4320 });
+  });
+
+  it("keeps boolean readings and labels an unknown hub status with values as stale", () => {
+    const r = report(house, house.devices.find((d) => d.id === "inner-sensor")!, null, "Asia/Taipei");
+    expect(r).toMatchObject({ data: "過期資料", readings: [{ name: "人體感應", value: true }] });
+    expect(homeStatusLine({ ok: true, status: "ok", scope: "內室", truncated: false, devices: [r] })).toContain("人體感應：是");
+  });
+
+  it("does not fall back to every reading when the metric is unknown", async () => {
+    const hub = await fakeHub();
+    expect(await bridge(hub.url).status("客廳", "noise")).toEqual({ ok: true, status: "no_such_reading", scope: "客廳", metric: "noise" });
   });
 });
 
