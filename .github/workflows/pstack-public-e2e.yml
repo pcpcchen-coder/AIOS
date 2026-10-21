@@ -1,0 +1,119 @@
+name: AIOS public pstack observability E2E
+
+on:
+  pull_request:
+    paths:
+      - "scripts/pstack-public-export.mjs"
+      - "tests/pstack-public-export.test.mjs"
+      - ".github/workflows/pstack-public-e2e.yml"
+      - "AGENTS.md"
+  push:
+    branches: [main]
+    paths:
+      - "scripts/pstack-public-export.mjs"
+      - "tests/pstack-public-export.test.mjs"
+      - ".github/workflows/pstack-public-e2e.yml"
+      - "AGENTS.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test public export and local recorder
+        run: node --test tests/pstack-public-export.test.mjs tests/pstack-observer.test.mjs
+      - name: Verify pinned original pstack
+        run: node scripts/check-pstack.mjs
+
+  publish:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RUN_ID: ${{ format('aios-ci-investigation-{0}-{1}', github.run_id, github.run_attempt) }}
+      GH_TOKEN: ${{ github.token }}
+      PSTACK_OBSERVE_PUBLICATION_ACK: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Start documented CI investigation run
+        id: start
+        run: |
+          node tools/pstack-observe.mjs start --repo pcpcchen-coder/AIOS --run "$RUN_ID" \
+            --title "AIOS pstack observability E2E (scripted CI, not native Agent)" \
+            --playbook investigation-ci --steps "inspect,verify,report" \
+            --branch "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
+      - name: Inspect pstack and Recorder presence
+        id: inspect
+        run: |
+          node tools/pstack-observe.mjs step --run "$RUN_ID" --step inspect --status running
+          if test -f vendor/pstack/skills/poteto-mode/SKILL.md && \
+             test -f vendor/pstack/skills/poteto-mode/playbooks/investigation.md && \
+             test -f vendor/pstack.lock.json && test -f tools/pstack-observe.mjs; then
+            node tools/pstack-observe.mjs step --run "$RUN_ID" --step inspect --status passed \
+              --note "Observed pinned pstack sources, playbook and local Recorder" \
+              --evidence "https://github.com/$GITHUB_REPOSITORY/tree/$GITHUB_SHA/vendor/pstack"
+          else
+            node tools/pstack-observe.mjs step --run "$RUN_ID" --step inspect --status failed --note "pstack source or Recorder missing"
+            exit 1
+          fi
+      - name: Run pinned pstack integrity and Recorder tests
+        id: verify
+        run: |
+          node tools/pstack-observe.mjs step --run "$RUN_ID" --step verify --status running
+          if node scripts/check-pstack.mjs && node --test tests/pstack-observer.test.mjs tests/pstack-public-export.test.mjs; then
+            node tools/pstack-observe.mjs step --run "$RUN_ID" --step verify --status passed \
+              --note "Real CI checks passed: pstack hashes, links, observer and public export" \
+              --evidence "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            node tools/pstack-observe.mjs step --run "$RUN_ID" --step verify --status failed --note "CI integrity or test failure"
+            exit 1
+          fi
+      - name: Document CI investigation boundaries
+        id: report
+        run: |
+          node tools/pstack-observe.mjs step --run "$RUN_ID" --step report --status running
+          mkdir -p reports
+          printf '%s\n' \
+            '# AIOS pstack CI investigation' \
+            'Overview: pinned pstack skills with external run Recorder.' \
+            'How: CI calls start, step and finish, then publishes reviewed metadata.' \
+            'Where: vendor/pstack, tools/pstack-observe.mjs and telemetry/pstack branch.' \
+            'Evidence: see matching GitHub Actions run and test logs.' \
+            'Limit: scripted CI, NOT a native Cursor or Codex Agent run; no AIOS hardware gate verified.' \
+            > reports/investigation.txt
+          test -s reports/investigation.txt
+          node tools/pstack-observe.mjs step --run "$RUN_ID" --step report --status passed \
+            --note "Generated source-grounded investigation report with explicit CI limitations" \
+            --evidence "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: Finish truthful Run receipt
+        if: always() && steps.start.outcome == 'success'
+        run: |
+          if [ "${{ steps.inspect.outcome }}" = success ] && [ "${{ steps.verify.outcome }}" = success ] && [ "${{ steps.report.outcome }}" = success ]; then
+            node tools/pstack-observe.mjs finish --run "$RUN_ID" --status passed
+          else
+            node tools/pstack-observe.mjs finish --run "$RUN_ID" --status failed
+          fi
+      - name: Publish APPROVED public metadata to AIOS telemetry branch
+        if: always() && steps.start.outcome == 'success'
+        run: node scripts/pstack-public-export.mjs --run "$RUN_ID" --public-ok
+      - name: Upload real Recorder receipt as CI evidence
+        if: always() && steps.start.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pstack-ci-investigation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .pstack/observability/runs/*.json
+            reports/investigation.txt
+          retention-days: 14
