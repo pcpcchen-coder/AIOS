@@ -44,6 +44,7 @@ jobs:
       RUN_ID: ${{ format('aios-ci-investigation-{0}-{1}', github.run_id, github.run_attempt) }}
       GH_TOKEN: ${{ github.token }}
       PSTACK_OBSERVE_PUBLICATION_ACK: "1"
+      PSTACK_PUBLISH_TRANSPORT: api
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

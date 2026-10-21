@@ -1,6 +1,6 @@
-import {test} from 'node:test';
+import {after,test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,writeFileSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -33,13 +33,18 @@ test('cannot forge repo, traversal IDs, or invalid stage success',()=>{
 
 const exporter=resolve(fileURLToPath(new URL('../scripts/pstack-public-export.mjs',import.meta.url)));
 const git=(cwd,...a)=>{const p=spawnSync('git',['-c','user.name=t','-c','user.email=t@example.com',...a],{cwd,encoding:'utf8'});assert.equal(p.status,0,p.stderr);return p.stdout.trim();};
-function telemetryRemote(){
- const bare=mkdtempSync(join(tmpdir(),'pstack-bare-'));git(bare,'init','--quiet','--bare');
- const seed=mkdtempSync(join(tmpdir(),'pstack-seed-'));git(seed,'init','--quiet');git(seed,'checkout','--quiet','-b','telemetry/pstack');
+const temp=[];
+after(()=>{for(const d of temp)rmSync(d,{recursive:true,force:true});});
+const tempDir=prefix=>{const d=mkdtempSync(join(tmpdir(),prefix));temp.push(d);return d;};
+function telemetryRemote({owner='pcpcchen-coder',relative=false}={}){
+ const home=tempDir('pstack-remote-');
+ const bare=join(home,owner,'AIOS.git');mkdirSync(bare,{recursive:true});git(bare,'init','--quiet','--bare');
+ const seed=tempDir('pstack-seed-');git(seed,'init','--quiet');git(seed,'checkout','--quiet','-b','telemetry/pstack');
  mkdirSync(join(seed,'observability','public'),{recursive:true});
  writeFileSync(join(seed,'observability','public','index.json'),JSON.stringify({schema_version:1,repo:'pcpcchen-coder/AIOS',updated_at:t,runs:[{run_id:'older',updated_at:'2026-10-20T00:00:00.000Z'}]}));
  git(seed,'add','.');git(seed,'commit','--quiet','-m','seed');git(seed,'push','--quiet',bare,'telemetry/pstack');
- const work=mkdtempSync(join(tmpdir(),'pstack-work-'));git(work,'init','--quiet');git(work,'remote','add','origin',bare);
+ const work=join(home,'work');mkdirSync(work);git(work,'init','--quiet');
+ git(work,'remote','add','origin',relative?join('..',owner,'AIOS.git'):bare);
  mkdirSync(join(work,'.pstack','observability','runs'),{recursive:true});
  const run={...example(),run_id:'agent-run-1',playbook:'feature'};
  writeFileSync(join(work,'.pstack','observability','runs','agent-run-1.json'),JSON.stringify(run));
@@ -57,6 +62,20 @@ test('publishes with git push to telemetry/pstack when no API token is available
  assert.deepEqual(index.runs.map(x=>x.run_id),['agent-run-1','older']);
  assert.equal(exportRun(work,{PSTACK_PUBLISH_TRANSPORT:'git'}).status,0,'republishing the same run is idempotent');
  assert.deepEqual(JSON.parse(git(bare,'show','telemetry/pstack:observability/public/index.json')).runs.map(x=>x.run_id),['agent-run-1','older']);
+});
+test('resolves a relative origin against the workspace',()=>{
+ const {bare,work}=telemetryRemote({relative:true});
+ const out=exportRun(work,{PSTACK_PUBLISH_TRANSPORT:'git'});assert.equal(out.status,0,out.stderr);
+ assert.equal(JSON.parse(git(bare,'show','telemetry/pstack:observability/public/runs/agent-run-1.json')).run_id,'agent-run-1');
+});
+test('refuses to push anywhere but AIOS',()=>{
+ const fork=telemetryRemote({owner:'someone-else'});
+ assert.match(exportRun(fork.work,{PSTACK_PUBLISH_TRANSPORT:'git'}).stderr,/origin is not pcpcchen-coder\/AIOS/);
+ assert.throws(()=>git(fork.bare,'show','telemetry/pstack:observability/public/runs/agent-run-1.json'));
+ const {work}=telemetryRemote();
+ const nested=join(work,'nested');mkdirSync(join(nested,'.pstack','observability','runs'),{recursive:true});
+ writeFileSync(join(nested,'.pstack','observability','runs','agent-run-1.json'),JSON.stringify({...example(),run_id:'agent-run-1'}));
+ assert.match(exportRun(nested,{PSTACK_PUBLISH_TRANSPORT:'git'}).stderr,/not the root of a Git checkout/);
 });
 test('rejects an unknown transport and still requires the publication flag',()=>{
  const {work}=telemetryRemote();

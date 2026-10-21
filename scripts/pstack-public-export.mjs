@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // AIOS public metadata publisher. No cross-repo token or raw transcript upload.
-import {existsSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {existsSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,rmSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
@@ -75,30 +75,48 @@ export async function publishPublicRun(original){
    catch(e){if(i===2||!/GitHub write (409|422)/.test(e.message))throw e;}
  }
 }
-function git(cwd,...a){
- const p=spawnSync('git',a,{cwd,encoding:'utf8',timeout:120000});
- if(p.status!==0)throw Error('git '+a[0]+' failed: '+String(p.stderr||'').trim().slice(0,300));
+const GIT_ENV={...process.env,GIT_TERMINAL_PROMPT:'0',GIT_SSH_COMMAND:process.env.GIT_SSH_COMMAND||'ssh -o BatchMode=yes'};
+// Finishes well inside the live wrapper's 180 s limit so the temp clone is always removed.
+const GIT_BUDGET_MS=150000;
+function gitRun(deadline,cwd,a){
+ const left=deadline-Date.now();
+ if(left<=0)throw Error('git publication timed out');
+ return spawnSync('git',a,{cwd,env:GIT_ENV,encoding:'utf8',timeout:Math.min(60000,left)});
+}
+function git(deadline,cwd,...a){
+ const p=gitRun(deadline,cwd,a);
+ if(p.status!==0)throw Error('git '+a[0]+' failed: '+String(p.stderr||p.error?.message||'').trim().slice(0,300));
  return p.stdout.trim();
+}
+const AIOS_REMOTE=/(^|[/:])pcpcchen-coder\/AIOS(\.git)?\/?$/i;
+/** The approval covers AIOS only: refuse a workspace that is not its own checkout or whose origin is not AIOS. */
+function aiosRemote(deadline,workspace){
+ if(realpathSync(git(deadline,workspace,'rev-parse','--show-toplevel'))!==realpathSync(workspace))throw Error('Workspace is not the root of a Git checkout');
+ const remote=git(deadline,workspace,'remote','get-url','origin');
+ if(!AIOS_REMOTE.test(remote))throw Error('Workspace origin is not '+TARGET+'; refusing to publish elsewhere');
+ return /^[a-z][a-z0-9+.-]*:\/\//i.test(remote)||/^[^/]+@[^/:]+:/.test(remote)?remote:resolve(workspace,remote);
 }
 // Claude Code cloud sessions reach GitHub through a proxy that refuses REST content writes but accepts git push.
 export function publishViaGit(original,workspace){
  const r=publicProjection(original);
- const remote=git(workspace,'remote','get-url','origin');
+ const deadline=Date.now()+GIT_BUDGET_MS;
+ const remote=aiosRemote(deadline,workspace);
  const dir=mkdtempSync(join(tmpdir(),'pstack-public-'));
  try{
-   git(dir,'clone','--quiet','--depth','1','--branch',REF,remote,'.');
-   for(let i=0;i<3;i++){
+   git(deadline,dir,'clone','--quiet','--depth','1','--branch',REF,remote,'.');
+   for(let i=0;;i++){
      mkdirSync(join(dir,RUNS),{recursive:true});
      writeFileSync(join(dir,RUNS+r.run_id+'.json'),JSON.stringify(r,null,2)+'\n');
      const ip=join(dir,INDEX);
      writeFileSync(ip,JSON.stringify(nextIndex(existsSync(ip)?JSON.parse(readFileSync(ip,'utf8')):null,r),null,2)+'\n');
-     git(dir,'add','observability/public');
-     git(dir,'-c','user.name=AIOS pstack observer','-c','user.email=pstack-observer@users.noreply.github.com',
+     git(deadline,dir,'add','observability/public');
+     git(deadline,dir,'-c','user.name=AIOS pstack observer','-c','user.email=pstack-observer@users.noreply.github.com',
        'commit','--quiet','-m','data(pstack): publish AIOS '+r.run_id);
-     const push=spawnSync('git',['push','--quiet','origin','HEAD:'+REF],{cwd:dir,encoding:'utf8',timeout:120000});
+     const push=gitRun(deadline,dir,['push','--quiet','origin','HEAD:'+REF]);
      if(push.status===0)return r;
-     if(i===2)throw Error('git push failed: '+String(push.stderr||'').trim().slice(0,300));
-     git(dir,'fetch','--quiet','--depth','1','origin',REF);git(dir,'reset','--quiet','--hard','FETCH_HEAD');
+     if(i===5)throw Error('git push failed: '+String(push.stderr||push.error?.message||'').trim().slice(0,300));
+     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,250+Math.random()*1000*(i+1));
+     git(deadline,dir,'fetch','--quiet','--depth','1','origin',REF);git(deadline,dir,'reset','--quiet','--hard','FETCH_HEAD');
    }
  }finally{rmSync(dir,{recursive:true,force:true});}
 }
