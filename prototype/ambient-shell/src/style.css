@@ -1086,3 +1086,14 @@ body[data-facing="yes"] #brain {
 body[data-camera-preview="open"] .subtitle {
   max-width: min(720px, 40vw);
 }
+
+/* 確認圖示（src/icons.ts）：只用在要說「確認執行」的地方。 */
+.confirm-head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.confirm-icon {
+  flex: none;
+  filter: drop-shadow(0 0 14px rgba(255, 181, 71, 0.45));
+}

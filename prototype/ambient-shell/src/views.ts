@@ -1,4 +1,5 @@
 import DOMPurify from "dompurify";
+import { confirmIcon } from "./icons.ts";
 import { marked } from "marked";
 import { computeProgress, isActive, sortForProgress, summarize } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type SettingsView, type Task, type TaskStep } from "../shared/types.ts";
@@ -447,7 +448,12 @@ export function renderConfirm(detail: ConfirmDetail): HTMLElement {
   const remaining = Math.max(0, Math.round((detail.expiresAt - Date.now()) / 1000));
   return surfaceShell(
     "confirm",
-    h("header", { class: "surface-header" }, h("p", { class: "eyebrow confirm-eyebrow" }, "請確認"), h("h2", {}, `${detail.server} · ${detail.name}`)),
+    h(
+      "header",
+      { class: "surface-header confirm-head" },
+      confirmIcon(88),
+      h("div", {}, h("p", { class: "eyebrow confirm-eyebrow" }, "請確認"), h("h2", {}, `${detail.server} · ${detail.name}`)),
+    ),
     h("pre", { class: "confirm-args" }, args.slice(0, 1200)),
     h(
       "p",

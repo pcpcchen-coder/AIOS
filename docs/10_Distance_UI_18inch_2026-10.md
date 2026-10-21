@@ -84,6 +84,7 @@ v0.1 的畫面仍是「可閱讀的卡片」，遠處無法一眼讀完，需等
 4. 語音提示「說 …」只在需要你回答時顯示（clarifying、confirming）；其他狀態閒置 8 秒才淡入。
 5. 澄清的預設值用倒數環表示，不寫「10 秒後用 2」。
 6. **安全例外**：確認畫面必須看得到動作、對象、後果三個錨點，不能只靠語音（06 §2.2 `action_confirmation`）。固定語句「確認寄出」；倒數條到 0 自動取消。
+   - **確認圖示**：琥珀色對話框＋打勾，代表「用說的確認」。只用在要說「確認執行」的地方（確認卡、狀態表），全系統統一；設計稿 `ConfirmIcon.dc.html`，程式 `prototype/ambient-shell/src/icons.ts`。
 7. 視線焦點：放大 1.04 + 8 px 亮框 + 外光暈 +「已指向」；注視只指向，不觸發動作（06 §4.4）。
 
 ### 5.1 語音稿 × 畫面錨點（示意）
@@ -108,6 +109,7 @@ v0.1 的畫面仍是「可閱讀的卡片」，遠處無法一眼讀完，需等
 | `StateCoding.dc.html` | 編碼表 | 8 狀態 × 4 通道 |
 | `Glance.dc.html` | 分工 | 錨點／跟讀／細節三層與 05 的語音時間軸 |
 | `Brain.dc.html` | 元件 | 電子腦：size / tone / mode / progress / region / dim |
+| `ConfirmIcon.dc.html` | 元件 | 確認圖示：size / variant（amber、ink）/ glow |
 | `S01`–`S03` | ambient → listening → working | 主流程 |
 | `S04`–`S06` | clarifying、presenting、比較＋視線焦點 | 需要你時 |
 | `S07`–`S09` | confirming、recoverable_error、Spoken Brief | 關鍵時刻 |
