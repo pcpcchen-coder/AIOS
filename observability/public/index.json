@@ -1,8 +1,38 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-21T04:46:49.406Z",
+  "updated_at": "2026-10-21T07:18:42.300Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261021065027-b6a473",
+      "title": "H0 HomeBridge home_status (corrected record; supersedes run-20261021062442-a6b76b)",
+      "playbook": "feature",
+      "status": "passed",
+      "updated_at": "2026-10-21T06:50:28.613Z",
+      "started_at": "2026-10-21T06:50:27.954Z",
+      "ended_at": "2026-10-21T06:50:28.613Z",
+      "branch": "claude/blissful-rubin-rbtgtk",
+      "commit_sha": "",
+      "passed_steps": 4,
+      "total_steps": 6,
+      "provenance": "Agent self-reported"
+    },
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261021062442-a6b76b",
+      "title": "H0 HomeBridge home_status (docs/12)",
+      "playbook": "feature",
+      "status": "passed",
+      "updated_at": "2026-10-21T06:37:03.679Z",
+      "started_at": "2026-10-21T06:24:42.337Z",
+      "ended_at": "2026-10-21T06:37:03.679Z",
+      "branch": "claude/blissful-rubin-rbtgtk",
+      "commit_sha": "",
+      "passed_steps": 6,
+      "total_steps": 6,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "aios-ci-investigation-39545880704-1",
