@@ -43,11 +43,12 @@ export function speechSupported(): boolean {
 }
 
 /** 按下說話與連續語音模式分開同意：後者在模式開啟期間會持續把音訊送到雲端辨識。 */
-export type ConsentKind = "push" | "continuous";
+export type ConsentKind = "push" | "continuous" | "realtime";
 
 const CONSENT_KEY: Record<ConsentKind, string> = {
   push: "nous.voice.cloud-consent.v1",
   continuous: "nous.voice.continuous-consent.v1",
+  realtime: "nous.voice.realtime-consent.v1",
 };
 
 export function hasVoiceConsent(kind: ConsentKind = "push"): boolean {

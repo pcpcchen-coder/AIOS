@@ -33,6 +33,11 @@ export const api = {
   chatgptCancel: () => call<SettingsView>("POST", "/api/auth/chatgpt/cancel", {}),
   chatgptLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/chatgpt/logout", {}),
   chatgptWelcomeAck: () => call<SettingsView>("POST", "/api/auth/chatgpt/welcome-ack", {}),
+  /** 即時語音：把 WebRTC SDP offer 交給本機核心，由它用 API key 向 OpenAI 建立連線。 */
+  realtimeCall: (sdp: string) => call<{ sdp: string; model: string }>("POST", "/api/realtime/call", { sdp }),
+  /** 即時語音的上網查詢：由本機核心用 OPENAI_API_KEY 呼叫 web_search。 */
+  webSearch: (query: string) =>
+    call<{ ok: true; answer: string; sources: { title: string; url: string }[]; model: string }>("POST", "/api/realtime/web-search", { query }),
 };
 
 export interface ChatTurn {

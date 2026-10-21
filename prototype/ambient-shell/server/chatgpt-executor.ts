@@ -1,4 +1,4 @@
-import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, SYSTEM_PROMPT } from "./prompts.ts";
+import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, systemPrompt, WEB_SEARCH_UNAVAILABLE_GAP } from "./prompts.ts";
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 import { RESOURCE, type ChatGPTAuth } from "./chatgpt-auth.ts";
 import type { ChatCapable, ChatMessage } from "./chat.ts";
@@ -9,8 +9,13 @@ import type { ChatCapable, ChatMessage } from "./chat.ts";
 export interface ChatGPTExecutorOptions {
   /** 指定模型 slug（NOUS_CHATGPT_MODEL）；未指定時取帳號模型清單的第一個可顯示模型。 */
   model: string | null;
+  /** 步驟執行時提供 Responses API 的 web_search 工具（NOUS_TASK_WEB_SEARCH）。 */
+  webSearch?: boolean;
   fetch?: typeof fetch;
 }
+
+/** 帶工具的請求被拒（例如方案額度不支援 web_search）：改用不帶工具的請求重試。 */
+class ToolsRejected extends Error {}
 
 interface StreamResult {
   text: string;
@@ -48,11 +53,13 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
   async run(input: { title: string }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
     const model = await this.resolveModel(await this.auth.getAccessToken());
     const served = new Set<string>();
+    let webSearch = !!this.options.webSearch;
+    const extraGaps: string[] = [];
 
     const planned = await this.stream(
       {
         model,
-        instructions: SYSTEM_PROMPT,
+        instructions: systemPrompt({ webSearch }),
         input: [{ role: "user", content: planPrompt(input.title) }],
         format: { type: "json_schema", name: "nous_plan", schema: PLAN_SCHEMA, strict: true },
       },
@@ -72,19 +79,30 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
       reporter.stepStarted(i);
       let chars = 0;
       let lastReport = 0;
-      const request = {
-        model,
-        instructions: SYSTEM_PROMPT,
-        input: [{ role: "user" as const, content: stepPrompt(input.title, plan, outputs, i) }],
-      };
-      const result = await this.stream(request, signal, (delta) => {
+      const onDelta = (delta: string) => {
         chars += delta.length;
         const now = Date.now();
         if (now - lastReport >= 700) {
           lastReport = now;
           reporter.stepProgress(i, chars);
         }
+      };
+      const request = (search: boolean) => ({
+        model,
+        instructions: systemPrompt({ webSearch: search }),
+        input: [{ role: "user" as const, content: stepPrompt(input.title, plan, outputs, i) }],
+        ...(search ? { tools: [{ type: "web_search" }] } : {}),
       });
+      let result: StreamResult;
+      try {
+        result = await this.stream(request(webSearch), signal, onDelta);
+      } catch (err) {
+        if (!(err instanceof ToolsRejected)) throw err;
+        webSearch = false;
+        extraGaps.push(WEB_SEARCH_UNAVAILABLE_GAP);
+        chars = 0;
+        result = await this.stream(request(false), signal, onDelta);
+      }
       if (result.model) served.add(result.model);
       if (result.incomplete) truncated = true;
       reporter.stepProgress(i, chars);
@@ -92,7 +110,7 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
       reporter.stepDone(i);
     }
 
-    const gaps = [...plan.capability_gaps];
+    const gaps = [...plan.capability_gaps, ...extraGaps];
     if (truncated) gaps.push("部分步驟的輸出未完整結束（response.incomplete）。");
     return {
       content: outputs[outputs.length - 1],
@@ -110,14 +128,27 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
     signal: AbortSignal,
   ): Promise<{ model: string | null }> {
     const model = await this.resolveModel(await this.auth.getAccessToken());
-    const result = await this.stream({ model, instructions: input.system, input: input.messages }, signal, onDelta);
+    const request = { model, instructions: input.system, input: input.messages };
+    let result: StreamResult;
+    try {
+      result = await this.stream(this.options.webSearch ? { ...request, tools: [{ type: "web_search" }] } : request, signal, onDelta);
+    } catch (err) {
+      if (!(err instanceof ToolsRejected)) throw err;
+      result = await this.stream(request, signal, onDelta);
+    }
     if (result.incomplete) throw new ExecutionError("ChatGPT 回覆尚未完成（response.incomplete），請再試一次。");
     return { model: result.model ?? model };
   }
 
   /** 送出一個串流 Responses 請求，直到 response.completed（或錯誤）。 */
   private async stream(
-    request: { model: string; instructions: string; input: ChatMessage[]; format?: Record<string, unknown> },
+    request: {
+      model: string;
+      instructions: string;
+      input: ChatMessage[];
+      format?: Record<string, unknown>;
+      tools?: Record<string, unknown>[];
+    },
     signal: AbortSignal,
     onDelta?: (delta: string) => void,
   ): Promise<StreamResult> {
@@ -130,6 +161,7 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
       stream: true,
     };
     if (request.format) body.text = { format: request.format };
+    if (request.tools) body.tools = request.tools;
     let res: Response;
     try {
       res = await this.fetch(`${RESOURCE}/responses`, {
@@ -141,6 +173,9 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
     } catch (err) {
       if (signal.aborted) throw err;
       throw new ExecutionError("無法連線到 OpenAI API（網路中斷或被阻擋）。", { cause: err });
+    }
+    if (!res.ok && request.tools && (res.status === 400 || res.status === 403)) {
+      throw new ToolsRejected((await this.httpError(res, "推論")).message);
     }
     if (!res.ok || !res.body) throw await this.httpError(res, "推論");
 
@@ -163,6 +198,9 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
       } else if (type === "error") {
         // 實際串流把錯誤放在 event.error 底下；舊格式在頂層。
         const err = (event.error as { code?: unknown; message?: unknown } | undefined) ?? event;
+        if (request.tools && err.code === "subscription_sharing_unsupported_capability" && !text) {
+          throw new ToolsRejected(String(err.message ?? err.code));
+        }
         throw this.codeError(
           typeof err.code === "string" ? err.code : null,
           typeof err.message === "string" ? err.message : "串流錯誤",

@@ -211,3 +211,36 @@ it.each(DOMAINS)("Claude planner passes %s through Reporter", async (domain) => 
   await ex.run({ title: "領域契約" }, reporter, new AbortController().signal);
   expect(calls[0]).toBe(`plan:主題步驟/${domain}|彙整成果/language:fixture-model`);
 });
+
+describe("ClaudeExecutor web search", () => {
+  const reporter: Reporter = { planReady: () => {}, stepStarted: () => {}, stepProgress: () => {}, stepDone: () => {} };
+  const sseResponse = (chunks: string[]) => new Response(sse(chunks), { headers: { "content-type": "text/event-stream" } });
+
+  it("步驟請求帶 web search 工具，規劃請求不帶", async () => {
+    const { client, requests } = fakeClient((req) => {
+      if (req.body?.stream) return sseResponse(["內容"]);
+      return json(message(JSON.stringify(PLAN)));
+    });
+    const ex = new ClaudeExecutor({ apiKey: "k", model: "claude-opus-5-5", modelFamily: "opus", fallbacks: false, webSearchTool: "web_search_20250305", client });
+    const result = await ex.run({ title: "比較 PCS 供應商" }, reporter, new AbortController().signal);
+    const msgs = requests.filter((r) => r.path.endsWith("/messages"));
+    expect(msgs[0].body).not.toHaveProperty("tools");
+    expect(msgs[1].body!.tools).toEqual([{ type: "web_search_20250305", name: "web_search", max_uses: 5 }]);
+    expect(String(msgs[1].body!.system)).toContain("web_search");
+    expect(result.capability_gaps).toEqual(["無法實際寄出"]);
+  });
+
+  it("工具被拒（400）時改用不帶工具的請求，並寫進能力缺口", async () => {
+    const { client, requests } = fakeClient((req) => {
+      if (req.body?.stream && req.body.tools) return json({ type: "error", error: { type: "invalid_request_error", message: "tool not supported" } }, 400);
+      if (req.body?.stream) return sseResponse(["內容"]);
+      return json(message(JSON.stringify(PLAN)));
+    });
+    const ex = new ClaudeExecutor({ apiKey: "k", model: "claude-opus-5-5", modelFamily: "opus", fallbacks: false, webSearchTool: "web_search_20250305", client });
+    const result = await ex.run({ title: "x" }, reporter, new AbortController().signal);
+    expect(result.status).toBe("complete");
+    expect(result.capability_gaps.join()).toContain("不支援上網搜尋");
+    const steps = requests.filter((r) => r.path.endsWith("/messages") && r.body?.stream);
+    expect(steps.map((r) => !!r.body!.tools)).toEqual([true, false, false, false]);
+  });
+});

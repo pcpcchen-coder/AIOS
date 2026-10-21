@@ -355,6 +355,13 @@ export function renderSettings(settings: SettingsView | null, message: string | 
     g.last_error && h("p", { class: "error-text" }, g.last_error),
     welcome,
     list,
+    settings.realtime &&
+      h(
+        "p",
+        { class: "small" },
+        h("strong", {}, "即時語音："),
+        `${settings.realtime.available ? "可用" : "不可用"} · ${settings.realtime.detail}`,
+      ),
     account.length > 0 && h("div", { class: "account" }, ...account),
     h("p", { class: "muted small" }, "新交辦的任務會用目前選擇的引擎；已在執行的任務不受影響。"),
     footer(actions),
@@ -363,4 +370,45 @@ export function renderSettings(settings: SettingsView | null, message: string | 
 
 export function renderNotice(message: string, actions: ViewActions): HTMLElement {
   return surfaceShell("notice", h("p", { class: "notice-text" }, message), footer(actions));
+}
+
+export interface ConfirmDetail {
+  server: string;
+  name: string;
+  arguments: string;
+  expiresAt: number;
+}
+
+/** 外部動作確認卡：遠處也看得到動作、對象與參數；用說的確認，不需要按任何東西。 */
+export function renderConfirm(detail: ConfirmDetail): HTMLElement {
+  let args = detail.arguments;
+  try {
+    args = JSON.stringify(JSON.parse(detail.arguments), null, 2);
+  } catch {
+    // 保留原文
+  }
+  const remaining = Math.max(0, Math.round((detail.expiresAt - Date.now()) / 1000));
+  return surfaceShell(
+    "confirm",
+    h("header", { class: "surface-header" }, h("p", { class: "eyebrow confirm-eyebrow" }, "請確認"), h("h2", {}, `${detail.server} · ${detail.name}`)),
+    h("pre", { class: "confirm-args" }, args.slice(0, 1200)),
+    h(
+      "p",
+      { class: "confirm-say" },
+      "說「",
+      h("strong", {}, "確認執行"),
+      "」執行，說「",
+      h("strong", {}, "取消"),
+      "」放棄",
+    ),
+    h("p", { class: "muted small" }, "只說「好」不算。", h("span", { class: "confirm-countdown", "data-expires": String(detail.expiresAt) }, `${remaining} 秒`), " 後沒有回應會自動取消。"),
+  );
+}
+
+/** 每秒更新確認卡的倒數。 */
+export function refreshCountdowns(root: ParentNode): void {
+  root.querySelectorAll<HTMLElement>(".confirm-countdown").forEach((el) => {
+    const expires = Number(el.dataset.expires);
+    if (Number.isFinite(expires)) el.textContent = `${Math.max(0, Math.round((expires - Date.now()) / 1000))} 秒`;
+  });
 }

@@ -2,6 +2,8 @@
 
 這份指南帶你在自己的電腦上跑起 Nous 電子腦原型。全程約 10 分鐘。
 
+> **macOS 也可以直接用 App**：下載 Releases 裡的 `Nous.app`，不用裝 Node.js、不用開終端機，選單列有 Nous 圖示可以設定。見 [desktop/README.md](./desktop/README.md)。
+
 ## 0. 需要的東西
 
 | 項目 | 版本／說明 |
@@ -83,6 +85,24 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 `.env` 已被 git 排除，不會被上傳。
 
+### 即時語音模式（選填，像 ChatGPT 語音模式）
+
+想要「語音直接對語音」、可以隨時插話的對話，在 `.env` 填入 OpenAI API key（到 <https://platform.openai.com/api-keys> 申請，依用量計費，語音比文字貴）：
+
+```
+OPENAI_API_KEY=sk-...
+```
+
+存檔後重新 `npm start`，終端機會顯示「即時語音：可用」。之後按「開始語音對話」就會用 OpenAI Realtime（`gpt-realtime`）：
+
+- 語音直接對語音，不經過瀏覽器的語音辨識，對話是連續的；你一開口，它就停下來聽。
+- 要它做較長的工作時，它會交辦成背景任務。**任務仍用上面選的引擎執行**（例如 ChatGPT 方案），不會用 API key 跑任務。
+- 任務完成時它會用語音告訴你；問「進度如何」它會查真實狀態再回答。
+- 說「再見」或「結束對話」、點右上角指示、按 Esc，或 2 分鐘沒說話就會結束，避免忘記關而持續計費。
+- API key 只留在本機核心，不會送到瀏覽器。
+
+ChatGPT 方案登入不能用即時語音（實測 OpenAI 會回 server_error），所以這個模式一定要 API key。沒填 key 時，「開始語音對話」沿用原本的語音模式（瀏覽器語音辨識＋ChatGPT 文字回覆＋電腦語音）。
+
 ## 5. 啟動
 
 ```bash
@@ -115,6 +135,7 @@ Nous 原型已啟動：http://localhost:8787
 | 按「結束對話」、輸入「收起」，或非播報時按 Esc | 停止收音、生成及播報，既有背景任務繼續執行 |
 | 麥克風按鈕 | 按下說話（第一次會先詢問是否同意使用瀏覽器的雲端語音辨識） |
 | 說或打「開啟語音模式」／按聲波按鈕 | 語音對話模式：像 ChatGPT 語音模式一樣直接聊天，它說話時可以插話（說「停」或直接講）；要它做較長的工作時會自動交辦成任務。建議戴耳機。說「關閉語音模式」結束 |
+| 有設定 `OPENAI_API_KEY` 時按「開始語音對話」 | 即時語音模式（OpenAI Realtime）：語音直接對語音、隨時插話；工作交辦給目前的引擎。右上角顯示「即時語音 · 聆聽中／回覆中」，點它或說「再見」結束 |
 
 ## 7. 常見問題
 
@@ -133,6 +154,9 @@ Nous 原型已啟動：http://localhost:8787
 | ChatGPT 任務失敗「已達用量上限」 | 按「管理用量」到 ChatGPT 設定查看方案或 Nous 的上限 |
 | 公司網路要走 proxy，任務顯示「無法連線到 OpenAI API」 | 啟動時加上 `NODE_USE_ENV_PROXY=1`（例如 `NODE_USE_ENV_PROXY=1 npm start`），讓 Node 使用 `HTTPS_PROXY` 設定 |
 | 麥克風權限被拒 | 點網址列左側的鎖頭圖示，把麥克風改為「允許」後重新整理 |
+| 即時語音顯示「OPENAI_API_KEY 無效或未授權（401）」 | 檢查 `.env` 的 `OPENAI_API_KEY` 是否完整、沒有多餘空白，改完重新 `npm start` |
+| 即時語音顯示「額度不足或超過速率限制（429）」 | 到 <https://platform.openai.com/settings/organization/billing> 確認 API 帳戶有餘額 |
+| 設定裡「即時語音：不可用」 | `.env` 沒有 `OPENAI_API_KEY`，或填了之後沒有重新 `npm start` |
 
 ## 8. 資料存放位置
 

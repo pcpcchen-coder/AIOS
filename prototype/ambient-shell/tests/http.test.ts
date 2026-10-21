@@ -10,6 +10,8 @@ import { ChatGPTExecutor } from "../server/chatgpt-executor.ts";
 import { ProviderManager } from "../server/providers.ts";
 import { allowedHosts, checkRequest } from "../server/http-guard.ts";
 import { MockExecutor } from "../server/mock-executor.ts";
+import { WebSearch } from "../server/web-search.ts";
+import { RealtimeBridge } from "../server/realtime.ts";
 import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
 import type { Task } from "../shared/types.ts";
@@ -48,7 +50,7 @@ afterEach(async () => {
   server = null;
 });
 
-async function start(mockStepMs = 5) {
+async function start(mockStepMs = 5, realtime?: RealtimeBridge, webSearch?: WebSearch) {
   const port = await freePort();
   const store = new TaskStore(null);
   const dir = mkdtempSync(join(tmpdir(), "nous-http-"));
@@ -69,6 +71,8 @@ async function start(mockStepMs = 5) {
     settings: providers,
     auth,
     chat: providers,
+    realtime,
+    webSearch,
     port,
     devPort: 5173,
     distDir: null,
@@ -191,6 +195,54 @@ describe("HTTP API", () => {
     const done = (await (await fetch(`${base}/api/tasks`)).json()) as Task[];
     for (const id of delegated) expect(done.find((t) => t.task_id === id)?.status).toBe("succeeded");
   }, 20_000);
+
+  it("即時語音：設定顯示是否可用，SDP 經本機核心轉送，API key 不出現在回應中", async () => {
+    const calls: string[] = [];
+    const openai = (async (url: string) => {
+      calls.push(url);
+      return url.endsWith("/client_secrets")
+        ? new Response(JSON.stringify({ value: "ek_fixture" }), { status: 200 })
+        : new Response("v=0 answer", { status: 201 });
+    }) as unknown as typeof fetch;
+    const { base, post } = await start(5, new RealtimeBridge({ apiKey: "sk-fixture", model: "gpt-realtime", voice: "marin", fetch: openai }));
+    const settings = (await (await fetch(`${base}/api/settings`)).json()) as { realtime?: { available: boolean } };
+    expect(settings.realtime).toMatchObject({ available: true });
+
+    expect((await post("/api/realtime/call", { sdp: "not sdp" })).status).toBe(400);
+    const res = await post("/api/realtime/call", { sdp: "v=0 offer" });
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(JSON.parse(raw)).toEqual({ sdp: "v=0 answer", model: "gpt-realtime" });
+    expect(raw).not.toContain("sk-fixture");
+    expect(raw).not.toContain("ek_fixture");
+    expect(calls).toEqual(["https://api.openai.com/v1/realtime/client_secrets", "https://api.openai.com/v1/realtime/calls"]);
+  });
+
+  it("即時語音：沒有 OPENAI_API_KEY 時回 409 並說明", async () => {
+    const { post } = await start(5, new RealtimeBridge({ apiKey: null, model: "gpt-realtime", voice: "marin" }));
+    const res = await post("/api/realtime/call", { sdp: "v=0 offer" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toContain("OPENAI_API_KEY");
+  });
+
+  it("即時語音上網查詢：驗證輸入、未設定 key 時 409、成功時回傳答案與來源且不外洩 key", async () => {
+    const disabled = await start(5, undefined, new WebSearch({ apiKey: null, model: "m", country: "TW", timezone: "Asia/Taipei" }));
+    expect((await disabled.post("/api/realtime/web-search", { query: "" })).status).toBe(400);
+    expect((await disabled.post("/api/realtime/web-search", { query: "新竹天氣" })).status).toBe(409);
+    await new Promise((r) => server!.close(r));
+
+    const openai = (async () =>
+      new Response(
+        JSON.stringify({ model: "m", output: [{ type: "message", content: [{ type: "output_text", text: "多雲（fixture）", annotations: [] }] }] }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    const { post } = await start(5, undefined, new WebSearch({ apiKey: "sk-fixture", model: "m", country: "TW", timezone: "Asia/Taipei", fetch: openai }));
+    const res = await post("/api/realtime/web-search", { query: "新竹天氣" });
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(JSON.parse(raw)).toMatchObject({ ok: true, answer: "多雲（fixture）", sources: [] });
+    expect(raw).not.toContain("sk-fixture");
+  });
 
   it("前端未建置時回傳說明而不是空白頁", async () => {
     const { base } = await start();

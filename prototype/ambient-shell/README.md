@@ -91,6 +91,18 @@ Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒
 
 模型不寫死：有設定 `NOUS_MODEL` 就用它；否則在第一個任務時經 Models API 取最新的 `NOUS_MODEL_FAMILY`（預設 `opus`）系列。預設開啟伺服器端 refusal fallback（beta `server-side-fallback-2026-07-01`），所選模型不支援時設 `NOUS_FALLBACKS=off`。
 
+### 即時語音模式（OpenAI Realtime）
+
+`.env` 設了 `OPENAI_API_KEY` 時，「開始語音對話」改用 OpenAI Realtime（預設 `gpt-realtime`，可用 `NOUS_REALTIME_MODEL`、`NOUS_REALTIME_VOICE` 調整），像 ChatGPT 語音模式一樣語音直接對語音：
+
+- 瀏覽器用 WebRTC 把麥克風串流到 OpenAI，由 `semantic_vad` 判斷說完了沒；使用者一開口，OpenAI 會截斷正在播放的回覆（插話）。
+- SDP 交換經本機核心 `POST /api/realtime/call`：核心用 API key 換一把 120 秒的 client secret，再代為送出 SDP。API key 不會送到瀏覽器，頁面 CSP 仍只允許 `connect-src 'self'`。
+- 模型的工具：`web_search`（上網查即時資料：天氣、新聞、價格等；由本機核心 `POST /api/realtime/web-search` 用同一把 key 呼叫 Responses API 的 `web_search`，預設模型 `gpt-5.5`、位置台灣，可用 `NOUS_SEARCH_*` 調整，來源顯示在字幕）、`delegate_task`（交辦需要較長時間的工作，**由目前選擇的引擎執行**，例如 ChatGPT 方案；查詢類問題不交辦）、`get_tasks`（查真實進度）、`end_conversation`（道別後結束）。任務完成時會以「（系統通知）」請模型用一句話轉告；多則通知會排隊，一次只要求一個回應。
+- 遠端 MCP：在 `NOUS_REALTIME_MCP` 填 JSON 陣列，伺服器會直接掛到 Realtime 工作階段，由 OpenAI 端連線呼叫。`require_approval` 預設 `always`：需要核准的動作（寄出、發布等）會顯示琥珀色確認卡，列出服務、工具與參數，並請模型用一句話說明；使用者**說「確認執行」**才執行，說「取消」、60 秒沒回應、或收起確認卡都不執行。判斷由本機的固定語句規則（`src/approval.ts`）做，不由模型轉述同意；只說「好」不算，句中有取消類詞語一律視為取消。不需要按任何東西。
+- 背景任務與文字對話：引擎支援時也帶上網搜尋（ChatGPT：Responses `web_search`；Claude：`NOUS_CLAUDE_WEB_SEARCH`，預設 `web_search_20250305`）。被拒時自動改送不帶工具的請求，並把「未經查證」寫進能力缺口。`NOUS_TASK_WEB_SEARCH=off` 可關閉。
+- 打字輸入也會進同一段即時對話；有畫面開著時 Esc 只關畫面，2 分鐘沒說話自動結束以免持續計費。
+- ChatGPT 方案登入能換到 Realtime client secret，但實測推論一律 `server_error`，所以這個模式只用 API key。
+
 任務與成果存在 `data/`（已排除於 git），重啟後可喚回；重啟時尚未完成的任務會標為「中斷」失敗，不假裝仍在執行。
 
 ## 與產品紅線的對照
@@ -156,7 +168,7 @@ npm run typecheck
 - 語音用瀏覽器內建的 Web Speech API（雲端辨識）與 speechSynthesis（電腦語音），沒有本地喚醒詞；路線是「語音轉文字 → AI 對話 → 文字轉語音」三段串接，延遲比 ChatGPT 的語音對語音模型長。
 - 插話靠「比對聽到的字和正在念的字」分辨回音與使用者：大多數字都在念的內容裡就當回音，出現新的字或「停／等一下」就打斷。用喇叭時同音異字的回音可能誤觸插話，戴耳機最準。念完 2.5 秒內與剛念內容相同的長句會被忽略。語音模式只用模擬的語音 API（含模擬喇叭回音）做過自動化測試，麥克風與喇叭未在實機驗證。
 - 沒有 webcam 視線、沒有 Tauri 桌面殼（瀏覽器頁面）、沒有記憶與知識層。
-- Agent 沒有工具：不能上網、讀寫檔案或對外動作；外部副作用與 Action Gate 尚未實作。
+- Agent 工具：即時語音可上網查詢（web_search）並可掛遠端 MCP；背景任務與文字對話在引擎支援時可上網搜尋（不支援時自動改回不帶工具並標示缺口）。讀寫本機檔案尚未提供；外部副作用的完整 Action Gate 尚未實作，目前 MCP 需核准的動作以確認卡＋語音固定語句逐次確認。
 - 單一使用者、單一螢幕；資料以明文 JSON 存在本機。
 
 ## 與正式規格的關係
