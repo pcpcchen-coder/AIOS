@@ -32,15 +32,13 @@ if(!['start','step','finish'].includes(command)){
     const auth=spawnSync('gh',['auth','token'],{encoding:'utf8',timeout:8000});
     if(auth.status===0)token=auth.stdout.trim();
    }
-   if(!token)fail('Local step recorded, publication unavailable: no GitHub authentication. Do not report PUBLIC success.',3);
-   else{
-    const publish=spawnSync(process.execPath,[join(root,'scripts','pstack-public-export.mjs'),'--run',id,'--workspace',work,'--public-ok'],{
-     cwd:work,env:{...process.env,GH_TOKEN:token},encoding:'utf8',timeout:60000
-    });
-    if(publish.stdout)process.stdout.write(publish.stdout);
-    if(publish.stderr)process.stderr.write(publish.stderr);
-    if(publish.status!==0)fail('Local step recorded; PUBLIC snapshot failed. Retry exporter without duplicating steps.',3);
-   }
+   // Without a token the exporter publishes with git push, using the workspace's own Git credentials.
+   const publish=spawnSync(process.execPath,[join(root,'scripts','pstack-public-export.mjs'),'--run',id,'--workspace',work,'--public-ok'],{
+    cwd:work,env:{...process.env,...(token?{GH_TOKEN:token}:{})},encoding:'utf8',timeout:180000
+   });
+   if(publish.stdout)process.stdout.write(publish.stdout);
+   if(publish.stderr)process.stderr.write(publish.stderr);
+   if(publish.status!==0)fail('Local step recorded; PUBLIC snapshot failed. Retry exporter without duplicating steps.',3);
   }
  }
 }
