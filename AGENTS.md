@@ -45,3 +45,14 @@ The separate `.github/workflows/pstack-observer.yml` is a **recorder smoke test*
 
 Run JSON defaults to `.pstack/observability/runs/` and stays gitignored and local. No automatic public upload is enabled. The central [Pstack Observatory](https://pcpcchen-coder.github.io/CursorPlugins/) is public. Never publish private transcripts, prompts, source, secrets, paths or PII. Publishing any run requires separate explicit approval, `PSTACK_OBSERVE_PUBLICATION_ACK=1` and `--public-ok`; see [operator documentation](https://github.com/pcpcchen-coder/CursorPlugins/blob/custom/pstack/docs/fork/PSTACK_DASHBOARD.md). Existing CLAUDE.md action gates still apply.
 <!-- PSTACK_OBSERVABILITY_END -->
+
+
+## Public AIOS Observatory feed consent (2026-10-21)
+
+The AIOS owner has approved publication of the project's pstack progress and evidence. Publish **sanitized operational run metadata only**: task title, playbook, step status, times and PUBLIC GitHub evidence URLs. Keep source code payloads, local paths, secrets, private prompts/transcripts and personal data out of the published feed.
+
+The AIOS GitHub Actions workflow at .github/workflows/pstack-public-e2e.yml can publish a scripted CI investigation to AIOS's public telemetry/pstack branch using **AIOS-only GITHUB_TOKEN**. The resulting run is deliberately called investigation-ci, not an IDE Agent run. This workflow does not run the native Cursor/Codex pstack controller.
+
+For a live Cursor/Codex task, AGENTS.md still requires start/step/finish calls. To publish each real snapshot to the central dashboard when using a separately authenticated GitHub CLI, use PSTACK_OBSERVE_PUBLICATION_ACK=1 and --publish --public-ok after checking the metadata. Do not put tokens in the repository. Local-only recording remains a safe fallback when the connection is unavailable.
+
+This authorization applies **only to AIOS**, not to unrelated projects that share pstack.
