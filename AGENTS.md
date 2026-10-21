@@ -56,3 +56,19 @@ The AIOS GitHub Actions workflow at .github/workflows/pstack-public-e2e.yml can 
 For a live Cursor/Codex task, AGENTS.md still requires start/step/finish calls. To publish each real snapshot to the central dashboard when using a separately authenticated GitHub CLI, use PSTACK_OBSERVE_PUBLICATION_ACK=1 and --publish --public-ok after checking the metadata. Do not put tokens in the repository. Local-only recording remains a safe fallback when the connection is unavailable.
 
 This authorization applies **only to AIOS**, not to unrelated projects that share pstack.
+
+
+### Native pstack task reporting after instrumentation
+
+For **subsequent real AIOS pstack development tasks**, invoke the public-safe sidecar in place of the raw recorder. This publishes each completed stage snapshot only after local recording succeeds and the owner-approved AIOS disclosure flag is set:
+
+    export PSTACK_OBSERVE_PUBLICATION_ACK=1
+    node tools/pstack-observe-live.mjs start --repo pcpcchen-coder/AIOS --title "Task" --playbook investigation --steps "inspect,verify,report"
+    node tools/pstack-observe-live.mjs step --run RUN_ID --step inspect --status running
+    # Work, then record the actual observed result.
+    node tools/pstack-observe-live.mjs step --run RUN_ID --step inspect --status passed --note "Checked actual source"
+    # Continue remaining stages and finish the run.
+
+If GH_TOKEN/GITHUB_TOKEN is not configured, the wrapper tries the authenticated GitHub CLI without printing the token. Publishing still requires permission to write **AIOS's telemetry/pstack branch**. If publication fails, it reports the error while retaining the local JSON. Do not claim the Dashboard received the step until publication succeeds. The wrapper rejects direct unfiltered --publish flags.
+
+This is **agent-invoked observability**, not hidden interception of Cursor/Codex tool calls. An agent that ignores these instructions remains unobserved.
