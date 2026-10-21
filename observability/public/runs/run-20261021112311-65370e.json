@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-21T11:23:11.336Z",
-  "updated_at": "2026-10-21T11:39:46.440Z",
+  "updated_at": "2026-10-21T11:39:50.068Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-21T11:39:50.068Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -117,6 +117,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "Blocking: shared types+prefs table; server and client disjoint but coupled by wire type; one writer per state; single implementer owns the diff"
+    },
+    {
+      "at": "2026-10-21T11:39:50.068Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
