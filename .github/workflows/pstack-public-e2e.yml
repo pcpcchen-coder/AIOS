@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - "scripts/pstack-public-export.mjs"
+      - "tools/pstack-observe-live.mjs"
+      - "tests/pstack-live.test.mjs"
       - "tests/pstack-public-export.test.mjs"
       - ".github/workflows/pstack-public-e2e.yml"
       - "AGENTS.md"
@@ -28,7 +30,7 @@ jobs:
         with:
           node-version: "22"
       - name: Test public export and local recorder
-        run: node --test tests/pstack-public-export.test.mjs tests/pstack-observer.test.mjs
+        run: node --test tests/pstack-public-export.test.mjs tests/pstack-observer.test.mjs tests/pstack-live.test.mjs
       - name: Verify pinned original pstack
         run: node scripts/check-pstack.mjs
 
