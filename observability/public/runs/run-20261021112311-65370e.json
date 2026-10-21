@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-21T11:23:11.336Z",
-  "updated_at": "2026-10-21T11:59:40.110Z",
+  "updated_at": "2026-10-21T11:59:43.991Z",
   "ended_at": null,
   "steps": [
     {
@@ -64,8 +64,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-21T11:59:43.991Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -150,6 +150,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "289 vitest; verify-aios PASS; Chromium + real MediaPipe + synthetic stereo clip: both tiles render, settings persist to camera.json, camera-off survives reload"
+    },
+    {
+      "at": "2026-10-21T11:59:43.991Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"

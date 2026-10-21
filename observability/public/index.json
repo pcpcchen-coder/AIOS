@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-21T11:59:42.015Z",
+  "updated_at": "2026-10-21T11:59:45.804Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,7 +9,7 @@
       "title": "Camera preview windows (live + stereo difference) and sensing settings",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-21T11:59:40.110Z",
+      "updated_at": "2026-10-21T11:59:43.991Z",
       "started_at": "2026-10-21T11:23:11.336Z",
       "ended_at": null,
       "branch": "claude/blissful-rubin-rbtgtk",
