@@ -7,15 +7,25 @@ export interface PolicyContext {
   /** 本次 session 內真實的使用者輸入（打字、語音、按鈕）id。 */
   userRequestIds: ReadonlySet<string>;
   tasks: ReadonlyMap<string, Task>;
+  /** 目前真的在等使用者確認的外部動作 id（來自 OpenAI 的 mcp_approval_request）。 */
+  pendingConfirmIds?: ReadonlySet<string>;
 }
 
 export type PolicyDecision = { allowed: true } | { allowed: false; reason: string };
 
-/** 原型目前只會產生 user_request；其他理由需要訂閱、確認等機制，尚未實作，一律拒絕。 */
-const SUPPORTED_REASONS: ReadonlySet<VisibilityReason> = new Set(["user_request"]);
+/** 原型支援 user_request 與 action_confirmation；其他理由需要訂閱等機制，尚未實作，一律拒絕。 */
+const SUPPORTED_REASONS: ReadonlySet<VisibilityReason> = new Set(["user_request", "action_confirmation"]);
 
 export function evaluateSurface(surface: Surface | null, ctx: PolicyContext): PolicyDecision {
   if (!surface) return { allowed: true };
+  if (surface.visibility_reason === "action_confirmation" || surface.kind === "confirm") {
+    if (surface.kind !== "confirm" || surface.visibility_reason !== "action_confirmation") {
+      return { allowed: false, reason: "確認卡與 action_confirmation 必須成對" };
+    }
+    return ctx.pendingConfirmIds?.has(surface.request_id)
+      ? { allowed: true }
+      : { allowed: false, reason: "沒有對應的待確認動作" };
+  }
   if (!SUPPORTED_REASONS.has(surface.visibility_reason)) {
     return { allowed: false, reason: `visibility_reason "${surface.visibility_reason}" 尚未支援` };
   }

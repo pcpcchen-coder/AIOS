@@ -1,9 +1,12 @@
+import { matchApproval } from "./approval.ts";
+
 // 即時語音模式（OpenAI Realtime）：像 ChatGPT 語音模式，語音直接對語音。
 // 麥克風音訊經 WebRTC 串流到 OpenAI，由伺服器端 VAD 判斷你何時說完；你一開口，
 // 正在播放的回覆就會被 OpenAI 截斷（插話）。SDP 交換經本機核心，API key 不進瀏覽器。
 // 上網查詢、交辦工作與查進度用 function calling：查詢經本機核心代為呼叫 web_search，
 // 交辦與進度呼叫既有的任務 API，任務仍用目前選擇的引擎執行。
-// 設定了遠端 MCP 伺服器時，由 OpenAI 端直接呼叫；需要核准的動作在這裡請使用者明確確認。
+// 設定了遠端 MCP 伺服器時，由 OpenAI 端直接呼叫；需要核准的動作顯示確認卡，
+// 使用者說出固定語句（「確認執行」或「取消」）才回覆 OpenAI，不需要按任何東西。
 
 export type RealtimePhase = "off" | "connecting" | "listening" | "hearing" | "thinking" | "speaking";
 
@@ -16,13 +19,17 @@ export interface RealtimeCallbacks {
   onGetTasks(): Promise<Record<string, unknown>>;
   /** 模型要上網查詢；回傳答案與來源，交還給模型。 */
   onWebSearch(query: string): Promise<Record<string, unknown>>;
-  /** MCP 工具需要核准：回傳使用者是否明確同意。 */
-  onMcpApproval(request: McpApprovalRequest): Promise<boolean>;
+  /** MCP 工具需要核准：顯示確認卡，等使用者說「確認執行」或「取消」。 */
+  onApprovalPrompt(request: McpApprovalRequest, expiresAt: number): void;
+  /** 確認卡結束：同意、拒絕、逾時、畫面被收起或對話結束。 */
+  onApprovalResolved(request: McpApprovalRequest, approved: boolean, outcome: ApprovalOutcome): void;
   /** 工具活動的短說明（例如「上網查詢：新竹天氣」），顯示在字幕。 */
   onToolActivity(text: string): void;
   /** 模式因錯誤或閒置而關閉。 */
   onClosed(reason: string): void;
 }
+
+export type ApprovalOutcome = "said_approve" | "said_reject" | "timeout" | "dismissed" | "closed";
 
 export interface McpApprovalRequest {
   id: string;
@@ -43,6 +50,8 @@ export interface RealtimeDeps {
 interface RealtimeOptions {
   /** 多久沒有任何說話就自動結束（毫秒），避免忘記關而持續計費。 */
   idleMs: number;
+  /** 確認卡多久沒回應就自動取消（毫秒），預設 60 秒。 */
+  approvalMs?: number;
 }
 
 interface ServerEvent {
@@ -71,6 +80,9 @@ export class RealtimeVoice {
   /** OpenAI 端正在執行的 MCP 呼叫或等待核准的數量。 */
   private mcpPending = 0;
   private handledApprovals = new Set<string>();
+  /** 等待使用者語音確認的請求：一次只顯示一張確認卡，其餘排隊。 */
+  private approvalQueue: McpApprovalRequest[] = [];
+  private approval: { request: McpApprovalRequest; timer: ReturnType<typeof setTimeout> } | null = null;
 
   constructor(
     private readonly callbacks: RealtimeCallbacks,
@@ -163,6 +175,7 @@ export class RealtimeVoice {
     this.resetIdle();
     if (this.responding) this.interrupt();
     this.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
+    this.checkApproval(text);
     this.requestResponse();
   }
 
@@ -204,7 +217,10 @@ export class RealtimeVoice {
         this.setPhase("thinking");
         break;
       case "conversation.item.input_audio_transcription.completed":
-        if (typeof event.transcript === "string" && event.transcript.trim()) this.callbacks.onUserTranscript(event.transcript.trim());
+        if (typeof event.transcript === "string" && event.transcript.trim()) {
+          this.callbacks.onUserTranscript(event.transcript.trim());
+          this.checkApproval(event.transcript);
+        }
         break;
       case "response.created":
         this.responding = true;
@@ -231,7 +247,7 @@ export class RealtimeVoice {
         const item = event.item as { type?: string; id?: string; server_label?: string; name?: string; arguments?: string } | undefined;
         if (item?.type === "mcp_approval_request" && item.id && !this.handledApprovals.has(item.id)) {
           this.handledApprovals.add(item.id);
-          void this.approve({ id: item.id, server: item.server_label ?? "", name: item.name ?? "", arguments: item.arguments ?? "{}" });
+          this.queueApproval({ id: item.id, server: item.server_label ?? "", name: item.name ?? "", arguments: item.arguments ?? "{}" });
         }
         break;
       }
@@ -322,17 +338,40 @@ export class RealtimeVoice {
     this.continueAfterTools();
   }
 
-  /** MCP 需要核准：請使用者明確確認後回覆 OpenAI；拒絕時照實告訴模型。 */
-  private async approve(request: McpApprovalRequest): Promise<void> {
-    const generation = this.generation;
+  /** MCP 需要核准：排進確認卡佇列；確認前 OpenAI 端不會執行這個動作。 */
+  private queueApproval(request: McpApprovalRequest): void {
     this.mcpPending += 1;
-    let approve = false;
-    try {
-      approve = await this.callbacks.onMcpApproval(request);
-    } catch {
-      approve = false;
-    }
-    if (generation !== this.generation) return;
+    this.approvalQueue.push(request);
+    if (!this.approval) this.showNextApproval();
+  }
+
+  private showNextApproval(): void {
+    const request = this.approvalQueue.shift();
+    if (!request) return;
+    const ms = this.options.approvalMs ?? 60_000;
+    const timer = setTimeout(() => this.resolveApproval(false, "timeout"), ms);
+    this.approval = { request, timer };
+    this.callbacks.onApprovalPrompt(request, Date.now() + ms);
+    this.notify(
+      `外部服務「${request.server}」要執行「${request.name}」，需要使用者確認。請用一句話說明要做什麼、對象和影響，並請使用者說「確認執行」或「取消」。不要替使用者確認。`,
+    );
+  }
+
+  /** 使用者說的話（或打的字）是否為確認卡的固定語句。 */
+  private checkApproval(text: string): void {
+    if (!this.approval) return;
+    const decision = matchApproval(text);
+    if (decision) this.resolveApproval(decision === "approve", decision === "approve" ? "said_approve" : "said_reject");
+  }
+
+  /** 結束目前的確認卡並回覆 OpenAI；畫面被收起時由呼叫端以 dismissed 拒絕。 */
+  resolveApproval(approve: boolean, outcome: ApprovalOutcome): void {
+    const current = this.approval;
+    if (!current) return;
+    clearTimeout(current.timer);
+    this.approval = null;
+    const { request } = current;
+    const reason = outcome === "timeout" ? "使用者沒有在時限內確認" : outcome === "dismissed" ? "使用者收起了確認畫面" : "使用者說取消";
     this.send({
       type: "conversation.item.create",
       item: {
@@ -340,23 +379,33 @@ export class RealtimeVoice {
         type: "mcp_approval_response",
         approval_request_id: request.id,
         approve,
-        ...(approve ? {} : { reason: "使用者沒有同意" }),
+        ...(approve ? {} : { reason }),
       },
     });
-    this.callbacks.onToolActivity(approve ? `已同意：${request.server} · ${request.name}` : `已拒絕：${request.server} · ${request.name}`);
+    this.callbacks.onApprovalResolved(request, approve, outcome);
+    this.callbacks.onToolActivity(approve ? `已確認：${request.server} · ${request.name}` : `沒有執行：${request.server} · ${request.name}（${reason}）`);
     this.toolsCalled = true;
-    this.finishMcp();
+    // 說出確認語句的這一輪已經（或即將）有回應：等它結束再接著回應，避免重疊的 response.create。
+    this.finishMcp(outcome !== "said_approve" && outcome !== "said_reject");
+    this.showNextApproval();
   }
 
-  private finishMcp(): void {
+  get pendingApproval(): McpApprovalRequest | null {
+    return this.approval?.request ?? null;
+  }
+
+  private finishMcp(continueNow = true): void {
     this.mcpPending = Math.max(0, this.mcpPending - 1);
-    this.continueAfterTools();
+    if (continueNow) this.continueAfterTools();
   }
 
-  /** 工具結果都交回、這輪回覆也結束後，請模型接著用語音回應；再補上排隊的系統通知。 */
+  /**
+   * 工具結果都交回、這輪回覆也結束後，請模型接著用語音回應；再補上排隊的系統通知。
+   * OpenAI 端的 MCP 呼叫或確認卡未結束時只先送通知（例如請模型說明確認卡），等它結束再接著回應。
+   */
   private continueAfterTools(): void {
-    if (this.responding || this.pendingTools > 0 || this.mcpPending > 0) return;
-    if (this.toolsCalled) {
+    if (this.responding || this.pendingTools > 0) return;
+    if (this.toolsCalled && this.mcpPending === 0) {
       this.toolsCalled = false;
       this.requestResponse();
       return;
@@ -405,6 +454,11 @@ export class RealtimeVoice {
     this.pendingTools = 0;
     this.mcpPending = 0;
     this.handledApprovals.clear();
+    const open = [...(this.approval ? [this.approval.request] : []), ...this.approvalQueue];
+    if (this.approval) clearTimeout(this.approval.timer);
+    this.approval = null;
+    this.approvalQueue = [];
+    for (const request of open) this.callbacks.onApprovalResolved(request, false, "closed");
     this.toolsCalled = false;
     this.responding = false;
     this.awaitingCreated = false;

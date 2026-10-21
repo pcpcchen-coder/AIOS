@@ -903,3 +903,32 @@ body.has-surface .conversation-status {
 }
 body.has-conversation .region-activity { top: 40px; }
 body.has-surface .region-activity { top: 21%; }
+
+/* 外部動作確認卡：琥珀色外框，遠處一眼辨識；用說的確認。 */
+.surface--confirm {
+  border: 3px solid var(--amber);
+  box-shadow: 0 0 0 6px rgba(255, 179, 92, 0.12);
+}
+.confirm-eyebrow {
+  color: var(--amber);
+}
+.confirm-args {
+  margin: 8px 0 16px;
+  padding: 12px 14px;
+  max-height: 30vh;
+  overflow: auto;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.confirm-say {
+  margin: 0 0 8px;
+  font-size: 22px;
+  line-height: 1.5;
+}
+.confirm-say strong {
+  color: var(--amber);
+}

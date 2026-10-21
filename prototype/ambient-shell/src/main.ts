@@ -3,7 +3,14 @@ import { computeProgress, isActive, queueText, sortForProgress } from "../shared
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
 import { ApiError, api, newRequestId, streamChat, subscribeEvents } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
-import { browserRealtimeDeps, realtimeSupported, RealtimeVoice, type McpApprovalRequest, type RealtimePhase } from "./realtime.ts";
+import {
+  browserRealtimeDeps,
+  realtimeSupported,
+  RealtimeVoice,
+  type ApprovalOutcome,
+  type McpApprovalRequest,
+  type RealtimePhase,
+} from "./realtime.ts";
 import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
@@ -19,7 +26,10 @@ import {
   renderNotice,
   renderProgress,
   renderSettings,
+  renderConfirm,
+  refreshCountdowns,
   updateLiveCounts,
+  type ConfirmDetail,
   type ViewActions,
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
@@ -145,7 +155,8 @@ const realtime = new RealtimeVoice(
     onDelegate: delegateFromRealtime,
     onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
     onWebSearch: webSearchFromRealtime,
-    onMcpApproval: approveMcp,
+    onApprovalPrompt: showApproval,
+    onApprovalResolved: closeApproval,
     onToolActivity: (text) => showSubtitle(text),
     onClosed: (reason) => {
       showSubtitle(reason);
@@ -419,18 +430,20 @@ async function webSearchFromRealtime(query: string): Promise<Record<string, unkn
   }
 }
 
-/**
- * 外部服務（MCP）要執行需要核准的動作：顯示動作、服務與參數，由使用者明確按下確認。
- * 不由模型轉述使用者的同意（產品紅線：外部副作用需當次明確確認）。
- */
-async function approveMcp(request: McpApprovalRequest): Promise<boolean> {
-  let args = request.arguments;
-  try {
-    args = JSON.stringify(JSON.parse(request.arguments), null, 2);
-  } catch {
-    // 保留原文
-  }
-  return window.confirm(`Nous 要使用外部服務「${request.server}」執行：${request.name}\n\n${args.slice(0, 800)}\n\n確定要執行嗎？`);
+/** 目前顯示中的外部動作確認卡（來自 OpenAI 的 mcp_approval_request）。 */
+const pendingConfirms = new Map<string, ConfirmDetail>();
+
+/** 外部服務要執行需要核准的動作：顯示確認卡，等使用者說「確認執行」或「取消」，不需要按任何東西。 */
+function showApproval(request: McpApprovalRequest, expiresAt: number): void {
+  pendingConfirms.set(request.id, { server: request.server, name: request.name, arguments: request.arguments, expiresAt });
+  dispatch({ type: "show.confirm", request_id: request.id, message: `${request.server} · ${request.name}` });
+}
+
+function closeApproval(request: McpApprovalRequest, _approved: boolean, outcome: ApprovalOutcome): void {
+  pendingConfirms.delete(request.id);
+  if (outcome === "timeout") showSubtitle("確認逾時，沒有執行。");
+  if (shell.surface?.kind === "confirm" && shell.surface.request_id === request.id) dispatch({ type: "dismiss" });
+  else render();
 }
 
 /** get_tasks 工具的回傳：最近的任務與真實進度。 */
@@ -490,7 +503,12 @@ function dispatch(event: ShellEvent): void {
   const next = reduceShell(shell, event);
   if (next === shell) return;
   const wasListening = shell.listening;
+  const leftConfirm = shell.surface?.kind === "confirm" && next.surface?.surface_id !== shell.surface.surface_id ? shell.surface.request_id : null;
   shell = next;
+  // 確認卡被收起或被其他畫面取代：視為不同意，外部動作不執行。
+  if (leftConfirm && pendingConfirms.has(leftConfirm) && realtime.pendingApproval?.id === leftConfirm) {
+    realtime.resolveApproval(false, "dismissed");
+  }
   if (!wasListening && shell.listening) {
     form.hidden = false;
     input.focus();
@@ -882,7 +900,7 @@ function renderConversation(): void {
   const allowed = reply.kind !== "idle" && evaluateSurface({
     surface_id: `conversation_${reply.requestId}`, kind: "conversation", visibility_reason: "user_request",
     request_id: reply.requestId, task_id: null, artifact_id: null, message: null,
-  }, { userRequestIds, tasks }).allowed;
+  }, { userRequestIds, tasks, pendingConfirmIds: new Set(pendingConfirms.keys()) }).allowed;
   conversationReply.hidden = !view.visible || !allowed || shell.surface !== null;
   document.body.classList.toggle("has-conversation", !conversationReply.hidden);
   if (reply.kind === "idle") return;
@@ -964,7 +982,7 @@ function line(cls: string, text: string): HTMLElement {
 
 function renderSurface(): void {
   const s = shell.surface;
-  const decision = evaluateSurface(s, { userRequestIds, tasks });
+  const decision = evaluateSurface(s, { userRequestIds, tasks, pendingConfirmIds: new Set(pendingConfirms.keys()) });
   if (!s || !decision.allowed) {
     if (s && !decision.allowed) {
       console.warn("[presentation-policy] 拒絕呈現：", decision.reason, s);
@@ -994,7 +1012,9 @@ function renderSurface(): void {
   const scrollTop = sameSurface && previous ? previous.scrollTop : 0;
 
   let el: HTMLElement;
-  if (s.kind === "settings") el = renderSettings(settings, s.message, actions);
+  const confirm = s.kind === "confirm" ? pendingConfirms.get(s.request_id) : undefined;
+  if (confirm) el = renderConfirm(confirm);
+  else if (s.kind === "settings") el = renderSettings(settings, s.message, actions);
   else if (s.kind === "progress") el = renderProgress([...tasks.values()], s.message, actions);
   else if (s.kind === "artifact" && task) {
     const artifactId = s.artifact_id!;
@@ -1020,6 +1040,7 @@ async function loadArtifact(artifactId: string): Promise<void> {
 
 setInterval(() => {
   refreshTimers(surfaceRoot);
+  refreshCountdowns(surfaceRoot);
 }, 1000);
 
 // ───────────── 輸入 ─────────────

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RealtimeVoice, type McpApprovalRequest, type RealtimeDeps, type RealtimePhase } from "../src/realtime.ts";
+import { RealtimeVoice, type ApprovalOutcome, type McpApprovalRequest, type RealtimeDeps, type RealtimePhase } from "../src/realtime.ts";
 
 // 模擬 WebRTC：資料通道收發 OpenAI Realtime 事件，不需要麥克風、喇叭或網路。
 class FakeChannel {
@@ -27,7 +27,7 @@ class FakePeer {
   close() { this.closed = true; }
 }
 
-function setup(overrides: Partial<RealtimeDeps> = {}, approve = true) {
+function setup(overrides: Partial<RealtimeDeps> = {}) {
   vi.useFakeTimers();
   const peer = new FakePeer();
   const track = { stop: vi.fn() };
@@ -39,6 +39,7 @@ function setup(overrides: Partial<RealtimeDeps> = {}, approve = true) {
   const exchanged: string[] = [];
   const searched: string[] = [];
   const approvals: McpApprovalRequest[] = [];
+  const resolved: { id: string; approved: boolean; outcome: ApprovalOutcome }[] = [];
   const activity: string[] = [];
   const voice = new RealtimeVoice(
     {
@@ -55,10 +56,8 @@ function setup(overrides: Partial<RealtimeDeps> = {}, approve = true) {
         searched.push(query);
         return { ok: true, answer: "新竹今天多雲，22 到 27 度（fixture）", sources: ["fixture 氣象站"] };
       },
-      onMcpApproval: async (request) => {
-        approvals.push(request);
-        return approve;
-      },
+      onApprovalPrompt: (request) => approvals.push(request),
+      onApprovalResolved: (request, approved, outcome) => resolved.push({ id: request.id, approved, outcome }),
       onToolActivity: (text) => activity.push(text),
     },
     {
@@ -71,7 +70,7 @@ function setup(overrides: Partial<RealtimeDeps> = {}, approve = true) {
       },
       ...overrides,
     },
-    { idleMs: 120_000 },
+    { idleMs: 120_000, approvalMs: 60_000 },
   );
   const ch = peer.channel;
   const sentTypes = () => ch.sent.map((e) => e.type);
@@ -88,7 +87,7 @@ function setup(overrides: Partial<RealtimeDeps> = {}, approve = true) {
     ch.emit({ type: "response.done", response: { status: "completed" } });
     ch.emit({ type: "output_audio_buffer.stopped" });
   }
-  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, searched, approvals, activity, sentTypes, userSays, modelSpeaks };
+  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, searched, approvals, resolved, activity, sentTypes, userSays, modelSpeaks };
 }
 
 afterEach(() => {
@@ -297,34 +296,78 @@ describe("RealtimeVoice tools", () => {
     expect(t.sentTypes().at(-1)).toBe("response.create");
   });
 
-  it("MCP approval: asks the user, sends mcp_approval_response, and continues the conversation", async () => {
+  it("MCP approval by voice: shows the card, asks the model to explain, approves only on the fixed phrase", async () => {
     const t = setup();
     await t.voice.start();
     t.ch.emit({ type: "session.created" });
     t.ch.emit({ type: "response.created" });
-    const item = { type: "mcp_approval_request", id: "apr_1", server_label: "calendar", name: "create_event", arguments: "{\"title\":\"會議\"}" };
+    const item = { type: "mcp_approval_request", id: "apr_1", server_label: "mail", name: "send_email", arguments: "{\"to\":\"王經理\"}" };
     t.ch.emit({ type: "conversation.item.added", item });
     t.ch.emit({ type: "conversation.item.done", item });
     t.ch.emit({ type: "response.done", response: { status: "completed" } });
-    await Promise.resolve();
-    await Promise.resolve();
 
-    expect(t.approvals).toEqual([{ id: "apr_1", server: "calendar", name: "create_event", arguments: "{\"title\":\"會議\"}" }]);
+    expect(t.approvals.map((a) => a.id)).toEqual(["apr_1"]);
+    // 回應結束後請模型用一句話說明確認卡，但還不能接著執行。
+    const notice = t.ch.sent.find((e) => JSON.stringify(e).includes("確認執行"));
+    expect(notice).toBeTruthy();
+    t.modelSpeaks("要寄信給王經理，確定的話請說確認執行。");
+
+    // 「好」不算確認。
+    t.userSays("好");
+    expect(t.resolved).toEqual([]);
+    expect(t.ch.sent.some((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response")).toBe(false);
+
+    // 實際順序：說完後伺服器 VAD 先建立自動回應，轉錄稍後才到。
+    const before = t.sentTypes().filter((x) => x === "response.create").length;
+    t.ch.emit({ type: "input_audio_buffer.speech_started" });
+    t.ch.emit({ type: "input_audio_buffer.speech_stopped" });
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "conversation.item.input_audio_transcription.completed", transcript: "確認執行。" });
+    expect(t.resolved).toEqual([{ id: "apr_1", approved: true, outcome: "said_approve" }]);
     const response = t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response");
     expect(response!.item).toMatchObject({ id: "mcp_approval_apr_1", approval_request_id: "apr_1", approve: true });
-    expect(t.sentTypes().at(-1)).toBe("response.create");
+    // 自動回應還在進行：不重疊送出 response.create，等它結束才接著回應一次。
+    expect(t.sentTypes().filter((x) => x === "response.create").length).toBe(before);
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    expect(t.sentTypes().filter((x) => x === "response.create").length).toBe(before + 1);
   });
 
-  it("MCP approval declined: tells OpenAI it was not approved", async () => {
-    const t = setup({}, false);
+  it("MCP approval: saying 取消 rejects with a reason", async () => {
+    const t = setup();
     await t.voice.start();
     t.ch.emit({ type: "session.created" });
     t.ch.emit({ type: "conversation.item.done", item: { type: "mcp_approval_request", id: "apr_2", server_label: "mail", name: "send", arguments: "{}" } });
-    await Promise.resolve();
-    await Promise.resolve();
+    t.userSays("不要，取消");
     const response = t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response");
-    expect(response!.item).toMatchObject({ approval_request_id: "apr_2", approve: false });
-    expect(t.activity).toContain("已拒絕：mail · send");
+    expect(response!.item).toMatchObject({ approval_request_id: "apr_2", approve: false, reason: "使用者說取消" });
+    expect(t.resolved).toEqual([{ id: "apr_2", approved: false, outcome: "said_reject" }]);
+  });
+
+  it("MCP approval: no answer within the time limit rejects automatically", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.ch.emit({ type: "conversation.item.done", item: { type: "mcp_approval_request", id: "apr_3", server_label: "cms", name: "publish", arguments: "{}" } });
+    vi.advanceTimersByTime(60_000);
+    expect(t.resolved).toEqual([{ id: "apr_3", approved: false, outcome: "timeout" }]);
+    const response = t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response");
+    expect(response!.item).toMatchObject({ approve: false });
+  });
+
+  it("MCP approval: dismissing the card and closing the session both reject", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.ch.emit({ type: "conversation.item.done", item: { type: "mcp_approval_request", id: "a", server_label: "s", name: "x", arguments: "{}" } });
+    t.ch.emit({ type: "conversation.item.done", item: { type: "mcp_approval_request", id: "b", server_label: "s", name: "y", arguments: "{}" } });
+    expect(t.approvals.map((a) => a.id)).toEqual(["a"]);
+    t.voice.resolveApproval(false, "dismissed");
+    expect(t.approvals.map((a) => a.id)).toEqual(["a", "b"]);
+    t.voice.stop();
+    expect(t.resolved).toEqual([
+      { id: "a", approved: false, outcome: "dismissed" },
+      { id: "b", approved: false, outcome: "closed" },
+    ]);
   });
 
   it("MCP call finishing after response.done triggers one follow-up response", async () => {

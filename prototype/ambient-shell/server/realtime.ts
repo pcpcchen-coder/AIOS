@@ -112,7 +112,7 @@ export function buildRealtimeInstructions(
   if (caps.mcp.length) {
     const names = caps.mcp.map((m) => (m.server_description ? `${m.server_label}（${m.server_description}）` : m.server_label));
     abilities.push(
-      `你也接上了這些外部服務，可以直接使用它們的工具：${names.join("、")}。需要確認的動作會由系統在畫面上請使用者確認，被拒絕就照實說沒有執行。`,
+      `你也接上了這些外部服務，可以直接使用它們的工具：${names.join("、")}。需要確認的動作（寄出、發布、刪除等），系統會在畫面顯示確認卡；你用一句話說明要做什麼、對象和影響，請使用者說「確認執行」或「取消」。使用者要說出「確認執行」才會執行，只說「好」不算，你也不能替使用者確認。沒有執行時照實說。`,
     );
   }
   abilities.push(`需要較長時間產出的工作（報告、整理、規劃、研究）交給背景任務${caps.taskWebSearch ? "，背景任務也能上網查資料" : ""}。`);

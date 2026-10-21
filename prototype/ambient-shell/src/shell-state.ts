@@ -3,7 +3,7 @@ import type { Task } from "../shared/types.ts";
 // Shell 狀態描述「使用者現在看到什麼」，與任務實際狀態分開（docs/06 §5）。
 // 聆聽是疊層（listening），結束後回到原本畫面，不銷毀內容。
 
-export type ShellMode = "ambient" | "working" | "presenting" | "recoverable_error";
+export type ShellMode = "ambient" | "working" | "presenting" | "confirming" | "recoverable_error";
 
 export type VisibilityReason =
   | "user_request"
@@ -13,7 +13,7 @@ export type VisibilityReason =
   | "sensor_status"
   | "user_pinned";
 
-export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation";
+export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation" | "confirm";
 
 export interface Surface {
   surface_id: string;
@@ -43,6 +43,8 @@ export type ShellEvent =
   | { type: "show.artifact"; request_id: string; task_id: string; artifact_id: string }
   | { type: "show.notice"; request_id: string; message: string }
   | { type: "show.settings"; request_id: string; message?: string | null }
+  /** 外部動作的確認卡；request_id 為確認請求 id，由 Presentation Policy 對照待確認清單。 */
+  | { type: "show.confirm"; request_id: string; message: string }
   | { type: "dismiss" };
 
 export const initialShell: ShellState = {
@@ -134,6 +136,13 @@ export function reduceShell(state: ShellState, event: ShellEvent): ShellState {
         listening: false,
         foreground_task_id: null,
         surface: surface("settings", event.request_id, { message: event.message ?? null }),
+      };
+    case "show.confirm":
+      return {
+        mode: "confirming",
+        listening: false,
+        foreground_task_id: null,
+        surface: { ...surface("confirm", event.request_id, { message: event.message }), visibility_reason: "action_confirmation" },
       };
     case "dismiss":
       // 「收起」只關閉視圖；任務照常在背景執行。
