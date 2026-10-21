@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-21T11:23:11.336Z",
-  "updated_at": "2026-10-21T12:12:05.782Z",
+  "updated_at": "2026-10-21T12:12:09.758Z",
   "ended_at": null,
   "steps": [
     {
@@ -78,11 +78,16 @@
     {
       "id": "pr",
       "title": "pr",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
-      "evidence": []
+      "status": "passed",
+      "started_at": "2026-10-21T12:12:09.758Z",
+      "ended_at": "2026-10-21T12:12:09.758Z",
+      "note": "PR 21 merged by owner before review fixes; fixes in PR 22",
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/pull/22"
+        }
+      ]
     }
   ],
   "events": [
@@ -169,6 +174,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "Independent review: 6 findings (voice phrase collisions, bad camera.json fails open, write-before-memory, cooldown, start race, docs); all fixed by a fresh implementer with regression tests; 335 vitest pass"
+    },
+    {
+      "at": "2026-10-21T12:12:09.758Z",
+      "type": "step_updated",
+      "step_id": "pr",
+      "status": "passed",
+      "note": "PR 21 merged by owner before review fixes; fixes in PR 22"
     }
   ],
   "provenance": "Agent self-reported"
