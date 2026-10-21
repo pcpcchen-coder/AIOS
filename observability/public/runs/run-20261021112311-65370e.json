@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-21T11:23:11.336Z",
-  "updated_at": "2026-10-21T11:39:33.943Z",
+  "updated_at": "2026-10-21T11:39:46.440Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-21T11:39:46.440Z",
+      "ended_at": "2026-10-21T11:39:46.440Z",
+      "note": "Blocking: shared types+prefs table; server and client disjoint but coupled by wire type; one writer per state; single implementer owns the diff",
       "evidence": []
     },
     {
@@ -110,6 +110,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "Arena: 2 candidate designs + cross-judge; base = candidate 1 (prefs table, camera.json, idempotent sync, pipeline draws previews); grafts: perceived seconds, error latch, optional controller prefs hook"
+    },
+    {
+      "at": "2026-10-21T11:39:46.440Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "passed",
+      "note": "Blocking: shared types+prefs table; server and client disjoint but coupled by wire type; one writer per state; single implementer owns the diff"
     }
   ],
   "provenance": "Agent self-reported"
