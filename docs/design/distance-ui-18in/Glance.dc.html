@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>語音與畫面分工</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1920px; height: 1240px; box-sizing: border-box; padding: 64px 80px; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 56px; font-weight: 900; line-height: 1.15">語音主講，畫面只放錨點，動畫只管「看哪裡」</div>
+<div style="font-size: 28px; color: #A9BBD3; line-height: 1.5">一瞥預算 2 秒（借用車用 HMI 的單次一瞥上限）：任何時刻畫面只有 1 個焦點詞（≤ 6 字）＋ 1 個圖形或數字。完整句子交給語音，不在畫面重複。</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px">
+<div style="background: #0E1526; border-radius: 24px; padding: 32px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 34px; font-weight: 700; color: #4FD1FF">錨點 · 常駐</div>
+<div style="font-size: 26px; line-height: 1.5; color: #D5E0EE">語音裡的關鍵詞或答案本身：「B 廠」「第三家？」「寄出 → 王經理」。語音結束後仍留著，晚到、沒聽清的人一瞥就補上。</div>
+</div>
+<div style="background: #0E1526; border-radius: 24px; padding: 32px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 34px; font-weight: 700; color: #4FD1FF">跟讀 · 隨語音亮起</div>
+<div style="font-size: 26px; line-height: 1.5; color: #D5E0EE">語音念到哪一項，那一項亮起並放大，其他降到 35%。這是唯一承載內容的動畫：它告訴眼睛現在看哪裡。</div>
+</div>
+<div style="background: #0E1526; border-radius: 24px; padding: 32px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 34px; font-weight: 700; color: #4FD1FF">細節 · 寄到你的信箱</div>
+<div style="font-size: 26px; line-height: 1.5; color: #D5E0EE">數字、原因、來源不上 18 吋畫面，整理成報告寄到你自己的信箱。畫面只在真的寄出後顯示「已寄到信箱」。只寄給本人可事先授權；寄給別人仍要確認。</div>
+</div>
+</div>
+<div style="font-size: 30px; font-weight: 700; color: #FFFFFF">時間軸：05 呈現結論（時間為估計，依 TTS 實測調整）</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 24px">
+<sc-for list="{{beats}}" as="b" hint-placeholder-count="5">
+<div style="display: flex; flex-direction: column; gap: 14px">
+<div style="font-size: 24px; color: #7F93AE; font-variant-numeric: tabular-nums">{{b.t}}</div>
+<div style="height: 186px; background: #070B16; border: 2px solid #26324A; border-radius: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px">
+<div style="font-size: 52px; font-weight: 900; color: #FFFFFF; opacity: {{b.anchorOp}}">B 廠</div>
+<div style="display: flex; gap: 8px">
+<sc-for list="{{b.pills}}" as="p" hint-placeholder-count="3">
+<div style="font-size: 20px; font-weight: 700; border-radius: 999px; padding: 4px 12px; {{p.style}}">{{p.label}}</div>
+</sc-for>
+</div>
+</div>
+<div style="font-size: 28px; font-weight: 700; color: #FFFFFF; line-height: 1.35">{{b.voice}}</div>
+<div style="font-size: 24px; color: #A9BBD3; line-height: 1.45">{{b.screen}}</div>
+</div>
+</sc-for>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 48px; font-size: 26px; line-height: 1.5; color: #D5E0EE">
+<div><b style="color: #FFFFFF">提示延遲：</b>只有需要你回答時才顯示說法；其他狀態閒置 8 秒才淡入。</div>
+<div><b style="color: #FFFFFF">表格改圖形：</b>比較用長短條，不放數字；數字在信箱的報告裡。</div>
+<div><b style="color: #FFFFFF">安全例外：</b>確認畫面必須看得到動作、對象、後果三個錨點，不能只靠語音。</div>
+<div><b style="color: #FFFFFF">誠實：</b>跟讀亮起的時間點取自 TTS 實際播放事件，不用估計的計時器。</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1240}}'>
+class Component extends DCLogic {
+renderVals() {
+const lit = 'background: #4FD1FF; color: #070B16';
+const done = 'background: #22314D; color: #EAF2FF';
+const dim = 'background: #10182A; color: #4A5A74';
+const pills = (a, b, c) => [{ label: '價格', style: a }, { label: '效率', style: b }, { label: '交期', style: c }];
+return {
+beats: [
+{ t: '0.0 s', anchorOp: 1, pills: pills(dim, dim, dim), voice: '「建議 B 廠。」', screen: '答案先出現；三項暗著' },
+{ t: '1.2 s', anchorOp: 1, pills: pills(lit, dim, dim), voice: '「價格最低，」', screen: '價格亮起' },
+{ t: '2.2 s', anchorOp: 1, pills: pills(done, lit, dim), voice: '「效率最高，」', screen: '價格轉為已讀，效率亮起' },
+{ t: '3.2 s', anchorOp: 1, pills: pills(done, done, lit), voice: '「交期最短。」', screen: '交期亮起' },
+{ t: '4.5 s →', anchorOp: 1, pills: pills(done, done, done), voice: '（安靜）', screen: '定格，全部可一瞥；報告寄出後顯示「已寄到信箱」' }
+]
+};
+}
+}
+</script>
+</body>
+</html>

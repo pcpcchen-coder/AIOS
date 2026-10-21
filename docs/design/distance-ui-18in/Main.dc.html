@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>Nous 遠距 UI 設計規範</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#4FD1FF}a:hover{color:#9FE6FF}
+</style>
+</helmet>
+<div style="width: 1920px; height: 1240px; box-sizing: border-box; padding: 72px 80px; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 64px; font-weight: 900; line-height: 1.15">遠距 UI 設計規範 v0.1</div>
+<div style="font-size: 30px; color: #A9BBD3; line-height: 1.4">18 吋 16:9 螢幕 · 設計觀看距離 2.0 m（適用 1.5–2.5 m）· 畫布 1920 × 1080 · 延續 docs/06 電子腦與 docs/09 交辦單</div>
+</div>
+<div style="font-size: 26px; color: #7F93AE; border: 2px solid #26324A; border-radius: 999px; padding: 10px 26px; white-space: nowrap">2026-10-21 · 數值皆為示意資料</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; flex-grow: 1">
+<div style="display: flex; flex-direction: column; gap: 28px">
+<div style="background: #0E1526; border-radius: 24px; padding: 36px; display: flex; flex-direction: column; gap: 18px">
+<div style="font-size: 36px; font-weight: 700; color: #4FD1FF">1 · 距離換算：比電視更嚴苛</div>
+<div style="font-size: 28px; line-height: 1.55; color: #D5E0EE">18 吋 = 398 × 224 mm，1080p 像素間距 0.21 mm。</div>
+<div style="font-size: 28px; line-height: 1.55; color: #D5E0EE">在 2.0 m 看，整個畫面只佔 11.4° × 6.4° 視角，<b style="color: #FFFFFF">等同 55 吋電視在 6.1 m 外</b>。一般電視 UI 假設 3 m。</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 24px; font-size: 26px; color: #A9BBD3">
+<div>1.5 m</div><div>≈ 55″ @ 4.6 m</div>
+<div style="color: #FFFFFF; font-weight: 700">2.0 m</div><div style="color: #FFFFFF; font-weight: 700">≈ 55″ @ 6.1 m</div>
+<div>2.5 m</div><div>≈ 55″ @ 7.6 m</div>
+</div>
+</div>
+<div style="background: #0E1526; border-radius: 24px; padding: 36px; display: flex; flex-direction: column; gap: 18px">
+<div style="font-size: 36px; font-weight: 700; color: #4FD1FF">4 · 安全區</div>
+<div style="font-size: 28px; line-height: 1.55; color: #D5E0EE">左右 96 px、上下 64 px（tvOS 90 / 60；Android TV 5%）。</div>
+<div style="font-size: 28px; line-height: 1.55; color: #D5E0EE">底部 64–200 px 固定給字幕帶與語音提示，不放內容。</div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 28px">
+<div style="background: #0E1526; border-radius: 24px; padding: 36px; display: flex; flex-direction: column; gap: 20px">
+<div style="font-size: 36px; font-weight: 700; color: #4FD1FF">2 · 字級 token（2.0 m）</div>
+<div style="display: grid; grid-template-columns: 150px 120px 90px minmax(0, 1fr); gap: 14px 16px; align-items: baseline; font-size: 26px; color: #A9BBD3">
+<div style="color: #7F93AE">名稱</div><div style="color: #7F93AE">px</div><div style="color: #7F93AE">視角</div><div style="color: #7F93AE">用途</div>
+<div style="color: #FFFFFF; font-weight: 700">Anchor</div><div>200–300</div><div>64′+</div><div>答案本身（≤ 3 字）</div>
+<div style="color: #FFFFFF; font-weight: 700">Hero</div><div>150</div><div>48′</div><div>錨點詞（≤ 6 字）</div>
+<div style="color: #FFFFFF; font-weight: 700">Title</div><div>108</div><div>35′</div><div>狀態字、選項名</div>
+<div style="color: #FFFFFF; font-weight: 700">Body</div><div>76</div><div>24′</div><div>選項、數值、字幕</div>
+<div style="color: #FFFFFF; font-weight: 700">Meta</div><div>56</div><div>18′</div><div>提示、來源、模擬標示</div>
+</div>
+<div style="font-size: 26px; line-height: 1.55; color: #A9BBD3">對照：電視最小 24 px 在 3 m 約 16′。Meta 已高於電視下限。換距離時整體 × (D ÷ 2.0 m)。</div>
+<div style="font-size: 26px; line-height: 1.55; color: #A9BBD3">一瞥 2 秒：≤ 6 字焦點 ＋ 1 個圖形；整句交給語音。一畫面 ≤ 3 個可選目標。</div>
+</div>
+<div style="background: #0E1526; border-radius: 24px; padding: 36px; display: flex; flex-direction: column; gap: 18px">
+<div style="font-size: 36px; font-weight: 700; color: #4FD1FF">3 · 視線在 2 m 只能分左右</div>
+<div style="font-size: 28px; line-height: 1.55; color: #D5E0EE">WebGazer 平均誤差 4.17° → 2 m 約 145 mm ≈ <b style="color: #FFFFFF">700 px</b>，畫面寬才 1920 px。</div>
+<div style="font-size: 28px; line-height: 1.55; color: #D5E0EE">決定：<b style="color: #FFFFFF">語音編號為主</b>；視線只做粗指向，最多 3 欄、目標寬 ≥ 540 px。</div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 28px">
+<div style="background: #0E1526; border-radius: 24px; padding: 36px; display: flex; flex-direction: column; gap: 16px">
+<div style="font-size: 36px; font-weight: 700; color: #4FD1FF">5 · 向電視借什麼</div>
+<div style="font-size: 28px; line-height: 1.5; color: #D5E0EE">借：低資訊密度、明顯焦點（放大＋亮框）、安全區、深底高對比、「看得到就說得出」的編號標籤（Xbox Kinect、MRTK See-it Say-it）。</div>
+<div style="font-size: 28px; line-height: 1.5; color: #FFB547">不借：首頁內容列、App 圖示列、常駐側欄——違反 Nous 產品紅線。</div>
+</div>
+<div style="background: #0E1526; border-radius: 24px; padding: 36px; display: flex; flex-direction: column; gap: 16px">
+<div style="font-size: 36px; font-weight: 700; color: #4FD1FF">6 · 畫面 × 語音分工</div>
+<div style="font-size: 28px; line-height: 1.5; color: #D5E0EE">聲音說結論與變更；畫面放證據與選項。</div>
+<div style="font-size: 28px; line-height: 1.5; color: #D5E0EE">不念畫面上已有的清單；長內容只說「在畫面上」。</div>
+<div style="font-size: 28px; line-height: 1.5; color: #D5E0EE">每個可選目標都有編號說法。</div>
+<div style="font-size: 28px; line-height: 1.5; color: #D5E0EE">外部動作要說固定語句（「確認寄出」）；「好」不算確認。</div>
+</div>
+</div>
+</div>
+<div style="font-size: 24px; color: #7F93AE; line-height: 1.5">參考：Fire TV 10-ft UI 指南、Android TV 版面、tvOS HIG 安全區、Alexa 多模態設計清單、WebQAmGaze（WebGazer 誤差）、MRTK See-it Say-it 標籤。下方各畫面為 1920 × 1080 實尺寸，請以 2 m 距離預覽。</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1240}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

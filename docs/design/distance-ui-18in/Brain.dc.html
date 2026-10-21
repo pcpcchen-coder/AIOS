@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>電子腦元件</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: {{px}}; height: {{px}}; background: #070B16">
+<svg viewBox="-60 -110 520 520" width="100%" height="100%" role="img" aria-label="{{label}}">
+<circle cx="{{gx}}" cy="{{gy}}" r="78" fill="{{tone}}" opacity="{{g1}}"></circle>
+<circle cx="{{gx}}" cy="{{gy}}" r="50" fill="{{tone}}" opacity="{{g2}}"></circle>
+<circle cx="{{gx}}" cy="{{gy}}" r="26" fill="{{tone}}" opacity="{{g3}}"></circle>
+<path d="M138 65L144 41 M138 65L145 93 M138 65L118 49 M138 65L121 79 M253 46L240 65 M253 46L279 70 M253 46L287 49 M213 118L228 141 M213 118L231 93 M213 118L189 124 M45 153L78 149 M45 153L36 130 M45 153L34 174 M174 232L211 220 M174 232L151 217 M174 232L178 210 M68 83L98 68 M68 83L89 95 M68 83L50 97 M245 262L270 245 M245 262L266 271 M245 262L224 247 M325 100L315 68 M325 100L351 109 M325 100L304 93 M133 230L151 217 M133 230L107 220 M133 230L138 198 M88 172L110 170 M88 172L78 149 M88 172L82 197 M249 120L228 141 M249 120L258 141 M249 120L274 125 M217 44L240 65 M217 44L195 34 M217 44L205 65 M135 173L110 170 M135 173L135 150 M135 173L138 198 M184 102L179 73 M184 102L209 87 M184 102L189 124 M303 201L327 200 M303 201L292 221 M303 201L319 179 M110 170L107 148 M110 170L116 199 M280 99L279 70 M280 99L304 93 M280 99L297 124 M280 99L255 90 M280 99L274 125 M78 149L107 148 M293 170L268 175 M293 170L288 146 M293 170L319 179 M268 175L264 199 M268 175L247 185 M228 141L235 164 M319 261L299 250 M319 261L339 246 M319 261L292 271 M191 192L209 172 M191 192L173 173 M191 192L178 210 M160 193L151 217 M160 193L173 173 M160 193L138 198 M160 193L178 210 M122 131L107 148 M122 131L135 150 M122 131L141 116 M231 93L240 65 M231 93L209 87 M231 93L255 90 M331 225L327 200 M331 225L349 204 M331 225L339 246 M162 127L163 153 M162 127L189 124 M162 127L141 116 M61 185L63 209 M61 185L82 197 M61 185L34 174 M98 68L118 49 M98 68L121 79 M98 68L89 95 M144 41L118 49 M144 41L169 53 M61 118L93 118 M61 118L36 130 M61 118L50 97 M240 65L255 90 M188 148L163 153 M188 148L209 172 M188 148L173 173 M188 148L189 124 M145 93L121 79 M145 93L141 116 M315 68L304 93 M315 68L287 49 M327 200L349 204 M327 200L341 181 M327 200L319 179 M83 219L107 220 M83 219L63 209 M83 219L82 197 M211 220L225 201 M211 220L224 247 M211 220L178 210 M116 199L107 220 M116 199L138 198 M360 138L365 163 M360 138L351 109 M360 138L336 132 M360 138L340 155 M319 146L297 124 M319 146L336 132 M319 146L340 155 M254 226L270 245 M254 226L264 199 M254 226L224 247 M288 146L297 124 M288 146L258 141 M288 146L274 125 M279 70L255 90 M279 70L287 49 M113 100L93 118 M113 100L121 79 M113 100L89 95 M179 73L169 53 M179 73L205 65 M270 245L299 250 M270 245L266 271 M270 245L292 221 M299 250L339 246 M299 250L292 221 M299 250L292 271 M225 201L209 172 M225 201L247 185 M209 87L205 65 M163 153L173 173 M163 153L135 150 M266 271L292 271 M365 163L341 181 M365 163L340 155 M264 199L247 185 M195 34L169 53 M195 34L205 65 M349 204L341 181 M209 172L235 164 M351 109L336 132 M93 118L89 95 M341 181L319 179 M235 164L247 185 M151 217L138 198 M36 130L34 174 M36 130L50 97 M297 124L274 125 M258 141L274 125 M336 132L340 155 M63 209L82 197" fill="none" stroke="#5FB8E8" stroke-width="1.6" opacity="{{edgeOp}}"></path>
+<path d="M138 65h0 M253 46h0 M213 118h0 M45 153h0 M174 232h0 M68 83h0 M245 262h0 M325 100h0 M133 230h0 M88 172h0 M249 120h0 M217 44h0 M135 173h0 M184 102h0 M303 201h0 M110 170h0 M280 99h0 M78 149h0 M293 170h0 M268 175h0 M228 141h0 M319 261h0 M191 192h0 M160 193h0 M122 131h0 M107 148h0 M231 93h0 M331 225h0 M162 127h0 M61 185h0 M98 68h0 M144 41h0 M61 118h0 M240 65h0 M188 148h0 M145 93h0 M315 68h0 M327 200h0 M83 219h0 M211 220h0 M116 199h0 M360 138h0 M319 146h0 M254 226h0 M288 146h0 M279 70h0 M113 100h0 M179 73h0 M270 245h0 M299 250h0 M225 201h0 M209 87h0 M163 153h0 M266 271h0 M365 163h0 M264 199h0 M195 34h0 M349 204h0 M224 247h0 M209 172h0 M339 246h0 M351 109h0 M93 118h0 M118 49h0 M341 181h0 M235 164h0 M292 221h0 M304 93h0 M151 217h0 M36 130h0 M297 124h0 M255 90h0 M107 220h0 M258 141h0 M169 53h0 M173 173h0 M121 79h0 M319 179h0 M336 132h0 M287 49h0 M247 185h0 M63 209h0 M82 197h0 M274 125h0 M34 174h0 M89 95h0 M205 65h0 M135 150h0 M189 124h0 M340 155h0 M138 198h0 M178 210h0 M50 97h0 M292 271h0 M141 116h0" fill="none" stroke="#CDEFFF" stroke-width="5.5" stroke-linecap="round" opacity="{{nodeOp}}"></path>
+<circle cx="200" cy="150" r="240" fill="none" stroke="{{tone}}" stroke-width="3" opacity="{{faint}}"></circle>
+<circle cx="200" cy="150" r="240" fill="none" stroke="{{tone}}" stroke-width="{{solidW}}" opacity="{{solid}}"></circle>
+<circle cx="200" cy="150" r="222" fill="none" stroke="{{tone}}" stroke-width="3" opacity="{{inner}}"></circle>
+<circle cx="200" cy="150" r="258" fill="none" stroke="{{tone}}" stroke-width="5" opacity="{{pulse2}}"></circle>
+<circle cx="200" cy="150" r="274" fill="none" stroke="{{tone}}" stroke-width="3" opacity="{{pulse3}}"></circle>
+<circle cx="200" cy="150" r="240" fill="none" stroke="{{tone}}" stroke-width="10" opacity="{{track}}"></circle>
+<circle cx="200" cy="150" r="240" fill="none" stroke="{{tone}}" stroke-width="12" stroke-linecap="round" stroke-dasharray="{{arcDash}}" transform="rotate(-90 200 150)" opacity="{{arc}}"></circle>
+<circle cx="200" cy="150" r="240" fill="none" stroke="{{tone}}" stroke-width="10" stroke-linecap="round" stroke-dasharray="26 26" opacity="{{dashed}}"></circle>
+<circle cx="200" cy="150" r="240" fill="none" stroke="{{tone}}" stroke-width="10" stroke-dasharray="{{brokenDash}}" transform="rotate(-60 200 150)" opacity="{{broken}}"></circle>
+</svg>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"size":{"editor":"int","default":640,"min":80,"max":1000},"tone":{"editor":"color","default":"#4FD1FF","options":["#4FD1FF","#8B9CFF","#FFB547","#FF6B6B"]},"mode":{"editor":"enum","default":"breath","options":["faint","breath","arc","pulse","dashed","solid","broken","none"]},"progress":{"editor":"range","default":40,"min":0,"max":100,"step":1},"region":{"editor":"enum","default":"none","options":["none","plan","art","math","vision","audio","lang"]},"dim":{"editor":"enum","default":"no","options":["no","yes"]},"$preview":{"width":640,"height":640}}'>
+class Component extends DCLogic {
+renderVals() {
+const size = Number(this.props.size ?? 640);
+const tone = this.props.tone ?? '#4FD1FF';
+const m = this.props.mode ?? 'breath';
+const p = Math.max(0, Math.min(100, Number(this.props.progress ?? 40)));
+const dim = (this.props.dim ?? 'no') === 'yes';
+const C = 2 * Math.PI * 240;
+const spots = { plan: [85, 120], art: [160, 70], math: [262, 100], vision: [335, 180], audio: [228, 215], lang: [118, 205] };
+const spot = spots[this.props.region ?? 'none'];
+const names = { faint: '待機', breath: '在聽', arc: '處理中', pulse: '說明中', dashed: '等你決定', solid: '請確認', broken: '沒做完', none: '' };
+return {
+px: size + 'px',
+tone: tone,
+label: '電子腦狀態：' + (names[m] || ''),
+gx: spot ? spot[0] : 200,
+gy: spot ? spot[1] : 150,
+g1: spot ? 0.12 : 0,
+g2: spot ? 0.2 : 0,
+g3: spot ? 0.38 : 0,
+edgeOp: dim ? 0.4 : 0.75,
+nodeOp: dim ? 0.55 : 0.95,
+faint: m === 'faint' ? 0.22 : 0,
+solid: (m === 'breath' || m === 'pulse' || m === 'solid') ? 0.95 : 0,
+solidW: m === 'solid' ? 18 : 10,
+inner: m === 'breath' ? 0.35 : 0,
+pulse2: m === 'pulse' ? 0.5 : 0,
+pulse3: m === 'pulse' ? 0.22 : 0,
+track: m === 'arc' ? 0.16 : 0,
+arc: m === 'arc' ? 1 : 0,
+arcDash: (C * p / 100).toFixed(1) + ' ' + C.toFixed(1),
+dashed: m === 'dashed' ? 0.95 : 0,
+broken: m === 'broken' ? 0.9 : 0,
+brokenDash: (C * 0.78).toFixed(1) + ' ' + (C * 0.22).toFixed(1)
+};
+}
+}
+</script>
+</body>
+</html>

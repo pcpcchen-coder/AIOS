@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>01 待機</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1920px; height: 1080px; position: relative; overflow: hidden; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; align-items: center; justify-content: center">
+<dc-import name="Brain" size="780" tone="#5A7FA8" mode="faint" progress="0" region="none" dim="no" hint-size="780px,780px"></dc-import>
+<div style="position: absolute; top: 64px; right: 96px; display: flex; align-items: center; gap: 16px">
+<div style="width: 28px; height: 28px; border-radius: 50%; background: #3E5878"></div>
+<div style="font-size: 40px; font-weight: 500; color: #7F93AE">待命</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1080}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

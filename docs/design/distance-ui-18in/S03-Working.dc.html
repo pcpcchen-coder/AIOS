@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>03 處理中</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1920px; height: 1080px; position: relative; overflow: hidden; box-sizing: border-box; padding: 56px 96px 64px; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; flex-direction: column; align-items: center">
+<div style="position: absolute; top: 64px; left: 96px; font-size: 40px; font-weight: 500; color: #FFB547; border: 3px solid #6B5326; border-radius: 999px; padding: 8px 28px">示意畫面</div>
+<dc-import name="Brain" size="600" tone="#8B9CFF" mode="arc" progress="40" region="math" dim="no" hint-size="600px,600px"></dc-import>
+<div style="display: flex; align-items: baseline; gap: 36px; margin-top: 8px">
+<div style="font-size: 108px; font-weight: 700; color: #8B9CFF; line-height: 1.2">處理中</div>
+<div style="font-size: 108px; font-weight: 700; color: #FFFFFF; line-height: 1.2; font-variant-numeric: tabular-nums">2 / 5</div>
+</div>
+<div style="display: flex; align-items: center; gap: 20px; margin-top: 12px">
+<div style="width: 24px; height: 24px; border-radius: 50%; background: #8B9CFF"></div>
+<div style="font-size: 56px; font-weight: 500; color: #A9BBD3">數理區</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1080}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
