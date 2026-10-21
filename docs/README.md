@@ -7,6 +7,7 @@
 | 檔案 | 內容 | 定位 |
 |---|---|---|
 | [08_Consolidation_and_Update_2026-10.md](./08_Consolidation_and_Update_2026-10.md) | 完整進度、決策日誌 v2、生態變化、架構修正提案、gate 時程 | 最新現況與規劃基線 |
+| [10_Distance_UI_18inch_2026-10.md](./10_Distance_UI_18inch_2026-10.md) | 18 吋遠距（2 m）畫面 × 語音設計：字級、狀態四重編碼、視線限制、9 個狀態畫面 | 設計提案，待實機驗證 |
 | [06_Ambient_Voice_Gaze_Experience.md](./06_Ambient_Voice_Gaze_Experience.md) | 電子腦、無 App、語音、視線、按需呈現與狀態架構 | 最新產品規格 |
 | [07_Ambient_Implementation_and_Acceptance.md](./07_Ambient_Implementation_and_Acceptance.md) | 目錄、契約、prompt、開發批次、驗收與量測 | 最新執行依據 |
 | [01_Complete_Technical_Blueprint.md](./01_Complete_Technical_Blueprint.md) | 核心架構與原 12 個月藍圖 | 基礎設計 |

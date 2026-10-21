@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>狀態四重編碼</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1920px; height: 1240px; box-sizing: border-box; padding: 64px 80px; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; flex-direction: column; gap: 28px">
+<div style="display: flex; flex-direction: column; gap: 10px">
+<div style="font-size: 56px; font-weight: 900; line-height: 1.15">狀態四重編碼：顏色 × 光環形狀 × 狀態字 × 提示音</div>
+<div style="font-size: 28px; color: #A9BBD3; line-height: 1.4">遠處先靠餘光看顏色與光環，走近才讀字；閉眼也能靠提示音知道狀態。任一通道失效（色弱、背對螢幕）都不會漏訊息。</div>
+</div>
+<div style="display: grid; grid-template-columns: 250px 130px 210px 300px 330px minmax(0, 1fr); column-gap: 28px; align-items: center; font-size: 24px; color: #7F93AE; border-bottom: 2px solid #1F2A40; padding-bottom: 12px">
+<div>Shell 狀態</div><div>光環</div><div>顏色</div><div>畫面狀態字</div><div>提示音（提案）</div><div>語音行為</div>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+<div style="display: grid; grid-template-columns: 250px 130px 210px 300px 330px minmax(0, 1fr); column-gap: 28px; align-items: center; min-height: 106px; border-bottom: 1px solid #141C2E">
+<div style="display: flex; flex-direction: column; gap: 4px">
+<div style="font-size: 32px; font-weight: 700; color: #FFFFFF">{{r.name}}</div>
+<div style="font-size: 22px; color: #7F93AE">{{r.key}}</div>
+</div>
+<dc-import name="Brain" size="110" tone="{{r.tone}}" mode="{{r.mode}}" progress="40" region="none" dim="{{r.dim}}" hint-size="110px,110px"></dc-import>
+<div style="display: flex; align-items: center; gap: 16px">
+<div style="width: 44px; height: 44px; border-radius: 50%; background: {{r.tone}}; flex: none"></div>
+<div style="font-size: 24px; color: #A9BBD3">{{r.toneName}}</div>
+</div>
+<div style="font-size: 56px; font-weight: 700; color: {{r.tone}}; line-height: 1.1">{{r.word}}</div>
+<div style="font-size: 26px; color: #D5E0EE; line-height: 1.35">{{r.sound}}</div>
+<div style="font-size: 26px; color: #D5E0EE; line-height: 1.35">{{r.voice}}</div>
+</div>
+</sc-for>
+<div style="font-size: 24px; color: #7F93AE; line-height: 1.5">光環只由真實事件驅動（收音開始、步驟完成、播放開始）；處理中的弧長＝完成步數 ÷ 總步數，規劃完成前不畫弧。請確認時另加全螢幕外框，讓背對螢幕轉身就能看到。</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1240}}'>
+class Component extends DCLogic {
+renderVals() {
+return {
+rows: [
+{ name: '待機', key: 'ambient', tone: '#5A7FA8', toneName: '暗藍', mode: 'faint', dim: 'yes', word: '—', sound: '無', voice: '不說話' },
+{ name: '在聽', key: 'listening', tone: '#4FD1FF', toneName: '青', mode: 'breath', dim: 'no', word: '在聽', sound: '喚醒：上行兩音', voice: '立刻停止播報，等你說完' },
+{ name: '處理中', key: 'working', tone: '#8B9CFF', toneName: '藍紫', mode: 'arc', dim: 'no', word: '處理中 2/5', sound: '無；背景完成時短鈴', voice: '開始時一句「開始做了」，之後安靜' },
+{ name: '說明中', key: 'presenting', tone: '#DDE8FF', toneName: '白', mode: 'pulse', dim: 'no', word: '說明中', sound: '無', voice: '只念結論 ≤ 2 句，細節留在畫面' },
+{ name: '等你決定', key: 'clarifying', tone: '#FFB547', toneName: '琥珀', mode: 'dashed', dim: 'no', word: '等你決定', sound: '下行兩音', voice: '念問題＋預設值，最多一題' },
+{ name: '請確認', key: 'confirming', tone: '#FFB547', toneName: '琥珀＋外框', mode: 'solid', dim: 'no', word: '請確認', sound: '下行兩音 × 2', voice: '念動作、對象、後果；要求固定語句' },
+{ name: '沒做完', key: 'recoverable_error', tone: '#FF6B6B', toneName: '珊瑚紅', mode: 'broken', dim: 'no', word: '沒做完', sound: '低音一聲', voice: '一句原因＋保留了什麼＋下一步' },
+{ name: '完成', key: 'task succeeded', tone: '#4ADE80', toneName: '綠（一次性）', mode: 'breath', dim: 'no', word: '完成', sound: '上行三音', voice: '「好了，在畫面上」；收起時不重開' }
+]
+};
+}
+}
+</script>
+</body>
+</html>

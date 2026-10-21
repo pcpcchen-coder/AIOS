@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>02 在聽</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1920px; height: 1080px; position: relative; overflow: hidden; box-sizing: border-box; padding: 56px 96px 64px; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; flex-direction: column; align-items: center">
+<div style="position: absolute; top: 64px; right: 96px; display: flex; align-items: center; gap: 16px">
+<div style="width: 28px; height: 28px; border-radius: 50%; background: #4FD1FF"></div>
+<div style="font-size: 44px; font-weight: 700; color: #4FD1FF">收音中</div>
+</div>
+<dc-import name="Brain" size="540" tone="#4FD1FF" mode="breath" progress="0" region="audio" dim="no" hint-size="540px,540px"></dc-import>
+<div style="font-size: 108px; font-weight: 700; color: #4FD1FF; line-height: 1.2; margin-top: 8px">在聽</div>
+<div style="flex-grow: 1"></div>
+<div style="width: 100%; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center">
+<div style="font-size: 76px; font-weight: 500; color: #FFFFFF; line-height: 1.25">「幫我比較三家 PCS 供應商，</div>
+<div style="font-size: 76px; font-weight: 500; color: #8FA3BD; line-height: 1.25">看價格、效率…</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1080}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

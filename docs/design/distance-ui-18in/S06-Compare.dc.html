@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>06 比較與視線焦點</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1920px; height: 1080px; overflow: hidden; box-sizing: border-box; padding: 48px 96px 64px; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; flex-direction: column">
+<div style="display: flex; align-items: center; justify-content: space-between">
+<div style="display: flex; align-items: center; gap: 28px">
+<dc-import name="Brain" size="140" tone="#DDE8FF" mode="pulse" progress="0" region="none" dim="yes" hint-size="140px,140px"></dc-import>
+<div style="font-size: 108px; font-weight: 700; color: #FFFFFF; line-height: 1.2">比較 3 家</div>
+</div>
+<div style="font-size: 40px; font-weight: 500; color: #FFB547; border: 3px solid #6B5326; border-radius: 999px; padding: 8px 28px">示意資料</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 48px; margin-top: 56px; align-items: start">
+<div style="background: #101828; border: 4px solid #22304A; border-radius: 32px; padding: 36px 40px; display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; align-items: center; gap: 24px">
+<div style="width: 88px; height: 88px; border-radius: 50%; background: #DDE8FF; color: #070B16; font-size: 56px; font-weight: 900; display: flex; align-items: center; justify-content: center">1</div>
+<div style="font-size: 108px; font-weight: 700; color: #FFFFFF; line-height: 1.15">A 廠</div>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><div style="font-size: 56px; color: #8FA3BD">價格</div><div style="font-size: 76px; font-weight: 700; color: #EAF2FF">2.4 萬</div></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><div style="font-size: 56px; color: #8FA3BD">效率</div><div style="font-size: 76px; font-weight: 700; color: #EAF2FF">97.9%</div></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><div style="font-size: 56px; color: #8FA3BD">交期</div><div style="font-size: 76px; font-weight: 700; color: #EAF2FF">10 週</div></div>
+</div>
+<div style="background: #13203A; border: 8px solid #4FD1FF; border-radius: 32px; padding: 32px 36px; display: flex; flex-direction: column; gap: 22px; transform: scale(1.05); box-shadow: 0 0 0 14px rgba(79, 209, 255, 0.16)">
+<div style="display: flex; align-items: center; justify-content: space-between">
+<div style="display: flex; align-items: center; gap: 24px">
+<div style="width: 88px; height: 88px; border-radius: 50%; background: #4FD1FF; color: #070B16; font-size: 56px; font-weight: 900; display: flex; align-items: center; justify-content: center">2</div>
+<div style="font-size: 108px; font-weight: 700; color: #FFFFFF; line-height: 1.15">B 廠</div>
+</div>
+<div style="font-size: 40px; font-weight: 700; color: #4FD1FF">已指向</div>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><div style="font-size: 56px; color: #8FA3BD">價格</div><div style="font-size: 76px; font-weight: 900; color: #4FD1FF">2.1 萬</div></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><div style="font-size: 56px; color: #8FA3BD">效率</div><div style="font-size: 76px; font-weight: 900; color: #4FD1FF">98.4%</div></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><div style="font-size: 56px; color: #8FA3BD">交期</div><div style="font-size: 76px; font-weight: 900; color: #4FD1FF">6 週</div></div>
+</div>
+<div style="background: #101828; border: 4px solid #22304A; border-radius: 32px; padding: 36px 40px; display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; align-items: center; gap: 24px">
+<div style="width: 88px; height: 88px; border-radius: 50%; background: #DDE8FF; color: #070B16; font-size: 56px; font-weight: 900; display: flex; align-items: center; justify-content: center">3</div>
+<div style="font-size: 108px; font-weight: 700; color: #FFFFFF; line-height: 1.15">C 廠</div>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><div style="font-size: 56px; color: #8FA3BD">價格</div><div style="font-size: 76px; font-weight: 700; color: #EAF2FF">2.3 萬</div></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><div style="font-size: 56px; color: #8FA3BD">效率</div><div style="font-size: 76px; font-weight: 700; color: #EAF2FF">98.1%</div></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><div style="font-size: 56px; color: #8FA3BD">交期</div><div style="font-size: 76px; font-weight: 700; color: #EAF2FF">8 週</div></div>
+</div>
+</div>
+<div style="flex-grow: 1"></div>
+<div style="align-self: flex-start; display: flex; align-items: center; gap: 20px; padding: 12px 36px; border: 3px solid #2E3B55; border-radius: 999px; font-size: 56px; font-weight: 500; color: #C9D6E8; line-height: 1.2">
+<svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#C9D6E8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v4"></path></svg>
+<span>看著它說<b style="color: #FFFFFF; font-weight: 700">「這個，展開」</b>，或說<b style="color: #FFFFFF; font-weight: 700">「第二個」</b></span>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1080}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
