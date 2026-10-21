@@ -8,7 +8,7 @@ import { ExecutionError } from "./runner.ts";
 import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { WebSearchError, type WebSearch } from "./web-search.ts";
 import { HomeBridgeError, type HomeBridge } from "./home-bridge.ts";
-import type { CameraSettings } from "../shared/sense.ts";
+import { CameraPatchError, parseCameraPatch, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
@@ -58,11 +58,17 @@ export interface AppOptions {
   webSearch?: WebSearch;
   /** 武陵居中控的唯讀查詢（docs/12 H0）；未提供時不可用。 */
   home?: HomeBridge;
-  /** 雙目鏡頭設定（docs/11）；未提供或未啟用時頁面不允許使用鏡頭。 */
-  camera?: CameraSettings;
+  /** 雙目鏡頭設定（docs/11，通常是 CameraSettingsStore）；未提供或未啟用時頁面不允許使用鏡頭。 */
+  camera?: CameraSettingsSource;
   port: number;
   devPort: number;
   distDir: string | null;
+}
+
+/** 鏡頭設定的來源：安裝設定固定，使用者設定可寫入。 */
+export interface CameraSettingsSource {
+  view(): CameraSettings;
+  update(patch: CameraPrefsPatch): CameraSettings;
 }
 
 class HttpError extends Error {
@@ -77,7 +83,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     view: (): SettingsView => ({
       ...options.settings.view(),
       ...(realtime ? { realtime: realtime.info() } : {}),
-      ...(options.camera ? { camera: options.camera } : {}),
+      ...(options.camera ? { camera: options.camera.view() } : {}),
     }),
     select: (provider: ExecutorMode) => options.settings.select(provider),
   };
@@ -104,7 +110,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (url.pathname.startsWith("/api/")) {
         await handleApi(req, res, url.pathname);
       } else {
-        serveStatic(res, url.pathname, options.distDir, !!options.camera?.enabled);
+        serveStatic(res, url.pathname, options.distDir, !!options.camera?.view().enabled);
       }
     } catch (err) {
       const code = err instanceof HttpError ? err.status : 500;
@@ -127,6 +133,19 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         throw new HttpError(409, (err as Error).message);
       }
+      return sendJson(res, 200, settings.view());
+    }
+    if (method === "POST" && path === "/api/settings/camera") {
+      if (!options.camera) throw new HttpError(409, "鏡頭未設定");
+      let patch: CameraPrefsPatch;
+      try {
+        patch = parseCameraPatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof CameraPatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      // update 會呼叫 onChange（→ notifySettings），這裡不重複廣播。
+      options.camera.update(patch);
       return sendJson(res, 200, settings.view());
     }
     if (method === "POST" && path === "/api/chat") return streamChat(req, res);

@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { parseEnv } from "node:util";
 import { createApp } from "./app.ts";
+import { CameraSettingsStore } from "./camera-settings.ts";
 import { ChatGPTAuth } from "./chatgpt-auth.ts";
 import { ChatGPTExecutor } from "./chatgpt-executor.ts";
 import { ClaudeExecutor } from "./claude-executor.ts";
@@ -79,6 +80,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     taskWebSearch: config.taskWebSearch,
     home: home.available,
   });
+  const camera = new CameraSettingsStore({ base: config.camera, dir: config.configDir, onChange: () => notify(), log });
   const store = new TaskStore(options.dataDir);
   const runner = new TaskRunner(store, providers, config.maxConcurrent);
   const server = createApp({
@@ -90,7 +92,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     realtime,
     webSearch,
     home,
-    camera: config.camera,
+    camera,
     port,
     devPort: config.devPort,
     distDir: options.distDir,
@@ -113,7 +115,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const live = realtime.info();
   log(`即時語音：${live.available ? "可用" : "不可用"}，${live.detail}`);
   log(`武陵居中控：${home.available ? "已設定" : "未設定"}，${home.detail}`);
-  log(`雙目鏡頭：${config.camera.enabled ? `啟用（${config.camera.label}，影像只在本機處理）` : "未啟用（NOUS_CAMERA=on 開啟）"}`);
+  const cam = camera.view();
+  log(`雙目鏡頭：${cam.enabled ? `啟用（${cam.label}，影像只在本機處理${cam.active ? "" : "；使用者已在設定關閉"}）` : "未啟用（NOUS_CAMERA=on 開啟）"}`);
   log(`憑證與設定目錄：${config.configDir}`);
 
   return {

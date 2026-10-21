@@ -2,6 +2,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { computeProgress, isActive, sortForProgress, summarize } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type SettingsView, type Task, type TaskStep } from "../shared/types.ts";
+import { CAMERA_PREF_KEYS, CAMERA_PREFS, stepCameraPref, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -16,6 +17,10 @@ export interface ViewActions {
   chatgptCancel(): void;
   chatgptLogout(): void;
   ackWelcome(): void;
+  /** 鏡頭設定的開關與 −／+：送出單一鍵的 patch（數值已依 CAMERA_PREFS 夾在範圍內）。 */
+  updateCamera(patch: CameraPrefsPatch): void;
+  /** 顯示鏡頭畫面（只是畫面，不保存）。 */
+  openCameraPreview(): void;
 }
 
 const MAX_LISTED = 8;
@@ -365,7 +370,58 @@ export function renderSettings(settings: SettingsView | null, message: string | 
       ),
     account.length > 0 && h("div", { class: "account" }, ...account),
     h("p", { class: "muted small" }, "新交辦的任務會用目前選擇的引擎；已在執行的任務不受影響。"),
+    settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
     footer(actions),
+  );
+}
+
+/** 鏡頭與手勢：逐項走 CAMERA_PREFS（順序、標籤、提示、範圍都從那裡來）。 */
+function renderCameraSettings(camera: CameraSettings, realtimeAvailable: boolean, actions: ViewActions): HTMLElement {
+  const title = h("h3", {}, "鏡頭與手勢");
+  if (!camera.enabled) {
+    return h("section", { class: "camera-settings" }, title, h("p", { class: "muted small" }, "鏡頭未啟用（.env 設定 NOUS_CAMERA=on 後重新啟動）。"));
+  }
+  const list = h("ul", { class: "pref-list" });
+  for (const key of CAMERA_PREF_KEYS) {
+    const spec = CAMERA_PREFS[key];
+    let control: HTMLElement;
+    if (spec.kind === "bool") {
+      const on = camera[key] as boolean;
+      control = button(on ? "開" : "關", () => actions.updateCamera({ [key]: !on }), on ? "btn--primary" : "");
+      control.setAttribute("aria-pressed", String(on));
+      control.setAttribute("aria-label", `${spec.label}：${on ? "開" : "關"}`);
+    } else {
+      const k = key as "look_to_talk_s" | "look_to_talk_cooldown_s";
+      const value = camera[k];
+      const minus = button("−", () => actions.updateCamera({ [k]: stepCameraPref(k, value, -1) }));
+      const plus = button("+", () => actions.updateCamera({ [k]: stepCameraPref(k, value, 1) }));
+      minus.disabled = value <= spec.min;
+      plus.disabled = value >= spec.max;
+      minus.setAttribute("aria-label", `${spec.label}減少`);
+      plus.setAttribute("aria-label", `${spec.label}增加`);
+      control = h("div", { class: "stepper" }, minus, h("span", { class: "stepper-value" }, `${value} 秒`), plus);
+    }
+    const hint = key === "look_to_talk" && !realtimeAvailable ? `${spec.hint}；需要即時語音（目前不可用）` : spec.hint;
+    list.append(
+      h(
+        "li",
+        { class: `pref${spec.kind === "seconds" ? " pref--sub" : ""}` },
+        h("div", { class: "provider-text" }, h("strong", {}, spec.label), h("span", { class: "muted small" }, hint)),
+        control,
+      ),
+    );
+  }
+  return h(
+    "section",
+    { class: "camera-settings" },
+    title,
+    list,
+    h("div", { class: "actions" }, button("顯示鏡頭畫面", actions.openCameraPreview)),
+    h(
+      "p",
+      { class: "muted small" },
+      `安裝（.env）：${camera.label} · ${camera.left_first ? "左半為左眼" : "右半為左眼"} · 螢幕寬 ${camera.screen_width_mm} mm · 鏡頭偏移 ${camera.screen_offset_mm} mm`,
+    ),
   );
 }
 

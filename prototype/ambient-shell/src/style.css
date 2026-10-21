@@ -676,6 +676,52 @@ body.listening .surface {
   margin-top: 14px;
 }
 
+/* 設定：鏡頭與手勢（由 CAMERA_PREFS 產生） */
+.camera-settings {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+.camera-settings h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+.pref-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.pref {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+}
+.pref--sub {
+  margin-left: 18px;
+}
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+.stepper-value {
+  min-width: 4.5em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .welcome {
   margin-bottom: 14px;
   padding: 12px 14px;
@@ -955,8 +1001,13 @@ body[data-facing="yes"] #brain {
   display: flex;
   align-items: center;
   gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
   font-size: 12px;
   color: var(--muted);
+  cursor: pointer;
 }
 .sensor-indicator::before {
   content: "";
@@ -969,3 +1020,69 @@ body[data-facing="yes"] #brain {
 .sensor-indicator[data-state="degraded"]::before,
 .sensor-indicator[data-state="starting"]::before { background: var(--amber); }
 .sensor-indicator[data-state="error"]::before { background: var(--red); }
+
+/*
+ * 鏡頭畫面：在指示點正上方、貼齊右緣，兩格上下排列，在距離縮放之外。
+ * 打開時字幕寬度上限改為 40vw（縮放 1.5 倍後右緣約在 80vw），預覽寬度 16vw + 邊距，兩者不重疊。
+ */
+.sensor-preview {
+  --preview-w: min(256px, 16vw);
+  position: fixed;
+  right: 16px;
+  bottom: 36px;
+  z-index: 30;
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: var(--panel);
+  backdrop-filter: blur(8px);
+}
+.sensor-preview figure {
+  position: relative;
+  margin: 0;
+  width: var(--preview-w);
+}
+.sensor-preview canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  height: auto;
+  border-radius: 6px;
+  background: #000;
+}
+.sensor-preview figcaption {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.sensor-preview-stale {
+  position: absolute;
+  inset: 0 0 auto 0;
+  aspect-ratio: 16 / 9;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--amber);
+  background: rgba(3, 5, 11, 0.7);
+}
+.sensor-preview[data-state="degraded"] .sensor-preview-stale { display: flex; }
+.sensor-preview-close {
+  justify-self: end;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--muted);
+  cursor: pointer;
+}
+.sensor-preview-close:hover,
+.sensor-preview-close:focus-visible { color: var(--text); }
+body[data-camera-preview="open"] .subtitle {
+  max-width: min(720px, 40vw);
+}
