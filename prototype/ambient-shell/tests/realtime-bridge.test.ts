@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildRealtimeInstructions, RealtimeBridge, RealtimeError } from "../server/realtime.ts";
+import { buildRealtimeInstructions, buildRealtimeTools, RealtimeBridge, RealtimeError } from "../server/realtime.ts";
 import { makeTask } from "./fixtures.ts";
 
 type Call = { url: string; init: RequestInit };
@@ -80,4 +80,41 @@ describe("RealtimeBridge", () => {
     expect(text).toContain("get_tasks");
     expect(text).toContain("目前沒有交辦的任務");
   });
+
+  it("with web search and MCP: exposes web_search first, attaches MCP servers, and drops the no-internet rule", async () => {
+    const api = fakeOpenAI([
+      new Response(JSON.stringify({ value: "ek_fixture" }), { status: 200 }),
+      new Response("v=0 answer", { status: 201 }),
+    ]);
+    const bridge = new RealtimeBridge({
+      apiKey: "sk-fixture",
+      model: "gpt-realtime",
+      voice: "marin",
+      webSearch: true,
+      taskWebSearch: true,
+      mcp: [{ server_label: "calendar", server_url: "https://example.com/mcp", require_approval: "always" }],
+      fetch: api.fetch,
+    });
+    await bridge.connect("v=0 offer", []);
+    const session = JSON.parse(String(api.calls[0].init.body)).session;
+    expect(session.tools.map((t: { name?: string; type: string }) => t.name ?? t.type)).toEqual([
+      "web_search",
+      "delegate_task",
+      "get_tasks",
+      "end_conversation",
+      "mcp",
+    ]);
+    expect(session.tools.at(-1)).toMatchObject({ type: "mcp", server_label: "calendar", server_url: "https://example.com/mcp", require_approval: "always" });
+    expect(session.instructions).toContain("web_search");
+    expect(session.instructions).toContain("calendar");
+    expect(session.instructions).not.toContain("沒有上網");
+    expect(bridge.info()).toMatchObject({ available: true, web_search: true, mcp: ["calendar"] });
+  });
+
+  it("without web search, no web_search tool is offered and no internet ability is claimed", () => {
+    const text = buildRealtimeInstructions([]);
+    expect(text).not.toContain("你可以上網");
+    expect(buildRealtimeTools({ webSearch: false, mcp: [] }).map((t) => t.name)).not.toContain("web_search");
+  });
 });
+

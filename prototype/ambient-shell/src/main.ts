@@ -3,7 +3,7 @@ import { computeProgress, isActive, queueText, sortForProgress } from "../shared
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
 import { ApiError, api, newRequestId, streamChat, subscribeEvents } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
-import { browserRealtimeDeps, realtimeSupported, RealtimeVoice, type RealtimePhase } from "./realtime.ts";
+import { browserRealtimeDeps, realtimeSupported, RealtimeVoice, type McpApprovalRequest, type RealtimePhase } from "./realtime.ts";
 import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
@@ -144,6 +144,9 @@ const realtime = new RealtimeVoice(
     onAssistantTranscript: (text) => showSubtitle(`Nous：${text}`),
     onDelegate: delegateFromRealtime,
     onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
+    onWebSearch: webSearchFromRealtime,
+    onMcpApproval: approveMcp,
+    onToolActivity: (text) => showSubtitle(text),
     onClosed: (reason) => {
       showSubtitle(reason);
       dispatch({ type: "input.open" });
@@ -400,6 +403,34 @@ async function delegateFromRealtime(title: string): Promise<Record<string, unkno
     engine: PROVIDER_LABEL[task.mode],
     note: task.status === "queued" ? queueText(task, tasks.values()) : "已開始處理，進度顯示在電子腦下方",
   };
+}
+
+/** 模型要上網查詢：本機核心代查，字幕顯示來源；失敗時照實交還給模型。 */
+async function webSearchFromRealtime(query: string): Promise<Record<string, unknown>> {
+  brain.pulse("step", classifyDomain(query));
+  try {
+    const result = await api.webSearch(query);
+    if (result.sources.length) showSubtitle(`來源：${result.sources.map((s) => s.title).slice(0, 3).join("、")}`);
+    return { ok: true, answer: result.answer, sources: result.sources.map((s) => s.title) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    showSubtitle(message);
+    return { ok: false, error: message };
+  }
+}
+
+/**
+ * 外部服務（MCP）要執行需要核准的動作：顯示動作、服務與參數，由使用者明確按下確認。
+ * 不由模型轉述使用者的同意（產品紅線：外部副作用需當次明確確認）。
+ */
+async function approveMcp(request: McpApprovalRequest): Promise<boolean> {
+  let args = request.arguments;
+  try {
+    args = JSON.stringify(JSON.parse(request.arguments), null, 2);
+  } catch {
+    // 保留原文
+  }
+  return window.confirm(`Nous 要使用外部服務「${request.server}」執行：${request.name}\n\n${args.slice(0, 800)}\n\n確定要執行嗎？`);
 }
 
 /** get_tasks 工具的回傳：最近的任務與真實進度。 */

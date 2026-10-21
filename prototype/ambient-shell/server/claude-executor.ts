@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, SYSTEM_PROMPT } from "./prompts.ts";
+import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, systemPrompt, WEB_SEARCH_UNAVAILABLE_GAP } from "./prompts.ts";
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 import type { ChatCapable, ChatMessage } from "./chat.ts";
 
@@ -13,8 +13,13 @@ export interface ClaudeExecutorOptions {
   modelFamily: string;
   /** 是否啟用伺服器端 refusal fallback（beta）。 */
   fallbacks: boolean;
+  /** 步驟執行時提供的 web search 工具版本（例如 web_search_20250305）；null 表示不上網。 */
+  webSearchTool?: string | null;
   client?: Anthropic;
 }
+
+/** 單一步驟遇到 pause_turn 時最多接續幾次。 */
+const MAX_CONTINUATIONS = 3;
 
 export class ClaudeExecutor implements Executor, ChatCapable {
   readonly mode = "claude" as const;
@@ -50,6 +55,11 @@ export class ClaudeExecutor implements Executor, ChatCapable {
       : {};
   }
 
+  /** Anthropic 伺服器端上網搜尋工具；版本由設定決定（NOUS_CLAUDE_WEB_SEARCH）。 */
+  private webSearchTool(): Anthropic.Beta.BetaToolUnion {
+    return { type: this.options.webSearchTool, name: "web_search", max_uses: 5 } as Anthropic.Beta.BetaToolUnion;
+  }
+
   /** 語音對話：低 effort 以降低首字延遲，串流回覆文字。 */
   async chat(
     input: { system: string; messages: ChatMessage[] },
@@ -58,19 +68,29 @@ export class ClaudeExecutor implements Executor, ChatCapable {
   ): Promise<{ model: string | null }> {
     try {
       const model = await this.resolveModel();
-      const stream = this.client.beta.messages.stream(
-        {
-          model,
-          max_tokens: 2000,
-          system: input.system,
-          output_config: { effort: "low" },
-          messages: input.messages,
-          ...this.extra(),
-        },
-        { signal },
-      );
-      stream.on("text", onDelta);
-      const message = await stream.finalMessage();
+      const talk = async (search: boolean) => {
+        const stream = this.client.beta.messages.stream(
+          {
+            model,
+            max_tokens: 2000,
+            system: input.system,
+            output_config: { effort: "low" },
+            messages: input.messages,
+            ...(search ? { tools: [this.webSearchTool()] } : {}),
+            ...this.extra(),
+          },
+          { signal },
+        );
+        stream.on("text", onDelta);
+        return stream.finalMessage();
+      };
+      let message: Anthropic.Beta.BetaMessage;
+      try {
+        message = await talk(!!this.options.webSearchTool);
+      } catch (err) {
+        if (!(this.options.webSearchTool && err instanceof Anthropic.BadRequestError)) throw err;
+        message = await talk(false);
+      }
       assertUsable(message, "對話");
       return { model: message.model };
     } catch (err) {
@@ -89,12 +109,14 @@ export class ClaudeExecutor implements Executor, ChatCapable {
   private async execute(title: string, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
     const model = await this.resolveModel();
     const served = new Set<string>();
+    let webSearch = !!this.options.webSearchTool;
+    const extraGaps: string[] = [];
 
     const planMessage = await this.client.beta.messages.create(
       {
         model,
         max_tokens: 4000,
-        system: SYSTEM_PROMPT,
+        system: systemPrompt({ webSearch }),
         output_config: { effort: "low", format: { type: "json_schema", schema: PLAN_SCHEMA } },
         messages: [{ role: "user", content: planPrompt(title) }],
         ...this.extra(),
@@ -118,37 +140,60 @@ export class ClaudeExecutor implements Executor, ChatCapable {
       const isSynthesis = i === titles.length - 1;
 
       reporter.stepStarted(i);
-      const stream = this.client.beta.messages.stream(
-        {
-          model,
-          max_tokens: isSynthesis ? 32000 : 16000,
-          system: SYSTEM_PROMPT,
-          output_config: { effort: "medium" },
-          messages: [{ role: "user", content: stepPrompt(title, plan, outputs, i) }],
-          ...this.extra(),
-        },
-        { signal },
-      );
       let chars = 0;
       let lastReport = 0;
-      stream.on("text", (delta) => {
+      const onText = (delta: string) => {
         chars += delta.length;
         const now = Date.now();
         if (now - lastReport >= 700) {
           lastReport = now;
           reporter.stepProgress(i, chars);
         }
-      });
-      const message = await stream.finalMessage();
-      served.add(message.model);
-      assertUsable(message, titles[i]);
-      if (message.stop_reason === "max_tokens") truncated = true;
+      };
+      const runStep = async (search: boolean) => {
+        const messages: Anthropic.Beta.BetaMessageParam[] = [{ role: "user", content: stepPrompt(title, plan, outputs, i) }];
+        let text = "";
+        for (let turn = 0; ; turn++) {
+          const stream = this.client.beta.messages.stream(
+            {
+              model,
+              max_tokens: isSynthesis ? 32000 : 16000,
+              system: systemPrompt({ webSearch: search }),
+              output_config: { effort: "medium" },
+              messages,
+              ...(search ? { tools: [this.webSearchTool()] } : {}),
+              ...this.extra(),
+            },
+            { signal },
+          );
+          stream.on("text", onText);
+          const message = await stream.finalMessage();
+          served.add(message.model);
+          assertUsable(message, titles[i]);
+          text += textOf(message);
+          // 伺服器端工具（上網搜尋）跑太久時會暫停這一輪：把已產生的內容接回去繼續。
+          if (message.stop_reason !== "pause_turn" || turn >= MAX_CONTINUATIONS) return { message, text };
+          messages.push({ role: "assistant", content: message.content as Anthropic.Beta.BetaContentBlockParam[] });
+        }
+      };
+      let step: { message: Anthropic.Beta.BetaMessage; text: string };
+      try {
+        step = await runStep(webSearch);
+      } catch (err) {
+        if (!(webSearch && err instanceof Anthropic.BadRequestError)) throw err;
+        webSearch = false;
+        extraGaps.push(WEB_SEARCH_UNAVAILABLE_GAP);
+        chars = 0;
+        step = await runStep(false);
+      }
+      const message = step.message;
+      if (message.stop_reason === "max_tokens" || message.stop_reason === "pause_turn") truncated = true;
       reporter.stepProgress(i, chars);
-      outputs.push(textOf(message));
+      outputs.push(step.text);
       reporter.stepDone(i);
     }
 
-    const gaps = [...plan.capability_gaps];
+    const gaps = [...plan.capability_gaps, ...extraGaps];
     if (truncated) gaps.push("部分步驟的輸出達到長度上限而被截斷。");
     return {
       content: outputs[outputs.length - 1],

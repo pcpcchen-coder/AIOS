@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RealtimeVoice, type RealtimeDeps, type RealtimePhase } from "../src/realtime.ts";
+import { RealtimeVoice, type McpApprovalRequest, type RealtimeDeps, type RealtimePhase } from "../src/realtime.ts";
 
 // 模擬 WebRTC：資料通道收發 OpenAI Realtime 事件，不需要麥克風、喇叭或網路。
 class FakeChannel {
@@ -27,7 +27,7 @@ class FakePeer {
   close() { this.closed = true; }
 }
 
-function setup(overrides: Partial<RealtimeDeps> = {}) {
+function setup(overrides: Partial<RealtimeDeps> = {}, approve = true) {
   vi.useFakeTimers();
   const peer = new FakePeer();
   const track = { stop: vi.fn() };
@@ -37,6 +37,9 @@ function setup(overrides: Partial<RealtimeDeps> = {}) {
   const delegated: string[] = [];
   const closed: string[] = [];
   const exchanged: string[] = [];
+  const searched: string[] = [];
+  const approvals: McpApprovalRequest[] = [];
+  const activity: string[] = [];
   const voice = new RealtimeVoice(
     {
       onPhase: (p) => phases.push(p),
@@ -48,6 +51,15 @@ function setup(overrides: Partial<RealtimeDeps> = {}) {
       },
       onGetTasks: async () => ({ ok: true, tasks: delegated.map((title) => ({ title, status: "running" })) }),
       onClosed: (r) => closed.push(r),
+      onWebSearch: async (query) => {
+        searched.push(query);
+        return { ok: true, answer: "新竹今天多雲，22 到 27 度（fixture）", sources: ["fixture 氣象站"] };
+      },
+      onMcpApproval: async (request) => {
+        approvals.push(request);
+        return approve;
+      },
+      onToolActivity: (text) => activity.push(text),
     },
     {
       getMicrophone: async () => ({ getAudioTracks: () => [track], getTracks: () => [track] }) as unknown as MediaStream,
@@ -76,7 +88,7 @@ function setup(overrides: Partial<RealtimeDeps> = {}) {
     ch.emit({ type: "response.done", response: { status: "completed" } });
     ch.emit({ type: "output_audio_buffer.stopped" });
   }
-  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, sentTypes, userSays, modelSpeaks };
+  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, searched, approvals, activity, sentTypes, userSays, modelSpeaks };
 }
 
 afterEach(() => {
@@ -262,5 +274,69 @@ describe("RealtimeVoice", () => {
     expect(t.voice.on).toBe(false);
     expect(t.closed[0]).toContain("401");
     expect(t.track.stop).toHaveBeenCalled();
+  });
+});
+
+describe("RealtimeVoice tools", () => {
+  it("web_search: queries through the local core, returns the answer to the model, then asks it to speak", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.userSays("新竹今天天氣如何");
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.function_call_arguments.done", name: "web_search", call_id: "c1", arguments: JSON.stringify({ query: "新竹市今天天氣" }) });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    await vi.runAllTicks();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(t.searched).toEqual(["新竹市今天天氣"]);
+    expect(t.activity).toContain("上網查詢：新竹市今天天氣");
+    const output = t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "function_call_output");
+    expect(JSON.parse(String((output!.item as { output: string }).output))).toMatchObject({ ok: true, answer: expect.stringContaining("新竹") });
+    expect(t.sentTypes().at(-1)).toBe("response.create");
+  });
+
+  it("MCP approval: asks the user, sends mcp_approval_response, and continues the conversation", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.ch.emit({ type: "response.created" });
+    const item = { type: "mcp_approval_request", id: "apr_1", server_label: "calendar", name: "create_event", arguments: "{\"title\":\"會議\"}" };
+    t.ch.emit({ type: "conversation.item.added", item });
+    t.ch.emit({ type: "conversation.item.done", item });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(t.approvals).toEqual([{ id: "apr_1", server: "calendar", name: "create_event", arguments: "{\"title\":\"會議\"}" }]);
+    const response = t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response");
+    expect(response!.item).toMatchObject({ id: "mcp_approval_apr_1", approval_request_id: "apr_1", approve: true });
+    expect(t.sentTypes().at(-1)).toBe("response.create");
+  });
+
+  it("MCP approval declined: tells OpenAI it was not approved", async () => {
+    const t = setup({}, false);
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.ch.emit({ type: "conversation.item.done", item: { type: "mcp_approval_request", id: "apr_2", server_label: "mail", name: "send", arguments: "{}" } });
+    await Promise.resolve();
+    await Promise.resolve();
+    const response = t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response");
+    expect(response!.item).toMatchObject({ approval_request_id: "apr_2", approve: false });
+    expect(t.activity).toContain("已拒絕：mail · send");
+  });
+
+  it("MCP call finishing after response.done triggers one follow-up response", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.mcp_call.in_progress" });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    expect(t.sentTypes().filter((x) => x === "response.create")).toHaveLength(0);
+    t.ch.emit({ type: "response.output_item.done", item: { type: "mcp_call", server_label: "calendar", name: "list_events" } });
+    expect(t.sentTypes().filter((x) => x === "response.create")).toHaveLength(1);
+    expect(t.activity).toContain("已使用 calendar：list_events");
   });
 });

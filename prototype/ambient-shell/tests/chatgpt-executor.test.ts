@@ -30,7 +30,7 @@ interface Recorded {
   body: Record<string, unknown> | null;
 }
 
-function setup(responses: (body: Record<string, unknown>) => Response) {
+function setup(responses: (body: Record<string, unknown>) => Response, opts: { webSearch?: boolean } = {}) {
   const requests: Recorded[] = [];
   const invalidated: string[] = [];
   const auth = {
@@ -54,7 +54,7 @@ function setup(responses: (body: Record<string, unknown>) => Response) {
     }
     return responses(body!);
   };
-  const ex = new ChatGPTExecutor(auth, { model: null, fetch: fakeFetch as typeof fetch });
+  const ex = new ChatGPTExecutor(auth, { model: null, fetch: fakeFetch as typeof fetch, ...opts });
   const calls: string[] = [];
   const reporter: Reporter = {
     planReady: (steps, model) =>
@@ -195,4 +195,34 @@ it.each(DOMAINS)("ChatGPT planner passes %s through Reporter and six-category sc
   expect(t.calls[0]).toBe(`plan:主題步驟/${domain}|彙整成果/language:gpt-x`);
   const schema = t.requests.find((r) => r.body?.text)?.body?.text;
   expect(schema).toMatchObject({ format: { schema: { properties: { steps: { items: { properties: { domain: { enum: DOMAINS } } } } } } } });
+});
+
+describe("ChatGPTExecutor web search", () => {
+  it("上網搜尋：步驟請求帶 web_search 工具，規劃請求不帶", async () => {
+    const t = setup((body) => (body.text ? textStream([JSON.stringify(PLAN)]) : textStream(["內容"])), { webSearch: true });
+    const result = await t.run();
+    const inference = t.requests.filter((r) => r.url.endsWith("/v1/responses"));
+    expect(inference[0].body).not.toHaveProperty("tools");
+    expect(inference[1].body!.tools).toEqual([{ type: "web_search" }]);
+    expect(String(inference[1].body!.instructions)).toContain("web_search");
+    expect(result.capability_gaps).toEqual([]);
+  });
+
+  it("方案不支援 web_search 時改用不帶工具的請求，並寫進能力缺口", async () => {
+    const t = setup(
+      (body) =>
+        body.text
+          ? textStream([JSON.stringify(PLAN)])
+          : body.tools
+            ? new Response(JSON.stringify({ error: { code: "subscription_sharing_unsupported_capability", message: "web_search" } }), { status: 400 })
+            : textStream(["內容"]),
+      { webSearch: true },
+    );
+    const result = await t.run();
+    expect(result.status).toBe("complete");
+    expect(result.capability_gaps.join()).toContain("不支援上網搜尋");
+    const steps = t.requests.filter((r) => r.url.endsWith("/v1/responses") && !r.body!.text);
+    // 第一步帶工具被拒、重試不帶；之後的步驟不再帶工具。
+    expect(steps.map((r) => !!r.body!.tools)).toEqual([true, false, false]);
+  });
 });

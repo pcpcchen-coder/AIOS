@@ -1,7 +1,9 @@
 // 即時語音模式（OpenAI Realtime）：像 ChatGPT 語音模式，語音直接對語音。
 // 麥克風音訊經 WebRTC 串流到 OpenAI，由伺服器端 VAD 判斷你何時說完；你一開口，
 // 正在播放的回覆就會被 OpenAI 截斷（插話）。SDP 交換經本機核心，API key 不進瀏覽器。
-// 交辦工作與查進度用 function calling，由這裡呼叫既有的任務 API，任務仍用目前選擇的引擎執行。
+// 上網查詢、交辦工作與查進度用 function calling：查詢經本機核心代為呼叫 web_search，
+// 交辦與進度呼叫既有的任務 API，任務仍用目前選擇的引擎執行。
+// 設定了遠端 MCP 伺服器時，由 OpenAI 端直接呼叫；需要核准的動作在這裡請使用者明確確認。
 
 export type RealtimePhase = "off" | "connecting" | "listening" | "hearing" | "thinking" | "speaking";
 
@@ -12,8 +14,21 @@ export interface RealtimeCallbacks {
   /** 模型決定交辦工作；回傳的內容會交還給模型，讓它用一句話告訴使用者。 */
   onDelegate(title: string): Promise<Record<string, unknown>>;
   onGetTasks(): Promise<Record<string, unknown>>;
+  /** 模型要上網查詢；回傳答案與來源，交還給模型。 */
+  onWebSearch(query: string): Promise<Record<string, unknown>>;
+  /** MCP 工具需要核准：回傳使用者是否明確同意。 */
+  onMcpApproval(request: McpApprovalRequest): Promise<boolean>;
+  /** 工具活動的短說明（例如「上網查詢：新竹天氣」），顯示在字幕。 */
+  onToolActivity(text: string): void;
   /** 模式因錯誤或閒置而關閉。 */
   onClosed(reason: string): void;
+}
+
+export interface McpApprovalRequest {
+  id: string;
+  server: string;
+  name: string;
+  arguments: string;
 }
 
 /** 可替換的瀏覽器能力，方便在測試中模擬。 */
@@ -53,6 +68,9 @@ export class RealtimeVoice {
   private endTimer: ReturnType<typeof setTimeout> | null = null;
   /** 已送出 response.create、還沒收到 response.created。 */
   private awaitingCreated = false;
+  /** OpenAI 端正在執行的 MCP 呼叫或等待核准的數量。 */
+  private mcpPending = 0;
+  private handledApprovals = new Set<string>();
 
   constructor(
     private readonly callbacks: RealtimeCallbacks,
@@ -208,6 +226,34 @@ export class RealtimeVoice {
       case "response.function_call_arguments.done":
         void this.runTool(String(event.name ?? ""), String(event.call_id ?? ""), String(event.arguments ?? "{}"));
         break;
+      case "conversation.item.done":
+      case "conversation.item.added": {
+        const item = event.item as { type?: string; id?: string; server_label?: string; name?: string; arguments?: string } | undefined;
+        if (item?.type === "mcp_approval_request" && item.id && !this.handledApprovals.has(item.id)) {
+          this.handledApprovals.add(item.id);
+          void this.approve({ id: item.id, server: item.server_label ?? "", name: item.name ?? "", arguments: item.arguments ?? "{}" });
+        }
+        break;
+      }
+      case "mcp_list_tools.failed":
+        this.callbacks.onToolActivity("外部服務（MCP）的工具清單載入失敗");
+        break;
+      case "response.mcp_call.in_progress":
+        this.mcpPending += 1;
+        this.toolsCalled = true;
+        break;
+      case "response.mcp_call.failed":
+        this.callbacks.onToolActivity("外部服務（MCP）呼叫失敗");
+        this.finishMcp();
+        break;
+      case "response.output_item.done": {
+        const item = event.item as { type?: string; server_label?: string; name?: string } | undefined;
+        if (item?.type === "mcp_call") {
+          this.callbacks.onToolActivity(`已使用 ${item.server_label ?? "外部服務"}：${item.name ?? ""}`);
+          this.finishMcp();
+        }
+        break;
+      }
       case "response.done":
         this.responding = false;
         this.resetIdle();
@@ -242,7 +288,7 @@ export class RealtimeVoice {
     const generation = this.generation;
     let output: Record<string, unknown>;
     try {
-      const args = JSON.parse(rawArgs || "{}") as { title?: unknown };
+      const args = JSON.parse(rawArgs || "{}") as { title?: unknown; query?: unknown };
       if (name === "end_conversation") {
         // 不需要模型再接著說：道別已在同一輪回覆中。
         this.endRequested = true;
@@ -254,6 +300,14 @@ export class RealtimeVoice {
       if (name === "delegate_task") {
         const title = typeof args.title === "string" ? args.title.trim() : "";
         output = title ? await this.callbacks.onDelegate(title) : { ok: false, error: "缺少任務描述" };
+      } else if (name === "web_search") {
+        const query = typeof args.query === "string" ? args.query.trim() : "";
+        if (!query) {
+          output = { ok: false, error: "缺少查詢內容" };
+        } else {
+          this.callbacks.onToolActivity(`上網查詢：${query}`);
+          output = await this.callbacks.onWebSearch(query);
+        }
       } else if (name === "get_tasks") {
         output = await this.callbacks.onGetTasks();
       } else {
@@ -268,9 +322,40 @@ export class RealtimeVoice {
     this.continueAfterTools();
   }
 
+  /** MCP 需要核准：請使用者明確確認後回覆 OpenAI；拒絕時照實告訴模型。 */
+  private async approve(request: McpApprovalRequest): Promise<void> {
+    const generation = this.generation;
+    this.mcpPending += 1;
+    let approve = false;
+    try {
+      approve = await this.callbacks.onMcpApproval(request);
+    } catch {
+      approve = false;
+    }
+    if (generation !== this.generation) return;
+    this.send({
+      type: "conversation.item.create",
+      item: {
+        id: `mcp_approval_${request.id}`,
+        type: "mcp_approval_response",
+        approval_request_id: request.id,
+        approve,
+        ...(approve ? {} : { reason: "使用者沒有同意" }),
+      },
+    });
+    this.callbacks.onToolActivity(approve ? `已同意：${request.server} · ${request.name}` : `已拒絕：${request.server} · ${request.name}`);
+    this.toolsCalled = true;
+    this.finishMcp();
+  }
+
+  private finishMcp(): void {
+    this.mcpPending = Math.max(0, this.mcpPending - 1);
+    this.continueAfterTools();
+  }
+
   /** 工具結果都交回、這輪回覆也結束後，請模型接著用語音回應；再補上排隊的系統通知。 */
   private continueAfterTools(): void {
-    if (this.responding || this.pendingTools > 0) return;
+    if (this.responding || this.pendingTools > 0 || this.mcpPending > 0) return;
     if (this.toolsCalled) {
       this.toolsCalled = false;
       this.requestResponse();
@@ -287,7 +372,7 @@ export class RealtimeVoice {
   private resetIdle(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
-      if (this.responding || this.phase === "speaking" || this.pendingTools > 0) {
+      if (this.responding || this.phase === "speaking" || this.pendingTools > 0 || this.mcpPending > 0) {
         this.resetIdle();
         return;
       }
@@ -318,6 +403,8 @@ export class RealtimeVoice {
     this.stopAudio?.();
     this.stopAudio = null;
     this.pendingTools = 0;
+    this.mcpPending = 0;
+    this.handledApprovals.clear();
     this.toolsCalled = false;
     this.responding = false;
     this.awaitingCreated = false;

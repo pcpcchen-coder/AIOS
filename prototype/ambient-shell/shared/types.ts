@@ -108,6 +108,10 @@ export interface SettingsView {
 export interface RealtimeInfo {
   available: boolean;
   model: string;
+  /** 是否能上網查詢（web_search 工具）。 */
+  web_search?: boolean;
+  /** 掛上的遠端 MCP 伺服器名稱。 */
+  mcp?: string[];
   /** 可用與否的說明，例如「未設定 OPENAI_API_KEY」。 */
   detail: string;
 }

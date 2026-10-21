@@ -9,6 +9,7 @@ import { loadConfig } from "./config.ts";
 import { MockExecutor } from "./mock-executor.ts";
 import { ProviderManager } from "./providers.ts";
 import { RealtimeBridge } from "./realtime.ts";
+import { WebSearch } from "./web-search.ts";
 import { TaskRunner } from "./runner.ts";
 import { TaskStore } from "./store.ts";
 
@@ -46,16 +47,35 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const auth = new ChatGPTAuth({ dir: config.configDir, callbackPort: config.oauthPort, onChange: () => notify() });
   const providers = new ProviderManager({
     claude: config.apiKey
-      ? new ClaudeExecutor({ apiKey: config.apiKey, model: config.model, modelFamily: config.modelFamily, fallbacks: config.fallbacks })
+      ? new ClaudeExecutor({
+          apiKey: config.apiKey,
+          model: config.model,
+          modelFamily: config.modelFamily,
+          fallbacks: config.fallbacks,
+          webSearchTool: config.taskWebSearch ? config.claudeWebSearchTool : null,
+        })
       : null,
-    chatgpt: new ChatGPTExecutor(auth, { model: config.chatgptModel }),
+    chatgpt: new ChatGPTExecutor(auth, { model: config.chatgptModel, webSearch: config.taskWebSearch }),
     mock: new MockExecutor(),
     auth,
     dir: config.configDir,
     preferred: config.preferred,
     onChange: () => notify(),
   });
-  const realtime = new RealtimeBridge({ apiKey: config.openaiApiKey, model: config.realtimeModel, voice: config.realtimeVoice });
+  const webSearch = new WebSearch({
+    apiKey: config.openaiApiKey,
+    model: config.searchModel,
+    country: config.searchCountry,
+    timezone: config.searchTimezone,
+  });
+  const realtime = new RealtimeBridge({
+    apiKey: config.openaiApiKey,
+    model: config.realtimeModel,
+    voice: config.realtimeVoice,
+    webSearch: webSearch.available,
+    mcp: config.realtimeMcp,
+    taskWebSearch: config.taskWebSearch,
+  });
   const store = new TaskStore(options.dataDir);
   const runner = new TaskRunner(store, providers, config.maxConcurrent);
   const server = createApp({
@@ -65,6 +85,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     auth,
     chat: providers,
     realtime,
+    webSearch,
     port,
     devPort: config.devPort,
     distDir: options.distDir,
