@@ -22,21 +22,49 @@ vi.mock("@mediapipe/tasks-vision", () => {
 });
 
 const stopped: string[] = [];
+interface FakeVideo {
+  play(): Promise<void>;
+  srcObject: unknown;
+  readyState: number;
+  videoWidth: number;
+}
+const videos: FakeVideo[] = [];
+/** 設成 true 時，下一個 video.play() 會等到 releasePlay() 才完成。 */
+let playGateOn = false;
+let releasePlay: (() => void) | null = null;
 
 beforeEach(() => {
   closed.length = 0;
   stopped.length = 0;
+  videos.length = 0;
   gateOn = false;
   releaseModels = null;
-  const track = { stop: () => stopped.push("track"), getSettings: () => ({ deviceId: "ccb" }) };
-  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  playGateOn = false;
+  releasePlay = null;
+  let opened = 0;
+  const openStream = () => {
+    const name = `track${++opened}`;
+    const track = { stop: () => stopped.push(name), getSettings: () => ({ deviceId: "ccb" }) };
+    return { getTracks: () => [track], getVideoTracks: () => [track] };
+  };
   vi.stubGlobal("document", {
-    createElement: (tag: string) =>
-      tag === "video" ? { play: async () => {}, readyState: 0, videoWidth: 0 } : { getContext: () => null },
+    createElement: (tag: string) => {
+      if (tag !== "video") return { getContext: () => null };
+      const gated = playGateOn;
+      playGateOn = false;
+      const video: FakeVideo = {
+        play: () => (gated ? new Promise<void>((r) => (releasePlay = r)) : Promise.resolve()),
+        srcObject: null,
+        readyState: 0,
+        videoWidth: 0,
+      };
+      videos.push(video);
+      return video;
+    },
   });
   vi.stubGlobal("navigator", {
     mediaDevices: {
-      getUserMedia: async () => stream,
+      getUserMedia: async () => openStream(),
       enumerateDevices: async () => [{ kind: "videoinput", label: "CCB Camera", deviceId: "ccb" }],
     },
   });
@@ -68,7 +96,7 @@ describe("SensePipeline start/stop (fixture camera)", () => {
     pipeline.stop();
     pipeline.stop();
     expect(states()).toEqual(["starting", "ok", "off"]);
-    expect(stopped).toEqual(["track"]);
+    expect(stopped).toEqual(["track1"]);
     expect(closed.sort()).toEqual(["gesture", "pose", "pose"]);
   });
 
@@ -84,6 +112,28 @@ describe("SensePipeline start/stop (fixture camera)", () => {
     await starting;
     expect(states()).toEqual(["starting", "off"]);
     expect(pipeline.running).toBe(false);
+    expect(closed.sort()).toEqual(["gesture", "pose", "pose"]);
+  });
+
+  it("quick off/on while the first video is still starting: the stale start releases its own stream and keeps the new video", async () => {
+    const { pipeline, states } = await make();
+    playGateOn = true;
+    const first = pipeline.start();
+    await vi.waitFor(() => expect(releasePlay).not.toBeNull());
+    pipeline.stop(); // 關掉：釋放 track1
+    const second = pipeline.start(); // 馬上又打開：track2、第二個 video
+    await second;
+    expect(pipeline.running).toBe(true);
+    releasePlay!(); // 第一輪的 play() 現在才完成
+    await first;
+    const internal = pipeline as unknown as { video: unknown; stream: unknown };
+    expect(internal.video).toBe(videos[1]);
+    expect(videos[0].srcObject).toBeNull();
+    expect(states()).toEqual(["starting", "off", "starting", "ok"]);
+    expect(stopped).toEqual(["track1", "track1"]); // 只停舊串流（重複 stop 對真實 track 無害），新串流仍在用
+    expect(closed).toEqual([]); // 第一輪沒有載入模型
+    pipeline.stop();
+    expect(stopped).toContain("track2");
     expect(closed.sort()).toEqual(["gesture", "pose", "pose"]);
   });
 

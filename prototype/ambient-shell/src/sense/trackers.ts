@@ -147,7 +147,8 @@ export interface LookTiming {
 
 /**
  * 看向螢幕就能說話（免手）：有人在場且面向螢幕（確認後）再停留 dwell_ms，而即時語音沒開時，請求開始對話。
- * 對話結束後 cooldown_ms 內不重新觸發，避免一說完「再見」又被自動開啟。
+ * 自動開始或對話結束後 cooldown_ms 內不重新觸發，避免一說完「再見」又被自動開啟。
+ * 只記暫停從何時開始，每次 update 都用當下的 cooldown_ms 比較，所以使用者調短暫停時立刻生效。
  * 時間由呼叫端每次傳入（使用者可在設定調整）；預設由 CAMERA_PREFS 推導：1.5 秒 − 面向確認 0.3 秒 = 1200 ms，冷卻 10 秒。
  */
 export class LookToTalk {
@@ -155,23 +156,25 @@ export class LookToTalk {
   static readonly COOLDOWN_MS = CAMERA_PREFS.look_to_talk_cooldown_s.default * 1000;
   static readonly DEFAULT: LookTiming = { dwell_ms: LookToTalk.DWELL_MS, cooldown_ms: LookToTalk.COOLDOWN_MS };
   private since: number | null = null;
-  private blockedUntil = 0;
+  /** 最近一次自動開始或對話結束的時間；null 表示沒有暫停。 */
+  private pausedAt: number | null = null;
 
-  /** 對話結束時呼叫。 */
-  ended(now: number, cooldownMs: number = LookToTalk.COOLDOWN_MS): void {
-    this.blockedUntil = now + cooldownMs;
+  /** 對話結束時呼叫：暫停從現在重新起算。 */
+  ended(now: number): void {
+    this.pausedAt = now;
     this.since = null;
   }
 
   update(now: number, state: { present: boolean; facing: boolean; talking: boolean }, timing: LookTiming = LookToTalk.DEFAULT): boolean {
-    if (!state.present || !state.facing || state.talking || now < this.blockedUntil) {
+    const paused = this.pausedAt !== null && now - this.pausedAt < timing.cooldown_ms;
+    if (!state.present || !state.facing || state.talking || paused) {
       this.since = null;
       return false;
     }
     this.since ??= now;
     if (now - this.since < timing.dwell_ms) return false;
     this.since = null;
-    this.blockedUntil = now + timing.cooldown_ms;
+    this.pausedAt = now;
     return true;
   }
 

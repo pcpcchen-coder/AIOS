@@ -110,7 +110,7 @@ export class SenseController {
 
   /** 對話結束時呼叫，避免說完「再見」又被立刻自動開啟。 */
   conversationEnded(): void {
-    this.look.ended(this.hooks.now(), lookTiming(this.prefs()).cooldown_ms);
+    this.look.ended(this.hooks.now());
   }
 
   private prefs(): SenseTuning {
@@ -133,25 +133,45 @@ export function lookTiming(prefs: SenseTuning): LookTiming {
 export type CameraCommand = { set: CameraPrefsPatch; say: string } | { preview: boolean };
 
 const OFF = "(關掉|關閉|停用|關)";
+const OFF_AFTER = "(關掉|關閉|關起來|停用)";
 const ON = "(打開|開啟|啟用)";
 const PREVIEW = "鏡頭(畫面|影像)";
 const LOOK = "看著說話";
 // 不收單獨的「手勢」：一般句子（「展開手勢研究」）太容易誤觸。
 const PALM = "(手掌停止(播報)?|停止手勢)";
+/** 可省略的客氣前後綴：「請幫我關掉鏡頭吧」＝「關掉鏡頭」。 */
+const POLITE_PREFIX = /^(請你?|麻煩你?|幫我|幫忙|可以|我要|我想)*把?/;
+const POLITE_SUFFIX = /(吧|一下|謝謝)+$/;
+/** 否定與問句一律不當指令：「不要打開鏡頭」「別關鏡頭」「怎麼關閉手掌停止」「開關鏡頭在哪裡」。 */
+const NEGATION_OR_QUESTION = /(不要|別|不用|不必|怎麼|怎樣|如何|為什麼|嗎|呢|在哪|哪裡|什麼)/;
 
-/** 使用者說的話是否在操作鏡頭（確定性規則，不經模型）。先比對「鏡頭畫面」，因為「關閉鏡頭畫面」包含「關閉鏡頭」。 */
+/** 「動詞＋對象」或「對象＋動詞」，必須是整句（錨定頭尾），所以「相關鏡頭」「開關鏡頭」不會被當成動詞。 */
+function whole(verbBefore: string, target: string, verbAfter: string): RegExp {
+  return new RegExp(`^(${verbBefore}${target}|${target}${verbAfter})$`);
+}
+
+const RULES: { pattern: RegExp; command: CameraCommand }[] = [
+  // 先比對「鏡頭畫面」：「關閉鏡頭畫面」只收起畫面，不關鏡頭。
+  { pattern: whole(`(收起|${OFF}|隱藏)`, PREVIEW, "(收起來?|關掉|關閉|隱藏)"), command: { preview: false } },
+  { pattern: whole(`(顯示|${ON}|看一下|看看)`, PREVIEW, "(顯示|打開|開啟)"), command: { preview: true } },
+  { pattern: whole(OFF, LOOK, "(關掉|關閉|停用)"), command: { set: { look_to_talk: false }, say: "已關閉看著說話。" } },
+  { pattern: whole(ON, LOOK, ON), command: { set: { look_to_talk: true }, say: "已打開看著說話。" } },
+  { pattern: whole(OFF, PALM, "(關掉|關閉|停用)"), command: { set: { stop_gesture: false }, say: "已關閉手掌停止。" } },
+  { pattern: whole(ON, PALM, ON), command: { set: { stop_gesture: true }, say: "已打開手掌停止。" } },
+  { pattern: whole(OFF, "鏡頭", OFF_AFTER), command: { set: { active: false }, say: "鏡頭已關閉。" } },
+  { pattern: whole(ON, "鏡頭", ON), command: { set: { active: true }, say: "正在開啟鏡頭（狀態看右下角指示點）。" } },
+];
+
+/**
+ * 使用者說的話是否在操作鏡頭（確定性規則，不經模型）。只收整句的短指令：去掉標點、空白與客氣前後綴後，
+ * 整句必須剛好是一條規則；否定、問句、敘述（「我昨天把鏡頭關掉了」）與「打開鏡頭設定」都回傳 null，
+ * 後者交給 classify 的設定意圖。
+ */
 export function matchCameraCommand(text: string): CameraCommand | null {
-  const t = text.replace(/[\s，。！？!?,.、]/g, "");
-  const has = (pattern: string) => new RegExp(pattern).test(t);
-  if (has(`(收起|${OFF}|隱藏)${PREVIEW}|${PREVIEW}(收起來?|關掉|關閉|隱藏)`)) return { preview: false };
-  if (has(`(顯示|${ON}|看一下|看看)${PREVIEW}|${PREVIEW}(顯示|打開|開啟)`)) return { preview: true };
-  if (has(`${OFF}${LOOK}|${LOOK}(關掉|關閉|停用)`)) return { set: { look_to_talk: false }, say: "已關閉看著說話。" };
-  if (has(`${ON}${LOOK}|${LOOK}(打開|開啟|啟用)`)) return { set: { look_to_talk: true }, say: "已打開看著說話。" };
-  if (has(`${OFF}${PALM}|${PALM}(關掉|關閉|停用)`)) return { set: { stop_gesture: false }, say: "已關閉手掌停止。" };
-  if (has(`${ON}${PALM}|${PALM}(打開|開啟|啟用)`)) return { set: { stop_gesture: true }, say: "已打開手掌停止。" };
-  if (/(關掉|關閉|停用|關)鏡頭|鏡頭(關掉|關閉|關起來|停用)/.test(t)) return { set: { active: false }, say: "鏡頭已關閉。" };
-  if (/(打開|開啟|啟用)鏡頭|鏡頭(打開|開啟|啟用)/.test(t)) return { set: { active: true }, say: "正在開啟鏡頭（狀態看右下角指示點）。" };
-  return null;
+  const t = text.replace(/[\s，。！？!?,.、~～…]/g, "");
+  if (NEGATION_OR_QUESTION.test(t)) return null;
+  const command = t.replace(POLITE_PREFIX, "").replace(POLITE_SUFFIX, "");
+  return RULES.find((rule) => rule.pattern.test(command))?.command ?? null;
 }
 
 /**

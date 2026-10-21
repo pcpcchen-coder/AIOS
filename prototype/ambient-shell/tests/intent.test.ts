@@ -25,6 +25,8 @@ describe("classify", () => {
     ["設定", "settings"],
     ["切換引擎", "settings"],
     ["鏡頭設定", "settings"],
+    ["打開鏡頭設定", "settings"],
+    ["開啟鏡頭設定", "settings"],
     ["登入 ChatGPT", "settings"],
   ])("「%s」→ %s", (text, kind) => {
     expect(classify(text).kind).toBe(kind);

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings, type PointZone, type SensorState } from "../shared/sense.ts";
 import { pageHeaders } from "../server/app.ts";
 import { loadConfig } from "../server/config.ts";
+import { classify } from "../src/intent.ts";
 import {
   cameraShouldRun,
   distanceScale,
@@ -102,6 +103,23 @@ describe("SenseController", () => {
     expect(t.log).toEqual(["start", "start"]);
   });
 
+  it("lowering the cooldown during a pause takes effect at once: 60 s pause, end, lower to 3 s → eligible after 3 s", () => {
+    const prefs: SenseTuning = { ...DEFAULT_CAMERA_PREFS, look_to_talk_s: 0.5, look_to_talk_cooldown_s: 60 };
+    const t = setup({ prefs });
+    t.c.handle({ type: "presence", present: true, distance_m: 2 });
+    t.c.handle({ type: "attention", facing: true });
+    t.advance(200);
+    expect(t.log).toEqual(["start"]);
+    t.stopTalking(); // 暫停從這裡起算
+    prefs.look_to_talk_cooldown_s = 3; // 在 60 秒暫停中改短
+    t.advance(2800);
+    t.advance(100); // 2.9 s：仍在暫停
+    expect(t.log).toEqual(["start"]);
+    t.advance(100); // 3.0 s：可以開始累計停留（0.5 s − 0.3 s 確認 = 200 ms）
+    t.advance(200);
+    expect(t.log).toEqual(["start", "start"]);
+  });
+
   it("look-to-talk off or not allowed: no dwell, no phantom cooldown; turning it on starts after one dwell", () => {
     const prefs: SenseTuning = { ...DEFAULT_CAMERA_PREFS, look_to_talk: false };
     const t = setup({ prefs });
@@ -169,28 +187,52 @@ describe("SenseController", () => {
 });
 
 describe("camera helpers", () => {
-  it("matches spoken camera on/off commands deterministically", () => {
-    expect(matchCameraCommand("鏡頭關掉")).toEqual({ set: { active: false }, say: "鏡頭已關閉。" });
-    expect(matchCameraCommand("幫我關閉鏡頭。")).toEqual({ set: { active: false }, say: "鏡頭已關閉。" });
-    expect(matchCameraCommand("打開鏡頭")).toMatchObject({ set: { active: true } });
-    expect(matchCameraCommand("鏡頭是什麼")).toBeNull();
+  // 整句短指令才算；否定、問句、敘述與「…設定」都不能改到保存的設定。
+  it.each<[string, ReturnType<typeof matchCameraCommand>]>([
+    ["鏡頭關掉", { set: { active: false }, say: "鏡頭已關閉。" }],
+    ["請幫我把鏡頭關掉", { set: { active: false }, say: "鏡頭已關閉。" }],
+    ["麻煩把鏡頭打開", { set: { active: true }, say: "正在開啟鏡頭（狀態看右下角指示點）。" }],
+    ["關掉鏡頭", { set: { active: false }, say: "鏡頭已關閉。" }],
+    ["關閉鏡頭", { set: { active: false }, say: "鏡頭已關閉。" }],
+    ["幫我關閉鏡頭。", { set: { active: false }, say: "鏡頭已關閉。" }],
+    ["麻煩關掉鏡頭吧", { set: { active: false }, say: "鏡頭已關閉。" }],
+    ["打開鏡頭", { set: { active: true }, say: "正在開啟鏡頭（狀態看右下角指示點）。" }],
+    ["開啟鏡頭", { set: { active: true }, say: "正在開啟鏡頭（狀態看右下角指示點）。" }],
+    ["請打開鏡頭一下", { set: { active: true }, say: "正在開啟鏡頭（狀態看右下角指示點）。" }],
+    ["顯示鏡頭畫面", { preview: true }],
+    ["打開鏡頭畫面", { preview: true }],
+    ["看一下鏡頭影像", { preview: true }],
+    ["收起鏡頭畫面", { preview: false }],
+    ["關閉鏡頭畫面", { preview: false }],
+    ["關閉看著說話", { set: { look_to_talk: false }, say: "已關閉看著說話。" }],
+    ["看著說話關掉", { set: { look_to_talk: false }, say: "已關閉看著說話。" }],
+    ["打開看著說話", { set: { look_to_talk: true }, say: "已打開看著說話。" }],
+    ["看著說話打開", { set: { look_to_talk: true }, say: "已打開看著說話。" }],
+    ["關掉手掌停止", { set: { stop_gesture: false }, say: "已關閉手掌停止。" }],
+    ["關閉手掌停止", { set: { stop_gesture: false }, say: "已關閉手掌停止。" }],
+    ["打開手掌停止", { set: { stop_gesture: true }, say: "已打開手掌停止。" }],
+    ["打開手掌停止播報", { set: { stop_gesture: true }, say: "已打開手掌停止。" }],
+    // 不得比對到的句子
+    ["打開鏡頭設定", null],
+    ["開啟鏡頭設定", null],
+    ["不要打開鏡頭", null],
+    ["別關鏡頭", null],
+    ["幫我找相關鏡頭的資料", null],
+    ["開關鏡頭在哪裡", null],
+    ["我昨天把鏡頭關掉了", null],
+    ["不要關掉看著說話", null],
+    ["怎麼關閉手掌停止", null],
+    ["可以關掉鏡頭嗎", null],
+    ["鏡頭是什麼", null],
+    ["看著說話是什麼", null],
+    ["幫我寫一篇展開手勢研究的報告", null],
+  ])("matchCameraCommand(「%s」)", (text, expected) => {
+    expect(matchCameraCommand(text)).toEqual(expected);
   });
 
-  it("preview phrases are view-only and win over camera off (「關閉鏡頭畫面」 contains 「關閉鏡頭」)", () => {
-    expect(matchCameraCommand("關閉鏡頭畫面")).toEqual({ preview: false });
-    expect(matchCameraCommand("收起鏡頭畫面")).toEqual({ preview: false });
-    expect(matchCameraCommand("顯示鏡頭畫面")).toEqual({ preview: true });
-    expect(matchCameraCommand("打開鏡頭畫面")).toEqual({ preview: true });
-    expect(matchCameraCommand("看一下鏡頭影像")).toEqual({ preview: true });
-  });
-
-  it("look-to-talk and palm-stop switches; unrelated sentences do not match", () => {
-    expect(matchCameraCommand("關閉看著說話")).toMatchObject({ set: { look_to_talk: false } });
-    expect(matchCameraCommand("看著說話打開")).toMatchObject({ set: { look_to_talk: true } });
-    expect(matchCameraCommand("關掉手掌停止")).toMatchObject({ set: { stop_gesture: false } });
-    expect(matchCameraCommand("打開手掌停止播報")).toMatchObject({ set: { stop_gesture: true } });
-    expect(matchCameraCommand("幫我寫一篇展開手勢研究的報告")).toBeNull();
-    expect(matchCameraCommand("看著說話是什麼")).toBeNull();
+  it("「打開鏡頭設定」 falls through to the settings intent instead of turning the camera on", () => {
+    expect(matchCameraCommand("打開鏡頭設定")).toBeNull();
+    expect(classify("打開鏡頭設定")).toEqual({ kind: "settings" });
   });
 
   it("cameraShouldRun: .env enabled, user active, no unconfirmed off, no unretried failure", () => {

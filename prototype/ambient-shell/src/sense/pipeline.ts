@@ -95,6 +95,12 @@ export class SensePipeline {
       video.playsInline = true;
       video.srcObject = stream;
       await video.play();
+      if (generation !== this.generation) {
+        // 播放期間被關掉（可能已經又開了新的一輪）：stop() 已釋放這個串流；不要蓋掉新一輪的 stream／video。
+        stopStream(stream);
+        video.srcObject = null;
+        return;
+      }
       this.video = video;
       const models = await this.loadModels();
       if (generation !== this.generation) {

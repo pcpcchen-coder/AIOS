@@ -1,7 +1,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../server/app.ts";
@@ -337,6 +337,16 @@ describe("HTTP API", () => {
     const again = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on", NOUS_LOOK_TO_TALK: "off" }, dir });
     const after = (await (await fetch(`${again.base}/api/settings`)).json()) as SettingsView;
     expect(after.camera).toMatchObject({ active: false, look_to_talk_s: 2.5, look_to_talk: false, stop_gesture: true });
+  });
+
+  it("鏡頭設定寫檔失敗：回 500 與可讀原因，記憶體與畫面不變", async () => {
+    const { base, post, dir } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" } });
+    mkdirSync(join(dir, "camera.json", "x"), { recursive: true }); // camera.json 被目錄佔住，rename 失敗
+    const res = await post("/api/settings/camera", { active: false });
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { error: string }).error).toMatch(/^鏡頭設定沒有保存/);
+    const view = (await (await fetch(`${base}/api/settings`)).json()) as SettingsView;
+    expect(view.camera?.active).toBe(true);
   });
 
   it("前端未建置時回傳說明而不是空白頁", async () => {

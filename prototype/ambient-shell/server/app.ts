@@ -145,7 +145,12 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         throw err;
       }
       // update 會呼叫 onChange（→ notifySettings），這裡不重複廣播。
-      options.camera.update(patch);
+      try {
+        options.camera.update(patch);
+      } catch (err) {
+        // 寫檔失敗：伺服器記憶體沒有改，回報真實原因，不顯示假成功。
+        throw new HttpError(500, `鏡頭設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
       return sendJson(res, 200, settings.view());
     }
     if (method === "POST" && path === "/api/chat") return streamChat(req, res);
