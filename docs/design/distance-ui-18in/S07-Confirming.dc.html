@@ -13,32 +13,38 @@
 body{margin:0}
 </style>
 </helmet>
-<div style="width: 1920px; height: 1080px; position: relative; overflow: hidden; box-sizing: border-box; padding: 56px 112px 72px; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; flex-direction: column">
+<div style="width: 1920px; height: 1080px; position: relative; overflow: hidden; box-sizing: border-box; padding: 56px 112px 80px; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; flex-direction: column">
 <div style="position: absolute; top: 18px; right: 18px; bottom: 18px; left: 18px; border: 10px solid #FFB547; border-radius: 40px"></div>
-<div style="display: flex; align-items: center; justify-content: space-between">
+<div style="position: absolute; left: 112px; right: 112px; bottom: 44px; height: 14px; border-radius: 7px; background: #3A2E14">
+<div style="width: 72%; height: 14px; border-radius: 7px; background: #FFB547"></div>
+</div>
 <div style="display: flex; align-items: center; gap: 28px">
 <dc-import name="Brain" size="150" tone="#FFB547" mode="solid" progress="0" region="none" dim="yes" hint-size="150px,150px"></dc-import>
 <div style="font-size: 108px; font-weight: 700; color: #FFB547; line-height: 1.2">請確認</div>
 </div>
-<div style="font-size: 56px; font-weight: 500; color: #A9BBD3; font-variant-numeric: tabular-nums">58 秒後自動取消</div>
+<div style="flex-grow: 1"></div>
+<div style="display: flex; align-items: center; gap: 48px">
+<div style="font-size: 200px; font-weight: 900; color: #FFFFFF; line-height: 1.1">寄出</div>
+<svg width="150" height="150" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12h16M13 6l6 6-6 6"></path></svg>
+<div style="font-size: 200px; font-weight: 900; color: #FFFFFF; line-height: 1.1">王經理</div>
 </div>
-<div style="font-size: 150px; font-weight: 900; color: #FFFFFF; line-height: 1.15; margin-top: 20px">要寄出這封信嗎？</div>
-<div style="display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px 40px; align-items: baseline; margin-top: 32px">
-<div style="font-size: 56px; color: #8FA3BD">對象</div>
-<div style="font-size: 76px; font-weight: 700; color: #FFFFFF">王經理（採購部）</div>
-<div style="font-size: 56px; color: #8FA3BD">附件</div>
-<div style="font-size: 76px; font-weight: 700; color: #FFFFFF">PCS 比較表 v3</div>
-<div style="font-size: 56px; color: #8FA3BD">後果</div>
-<div style="font-size: 76px; font-weight: 700; color: #FFB547">寄出後無法收回</div>
+<div style="display: flex; align-items: center; gap: 64px; margin-top: 36px">
+<div style="display: flex; align-items: center; gap: 20px">
+<svg width="84" height="84" viewBox="0 0 24 24" fill="none" stroke="#A9BBD3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6v18h12V7z"></path><path d="M14 3v4h4"></path></svg>
+<div style="font-size: 76px; font-weight: 700; color: #C9D6E8">比較表</div>
+</div>
+<div style="display: flex; align-items: center; gap: 20px">
+<svg width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#FFB547" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"></path><path d="M12 10v5"></path><path d="M12 18h0"></path></svg>
+<div style="font-size: 108px; font-weight: 700; color: #FFB547">無法收回</div>
+</div>
 </div>
 <div style="flex-grow: 1"></div>
 <div style="display: flex; align-items: center; gap: 40px">
 <div style="display: flex; align-items: center; gap: 20px; padding: 20px 48px; background: #FFB547; border-radius: 999px; font-size: 76px; font-weight: 900; color: #070B16; line-height: 1.2">
 <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="#070B16" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v4"></path></svg>
-<span>說「確認寄出」</span>
+<span>「確認寄出」</span>
 </div>
-<div style="padding: 20px 48px; border: 4px solid #5A6B85; border-radius: 999px; font-size: 76px; font-weight: 700; color: #EAF2FF; line-height: 1.2">說「取消」</div>
-<div style="font-size: 56px; font-weight: 500; color: #A9BBD3">「好」不算數</div>
+<div style="padding: 20px 48px; border: 4px solid #5A6B85; border-radius: 999px; font-size: 76px; font-weight: 700; color: #EAF2FF; line-height: 1.2">「取消」</div>
 </div>
 </div>
 </x-dc>
