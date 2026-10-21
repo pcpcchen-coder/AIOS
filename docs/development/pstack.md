@@ -55,3 +55,10 @@ Source feed: https://github.com/pcpcchen-coder/AIOS/tree/telemetry/pstack/observ
 Dashboard: https://pcpcchen-coder.github.io/CursorPlugins/
 
 The Dashboard fetches the source feed directly. It requires no cross-repository PAT, and polls about every 60 seconds while the browser tab is visible. GitHub/CDN caching may delay a response. Actual native Agent-run coverage still requires agents to invoke the recorder for each playbook step. Running the workflow does not imply AIOS UI, microphone, camera or other real hardware gates passed.
+
+
+#### Live native-agent reporting
+
+AIOS has a safe wrapper at tools/pstack-observe-live.mjs. It calls the existing Recorder first, then runs scripts/pstack-public-export.mjs with its public-safe field projection. Export PSTACK_OBSERVE_PUBLICATION_ACK=1 in the running agent environment; ensure GitHub CLI authentication has Contents:write to **AIOS**. Every start/step/finish then updates the public telemetry branch. If credentials or connectivity are unavailable, JSON remains local and the error is explicit. Other repositories remain opt-in.
+
+The workflow is **not** hooked directly into IDE process events; the AIOS Agent must actually call this wrapper. Tests run without an acknowledgment flag so they never publish.

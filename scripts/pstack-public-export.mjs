@@ -76,7 +76,9 @@ if(process.argv[1]&&resolve(process.argv[1])===new URL(import.meta.url).pathname
    const args=process.argv.slice(2),p=args.indexOf('--run'),id=p>=0?args[p+1]:null;
    if(!validId.test(id||''))throw Error('Use --run with a valid ID');
    if(!args.includes('--public-ok')||process.env.PSTACK_OBSERVE_PUBLICATION_ACK!=='1')throw Error('Publication requires --public-ok and explicit approval flag');
-   const local=join(process.cwd(),'.pstack','observability','runs',id+'.json');
+   const wi=args.indexOf('--workspace');
+   const workspace=wi>=0?resolve(args[wi+1]):process.cwd();
+   const local=join(workspace,'.pstack','observability','runs',id+'.json');
    const r=await publishPublicRun(JSON.parse(readFileSync(local,'utf8')));
    console.log('PUBLISHED PUBLIC AIOS RUN '+r.run_id+' '+r.status+' ('+r.steps.length+' steps)');
  }catch(e){console.error('PUBLICATION FAILED: '+e.message);process.exitCode=1;}
