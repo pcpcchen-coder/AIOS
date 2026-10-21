@@ -22,3 +22,26 @@ Keep a plan for multi-step work. Match the task to investigation, bug fix, featu
 ## Validation
 
 From the repository root, run `node scripts/check-pstack.mjs` to check the pinned upstream copy and skill registration. Run `node scripts/verify-aios.mjs` for type checking, the existing test suite, a build, and an isolated mock HTTP journey. Neither command installs dependencies. If needed, use `npm ci` in `prototype/ambient-shell` first.
+
+<!-- PSTACK_OBSERVABILITY_BEGIN -->
+## AIOS pstack execution observability
+
+AIOS already pins pstack in `vendor/pstack/` with `vendor/pstack.lock.json`. Do not replace original skills, model rules or hash checks. Follow CLAUDE.md first.
+
+For each **actual** pstack engineering task, initialize a stable run from the repository root **before** the first playbook stage:
+
+```bash
+node tools/pstack-observe.mjs start --repo pcpcchen-coder/AIOS --title "Read-only investigation" --playbook investigation --steps "inspect,verify,report" --branch "feature/my-work"
+node tools/pstack-observe.mjs step --run RUN_ID --step inspect --status running
+# Execute work; mark the actual result with evidence only afterwards.
+node tools/pstack-observe.mjs step --run RUN_ID --step inspect --status passed --note "Reviewed source" --evidence "https://github.com/pcpcchen-coder/AIOS"
+# Repeat other actual steps before finishing.
+node tools/pstack-observe.mjs finish --run RUN_ID --status passed
+```
+
+Read RUN_ID from stdout; choose actual playbook step IDs rather than generic steps. Update each to running, then passed / failed / blocked / skipped with factual notes. Never mark a test passed without test evidence. Recorder errors must be reported, not silently skipped.
+
+The separate `.github/workflows/pstack-observer.yml` is a **recorder smoke test**, not pstack engineering execution or AIOS product verification. It generates an Actions artifact only.
+
+Run JSON defaults to `.pstack/observability/runs/` and stays gitignored and local. No automatic public upload is enabled. The central [Pstack Observatory](https://pcpcchen-coder.github.io/CursorPlugins/) is public. Never publish private transcripts, prompts, source, secrets, paths or PII. Publishing any run requires separate explicit approval, `PSTACK_OBSERVE_PUBLICATION_ACK=1` and `--public-ok`; see [operator documentation](https://github.com/pcpcchen-coder/CursorPlugins/blob/custom/pstack/docs/fork/PSTACK_DASHBOARD.md). Existing CLAUDE.md action gates still apply.
+<!-- PSTACK_OBSERVABILITY_END -->

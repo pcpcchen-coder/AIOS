@@ -39,3 +39,6 @@ src-tauri/Cargo.lock
 *.pem
 *.key
 secrets/
+
+# Local pstack execution history — never commit by default
+.pstack/observability/

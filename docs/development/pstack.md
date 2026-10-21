@@ -33,3 +33,14 @@ git diff --check
 4. 執行上述檢查，並在實際使用的客戶端確認技能重新探索成功。
 
 本地檔案與驗證程式可以在雲端檢查。Cursor 選單顯示、全域外掛安裝狀態及原生專屬功能仍須在 Cursor 內確認。Benny Automations 隨官方原始檔保留，但未啟用。此接入不會自動提交、推送、建立 PR、合併或發布。
+
+## Observatory：AIOS pstack 執行監控
+
+原版 pstack 0.15.29 與 `vendor/pstack.lock.json`、既有 Skills 均保持不動；另外提供 `tools/pstack-observe.mjs` 記錄 Run 與步驟。完整操作規範在 `AGENTS.md` 的 observability 區塊。
+
+- Dashboard：https://pcpcchen-coder.github.io/CursorPlugins/
+- 本地資料：`.pstack/observability/runs/*.json`（gitignored；預設不公開）。
+- AIOS CI：`.github/workflows/pstack-observer.yml`，執行記錄器測試、`scripts/check-pstack.mjs`，生成可下載的 smoke Run Artifact。
+- AIOS CI smoke 只證明 Recorder 工作，**不等於** pstack Agent 真正做了功能修改，也不等於 AIOS 產品 Gate 通過。
+- 真實的 pstack 任務需由 Agent 依序呼叫 `start`、`step`（running→完成狀態）、`finish`，記錄真實證據與失敗原因。沒有呼叫就沒有觀測資料。
+- 需使用者另行明確授權公開內容，才可依[中央文件](https://github.com/pcpcchen-coder/CursorPlugins/blob/custom/pstack/docs/fork/PSTACK_DASHBOARD.md)執行 `publish --public-ok`；預設絕不公開。
