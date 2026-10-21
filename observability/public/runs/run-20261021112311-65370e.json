@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-21T11:23:11.336Z",
-  "updated_at": "2026-10-21T11:58:16.202Z",
+  "updated_at": "2026-10-21T11:59:40.110Z",
   "ended_at": null,
   "steps": [
     {
@@ -50,11 +50,16 @@
     {
       "id": "verify",
       "title": "verify",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-21T11:58:16.202Z",
-      "ended_at": null,
-      "note": "",
-      "evidence": []
+      "ended_at": "2026-10-21T11:59:40.110Z",
+      "note": "289 vitest; verify-aios PASS; Chromium + real MediaPipe + synthetic stereo clip: both tiles render, settings persist to camera.json, camera-off survives reload",
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/pull/21"
+        }
+      ]
     },
     {
       "id": "review",
@@ -138,6 +143,13 @@
       "step_id": "verify",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-21T11:59:40.110Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "passed",
+      "note": "289 vitest; verify-aios PASS; Chromium + real MediaPipe + synthetic stereo clip: both tiles render, settings persist to camera.json, camera-off survives reload"
     }
   ],
   "provenance": "Agent self-reported"
