@@ -1,10 +1,12 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../server/app.ts";
+import { CameraSettingsStore } from "../server/camera-settings.ts";
+import { loadConfig } from "../server/config.ts";
 import { ChatGPTAuth } from "../server/chatgpt-auth.ts";
 import { ChatGPTExecutor } from "../server/chatgpt-executor.ts";
 import { ProviderManager } from "../server/providers.ts";
@@ -15,7 +17,7 @@ import { HomeBridge } from "../server/home-bridge.ts";
 import { RealtimeBridge } from "../server/realtime.ts";
 import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
-import type { Task } from "../shared/types.ts";
+import type { SettingsView, Task } from "../shared/types.ts";
 
 describe("checkRequest", () => {
   const hosts = allowedHosts(8787, 5173);
@@ -51,10 +53,20 @@ afterEach(async () => {
   server = null;
 });
 
-async function start(mockStepMs = 5, realtime?: RealtimeBridge, webSearch?: WebSearch, home?: HomeBridge) {
+async function start(
+  mockStepMs = 5,
+  realtime?: RealtimeBridge,
+  webSearch?: WebSearch,
+  home?: HomeBridge,
+  camera?: { env: NodeJS.ProcessEnv; dir?: string },
+) {
   const port = await freePort();
   const store = new TaskStore(null);
-  const dir = mkdtempSync(join(tmpdir(), "nous-http-"));
+  const dir = camera?.dir ?? mkdtempSync(join(tmpdir(), "nous-http-"));
+  let notify = () => {};
+  const cameraStore = camera
+    ? new CameraSettingsStore({ base: loadConfig(camera.env).camera, dir, onChange: () => notify(), log: () => {} })
+    : undefined;
   const auth = new ChatGPTAuth({ dir, callbackPort: 0, onChange: () => {} });
   const providers = new ProviderManager({
     claude: null,
@@ -66,7 +78,7 @@ async function start(mockStepMs = 5, realtime?: RealtimeBridge, webSearch?: WebS
     onChange: () => {},
   });
   const runner = new TaskRunner(store, providers);
-  server = createApp({
+  const app = createApp({
     store,
     runner,
     settings: providers,
@@ -75,15 +87,18 @@ async function start(mockStepMs = 5, realtime?: RealtimeBridge, webSearch?: WebS
     realtime,
     webSearch,
     home,
+    camera: cameraStore,
     port,
     devPort: 5173,
     distDir: null,
   });
+  notify = app.notifySettings;
+  server = app;
   await new Promise<void>((r) => server!.listen(port, "127.0.0.1", r));
   const base = `http://localhost:${port}`;
   const post = (path: string, body: unknown) =>
     fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  return { base, post, runner, store };
+  return { base, post, runner, store, dir };
 }
 
 describe("HTTP API", () => {
@@ -279,6 +294,49 @@ describe("HTTP API", () => {
     expect(JSON.parse(raw)).toMatchObject({ status: "ok", devices: [{ device: "溫濕度計", minutes_ago: 1, readings: [{ value: 26.5 }] }] });
     expect(raw).not.toContain("hub-secret");
     expect(seen).toEqual(["http://127.0.0.1:8788/api/v1/home Bearer hub-secret"]);
+  });
+
+  it("鏡頭設定：驗證輸入、保存到 camera.json、推送 settings.updated，重新啟動後仍保留", async () => {
+    const none = await start();
+    expect((await none.post("/api/settings/camera", { active: false })).status).toBe(409);
+    await new Promise((r) => server!.close(r));
+
+    const { base, post, dir } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" } });
+    const initial = (await (await fetch(`${base}/api/settings`)).json()) as SettingsView;
+    expect(initial.camera).toMatchObject({ enabled: true, label: "CCB Camera", active: true, look_to_talk: true, look_to_talk_s: 1.5, stop_gesture: true });
+
+    expect((await post("/api/settings/camera", { enabled: false })).status).toBe(400);
+    expect((await post("/api/settings/camera", { look_to_talk_s: 9 })).status).toBe(400);
+    expect((await post("/api/settings/camera", { active: "no" })).status).toBe(400);
+
+    const controller = new AbortController();
+    const events = await fetch(`${base}/api/events`, { signal: controller.signal });
+    const reader = events.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const next = async () => {
+      while (!buffer.includes("\n\n")) buffer += decoder.decode((await reader.read()).value);
+      const [frame, ...rest] = buffer.split("\n\n");
+      buffer = rest.join("\n\n");
+      return JSON.parse(frame.replace(/^data: /, ""));
+    };
+    expect(await next()).toMatchObject({ type: "hello" });
+
+    const res = await post("/api/settings/camera", { active: false, look_to_talk_s: 2.5 });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as SettingsView).camera).toMatchObject({ enabled: true, active: false, look_to_talk_s: 2.5, look_to_talk: true });
+    expect(await next()).toMatchObject({ type: "settings.updated", settings: { camera: { active: false, look_to_talk_s: 2.5 } } });
+    controller.abort();
+
+    const file = join(dir, "camera.json");
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ schema_version: 1, prefs: { active: false, look_to_talk_s: 2.5 } });
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600);
+    await new Promise((r) => server!.close(r));
+
+    // .env 改成關閉看著說話：使用者沒改過的鍵跟著 .env，改過的鍵以 camera.json 為準。
+    const again = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on", NOUS_LOOK_TO_TALK: "off" }, dir });
+    const after = (await (await fetch(`${again.base}/api/settings`)).json()) as SettingsView;
+    expect(after.camera).toMatchObject({ active: false, look_to_talk_s: 2.5, look_to_talk: false, stop_gesture: true });
   });
 
   it("前端未建置時回傳說明而不是空白頁", async () => {

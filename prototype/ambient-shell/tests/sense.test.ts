@@ -136,6 +136,22 @@ describe("trackers", () => {
     expect(l.update(15_000, s)).toBe(false);
     expect(l.update(16_200, s)).toBe(true);
   });
+
+  it("look-to-talk takes timings per call; reset clears the dwell without a cooldown", () => {
+    const l = new LookToTalk();
+    const s = { present: true, facing: true, talking: false };
+    const timing = { dwell_ms: 2000, cooldown_ms: 5000 };
+    expect(l.update(0, s, timing)).toBe(false);
+    expect(l.update(1999, s, timing)).toBe(false);
+    expect(l.update(2000, s, timing)).toBe(true);
+    expect(l.update(6999, s, timing)).toBe(false);
+    expect(l.update(7000, s, timing)).toBe(false);
+    l.reset();
+    expect(l.update(8000, s, timing)).toBe(false);
+    l.reset();
+    expect(l.update(9000, s, timing)).toBe(false);
+    expect(l.update(11_000, s, timing)).toBe(true);
+  });
 });
 
 describe("SenseProcessor", () => {

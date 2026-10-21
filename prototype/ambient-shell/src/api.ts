@@ -1,4 +1,5 @@
 import type { HomeStatusResult } from "../shared/home.ts";
+import type { CameraPrefsPatch } from "../shared/sense.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
 
 export class ApiError extends Error {
@@ -30,6 +31,8 @@ export const api = {
     call<Task>("POST", `/api/tasks/${taskId}/retry`, { request_id }),
   getArtifact: (artifactId: string) => call<Artifact>("GET", `/api/artifacts/${artifactId}`),
   selectProvider: (provider: ExecutorMode) => call<SettingsView>("POST", "/api/settings/provider", { provider }),
+  /** 鏡頭使用者設定（保存在本機 camera.json）；回傳更新後的設定。 */
+  updateCamera: (patch: CameraPrefsPatch) => call<SettingsView>("POST", "/api/settings/camera", patch),
   chatgptLogin: (mode: "auto" | "new") => call<{ authorize_url: string }>("POST", "/api/auth/chatgpt/login", { mode }),
   chatgptCancel: () => call<SettingsView>("POST", "/api/auth/chatgpt/cancel", {}),
   chatgptLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/chatgpt/logout", {}),

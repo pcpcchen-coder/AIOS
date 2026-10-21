@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExecutorMode } from "../shared/types.ts";
-import type { CameraSettings } from "../shared/sense.ts";
+import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_MAX_CONCURRENT } from "./runner.ts";
 
 export interface Config {
@@ -35,7 +35,7 @@ export interface Config {
   taskWebSearch: boolean;
   /** Claude 背景任務使用的 web search 工具版本（NOUS_CLAUDE_WEB_SEARCH）。 */
   claudeWebSearchTool: string;
-  /** 雙目鏡頭（docs/11）；影像只在本機處理。 */
+  /** 雙目鏡頭（docs/11）：安裝設定與使用者設定的預設；使用者改過的值由 CameraSettingsStore 疊上去。 */
   camera: CameraSettings;
   /** 武陵居中控（docs/12）：SMARTHOME_URL、SMARTHOME_TOKEN；權杖只留在本機核心。 */
   smarthomeUrl: string | null;
@@ -89,9 +89,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",
       left_first: (env.NOUS_CAMERA_LEFT_FIRST ?? "true").trim().toLowerCase() !== "false",
-      look_to_talk: (env.NOUS_LOOK_TO_TALK ?? "on").trim().toLowerCase() !== "off",
       screen_width_mm: positiveOr(env.NOUS_SCREEN_WIDTH_MM, 398),
       screen_offset_mm: numberOr(env.NOUS_CAMERA_OFFSET_MM, 140),
+      ...DEFAULT_CAMERA_PREFS,
+      // .env 只提供這一個使用者設定的預設；使用者在設定畫面改過後以 camera.json 為準。
+      look_to_talk: (env.NOUS_LOOK_TO_TALK ?? "on").trim().toLowerCase() !== "off",
     },
   };
 }

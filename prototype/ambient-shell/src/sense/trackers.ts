@@ -1,7 +1,7 @@
 // 感知事件的時間濾波（docs/11 §2、docs/06 §4.4）：只在狀態穩定後才發出事件，避免畫面跳動與誤觸。
 // 純邏輯，時間由呼叫端傳入（毫秒），方便測試。
 
-import type { PointZone } from "../../shared/sense.ts";
+import { CAMERA_PREFS, lookToTalkDwellMs, type PointZone } from "../../shared/sense.ts";
 import { median } from "./geometry.ts";
 
 /** 在場：連續偵測到人 500 ms 才算在場，60 秒沒看到才算離開；距離取最近 9 筆的中位數。 */
@@ -140,31 +140,43 @@ export class ZoneStabilizer {
   }
 }
 
+export interface LookTiming {
+  dwell_ms: number;
+  cooldown_ms: number;
+}
+
 /**
- * 看向螢幕就能說話（免手）：有人在場且面向螢幕 1.2 秒，而即時語音沒開時，請求開始對話。
- * 對話結束後 10 秒內不重新觸發，避免一說完「再見」又被自動開啟。
+ * 看向螢幕就能說話（免手）：有人在場且面向螢幕（確認後）再停留 dwell_ms，而即時語音沒開時，請求開始對話。
+ * 對話結束後 cooldown_ms 內不重新觸發，避免一說完「再見」又被自動開啟。
+ * 時間由呼叫端每次傳入（使用者可在設定調整）；預設由 CAMERA_PREFS 推導：1.5 秒 − 面向確認 0.3 秒 = 1200 ms，冷卻 10 秒。
  */
 export class LookToTalk {
-  static readonly DWELL_MS = 1200;
-  static readonly COOLDOWN_MS = 10_000;
+  static readonly DWELL_MS = lookToTalkDwellMs(CAMERA_PREFS.look_to_talk_s.default, AttentionTracker.ON_MS);
+  static readonly COOLDOWN_MS = CAMERA_PREFS.look_to_talk_cooldown_s.default * 1000;
+  static readonly DEFAULT: LookTiming = { dwell_ms: LookToTalk.DWELL_MS, cooldown_ms: LookToTalk.COOLDOWN_MS };
   private since: number | null = null;
   private blockedUntil = 0;
 
   /** 對話結束時呼叫。 */
-  ended(now: number): void {
-    this.blockedUntil = now + LookToTalk.COOLDOWN_MS;
+  ended(now: number, cooldownMs: number = LookToTalk.COOLDOWN_MS): void {
+    this.blockedUntil = now + cooldownMs;
     this.since = null;
   }
 
-  update(now: number, state: { present: boolean; facing: boolean; talking: boolean }): boolean {
+  update(now: number, state: { present: boolean; facing: boolean; talking: boolean }, timing: LookTiming = LookToTalk.DEFAULT): boolean {
     if (!state.present || !state.facing || state.talking || now < this.blockedUntil) {
       this.since = null;
       return false;
     }
     this.since ??= now;
-    if (now - this.since < LookToTalk.DWELL_MS) return false;
+    if (now - this.since < timing.dwell_ms) return false;
     this.since = null;
-    this.blockedUntil = now + LookToTalk.COOLDOWN_MS;
+    this.blockedUntil = now + timing.cooldown_ms;
     return true;
+  }
+
+  /** 看著說話不可用（關閉或無法自動開始）時呼叫：清掉累計中的停留，不設冷卻。 */
+  reset(): void {
+    this.since = null;
   }
 }

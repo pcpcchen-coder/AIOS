@@ -3,9 +3,9 @@ import { computeProgress, isActive, queueText, sortForProgress } from "../shared
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
 import { ApiError, api, newRequestId, streamChat, subscribeEvents } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
-import { matchCameraCommand, SenseController, zoneOf } from "./sense/controller.ts";
-import type { SensePipeline } from "./sense/pipeline.ts";
-import type { PointZone, SensorState } from "../shared/sense.ts";
+import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf } from "./sense/controller.ts";
+import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
+import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
 import {
   browserRealtimeDeps,
   realtimeSupported,
@@ -202,9 +202,11 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
     conversation.stop();
     hideSubtitle();
   }
+  const wasActive = settings?.camera?.active;
   settings = value;
-  // 鏡頭啟用時自動開啟（免手）；影像只在本機處理。
-  if (value.camera?.enabled && !pipeline?.running) void startCamera();
+  if (value.camera && !value.camera.active) cameraOffPending = false; // 伺服器已保存「關掉」
+  if (value.camera && wasActive !== undefined && value.camera.active !== wasActive) cameraFailed = false;
+  syncCamera();
 }
 
 function chatGPTAvailable(): boolean {
@@ -374,18 +376,94 @@ function enableVoiceMode(): void {
 // ───────────── 雙目鏡頭（docs/11） ─────────────
 // 影像只在本機處理；這裡只收到在場、面向、手勢、指向等事件。手勢與指向不觸發任何外部動作。
 
-const sensorIndicator = document.createElement("div");
+const sensorIndicator = document.createElement("button");
+sensorIndicator.type = "button";
 sensorIndicator.className = "sensor-indicator";
 sensorIndicator.hidden = true;
 document.body.append(sensorIndicator);
 let pipeline: SensePipeline | null = null;
 let pointedZone: PointZone | null = null;
+/** 最後一次的鏡頭裝置狀態（來自管線事件，不是設定）。 */
+let sensorState: SensorState = "off";
+/**
+ * 這個視窗剛說了「鏡頭關掉」但伺服器還沒回報 active=false：防止尚未保存時收到舊的 hello 把鏡頭又打開。
+ * 清除：伺服器回報 active=false，或使用者開鏡頭。
+ */
+let cameraOffPending = false;
+/** 上次啟動失敗：不在每次 hello／settings.updated 重試；使用者再次開啟或 active 改變時才重試。 */
+let cameraFailed = false;
+
+// 鏡頭畫面：使用者要求才出現（user_request），不保存，重新整理後一定是收起。與 sensorIndicator 一樣是 ShellState 之外的覆蓋層。
+const PREVIEW_W = 256;
+const PREVIEW_H = 144;
+const sensorPreview = document.createElement("div");
+sensorPreview.className = "sensor-preview";
+sensorPreview.hidden = true;
+const previewTargets: PreviewTargets = { live: previewCanvas(), diff: previewCanvas() };
+const previewClose = document.createElement("button");
+previewClose.type = "button";
+previewClose.className = "sensor-preview-close";
+previewClose.textContent = "×";
+previewClose.setAttribute("aria-label", "收起鏡頭畫面");
+previewClose.addEventListener("click", () => closePreview());
+sensorPreview.append(
+  previewClose,
+  previewTile(previewTargets.live, "即時影像（左眼）· 只在本機"),
+  previewTile(previewTargets.diff, "左右眼差異 · 只在本機"),
+);
+document.body.append(sensorPreview);
+/** 唯一的預覽狀態；null = 收起。 */
+let previewRequestId: string | null = null;
+
+function previewCanvas(): HTMLCanvasElement {
+  const c = document.createElement("canvas");
+  c.width = PREVIEW_W;
+  c.height = PREVIEW_H;
+  return c;
+}
+
+function previewTile(target: HTMLCanvasElement, label: string): HTMLElement {
+  const figure = document.createElement("figure");
+  const stale = document.createElement("span");
+  stale.className = "sensor-preview-stale";
+  stale.textContent = "影像中斷";
+  const text = document.createElement("figcaption");
+  text.textContent = label;
+  figure.append(target, stale, text);
+  return figure;
+}
+
+/** 只在鏡頭運作中（含暫時中斷）時打開；其他狀態說明原因。 */
+function openPreview(requestId: string): void {
+  if (sensorState !== "ok" && sensorState !== "degraded") {
+    showSubtitle(settings?.camera?.enabled ? "鏡頭沒有在運作，無法顯示鏡頭畫面。" : "鏡頭未啟用（.env 設定 NOUS_CAMERA=on 後重新啟動）。");
+    return;
+  }
+  previewRequestId = requestId;
+  sensorPreview.dataset.visibilityReason = "user_request";
+  sensorPreview.dataset.requestId = requestId;
+  sensorPreview.hidden = false;
+  document.body.dataset.cameraPreview = "open";
+  pipeline?.setPreview(previewTargets);
+}
+
+/** 只收起畫面，不關鏡頭（收起 ≠ 停止）。 */
+function closePreview(): void {
+  previewRequestId = null;
+  sensorPreview.hidden = true;
+  delete sensorPreview.dataset.visibilityReason;
+  delete sensorPreview.dataset.requestId;
+  delete document.body.dataset.cameraPreview;
+  pipeline?.setPreview(null);
+}
+
+sensorIndicator.addEventListener("click", () => (previewRequestId ? closePreview() : openPreview(userRequest())));
 
 const sense = new SenseController({
   now: () => performance.now(),
   isTalking: () => realtime.on || conversation.current !== "off",
-  canAutoTalk: () =>
-    !!settings?.camera?.look_to_talk && !!settings.realtime?.available && realtimeSupported() && hasVoiceConsent("realtime"),
+  canAutoTalk: () => !!settings?.realtime?.available && realtimeSupported() && hasVoiceConsent("realtime"),
+  prefs: () => settings?.camera ?? DEFAULT_CAMERA_PREFS,
   startTalk: () => startRealtime(),
   interruptSpeech: () => {
     if (realtime.current === "speaking") realtime.interrupt();
@@ -396,6 +474,7 @@ const sense = new SenseController({
     if (realtime.pendingApproval) realtime.resolveApproval(false, "dismissed");
     if (shell.surface) dispatch({ type: "dismiss" });
     if (realtime.on) realtime.stop();
+    closePreview();
   },
   setScale: (scale) => document.documentElement.style.setProperty("--distance-scale", String(scale)),
   setPresence: (present) => (document.body.dataset.present = present ? "yes" : "no"),
@@ -405,11 +484,17 @@ const sense = new SenseController({
     applyPointing();
   },
   setSensor: (state: SensorState, detail: string) => {
+    sensorState = state;
     sensorIndicator.hidden = state === "off";
     sensorIndicator.dataset.state = state;
-    sensorIndicator.title = detail;
+    sensorIndicator.title = `${detail}（按一下顯示／收起鏡頭畫面）`;
     sensorIndicator.textContent = state === "ok" ? "鏡頭" : state === "starting" ? "鏡頭啟動中" : `鏡頭：${detail}`;
-    if (state === "error") showSubtitle(detail);
+    sensorPreview.dataset.state = state;
+    if (state === "off" || state === "error" || state === "starting") closePreview();
+    if (state === "error") {
+      cameraFailed = true;
+      showSubtitle(detail);
+    }
   },
 });
 setInterval(() => sense.tick(), 200);
@@ -428,28 +513,53 @@ function applyPointing(): void {
   if (realtime.on && label) realtime.addContext(`（系統狀態）使用者正用手指著畫面上的「${label}」。使用者說「這個」時指的是它；指向只是選定，不代表要執行任何動作。`);
 }
 
+/** 唯一決定鏡頭開關的地方；冪等（管線的 start／stop 重複呼叫不發事件），每次設定更新與指令都呼叫。 */
+function syncCamera(): void {
+  if (cameraShouldRun(settings?.camera, cameraOffPending, cameraFailed)) void startCamera();
+  else pipeline?.stop();
+}
+
 async function startCamera(): Promise<void> {
-  if (!settings?.camera?.enabled || pipeline?.running) return;
   const { SensePipeline } = await import("./sense/pipeline.ts");
+  // 載入模組期間可能已收到「鏡頭關掉」。
+  if (!settings?.camera || !cameraShouldRun(settings.camera, cameraOffPending, cameraFailed)) return;
   pipeline ??= new SensePipeline(settings.camera, (event) => sense.handle(event));
   await pipeline.start();
 }
 
-function stopCamera(): void {
-  pipeline?.stop();
+/**
+ * 設定畫面、語音、打字、即時語音逐字稿：所有鏡頭使用者設定都走這一條。
+ * 「關掉」先在本機釋放鏡頭再送出，不等網路。回傳失敗說明；成功時為 null。
+ */
+async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null> {
+  if (patch.active === false) cameraOffPending = true;
+  if (patch.active === true) {
+    cameraOffPending = false;
+    cameraFailed = false;
+  }
+  syncCamera();
+  try {
+    applySettings(await api.updateCamera(patch));
+    render();
+    return null;
+  } catch (err) {
+    return patch.active === false
+      ? "鏡頭已關閉，但設定沒有保存（本機核心未連線）；重新整理頁面後會再開啟。"
+      : `鏡頭設定沒有保存：${(err as Error).message}`;
+  }
 }
 
-/** 「鏡頭關掉」「打開鏡頭」：本機規則處理，不經模型。 */
+/** 鏡頭、鏡頭畫面、看著說話、手掌停止：本機規則處理，不經模型。 */
 function handleCameraCommand(text: string): boolean {
   const command = matchCameraCommand(text);
   if (!command) return false;
-  if (command === "off") {
-    stopCamera();
-    showSubtitle("鏡頭已關閉。");
-  } else if (settings?.camera?.enabled) {
-    void startCamera();
-  } else {
+  if ("preview" in command) {
+    if (command.preview) openPreview(userRequest());
+    else closePreview();
+  } else if (!settings?.camera?.enabled) {
     showSubtitle("鏡頭未啟用（.env 設定 NOUS_CAMERA=on 後重新啟動）。");
+  } else {
+    void updateCameraPrefs(command.set).then((error) => showSubtitle(error ?? command.say));
   }
   return true;
 }
@@ -734,7 +844,7 @@ async function handleCommand(text: string): Promise<void> {
     case "settings":
       input.value = "";
       dispatch({ type: "show.settings", request_id: requestId });
-      say("這是 AI 引擎設定。");
+      say(settings?.camera?.enabled ? "這是 AI 引擎與鏡頭設定。" : "這是 AI 引擎設定。");
       return;
     case "use_provider":
       input.value = "";
@@ -823,6 +933,13 @@ const actions: ViewActions = {
   dismiss: () => dispatch({ type: "dismiss" }),
   openSettings: () => dispatch({ type: "show.settings", request_id: userRequest() }),
   selectProvider: (provider) => void selectProvider(provider, userRequest()),
+  updateCamera(patch) {
+    const requestId = userRequest();
+    void updateCameraPrefs(patch).then((error) => {
+      if (error) dispatch({ type: "show.settings", request_id: requestId, message: error });
+    });
+  },
+  openCameraPreview: () => openPreview(userRequest()),
   chatgptLogin: (mode) => void chatgptLogin(mode, userRequest()),
   async chatgptCancel() {
     const next = await api.chatgptCancel().catch(() => null);

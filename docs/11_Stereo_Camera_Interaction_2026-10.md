@@ -1,6 +1,6 @@
 # Nous 11 — 雙目鏡頭的遠距互動設計（AR0144）
 
-版本：v0.2 · 日期：2026-10-21 · 狀態：四種用法已在原型實作（`prototype/ambient-shell/src/sense/`），數值仍由廠商規格推算，尚未校正與實測
+版本：v0.3 · 日期：2026-10-21 · 狀態：四種用法已在原型實作（`prototype/ambient-shell/src/sense/`），v0.3 加上鏡頭畫面與使用者設定；數值仍由廠商規格推算，尚未校正與實測
 關聯：06 §4（視線）、10（18 吋遠距 UI）、this-is-yourX `stereo_camera/` 與 ADR-0002、ADR-0005
 
 ---
@@ -66,7 +66,8 @@ SensePipeline（Electron 隱藏視窗或 Worker，TypeScript）
    ├─ 切左右 1280×720 → 載入 ADR-0005 的雙目校正
    ├─ MediaPipe Tasks Vision（Apache-2.0）：左右各自偵測臉、手、姿勢關鍵點
    ├─ 關鍵點三角化 → 3D（不做全畫面稠密深度，ADR-0005）
-   └─ 只輸出事件，不輸出影像
+   ├─ 只輸出事件，不輸出影像
+   └─ 使用者要求時：把縮小的左眼畫面與左右眼差異直接畫到本頁兩個畫布（不交出串流）
         presence { distance_m, confidence }
         attention { facing_screen }
         gesture { kind: "stop" }
@@ -80,6 +81,7 @@ Nous Shell（既有狀態機）：PointerProvider 取代 06 的 GazeProvider 介
 - **隱私**：
   - 影像不寫檔、不進 trace、不送 Realtime API 或任何雲端。
   - 只有上面列出的事件離開 SensePipeline。
+  - 例外：使用者要求「顯示鏡頭畫面」時，管線自己把縮小的畫面（約 256×144）畫到本頁的兩個預覽畫布。不交出 MediaStream，不讀回像素（前端不得使用 `getImageData`、`toDataURL`、`toBlob`、`captureStream`、`createObjectURL`，由靜態測試檢查），不寫檔、不進 trace、不外傳。預覽只給人看，AI 不分析這些畫面，電子腦的視覺區也不因此亮起。
   - 要讓 AI「看一眼」某個畫面時，需另立 ADR，並設計逐張同意的流程。
 - **宿主政策**：`app.ts` 目前的 `Permissions-Policy: camera=()` 需要放寬，但只開放給 SensePipeline 的來源，不開放給生成 UI（CLAUDE.md 紅線）。
 - **感測器指示**：鏡頭啟用時畫面角落顯示最小指示（06 `sensor_status`）。說「鏡頭關掉」立即釋放串流。
@@ -90,7 +92,9 @@ Nous Shell（既有狀態機）：PointerProvider 取代 06 的 GazeProvider 介
 - **面向螢幕**：電子腦外環亮一格，表示「我知道你在對我說話」。
 - **指向**：被指向的卡片放大 1.04 倍並加亮框，字樣為「已指向」，與 10 的 S06 相同。
 - **停止手勢**：播報立即停止，電子腦脈衝停止。
-- **鏡頭狀態**：角落小點。綠色＝運作，灰色＝關閉，琥珀色＝降級。
+- **鏡頭狀態**：右下角小點。綠色＝運作，琥珀色＝啟動中或降級，紅色＝錯誤；關閉時不顯示。小點與預覽依裝置事件（`sensor`）更新，不依設定開關。
+- **鏡頭畫面**（v0.3）：說「顯示鏡頭畫面」、按小點，或在設定按「顯示鏡頭畫面」，小點上方出現兩格：「即時影像（左眼）」與「左右眼差異」（左眼減右眼的絕對值；近處物體會出現雙邊，遠處背景接近黑色，這不是深度圖）。不鏡像，顯示鏡頭實際看到的方向。只在鏡頭運作中（含降級）可開；降級時顯示「影像中斷」。說「收起鏡頭畫面」、再按小點或按 ×，或鏡頭關閉、錯誤、重新啟動、人離開時收起。收起只關畫面，不關鏡頭。預覽不保存，重新整理後一定是收起；標記 `data-visibility-reason="user_request"` 與該次請求 ID。
+- **設定**（v0.3）：設定畫面的「鏡頭與手勢」可調整鏡頭開關、看著說話、面向螢幕幾秒後開始對話（0.5–5 秒，預設 1.5）、對話結束後暫停（3–60 秒，預設 10）、手掌停止播報。保存在本機 `camera.json`，說「鏡頭關掉」也會保存，重新連線或重新啟動都不會自己打開。
 
 ## 6. 鏡頭給誰用（已決定：先給 Nous，2026-10-21）
 
@@ -106,12 +110,13 @@ George 決定先採 **A**：鏡頭先接到 Nous 使用（雙目）。Amazing Ha
 
 | 模組 | 內容 |
 |---|---|
-| `shared/sense.ts` | 事件與設定型別；只有事件離開感知管線 |
+| `shared/sense.ts` | 事件與設定型別；`CAMERA_PREFS` 是使用者設定的唯一清單（預設、範圍、標籤、驗證）；只有事件離開感知管線 |
+| `server/camera-settings.ts` | 使用者設定的保存（`<configDir>/camera.json`，只存改過的鍵）；優先順序：保存的值 > `.env`（`NOUS_LOOK_TO_TALK`）> 預設 |
 | `src/sense/geometry.ts` | 三角化、指向線與螢幕交點、頭部朝向、舉手判斷 |
-| `src/sense/trackers.ts` | 時間濾波：在場 0.5 s／離開 60 s、面向遲滯、停止手勢 0.3 s＋2 s 冷卻、指向穩定 450 ms／清除 1 s、看向即說話 1.2 s |
+| `src/sense/trackers.ts` | 時間濾波：在場 0.5 s／離開 60 s、面向遲滯（確認 0.3 s）、停止手勢 0.3 s＋2 s 冷卻、指向穩定 450 ms／清除 1 s、看向即說話（可在設定調整：從面向算起預設 1.5 s，即確認 0.3 s 後再停留 1.2 s；冷卻預設 10 s） |
 | `src/sense/processor.ts` | 每幀關鍵點 → 事件 |
-| `src/sense/pipeline.ts` | 鏡頭、切左右眼、MediaPipe Pose 與手勢模型（本機 wasm） |
-| `src/sense/controller.ts` | 事件 → Shell：字級縮放、看向即說話、停止播報、指向亮框、離開時收起與拒絕待確認動作 |
+| `src/sense/pipeline.ts` | 鏡頭、切左右眼、MediaPipe Pose 與手勢模型（本機 wasm）；使用者要求時畫鏡頭畫面 |
+| `src/sense/controller.ts` | 事件 → Shell：字級縮放、看向即說話、停止播報（可關閉）、指向亮框、離開時收起與拒絕待確認動作；鏡頭語音指令 |
 
 設定與安裝見原型 README〈雙目鏡頭〉與 INSTALL。
 

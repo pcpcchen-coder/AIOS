@@ -1,8 +1,9 @@
 // 雙目鏡頭感知管線（docs/11 §4）：瀏覽器／Electron 內執行，影像只在本機。
 // 2560×720 併排影像 → 切左右 1280×720 → MediaPipe Pose（左右各一）＋手勢辨識（左）→ SenseProcessor → 事件。
-// 不保存、不上傳任何影像；離開這個模組的只有 SenseEvent。
+// 不保存、不上傳任何影像；離開這個模組的只有 SenseEvent。使用者要求看鏡頭畫面時，管線自己把縮小的左眼畫面
+// 與左右眼差異畫到呼叫端給的兩個畫布上；不交出 MediaStream、video 或原尺寸畫布，也不讀回像素。
 
-import type { CameraSettings, SenseEvent } from "../../shared/sense.ts";
+import type { CameraInstall, SenseEvent } from "../../shared/sense.ts";
 import { SenseProcessor } from "./processor.ts";
 
 const EYE_W = 1280;
@@ -20,6 +21,18 @@ export const VISION_ASSETS = {
 };
 
 type Emit = (event: SenseEvent) => void;
+
+/** 預覽畫布由 main.ts 建立與擁有；尺寸由畫布本身決定。 */
+export interface PreviewTargets {
+  live: HTMLCanvasElement;
+  diff: HTMLCanvasElement;
+}
+
+interface Models {
+  poseL: Landmarker;
+  poseR: Landmarker;
+  gesture: Recognizer;
+}
 
 interface Landmarker {
   detectForVideo(image: HTMLCanvasElement, ts: number): { landmarks: { x: number; y: number; visibility?: number }[][] };
@@ -44,9 +57,13 @@ export class SensePipeline {
   private lastTs = 0;
   private degraded = false;
   private generation = 0;
+  /** start／stop 依此判斷：重複呼叫不重複開鏡頭、不重複回報（syncCamera 在每次設定更新都會呼叫）。 */
+  private phase: "off" | "starting" | "on" = "off";
+  private preview: PreviewTargets | null = null;
 
+  /** 只拿安裝設定：核心執行期間不變，所以保存一份是正確的；使用者設定不進管線。 */
   constructor(
-    private readonly settings: CameraSettings,
+    private readonly settings: CameraInstall,
     private readonly emit: Emit,
   ) {
     this.processor = new SenseProcessor({ width_mm: settings.screen_width_mm, offset_mm: settings.screen_offset_mm });
@@ -57,11 +74,13 @@ export class SensePipeline {
   }
 
   get running(): boolean {
-    return this.stream !== null;
+    return this.phase === "on";
   }
 
+  /** 已在啟動中或運作中時直接返回，不發任何事件。 */
   async start(): Promise<void> {
-    if (this.stream) return;
+    if (this.phase !== "off") return;
+    this.phase = "starting";
     const generation = ++this.generation;
     this.emit({ type: "sensor", state: "starting", detail: "鏡頭啟動中" });
     try {
@@ -77,20 +96,44 @@ export class SensePipeline {
       video.srcObject = stream;
       await video.play();
       this.video = video;
-      await this.loadModels();
-      if (generation !== this.generation) return;
+      const models = await this.loadModels();
+      if (generation !== this.generation) {
+        // 載入期間被關掉：stop() 已釋放鏡頭，這裡關掉剛建立的模型，避免留在 GPU 上。
+        closeModels(models);
+        return;
+      }
+      ({ poseL: this.poseL, poseR: this.poseR, gesture: this.gesture } = models);
       this.processor = new SenseProcessor({ width_mm: this.settings.screen_width_mm, offset_mm: this.settings.screen_offset_mm });
       this.timer = setInterval(() => this.tick(), FRAME_INTERVAL_MS);
       this.lastFrameAt = performance.now();
+      this.phase = "on";
       this.emit({ type: "sensor", state: "ok", detail: "鏡頭運作中（影像只在本機處理）" });
     } catch (err) {
-      this.stop(false);
+      if (generation !== this.generation) return; // 已被 stop()，它已回報 off
+      this.release();
       this.emit({ type: "sensor", state: "error", detail: describeError(err) });
     }
   }
 
-  /** 釋放鏡頭；回報 off，並清除在場、面向與指向狀態。 */
-  stop(report = true): void {
+  /** 釋放鏡頭；只有真的從啟動中／運作中關掉時才回報 off，並清除在場、面向與指向狀態。 */
+  stop(): void {
+    if (this.phase === "off") return;
+    this.release();
+    this.emit({ type: "sensor", state: "off", detail: "鏡頭已關閉" });
+    this.emit({ type: "presence", present: false, distance_m: null });
+    this.emit({ type: "attention", facing: false });
+    this.emit({ type: "pointing", zone: null });
+  }
+
+  /** 開或關鏡頭畫面（null）。只影響畫，不影響偵測；換掉或關掉時清空舊畫布，不留下凍結的最後一格。 */
+  setPreview(targets: PreviewTargets | null): void {
+    if (this.preview && this.preview !== targets) clearPreview(this.preview);
+    this.preview = targets;
+  }
+
+  /** 釋放鏡頭、模型與預覽，不發事件。 */
+  private release(): void {
+    this.phase = "off";
     this.generation++;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
@@ -103,15 +146,11 @@ export class SensePipeline {
     this.gesture?.close();
     this.poseL = this.poseR = null;
     this.gesture = null;
-    if (report) {
-      this.emit({ type: "sensor", state: "off", detail: "鏡頭已關閉" });
-      this.emit({ type: "presence", present: false, distance_m: null });
-      this.emit({ type: "attention", facing: false });
-      this.emit({ type: "pointing", zone: null });
-    }
+    this.degraded = false;
+    this.setPreview(null);
   }
 
-  private async loadModels(): Promise<void> {
+  private async loadModels(): Promise<Models> {
     const vision = await import("@mediapipe/tasks-vision");
     const fileset = await vision.FilesetResolver.forVisionTasks(VISION_ASSETS.wasm);
     const poseOptions = {
@@ -119,15 +158,18 @@ export class SensePipeline {
       runningMode: "VIDEO" as const,
       numPoses: 1,
     };
+    const created: Partial<Models> = {};
     try {
-      this.poseL = (await vision.PoseLandmarker.createFromOptions(fileset, poseOptions)) as unknown as Landmarker;
-      this.poseR = (await vision.PoseLandmarker.createFromOptions(fileset, poseOptions)) as unknown as Landmarker;
-      this.gesture = (await vision.GestureRecognizer.createFromOptions(fileset, {
+      created.poseL = (await vision.PoseLandmarker.createFromOptions(fileset, poseOptions)) as unknown as Landmarker;
+      created.poseR = (await vision.PoseLandmarker.createFromOptions(fileset, poseOptions)) as unknown as Landmarker;
+      created.gesture = (await vision.GestureRecognizer.createFromOptions(fileset, {
         baseOptions: { modelAssetPath: VISION_ASSETS.gesture, delegate: "GPU" },
         runningMode: "VIDEO",
         numHands: 2,
       })) as unknown as Recognizer;
+      return created as Models;
     } catch (err) {
+      closeModels(created);
       throw new Error(`視覺模型載入失敗（請先執行 npm run vision:setup）：${err instanceof Error ? err.message : String(err)}`);
     }
   }
@@ -147,6 +189,7 @@ export class SensePipeline {
     const [first, second] = this.settings.left_first ? [this.canvasL, this.canvasR] : [this.canvasR, this.canvasL];
     first.getContext("2d")!.drawImage(video, 0, 0, EYE_W, EYE_H, 0, 0, EYE_W, EYE_H);
     second.getContext("2d")!.drawImage(video, EYE_W, 0, EYE_W, EYE_H, 0, 0, EYE_W, EYE_H);
+    if (this.preview) drawPreview(this.canvasL, this.canvasR, this.preview);
 
     const ts = Math.max(Math.round(now), this.lastTs + 1);
     this.lastTs = ts;
@@ -172,6 +215,31 @@ export class SensePipeline {
       this.emit({ type: "pointing", zone: null });
     }
   }
+}
+
+/**
+ * 縮小的 drawImage，都在畫布上完成，不讀回像素：
+ *   live：左眼；diff：先畫左眼，再以 "difference" 疊上右眼 → |左 − 右|。
+ * 近處物體在左右眼位置不同，會出現雙邊；遠處背景接近黑色。這不是深度圖。
+ */
+export function drawPreview(left: HTMLCanvasElement, right: HTMLCanvasElement, t: PreviewTargets): void {
+  t.live.getContext("2d")!.drawImage(left, 0, 0, t.live.width, t.live.height);
+  const diff = t.diff.getContext("2d")!;
+  diff.globalCompositeOperation = "copy";
+  diff.drawImage(left, 0, 0, t.diff.width, t.diff.height);
+  diff.globalCompositeOperation = "difference";
+  diff.drawImage(right, 0, 0, t.diff.width, t.diff.height);
+  diff.globalCompositeOperation = "source-over";
+}
+
+function clearPreview(t: PreviewTargets): void {
+  for (const c of [t.live, t.diff]) c.getContext("2d")?.clearRect(0, 0, c.width, c.height);
+}
+
+function closeModels(models: Partial<Models>): void {
+  models.poseL?.close();
+  models.poseR?.close();
+  models.gesture?.close();
 }
 
 /** 依名稱找雙目鏡頭；找不到時不改用其他鏡頭（避免誤開筆電的前鏡頭）。 */
