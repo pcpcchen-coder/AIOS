@@ -18,6 +18,7 @@ import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
 import { formatCount } from "./format.ts";
+import { homeStatusLine } from "../shared/home.ts";
 import { classify } from "./intent.ts";
 import { evaluateSurface } from "./presentation-policy.ts";
 import { initialShell, reduceShell, type ShellEvent, type ShellState } from "./shell-state.ts";
@@ -161,6 +162,7 @@ const realtime = new RealtimeVoice(
     onDelegate: delegateFromRealtime,
     onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
     onWebSearch: webSearchFromRealtime,
+    onHomeStatus: homeStatusFromRealtime,
     onApprovalPrompt: showApproval,
     onApprovalResolved: closeApproval,
     onToolActivity: (text) => showSubtitle(text),
@@ -515,6 +517,20 @@ async function webSearchFromRealtime(query: string): Promise<Record<string, unkn
     const result = await api.webSearch(query);
     if (result.sources.length) showSubtitle(`來源：${result.sources.map((s) => s.title).slice(0, 3).join("、")}`);
     return { ok: true, answer: result.answer, sources: result.sources.map((s) => s.title) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    showSubtitle(message);
+    return { ok: false, error: message };
+  }
+}
+
+/** 模型要查家電狀態：本機核心帶權杖問中控，字幕顯示讀值與資料時間；失敗時照實交還給模型。 */
+async function homeStatusFromRealtime(target: string, metric: string | null): Promise<Record<string, unknown>> {
+  brain.pulse("step", classifyDomain(target));
+  try {
+    const result = await api.homeStatus(target, metric);
+    showSubtitle(homeStatusLine(result));
+    return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     showSubtitle(message);

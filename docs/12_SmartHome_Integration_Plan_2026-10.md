@@ -1,6 +1,6 @@
 # Nous 12 — 武陵居智慧家電整合規劃（AIOS 端）
 
-版本：v0.2 · 日期：2026-10-21 · 狀態：規劃，尚未實作（v0.2 納入 George 的四項決定，見 §8）
+版本：v0.3 · 日期：2026-10-21 · 狀態：H0 已在原型實作，待實機驗證；H1–H4 尚未開始（v0.2 納入 George 的四項決定，見 §8）
 對應：SmartHomeAI repo [`docs/AIOS接入規劃.md`](https://github.com/pcpcchen-coder/SmartHomeAI/blob/main/docs/AIOS接入規劃.md)（中控端要補的介面）
 關聯：10（遠距 UI）、11（雙目鏡頭）、即時語音的工具與語音確認（`prototype/ambient-shell/src/realtime.ts`、`src/approval.ts`）
 
@@ -123,6 +123,8 @@ AIOS 本機核心 HomeBridge（新）── REST v1 + SSE，Bearer 範圍權杖 
 | H4（選用） | 背景 Agent 透過中控本機 MCP 執行多步驟工作，例如晚上的例行檢查 | 中控 P3 | 與語音共用同一權杖範圍與語音控制設定 |
 
 每個批次依 CLAUDE.md 交付變更清單、測試結果、實機證據與未完成項目。
+
+**H0 實作對照（2026-10-21）**：`prototype/ambient-shell/server/home-bridge.ts`（設定、讀 `GET /api/v1/home`、本機名稱比對、讀值整理）、`POST /api/home/status`、即時語音的 `home_status` 工具與字幕錨點。每次查詢都向中控取最新資料，不快取讀值。驗證見 [`docs/validation/smarthome-h0-2026-10-21.md`](./validation/smarthome-h0-2026-10-21.md)。尚缺：George 家裡的實機語音查詢、§3 的大數字錨點畫面。
 
 ## 7. 測試
 

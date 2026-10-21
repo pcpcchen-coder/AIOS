@@ -19,6 +19,8 @@ export interface RealtimeCallbacks {
   onGetTasks(): Promise<Record<string, unknown>>;
   /** 模型要上網查詢；回傳答案與來源，交還給模型。 */
   onWebSearch(query: string): Promise<Record<string, unknown>>;
+  /** 模型要查家電狀態（唯讀）；回傳中控的真實讀值，交還給模型。 */
+  onHomeStatus(target: string, metric: string | null): Promise<Record<string, unknown>>;
   /** MCP 工具需要核准：顯示確認卡，等使用者說「確認執行」或「取消」。 */
   onApprovalPrompt(request: McpApprovalRequest, expiresAt: number): void;
   /** 確認卡結束：同意、拒絕、逾時、畫面被收起或對話結束。 */
@@ -310,7 +312,7 @@ export class RealtimeVoice {
     const generation = this.generation;
     let output: Record<string, unknown>;
     try {
-      const args = JSON.parse(rawArgs || "{}") as { title?: unknown; query?: unknown };
+      const args = JSON.parse(rawArgs || "{}") as { title?: unknown; query?: unknown; target?: unknown; metric?: unknown };
       if (name === "end_conversation") {
         // 不需要模型再接著說：道別已在同一輪回覆中。
         this.endRequested = true;
@@ -329,6 +331,15 @@ export class RealtimeVoice {
         } else {
           this.callbacks.onToolActivity(`上網查詢：${query}`);
           output = await this.callbacks.onWebSearch(query);
+        }
+      } else if (name === "home_status") {
+        const target = typeof args.target === "string" ? args.target.trim() : "";
+        const metric = typeof args.metric === "string" && args.metric.trim() ? args.metric.trim() : null;
+        if (!target) {
+          output = { ok: false, error: "缺少要查的房間或設備" };
+        } else {
+          this.callbacks.onToolActivity(`查詢家裡：${target}`);
+          output = await this.callbacks.onHomeStatus(target, metric);
         }
       } else if (name === "get_tasks") {
         output = await this.callbacks.onGetTasks();

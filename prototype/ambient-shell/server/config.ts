@@ -37,6 +37,9 @@ export interface Config {
   claudeWebSearchTool: string;
   /** 雙目鏡頭（docs/11）；影像只在本機處理。 */
   camera: CameraSettings;
+  /** 武陵居中控（docs/12）：SMARTHOME_URL、SMARTHOME_TOKEN；權杖只留在本機核心。 */
+  smarthomeUrl: string | null;
+  smarthomeToken: string | null;
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -80,6 +83,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     realtimeMcp: parseMcp(env.NOUS_REALTIME_MCP),
     taskWebSearch: (env.NOUS_TASK_WEB_SEARCH ?? "on").trim().toLowerCase() !== "off",
     claudeWebSearchTool: env.NOUS_CLAUDE_WEB_SEARCH?.trim() || "web_search_20250305",
+    smarthomeUrl: parseHttpUrl(env.SMARTHOME_URL, "SMARTHOME_URL"),
+    smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",
@@ -136,4 +141,19 @@ export function parseMcp(raw: string | undefined): McpServerConfig[] {
     if (Array.isArray(o.allowed_tools)) server.allowed_tools = o.allowed_tools.filter((t): t is string => typeof t === "string");
     return server;
   });
+}
+
+/** 中控位址：只接受 http／https，去掉結尾斜線；空白時視為未設定。 */
+export function parseHttpUrl(raw: string | undefined, name: string): string | null {
+  const text = raw?.trim();
+  if (!text) return null;
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    throw new Error(`${name} 不是有效的網址：${text}`);
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`${name} 必須是 http 或 https 網址`);
+  if (url.username || url.password) throw new Error(`${name} 不可內含帳號密碼；權杖請放在 SMARTHOME_TOKEN`);
+  return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
