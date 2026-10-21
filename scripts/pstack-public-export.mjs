@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 // AIOS public metadata publisher. No cross-repo token or raw transcript upload.
-import {readFileSync} from 'node:fs';
+import {existsSync,mkdirSync,mkdtempSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
+import {spawnSync} from 'node:child_process';
 const TARGET='pcpcchen-coder/AIOS', REF='telemetry/pstack';
+const RUNS='observability/public/runs/', INDEX='observability/public/index.json';
 const validId=/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/;
 const statuses=new Set(['running','passed','failed','blocked','cancelled']);
 const stageStates=new Set(['pending','running','passed','failed','blocked','skipped']);
@@ -56,19 +59,59 @@ async function put(path,value,sha){
  const res=await request(path,'PUT',body);
  if(!res.ok)throw Error('GitHub write '+res.status+': '+(await res.text()).slice(0,350));
 }
+export function nextIndex(old,r){
+ if(old&&(old.schema_version!==1||old.repo!==TARGET||!Array.isArray(old.runs)))throw Error('Invalid source index');
+ const runs=(old?.runs||[]).filter(x=>x.run_id!==r.run_id);
+ runs.push(summary(r));runs.sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
+ return {schema_version:1,repo:TARGET,updated_at:new Date().toISOString(),runs:runs.slice(0,100)};
+}
 export async function publishPublicRun(original){
  const r=publicProjection(original);
- const path='observability/public/runs/'+r.run_id+'.json';
+ const path=RUNS+r.run_id+'.json';
  const existing=await read(path);await put(path,r,existing?.sha);
- const ipath='observability/public/index.json';
  for(let i=0;i<3;i++){
-   const prev=await read(ipath);
-   const old=prev?.value;
-   if(old&&(old.schema_version!==1||old.repo!==TARGET||!Array.isArray(old.runs)))throw Error('Invalid source index');
-   const runs=(old?.runs||[]).filter(x=>x.run_id!==r.run_id);
-   runs.push(summary(r));runs.sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
-   try{await put(ipath,{schema_version:1,repo:TARGET,updated_at:new Date().toISOString(),runs:runs.slice(0,100)},prev?.sha);return r;}
+   const prev=await read(INDEX);
+   try{await put(INDEX,nextIndex(prev?.value,r),prev?.sha);return r;}
    catch(e){if(i===2||!/GitHub write (409|422)/.test(e.message))throw e;}
+ }
+}
+function git(cwd,...a){
+ const p=spawnSync('git',a,{cwd,encoding:'utf8',timeout:120000});
+ if(p.status!==0)throw Error('git '+a[0]+' failed: '+String(p.stderr||'').trim().slice(0,300));
+ return p.stdout.trim();
+}
+// Claude Code cloud sessions reach GitHub through a proxy that refuses REST content writes but accepts git push.
+export function publishViaGit(original,workspace){
+ const r=publicProjection(original);
+ const remote=git(workspace,'remote','get-url','origin');
+ const dir=mkdtempSync(join(tmpdir(),'pstack-public-'));
+ try{
+   git(dir,'clone','--quiet','--depth','1','--branch',REF,remote,'.');
+   for(let i=0;i<3;i++){
+     mkdirSync(join(dir,RUNS),{recursive:true});
+     writeFileSync(join(dir,RUNS+r.run_id+'.json'),JSON.stringify(r,null,2)+'\n');
+     const ip=join(dir,INDEX);
+     writeFileSync(ip,JSON.stringify(nextIndex(existsSync(ip)?JSON.parse(readFileSync(ip,'utf8')):null,r),null,2)+'\n');
+     git(dir,'add','observability/public');
+     git(dir,'-c','user.name=AIOS pstack observer','-c','user.email=pstack-observer@users.noreply.github.com',
+       'commit','--quiet','-m','data(pstack): publish AIOS '+r.run_id);
+     const push=spawnSync('git',['push','--quiet','origin','HEAD:'+REF],{cwd:dir,encoding:'utf8',timeout:120000});
+     if(push.status===0)return r;
+     if(i===2)throw Error('git push failed: '+String(push.stderr||'').trim().slice(0,300));
+     git(dir,'fetch','--quiet','--depth','1','origin',REF);git(dir,'reset','--quiet','--hard','FETCH_HEAD');
+   }
+ }finally{rmSync(dir,{recursive:true,force:true});}
+}
+async function publish(original,workspace){
+ const transport=process.env.PSTACK_PUBLISH_TRANSPORT||'auto';
+ if(!['auto','api','git'].includes(transport))throw Error('PSTACK_PUBLISH_TRANSPORT must be auto, api or git');
+ const token=process.env.GH_TOKEN||process.env.GITHUB_TOKEN;
+ if(transport==='git'||(transport==='auto'&&!token))return publishViaGit(original,workspace);
+ try{return await publishPublicRun(original);}
+ catch(e){
+   if(transport==='api'||!/GitHub (read|write) (401|403)/.test(e.message))throw e;
+   console.error('REST publication refused ('+e.message.slice(0,120)+'); retrying with git push.');
+   return publishViaGit(original,workspace);
  }
 }
 if(process.argv[1]&&resolve(process.argv[1])===new URL(import.meta.url).pathname){
@@ -79,7 +122,7 @@ if(process.argv[1]&&resolve(process.argv[1])===new URL(import.meta.url).pathname
    const wi=args.indexOf('--workspace');
    const workspace=wi>=0?resolve(args[wi+1]):process.cwd();
    const local=join(workspace,'.pstack','observability','runs',id+'.json');
-   const r=await publishPublicRun(JSON.parse(readFileSync(local,'utf8')));
+   const r=await publish(JSON.parse(readFileSync(local,'utf8')),workspace);
    console.log('PUBLISHED PUBLIC AIOS RUN '+r.run_id+' '+r.status+' ('+r.steps.length+' steps)');
  }catch(e){console.error('PUBLICATION FAILED: '+e.message);process.exitCode=1;}
 }
