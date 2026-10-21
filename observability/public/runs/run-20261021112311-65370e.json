@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "claude/blissful-rubin-rbtgtk",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-10-21T11:23:11.336Z",
-  "updated_at": "2026-10-21T12:12:09.758Z",
-  "ended_at": null,
+  "updated_at": "2026-10-21T12:12:13.400Z",
+  "ended_at": "2026-10-21T12:12:13.400Z",
   "steps": [
     {
       "id": "how",
@@ -181,6 +181,13 @@
       "step_id": "pr",
       "status": "passed",
       "note": "PR 21 merged by owner before review fixes; fixes in PR 22"
+    },
+    {
+      "at": "2026-10-21T12:12:13.400Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
