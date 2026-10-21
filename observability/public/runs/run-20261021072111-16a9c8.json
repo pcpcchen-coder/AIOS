@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-21T07:21:11.208Z",
-  "updated_at": "2026-10-21T07:22:31.987Z",
+  "updated_at": "2026-10-21T07:22:35.282Z",
   "ended_at": null,
   "steps": [
     {
@@ -55,8 +55,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-21T07:22:35.281Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -111,6 +111,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "Real cloud session: live wrapper published this run; REST read 401 then automatic git push fallback; feed read back from telemetry/pstack"
+    },
+    {
+      "at": "2026-10-21T07:22:35.282Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
