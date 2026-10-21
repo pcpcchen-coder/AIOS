@@ -969,3 +969,14 @@ body[data-facing="yes"] #brain {
 .sensor-indicator[data-state="degraded"]::before,
 .sensor-indicator[data-state="starting"]::before { background: var(--amber); }
 .sensor-indicator[data-state="error"]::before { background: var(--red); }
+
+/* 確認圖示（src/icons.ts）：只用在要說「確認執行」的地方。 */
+.confirm-head {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.confirm-icon {
+  flex: none;
+  filter: drop-shadow(0 0 14px rgba(255, 181, 71, 0.45));
+}
