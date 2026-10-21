@@ -3,6 +3,9 @@ import { computeProgress, isActive, queueText, sortForProgress } from "../shared
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
 import { ApiError, api, newRequestId, streamChat, subscribeEvents } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
+import { matchCameraCommand, SenseController, zoneOf } from "./sense/controller.ts";
+import type { SensePipeline } from "./sense/pipeline.ts";
+import type { PointZone, SensorState } from "../shared/sense.ts";
 import {
   browserRealtimeDeps,
   realtimeSupported,
@@ -150,7 +153,10 @@ const realtimeTaskIds = new Set<string>();
 const realtime = new RealtimeVoice(
   {
     onPhase: renderRealtimeState,
-    onUserTranscript: (text) => showSubtitle(`你：${text}`),
+    onUserTranscript: (text) => {
+      showSubtitle(`你：${text}`);
+      handleCameraCommand(text);
+    },
     onAssistantTranscript: (text) => showSubtitle(`Nous：${text}`),
     onDelegate: delegateFromRealtime,
     onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
@@ -159,6 +165,7 @@ const realtime = new RealtimeVoice(
     onApprovalResolved: closeApproval,
     onToolActivity: (text) => showSubtitle(text),
     onClosed: (reason) => {
+      sense.conversationEnded();
       showSubtitle(reason);
       dispatch({ type: "input.open" });
       showCommandError(reason);
@@ -194,6 +201,8 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
     hideSubtitle();
   }
   settings = value;
+  // 鏡頭啟用時自動開啟（免手）；影像只在本機處理。
+  if (value.camera?.enabled && !pipeline?.running) void startCamera();
 }
 
 function chatGPTAvailable(): boolean {
@@ -358,6 +367,89 @@ function enableVoiceMode(): void {
   dispatch({ type: "dismiss" });
   conversation.start();
   say("語音模式已開啟，直接跟我說話就好，我說話時你也可以打斷我。");
+}
+
+// ───────────── 雙目鏡頭（docs/11） ─────────────
+// 影像只在本機處理；這裡只收到在場、面向、手勢、指向等事件。手勢與指向不觸發任何外部動作。
+
+const sensorIndicator = document.createElement("div");
+sensorIndicator.className = "sensor-indicator";
+sensorIndicator.hidden = true;
+document.body.append(sensorIndicator);
+let pipeline: SensePipeline | null = null;
+let pointedZone: PointZone | null = null;
+
+const sense = new SenseController({
+  now: () => performance.now(),
+  isTalking: () => realtime.on || conversation.current !== "off",
+  canAutoTalk: () =>
+    !!settings?.camera?.look_to_talk && !!settings.realtime?.available && realtimeSupported() && hasVoiceConsent("realtime"),
+  startTalk: () => startRealtime(),
+  interruptSpeech: () => {
+    if (realtime.current === "speaking") realtime.interrupt();
+    else if (conversation.current === "speaking") conversation.interrupt();
+  },
+  onLeave: () => {
+    // 人離開：待確認的外部動作不執行、收起畫面、結束即時語音（避免對空房間持續計費）。
+    if (realtime.pendingApproval) realtime.resolveApproval(false, "dismissed");
+    if (shell.surface) dispatch({ type: "dismiss" });
+    if (realtime.on) realtime.stop();
+  },
+  setScale: (scale) => document.documentElement.style.setProperty("--distance-scale", String(scale)),
+  setPresence: (present) => (document.body.dataset.present = present ? "yes" : "no"),
+  setFacing: (facing) => (document.body.dataset.facing = facing ? "yes" : "no"),
+  pointTo: (zone) => {
+    pointedZone = zone;
+    applyPointing();
+  },
+  setSensor: (state: SensorState, detail: string) => {
+    sensorIndicator.hidden = state === "off";
+    sensorIndicator.dataset.state = state;
+    sensorIndicator.title = detail;
+    sensorIndicator.textContent = state === "ok" ? "鏡頭" : state === "starting" ? "鏡頭啟動中" : `鏡頭：${detail}`;
+    if (state === "error") showSubtitle(detail);
+  },
+});
+setInterval(() => sense.tick(), 200);
+
+/** 把指向的區塊對到畫面上可選的項目；只是選定（亮框），不展開、不送出（06 §4.4）。 */
+function applyPointing(): void {
+  const items = [...surfaceRoot.querySelectorAll<HTMLElement>("[data-selectable]")];
+  let target: HTMLElement | null = null;
+  for (const el of items) {
+    const rect = el.getBoundingClientRect();
+    const hit = pointedZone !== null && zoneOf(rect.left + rect.width / 2, window.innerWidth) === pointedZone;
+    el.classList.toggle("pointed", hit && target === null);
+    if (hit && target === null) target = el;
+  }
+  const label = target?.dataset.label ?? null;
+  if (realtime.on && label) realtime.addContext(`（系統狀態）使用者正用手指著畫面上的「${label}」。使用者說「這個」時指的是它；指向只是選定，不代表要執行任何動作。`);
+}
+
+async function startCamera(): Promise<void> {
+  if (!settings?.camera?.enabled || pipeline?.running) return;
+  const { SensePipeline } = await import("./sense/pipeline.ts");
+  pipeline ??= new SensePipeline(settings.camera, (event) => sense.handle(event));
+  await pipeline.start();
+}
+
+function stopCamera(): void {
+  pipeline?.stop();
+}
+
+/** 「鏡頭關掉」「打開鏡頭」：本機規則處理，不經模型。 */
+function handleCameraCommand(text: string): boolean {
+  const command = matchCameraCommand(text);
+  if (!command) return false;
+  if (command === "off") {
+    stopCamera();
+    showSubtitle("鏡頭已關閉。");
+  } else if (settings?.camera?.enabled) {
+    void startCamera();
+  } else {
+    showSubtitle("鏡頭未啟用（.env 設定 NOUS_CAMERA=on 後重新啟動）。");
+  }
+  return true;
 }
 
 // ───────────── 即時語音（OpenAI Realtime） ─────────────
@@ -604,6 +696,10 @@ function latestArtifactTask(): Task | undefined {
 }
 
 async function handleCommand(text: string): Promise<void> {
+  if (handleCameraCommand(text)) {
+    dispatch({ type: "input.close" });
+    return;
+  }
   const intent = classify(text);
   if (intent.kind === "empty") {
     dispatch({ type: "input.close" });
@@ -1027,6 +1123,7 @@ function renderSurface(): void {
   surfaceRoot.replaceChildren(el);
   el.scrollTop = scrollTop;
   renderedKey = key;
+  if (pointedZone) applyPointing();
 }
 
 async function loadArtifact(artifactId: string): Promise<void> {

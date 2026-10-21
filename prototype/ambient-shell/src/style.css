@@ -932,3 +932,40 @@ body.has-surface .region-activity { top: 21%; }
 .confirm-say strong {
   color: var(--amber);
 }
+
+/* 雙目鏡頭（docs/11）：距離縮放、面向回饋、指向亮框、鏡頭狀態指示。 */
+.surface-root,
+.subtitle {
+  zoom: var(--distance-scale, 1);
+}
+body[data-facing="yes"] #brain {
+  filter: drop-shadow(0 0 18px rgba(92, 225, 255, 0.35));
+}
+[data-selectable].pointed {
+  outline: 4px solid var(--cyan);
+  outline-offset: 4px;
+  box-shadow: 0 0 0 10px rgba(92, 225, 255, 0.15);
+  transform: scale(1.02);
+}
+.sensor-indicator {
+  position: fixed;
+  right: 16px;
+  bottom: 12px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.sensor-indicator::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.sensor-indicator[data-state="ok"]::before { background: var(--mint); }
+.sensor-indicator[data-state="degraded"]::before,
+.sensor-indicator[data-state="starting"]::before { background: var(--amber); }
+.sensor-indicator[data-state="error"]::before { background: var(--red); }

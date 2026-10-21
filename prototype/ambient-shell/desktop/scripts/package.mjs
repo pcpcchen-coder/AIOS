@@ -27,6 +27,7 @@ const [dir] = await packager({
   overwrite: true,
   extendInfo: {
     NSMicrophoneUsageDescription: "Nous 需要麥克風才能進行即時語音對話；只有在你按下「開始語音對話」後才會收音。",
+    NSCameraUsageDescription: "Nous 用雙目鏡頭判斷有沒有人在螢幕前、距離、是否面向螢幕、停止手勢與手臂指向；影像只在這台電腦上處理，不保存也不上傳。",
     LSMinimumSystemVersion: "13.0",
     NSHumanReadableCopyright: "Nous prototype",
   },

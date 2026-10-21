@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExecutorMode } from "../shared/types.ts";
+import type { CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_MAX_CONCURRENT } from "./runner.ts";
 
 export interface Config {
@@ -34,6 +35,8 @@ export interface Config {
   taskWebSearch: boolean;
   /** Claude 背景任務使用的 web search 工具版本（NOUS_CLAUDE_WEB_SEARCH）。 */
   claudeWebSearchTool: string;
+  /** 雙目鏡頭（docs/11）；影像只在本機處理。 */
+  camera: CameraSettings;
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -77,7 +80,25 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     realtimeMcp: parseMcp(env.NOUS_REALTIME_MCP),
     taskWebSearch: (env.NOUS_TASK_WEB_SEARCH ?? "on").trim().toLowerCase() !== "off",
     claudeWebSearchTool: env.NOUS_CLAUDE_WEB_SEARCH?.trim() || "web_search_20250305",
+    camera: {
+      enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
+      label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",
+      left_first: (env.NOUS_CAMERA_LEFT_FIRST ?? "true").trim().toLowerCase() !== "false",
+      look_to_talk: (env.NOUS_LOOK_TO_TALK ?? "on").trim().toLowerCase() !== "off",
+      screen_width_mm: positiveOr(env.NOUS_SCREEN_WIDTH_MM, 398),
+      screen_offset_mm: numberOr(env.NOUS_CAMERA_OFFSET_MM, 140),
+    },
   };
+}
+
+function numberOr(value: string | undefined, fallback: number): number {
+  const n = Number.parseFloat(value ?? "");
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function positiveOr(value: string | undefined, fallback: number): number {
+  const n = numberOr(value, fallback);
+  return n > 0 ? n : fallback;
 }
 
 function intOr(value: string | undefined, fallback: number): number {

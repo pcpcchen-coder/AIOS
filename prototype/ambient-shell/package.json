@@ -14,10 +14,12 @@
     "dev:web": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "vision:setup": "node scripts/vision-setup.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.131.0",
+    "@mediapipe/tasks-vision": "1.1.1",
     "dompurify": "3.4.16",
     "marked": "18.0.14"
   },

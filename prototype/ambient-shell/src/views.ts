@@ -159,7 +159,8 @@ function renderTaskCard(task: Task, actions: ViewActions): HTMLElement {
 
   return h(
     "li",
-    { class: `task-card task-card--${task.status}` },
+    // data-selectable：可被手臂指向選定（docs/11）；只是選定，不觸發任何動作。
+    { class: `task-card task-card--${task.status}`, "data-selectable": "", "data-label": task.title },
     head,
     bar,
     meta,

@@ -7,6 +7,7 @@ import { buildChatSystem, DelegationFilter, validateMessages, type ChatCapable }
 import { ExecutionError } from "./runner.ts";
 import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { WebSearchError, type WebSearch } from "./web-search.ts";
+import type { CameraSettings } from "../shared/sense.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
@@ -23,15 +24,22 @@ const CONTENT_TYPES: Record<string, string> = {
   ".png": "image/png",
   ".ico": "image/x-icon",
   ".json": "application/json; charset=utf-8",
+  ".wasm": "application/wasm",
+  ".task": "application/octet-stream",
 };
 
-const PAGE_HEADERS = {
-  "Content-Security-Policy":
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
-  "X-Content-Type-Options": "nosniff",
-  "Referrer-Policy": "no-referrer",
-  "Permissions-Policy": "camera=(), microphone=(self), geolocation=()",
-};
+/**
+ * 頁面安全標頭。鏡頭啟用時（NOUS_CAMERA=on）才允許本頁使用鏡頭，並允許編譯本機的 MediaPipe wasm；
+ * 影像處理仍只在本機（connect-src 'self'）。
+ */
+export function pageHeaders(camera: boolean): Record<string, string> {
+  return {
+    "Content-Security-Policy": `default-src 'self'; script-src 'self'${camera ? " 'wasm-unsafe-eval'" : ""}; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`,
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "Permissions-Policy": `camera=(${camera ? "self" : ""}), microphone=(self), geolocation=()`,
+  };
+}
 
 export interface AppOptions {
   store: TaskStore;
@@ -47,6 +55,8 @@ export interface AppOptions {
   realtime?: RealtimeBridge;
   /** 即時語音的上網查詢；未提供時不可用。 */
   webSearch?: WebSearch;
+  /** 雙目鏡頭設定（docs/11）；未提供或未啟用時頁面不允許使用鏡頭。 */
+  camera?: CameraSettings;
   port: number;
   devPort: number;
   distDir: string | null;
@@ -61,7 +71,11 @@ class HttpError extends Error {
 export function createApp(options: AppOptions): Server & { notifySettings(): void } {
   const { store, runner, auth, chat, realtime, webSearch } = options;
   const settings = {
-    view: (): SettingsView => (realtime ? { ...options.settings.view(), realtime: realtime.info() } : options.settings.view()),
+    view: (): SettingsView => ({
+      ...options.settings.view(),
+      ...(realtime ? { realtime: realtime.info() } : {}),
+      ...(options.camera ? { camera: options.camera } : {}),
+    }),
     select: (provider: ExecutorMode) => options.settings.select(provider),
   };
   const hosts = allowedHosts(options.port, options.devPort);
@@ -87,7 +101,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (url.pathname.startsWith("/api/")) {
         await handleApi(req, res, url.pathname);
       } else {
-        serveStatic(res, url.pathname, options.distDir);
+        serveStatic(res, url.pathname, options.distDir, !!options.camera?.enabled);
       }
     } catch (err) {
       const code = err instanceof HttpError ? err.status : 500;
@@ -282,7 +296,7 @@ function sendJson(res: ServerResponse, status: number, value: unknown): void {
   res.end(JSON.stringify(value));
 }
 
-function serveStatic(res: ServerResponse, pathname: string, distDir: string | null): void {
+function serveStatic(res: ServerResponse, pathname: string, distDir: string | null, camera = false): void {
   if (!distDir || !existsSync(join(distDir, "index.html"))) {
     res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("前端尚未建置：請用 npm start（會先 vite build），或開發時用 npm run dev:web。");
@@ -294,7 +308,7 @@ function serveStatic(res: ServerResponse, pathname: string, distDir: string | nu
   if (!existsSync(file) || statSync(file).isDirectory()) file = join(distDir, "index.html");
   const type = CONTENT_TYPES[extname(file)] ?? "application/octet-stream";
   const headers: Record<string, string> = { "Content-Type": type };
-  if (type.startsWith("text/html")) Object.assign(headers, PAGE_HEADERS, { "Cache-Control": "no-cache" });
+  if (type.startsWith("text/html")) Object.assign(headers, pageHeaders(camera), { "Cache-Control": "no-cache" });
   res.writeHead(200, headers);
   res.end(readFileSync(file));
 }
