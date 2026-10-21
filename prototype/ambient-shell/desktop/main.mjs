@@ -447,7 +447,7 @@ app.whenReady().then(async () => {
     return;
   }
 
-  // 麥克風只開放給本機核心的頁面。
+  // 麥克風與鏡頭（media）只開放給本機核心的頁面；鏡頭需 NOUS_CAMERA=on，影像只在本機處理。
   const allowMedia = (url) => Boolean(core && url?.startsWith(core.url));
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
     callback(permission === "media" && allowMedia(details.requestingUrl));

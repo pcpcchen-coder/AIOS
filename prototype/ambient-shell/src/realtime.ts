@@ -179,6 +179,12 @@ export class RealtimeVoice {
     this.requestResponse();
   }
 
+  /** 補充背景資訊給模型（例如使用者正指著畫面哪一項），不要求模型回應。 */
+  addContext(text: string): void {
+    if (!this.channel) return;
+    this.send({ type: "conversation.item.create", item: { type: "message", role: "system", content: [{ type: "input_text", text }] } });
+  }
+
   /** 系統通知（例如任務完成）：請模型用一句話轉告；正在回覆時等這輪結束再說。 */
   notify(text: string): void {
     if (!this.channel) return;

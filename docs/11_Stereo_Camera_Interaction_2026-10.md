@@ -1,6 +1,6 @@
 # Nous 11 — 雙目鏡頭的遠距互動設計（AR0144）
 
-版本：v0.1 · 日期：2026-10-21 · 狀態：設計提案（數值由廠商規格推算，尚未實測）
+版本：v0.2 · 日期：2026-10-21 · 狀態：四種用法已在原型實作（`prototype/ambient-shell/src/sense/`），數值仍由廠商規格推算，尚未校正與實測
 關聯：06 §4（視線）、10（18 吋遠距 UI）、this-is-yourX `stereo_camera/` 與 ADR-0002、ADR-0005
 
 ---
@@ -92,7 +92,7 @@ Nous Shell（既有狀態機）：PointerProvider 取代 06 的 GazeProvider 介
 - **停止手勢**：播報立即停止，電子腦脈衝停止。
 - **鏡頭狀態**：角落小點。綠色＝運作，灰色＝關閉，琥珀色＝降級。
 
-## 6. 待 George 決定：鏡頭給誰用
+## 6. 鏡頭給誰用（已決定：先給 Nous，2026-10-21）
 
 | 選項 | 做法 | 代價 |
 |---|---|---|
@@ -100,7 +100,20 @@ Nous Shell（既有狀態機）：PointerProvider 取代 06 的 GazeProvider 介
 | B. 先給 Amazing Hand | 維持 ADR-0005 的安裝，Nous 先只用語音 | Nous 的鏡頭互動延後 |
 | C. 再買一台同型號 | 兩邊各一台，各自校正 | 多一份硬體；兩台的校正與設定要分開管理 |
 
-建議 **C**。兩種安裝的距離、角度和校正都不同，來回搬動會讓校正一再失效。
+George 決定先採 **A**：鏡頭先接到 Nous 使用（雙目）。Amazing Hand 的視覺之後再看是否另購一台（C）。
+
+### 實作對照（v0.2）
+
+| 模組 | 內容 |
+|---|---|
+| `shared/sense.ts` | 事件與設定型別；只有事件離開感知管線 |
+| `src/sense/geometry.ts` | 三角化、指向線與螢幕交點、頭部朝向、舉手判斷 |
+| `src/sense/trackers.ts` | 時間濾波：在場 0.5 s／離開 60 s、面向遲滯、停止手勢 0.3 s＋2 s 冷卻、指向穩定 450 ms／清除 1 s、看向即說話 1.2 s |
+| `src/sense/processor.ts` | 每幀關鍵點 → 事件 |
+| `src/sense/pipeline.ts` | 鏡頭、切左右眼、MediaPipe Pose 與手勢模型（本機 wasm） |
+| `src/sense/controller.ts` | 事件 → Shell：字級縮放、看向即說話、停止播報、指向亮框、離開時收起與拒絕待確認動作 |
+
+設定與安裝見原型 README〈雙目鏡頭〉與 INSTALL。
 
 ## 7. 驗證計畫（建議併入 G2，取代 06 的 webcam 三區驗證）
 

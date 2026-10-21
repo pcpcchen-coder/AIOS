@@ -1,3 +1,4 @@
+import type { CameraSettings } from "./sense.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
 // 這裡先用 TS 型別，schema_version 標為 proto-0.1 以免與正式契約混淆。
@@ -103,6 +104,8 @@ export interface SettingsView {
   chatgpt: ChatGPTAccountInfo;
   /** 即時語音模式（OpenAI Realtime）；未提供時視為不可用。 */
   realtime?: RealtimeInfo;
+  /** 雙目鏡頭設定（docs/11）；未提供時不使用鏡頭。 */
+  camera?: CameraSettings;
 }
 
 export interface RealtimeInfo {

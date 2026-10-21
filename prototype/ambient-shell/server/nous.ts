@@ -86,6 +86,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     chat: providers,
     realtime,
     webSearch,
+    camera: config.camera,
     port,
     devPort: config.devPort,
     distDir: options.distDir,
@@ -107,6 +108,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   for (const p of view.providers) log(`  - ${p.label}：${p.available ? "可用" : "不可用"}，${p.detail}`);
   const live = realtime.info();
   log(`即時語音：${live.available ? "可用" : "不可用"}，${live.detail}`);
+  log(`雙目鏡頭：${config.camera.enabled ? `啟用（${config.camera.label}，影像只在本機處理）` : "未啟用（NOUS_CAMERA=on 開啟）"}`);
   log(`憑證與設定目錄：${config.configDir}`);
 
   return {
