@@ -22,6 +22,8 @@ export interface RealtimeOptions {
   mcp?: McpServerConfig[];
   /** 背景任務是否能上網（只影響說明文字）。 */
   taskWebSearch?: boolean;
+  /** 是否提供 home_status 工具（已設定武陵居中控時為 true）。 */
+  home?: boolean;
   fetch?: typeof fetch;
   /** 5xx 重試前的等待（毫秒），測試時設 0。 */
   retryDelayMs?: number;
@@ -32,6 +34,8 @@ export interface RealtimeCapabilities {
   mcp: McpServerConfig[];
   /** 背景任務是否能上網。 */
   taskWebSearch?: boolean;
+  /** 能查武陵居家電狀態（唯讀）。 */
+  home?: boolean;
 }
 
 const WEB_SEARCH_TOOL = {
@@ -43,6 +47,26 @@ const WEB_SEARCH_TOOL = {
     type: "object",
     properties: { query: { type: "string", description: "查詢內容，具體寫出地點與時間（例如「新竹市今天天氣與降雨機率」）" } },
     required: ["query"],
+    additionalProperties: false,
+  },
+} as const;
+
+const HOME_STATUS_TOOL = {
+  type: "function",
+  name: "home_status",
+  description:
+    "查武陵居家裡的感測值與設備狀態（溫度、濕度、二氧化碳、PM2.5、設備在不在線等），由家裡的中控回報。只能查詢，不能控制家電。",
+  parameters: {
+    type: "object",
+    properties: {
+      target: { type: "string", description: "房間、設備名稱或「全家」，照使用者的說法填（例如「客廳」「客廳主燈」「全家」）" },
+      metric: {
+        type: "string",
+        description: "要查的讀值，可省略",
+        enum: ["temperature", "humidity", "co2", "pm25", "pm10", "voc", "formaldehyde", "illuminance", "battery", "power_usage", "energy", "presence", "motion", "leak", "contact"],
+      },
+    },
+    required: ["target"],
     additionalProperties: false,
   },
 } as const;
@@ -80,7 +104,7 @@ export const REALTIME_TOOLS = [
 export function buildRealtimeTools(caps: RealtimeCapabilities): Record<string, unknown>[] {
   const functions = REALTIME_TOOLS.filter((t) => caps.webSearch || t.name !== "web_search");
   const mcp = caps.mcp.map((server) => ({ type: "mcp", ...server }));
-  return [...functions, ...mcp];
+  return [...functions, ...(caps.home ? [HOME_STATUS_TOOL] : []), ...mcp];
 }
 
 const STATUS_TEXT: Record<Task["status"], string> = {
@@ -107,6 +131,11 @@ export function buildRealtimeInstructions(
   if (caps.webSearch) {
     abilities.push(
       "你可以上網：需要即時或最新資訊（天氣、新聞、股價、匯率、營業時間、交通、最近的事）時，立刻呼叫 web_search，不要憑記憶回答。呼叫前先說一句「我查一下」。回答講結論和數字，來源會顯示在畫面上，不用念網址。",
+    );
+  }
+  if (caps.home) {
+    abilities.push(
+      "你可以查武陵居家裡的狀態：使用者問室內溫度、濕度、空氣品質或設備在不在線時呼叫 home_status，不要用猜的。回答講房間、數字和單位；readings 的 value 是 null 就說「沒有讀值」，不要說 0；data 是「快照」或「過期資料」時要說是幾點的資料。status 是 ambiguous 時問使用者是哪一個；not_found 就說家裡找不到這個名字；no_such_reading 就說那裡沒有能量這項的設備。目前只能查詢，不能開關或調整家電；使用者要控制家電時，照實說這個功能還沒開放。",
     );
   }
   if (caps.mcp.length) {
@@ -147,17 +176,25 @@ export class RealtimeBridge {
   }
 
   private get caps(): RealtimeCapabilities {
-    return { webSearch: !!this.options.webSearch, mcp: this.options.mcp ?? [], taskWebSearch: !!this.options.taskWebSearch };
+    return {
+      webSearch: !!this.options.webSearch,
+      mcp: this.options.mcp ?? [],
+      taskWebSearch: !!this.options.taskWebSearch,
+      home: !!this.options.home,
+    };
   }
 
   info(): RealtimeInfo {
-    const { webSearch, mcp } = this.caps;
-    const tools = [webSearch ? "上網查詢" : null, ...mcp.map((m) => `MCP：${m.server_label}`)].filter(Boolean).join("、");
+    const { webSearch, mcp, home } = this.caps;
+    const tools = [webSearch ? "上網查詢" : null, home ? "家電狀態查詢" : null, ...mcp.map((m) => `MCP：${m.server_label}`)]
+      .filter(Boolean)
+      .join("、");
     return this.options.apiKey
       ? {
           available: true,
           model: this.options.model,
           web_search: webSearch,
+          home,
           mcp: mcp.map((m) => m.server_label),
           detail: `OpenAI Realtime（${this.options.model}），使用 .env 的 OPENAI_API_KEY，依用量計費${tools ? `；工具：${tools}` : ""}`,
         }

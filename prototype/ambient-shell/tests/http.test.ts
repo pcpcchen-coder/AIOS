@@ -11,6 +11,7 @@ import { ProviderManager } from "../server/providers.ts";
 import { allowedHosts, checkRequest } from "../server/http-guard.ts";
 import { MockExecutor } from "../server/mock-executor.ts";
 import { WebSearch } from "../server/web-search.ts";
+import { HomeBridge } from "../server/home-bridge.ts";
 import { RealtimeBridge } from "../server/realtime.ts";
 import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
@@ -50,7 +51,7 @@ afterEach(async () => {
   server = null;
 });
 
-async function start(mockStepMs = 5, realtime?: RealtimeBridge, webSearch?: WebSearch) {
+async function start(mockStepMs = 5, realtime?: RealtimeBridge, webSearch?: WebSearch, home?: HomeBridge) {
   const port = await freePort();
   const store = new TaskStore(null);
   const dir = mkdtempSync(join(tmpdir(), "nous-http-"));
@@ -73,6 +74,7 @@ async function start(mockStepMs = 5, realtime?: RealtimeBridge, webSearch?: WebS
     chat: providers,
     realtime,
     webSearch,
+    home,
     port,
     devPort: 5173,
     distDir: null,
@@ -242,6 +244,41 @@ describe("HTTP API", () => {
     const raw = await res.text();
     expect(JSON.parse(raw)).toMatchObject({ ok: true, answer: "多雲（fixture）", sources: [] });
     expect(raw).not.toContain("sk-fixture");
+  });
+
+  it("家電狀態：驗證輸入、未設定中控時 409、經本機核心查中控且不外洩權杖", async () => {
+    const off = await start(5, undefined, undefined, new HomeBridge({ url: null, token: null }));
+    expect((await off.post("/api/home/status", { target: "" })).status).toBe(400);
+    expect((await off.post("/api/home/status", { target: "客廳" })).status).toBe(409);
+    await new Promise((r) => server!.close(r));
+
+    const seen: string[] = [];
+    const hub = (async (url: string, init: RequestInit) => {
+      seen.push(`${url} ${new Headers(init.headers).get("authorization")}`);
+      return new Response(
+        JSON.stringify({
+          layout: { rooms: [{ id: "living", name: "客廳" }] },
+          devices: [
+            {
+              id: "th",
+              name: "溫濕度計",
+              placement: { room_id: "living" },
+              state: { available: true, fresh: true },
+              telemetry: { metrics: [{ key: "temperature", label: "溫度", unit: "°C", precision: 1, value: 26.5 }], status: "live", received_at: 100, source_label: "fixture" },
+            },
+          ],
+          server_time: 160,
+        }),
+        { status: 200 },
+      );
+    }) as unknown as typeof fetch;
+    const { post } = await start(5, undefined, undefined, new HomeBridge({ url: "http://127.0.0.1:8788", token: "hub-secret", fetch: hub }));
+    const res = await post("/api/home/status", { target: "客廳", metric: "temperature" });
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(JSON.parse(raw)).toMatchObject({ status: "ok", devices: [{ device: "溫濕度計", minutes_ago: 1, readings: [{ value: 26.5 }] }] });
+    expect(raw).not.toContain("hub-secret");
+    expect(seen).toEqual(["http://127.0.0.1:8788/api/v1/home Bearer hub-secret"]);
   });
 
   it("前端未建置時回傳說明而不是空白頁", async () => {

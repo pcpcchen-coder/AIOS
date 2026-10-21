@@ -1,3 +1,4 @@
+import type { HomeStatusResult } from "../shared/home.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
 
 export class ApiError extends Error {
@@ -38,6 +39,9 @@ export const api = {
   /** 即時語音的上網查詢：由本機核心用 OPENAI_API_KEY 呼叫 web_search。 */
   webSearch: (query: string) =>
     call<{ ok: true; answer: string; sources: { title: string; url: string }[]; model: string }>("POST", "/api/realtime/web-search", { query }),
+  /** 武陵居家電狀態（唯讀）：由本機核心帶權杖查中控，權杖不進瀏覽器。 */
+  homeStatus: (target: string, metric: string | null) =>
+    call<HomeStatusResult>("POST", "/api/home/status", metric ? { target, metric } : { target }),
 };
 
 export interface ChatTurn {

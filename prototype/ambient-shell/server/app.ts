@@ -7,6 +7,7 @@ import { buildChatSystem, DelegationFilter, validateMessages, type ChatCapable }
 import { ExecutionError } from "./runner.ts";
 import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { WebSearchError, type WebSearch } from "./web-search.ts";
+import { HomeBridgeError, type HomeBridge } from "./home-bridge.ts";
 import type { CameraSettings } from "../shared/sense.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
 import type { TaskRunner } from "./runner.ts";
@@ -55,6 +56,8 @@ export interface AppOptions {
   realtime?: RealtimeBridge;
   /** 即時語音的上網查詢；未提供時不可用。 */
   webSearch?: WebSearch;
+  /** 武陵居中控的唯讀查詢（docs/12 H0）；未提供時不可用。 */
+  home?: HomeBridge;
   /** 雙目鏡頭設定（docs/11）；未提供或未啟用時頁面不允許使用鏡頭。 */
   camera?: CameraSettings;
   port: number;
@@ -69,7 +72,7 @@ class HttpError extends Error {
 }
 
 export function createApp(options: AppOptions): Server & { notifySettings(): void } {
-  const { store, runner, auth, chat, realtime, webSearch } = options;
+  const { store, runner, auth, chat, realtime, webSearch, home } = options;
   const settings = {
     view: (): SettingsView => ({
       ...options.settings.view(),
@@ -149,6 +152,20 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         return sendJson(res, 200, await webSearch.search(query));
       } catch (err) {
         if (err instanceof WebSearchError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
+    }
+    if (method === "POST" && path === "/api/home/status") {
+      const body = await readJson(req);
+      const target = typeof body.target === "string" ? body.target.trim() : "";
+      const metric = typeof body.metric === "string" ? body.metric.trim() : null;
+      if (!target) throw new HttpError(400, "target is required");
+      if (target.length > 100 || (metric?.length ?? 0) > 40) throw new HttpError(400, "target or metric is too long");
+      if (!home?.available) throw new HttpError(409, "尚未設定武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）");
+      try {
+        return sendJson(res, 200, await home.status(target, metric));
+      } catch (err) {
+        if (err instanceof HomeBridgeError) throw new HttpError(err.status, err.message);
         throw err;
       }
     }

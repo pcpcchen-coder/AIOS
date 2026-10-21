@@ -38,6 +38,7 @@ function setup(overrides: Partial<RealtimeDeps> = {}) {
   const closed: string[] = [];
   const exchanged: string[] = [];
   const searched: string[] = [];
+  const homeQueries: { target: string; metric: string | null }[] = [];
   const approvals: McpApprovalRequest[] = [];
   const resolved: { id: string; approved: boolean; outcome: ApprovalOutcome }[] = [];
   const activity: string[] = [];
@@ -55,6 +56,10 @@ function setup(overrides: Partial<RealtimeDeps> = {}) {
       onWebSearch: async (query) => {
         searched.push(query);
         return { ok: true, answer: "新竹今天多雲，22 到 27 度（fixture）", sources: ["fixture 氣象站"] };
+      },
+      onHomeStatus: async (target, metric) => {
+        homeQueries.push({ target, metric });
+        return { ok: true, status: "ok", scope: "客廳", devices: [{ device: "溫濕度計", readings: [{ name: "溫度", value: 26.5, unit: "°C" }] }] };
       },
       onApprovalPrompt: (request) => approvals.push(request),
       onApprovalResolved: (request, approved, outcome) => resolved.push({ id: request.id, approved, outcome }),
@@ -87,7 +92,7 @@ function setup(overrides: Partial<RealtimeDeps> = {}) {
     ch.emit({ type: "response.done", response: { status: "completed" } });
     ch.emit({ type: "output_audio_buffer.stopped" });
   }
-  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, searched, approvals, resolved, activity, sentTypes, userSays, modelSpeaks };
+  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, searched, homeQueries, approvals, resolved, activity, sentTypes, userSays, modelSpeaks };
 }
 
 afterEach(() => {
@@ -294,6 +299,40 @@ describe("RealtimeVoice tools", () => {
     const output = t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "function_call_output");
     expect(JSON.parse(String((output!.item as { output: string }).output))).toMatchObject({ ok: true, answer: expect.stringContaining("新竹") });
     expect(t.sentTypes().at(-1)).toBe("response.create");
+  });
+
+  it("home_status: asks the local core for real readings and hands them to the model", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.userSays("客廳現在幾度");
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.function_call_arguments.done", name: "home_status", call_id: "h1", arguments: JSON.stringify({ target: "客廳", metric: "temperature" }) });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    await vi.runAllTicks();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(t.homeQueries).toEqual([{ target: "客廳", metric: "temperature" }]);
+    expect(t.activity).toContain("查詢家裡：客廳");
+    const output = t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "function_call_output");
+    expect(JSON.parse(String((output!.item as { output: string }).output))).toMatchObject({ status: "ok", devices: [{ readings: [{ value: 26.5 }] }] });
+    expect(t.sentTypes().at(-1)).toBe("response.create");
+  });
+
+  it("home_status without a target reports the error to the model instead of querying", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.function_call_arguments.done", name: "home_status", call_id: "h2", arguments: "{}" });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    await vi.runAllTicks();
+    await Promise.resolve();
+
+    expect(t.homeQueries).toEqual([]);
+    const output = t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "function_call_output");
+    expect(JSON.parse(String((output!.item as { output: string }).output))).toEqual({ ok: false, error: "缺少要查的房間或設備" });
   });
 
   it("MCP approval by voice: shows the card, asks the model to explain, approves only on the fixed phrase", async () => {

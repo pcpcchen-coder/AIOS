@@ -10,6 +10,7 @@ import { MockExecutor } from "./mock-executor.ts";
 import { ProviderManager } from "./providers.ts";
 import { RealtimeBridge } from "./realtime.ts";
 import { WebSearch } from "./web-search.ts";
+import { HomeBridge } from "./home-bridge.ts";
 import { TaskRunner } from "./runner.ts";
 import { TaskStore } from "./store.ts";
 
@@ -68,6 +69,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     country: config.searchCountry,
     timezone: config.searchTimezone,
   });
+  const home = new HomeBridge({ url: config.smarthomeUrl, token: config.smarthomeToken });
   const realtime = new RealtimeBridge({
     apiKey: config.openaiApiKey,
     model: config.realtimeModel,
@@ -75,6 +77,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     webSearch: webSearch.available,
     mcp: config.realtimeMcp,
     taskWebSearch: config.taskWebSearch,
+    home: home.available,
   });
   const store = new TaskStore(options.dataDir);
   const runner = new TaskRunner(store, providers, config.maxConcurrent);
@@ -86,6 +89,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     chat: providers,
     realtime,
     webSearch,
+    home,
     camera: config.camera,
     port,
     devPort: config.devPort,
@@ -108,6 +112,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   for (const p of view.providers) log(`  - ${p.label}：${p.available ? "可用" : "不可用"}，${p.detail}`);
   const live = realtime.info();
   log(`即時語音：${live.available ? "可用" : "不可用"}，${live.detail}`);
+  log(`武陵居中控：${home.available ? "已設定" : "未設定"}，${home.detail}`);
   log(`雙目鏡頭：${config.camera.enabled ? `啟用（${config.camera.label}，影像只在本機處理）` : "未啟用（NOUS_CAMERA=on 開啟）"}`);
   log(`憑證與設定目錄：${config.configDir}`);
 

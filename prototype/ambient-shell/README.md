@@ -118,6 +118,18 @@ Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒
 - 影像只在這台電腦的頁面內處理，離開感知管線的只有上面四種事件；`connect-src 'self'` 不變，模型與 wasm 由本機核心提供。鏡頭只在 `NOUS_CAMERA=on` 時被頁面政策允許。
 - 雙目參數目前用廠商規格推算（焦距約 1005 px、基線 52 mm），**尚未做 ChArUco 校正與實機驗證**；左右眼順序以 `NOUS_CAMERA_LEFT_FIRST` 指定。準確度與門檻依 docs/11 §7 實測後調整。
 
+### 武陵居家電狀態（docs/12 H0，唯讀）
+
+`.env` 設 `SMARTHOME_URL` 與 `SMARTHOME_TOKEN` 後，即時語音多一個 `home_status` 工具，可以回答「客廳現在幾度」「書房二氧化碳多少」「客廳主燈在不在線」：
+
+- 本機核心的 HomeBridge（`server/home-bridge.ts`）帶權杖呼叫中控 `GET /api/v1/home`，瀏覽器經 `POST /api/home/status` 取得結果。權杖不進瀏覽器，也不進 OpenAI 的工作階段設定；OpenAI 只看到查詢結果。
+- 名稱用確定性比對：全家 → 設備名稱或別名完全相同 → 房間 → 房間加設備名稱 → 名稱包含。多個候選時回傳 `ambiguous` 讓模型問是哪一個，不自己挑。「客廳溫度」這種說法會拆成房間與讀值。中控提供 `GET /resolve` 後改用中控的比對（H2）。
+- 讀值照中控回報：缺值是 `null`，字幕與語音說「沒有讀值」，不說 0；中控標為快照或過期的資料會連同時間一起說。時間與「幾分鐘前」用中控的 `server_time` 計算。
+- 字幕顯示一行錨點，例如「客廳 溫濕度計：溫度 26.5 °C（14:29）」。docs/12 §3 的大數字錨點畫面尚未做。
+- **只能查詢**：不能開關或調整家電，模型被告知照實說這個功能還沒開放（`home_control` 是 H1）。
+
+已驗證：假中控與真實中控程式（SmartHomeAI，示例配置加上標明為 fixture 的讀值）的 HTTP 查詢，見 [驗證紀錄](../../docs/validation/smarthome-h0-2026-10-21.md)。尚未用 George 家裡的真實設備與 OpenAI 即時語音走過一次。
+
 任務與成果存在 `data/`（已排除於 git），重啟後可喚回；重啟時尚未完成的任務會標為「中斷」失敗，不假裝仍在執行。
 
 ## 與產品紅線的對照
@@ -158,6 +170,7 @@ prototype/ambient-shell/
 │   ├── claude-executor.ts  # Claude 規劃與串流執行
 │   ├── chatgpt-auth.ts     # Sign in with ChatGPT（OAuth、ID token 驗證、refresh、登出）
 │   ├── chatgpt-executor.ts # ChatGPT 方案用量：/v1/responses 串流
+│   ├── home-bridge.ts      # 武陵居中控唯讀查詢：名稱比對、讀值整理（docs/12 H0）
 │   ├── mock-executor.ts
 │   ├── store.ts            # JSON 持久化
 │   └── app.ts / http-guard.ts / config.ts / index.ts
@@ -184,6 +197,7 @@ npm run typecheck
 - 插話靠「比對聽到的字和正在念的字」分辨回音與使用者：大多數字都在念的內容裡就當回音，出現新的字或「停／等一下」就打斷。用喇叭時同音異字的回音可能誤觸插話，戴耳機最準。念完 2.5 秒內與剛念內容相同的長句會被忽略。語音模式只用模擬的語音 API（含模擬喇叭回音）做過自動化測試，麥克風與喇叭未在實機驗證。
 - 鏡頭互動依 docs/11 實作在場、面向、停止手勢與手臂指向（未經實機驗證，未做雙目校正）；不做眼睛視線。沒有記憶與知識層。
 - Agent 工具：即時語音可上網查詢（web_search）並可掛遠端 MCP；背景任務與文字對話在引擎支援時可上網搜尋（不支援時自動改回不帶工具並標示缺口）。讀寫本機檔案尚未提供；外部副作用的完整 Action Gate 尚未實作，目前 MCP 需核准的動作以確認卡＋語音固定語句逐次確認。
+- 家電只能查詢（H0），不能控制；家電查詢只在即時語音模式（需要 OPENAI_API_KEY）提供，瀏覽器語音辨識與文字對話沒有這個工具。
 - 單一使用者、單一螢幕；資料以明文 JSON 存在本機。
 
 ## 與正式規格的關係
