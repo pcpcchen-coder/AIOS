@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>06 比較與視線焦點</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1920px; height: 1080px; overflow: hidden; box-sizing: border-box; padding: 48px 96px 64px; background: #070B16; color: #EAF2FF; font-family: 'Noto Sans TC', sans-serif; display: flex; flex-direction: column">
+<div style="display: flex; align-items: center; justify-content: space-between">
+<div style="display: flex; align-items: center; gap: 28px">
+<dc-import name="Brain" size="140" tone="#DDE8FF" mode="pulse" progress="0" region="none" dim="yes" hint-size="140px,140px"></dc-import>
+<div style="font-size: 56px; font-weight: 700; color: #DDE8FF">說明中</div>
+</div>
+<div style="font-size: 40px; font-weight: 500; color: #FFB547; border: 3px solid #6B5326; border-radius: 999px; padding: 8px 28px">示意資料 · 條越長越好</div>
+</div>
+<div style="display: flex; gap: 40px; margin-top: 64px; align-items: flex-start">
+<div style="width: 180px; flex: none; padding-top: 36px; display: flex; flex-direction: column">
+<div style="height: 150px"></div>
+<div style="height: 130px; display: flex; align-items: center; font-size: 56px; font-weight: 500; color: #8FA3BD">價格</div>
+<div style="height: 130px; display: flex; align-items: center; font-size: 56px; font-weight: 500; color: #8FA3BD">效率</div>
+<div style="height: 130px; display: flex; align-items: center; font-size: 56px; font-weight: 500; color: #8FA3BD">交期</div>
+</div>
+<sc-for list="{{cols}}" as="c" hint-placeholder-count="3">
+<div style="flex: 1 1 0; min-width: 0; border-radius: 32px; display: flex; flex-direction: column; {{c.box}}">
+<div style="height: 150px; display: flex; align-items: center; justify-content: space-between">
+<div style="display: flex; align-items: center; gap: 24px">
+<div style="width: 96px; height: 96px; border-radius: 50%; color: #070B16; font-size: 60px; font-weight: 900; display: flex; align-items: center; justify-content: center; {{c.badge}}">{{c.n}}</div>
+<div style="font-size: 108px; font-weight: 700; color: #FFFFFF; line-height: 1.1">{{c.name}}</div>
+</div>
+<sc-if value="{{c.focused}}" hint-placeholder-val="{{ false }}">
+<div style="font-size: 40px; font-weight: 700; color: #4FD1FF">已指向</div>
+</sc-if>
+</div>
+<sc-for list="{{c.bars}}" as="b" hint-placeholder-count="3">
+<div style="height: 130px; display: flex; align-items: center">
+<div style="width: 100%; height: 56px; border-radius: 28px; background: #18223A; overflow: hidden">
+<div style="height: 56px; border-radius: 28px; width: {{b.w}}; background: {{c.fill}}"></div>
+</div>
+</div>
+</sc-for>
+</div>
+</sc-for>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1920,"height":1080}}'>
+class Component extends DCLogic {
+renderVals() {
+const plain = 'background: #101828; border: 4px solid #22304A; padding: 32px 36px';
+const focus = 'background: #13203A; border: 8px solid #4FD1FF; padding: 28px 32px; transform: scale(1.04); box-shadow: 0 0 0 14px rgba(79, 209, 255, 0.16)';
+const bars = (a, b, c) => [{ w: a + '%' }, { w: b + '%' }, { w: c + '%' }];
+return {
+cols: [
+{ n: '1', name: 'A', box: plain, badge: 'background: #DDE8FF', fill: '#6F86A8', focused: false, bars: bars(60, 70, 55) },
+{ n: '2', name: 'B', box: focus, badge: 'background: #4FD1FF', fill: '#4FD1FF', focused: true, bars: bars(100, 100, 100) },
+{ n: '3', name: 'C', box: plain, badge: 'background: #DDE8FF', fill: '#6F86A8', focused: false, bars: bars(75, 85, 75) }
+]
+};
+}
+}
+</script>
+</body>
+</html>
