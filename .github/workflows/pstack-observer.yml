@@ -1,0 +1,91 @@
+name: AIOS pstack observer
+
+on:
+  pull_request:
+    paths:
+      - "AGENTS.md"
+      - ".gitignore"
+      - "tools/pstack-observe.mjs"
+      - "tests/pstack-observer.test.mjs"
+      - "docs/development/pstack.md"
+      - ".github/workflows/pstack-observer.yml"
+  push:
+    branches: [main]
+    paths:
+      - "AGENTS.md"
+      - ".gitignore"
+      - "tools/pstack-observe.mjs"
+      - "tests/pstack-observer.test.mjs"
+      - "docs/development/pstack.md"
+      - ".github/workflows/pstack-observer.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  observer:
+    runs-on: ubuntu-latest
+    env:
+      RUN_ID: ${{ format('aios-ci-{0}-{1}', github.run_id, github.run_attempt) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Start observer smoke (not a pstack engineering task)
+        id: start
+        run: |
+          node tools/pstack-observe.mjs start --repo pcpcchen-coder/AIOS --run "$RUN_ID" \
+            --title "Observer CI smoke only (not a pstack task)" \
+            --playbook observer-smoke --steps "recorder-tests,pstack-integrity" \
+            --branch "$GITHUB_REF_NAME" --commit "$GITHUB_SHA"
+
+      - name: Test recorder lifecycle
+        id: tests
+        run: |
+          node tools/pstack-observe.mjs step --run "$RUN_ID" --step recorder-tests --status running
+          if node --test tests/pstack-observer.test.mjs; then
+            node tools/pstack-observe.mjs step --run "$RUN_ID" --step recorder-tests \
+              --status passed --note "Recorder tests passed" \
+              --evidence "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            node tools/pstack-observe.mjs step --run "$RUN_ID" --step recorder-tests \
+              --status failed --note "Recorder tests failed"
+            exit 1
+          fi
+
+      - name: Verify pinned pstack integrity
+        id: integrity
+        run: |
+          node tools/pstack-observe.mjs step --run "$RUN_ID" --step pstack-integrity --status running
+          if node scripts/check-pstack.mjs; then
+            node tools/pstack-observe.mjs step --run "$RUN_ID" --step pstack-integrity \
+              --status passed --note "Pinned pstack hashes, skills and symlinks verified" \
+              --evidence "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            node tools/pstack-observe.mjs step --run "$RUN_ID" --step pstack-integrity \
+              --status failed --note "Pinned pstack integrity failed"
+            exit 1
+          fi
+
+      - name: Finish smoke receipt
+        if: always() && steps.start.outcome == 'success'
+        run: |
+          if [ "${{ steps.tests.outcome }}" = success ] && [ "${{ steps.integrity.outcome }}" = success ]; then
+            node tools/pstack-observe.mjs finish --run "$RUN_ID" --status passed \
+              --note "Recorder smoke passed; this does not demonstrate a pstack task"
+          else
+            node tools/pstack-observe.mjs finish --run "$RUN_ID" --status failed \
+              --note "Recorder smoke failed or incomplete; check CI logs"
+          fi
+
+      - name: Upload local-only observer JSON artifact
+        if: always() && steps.start.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: aios-pstack-observer-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .pstack/observability/runs/*.json
+          retention-days: 14
+          if-no-files-found: error
