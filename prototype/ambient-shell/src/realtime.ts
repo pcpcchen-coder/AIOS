@@ -50,7 +50,7 @@ export interface RealtimeDeps {
 }
 
 interface RealtimeOptions {
-  /** 多久沒有任何說話就自動結束（毫秒），避免忘記關而持續計費。 */
+  /** 多久沒有任何說話就自動結束（毫秒），避免忘記關而持續計費；之後可用 setIdleMs 改。 */
   idleMs: number;
   /** 確認卡多久沒回應就自動取消（毫秒），預設 60 秒。 */
   approvalMs?: number;
@@ -86,11 +86,25 @@ export class RealtimeVoice {
   private approvalQueue: McpApprovalRequest[] = [];
   private approval: { request: McpApprovalRequest; timer: ReturnType<typeof setTimeout> } | null = null;
 
+  private idleMs: number;
+
   constructor(
     private readonly callbacks: RealtimeCallbacks,
     private readonly deps: RealtimeDeps,
     private readonly options: RealtimeOptions,
-  ) {}
+  ) {
+    this.idleMs = options.idleMs;
+  }
+
+  /**
+   * 改閒置時間（voice.json 改了）。值真的改變而且正在倒數時，從現在起重新倒數新的長度；
+   * 同樣的值不延長倒數；沒開著時只記下來，下次連線才用。
+   */
+  setIdleMs(ms: number): void {
+    if (ms === this.idleMs) return;
+    this.idleMs = ms;
+    if (this.on && this.idleTimer) this.resetIdle();
+  }
 
   get current(): RealtimePhase {
     return this.phase;
@@ -443,7 +457,7 @@ export class RealtimeVoice {
         return;
       }
       this.close("一段時間沒有說話，即時語音已結束（避免持續計費）。");
-    }, this.options.idleMs);
+    }, this.idleMs);
   }
 
   private close(reason: string): void {

@@ -15,7 +15,8 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "vision:setup": "node scripts/vision-setup.mjs"
+    "vision:setup": "node scripts/vision-setup.mjs",
+    "docs:commands": "tsx scripts/write-commands-doc.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.131.0",

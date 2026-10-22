@@ -190,7 +190,7 @@ export interface ConversationCallbacks {
 }
 
 export interface ConversationOptions {
-  /** 多久沒有聽到任何話就自動關閉（毫秒）。 */
+  /** 多久沒有聽到任何話就自動關閉（毫秒）；之後可用 setIdleMs 改。 */
   idleMs: number;
   /** 念完後多久內，聽到與剛念內容相同的話仍視為回音（毫秒）。 */
   echoTailMs?: number;
@@ -241,10 +241,24 @@ export class VoiceConversation {
   /** 插話當下的念出內容，用來清掉該句辨識結果開頭的回音。 */
   private bargeSpoken: string | null = null;
 
+  private idleMs: number;
+
   constructor(
     private readonly callbacks: ConversationCallbacks,
     private readonly options: ConversationOptions,
-  ) {}
+  ) {
+    this.idleMs = options.idleMs;
+  }
+
+  /**
+   * 改閒置時間（voice.json 改了）。值真的改變而且模式開著時，從現在起重新倒數新的長度；
+   * 同樣的值（無關的設定更新）不延長倒數；模式關著時只記下來，下次開啟才用。
+   */
+  setIdleMs(ms: number): void {
+    if (ms === this.idleMs) return;
+    this.idleMs = ms;
+    if (this.on && this.idleTimer) this.resetIdle();
+  }
 
   get current(): ConversationState {
     return this.state;
@@ -423,7 +437,7 @@ export class VoiceConversation {
         return;
       }
       this.close("一段時間沒有聽到指令，語音模式已關閉。");
-    }, this.options.idleMs);
+    }, this.idleMs);
   }
 
   private clearIdle(): void {

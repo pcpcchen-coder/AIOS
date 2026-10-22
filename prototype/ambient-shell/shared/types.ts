@@ -1,4 +1,6 @@
 import type { CameraSettings } from "./sense.ts";
+import type { SecondsSetting } from "./seconds-menu.ts";
+import type { VoicePrefs } from "./voice-prefs.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
 // 這裡先用 TS 型別，schema_version 標為 proto-0.1 以免與正式契約混淆。
@@ -106,6 +108,10 @@ export interface SettingsView {
   realtime?: RealtimeInfo;
   /** 雙目鏡頭設定（docs/11）；未提供時不使用鏡頭。 */
   camera?: CameraSettings;
+  /** 語音閒置秒數（voice.json）；本機核心一定提供，未提供時用 DEFAULT_VOICE_PREFS。 */
+  voice?: VoicePrefs;
+  /** 所有秒數設定，給選單列直接畫；由核心推導（describeSeconds）。 */
+  seconds?: SecondsSetting[];
 }
 
 export interface RealtimeInfo {

@@ -9,7 +9,10 @@ import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { WebSearchError, type WebSearch } from "./web-search.ts";
 import { HomeBridgeError, type HomeBridge } from "./home-bridge.ts";
 import { CameraPatchError, parseCameraPatch, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
+import { describeSeconds } from "../shared/seconds-menu.ts";
+import { DEFAULT_VOICE_PREFS, parseVoicePatch, VoicePatchError, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
+import { COMMANDS_PATH, commandsPageHeaders, renderCommandsPage } from "./commands-page.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
 
@@ -60,6 +63,8 @@ export interface AppOptions {
   home?: HomeBridge;
   /** 雙目鏡頭設定（docs/11，通常是 CameraSettingsStore）；未提供或未啟用時頁面不允許使用鏡頭。 */
   camera?: CameraSettingsSource;
+  /** 語音閒置秒數（通常是 VoiceSettingsStore）；未提供時用預設值且不能修改。 */
+  voice?: VoiceSettingsSource;
   port: number;
   devPort: number;
   distDir: string | null;
@@ -71,6 +76,12 @@ export interface CameraSettingsSource {
   update(patch: CameraPrefsPatch): CameraSettings;
 }
 
+/** 語音閒置秒數的來源。 */
+export interface VoiceSettingsSource {
+  view(): VoicePrefs;
+  update(patch: VoicePrefsPatch): VoicePrefs;
+}
+
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
     super(message);
@@ -80,11 +91,18 @@ class HttpError extends Error {
 export function createApp(options: AppOptions): Server & { notifySettings(): void } {
   const { store, runner, auth, chat, realtime, webSearch, home } = options;
   const settings = {
-    view: (): SettingsView => ({
-      ...options.settings.view(),
-      ...(realtime ? { realtime: realtime.info() } : {}),
-      ...(options.camera ? { camera: options.camera.view() } : {}),
-    }),
+    view: (): SettingsView => {
+      const live = realtime?.info();
+      const camera = options.camera?.view();
+      const voice = options.voice?.view() ?? DEFAULT_VOICE_PREFS;
+      return {
+        ...options.settings.view(),
+        ...(live ? { realtime: live } : {}),
+        ...(camera ? { camera } : {}),
+        voice,
+        seconds: describeSeconds({ camera, voice, voiceWritable: !!options.voice, realtime: live }),
+      };
+    },
     select: (provider: ExecutorMode) => options.settings.select(provider),
   };
   const hosts = allowedHosts(options.port, options.devPort);
@@ -107,7 +125,13 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const guard = checkRequest(req.method ?? "GET", req.headers, hosts);
       if (!guard.ok) throw new HttpError(guard.status, guard.message);
       const url = new URL(req.url ?? "/", "http://localhost");
-      if (url.pathname.startsWith("/api/")) {
+      if (url.pathname === COMMANDS_PATH) {
+        // 唯讀的指令表：在 SPA fallback 之前，每次依目前設定產生。
+        const method = req.method ?? "GET";
+        if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");
+        res.writeHead(200, commandsPageHeaders());
+        res.end(method === "HEAD" ? undefined : renderCommandsPage(settings.view(), new Date()));
+      } else if (url.pathname.startsWith("/api/")) {
         await handleApi(req, res, url.pathname);
       } else {
         serveStatic(res, url.pathname, options.distDir, !!options.camera?.view().enabled);
@@ -150,6 +174,22 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         // 寫檔失敗：伺服器記憶體沒有改，回報真實原因，不顯示假成功。
         throw new HttpError(500, `鏡頭設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, settings.view());
+    }
+    if (method === "POST" && path === "/api/settings/voice") {
+      if (!options.voice) throw new HttpError(409, "語音設定未設定");
+      let patch: VoicePrefsPatch;
+      try {
+        patch = parseVoicePatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof VoicePatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      try {
+        options.voice.update(patch);
+      } catch (err) {
+        throw new HttpError(500, `語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, settings.view());
     }

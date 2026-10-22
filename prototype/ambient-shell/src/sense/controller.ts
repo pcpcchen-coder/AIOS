@@ -150,7 +150,8 @@ function whole(verbBefore: string, target: string, verbAfter: string): RegExp {
   return new RegExp(`^(${verbBefore}${target}|${target}${verbAfter})$`);
 }
 
-const RULES: { pattern: RegExp; command: CameraCommand }[] = [
+/** 鏡頭指令規則；指令表（shared/voice-commands.ts）每條規則一列，由測試對照。 */
+export const CAMERA_RULES: readonly { pattern: RegExp; command: CameraCommand }[] = [
   // 先比對「鏡頭畫面」：「關閉鏡頭畫面」只收起畫面，不關鏡頭。
   { pattern: whole(`(收起|${OFF}|隱藏)`, PREVIEW, "(收起來?|關掉|關閉|隱藏)"), command: { preview: false } },
   { pattern: whole(`(顯示|${ON}|看一下|看看)`, PREVIEW, "(顯示|打開|開啟)"), command: { preview: true } },
@@ -171,7 +172,7 @@ export function matchCameraCommand(text: string): CameraCommand | null {
   const t = text.replace(/[\s，。！？!?,.、~～…]/g, "");
   if (NEGATION_OR_QUESTION.test(t)) return null;
   const command = t.replace(POLITE_PREFIX, "").replace(POLITE_SUFFIX, "");
-  return RULES.find((rule) => rule.pattern.test(command))?.command ?? null;
+  return CAMERA_RULES.find((rule) => rule.pattern.test(command))?.command ?? null;
 }
 
 /**

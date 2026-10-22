@@ -4,8 +4,12 @@
 
 export type ApprovalDecision = "approve" | "reject";
 
-const REJECT = /取消|不要|別|算了|停止|不用|不行|不同意|拒絕/;
-const APPROVE = /(確認|確定)(執行|寄出|送出|寄送|發送|發布|刪除|付款|購買|下單|建立|新增|修改|更新)/;
+/** 取消類詞語；指令表的拒絕列由測試對照這份。 */
+export const REJECT_WORDS = ["取消", "不要", "別", "算了", "停止", "不用", "不行", "不同意", "拒絕"] as const;
+const REJECT = new RegExp(REJECT_WORDS.join("|"));
+/** 「確認／確定」後面可以接的動作；指令表的確認列由測試對照這份。 */
+export const APPROVE_VERBS = ["執行", "寄出", "送出", "寄送", "發送", "發布", "刪除", "付款", "購買", "下單", "建立", "新增", "修改", "更新"] as const;
+const APPROVE = new RegExp(`(確認|確定)(${APPROVE_VERBS.join("|")})`);
 
 /** 判斷一句話是否為確認或取消；都不是時回傳 null（確認卡繼續等待）。 */
 export function matchApproval(text: string): ApprovalDecision | null {

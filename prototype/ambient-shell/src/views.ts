@@ -4,6 +4,8 @@ import { marked } from "marked";
 import { computeProgress, isActive, sortForProgress, summarize } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type SettingsView, type Task, type TaskStep } from "../shared/types.ts";
 import { CAMERA_PREF_KEYS, CAMERA_PREFS, stepCameraPref, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
+import { formatSeconds, stepPref } from "../shared/prefs.ts";
+import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -22,6 +24,8 @@ export interface ViewActions {
   updateCamera(patch: CameraPrefsPatch): void;
   /** 顯示鏡頭畫面（只是畫面，不保存）。 */
   openCameraPreview(): void;
+  /** 語音閒置秒數的 −／+：送出單一鍵的 patch（數值已依 VOICE_PREFS 夾在範圍內）。 */
+  updateVoice(patch: VoicePrefsPatch): void;
 }
 
 const MAX_LISTED = 8;
@@ -371,9 +375,35 @@ export function renderSettings(settings: SettingsView | null, message: string | 
       ),
     account.length > 0 && h("div", { class: "account" }, ...account),
     h("p", { class: "muted small" }, "新交辦的任務會用目前選擇的引擎；已在執行的任務不受影響。"),
+    settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
     footer(actions),
   );
+}
+
+/** 語音閒置秒數：逐項走 VOICE_PREFS（順序、標籤、提示、範圍都從那裡來）；不需要鏡頭。 */
+function renderVoiceSettings(voice: VoicePrefs, realtimeAvailable: boolean, actions: ViewActions): HTMLElement {
+  const list = h("ul", { class: "pref-list" });
+  for (const key of VOICE_PREF_KEYS) {
+    const spec = VOICE_PREFS[key];
+    const value = voice[key];
+    const minus = button("−", () => actions.updateVoice({ [key]: stepPref(spec, value, -1) }));
+    const plus = button("+", () => actions.updateVoice({ [key]: stepPref(spec, value, 1) }));
+    minus.disabled = value <= spec.min;
+    plus.disabled = value >= spec.max;
+    minus.setAttribute("aria-label", `${spec.label}減少`);
+    plus.setAttribute("aria-label", `${spec.label}增加`);
+    const hint = key === "realtime_idle_s" && !realtimeAvailable ? `${spec.hint}；即時語音目前不可用` : spec.hint;
+    list.append(
+      h(
+        "li",
+        { class: "pref" },
+        h("div", { class: "provider-text" }, h("strong", {}, spec.label), h("span", { class: "muted small" }, hint)),
+        h("div", { class: "stepper" }, minus, h("span", { class: "stepper-value" }, formatSeconds(value)), plus),
+      ),
+    );
+  }
+  return h("section", { class: "camera-settings" }, h("h3", {}, "語音"), list, h("p", { class: "muted small" }, "改了立即生效：開著的語音從現在起重新計時。macOS App 也可以在選單列「秒數設定」調整。"));
 }
 
 /** 鏡頭與手勢：逐項走 CAMERA_PREFS（順序、標籤、提示、範圍都從那裡來）。 */

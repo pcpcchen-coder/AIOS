@@ -51,7 +51,7 @@ const WEB_SEARCH_TOOL = {
   },
 } as const;
 
-const HOME_STATUS_TOOL = {
+export const HOME_STATUS_TOOL = {
   type: "function",
   name: "home_status",
   description:

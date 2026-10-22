@@ -1,5 +1,6 @@
 // 雙目鏡頭的感知事件與設定（docs/11）。影像只在本機處理；離開感知管線的只有這些事件，不含任何影像或關鍵點座標。
 // 使用者要求看鏡頭畫面時，管線把縮小的畫面直接畫到本頁畫布（不寫檔、不進 trace、不外傳）。
+import { parsePrefsPatch, prefDefaults, stepPref, type PrefSpecs } from "./prefs.ts";
 
 export type PointZone = "left" | "center" | "right";
 
@@ -50,26 +51,6 @@ export type CameraSettings = CameraInstall & CameraPrefs;
 
 export type CameraPrefsPatch = Partial<CameraPrefs>;
 
-interface BoolPrefSpec {
-  kind: "bool";
-  default: boolean;
-  /** 設定畫面的標籤，也是語音指令裡的名稱（「關閉看著說話」）。 */
-  label: string;
-  hint: string;
-}
-
-interface SecondsPrefSpec {
-  kind: "seconds";
-  default: number;
-  min: number;
-  max: number;
-  step: number;
-  label: string;
-  hint: string;
-}
-
-type PrefSpec<T> = T extends boolean ? BoolPrefSpec : SecondsPrefSpec;
-
 /**
  * 唯一的使用者設定清單：預設值、伺服器驗證、設定畫面都由此推導；順序就是設定畫面的順序。
  * `satisfies` 讓型別與清單不一致時編譯失敗。
@@ -78,23 +59,21 @@ export const CAMERA_PREFS = {
   active: { kind: "bool", default: true, label: "鏡頭", hint: "實際狀態看右下角指示點" },
   look_to_talk: { kind: "bool", default: true, label: "看著說話", hint: "面向螢幕後自動開始即時語音" },
   look_to_talk_s: {
-    kind: "seconds", default: 1.5, min: 0.5, max: 5, step: 0.1,
+    kind: "seconds", default: 1.5, min: 0.5, max: 5, step: 0.1, presets: [1, 1.5, 2, 3],
     label: "面向螢幕幾秒後開始對話", hint: "從開始面向螢幕算起；系統約每 0.2 秒檢查一次",
   },
   look_to_talk_cooldown_s: {
-    kind: "seconds", default: 10, min: 3, max: 60, step: 1,
+    kind: "seconds", default: 10, min: 3, max: 60, step: 1, presets: [5, 10, 15, 20, 30, 60],
     label: "對話結束後暫停", hint: "這段時間內不再自動開始，避免說完再見又被打開",
   },
   stop_gesture: { kind: "bool", default: true, label: "手掌停止播報", hint: "舉起張開的手掌停止 Nous 說話（不取消任務）" },
-} as const satisfies { [K in keyof CameraPrefs]: PrefSpec<CameraPrefs[K]> };
+} as const satisfies PrefSpecs<CameraPrefs>;
 
 export type CameraPrefKey = keyof CameraPrefs;
 
 export const CAMERA_PREF_KEYS = Object.keys(CAMERA_PREFS) as CameraPrefKey[];
 
-export const DEFAULT_CAMERA_PREFS: CameraPrefs = Object.fromEntries(
-  CAMERA_PREF_KEYS.map((key) => [key, CAMERA_PREFS[key].default]),
-) as unknown as CameraPrefs;
+export const DEFAULT_CAMERA_PREFS: CameraPrefs = prefDefaults<CameraPrefs>(CAMERA_PREFS);
 
 export class CameraPatchError extends Error {}
 
@@ -103,32 +82,12 @@ export class CameraPatchError extends Error {}
  * 秒數必須在範圍內且落在 step 上。不默默夾住數值，錯誤一律丟 CameraPatchError（→ HTTP 400）。
  */
 export function parseCameraPatch(input: unknown): CameraPrefsPatch {
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new CameraPatchError("鏡頭設定必須是 JSON 物件");
-  const patch: Record<string, boolean | number> = {};
-  for (const [key, value] of Object.entries(input)) {
-    if (!Object.hasOwn(CAMERA_PREFS, key)) throw new CameraPatchError(`未知的鏡頭設定：${key}`);
-    const spec = CAMERA_PREFS[key as CameraPrefKey];
-    if (spec.kind === "bool") {
-      if (typeof value !== "boolean") throw new CameraPatchError(`${key} 必須是 true 或 false`);
-    } else if (typeof value !== "number" || !Number.isFinite(value) || value < spec.min || value > spec.max || !onStep(value, spec.step)) {
-      throw new CameraPatchError(`${key} 必須是 ${spec.min}–${spec.max} 秒、間隔 ${spec.step}`);
-    }
-    patch[key] = value;
-  }
-  return patch as CameraPrefsPatch;
+  return parsePrefsPatch<CameraPrefs>(CAMERA_PREFS, input, { noun: "鏡頭設定", make: (m) => new CameraPatchError(m) });
 }
 
-function onStep(value: number, step: number): boolean {
-  const n = value / step;
-  return Math.abs(n - Math.round(n)) < 1e-6;
-}
-
-/** 設定畫面的 −／+：移動一格並夾在範圍內；四捨五入到 step 的小數位，避免 1.6000000000000003。 */
+/** 設定畫面的 −／+：移動一格並夾在範圍內。 */
 export function stepCameraPref(key: "look_to_talk_s" | "look_to_talk_cooldown_s", current: number, direction: 1 | -1): number {
-  const spec = CAMERA_PREFS[key];
-  const decimals = (String(spec.step).split(".")[1] ?? "").length;
-  const next = Number((current + direction * spec.step).toFixed(decimals));
-  return Math.min(spec.max, Math.max(spec.min, next));
+  return stepPref(CAMERA_PREFS[key], current, direction);
 }
 
 /**

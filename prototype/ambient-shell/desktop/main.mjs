@@ -117,6 +117,8 @@ async function restartCore(reason, { ask = true } = {}) {
   await core?.close();
   await startCore();
   if (win && !win.isDestroyed()) await win.loadURL(core.url);
+  // 連接埠可能換了；指令表也重新依新核心的設定產生。
+  if (commandsWin && !commandsWin.isDestroyed()) loadCommands();
   await refreshSettings();
   return true;
 }
@@ -180,6 +182,65 @@ function toggleWindow() {
   else showWindow();
 }
 
+// ───────────── 語音指令表（獨立的唯讀視窗） ─────────────
+// 不經過主視窗：不呼叫 showWindow／command，主頁面收不到任何事件，正在進行的對話與回覆不受影響。
+// 頁面由本機核心依目前設定產生（GET /help/commands，沒有 script、CSP 只允許自己的 style）；視窗再加一層鎖：
+// 不載入 preload、sandbox、關掉 JavaScript、獨立的記憶體 session 拒絕所有權限、禁止導覽與開新視窗。
+
+const HELP_PARTITION = "nous-help"; // 沒有 persist: 前綴：只在記憶體，不和主視窗共用（主視窗的 session 允許麥克風）
+let commandsWin = null;
+
+function openCommandsWindow() {
+  if (commandsWin && !commandsWin.isDestroyed()) {
+    if (commandsWin.isMinimized()) commandsWin.restore();
+    commandsWin.show();
+    commandsWin.focus();
+    return;
+  }
+  const helpSession = session.fromPartition(HELP_PARTITION);
+  helpSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  helpSession.setPermissionCheckHandler(() => false);
+  commandsWin = new BrowserWindow({
+    width: 920,
+    height: 720,
+    minWidth: 480,
+    minHeight: 360,
+    title: "Nous 語音指令表",
+    show: false,
+    webPreferences: {
+      partition: HELP_PARTITION,
+      sandbox: true,
+      contextIsolation: true,
+      nodeIntegration: false,
+      javascript: false,
+      webviewTag: false,
+      spellcheck: false,
+    },
+  });
+  const contents = commandsWin.webContents;
+  contents.setWindowOpenHandler(() => ({ action: "deny" }));
+  contents.on("will-navigate", (e) => e.preventDefault());
+  contents.on("will-redirect", (e) => e.preventDefault());
+  contents.on("will-attach-webview", (e) => e.preventDefault());
+  commandsWin.once("ready-to-show", () => commandsWin?.show());
+  commandsWin.on("closed", () => {
+    commandsWin = null;
+  });
+  loadCommands();
+}
+
+function loadCommands() {
+  const target = commandsWin;
+  target.loadURL(`${core.url}/help/commands`).catch((err) => {
+    // ⌘R 或核心重啟後的 loadCommands 取代了還在載入的那一次：舊的載入以 ERR_ABORTED 結束，新的照常進行。
+    if (err?.code === "ERR_ABORTED") return;
+    log(`語音指令表載入失敗：${err.message ?? err}`);
+    if (target.isDestroyed()) return;
+    dialog.showErrorBox("無法打開語音指令表", `本機核心沒有回應（${err.message ?? err}）。稍後再試，或在「設定與資料」重新啟動核心。`);
+    target.destroy();
+  });
+}
+
 /** 把選單動作交給網頁（開始語音、看進度…）。 */
 function command(name) {
   showWindow();
@@ -224,6 +285,49 @@ async function refreshSettings() {
 
 function radio(label, checked, click, enabled = true) {
   return { label, type: "radio", checked, enabled, click };
+}
+
+/**
+ * 「秒數設定」子選單：照核心給的 settings.seconds 畫（鍵、範圍、選項、標籤、寫入路徑都由核心推導），
+ * 這裡不寫任何秒數。不能用時，原因放在子選單第一項（sublabel 只有 macOS 14.4 以上才顯示）。
+ */
+function secondsMenu() {
+  const rows = settings?.seconds;
+  if (!rows) return [{ label: "讀取中…", enabled: false }];
+  const items = [];
+  let group = null;
+  for (const row of rows) {
+    if (row.group !== group) {
+      if (group !== null) items.push({ type: "separator" });
+      items.push({ label: row.group_label, enabled: false });
+      group = row.group;
+    }
+    const enabled = row.disabled_reason === null;
+    items.push({
+      label: `${row.label}：${row.value_label}`,
+      sublabel: row.disabled_reason ?? row.note,
+      submenu: [
+        ...(enabled ? [] : [{ label: row.disabled_reason, enabled: false }, { type: "separator" }]),
+        ...row.options.map((o) => radio(o.label, o.checked, () => void setSeconds(row, o.value), enabled)),
+        { type: "separator" },
+        { label: row.note, enabled: false },
+      ],
+    });
+  }
+  items.push({ type: "separator" }, { label: "更多設定…", click: () => command("settings") });
+  return items;
+}
+
+/** 送出後直接套用回應（不等 15 秒的輪詢）；失敗時說明真實原因，並重新讀取實際保存的值。 */
+async function setSeconds(row, value) {
+  try {
+    settings = await api(row.write_path, { [row.key]: value });
+  } catch (err) {
+    dialog.showErrorBox("秒數沒有保存", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  rebuildMenu();
 }
 
 function rebuildMenu() {
@@ -308,6 +412,8 @@ function rebuildMenu() {
         }),
       ),
     },
+    { label: "秒數設定", submenu: secondsMenu() },
+    { label: "語音指令表", click: openCommandsWindow },
     { type: "separator" },
     {
       label: "設定與資料",
@@ -427,9 +533,18 @@ app.on("window-all-closed", () => {
   // 留在選單列，不結束。
 });
 
+// 設定在頁面（設定畫面、語音或打字指令）改了：頁面收到核心的 settings.updated 後回報新的版本字串，這裡馬上重新讀取。
+// 不在點選單列圖示時才讀：macOS 上 setContextMenu 的選單在 mouse-down 當下就打開，非同步的讀取趕不上這一次。
+let reportedSettings = null;
 ipcMain.on("nous:state", (_e, state) => {
   if (!state || typeof state !== "object") return;
   pageState = { voice: String(state.voice ?? "off"), activeTasks: Number(state.activeTasks) || 0 };
+  const revision = String(state.settings ?? "");
+  if (revision && revision !== reportedSettings) {
+    reportedSettings = revision;
+    void refreshSettings(); // 讀完會 rebuildMenu
+    return;
+  }
   rebuildMenu();
 });
 ipcMain.on("nous:open-external", (_e, url) => {
@@ -486,6 +601,7 @@ app.whenReady().then(async () => {
           { label: "開始／結束語音對話", accelerator: "Alt+Command+V", click: () => command("voice") },
           { label: "看進度", accelerator: "Command+P", click: () => command("progress") },
           { label: "AI 引擎設定", accelerator: "Command+,", click: () => command("settings") },
+          { label: "語音指令表", accelerator: "Command+/", click: openCommandsWindow },
           { type: "separator" },
           { role: "reload", label: "重新載入" },
           { role: "togglefullscreen", label: "全螢幕" },
@@ -500,6 +616,11 @@ app.whenReady().then(async () => {
           { type: "separator" },
           { label: "全部移到最前面", role: "front" },
         ],
+      },
+      {
+        label: "說明",
+        role: "help",
+        submenu: [{ label: "語音指令表", click: openCommandsWindow }],
       },
     ]),
   );
