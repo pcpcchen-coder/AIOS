@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T03:08:22.788Z",
-  "updated_at": "2026-10-22T03:27:22.033Z",
+  "updated_at": "2026-10-22T03:27:26.283Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-22T03:27:26.283Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -124,6 +124,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "Blocking: shared prefs + store; 4 workstreams share wire types; one writer per file; single implementer"
+    },
+    {
+      "at": "2026-10-22T03:27:26.283Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
