@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T11:32:47.236Z",
-  "updated_at": "2026-10-22T13:41:58.869Z",
+  "updated_at": "2026-10-22T13:42:02.877Z",
   "ended_at": null,
   "steps": [
     {
@@ -50,10 +50,10 @@
     {
       "id": "verify",
       "title": "verify",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-22T13:42:02.877Z",
+      "ended_at": "2026-10-22T13:42:02.877Z",
+      "note": "Orchestrator re-ran: tsc, vitest 580/580, vite build, desktop check, verify-aios PASS, diff --check",
       "evidence": []
     },
     {
@@ -131,6 +131,13 @@
       "step_id": "implement",
       "status": "passed",
       "note": "7a7f70a: route union in home-bridge.ts, AIFA merge/power/climate, IR key match, 60 s deadline; docs/12 + validation doc"
+    },
+    {
+      "at": "2026-10-22T13:42:02.877Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "passed",
+      "note": "Orchestrator re-ran: tsc, vitest 580/580, vite build, desktop check, verify-aios PASS, diff --check"
     }
   ],
   "provenance": "Agent self-reported"
