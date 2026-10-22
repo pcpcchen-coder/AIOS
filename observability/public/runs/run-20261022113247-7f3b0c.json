@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T11:32:47.236Z",
-  "updated_at": "2026-10-22T13:42:02.877Z",
+  "updated_at": "2026-10-22T13:42:06.320Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,8 +59,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-22T13:42:06.320Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -138,6 +138,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "Orchestrator re-ran: tsc, vitest 580/580, vite build, desktop check, verify-aios PASS, diff --check"
+    },
+    {
+      "at": "2026-10-22T13:42:06.320Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
