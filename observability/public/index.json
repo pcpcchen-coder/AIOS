@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-22T13:42:07.529Z",
+  "updated_at": "2026-10-22T13:50:02.419Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,12 +9,12 @@
       "title": "H1b: 語音控制冷氣與紅外線家電",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-22T13:42:06.320Z",
+      "updated_at": "2026-10-22T13:50:00.131Z",
       "started_at": "2026-10-22T11:32:47.236Z",
       "ended_at": null,
       "branch": "",
       "commit_sha": "",
-      "passed_steps": 5,
+      "passed_steps": 6,
       "total_steps": 7,
       "provenance": "Agent self-reported"
     },
