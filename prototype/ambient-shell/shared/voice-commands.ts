@@ -265,7 +265,7 @@ export const CAVEATS: readonly Caveat[] = [
   { id: "card-ok-is-not-yes", cases: [{ says: "好", checks: { approval: null, camera: null } }],
     truth: "確認卡開著時只說「好」不算同意，也不算取消：指令不會送出，確認卡繼續等你說「確認執行」或「取消」，60 秒後自動取消" },
   { id: "home-aircon", cases: [{ says: "冷氣調 26 度", checks: { camera: null, approval: null, notLocalIn: ["realtime"] } }],
-    truth: "不是本機指令，會交給 AI。冷氣溫度與紅外線設備（電視、冷氣遙控）還不能用語音控制，AI 會照實說；色溫（2500–9000 K）只用在燈" },
+    truth: "不是本機指令，會交給 AI。AIFA 冷氣：先讀控制器記得的設定再送出 26 度，讀不到的項目用預設值並說出來；冷氣不會回報，所以只會說「已送出，請確認」，不會說調好了，冷氣關著時也不代表會開機（要開請說「開冷氣」）。紅外線遙控的冷氣只能按它的遙控鍵；色溫（2500–9000 K）只用在燈" },
   { id: "home-room-wide", cases: [{ says: "客廳的燈全部關掉", checks: { camera: null, approval: null, notLocalIn: ["realtime"] } }],
     truth: "一次只控制一台：說整個房間或「全部」時，AI 會問你是哪一台，不會一次關掉整個房間" },
   { id: "substring-progress", cases: [{ says: "交通狀況如何", checks: { camera: null, intent: "progress" } }],
@@ -283,8 +283,8 @@ export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
     needs: { text: "即時語音", live: "realtime_available" } },
   home_status: { try: ["客廳現在幾度"], does: "查武陵居的感測值與設備狀態",
     needs: { text: "即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）", live: "realtime_home" } },
-  home_control: { try: ["客廳主燈關掉", "書桌燈調到 60%", "色溫調到 3000K"],
-    does: "請中控控制一台家電，照中控的回讀說結果：確認了才說好了；「已送出、未確認」要你看一下，不算成功。一次一台；冷氣溫度與紅外線設備還不支援",
+  home_control: { try: ["客廳主燈關掉", "書桌燈調到 60%", "色溫調到 3000K", "冷氣調 26 度", "電視大聲一點"],
+    does: "請中控控制一台家電，照中控的回讀說結果：確認了才說好了；「已送出、未確認」要你看一下，不算成功。AIFA 冷氣（開關、溫度、模式、風量）與紅外線家電（一次按一個遙控鍵）沒有回讀，只會說「已送出，請確認」。一次一台",
     needs: { text: "即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）", live: "realtime_home" } },
 };
 

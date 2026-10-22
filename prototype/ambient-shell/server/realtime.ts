@@ -76,19 +76,21 @@ export const HOME_CONTROL_TOOL = {
   type: "function",
   name: "home_control",
   description:
-    "控制武陵居家裡的一台設備：開關、亮度、燈的色溫、顏色、音量、靜音、播放／暫停／停止、窗簾。由家裡的中控執行並回讀確認，回傳真實結果。一次只控制一台；整個房間或全家一起控制還不支援。冷氣（開關與溫度）、紅外線設備（電視、冷氣遙控）與無線按鈕還不能用語音控制。",
+    "控制武陵居家裡的一台設備：開關、亮度、燈的色溫、顏色、音量、靜音、播放／暫停／停止、窗簾；AIFA 冷氣的開關、設定溫度（ac_temperature）、模式、風量、擺風；紅外線家電（電視、電風扇等）按一個遙控鍵（press）。由家裡的中控執行，回傳真實結果：燈、插座等會回讀確認；冷氣與紅外線家電沒有回讀，最多只會「已送出」，不會確認。一次只控制一台；整個房間或全家一起控制還不支援。不是 AIFA 的冷氣（Tuya、Home Assistant）與無線按鈕還不能用語音控制。",
   parameters: {
     type: "object",
     properties: {
-      target: { type: "string", description: "一台設備的名稱，照使用者的說法填（例如「客廳主燈」「書桌燈」）" },
+      target: { type: "string", description: "一台設備的名稱，照使用者的說法填（例如「客廳主燈」「書桌燈」「冷氣」「電視」）；度數、按鍵不要放在這裡" },
       command: {
         type: "string",
-        description: "power 開關；brightness 亮度；color_temperature 燈的色溫（K，不是冷氣溫度）；color 顏色；volume 音量；mute 靜音；play／pause／stop 播放控制；cover 窗簾",
+        description:
+          "power 開關；brightness 亮度；color_temperature 燈的色溫（K，不是冷氣溫度）；color 顏色；volume 音量數字（紅外線家電不能用）；mute 靜音；play／pause／stop 播放控制；cover 窗簾；ac_temperature AIFA 冷氣的設定溫度（攝氏）；ac_mode 冷氣模式；ac_fan 冷氣風量；ac_swing 冷氣擺風；press 紅外線家電按一個遙控鍵",
         enum: [...HOME_COMMANDS],
       },
       value: {
         type: "string",
-        description: "power／mute：true 或 false；brightness／volume：0 到 100；color_temperature：2500 到 9000；color：#RRGGBB；cover：open、close 或 stop；play／pause／stop 不用填",
+        description:
+          "power／mute：true 或 false；brightness／volume：0 到 100；color_temperature：2500 到 9000；color：#RRGGBB；cover：open、close 或 stop；ac_temperature：攝氏整數，例如 26（通常 17 到 30）；ac_mode：auto、cool 或 dry；ac_fan：auto、low、medium、high、up（調大一格）或 down（調小一格）；ac_swing：auto 或 fixed_1 到 fixed_5；press：power、volume_up、volume_down、mute、channel_up、channel_down、fan_speed、oscillate，或使用者說的按鍵名稱；play／pause／stop 不用填",
       },
     },
     required: ["target", "command"],
@@ -161,7 +163,8 @@ export function buildRealtimeInstructions(
   if (caps.home) {
     abilities.push(
       "你可以查武陵居家裡的狀態：使用者問室內溫度、濕度、空氣品質或設備在不在線時呼叫 home_status，不要用猜的。回答講房間、數字和單位；readings 的 value 是 null 就說「沒有讀值」，不要說 0；data 是「快照」或「過期資料」時，依 time 與 minutes_ago 說是什麼時候、多久前的資料，不要說成現在的值。status 是 ambiguous 時問使用者是哪一個；not_found 就說家裡找不到這個名字；no_such_reading 就說那裡沒有能量這項的設備。",
-      "你也可以控制武陵居的家電：使用者要開關或調整一台設備（燈、插座、音響、窗簾）時，先說一句「好，我請中控處理」，再呼叫 home_control，一次一台。依回傳的 status 說話：confirmed 才說已經做好；unconfirmed 是已送出但設備還沒確認，請使用者看一下有沒有反應，不要說成功（why 是 no_reply 時說不確定有沒有執行）；failed 照 message 說沒有成功的原因；refused 表示指令沒有送出，照 message 說；ambiguous 問是哪一台；not_found 說家裡找不到這個名字。needs_confirmation 時用一句話說要對哪台設備做什麼，請使用者說「確認執行」或「取消」；不要再呼叫 home_control，也不能替使用者確認，結果會用系統通知送來。busy 表示另一張確認卡還沒處理完，這個指令沒有送出：請使用者先回答那張卡，之後再說一次。整個房間或全家一起控制還不支援，請使用者指定一台。color_temperature 是燈的色溫（K）；冷氣（開關與溫度）、紅外線設備與無線按鈕還不能用語音控制，使用者要求時照實說。",
+      "你也可以控制武陵居的家電：使用者要開關或調整一台設備（燈、插座、音響、窗簾）時，先說一句「好，我請中控處理」，再呼叫 home_control，一次一台。依回傳的 status 說話：confirmed 才說已經做好；unconfirmed 是已送出但設備還沒確認，請使用者看一下有沒有反應，不要說成功（why 是 no_reply 時說不確定有沒有執行）；failed 照 message 說沒有成功的原因；refused 表示指令沒有送出，照 message 說；ambiguous 問是哪一台；not_found 說家裡找不到這個名字。needs_confirmation 時用一句話說要對哪台設備做什麼，請使用者說「確認執行」或「取消」；不要再呼叫 home_control，也不能替使用者確認，結果會用系統通知送來。busy 表示另一張確認卡還沒處理完，這個指令沒有送出：請使用者先回答那張卡，之後再說一次。整個房間或全家一起控制還不支援，請使用者指定一台。color_temperature 是燈的色溫（K），不是冷氣溫度。",
+      "AIFA 冷氣：開關用 power；設定溫度用 ac_temperature（「冷氣調 26 度」是 target「冷氣」、value「26」）；模式 ac_mode、風量 ac_fan（「風量調小」是 down）、擺風 ac_swing。「開冷氣 26 度」要呼叫兩次：先 power true，等結果回來再 ac_temperature 26，兩個結果都照說。紅外線家電（電視、電風扇等）：開關用 power、靜音用 mute，其他鍵用 press（「大聲一點」是 press volume_up）；一次只按一下，使用者要按好幾下時，按一下之後請他再說一次。冷氣與紅外線家電沒有回讀，結果不會是 confirmed：why 是 one_way 時說「已送出，請看一下有沒有反應」，不要說已經開了、關了或調好了；有 key 時說按了哪個鍵；toggle 表示按的是電源切換鍵，不能說開了或關了；cloud_no_reply 說雲端沒有回覆、不確定有沒有送出；controller_reported 只能說成「控制器回報…」，那不是冷氣的實際狀態；defaults_used 有內容時要說哪些設定用了預設值；有 note 時照說。不是 AIFA 的冷氣（Tuya、Home Assistant）與無線按鈕還不能用語音控制，使用者要求時照實說。",
     );
   }
   if (caps.mcp.length) {
