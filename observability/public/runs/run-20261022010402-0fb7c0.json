@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T01:04:02.355Z",
-  "updated_at": "2026-10-22T01:27:23.722Z",
+  "updated_at": "2026-10-22T01:27:27.594Z",
   "ended_at": null,
   "steps": [
     {
@@ -68,10 +68,10 @@
     {
       "id": "report",
       "title": "report",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-22T01:27:27.594Z",
       "ended_at": null,
-      "note": "",
+      "note": "Preparing the validation record and labeled synthetic browser evidence.",
       "evidence": []
     }
   ],
@@ -166,6 +166,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "307 tests, typecheck, build and mock HTTP journey passed. Six synthetic-distance Chromium groups passed on final assets with no page errors; physical camera not verified."
+    },
+    {
+      "at": "2026-10-22T01:27:27.594Z",
+      "type": "step_updated",
+      "step_id": "report",
+      "status": "running",
+      "note": "Preparing the validation record and labeled synthetic browser evidence."
     }
   ],
   "provenance": "Agent self-reported"
