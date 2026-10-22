@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T03:08:22.788Z",
-  "updated_at": "2026-10-22T03:27:18.502Z",
+  "updated_at": "2026-10-22T03:27:22.033Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-22T03:27:22.033Z",
+      "ended_at": "2026-10-22T03:27:22.033Z",
+      "note": "Blocking: shared prefs + store; 4 workstreams share wire types; one writer per file; single implementer",
       "evidence": []
     },
     {
@@ -117,6 +117,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "Arena: 2 candidates + cross-judge; base = candidate 2 (core-derived menu data, separate locked-down table window, voice.json); grafts from candidate 1: verified caveat rows, Cmd+/ and Help menu, per-key fail-closed + mapped-type coverage; fixed idle-restart and macOS<14.4 reason bugs"
+    },
+    {
+      "at": "2026-10-22T03:27:22.033Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "passed",
+      "note": "Blocking: shared prefs + store; 4 workstreams share wire types; one writer per file; single implementer"
     }
   ],
   "provenance": "Agent self-reported"
