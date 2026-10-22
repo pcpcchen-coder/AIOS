@@ -44,7 +44,8 @@ export function stripEcho(heard: string, spoken: string): string {
   return chars.slice(cut).join("").trim();
 }
 
-const STOP_WORDS = ["停", "停停", "停一下", "暫停", "先停", "等等", "等一下", "等一等", "stop", "wait"];
+/** 插話詞；指令表（shared/voice-commands.ts）的插話列由測試對照這份。 */
+export const STOP_WORDS: readonly string[] = ["停", "停停", "停一下", "暫停", "先停", "等等", "等一下", "等一等", "stop", "wait"];
 
 /** 「停」「等一下」這類插話詞：即使很短、即使字剛好出現在念的內容裡，也要立刻打斷。 */
 export function isStopWord(heard: string): boolean {

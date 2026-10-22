@@ -1,0 +1,84 @@
+// 使用者設定的規格（CAMERA_PREFS、VOICE_PREFS 都是這種表）：預設值、驗證、設定畫面與選單列的選項都由表推導。
+
+export interface BoolPrefSpec {
+  kind: "bool";
+  default: boolean;
+  /** 設定畫面的標籤，也是語音指令裡的名稱（「關閉看著說話」）。 */
+  label: string;
+  hint: string;
+}
+
+export interface SecondsPrefSpec {
+  kind: "seconds";
+  default: number;
+  min: number;
+  max: number;
+  step: number;
+  /**
+   * 選單列提供的選項（選單不能輸入數字）。每一個都要在範圍內、落在 step 上、由小到大不重複，且包含預設值
+   * （tests/prefs.test.ts 對每張表檢查），所以選單的點選不會被核心以 400 拒絕。
+   */
+  presets: readonly number[];
+  label: string;
+  hint: string;
+}
+
+export type PrefSpec<T> = T extends boolean ? BoolPrefSpec : SecondsPrefSpec;
+
+/** 一張設定表：每個鍵一個規格，順序就是設定畫面與選單的順序。 */
+export type PrefSpecs<P> = { [K in keyof P]: PrefSpec<P[K]> };
+
+/** 表裡的秒數鍵。 */
+export type SecondsKeyOf<S> = { [K in keyof S]: S[K] extends { kind: "seconds" } ? K : never }[keyof S];
+
+export interface PatchErrors {
+  /** 訊息裡的名稱：「鏡頭設定」「語音設定」。 */
+  noun: string;
+  make(message: string): Error;
+}
+
+/**
+ * 邊界驗證（HTTP body、設定檔）：只接受表裡的鍵；開關必須是 boolean；秒數必須在範圍內且落在 step 上。
+ * 不默默夾住數值，錯誤一律用 errors.make 丟出（→ HTTP 400）。
+ */
+export function parsePrefsPatch<P>(specs: PrefSpecs<P>, input: unknown, errors: PatchErrors): Partial<P> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw errors.make(`${errors.noun}必須是 JSON 物件`);
+  const table = specs as Record<string, BoolPrefSpec | SecondsPrefSpec>;
+  const patch: Record<string, boolean | number> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (!Object.hasOwn(table, key)) throw errors.make(`未知的${errors.noun}：${key}`);
+    const spec = table[key];
+    if (spec.kind === "bool") {
+      if (typeof value !== "boolean") throw errors.make(`${key} 必須是 true 或 false`);
+    } else if (typeof value !== "number" || !Number.isFinite(value) || value < spec.min || value > spec.max || !onStep(value, spec.step)) {
+      throw errors.make(`${key} 必須是 ${spec.min}–${spec.max} 秒、間隔 ${spec.step}`);
+    }
+    patch[key] = value;
+  }
+  return patch as Partial<P>;
+}
+
+export function onStep(value: number, step: number): boolean {
+  const n = value / step;
+  return Math.abs(n - Math.round(n)) < 1e-6;
+}
+
+/** 設定畫面的 −／+：移動一格並夾在範圍內；四捨五入到 step 的小數位，避免 1.6000000000000003。 */
+export function stepPref(spec: SecondsPrefSpec, current: number, direction: 1 | -1): number {
+  const decimals = (String(spec.step).split(".")[1] ?? "").length;
+  const next = Number((current + direction * spec.step).toFixed(decimals));
+  return Math.min(spec.max, Math.max(spec.min, next));
+}
+
+/** 表的預設值。 */
+export function prefDefaults<P>(specs: PrefSpecs<P>): P {
+  return Object.fromEntries(Object.entries(specs).map(([key, spec]) => [key, (spec as { default: unknown }).default])) as P;
+}
+
+/** 「1.5 秒」「45 秒」「2 分鐘」「1 分 30 秒」：選單、設定畫面與同意說明共用。 */
+export function formatSeconds(seconds: number): string {
+  if (seconds < 60) return `${Number(seconds.toFixed(3))} 秒`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Number((seconds - minutes * 60).toFixed(3));
+  return rest === 0 ? `${minutes} 分鐘` : `${minutes} 分 ${rest} 秒`;
+}

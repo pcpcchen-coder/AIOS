@@ -1,4 +1,5 @@
-import { createServer, type Server } from "node:http";
+import { createHash } from "node:crypto";
+import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, statSync } from "node:fs";
@@ -6,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../server/app.ts";
 import { CameraSettingsStore } from "../server/camera-settings.ts";
+import { VoiceSettingsStore } from "../server/voice-settings.ts";
 import { loadConfig } from "../server/config.ts";
 import { ChatGPTAuth } from "../server/chatgpt-auth.ts";
 import { ChatGPTExecutor } from "../server/chatgpt-executor.ts";
@@ -18,6 +20,7 @@ import { RealtimeBridge } from "../server/realtime.ts";
 import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
 import type { SettingsView, Task } from "../shared/types.ts";
+import { commandSections } from "../shared/voice-commands.ts";
 
 describe("checkRequest", () => {
   const hosts = allowedHosts(8787, 5173);
@@ -59,14 +62,16 @@ async function start(
   webSearch?: WebSearch,
   home?: HomeBridge,
   camera?: { env: NodeJS.ProcessEnv; dir?: string },
+  voice?: { dir?: string },
 ) {
   const port = await freePort();
   const store = new TaskStore(null);
-  const dir = camera?.dir ?? mkdtempSync(join(tmpdir(), "nous-http-"));
+  const dir = camera?.dir ?? voice?.dir ?? mkdtempSync(join(tmpdir(), "nous-http-"));
   let notify = () => {};
   const cameraStore = camera
     ? new CameraSettingsStore({ base: loadConfig(camera.env).camera, dir, onChange: () => notify(), log: () => {} })
     : undefined;
+  const voiceStore = voice ? new VoiceSettingsStore({ dir, onChange: () => notify(), log: () => {} }) : undefined;
   const auth = new ChatGPTAuth({ dir, callbackPort: 0, onChange: () => {} });
   const providers = new ProviderManager({
     claude: null,
@@ -88,6 +93,7 @@ async function start(
     webSearch,
     home,
     camera: cameraStore,
+    voice: voiceStore,
     port,
     devPort: 5173,
     distDir: null,
@@ -347,6 +353,104 @@ describe("HTTP API", () => {
     expect(((await res.json()) as { error: string }).error).toMatch(/^鏡頭設定沒有保存/);
     const view = (await (await fetch(`${base}/api/settings`)).json()) as SettingsView;
     expect(view.camera?.active).toBe(true);
+  });
+
+  it("語音閒置秒數：驗證輸入、保存到 voice.json、推送 settings.updated，回應帶新的 seconds 列", async () => {
+    const none = await start();
+    const defaults = (await (await fetch(`${none.base}/api/settings`)).json()) as SettingsView;
+    expect(defaults.voice).toEqual({ voice_idle_s: 90, realtime_idle_s: 120 });
+    expect(defaults.seconds?.map((r) => r.key)).toEqual(["look_to_talk_s", "look_to_talk_cooldown_s", "voice_idle_s", "realtime_idle_s"]);
+    expect(defaults.seconds?.filter((r) => r.group === "camera").every((r) => r.disabled_reason !== null)).toBe(true);
+    expect((await none.post("/api/settings/voice", { voice_idle_s: 60 })).status).toBe(409);
+    await new Promise((r) => server!.close(r));
+
+    const { base, post, dir } = await start(5, undefined, undefined, undefined, undefined, {});
+    expect((await post("/api/settings/voice", { voice_idle_s: 95 })).status).toBe(400);
+    expect((await post("/api/settings/voice", { voice_idle_s: 20 })).status).toBe(400);
+    expect((await post("/api/settings/voice", { active: false })).status).toBe(400);
+    expect((await post("/api/settings/voice", { realtime_idle_s: "60" })).status).toBe(400);
+
+    const controller = new AbortController();
+    const events = await fetch(`${base}/api/events`, { signal: controller.signal });
+    const reader = events.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const next = async () => {
+      while (!buffer.includes("\n\n")) buffer += decoder.decode((await reader.read()).value);
+      const [frame, ...rest] = buffer.split("\n\n");
+      buffer = rest.join("\n\n");
+      return JSON.parse(frame.replace(/^data: /, ""));
+    };
+    expect(await next()).toMatchObject({ type: "hello", settings: { voice: { voice_idle_s: 90 } } });
+
+    const res = await post("/api/settings/voice", { voice_idle_s: 60 });
+    expect(res.status).toBe(200);
+    const view = (await res.json()) as SettingsView;
+    expect(view.voice).toEqual({ voice_idle_s: 60, realtime_idle_s: 120 });
+    const row = view.seconds!.find((r) => r.key === "voice_idle_s")!;
+    expect(row).toMatchObject({ value: 60, value_label: "1 分鐘", disabled_reason: null, write_path: "/api/settings/voice" });
+    expect(row.options.filter((o) => o.checked).map((o) => o.value)).toEqual([60]);
+    expect(await next()).toMatchObject({ type: "settings.updated", settings: { voice: { voice_idle_s: 60 } } });
+    controller.abort();
+    expect(JSON.parse(readFileSync(join(dir, "voice.json"), "utf8"))).toEqual({ schema_version: 1, prefs: { voice_idle_s: 60 } });
+    await new Promise((r) => server!.close(r));
+
+    const again = await start(5, undefined, undefined, undefined, undefined, { dir });
+    expect(((await (await fetch(`${again.base}/api/settings`)).json()) as SettingsView).voice).toEqual({ voice_idle_s: 60, realtime_idle_s: 120 });
+  });
+
+  it("語音設定寫檔失敗：回 500 與可讀原因，記憶體不變", async () => {
+    const { base, post, dir } = await start(5, undefined, undefined, undefined, undefined, {});
+    mkdirSync(join(dir, "voice.json", "x"), { recursive: true });
+    const res = await post("/api/settings/voice", { voice_idle_s: 60 });
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { error: string }).error).toMatch(/^語音設定沒有保存/);
+    expect(((await (await fetch(`${base}/api/settings`)).json()) as SettingsView).voice?.voice_idle_s).toBe(90);
+  });
+
+  it("鏡頭秒數經 POST /api/settings/camera 改變時，回應的 seconds 列跟著更新（選單列直接套用回應）", async () => {
+    const { post } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" } });
+    const view = (await (await post("/api/settings/camera", { look_to_talk_s: 1.6 })).json()) as SettingsView;
+    const row = view.seconds!.find((r) => r.key === "look_to_talk_s")!;
+    expect(row).toMatchObject({ value: 1.6, disabled_reason: null, write_path: "/api/settings/camera" });
+    expect(row.options.find((o) => o.checked)).toEqual({ value: 1.6, label: "1.6 秒（目前）", checked: true });
+  });
+
+  it("語音指令表頁：在 SPA fallback 之前、沒有 script、CSP 只允許自己的 inline style，依目前設定標註前提", async () => {
+    const off = await start();
+    const res = await fetch(`${off.base}/help/commands`);
+    expect(res.status).toBe(200); // 前端沒建置（distDir null）也能看，不走 serveStatic
+    const csp = res.headers.get("content-security-policy") ?? "";
+    expect(csp).toMatch(/^default-src 'none'; style-src 'sha256-[A-Za-z0-9+/=]+'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'$/);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    const html = await res.text();
+    expect(html).not.toMatch(/<script|javascript:|\son\w+=/i);
+    const style = html.slice(html.indexOf("<style>") + 7, html.indexOf("</style>"));
+    expect(csp).toContain(`'sha256-${createHash("sha256").update(style).digest("base64")}'`);
+    for (const row of commandSections(null).flatMap((s) => s.rows)) expect(html).toContain(`data-row="${row.id}"`);
+    expect(html).toContain("目前：鏡頭未啟用");
+    expect(html).toContain("目前 1 分 30 秒（預設 1 分 30 秒）");
+    expect(html).toMatch(/依 \d\d:\d\d:\d\d 打開時的設定產生/);
+    const head = await fetch(`${off.base}/help/commands`, { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect((await fetch(`${off.base}/help/commands`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(405);
+    await new Promise((r) => server!.close(r));
+
+    const { base, post } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" } }, {});
+    await post("/api/settings/voice", { realtime_idle_s: 300 });
+    const live = await (await fetch(`${base}/help/commands`)).text();
+    expect(live).not.toContain("目前：鏡頭未啟用");
+    expect(live).toContain("目前 5 分鐘（預設 2 分鐘）");
+    const { port } = server!.address() as AddressInfo;
+    const foreign = await new Promise<number>((resolve, reject) => {
+      const req = request({ host: "127.0.0.1", port, path: "/help/commands", headers: { host: `evil.example:${port}` } }, (r) => {
+        r.resume();
+        resolve(r.statusCode ?? 0);
+      });
+      req.on("error", reject);
+      req.end();
+    });
+    expect(foreign).toBe(403);
   });
 
   it("前端未建置時回傳說明而不是空白頁", async () => {

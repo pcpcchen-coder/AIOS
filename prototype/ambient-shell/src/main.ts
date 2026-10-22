@@ -6,6 +6,8 @@ import { ConversationSession } from "./conversation.ts";
 import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf } from "./sense/controller.ts";
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
+import { formatSeconds } from "../shared/prefs.ts";
+import { DEFAULT_VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import {
   browserRealtimeDeps,
   realtimeSupported,
@@ -118,8 +120,12 @@ const voice = new PushToTalk({
   onError: showCommandError,
 });
 
+/** 語音閒置秒數（voice.json，選單列或設定畫面可改）；收到核心的設定前用預設值。 */
+function voicePrefs(): VoicePrefs {
+  return settings?.voice ?? DEFAULT_VOICE_PREFS;
+}
+
 // 連續語音對話模式：開啟後不用按鍵，說完一句就處理一句，並用語音簡短回覆。
-const VOICE_IDLE_MS = 90_000;
 const conversation = new VoiceConversation(
   {
     onCaptureChange: () => render(),
@@ -143,12 +149,11 @@ const conversation = new VoiceConversation(
       showCommandError(reason);
     },
   },
-  { idleMs: VOICE_IDLE_MS },
+  { idleMs: DEFAULT_VOICE_PREFS.voice_idle_s * 1000 },
 );
 let pendingConsent: ConsentKind = "push";
 
 // 即時語音模式（OpenAI Realtime）：有 OPENAI_API_KEY 時，「開始語音對話」改用語音直接對語音。
-const REALTIME_IDLE_MS = 120_000;
 /** 即時語音中交辦的任務：完成時請模型用語音轉告。 */
 const realtimeTaskIds = new Set<string>();
 const realtime = new RealtimeVoice(
@@ -174,7 +179,7 @@ const realtime = new RealtimeVoice(
     },
   },
   browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp)).sdp),
-  { idleMs: REALTIME_IDLE_MS },
+  { idleMs: DEFAULT_VOICE_PREFS.realtime_idle_s * 1000 },
 );
 
 const session = new ConversationSession({
@@ -204,6 +209,9 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
   }
   const wasActive = settings?.camera?.active;
   settings = value;
+  // 只有值真的改變、而且語音正開著時才從現在重新倒數（setIdleMs 內判斷）；無關的設定更新不延長倒數。
+  conversation.setIdleMs(voicePrefs().voice_idle_s * 1000);
+  realtime.setIdleMs(voicePrefs().realtime_idle_s * 1000);
   if (value.camera && !value.camera.active) cameraOffPending = false; // 伺服器已保存「關掉」
   if (value.camera && wasActive !== undefined && value.camera.active !== wasActive) cameraFailed = false;
   syncCamera();
@@ -553,6 +561,17 @@ async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null
   }
 }
 
+/** 語音閒置秒數（設定畫面的 −／+）。回傳失敗說明；成功時為 null。 */
+async function updateVoicePrefs(patch: VoicePrefsPatch): Promise<string | null> {
+  try {
+    applySettings(await api.updateVoice(patch));
+    render();
+    return null;
+  } catch (err) {
+    return `語音秒數沒有保存：${(err as Error).message}`;
+  }
+}
+
 /** 鏡頭、鏡頭畫面、看著說話、手掌停止：本機規則處理，不經模型。 */
 function handleCameraCommand(text: string): boolean {
   const command = matchCameraCommand(text);
@@ -694,18 +713,22 @@ function disableVoiceMode(): void {
   showSubtitle("語音模式已關閉。");
 }
 
-const CONSENT_TEXT: Record<ConsentKind, string> = {
-  realtime:
-    "即時語音模式像 ChatGPT 語音模式：開啟期間麥克風音訊會即時串流到 OpenAI（使用你在 .env 設定的 OPENAI_API_KEY，依用量計費），AI 直接用語音回答，你隨時可以插話。要它做較長的工作時會交辦成背景任務，仍用目前選擇的引擎執行。說「再見」或「結束對話」、點右上角指示、按 Esc 或 2 分鐘沒說話就會結束。本系統不保存音訊。要開啟嗎？",
-  push:
-    "語音辨識使用瀏覽器內建服務；在 Chrome／Edge 中，音訊會傳到瀏覽器供應商（例如 Google）的雲端辨識。只有在你按下麥克風時才收音，本系統不保存音訊。要啟用嗎？",
-  continuous:
-    "語音模式是對話：開啟期間會持續收音（包含 Nous 說話時，才能讓你插話），你說的話會傳到瀏覽器供應商（例如 Google）的雲端辨識，並送到目前的 AI 引擎回答，回覆用電腦語音念出。建議戴耳機，插話會更準。說「關閉語音模式」、點右上角指示或 90 秒沒說話就會關閉。本系統不保存音訊。要開啟嗎？",
-};
+/** 同意說明；閒置秒數用目前的設定（選單列可改），不寫死。 */
+function consentMessage(kind: ConsentKind): string {
+  const idle = voicePrefs();
+  switch (kind) {
+    case "realtime":
+      return `即時語音模式像 ChatGPT 語音模式：開啟期間麥克風音訊會即時串流到 OpenAI（使用你在 .env 設定的 OPENAI_API_KEY，依用量計費），AI 直接用語音回答，你隨時可以插話。要它做較長的工作時會交辦成背景任務，仍用目前選擇的引擎執行。說「再見」（由 AI 判斷）、點右上角指示、按 Esc 或 ${formatSeconds(idle.realtime_idle_s)}沒說話就會結束。本系統不保存音訊。要開啟嗎？`;
+    case "push":
+      return "語音辨識使用瀏覽器內建服務；在 Chrome／Edge 中，音訊會傳到瀏覽器供應商（例如 Google）的雲端辨識。只有在你按下麥克風時才收音，本系統不保存音訊。要啟用嗎？";
+    case "continuous":
+      return `語音模式是對話：開啟期間會持續收音（包含 Nous 說話時，才能讓你插話），你說的話會傳到瀏覽器供應商（例如 Google）的雲端辨識，並送到目前的 AI 引擎回答，回覆用電腦語音念出。建議戴耳機，插話會更準。說「關閉語音模式」、點右上角指示或 ${formatSeconds(idle.voice_idle_s)}沒說話就會關閉。本系統不保存音訊。要開啟嗎？`;
+  }
+}
 
 function askConsent(kind: ConsentKind): void {
   pendingConsent = kind;
-  consentText.textContent = CONSENT_TEXT[kind];
+  consentText.textContent = consentMessage(kind);
   dispatch({ type: "input.open" });
   consentBox.hidden = false;
 }
@@ -940,6 +963,12 @@ const actions: ViewActions = {
   updateCamera(patch) {
     const requestId = userRequest();
     void updateCameraPrefs(patch).then((error) => {
+      if (error) dispatch({ type: "show.settings", request_id: requestId, message: error });
+    });
+  },
+  updateVoice(patch) {
+    const requestId = userRequest();
+    void updateVoicePrefs(patch).then((error) => {
       if (error) dispatch({ type: "show.settings", request_id: requestId, message: error });
     });
   },
