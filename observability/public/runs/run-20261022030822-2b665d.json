@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "repo": "pcpcchen-coder/AIOS",
+  "run_id": "run-20261022030822-2b665d",
+  "title": "Desktop menu bar: camera timing settings and voice command table",
+  "playbook": "feature",
+  "branch": "claude/blissful-rubin-rbtgtk",
+  "commit_sha": "",
+  "status": "running",
+  "started_at": "2026-10-22T03:08:22.788Z",
+  "updated_at": "2026-10-22T03:08:22.788Z",
+  "ended_at": null,
+  "steps": [
+    {
+      "id": "how",
+      "title": "how",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "architect",
+      "title": "architect",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "checkpoint",
+      "title": "checkpoint",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "implement",
+      "title": "implement",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "verify",
+      "title": "verify",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "review",
+      "title": "review",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "pr",
+      "title": "pr",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-22T03:08:22.788Z",
+      "type": "run_started",
+      "step_id": null,
+      "status": "running",
+      "note": ""
+    }
+  ],
+  "provenance": "Agent self-reported"
+}
