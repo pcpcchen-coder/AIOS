@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T04:52:16.975Z",
-  "updated_at": "2026-10-22T08:31:31.035Z",
+  "updated_at": "2026-10-22T08:37:32.408Z",
   "ended_at": null,
   "steps": [
     {
@@ -68,10 +68,10 @@
     {
       "id": "pr",
       "title": "pr",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-22T08:37:32.408Z",
+      "ended_at": "2026-10-22T08:37:32.408Z",
+      "note": "Review fixes a496276 (537 tests, verify-aios PASS); PR https://github.com/pcpcchen-coder/AIOS/pull/25",
       "evidence": []
     }
   ],
@@ -152,6 +152,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "Independent review of 85c6fe9: 7 real findings (approval queue, confirm TTL, retry budget, air-con detection, notice gating, 404 mapping, docs); fix round delegated"
+    },
+    {
+      "at": "2026-10-22T08:37:32.408Z",
+      "type": "step_updated",
+      "step_id": "pr",
+      "status": "passed",
+      "note": "Review fixes a496276 (537 tests, verify-aios PASS); PR https://github.com/pcpcchen-coder/AIOS/pull/25"
     }
   ],
   "provenance": "Agent self-reported"
