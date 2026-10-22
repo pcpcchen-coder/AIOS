@@ -65,7 +65,7 @@ export type Provider = "claude" | "chatgpt" | "mock";
 /** 測試在編譯期比對 src/approval.ts 的 ApprovalDecision。 */
 export type ApprovalDecision = "approve" | "reject";
 /** 即時語音的模型工具；測試在編譯期比對 server/realtime.ts。 */
-export type RealtimeToolName = "web_search" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status";
+export type RealtimeToolName = "web_search" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control";
 
 /** 鏡頭規則的效果（CameraCommand 去掉字幕 say）。 */
 export type CameraEffect = { preview: boolean } | { set: { active?: boolean; look_to_talk?: boolean; stop_gesture?: boolean } };
@@ -200,16 +200,16 @@ export const INTENT_COMMANDS: { readonly [K in LocalIntentKind]: NonEmpty<LocalC
 export const APPROVAL_COMMANDS: { readonly [D in ApprovalDecision]: NonEmpty<LocalCommand> } = {
   approve: [
     { id: "approve", says: ["確認執行", "確定寄出", "確認發布"], works: ["typed", "realtime"], needs: CARD_NEEDS,
-      does: "同意這一次外部動作（寄出、發布…）",
+      does: "同意這一次外部動作（寄出、發布…）或家電指令",
       note: "「確認」或「確定」後面要接動作：執行、寄出、送出、寄送、發送、發布、刪除、付款、購買、下單、建立、新增、修改、更新；只說「好」「可以」「確認」不算",
       expect: { matcher: "approval", decision: "approve" } },
   ],
   reject: [
     { id: "reject", says: ["算了", "不要執行", "不同意"], works: ["typed", "realtime"], needs: CARD_NEEDS,
-      does: "拒絕這一次外部動作", note: "句中有取消、不要、別、算了、停止、不用、不行、不同意、拒絕，一律算拒絕（寧可不做也不誤做）",
+      does: "拒絕這一次外部動作或家電指令", note: "句中有取消、不要、別、算了、停止、不用、不行、不同意、拒絕，一律算拒絕（寧可不做也不誤做）",
       expect: { matcher: "approval", decision: "reject" } },
     { id: "reject-said-cancel", says: ["取消"], works: ["realtime"], needs: CARD_NEEDS,
-      does: "拒絕這一次外部動作", note: "用打的「取消」先被當成停止任務（見容易誤會）",
+      does: "拒絕這一次外部動作或家電指令", note: "用打的「取消」先被當成停止任務（見容易誤會）",
       expect: { matcher: "approval", decision: "reject" } },
   ],
 };
@@ -260,6 +260,14 @@ export const CAVEATS: readonly Caveat[] = [
       { says: "收起", checks: { intent: "dismiss", notLocalIn: ["realtime"] } },
     ],
     truth: "即時語音中用說的，這些都不在本機處理，會交給 AI：問進度 AI 會查真實狀態回答；AI 沒有停止任務或收起畫面的工具。要停止任務，請打「停止任務」或按進度畫面上的停止按鈕；要收起，請打「收起」、按 Esc 或點畫面上的按鈕。Esc 只會打斷說話或收起畫面，不會停止任務。確認卡開著時，含「停止」的話會拒絕確認卡" },
+  { id: "home-confirm-with-stop", cases: [{ says: "確認執行停止播放", checks: { approval: "reject" } }],
+    truth: "確認卡開著時，這句話因為含「停止」而算取消，家電指令不會執行。要同意只說「確認執行」，不要把動作接在後面" },
+  { id: "card-ok-is-not-yes", cases: [{ says: "好", checks: { approval: null, camera: null } }],
+    truth: "確認卡開著時只說「好」不算同意，也不算取消：指令不會送出，確認卡繼續等你說「確認執行」或「取消」，60 秒後自動取消" },
+  { id: "home-aircon", cases: [{ says: "冷氣調 26 度", checks: { camera: null, approval: null, notLocalIn: ["realtime"] } }],
+    truth: "不是本機指令，會交給 AI。冷氣溫度與紅外線設備（電視、冷氣遙控）還不能用語音控制，AI 會照實說；色溫（2500–9000 K）只用在燈" },
+  { id: "home-room-wide", cases: [{ says: "客廳的燈全部關掉", checks: { camera: null, approval: null, notLocalIn: ["realtime"] } }],
+    truth: "一次只控制一台：說整個房間或「全部」時，AI 會問你是哪一台，不會一次關掉整個房間" },
   { id: "substring-progress", cases: [{ says: "交通狀況如何", checks: { camera: null, intent: "progress" } }],
     truth: "14 個字以內、句中有「進度」「狀態」「狀況」「好了沒」「做到哪」等詞（又沒有寫、整理、規劃等交辦動詞）就算查進度：例如「交通狀況如何」會打開進度，不會交給 AI。想問 AI 請把句子說完整，或用即時語音" },
   { id: "substring-result", cases: [{ says: "比賽結果", checks: { camera: null, intent: "result" } }],
@@ -273,7 +281,10 @@ export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
   web_search: { try: ["新竹今天會下雨嗎"], does: "AI 上網查詢後回答，字幕顯示來源", needs: { text: "即時語音與上網查詢（OPENAI_API_KEY）", live: "realtime_web_search" } },
   delegate_task: { try: ["幫我寫一份下週出差規劃"], does: "AI 判斷是較長的工作時交辦成背景任務，進度顯示在電子腦下方",
     needs: { text: "即時語音", live: "realtime_available" } },
-  home_status: { try: ["客廳現在幾度"], does: "查武陵居的感測值與設備狀態（只能查，不能控制）",
+  home_status: { try: ["客廳現在幾度"], does: "查武陵居的感測值與設備狀態",
+    needs: { text: "即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）", live: "realtime_home" } },
+  home_control: { try: ["客廳主燈關掉", "書桌燈調到 60%", "色溫調到 3000K"],
+    does: "請中控控制一台家電，照中控的回讀說結果：確認了才說好了；「已送出、未確認」要你看一下，不算成功。一次一台；冷氣溫度與紅外線設備還不支援",
     needs: { text: "即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）", live: "realtime_home" } },
 };
 
@@ -371,7 +382,7 @@ export function commandSections(ctx: CommandContext | null): TableSection[] {
       rows: [...intents.voice_on, ...intents.voice_off, ...intents.dismiss, ...intents.settings, ...intents.use_provider].map((r) => localRow(r, ctx)) },
     { id: "tasks", title: "任務", intro: null, columns: LOCAL_COLUMNS,
       rows: [...intents.progress, ...intents.result, ...intents.stop].map((r) => localRow(r, ctx)) },
-    { id: "approval", title: "外部動作確認", intro: "外部服務要寄出、發布等動作時出現確認卡；由本機固定語句判斷，不由 AI 轉述。60 秒沒回應或收起確認卡都不執行。", columns: LOCAL_COLUMNS,
+    { id: "approval", title: "外部動作確認", intro: "外部服務要寄出、發布等動作，或中控設為需要確認的家電時，出現確認卡；由本機固定語句判斷，不由 AI 轉述。60 秒沒回應或收起確認卡都不執行。家電確認卡要等中控提供每台設備的語音設定（H2）才會出現，目前家電一律直接執行。", columns: LOCAL_COLUMNS,
       rows: [...APPROVAL_COMMANDS.approve, ...APPROVAL_COMMANDS.reject].map((r) => localRow(r, ctx)) },
     { id: "barge-in", title: "插話", intro: null, columns: LOCAL_COLUMNS,
       rows: [{ id: "barge-in", unmet: null,

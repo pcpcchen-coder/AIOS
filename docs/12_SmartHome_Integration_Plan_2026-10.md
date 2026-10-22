@@ -1,6 +1,6 @@
 # Nous 12 — 武陵居智慧家電整合規劃（AIOS 端）
 
-版本：v0.3 · 日期：2026-10-21 · 狀態：H0 已在原型實作，待實機驗證；H1–H4 尚未開始（v0.2 納入 George 的四項決定，見 §8）
+版本：v0.4 · 日期：2026-10-22 · 狀態：H0、H1 已在原型實作，待 George 家裡實機驗證；H2–H4 尚未開始（v0.2 納入 George 的四項決定，見 §8；v0.4 記錄 H1 對 §1 第 5 點的修正）
 對應：SmartHomeAI repo [`docs/AIOS接入規劃.md`](https://github.com/pcpcchen-coder/SmartHomeAI/blob/main/docs/AIOS接入規劃.md)（中控端要補的介面）
 關聯：10（遠距 UI）、11（雙目鏡頭）、即時語音的工具與語音確認（`prototype/ambient-shell/src/realtime.ts`、`src/approval.ts`）
 
@@ -53,6 +53,7 @@ AIOS 本機核心 HomeBridge（新）── REST v1 + SSE，Bearer 範圍權杖 
 5. **接收結果**：訂閱 `GET /events`（SSE，Last-Event-ID 重播）。
    - 收到 `command.result`（中控 P0-4）就轉成語音通知。
    - 在中控補上之前，改用 `GET /commands/{id}` 輪詢。
+   - **H1 修正（2026-10-22）**：實際讀過中控程式後，`POST /devices/{id}/commands` 是同步的：送出後等 0.4 秒回讀設備（最多 14 秒）才回傳 `confirmed`／`unconfirmed`／`failed`。同一把 `Idempotency-Key`、同樣內容再送一次會回傳已記下的結果（還在執行時等它完成），不會再執行。所以 H1 不輪詢 `/commands/{id}`：逾時就用同一把 key 重送一次，等於輪詢，而且第一次沒收到回覆、不知道中控的指令 id 也能用。兩次都沒有回覆時回報「不確定有沒有執行」，不說成功。SSE `command.result` 仍留給 H2（例如中控之後改成非同步時）。
 6. **語音控制設定**：
    - 讀取中控設備能力中的 `voice: "allow" | "confirm" | "off"`（中控 P0-2）。
    - **設定只在中控改**。AIOS 沒有自己的設定，也不自行判斷風險。
@@ -123,6 +124,17 @@ AIOS 本機核心 HomeBridge（新）── REST v1 + SSE，Bearer 範圍權杖 
 | H4（選用） | 背景 Agent 透過中控本機 MCP 執行多步驟工作，例如晚上的例行檢查 | 中控 P3 | 與語音共用同一權杖範圍與語音控制設定 |
 
 每個批次依 CLAUDE.md 交付變更清單、測試結果、實機證據與未完成項目。
+
+**H1 實作對照（2026-10-22）**：`HomeBridge.control`／`confirm`（`server/home-bridge.ts`）、`POST /api/home/control`、`POST /api/home/confirm`、即時語音的 `home_control` 工具、家電確認卡與字幕錨點。做法與限制：
+
+- 指令：開關、亮度、燈的色溫（工具參數叫 `color_temperature`，單位 K，送到中控時才是 `temperature`）、顏色、音量、靜音、播放／暫停／停止、窗簾。**冷氣溫度與紅外線設備不支援**（AIFA 冷氣與紅外線走中控的專用路徑，另立 H1b），工具說明與模型指示都照實說。
+- 一次一台：說房間或全家（即使房間裡只有一台）一律回 `ambiguous` 請使用者指定，房間指令留給 H3。
+- 結果照 §2 的狀態詞：只有 `confirmed` 是成功；`unconfirmed` 帶 `why`（`hub_unverified`＝中控送出但設備沒確認，`no_reply`＝兩次逾時、不確定有沒有執行）；`failed` 帶原因；沒有送出時是 `refused` 加原因（未完成接入、狀態未更新、不支援、數值不合、每分鐘 6 個上限、不開放語音、沒有確認、確認卡失效）。中控回傳 `accepted`／`sent` 或不認得的狀態一律當成未確認。
+- 中控回 409 `state_stale`（上一次回讀逾時後設備被標成過期）時，自動 `POST /devices/{id}/refresh` 一次，再用同一把 key 重送；中控在記下 key 之前就回 409，所以不會執行兩次。仍不能控制就回報「狀態還沒更新，指令沒有送出」。不在 AIOS 端用 `can_control`／`state.commands` 先拒絕，因為回讀逾時後 `commands` 是空的，會被誤說成不支援。
+- 時間：每次送出等 16 秒，最多同 key 重送一次；重新讀取等 15 秒；最壞約 50 秒。模型先說一句「好，我請中控處理」，字幕顯示「控制中：設備」。
+- 確認卡流程已接好，但 H1 沒有任何設備會觸發：只能用測試專用的 `policyFor` 選項，`.env` 與設定檔都不能開。H2 改讀中控的 `voice` 設定。確認卡的答案交給本機核心（不送 OpenAI），確認後的結果以系統通知轉告；伺服器端的確認 ID 只能用一次、綁定設備與指令、90 秒失效。
+
+驗證見 [`docs/validation/smarthome-h1-2026-10-22.md`](./validation/smarthome-h1-2026-10-22.md)：假中控測試與真實中控程式（示例配置，沒有真實設備）。尚缺：George 家裡的實機語音控制、§3 的大圖示結果畫面。
 
 **H0 實作對照（2026-10-21）**：`prototype/ambient-shell/server/home-bridge.ts`（設定、讀 `GET /api/v1/home`、本機名稱比對、讀值整理）、`POST /api/home/status`、即時語音的 `home_status` 工具與字幕錨點。每次查詢都向中控取最新資料，不快取讀值。驗證見 [`docs/validation/smarthome-h0-2026-10-21.md`](./validation/smarthome-h0-2026-10-21.md)。尚缺：George 家裡的實機語音查詢、§3 的大數字錨點畫面。
 

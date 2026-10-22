@@ -302,6 +302,51 @@ describe("HTTP API", () => {
     expect(seen).toEqual(["http://127.0.0.1:8788/api/v1/home Bearer hub-secret"]);
   });
 
+  it("家電控制：驗證輸入、未設定中控時 409、經本機核心送出指令與確認卡，不外洩權杖", async () => {
+    const off = await start(5, undefined, undefined, new HomeBridge({ url: null, token: null }));
+    expect((await off.post("/api/home/control", { target: "書桌燈" })).status).toBe(400);
+    expect((await off.post("/api/home/control", { target: "書桌燈", command: "power", value: { on: true } })).status).toBe(400);
+    expect((await off.post("/api/home/control", { target: "書桌燈", command: "power", value: true })).status).toBe(409);
+    expect((await off.post("/api/home/confirm", { confirm_id: "home_x" })).status).toBe(400);
+    expect((await off.post("/api/home/confirm", { confirm_id: "other", approve: true })).status).toBe(400);
+    expect((await off.post("/api/home/confirm", { confirm_id: "home_x", approve: true })).status).toBe(409);
+    await new Promise((r) => server!.close(r));
+
+    const seen: string[] = [];
+    const hub = (async (url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers);
+      seen.push(`${init.method ?? "GET"} ${url} ${headers.get("authorization")} ${headers.get("idempotency-key") ?? ""} ${init.body ?? ""}`);
+      if (url.endsWith("/api/v1/home")) {
+        return new Response(
+          JSON.stringify({
+            layout: { rooms: [{ id: "study", name: "書房" }] },
+            devices: [{ id: "desk", name: "書桌燈", placement: { room_id: "study" }, configured: true, state: { available: true, fresh: true } }],
+            server_time: 160,
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({ id: "c1", status: "confirmed", message: "設備回讀已確認" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const bridge = new HomeBridge({ url: "http://127.0.0.1:8788", token: "hub-secret", fetch: hub, newId: () => "fixed", policyFor: (d) => (d.id === "desk" && seen.length > 2 ? "confirm" : "allow") });
+    const { post } = await start(5, undefined, undefined, bridge);
+    const res = await post("/api/home/control", { target: "書桌燈", command: "brightness", value: "60" });
+    expect(res.status).toBe(200);
+    const raw = await res.text();
+    expect(JSON.parse(raw)).toMatchObject({ status: "confirmed", device: "書桌燈", action: "亮度 60%" });
+    expect(raw).not.toContain("hub-secret");
+    expect(seen).toEqual([
+      "GET http://127.0.0.1:8788/api/v1/home Bearer hub-secret  ",
+      `POST http://127.0.0.1:8788/api/v1/devices/desk/commands Bearer hub-secret nous_fixed {"command":"brightness","value":60}`,
+    ]);
+
+    const asked = await (await post("/api/home/control", { target: "書桌燈", command: "power", value: false })).json();
+    expect(asked).toMatchObject({ status: "needs_confirmation", confirm_id: "home_fixed" });
+    const confirmed = await post("/api/home/confirm", { confirm_id: "home_fixed", approve: true });
+    expect(await confirmed.json()).toMatchObject({ status: "confirmed", action: "關閉" });
+    expect(await (await post("/api/home/confirm", { confirm_id: "home_gone", approve: true })).json()).toMatchObject({ status: "refused", reason: "expired" });
+  });
+
   it("鏡頭設定：驗證輸入、保存到 camera.json、推送 settings.updated，重新啟動後仍保留", async () => {
     const none = await start();
     expect((await none.post("/api/settings/camera", { active: false })).status).toBe(409);

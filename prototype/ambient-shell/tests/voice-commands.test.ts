@@ -4,7 +4,7 @@ import { APPROVE_VERBS, matchApproval, REJECT_WORDS, type ApprovalDecision } fro
 import { isStopWord, STOP_WORDS } from "../src/echo.ts";
 import { classify, type Intent } from "../src/intent.ts";
 import { CAMERA_RULES, matchCameraCommand, type CameraCommand } from "../src/sense/controller.ts";
-import { buildRealtimeTools, HOME_STATUS_TOOL, REALTIME_TOOLS } from "../server/realtime.ts";
+import { buildRealtimeTools, HOME_CONTROL_TOOL, HOME_STATUS_TOOL, REALTIME_TOOLS } from "../server/realtime.ts";
 import {
   APPROVAL_COMMANDS,
   ASK_THE_AI,
@@ -81,7 +81,9 @@ describe("compile-time coverage", () => {
     expectTypeOf<LocalIntentKind>().toEqualTypeOf<Exclude<Intent["kind"], "empty" | "task">>();
     expectTypeOf<Provider>().toEqualTypeOf<Extract<Intent, { kind: "use_provider" }>["provider"]>();
     expectTypeOf<TableApprovalDecision>().toEqualTypeOf<ApprovalDecision>();
-    expectTypeOf<RealtimeToolName>().toEqualTypeOf<(typeof REALTIME_TOOLS)[number]["name"] | (typeof HOME_STATUS_TOOL)["name"]>();
+    expectTypeOf<RealtimeToolName>().toEqualTypeOf<
+      (typeof REALTIME_TOOLS)[number]["name"] | (typeof HOME_STATUS_TOOL)["name"] | (typeof HOME_CONTROL_TOOL)["name"]
+    >();
   });
 });
 

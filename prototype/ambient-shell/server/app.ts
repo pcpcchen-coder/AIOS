@@ -7,7 +7,7 @@ import { buildChatSystem, DelegationFilter, validateMessages, type ChatCapable }
 import { ExecutionError } from "./runner.ts";
 import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { WebSearchError, type WebSearch } from "./web-search.ts";
-import { HomeBridgeError, type HomeBridge } from "./home-bridge.ts";
+import { HomeBridgeError, type ControlRequest, type HomeBridge } from "./home-bridge.ts";
 import { CameraPatchError, parseCameraPatch, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
 import { describeSeconds } from "../shared/seconds-menu.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VoicePatchError, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
@@ -59,7 +59,7 @@ export interface AppOptions {
   realtime?: RealtimeBridge;
   /** 即時語音的上網查詢；未提供時不可用。 */
   webSearch?: WebSearch;
-  /** 武陵居中控的唯讀查詢（docs/12 H0）；未提供時不可用。 */
+  /** 武陵居中控的查詢與控制（docs/12 H0、H1）；未提供時不可用。 */
   home?: HomeBridge;
   /** 雙目鏡頭設定（docs/11，通常是 CameraSettingsStore）；未提供或未啟用時頁面不允許使用鏡頭。 */
   camera?: CameraSettingsSource;
@@ -225,13 +225,28 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const metric = typeof body.metric === "string" ? body.metric.trim() : null;
       if (!target) throw new HttpError(400, "target is required");
       if (target.length > 100 || (metric?.length ?? 0) > 40) throw new HttpError(400, "target or metric is too long");
-      if (!home?.available) throw new HttpError(409, "尚未設定武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）");
-      try {
-        return sendJson(res, 200, await home.status(target, metric));
-      } catch (err) {
-        if (err instanceof HomeBridgeError) throw new HttpError(err.status, err.message);
-        throw err;
+      return sendJson(res, 200, await homeCall(() => home!.status(target, metric)));
+    }
+    if (method === "POST" && path === "/api/home/control") {
+      const body = await readJson(req);
+      const target = typeof body.target === "string" ? body.target.trim() : "";
+      const command = typeof body.command === "string" ? body.command.trim() : "";
+      const value = body.value ?? null;
+      if (!target || !command) throw new HttpError(400, "target and command are required");
+      if (target.length > 100 || command.length > 40) throw new HttpError(400, "target or command is too long");
+      if (!(value === null || typeof value === "boolean" || typeof value === "number" || (typeof value === "string" && value.length <= 40))) {
+        throw new HttpError(400, "value must be a short string, a number or a boolean");
       }
+      return sendJson(res, 200, await homeCall(() => home!.control({ target, command, value: value as ControlRequest["value"] })));
+    }
+    if (method === "POST" && path === "/api/home/confirm") {
+      const body = await readJson(req);
+      const id = body.confirm_id;
+      if (typeof id !== "string" || !/^home_[\w-]{1,64}$/.test(id) || typeof body.approve !== "boolean") {
+        throw new HttpError(400, "confirm_id and approve are required");
+      }
+      const approve = body.approve;
+      return sendJson(res, 200, await homeCall(() => home!.confirm(id, approve)));
     }
     if (method === "POST" && path === "/api/auth/chatgpt/login") {
       const body = await readJson(req);
@@ -286,6 +301,17 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     }
 
     throw new HttpError(404, "not found");
+  }
+
+  /** 武陵居中控的呼叫：未設定時 409；連不上、權杖被拒等照實轉成 HTTP 錯誤。 */
+  async function homeCall<T>(run: () => Promise<T>): Promise<T> {
+    if (!home?.available) throw new HttpError(409, "尚未設定武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）");
+    try {
+      return await run();
+    } catch (err) {
+      if (err instanceof HomeBridgeError) throw new HttpError(err.status, err.message);
+      throw err;
+    }
   }
 
   /** 語音對話：以 SSE 串流回覆文字；客戶端中斷（插話）時一併中止上游請求。 */

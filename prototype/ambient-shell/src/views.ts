@@ -460,31 +460,39 @@ export function renderNotice(message: string, actions: ViewActions): HTMLElement
   return surfaceShell("notice", h("p", { class: "notice-text" }, message), footer(actions));
 }
 
-export interface ConfirmDetail {
-  server: string;
-  name: string;
-  arguments: string;
-  expiresAt: number;
-}
+export type ConfirmDetail =
+  | { kind: "mcp"; server: string; name: string; arguments: string; expiresAt: number }
+  | { kind: "home"; device: string; room: string | null; action: string; expiresAt: number };
 
-/** 外部動作確認卡：遠處也看得到動作、對象與參數；用說的確認，不需要按任何東西。 */
+/** 確認卡：遠處也看得到動作、對象與參數；用說的確認，不需要按任何東西。 */
 export function renderConfirm(detail: ConfirmDetail): HTMLElement {
-  let args = detail.arguments;
-  try {
-    args = JSON.stringify(JSON.parse(detail.arguments), null, 2);
-  } catch {
-    // 保留原文
-  }
   const remaining = Math.max(0, Math.round((detail.expiresAt - Date.now()) / 1000));
+  let eyebrow = "請確認";
+  let title: string;
+  let body: HTMLElement | null = null;
+  if (detail.kind === "home") {
+    eyebrow = "請確認 · 武陵居家電";
+    const where = detail.room && !detail.device.includes(detail.room) ? `${detail.room} ${detail.device}` : detail.device;
+    title = `${where}：${detail.action}`;
+  } else {
+    let args = detail.arguments;
+    try {
+      args = JSON.stringify(JSON.parse(detail.arguments), null, 2);
+    } catch {
+      // 保留原文
+    }
+    title = `${detail.server} · ${detail.name}`;
+    body = h("pre", { class: "confirm-args" }, args.slice(0, 1200));
+  }
   return surfaceShell(
     "confirm",
     h(
       "header",
       { class: "surface-header confirm-head" },
       confirmIcon(88),
-      h("div", {}, h("p", { class: "eyebrow confirm-eyebrow" }, "請確認"), h("h2", {}, `${detail.server} · ${detail.name}`)),
+      h("div", {}, h("p", { class: "eyebrow confirm-eyebrow" }, eyebrow), h("h2", {}, title)),
     ),
-    h("pre", { class: "confirm-args" }, args.slice(0, 1200)),
+    ...(body ? [body] : []),
     h(
       "p",
       { class: "confirm-say" },

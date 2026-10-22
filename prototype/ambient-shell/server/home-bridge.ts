@@ -1,11 +1,32 @@
-// 武陵居中控（SmartHomeAI）的本機橋接（docs/12 H0）：只做唯讀查詢。
+// 武陵居中控（SmartHomeAI）的本機橋接（docs/12 H0 查詢、H1 控制）。
 // 本機核心經區網呼叫中控 REST v1，權杖只留在這裡，不進瀏覽器、不進 OpenAI 的工作階段。
 // 讀值照中控回報：缺值是 null，不補 0；快照、過期資料要標出來，不當成即時值。
+// 控制照中控的結果回報：只有 confirmed 是成功；unconfirmed、沒有回覆都不說成成功。
 
-import type { DeviceReport, HomeStatusResult } from "../shared/home.ts";
+import { randomUUID } from "node:crypto";
+import {
+  commandText,
+  HOME_COMMANDS,
+  type DeviceReport,
+  type HomeCommand,
+  type HomeControlResult,
+  type HomeStatusResult,
+  type HomeTarget,
+  type RefusedReason,
+} from "../shared/home.ts";
 
 const TIMEOUT_MS = 8_000;
 const MAX_DEVICES = 12;
+/** 中控的控制是同步的：送出後等 0.4 秒再回讀設備（最多 14 秒），所以逾時要比它長。 */
+const COMMAND_TIMEOUT_MS = 16_000;
+/** POST /devices/{id}/refresh 也是同步回讀（最多 14 秒）。 */
+const REFRESH_TIMEOUT_MS = 15_000;
+const RATE_LIMIT = 6;
+const RATE_WINDOW_MS = 60_000;
+/** 確認卡 60 秒；伺服器多留 30 秒給確認後的執行與回讀。 */
+const CONFIRM_CARD_S = 60;
+const CONFIRM_TTL_MS = 90_000;
+const MAX_PENDING = 8;
 
 export interface HomeBridgeOptions {
   /** SMARTHOME_URL，例如 http://127.0.0.1:8788；分機部署時改成中控的區網位址。 */
@@ -15,6 +36,27 @@ export interface HomeBridgeOptions {
   fetch?: typeof fetch;
   /** 念給使用者聽的時間用哪個時區；未指定時用這台電腦的時區。 */
   timeZone?: string;
+  /**
+   * 只給測試用：讓確認卡流程可以被觸發。不從 .env 或任何檔案讀，nous.ts 也不傳，所以出貨時每台設備都是 allow
+   * （George 的決定）。H2 改讀中控每台設備的 voice 設定後刪掉。
+   */
+  policyFor?: (device: HubDevice) => VoicePolicy;
+  /** 毫秒；速率限制與確認卡期限用，測試可替換。 */
+  now?: () => number;
+  /** 指令 ID（Idempotency-Key）與確認卡 ID 的來源，測試可替換。 */
+  newId?: () => string;
+  /** 測試用：縮短控制與重新讀取的逾時。 */
+  commandTimeoutMs?: number;
+  refreshTimeoutMs?: number;
+}
+
+export type VoicePolicy = "allow" | "confirm" | "off";
+
+/** home_control 的原始參數（模型送來的字串）；只在 parseCommand 解析一次。 */
+export interface ControlRequest {
+  target: string;
+  command: string;
+  value?: string | number | boolean | null;
 }
 
 /** 中控 GET /api/v1/home 裡 AIOS 會用到的部分（在邊界解析，其他欄位忽略）。 */
@@ -36,6 +78,10 @@ export interface HubDevice {
   roomId: string | null;
   available: boolean | null;
   fresh: boolean;
+  /** 中控判斷的「已完成設備接入」；中控沒給時當作 true，交給中控自己拒絕。 */
+  configured: boolean;
+  /** 紅外線家電或 AIFA 冷氣：要走中控的專用路徑，H1 不支援（H1b）。 */
+  separateRoute: boolean;
   telemetry: { metrics: HubMetric[]; status: HubDataStatus; receivedAt: number | null; source: string } | null;
 }
 
@@ -101,6 +147,73 @@ function splitMetric(target: string): { rest: string; metric: string | null } {
     }
   }
   return { rest: target, metric: null };
+}
+
+const ON = new Set(["true", "on", "開", "開啟", "打開"]);
+const OFF = new Set(["false", "off", "關", "關閉", "關掉"]);
+
+function toBool(value: ControlRequest["value"]): boolean | null {
+  if (typeof value === "boolean") return value;
+  const t = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return ON.has(t) ? true : OFF.has(t) ? false : null;
+}
+
+/** 「60」「60%」「3000K」→ 數字；其他回傳 null。 */
+function toNumber(value: ControlRequest["value"], unit: RegExp): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const t = value.trim().replace(unit, "").trim();
+  return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null;
+}
+
+const isCommandName = (c: string): c is HomeCommand["command"] => (HOME_COMMANDS as readonly string[]).includes(c);
+
+/** 解析模型送來的指令與數值；不合中控規則的在這裡就拒絕，不送到中控。 */
+export function parseCommand(command: string, value: ControlRequest["value"]): HomeCommand | { error: string } {
+  const c = command.trim();
+  if (!isCommandName(c)) return { error: `不認得的控制指令「${command}」。` };
+  switch (c) {
+    case "power":
+    case "mute": {
+      const v = toBool(value);
+      return v === null ? { error: c === "power" ? "要開還是關？" : "要靜音還是取消靜音？" } : { command: c, value: v };
+    }
+    case "brightness":
+    case "volume": {
+      const v = toNumber(value, /%$/);
+      if (v === null || v < 0 || v > 100) return { error: `${c === "brightness" ? "亮度" : "音量"}要在 0 到 100 之間。` };
+      return { command: c, value: Math.round(v) };
+    }
+    case "color_temperature": {
+      const v = toNumber(value, /\s*k$/i);
+      if (v === null || v < 2500 || v > 9000) return { error: "色溫要在 2500 到 9000 K 之間（這是燈的色溫；冷氣溫度還不能用語音控制）。" };
+      return { command: c, kelvin: Math.round(v) };
+    }
+    case "color": {
+      const t = typeof value === "string" ? value.trim() : "";
+      return /^#[0-9a-fA-F]{6}$/.test(t) ? { command: c, value: t.toUpperCase() } : { error: "顏色要用 #RRGGBB 表示。" };
+    }
+    case "cover": {
+      const t = typeof value === "string" ? value.trim().toLowerCase() : "";
+      return t === "open" || t === "close" || t === "stop" ? { command: c, value: t } : { error: "窗簾要 open、close 或 stop。" };
+    }
+    default:
+      return { command: c };
+  }
+}
+
+/** 送到中控 POST /devices/{id}/commands 的內容；只有這裡知道色溫在中控叫 temperature。 */
+function toWire(c: HomeCommand): { command: string; value: boolean | number | string | null } {
+  switch (c.command) {
+    case "color_temperature":
+      return { command: "temperature", value: c.kelvin };
+    case "play":
+    case "pause":
+    case "stop":
+      return { command: c.command, value: null };
+    default:
+      return { command: c.command, value: c.value };
+  }
 }
 
 const names = (d: HubDevice) => [d.name, ...d.aliases].map(norm).filter(Boolean);
@@ -199,13 +312,50 @@ export function report(home: HubSnapshot, d: HubDevice, metric: string | null, t
   };
 }
 
+/** 候選名稱：設備名稱裡沒有房間時加上房間（「客廳的立燈」）。 */
+function candidates(home: HubSnapshot, devices: HubDevice[]): string[] {
+  return devices.slice(0, 5).map((d) => {
+    const room = home.rooms.find((r) => r.id === d.roomId)?.name;
+    return room && !norm(d.name).includes(norm(room)) ? `${room}的${d.name}` : d.name;
+  });
+}
+
+/** 一次 POST 的結果（不出 HomeBridge）。 */
+type HubReply =
+  | { kind: "result"; status: "confirmed" | "unconfirmed" | "failed"; message: string }
+  | { kind: "stale" }
+  | { kind: "refused"; reason: Extract<RefusedReason, "not_configured" | "unsupported" | "invalid_value">; message: string }
+  /** 同一把 key 用在不同指令：只可能是 AIOS 的錯（每個意圖都產生新 key），不重試。 */
+  | { kind: "key_conflict" }
+  | { kind: "gone" }
+  /** maybeReceived：逾時、連上後中斷或 5xx，中控可能已經執行；連線被拒則一定沒收到。 */
+  | { kind: "retry"; maybeReceived: boolean };
+
+/** control() 時就綁定設備、指令與 key；瀏覽器只拿到不透明的 confirm_id，改不了要執行的內容。 */
+interface PendingCommand {
+  deviceId: string;
+  target: HomeTarget;
+  command: HomeCommand;
+  key: string;
+  expiresAt: number;
+  /** 第一次同意後的執行；重複同意（或之後的拒絕）都拿到同一個結果，不會送第二次。 */
+  run: Promise<HomeControlResult> | null;
+}
+
 export class HomeBridge {
   private readonly fetch: typeof fetch;
   private readonly base: string | null;
+  private readonly now: () => number;
+  private readonly newId: () => string;
+  private readonly pending = new Map<string, PendingCommand>();
+  /** 最近一分鐘送出的控制指令時間（只算第一次送出；同 key 重試、重新讀取不算）。 */
+  private sent: number[] = [];
 
   constructor(private readonly options: HomeBridgeOptions) {
     this.fetch = options.fetch ?? fetch;
     this.base = options.url ? options.url.replace(/\/+$/, "") : null;
+    this.now = options.now ?? Date.now;
+    this.newId = options.newId ?? randomUUID;
   }
 
   get available(): boolean {
@@ -216,7 +366,7 @@ export class HomeBridge {
   get detail(): string {
     if (!this.base) return "未設定 SMARTHOME_URL";
     if (!this.options.token) return "未設定 SMARTHOME_TOKEN";
-    return `${this.base}（唯讀查詢）`;
+    return `${this.base}（查詢與控制）`;
   }
 
   async status(target: string, metric?: string | null): Promise<HomeStatusResult> {
@@ -227,10 +377,7 @@ export class HomeBridge {
       return {
         ok: true,
         status: "ambiguous",
-        candidates: resolved.candidates.slice(0, 5).map((d) => {
-          const room = home.rooms.find((r) => r.id === d.roomId)?.name;
-          return room && !norm(d.name).includes(norm(room)) ? `${room}的${d.name}` : d.name;
-        }),
+        candidates: candidates(home, resolved.candidates),
       };
     }
     if (metric && !metricKey(metric)) return { ok: true, status: "no_such_reading", scope: resolved.scope, metric };
@@ -246,12 +393,182 @@ export class HomeBridge {
     };
   }
 
+  /**
+   * home_control：解析指令 → 讀中控設備清單比對名稱 → 只控制一台 → 依政策直接執行或等確認卡。
+   * 只在完全無法和中控溝通時丟 HomeBridgeError（未設定、連不上、權杖被拒、格式不符），和 status() 相同。
+   */
+  async control(req: ControlRequest): Promise<HomeControlResult> {
+    const command = parseCommand(req.command, req.value ?? null);
+    if ("error" in command) return { ok: true, status: "refused", reason: "invalid_value", message: command.error };
+    const home = await this.home();
+    const resolved = resolveTarget(home, req.target);
+    if (resolved.kind === "not_found") return { ok: true, status: "not_found", target: req.target };
+    if (resolved.kind === "ambiguous") return { ok: true, status: "ambiguous", candidates: candidates(home, resolved.candidates) };
+    if (!resolved.devices.length) return { ok: true, status: "not_found", target: req.target };
+    // 說的是房間或全家（即使裡面只有一台）就是房間指令，那是 H3：先問是哪一台，不一次控制多台。
+    if (resolved.devices.length > 1 || resolved.scope !== resolved.devices[0].name) {
+      return { ok: true, status: "ambiguous", candidates: candidates(home, resolved.devices) };
+    }
+
+    const device = resolved.devices[0];
+    const target: HomeTarget = { device: device.name, room: home.rooms.find((r) => r.id === device.roomId)?.name ?? null };
+    const refuse = (reason: RefusedReason, message: string): HomeControlResult => ({ ok: true, status: "refused", reason, message, ...target });
+    if (device.separateRoute) return refuse("unsupported", `${device.name}是紅外線或冷氣設備，目前還不能用語音控制。`);
+    if (!device.configured) return refuse("not_configured", `${device.name}還沒在中控完成設備接入，指令沒有送出。`);
+
+    const policy = this.options.policyFor?.(device) ?? "allow";
+    if (policy === "off") return refuse("voice_disabled", `${device.name}沒有開放語音控制。`);
+    const entry = { deviceId: device.id, target, command, key: `nous_${this.newId()}` };
+    if (policy === "allow") return this.submit(entry);
+
+    this.prune();
+    while (this.pending.size >= MAX_PENDING) this.pending.delete(this.pending.keys().next().value!);
+    const confirmId = `home_${this.newId()}`;
+    this.pending.set(confirmId, { ...entry, expiresAt: this.now() + CONFIRM_TTL_MS, run: null });
+    return { ok: true, status: "needs_confirmation", confirm_id: confirmId, action: commandText(command), expires_in_s: CONFIRM_CARD_S, ...target };
+  }
+
+  /**
+   * 確認卡結束。approve=false 只丟掉這張卡（不呼叫中控）；approve=true 用 control() 時綁定的內容與 key 送出，
+   * 重複呼叫拿到同一個結果。找不到或過期的 ID 回 expired。不重新比對名稱：使用者確認的是卡上寫的那台。
+   */
+  async confirm(confirmId: string, approve: boolean): Promise<HomeControlResult> {
+    this.prune();
+    const p = this.pending.get(confirmId);
+    if (!p) return { ok: true, status: "refused", reason: "expired", message: "這張確認卡已經失效，沒有執行。" };
+    if (p.run) return p.run;
+    if (!approve) {
+      this.pending.delete(confirmId);
+      return { ok: true, status: "refused", reason: "declined", message: `沒有確認，${p.target.device}${commandText(p.command)}沒有執行。`, ...p.target };
+    }
+    p.run = this.submit(p);
+    return p.run;
+  }
+
+  private prune(): void {
+    const now = this.now();
+    for (const [id, p] of this.pending) if (p.expiresAt <= now) this.pending.delete(id);
+  }
+
+  /** 速率限制：一分鐘內第 7 個指令不送出，回傳要等幾秒；沒超過時記下這一次。 */
+  private takeRate(): number | null {
+    const now = this.now();
+    this.sent = this.sent.filter((t) => t > now - RATE_WINDOW_MS);
+    if (this.sent.length >= RATE_LIMIT) return Math.max(1, Math.ceil((this.sent[0] + RATE_WINDOW_MS - now) / 1000));
+    this.sent.push(now);
+    return null;
+  }
+
+  /**
+   * 送出一個使用者意圖。state_stale 時重新讀取設備一次，再用同一把 key 重送：中控在記下 key 之前就回 409，
+   * 所以不會執行兩次。重新讀取後仍不能控制就照實說沒有送出。
+   */
+  private async submit(p: Omit<PendingCommand, "expiresAt" | "run">): Promise<HomeControlResult> {
+    const action = commandText(p.command);
+    const base = { ok: true as const, action, ...p.target };
+    const wait = this.takeRate();
+    if (wait !== null) {
+      return { ok: true, status: "refused", reason: "rate_limited", retry_after_s: wait, message: `一分鐘內控制指令太多，這個沒有送出，請等 ${wait} 秒再說。`, ...p.target };
+    }
+    let reply = await this.send(p);
+    if (reply.kind === "stale" && (await this.refresh(p.deviceId))) reply = await this.send(p);
+    switch (reply.kind) {
+      case "result":
+        if (reply.status === "confirmed") return { ...base, status: "confirmed", message: reply.message || "設備回讀已確認" };
+        if (reply.status === "failed") return { ...base, status: "failed", reason: "device", message: reply.message || "中控回報失敗" };
+        return { ...base, status: "unconfirmed", why: "hub_unverified", message: reply.message || "已送出，尚未從設備確認" };
+      case "stale":
+        return { ok: true, status: "refused", reason: "not_ready", message: `${p.target.device}的狀態還沒更新，指令沒有送出；請稍後再試，或先在中控重新讀取設備。`, ...p.target };
+      case "refused":
+        return { ok: true, status: "refused", reason: reply.reason, message: reply.reason === "invalid_value" ? reply.message : `${p.target.device}${reply.message}`, ...p.target };
+      case "key_conflict":
+        return { ...base, status: "failed", reason: "internal", message: "AIOS 內部錯誤：指令編號重複，沒有執行" };
+      case "gone":
+        return { ok: true, status: "not_found", target: p.target.device };
+      case "retry":
+        return reply.maybeReceived
+          ? { ...base, status: "unconfirmed", why: "no_reply", message: "中控沒有回覆，不確定有沒有執行，請看一下設備" }
+          : { ...base, status: "failed", reason: "hub_unreachable", message: "無法連線到武陵居中控，指令沒有送出" };
+    }
+  }
+
+  /** POST 一次；逾時、5xx 或連線問題時用同一把 key 與內容重送一次（中控會回傳已記下的結果，不會再執行）。 */
+  private async send(p: Omit<PendingCommand, "expiresAt" | "run">): Promise<HubReply> {
+    const body = JSON.stringify(toWire(p.command));
+    let maybeReceived = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const reply = await this.post(`/api/v1/devices/${encodeURIComponent(p.deviceId)}/commands`, body, p.key);
+      if (reply.kind !== "retry") return reply;
+      maybeReceived ||= reply.maybeReceived;
+    }
+    return { kind: "retry", maybeReceived };
+  }
+
+  private async post(path: string, body: string, key: string): Promise<HubReply> {
+    let res: Response;
+    try {
+      res = await this.fetch(`${this.base}${path}`, {
+        method: "POST",
+        headers: { ...this.headers(), "Content-Type": "application/json", "Idempotency-Key": key },
+        body,
+        redirect: "error",
+        signal: AbortSignal.timeout(this.options.commandTimeoutMs ?? COMMAND_TIMEOUT_MS),
+      });
+    } catch (err) {
+      return { kind: "retry", maybeReceived: !refusedConnection(err) };
+    }
+    this.checkAuth(res, "控制設備");
+    const data: unknown = await res.json().catch(() => null);
+    const detail = isRecord(data) ? data.detail : undefined;
+    const code = isRecord(detail) ? str(detail.code) : "";
+    const message = isRecord(detail) ? str(detail.message) : typeof detail === "string" ? detail : "";
+    if (res.ok) {
+      const status = isRecord(data) ? str(data.status) : "";
+      const text = isRecord(data) ? str(data.message) : "";
+      // 中控已記下但還沒完成（accepted／sent）或不認得的狀態，一律當成未確認，不說成功。
+      return { kind: "result", status: status === "confirmed" || status === "failed" ? status : "unconfirmed", message: text };
+    }
+    if (res.status === 409 && code === "state_stale") return { kind: "stale" };
+    if (res.status === 409 && code === "not_configured") return { kind: "refused", reason: "not_configured", message: "還沒在中控完成設備接入，指令沒有送出。" };
+    if (res.status === 409 && typeof detail === "string") return { kind: "key_conflict" };
+    if (res.status === 422 && code === "unsupported_command") return { kind: "refused", reason: "unsupported", message: "沒有這項控制功能，指令沒有送出。" };
+    if (res.status === 422) return { kind: "refused", reason: "invalid_value", message: message ? `中控不接受這個數值：${message}` : "中控不接受這個指令的格式。" };
+    if (res.status === 404) return { kind: "gone" };
+    if (res.status >= 500) return { kind: "retry", maybeReceived: true };
+    throw new HomeBridgeError(`武陵居中控回應錯誤（HTTP ${res.status}）。`, 502);
+  }
+
+  /** POST /devices/{id}/refresh（同步回讀）；成功回 true，任何錯誤都回 false。 */
+  private async refresh(deviceId: string): Promise<boolean> {
+    try {
+      const res = await this.fetch(`${this.base}/api/v1/devices/${encodeURIComponent(deviceId)}/refresh`, {
+        method: "POST",
+        headers: this.headers(),
+        redirect: "error",
+        signal: AbortSignal.timeout(this.options.refreshTimeoutMs ?? REFRESH_TIMEOUT_MS),
+      });
+      await res.body?.cancel();
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  private headers(): Record<string, string> {
+    return { Authorization: `Bearer ${this.options.token}`, Accept: "application/json" };
+  }
+
+  private checkAuth(res: Response, what: string): void {
+    if (res.status === 401) throw new HomeBridgeError("武陵居中控拒絕了權杖（401），請到中控「系統接入」重新核發後更新 SMARTHOME_TOKEN。", 502);
+    if (res.status === 403) throw new HomeBridgeError(`這把中控權杖沒有${what}的權限（403）。`, 502);
+  }
+
   private async home(): Promise<HubSnapshot> {
     if (!this.base || !this.options.token) throw new HomeBridgeError("尚未設定武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）。", 409);
     let res: Response;
     try {
       res = await this.fetch(`${this.base}/api/v1/home`, {
-        headers: { Authorization: `Bearer ${this.options.token}`, Accept: "application/json" },
+        headers: this.headers(),
         redirect: "error",
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
@@ -263,8 +580,7 @@ export class HomeBridge {
         { cause: err },
       );
     }
-    if (res.status === 401) throw new HomeBridgeError("武陵居中控拒絕了權杖（401），請到中控「系統接入」重新核發後更新 SMARTHOME_TOKEN。", 502);
-    if (res.status === 403) throw new HomeBridgeError("這把中控權杖沒有讀取設備的權限（403）。", 502);
+    this.checkAuth(res, "讀取設備");
     if (!res.ok) throw new HomeBridgeError(`武陵居中控回應錯誤（HTTP ${res.status}）。`, 502);
     try {
       return parseHome(await res.json());
@@ -272,6 +588,12 @@ export class HomeBridge {
       throw new HomeBridgeError("武陵居中控回傳的資料格式不符，無法讀取。", 502, { cause: err });
     }
   }
+}
+
+/** 連線被拒（ECONNREFUSED）：中控一定沒收到；其他錯誤（逾時、連上後中斷）都可能已經收到。 */
+function refusedConnection(err: unknown): boolean {
+  const cause = (err as { cause?: { code?: unknown } } | null)?.cause;
+  return cause?.code === "ECONNREFUSED";
 }
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -295,6 +617,7 @@ export function parseHome(body: unknown): HubSnapshot {
   const devices = body.devices.filter(isRecord).map((d): HubDevice => {
     const state = isRecord(d.state) ? d.state : {};
     const placement = isRecord(d.placement) ? d.placement : {};
+    const config = isRecord(d.config) ? d.config : {};
     const t = isRecord(d.telemetry) ? d.telemetry : null;
     const metrics: HubMetric[] = (Array.isArray(t?.metrics) ? t.metrics : []).filter(isRecord).map((m) => ({
       key: str(m.key),
@@ -311,6 +634,9 @@ export function parseHome(body: unknown): HubSnapshot {
       roomId: str(placement.room_id) || null,
       available: typeof state.available === "boolean" ? state.available : null,
       fresh: state.fresh === true,
+      configured: d.configured !== false,
+      separateRoute:
+        isRecord(d.infrared) || config.infrared_virtual === true || config.external_provider === "aifa" || ["remote", "air_conditioner"].includes(str(d.kind)),
       telemetry: t
         ? { metrics, status: dataStatus(str(t.status), metrics), receivedAt: num(t.received_at), source: str(t.source_label) }
         : null,

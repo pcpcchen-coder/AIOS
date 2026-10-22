@@ -1,4 +1,4 @@
-import type { HomeStatusResult } from "../shared/home.ts";
+import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
@@ -47,7 +47,17 @@ export const api = {
   /** 武陵居家電狀態（唯讀）：由本機核心帶權杖查中控，權杖不進瀏覽器。 */
   homeStatus: (target: string, metric: string | null) =>
     call<HomeStatusResult>("POST", "/api/home/status", metric ? { target, metric } : { target }),
+  /** 武陵居家電控制：由本機核心帶權杖送到中控，回傳中控的真實結果。 */
+  homeControl: (args: HomeControlArgs) => call<HomeControlResult>("POST", "/api/home/control", args),
+  /** 確認卡的答案（同意或不同意）；本機核心才知道這張卡要執行什麼。 */
+  homeConfirm: (confirmId: string, approve: boolean) => call<HomeControlResult>("POST", "/api/home/confirm", { confirm_id: confirmId, approve }),
 };
+
+export interface HomeControlArgs {
+  target: string;
+  command: string;
+  value: string | number | boolean | null;
+}
 
 export interface ChatTurn {
   role: "user" | "assistant";

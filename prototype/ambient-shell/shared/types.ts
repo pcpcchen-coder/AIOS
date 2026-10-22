@@ -121,7 +121,7 @@ export interface RealtimeInfo {
   web_search?: boolean;
   /** 掛上的遠端 MCP 伺服器名稱。 */
   mcp?: string[];
-  /** 能查武陵居家電狀態（home_status，唯讀）。 */
+  /** 能查詢與控制武陵居的家電（home_status、home_control）。 */
   home?: boolean;
   /** 可用與否的說明，例如「未設定 OPENAI_API_KEY」。 */
   detail: string;

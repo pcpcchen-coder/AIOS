@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RealtimeVoice, type ApprovalOutcome, type McpApprovalRequest, type RealtimeDeps, type RealtimePhase } from "../src/realtime.ts";
+import { RealtimeVoice, type ApprovalOutcome, type ApprovalRequest, type HomeResult, type RealtimeDeps, type RealtimePhase } from "../src/realtime.ts";
+import type { HomeControlArgs } from "../src/api.ts";
 
 // 模擬 WebRTC：資料通道收發 OpenAI Realtime 事件，不需要麥克風、喇叭或網路。
 class FakeChannel {
@@ -27,7 +28,16 @@ class FakePeer {
   close() { this.closed = true; }
 }
 
-function setup(overrides: Partial<RealtimeDeps> = {}) {
+interface HomeFixture {
+  /** home_control 的回傳；預設是已確認。 */
+  control?: (args: HomeControlArgs) => HomeResult;
+  /** 確認卡答案的回傳；預設同意＝已確認、不同意＝declined。可回傳 Promise 模擬執行中。 */
+  confirm?: (id: string, approve: boolean) => HomeResult | Promise<HomeResult>;
+}
+
+const CONFIRMED: HomeResult = { ok: true, status: "confirmed", device: "客廳主燈", room: "客廳", action: "關閉", message: "設備回讀已確認（fixture）" };
+
+function setup(overrides: Partial<RealtimeDeps> = {}, home: HomeFixture = {}) {
   vi.useFakeTimers();
   const peer = new FakePeer();
   const track = { stop: vi.fn() };
@@ -39,7 +49,11 @@ function setup(overrides: Partial<RealtimeDeps> = {}) {
   const exchanged: string[] = [];
   const searched: string[] = [];
   const homeQueries: { target: string; metric: string | null }[] = [];
-  const approvals: McpApprovalRequest[] = [];
+  const approvals: ApprovalRequest[] = [];
+  /** 每張確認卡出現時，資料通道已送出幾個事件（檢查卡片比工具結果先排好）。 */
+  const promptedAt: number[] = [];
+  const homeControls: HomeControlArgs[] = [];
+  const homeConfirms: { id: string; approve: boolean }[] = [];
   const resolved: { id: string; approved: boolean; outcome: ApprovalOutcome }[] = [];
   const activity: string[] = [];
   const voice = new RealtimeVoice(
@@ -61,7 +75,22 @@ function setup(overrides: Partial<RealtimeDeps> = {}) {
         homeQueries.push({ target, metric });
         return { ok: true, status: "ok", scope: "客廳", devices: [{ device: "溫濕度計", readings: [{ name: "溫度", value: 26.5, unit: "°C" }] }] };
       },
-      onApprovalPrompt: (request) => approvals.push(request),
+      onHomeControl: async (args) => {
+        homeControls.push(args);
+        return home.control?.(args) ?? CONFIRMED;
+      },
+      onHomeConfirm: async (id, approve) => {
+        homeConfirms.push({ id, approve });
+        return home.confirm
+          ? home.confirm(id, approve)
+          : approve
+            ? CONFIRMED
+            : { ok: true, status: "refused", reason: "declined", message: "沒有確認，書房燈關閉沒有執行。（fixture）", device: "書房燈", room: "書房" };
+      },
+      onApprovalPrompt: (request) => {
+        approvals.push(request);
+        promptedAt.push(peer.channel.sent.length);
+      },
       onApprovalResolved: (request, approved, outcome) => resolved.push({ id: request.id, approved, outcome }),
       onToolActivity: (text) => activity.push(text),
     },
@@ -92,7 +121,7 @@ function setup(overrides: Partial<RealtimeDeps> = {}) {
     ch.emit({ type: "response.done", response: { status: "completed" } });
     ch.emit({ type: "output_audio_buffer.stopped" });
   }
-  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, searched, homeQueries, approvals, resolved, activity, sentTypes, userSays, modelSpeaks };
+  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, searched, homeQueries, homeControls, homeConfirms, approvals, promptedAt, resolved, activity, sentTypes, userSays, modelSpeaks };
 }
 
 afterEach(() => {
@@ -422,3 +451,189 @@ describe("RealtimeVoice tools", () => {
     expect(t.activity).toContain("已使用 calendar：list_events");
   });
 });
+
+describe("RealtimeVoice home_control", () => {
+  const NEEDS: HomeResult = { ok: true, status: "needs_confirmation", confirm_id: "home_c1", device: "書房燈", room: "書房", action: "關閉", expires_in_s: 60 };
+  const outputs = (t: ReturnType<typeof setup>) =>
+    t.ch.sent.filter((e) => (e.item as { type?: string } | undefined)?.type === "function_call_output").map((e) => JSON.parse(String((e.item as { output: string }).output)));
+  const notices = (t: ReturnType<typeof setup>) =>
+    t.ch.sent
+      .map((e) => (e.item as { role?: string; content?: { text?: string }[] } | undefined))
+      .filter((item) => item?.role === "user" && item.content?.[0]?.text?.startsWith("（系統通知）"))
+      .map((item) => item!.content![0].text!);
+  const flush = async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+
+  /** 模型說「好，我請中控處理」並呼叫 home_control（照實際順序：這輪回應先結束，工具結果稍後才交回）。 */
+  async function callControl(t: ReturnType<typeof setup>, args: Record<string, unknown>) {
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.function_call_arguments.done", name: "home_control", call_id: "hc", arguments: JSON.stringify(args) });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    await flush();
+  }
+
+  it("allow: the local core runs the command, the real result goes back to the model, then it speaks", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.userSays("客廳主燈關掉");
+    await callControl(t, { target: "客廳主燈", command: "power", value: "false" });
+    expect(t.homeControls).toEqual([{ target: "客廳主燈", command: "power", value: "false" }]);
+    expect(outputs(t)).toEqual([CONFIRMED]);
+    expect(t.sentTypes().at(-1)).toBe("response.create");
+    expect(t.approvals).toEqual([]);
+  });
+
+  it("missing target or command is reported to the model without calling the core", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "客廳主燈" });
+    expect(t.homeControls).toEqual([]);
+    expect(outputs(t)).toEqual([{ ok: false, error: "缺少要控制的設備或動作" }]);
+  });
+
+  it("needs_confirmation: the card is queued before the result goes back, no MCP notice, and the model is still asked to speak", async () => {
+    const t = setup({}, { control: () => NEEDS });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    expect(t.approvals).toEqual([{ kind: "home", id: "home_c1", device: "書房燈", room: "書房", action: "關閉" }]);
+    const outputIndex = t.ch.sent.findIndex((e) => (e.item as { type?: string } | undefined)?.type === "function_call_output");
+    expect(t.promptedAt[0]).toBeLessThanOrEqual(outputIndex);
+    expect(JSON.stringify(t.ch.sent)).not.toContain("外部服務");
+    // 家電卡不佔 MCP 的計數：工具結果交回後照樣請模型說話（請使用者確認）。
+    expect(t.sentTypes().at(-1)).toBe("response.create");
+    expect(t.voice.pendingApproval).toMatchObject({ kind: "home", id: "home_c1" });
+  });
+
+  it("saying 確認執行 sends the answer to the local core, never to OpenAI, and the result arrives as one notice after the reply", async () => {
+    const t = setup({}, { control: () => NEEDS });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    t.modelSpeaks("要關書房燈，確定的話請說確認執行。");
+
+    t.userSays("好");
+    expect(t.homeConfirms).toEqual([]);
+
+    const before = t.sentTypes().filter((x) => x === "response.create").length;
+    t.ch.emit({ type: "input_audio_buffer.speech_started" });
+    t.ch.emit({ type: "input_audio_buffer.speech_stopped" });
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "conversation.item.input_audio_transcription.completed", transcript: "確認執行。" });
+    await flush();
+    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: true }]);
+    expect(t.resolved).toEqual([{ id: "home_c1", approved: true, outcome: "said_approve" }]);
+    expect(t.ch.sent.some((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response")).toBe(false);
+    // 自動回應還在進行：通知排隊，等這輪結束才送，且只送一次 response.create。
+    expect(notices(t)).toEqual([]);
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    expect(notices(t)).toEqual(["（系統通知）客廳主燈「關閉」已由設備回讀確認。"]);
+    expect(t.sentTypes().filter((x) => x === "response.create").length).toBe(before + 1);
+  });
+
+  it("「確認執行停止播放」 counts as a rejection because it contains 停止", async () => {
+    const t = setup({}, { control: () => NEEDS });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    t.userSays("確認執行停止播放");
+    await flush();
+    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: false }]);
+  });
+
+  it("saying 取消 tells the core and adds context without forcing another reply", async () => {
+    const t = setup({}, { control: () => NEEDS });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    t.modelSpeaks("要關書房燈嗎？");
+    const before = t.sentTypes().filter((x) => x === "response.create").length;
+    t.userSays("取消");
+    await flush();
+    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: false }]);
+    expect(t.resolved).toEqual([{ id: "home_c1", approved: false, outcome: "said_reject" }]);
+    expect(notices(t)).toEqual([]);
+    expect(JSON.stringify(t.ch.sent.at(-1))).toContain("沒有執行");
+    expect(t.sentTypes().filter((x) => x === "response.create").length).toBe(before);
+  });
+
+  it("timeout and a dismissed card tell the core and the model that nothing ran; closing only tells the core", async () => {
+    const t = setup({}, { control: () => NEEDS });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    t.modelSpeaks("要關書房燈嗎？請說確認執行或取消。");
+    vi.advanceTimersByTime(60_000);
+    await flush();
+    expect(t.resolved).toEqual([{ id: "home_c1", approved: false, outcome: "timeout" }]);
+    expect(notices(t)).toEqual(["（系統通知）家電指令沒有執行：沒有確認，書房燈關閉沒有執行。（fixture）"]);
+
+    t.modelSpeaks("好，沒有關。");
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    t.voice.resolveApproval(false, "dismissed");
+    await flush();
+    expect(t.homeConfirms.map((c) => c.approve)).toEqual([false, false]);
+
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    const sent = t.ch.sent.length;
+    t.voice.stop();
+    await flush();
+    expect(t.resolved.at(-1)).toEqual({ id: "home_c1", approved: false, outcome: "closed" });
+    expect(t.homeConfirms).toHaveLength(3);
+    expect(t.ch.sent.length).toBe(sent);
+  });
+
+  it("an MCP card and a home card are shown one at a time, each answered its own way", async () => {
+    const t = setup({}, { control: () => NEEDS });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.ch.emit({ type: "conversation.item.done", item: { type: "mcp_approval_request", id: "apr_m", server_label: "mail", name: "send", arguments: "{}" } });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    expect(t.approvals.map((a) => a.id)).toEqual(["apr_m"]);
+    t.userSays("確認執行");
+    expect(t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response")!.item).toMatchObject({ approval_request_id: "apr_m", approve: true });
+    expect(t.approvals.map((a) => a.id)).toEqual(["apr_m", "home_c1"]);
+    expect(t.homeConfirms).toEqual([]);
+    t.userSays("確認執行");
+    await flush();
+    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: true }]);
+    expect(t.ch.sent.filter((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response")).toHaveLength(1);
+  });
+
+  it("holds the idle timer while a confirmed command is still running, and drops its result after the session ends", async () => {
+    let finish: (r: HomeResult) => void = () => {};
+    const t = setup({}, { control: () => NEEDS, confirm: (_id, approve) => (approve ? new Promise<HomeResult>((r) => (finish = r)) : CONFIRMED) });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    t.modelSpeaks("要關書房燈嗎？");
+    t.userSays("確認執行");
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    vi.advanceTimersByTime(130_000);
+    expect(t.closed).toEqual([]);
+    finish(CONFIRMED);
+    await flush();
+    expect(notices(t).at(-1)).toContain("已由設備回讀確認");
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    vi.advanceTimersByTime(121_000);
+    expect(t.closed).toHaveLength(1);
+
+    // 另一次對話：執行中就結束，晚到的結果不再通知（字幕由 main.ts 顯示）。
+    const u = setup({}, { control: () => NEEDS, confirm: (_id, approve) => (approve ? new Promise<HomeResult>((r) => (finish = r)) : CONFIRMED) });
+    await u.voice.start();
+    u.ch.emit({ type: "session.created" });
+    await callControl(u, { target: "書房燈", command: "power", value: false });
+    u.userSays("確認執行");
+    u.voice.stop();
+    const sent = u.ch.sent.length;
+    finish(CONFIRMED);
+    await flush();
+    expect(u.ch.sent.length).toBe(sent);
+  });
+});
+
