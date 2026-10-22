@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "claude/blissful-rubin-rbtgtk",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-10-22T04:52:16.975Z",
-  "updated_at": "2026-10-22T08:37:32.408Z",
-  "ended_at": null,
+  "updated_at": "2026-10-22T08:37:35.864Z",
+  "ended_at": "2026-10-22T08:37:35.864Z",
   "steps": [
     {
       "id": "how",
@@ -159,6 +159,13 @@
       "step_id": "pr",
       "status": "passed",
       "note": "Review fixes a496276 (537 tests, verify-aios PASS); PR https://github.com/pcpcchen-coder/AIOS/pull/25"
+    },
+    {
+      "at": "2026-10-22T08:37:35.864Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
