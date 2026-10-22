@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T01:04:02.355Z",
-  "updated_at": "2026-10-22T01:18:58.433Z",
+  "updated_at": "2026-10-22T01:21:49.800Z",
   "ended_at": null,
   "steps": [
     {
@@ -53,7 +53,7 @@
       "status": "running",
       "started_at": "2026-10-22T01:18:58.433Z",
       "ended_at": null,
-      "note": "Running the full test suite, isolated mock HTTP journey and synthetic-distance browser scenarios.",
+      "note": "Full suite passed 307 tests; targeted browser check found near-distance source-row overlap. Applying a bounded placement fix before final verification.",
       "evidence": []
     },
     {
@@ -145,6 +145,13 @@
       "step_id": "verify",
       "status": "running",
       "note": "Running the full test suite, isolated mock HTTP journey and synthetic-distance browser scenarios."
+    },
+    {
+      "at": "2026-10-22T01:21:49.800Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "running",
+      "note": "Full suite passed 307 tests; targeted browser check found near-distance source-row overlap. Applying a bounded placement fix before final verification."
     }
   ],
   "provenance": "Agent self-reported"
