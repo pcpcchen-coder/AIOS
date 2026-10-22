@@ -8,25 +8,25 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T03:08:22.788Z",
-  "updated_at": "2026-10-22T03:08:22.788Z",
+  "updated_at": "2026-10-22T03:27:18.502Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-22T03:08:50.205Z",
+      "ended_at": "2026-10-22T03:13:31.350Z",
+      "note": "how skill: 2 explorers (desktop menu bar; voice command matchers) + explainer; camera seconds prefs already live via POST /api/settings/camera; 4 deterministic matchers + model tools; docs disagree with code",
       "evidence": []
     },
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-22T03:13:31.410Z",
+      "ended_at": "2026-10-22T03:27:18.502Z",
+      "note": "Arena: 2 candidates + cross-judge; base = candidate 2 (core-derived menu data, separate locked-down table window, voice.json); grafts from candidate 1: verified caveat rows, Cmd+/ and Help menu, per-key fail-closed + mapped-type coverage; fixed idle-restart and macOS<14.4 reason bugs",
       "evidence": []
     },
     {
@@ -82,6 +82,41 @@
       "step_id": null,
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-22T03:08:50.206Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-10-22T03:13:31.350Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "passed",
+      "note": "how skill: 2 explorers (desktop menu bar; voice command matchers) + explainer; camera seconds prefs already live via POST /api/settings/camera; 4 deterministic matchers + model tools; docs disagree with code"
+    },
+    {
+      "at": "2026-10-22T03:13:31.411Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-10-22T03:22:46.789Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "running",
+      "note": "2 candidates done; cross-judge running"
+    },
+    {
+      "at": "2026-10-22T03:27:18.502Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "passed",
+      "note": "Arena: 2 candidates + cross-judge; base = candidate 2 (core-derived menu data, separate locked-down table window, voice.json); grafts from candidate 1: verified caveat rows, Cmd+/ and Help menu, per-key fail-closed + mapped-type coverage; fixed idle-restart and macOS<14.4 reason bugs"
     }
   ],
   "provenance": "Agent self-reported"
