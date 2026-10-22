@@ -72,4 +72,19 @@ npm start        # 開發：組好內容後直接用 Electron 開
 npm run package  # 打包成 release/Nous-darwin-arm64/Nous.app 與 zip
 ```
 
-`scripts/build.mjs` 先用 vite 建前端、用 esbuild 把本機核心（`server/nous.ts`）打成單檔 `server.mjs`，再組成 `build/app`；`scripts/package.mjs` 用 `@electron/packager`（Electron 44.7.0）打包、ad-hoc 簽章並壓 zip。
+`scripts/build.mjs` 先用 vite 建前端、用 esbuild 把本機核心（`server/nous.ts`）打成單檔 `server.mjs`，再組成 `build/app`；`scripts/package.mjs` 用 `@electron/packager`（Electron 44.7.0）打包、簽章並壓 zip。
+
+### 固定簽章（建議：更新後不用再按一次鏡頭與麥克風權限）
+
+沒有憑證時，打包會用 ad-hoc 簽章。ad-hoc 簽章的「指定要求」是這次打包的雜湊值（`codesign -d -r- Nous.app` 會看到 `cdhash H"…"`），每次打包都不同，所以 macOS 會把更新後的 App 當成新 App：
+
+- 重新詢問鏡頭與麥克風權限；
+- 還沒按「允許」之前，鏡頭會一直停在「鏡頭啟動中」。
+
+在自己的 Mac 上建立一張固定的自簽憑證就能避免（只需一次）：
+
+1. 打開「鑰匙圈存取」，選單「鑰匙圈存取 → 憑證輔助程式 → 製作憑證…」。
+2. 名稱填 `Nous Local Signing`，身分類型選「自簽根憑證」，憑證類型選「程式碼簽署」，按「製作」。
+3. 重新執行 `npm run package`，終端機會顯示「簽章：Nous Local Signing（固定身分…）」。
+
+換成固定簽章後的第一次啟動會再問一次權限，之後更新都會保留。也可以用 `NOUS_SIGN_IDENTITY="憑證名稱" npm run package` 指定其他憑證（例如 Xcode 的 Apple Development）。這張自簽憑證只對你自己的 Mac 有意義；從 Releases 下載的版本仍是 ad-hoc 簽章。
