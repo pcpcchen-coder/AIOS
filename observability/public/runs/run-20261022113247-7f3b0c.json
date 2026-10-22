@@ -8,16 +8,16 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T11:32:47.236Z",
-  "updated_at": "2026-10-22T11:32:56.282Z",
+  "updated_at": "2026-10-22T11:40:37.156Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-22T11:32:56.282Z",
-      "ended_at": null,
-      "note": "Explorers: hub air-con/IR routes; AIOS home_control surface",
+      "ended_at": "2026-10-22T11:40:37.155Z",
+      "note": "2 explorers (hub AIFA/IR routes; AIOS H1 surface) + explainer (18 gotchas); scope: AIFA air-con + Tuya IR TV/fan per George",
       "evidence": []
     },
     {
@@ -89,6 +89,13 @@
       "step_id": "how",
       "status": "running",
       "note": "Explorers: hub air-con/IR routes; AIOS home_control surface"
+    },
+    {
+      "at": "2026-10-22T11:40:37.156Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "passed",
+      "note": "2 explorers (hub AIFA/IR routes; AIOS H1 surface) + explainer (18 gotchas); scope: AIFA air-con + Tuya IR TV/fan per George"
     }
   ],
   "provenance": "Agent self-reported"
