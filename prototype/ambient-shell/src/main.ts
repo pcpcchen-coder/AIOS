@@ -1,7 +1,7 @@
 import "./style.css";
 import { computeProgress, isActive, queueText, sortForProgress } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
-import { ApiError, api, newRequestId, streamChat, subscribeEvents } from "./api.ts";
+import { ApiError, api, newRequestId, streamChat, subscribeEvents, type HomeControlArgs } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
 import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf } from "./sense/controller.ts";
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
@@ -13,14 +13,15 @@ import {
   realtimeSupported,
   RealtimeVoice,
   type ApprovalOutcome,
-  type McpApprovalRequest,
+  type ApprovalRequest,
+  type HomeResult,
   type RealtimePhase,
 } from "./realtime.ts";
 import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
 import { formatCount } from "./format.ts";
-import { homeStatusLine } from "../shared/home.ts";
+import { homeControlLine, homeStatusLine } from "../shared/home.ts";
 import { classify } from "./intent.ts";
 import { evaluateSurface } from "./presentation-policy.ts";
 import { initialShell, reduceShell, type ShellEvent, type ShellState } from "./shell-state.ts";
@@ -172,6 +173,8 @@ const realtime = new RealtimeVoice(
     onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
     onWebSearch: webSearchFromRealtime,
     onHomeStatus: homeStatusFromRealtime,
+    onHomeControl: homeControlFromRealtime,
+    onHomeConfirm: homeConfirmFromRealtime,
     onApprovalPrompt: showApproval,
     onApprovalResolved: closeApproval,
     onToolActivity: (text) => showSubtitle(text),
@@ -677,16 +680,54 @@ async function homeStatusFromRealtime(target: string, metric: string | null): Pr
   }
 }
 
-/** 目前顯示中的外部動作確認卡（來自 OpenAI 的 mcp_approval_request）。 */
+/**
+ * 模型要控制家電：本機核心帶權杖送到中控，等中控回讀（可能要十幾秒），字幕先顯示「控制中」再換成真實結果。
+ * 結果只放字幕，不換畫面：換掉開著的確認卡會被當成拒絕。
+ */
+async function homeControlFromRealtime(args: HomeControlArgs): Promise<HomeResult> {
+  brain.pulse("step", classifyDomain(args.target));
+  showSubtitle(`控制中：${args.target}`, true);
+  try {
+    const result = await api.homeControl(args);
+    showSubtitle(homeControlLine(result));
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    showSubtitle(message);
+    return { ok: false, error: message };
+  }
+}
+
+/** 家電確認卡的答案交給本機核心；同意時字幕顯示執行中與真實結果（對話已結束也照樣顯示）。 */
+async function homeConfirmFromRealtime(confirmId: string, approve: boolean): Promise<HomeResult> {
+  const detail = pendingConfirms.get(confirmId);
+  if (approve && detail?.kind === "home") showSubtitle(`控制中：${detail.device}`, true);
+  try {
+    const result = await api.homeConfirm(confirmId, approve);
+    if (approve) showSubtitle(homeControlLine(result));
+    return result;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (approve) showSubtitle(message);
+    return { ok: false, error: message };
+  }
+}
+
+/** 目前顯示中的確認卡（OpenAI 的 mcp_approval_request，或家電的 needs_confirmation）。 */
 const pendingConfirms = new Map<string, ConfirmDetail>();
 
-/** 外部服務要執行需要核准的動作：顯示確認卡，等使用者說「確認執行」或「取消」，不需要按任何東西。 */
-function showApproval(request: McpApprovalRequest, expiresAt: number): void {
-  pendingConfirms.set(request.id, { server: request.server, name: request.name, arguments: request.arguments, expiresAt });
+/** 需要確認的動作：顯示確認卡，等使用者說「確認執行」或「取消」，不需要按任何東西。 */
+function showApproval(request: ApprovalRequest, expiresAt: number): void {
+  if (request.kind === "home") {
+    pendingConfirms.set(request.id, { kind: "home", device: request.device, room: request.room, action: request.action, expiresAt });
+    dispatch({ type: "show.confirm", request_id: request.id, message: `武陵居 · ${request.device}：${request.action}` });
+    return;
+  }
+  pendingConfirms.set(request.id, { kind: "mcp", server: request.server, name: request.name, arguments: request.arguments, expiresAt });
   dispatch({ type: "show.confirm", request_id: request.id, message: `${request.server} · ${request.name}` });
 }
 
-function closeApproval(request: McpApprovalRequest, _approved: boolean, outcome: ApprovalOutcome): void {
+function closeApproval(request: ApprovalRequest, _approved: boolean, outcome: ApprovalOutcome): void {
   pendingConfirms.delete(request.id);
   if (outcome === "timeout") showSubtitle("確認逾時，沒有執行。");
   if (shell.surface?.kind === "confirm" && shell.surface.request_id === request.id) dispatch({ type: "dismiss" });

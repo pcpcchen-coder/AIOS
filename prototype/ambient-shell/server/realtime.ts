@@ -1,4 +1,5 @@
 import { computeProgress, sortForProgress } from "../shared/progress.ts";
+import { HOME_COMMANDS } from "../shared/home.ts";
 import type { RealtimeInfo, Task } from "../shared/types.ts";
 import type { McpServerConfig } from "./config.ts";
 
@@ -22,7 +23,7 @@ export interface RealtimeOptions {
   mcp?: McpServerConfig[];
   /** 背景任務是否能上網（只影響說明文字）。 */
   taskWebSearch?: boolean;
-  /** 是否提供 home_status 工具（已設定武陵居中控時為 true）。 */
+  /** 是否提供 home_status 與 home_control 工具（已設定武陵居中控時為 true）。 */
   home?: boolean;
   fetch?: typeof fetch;
   /** 5xx 重試前的等待（毫秒），測試時設 0。 */
@@ -34,7 +35,7 @@ export interface RealtimeCapabilities {
   mcp: McpServerConfig[];
   /** 背景任務是否能上網。 */
   taskWebSearch?: boolean;
-  /** 能查武陵居家電狀態（唯讀）。 */
+  /** 能查詢與控制武陵居的家電。 */
   home?: boolean;
 }
 
@@ -55,7 +56,7 @@ export const HOME_STATUS_TOOL = {
   type: "function",
   name: "home_status",
   description:
-    "查武陵居家裡的感測值與設備狀態（溫度、濕度、二氧化碳、PM2.5、設備在不在線等），由家裡的中控回報。只能查詢，不能控制家電。",
+    "查武陵居家裡的感測值與設備狀態（溫度、濕度、二氧化碳、PM2.5、設備在不在線等），由家裡的中控回報。這個工具只查詢；要開關或調整家電用 home_control。",
   parameters: {
     type: "object",
     properties: {
@@ -67,6 +68,30 @@ export const HOME_STATUS_TOOL = {
       },
     },
     required: ["target"],
+    additionalProperties: false,
+  },
+} as const;
+
+export const HOME_CONTROL_TOOL = {
+  type: "function",
+  name: "home_control",
+  description:
+    "控制武陵居家裡的一台設備：開關、亮度、燈的色溫、顏色、音量、靜音、播放／暫停／停止、窗簾。由家裡的中控執行並回讀確認，回傳真實結果。一次只控制一台；整個房間或全家一起控制還不支援。冷氣（開關與溫度）、紅外線設備（電視、冷氣遙控）與無線按鈕還不能用語音控制。",
+  parameters: {
+    type: "object",
+    properties: {
+      target: { type: "string", description: "一台設備的名稱，照使用者的說法填（例如「客廳主燈」「書桌燈」）" },
+      command: {
+        type: "string",
+        description: "power 開關；brightness 亮度；color_temperature 燈的色溫（K，不是冷氣溫度）；color 顏色；volume 音量；mute 靜音；play／pause／stop 播放控制；cover 窗簾",
+        enum: [...HOME_COMMANDS],
+      },
+      value: {
+        type: "string",
+        description: "power／mute：true 或 false；brightness／volume：0 到 100；color_temperature：2500 到 9000；color：#RRGGBB；cover：open、close 或 stop；play／pause／stop 不用填",
+      },
+    },
+    required: ["target", "command"],
     additionalProperties: false,
   },
 } as const;
@@ -104,7 +129,7 @@ export const REALTIME_TOOLS = [
 export function buildRealtimeTools(caps: RealtimeCapabilities): Record<string, unknown>[] {
   const functions = REALTIME_TOOLS.filter((t) => caps.webSearch || t.name !== "web_search");
   const mcp = caps.mcp.map((server) => ({ type: "mcp", ...server }));
-  return [...functions, ...(caps.home ? [HOME_STATUS_TOOL] : []), ...mcp];
+  return [...functions, ...(caps.home ? [HOME_STATUS_TOOL, HOME_CONTROL_TOOL] : []), ...mcp];
 }
 
 const STATUS_TEXT: Record<Task["status"], string> = {
@@ -135,7 +160,8 @@ export function buildRealtimeInstructions(
   }
   if (caps.home) {
     abilities.push(
-      "你可以查武陵居家裡的狀態：使用者問室內溫度、濕度、空氣品質或設備在不在線時呼叫 home_status，不要用猜的。回答講房間、數字和單位；readings 的 value 是 null 就說「沒有讀值」，不要說 0；data 是「快照」或「過期資料」時，依 time 與 minutes_ago 說是什麼時候、多久前的資料，不要說成現在的值。status 是 ambiguous 時問使用者是哪一個；not_found 就說家裡找不到這個名字；no_such_reading 就說那裡沒有能量這項的設備。目前只能查詢，不能開關或調整家電；使用者要控制家電時，照實說這個功能還沒開放。",
+      "你可以查武陵居家裡的狀態：使用者問室內溫度、濕度、空氣品質或設備在不在線時呼叫 home_status，不要用猜的。回答講房間、數字和單位；readings 的 value 是 null 就說「沒有讀值」，不要說 0；data 是「快照」或「過期資料」時，依 time 與 minutes_ago 說是什麼時候、多久前的資料，不要說成現在的值。status 是 ambiguous 時問使用者是哪一個；not_found 就說家裡找不到這個名字；no_such_reading 就說那裡沒有能量這項的設備。",
+      "你也可以控制武陵居的家電：使用者要開關或調整一台設備（燈、插座、音響、窗簾）時，先說一句「好，我請中控處理」，再呼叫 home_control，一次一台。依回傳的 status 說話：confirmed 才說已經做好；unconfirmed 是已送出但設備還沒確認，請使用者看一下有沒有反應，不要說成功（why 是 no_reply 時說不確定有沒有執行）；failed 照 message 說沒有成功的原因；refused 表示指令沒有送出，照 message 說；ambiguous 問是哪一台；not_found 說家裡找不到這個名字。needs_confirmation 時用一句話說要對哪台設備做什麼，請使用者說「確認執行」或「取消」；不要再呼叫 home_control，也不能替使用者確認，結果會用系統通知送來。busy 表示另一張確認卡還沒處理完，這個指令沒有送出：請使用者先回答那張卡，之後再說一次。整個房間或全家一起控制還不支援，請使用者指定一台。color_temperature 是燈的色溫（K）；冷氣（開關與溫度）、紅外線設備與無線按鈕還不能用語音控制，使用者要求時照實說。",
     );
   }
   if (caps.mcp.length) {
@@ -186,7 +212,7 @@ export class RealtimeBridge {
 
   info(): RealtimeInfo {
     const { webSearch, mcp, home } = this.caps;
-    const tools = [webSearch ? "上網查詢" : null, home ? "家電狀態查詢" : null, ...mcp.map((m) => `MCP：${m.server_label}`)]
+    const tools = [webSearch ? "上網查詢" : null, home ? "家電查詢與控制" : null, ...mcp.map((m) => `MCP：${m.server_label}`)]
       .filter(Boolean)
       .join("、");
     return this.options.apiKey

@@ -57,6 +57,7 @@ function realtimeVoice() {
     {
       onPhase() {}, onUserTranscript() {}, onAssistantTranscript() {},
       onDelegate: async () => ({}), onGetTasks: async () => ({}), onWebSearch: async () => ({}), onHomeStatus: async () => ({}),
+      onHomeControl: async () => ({ ok: false, error: "unused" }), onHomeConfirm: async () => ({ ok: false, error: "unused" }),
       onApprovalPrompt() {}, onApprovalResolved() {}, onToolActivity() {}, onClosed: (r) => closed.push(r),
     },
     deps,
