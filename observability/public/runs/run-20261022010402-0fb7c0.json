@@ -8,16 +8,16 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T01:04:02.355Z",
-  "updated_at": "2026-10-22T01:04:32.249Z",
+  "updated_at": "2026-10-22T01:08:08.694Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-22T01:04:32.249Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-22T01:08:08.693Z",
+      "note": "Traced distance events, renderer radius, reset paths and existing CSS zoom; verified panel positioning in Chromium.",
       "evidence": []
     },
     {
@@ -89,6 +89,13 @@
       "step_id": "how",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-22T01:08:08.694Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "passed",
+      "note": "Traced distance events, renderer radius, reset paths and existing CSS zoom; verified panel positioning in Chromium."
     }
   ],
   "provenance": "Agent self-reported"
