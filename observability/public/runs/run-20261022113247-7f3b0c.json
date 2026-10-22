@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T11:32:47.236Z",
-  "updated_at": "2026-10-22T13:11:21.377Z",
+  "updated_at": "2026-10-22T13:41:58.869Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-22T13:11:21.377Z",
-      "ended_at": null,
-      "note": "Delegated to implementer subagent",
+      "ended_at": "2026-10-22T13:41:58.868Z",
+      "note": "7a7f70a: route union in home-bridge.ts, AIFA merge/power/climate, IR key match, 60 s deadline; docs/12 + validation doc",
       "evidence": []
     },
     {
@@ -124,6 +124,13 @@
       "step_id": "implement",
       "status": "running",
       "note": "Delegated to implementer subagent"
+    },
+    {
+      "at": "2026-10-22T13:41:58.869Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "7a7f70a: route union in home-bridge.ts, AIFA merge/power/climate, IR key match, 60 s deadline; docs/12 + validation doc"
     }
   ],
   "provenance": "Agent self-reported"
