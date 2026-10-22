@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T01:04:02.355Z",
-  "updated_at": "2026-10-22T01:12:49.222Z",
+  "updated_at": "2026-10-22T01:12:54.449Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-22T01:12:54.449Z",
       "ended_at": null,
-      "note": "",
+      "note": "Connecting the existing sensing scale callback to renderer geometry and consistent hit targeting.",
       "evidence": []
     },
     {
@@ -124,6 +124,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "Single prototype owner; separate browser and documentation artifacts; existing distance policy retained."
+    },
+    {
+      "at": "2026-10-22T01:12:54.449Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": "Connecting the existing sensing scale callback to renderer geometry and consistent hit targeting."
     }
   ],
   "provenance": "Agent self-reported"
