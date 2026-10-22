@@ -1,0 +1,15 @@
+
+> nous-ambient-shell-prototype@0.1.0 test
+> vitest run
+
+
+ RUN  v5.0.3 /workspace/AIOS/prototype/ambient-shell
+
+
+ Test Files  32 passed (32)
+      Tests  307 passed (307)
+   Start at  01:19:03
+   Duration  6.24s (tests 79%, transform 11%, import 8%, worker 1%)
+
+    Isolate  32 workers spawned · ~98ms startup each (spawn + environment, per file)
+             at least ~943ms faster with isolate: false — reuses workers across files instead of one per file
