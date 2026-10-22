@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T04:52:16.975Z",
-  "updated_at": "2026-10-22T08:05:06.842Z",
+  "updated_at": "2026-10-22T08:05:10.558Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-22T08:05:10.558Z",
+      "ended_at": "2026-10-22T08:05:10.558Z",
+      "note": "Blocking: shared types + bridge; 3 workstreams on shared types; single owner per state; one implementer",
       "evidence": []
     },
     {
@@ -110,6 +110,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "Arena: 2 candidates + cross-judge (verified against hub app.py); base = candidate 1 (deep HomeBridge); grafts: refresh+same-key retry on state_stale, drop misleading pre-checks, unconfirmed{why}"
+    },
+    {
+      "at": "2026-10-22T08:05:10.558Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "passed",
+      "note": "Blocking: shared types + bridge; 3 workstreams on shared types; single owner per state; one implementer"
     }
   ],
   "provenance": "Agent self-reported"
