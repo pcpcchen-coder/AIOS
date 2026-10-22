@@ -10,7 +10,8 @@ export interface Reading {
 export interface DeviceReport {
   device: string;
   room: string | null;
-  online: "在線" | "離線" | "狀態未知";
+  /** AIFA 冷氣的離線來自上次讀取的 AIFA 清單（最多 24 小時前），所以帶上那次的時間，不說成現在離線。 */
+  online: "在線" | "離線" | "狀態未知" | `上次讀取 AIFA 清單時離線（${string}）`;
   /** 讀值的性質；沒有感測功能的設備為 null。 */
   data: "即時" | "快照" | "過期資料" | "沒有讀值" | null;
   /** 中控收到讀值的時間（HH:mm；不是今天時為 M/D HH:mm），沒有時為 null。 */
@@ -23,7 +24,8 @@ export interface DeviceReport {
 /** 交還給模型的結果；模型只依這些內容說話。 */
 export type HomeStatusResult =
   | { ok: true; status: "ok"; scope: string; devices: DeviceReport[]; truncated: boolean }
-  | { ok: true; status: "ambiguous"; candidates: string[] }
+  /** note：候選帶路徑（「（AIFA）」「（紅外線遙控）」）時，請模型照抄候選名稱當 target。 */
+  | { ok: true; status: "ambiguous"; candidates: string[]; note?: string }
   | { ok: true; status: "not_found"; target: string }
   | { ok: true; status: "no_such_reading"; scope: string; metric: string };
 
@@ -200,7 +202,7 @@ export type UnconfirmedWhy = "hub_unverified" | "no_reply" | "one_way" | "cloud_
 export type SendFacts = {
   /** 紅外線：實際按下的按鍵名稱（中控同步的名稱），例如「Vol+」。 */
   key?: string;
-  /** 紅外線：按的是電源切換鍵，不能說成已開或已關。 */
+  /** 紅外線：按的是切換鍵（電源切換鍵或靜音鍵），按一下切換一次：不能說成開了、關了、靜音了或取消靜音了。 */
   toggle?: true;
   /** AIFA 冷氣設定：實際送出的完整設定，例如「冷氣、26 度、風量自動、擺風自動」。 */
   sent_settings?: string;
@@ -222,7 +224,8 @@ export type HomeControlResult =
   | ({ ok: true; status: "unconfirmed"; why: UnconfirmedWhy; action: string; message: string } & HomeTarget & SendFacts)
   | ({ ok: true; status: "failed"; reason: "device" | "hub_unreachable" | "internal"; action: string; message: string } & HomeTarget & SendFacts)
   | ({ ok: true; status: "refused"; reason: RefusedReason; message: string; retry_after_s?: number } & Partial<HomeTarget>)
-  | { ok: true; status: "ambiguous"; candidates: string[] }
+  /** note：候選帶路徑（「（AIFA）」「（紅外線遙控）」）時，請模型照抄候選名稱當 target。 */
+  | { ok: true; status: "ambiguous"; candidates: string[]; note?: string }
   /** note：AIFA 冷氣清單讀不到時帶上，不把「找不到」說成確定的事。 */
   | { ok: true; status: "not_found"; target: string; note?: string }
   | ({ ok: true; status: "needs_confirmation"; confirm_id: string; action: string; expires_in_s: number } & HomeTarget);
@@ -237,7 +240,7 @@ export function homeControlLine(r: HomeControlResult): string {
     case "confirmed":
       return `✓ ${where(r)} ${r.action}：已確認`;
     case "unconfirmed":
-      if (r.why === "one_way") return `⏳ ${where(r)} ${r.action}：已送出，請確認${r.toggle ? "（電源鍵是切換鍵）" : ""}`;
+      if (r.why === "one_way") return `⏳ ${where(r)} ${r.action}：已送出，請確認${r.toggle ? "（這是切換鍵）" : ""}`;
       if (r.why === "cloud_no_reply") return `? ${where(r)} ${r.action}：雲端沒有回覆，不確定有沒有送出（中控不會自動重送）`;
       return r.why === "no_reply"
         ? `? ${where(r)} ${r.action}：中控沒有回覆，不確定有沒有執行`
@@ -261,7 +264,7 @@ function factsText(r: SendFacts): string {
   if (r.sent_settings) parts.push(`送出的設定：${r.sent_settings}。`);
   if (r.defaults_used?.length) parts.push(`控制器沒有回報、用了預設值：${r.defaults_used.join("、")}，要告訴使用者。`);
   if (r.controller_reported) parts.push(`${r.controller_reported}（只是控制器記得的設定，不是冷氣的實際狀態）。`);
-  if (r.toggle) parts.push("按的是電源切換鍵，不能說已開或已關。");
+  if (r.toggle) parts.push("按的是切換鍵（電源切換鍵或靜音鍵），按一下切換一次，不知道按完是哪個狀態：不能說開了、關了、靜音了或取消靜音了，請使用者看一下或聽一下。");
   if (r.note) parts.push(r.note);
   return parts.join("");
 }

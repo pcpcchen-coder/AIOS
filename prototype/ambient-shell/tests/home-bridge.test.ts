@@ -384,6 +384,8 @@ describe("realtime session with the hub configured", () => {
     expect(text).toContain("控制器回報");
     expect(text).toContain("busy");
     expect(text).toContain("不要說成功");
+    // 審查修正：同名候選帶路徑時，模型要照抄候選名稱（含括號）當 target。
+    expect(text).toContain("target 照候選名稱一字不差填（包括「（AIFA）」「（紅外線遙控）」）");
     expect(buildRealtimeInstructions([], new Date(), { webSearch: false, mcp: [] })).not.toContain("home_");
   });
 
@@ -918,6 +920,23 @@ describe("H1b: AIFA air-cons merged from GET /integrations/aifa", () => {
     expect(hub.requests.filter((r) => r.method === "GET").map((r) => r.url).sort()).toEqual(["/api/v1/home", "/api/v1/home", "/api/v1/integrations/aifa", "/api/v1/integrations/aifa"]);
   });
 
+  it("review: an offline AIFA child is said with the time of the list it came from, never as offline now", async () => {
+    const list = aifaList(NOW - 3600);
+    const hub2 = list.items[1] as Record<string, unknown>;
+    const offline = { ...list, items: [list.items[0], { ...hub2, online: false }] };
+    const hub = await h1bHub({ aifa: () => ({ status: 200, body: offline }) });
+    const b = h1bController(hub.url, { timeZone: "Asia/Taipei" });
+    const r = await b.status("主臥冷氣");
+    expect(r).toMatchObject({ status: "ok", devices: [{ device: "主臥冷氣", online: "上次讀取 AIFA 清單時離線（12:20）" }] });
+    expect(homeStatusLine(r)).toBe("主臥冷氣：上次讀取 AIFA 清單時離線（12:20）");
+    // 清單沒有讀取時間：不知道是什麼時候的離線，說狀態未知。
+    const untimed = await h1bHub({ aifa: () => ({ status: 200, body: { ...offline, queried_at: null } }) });
+    expect(await h1bController(untimed.url).status("主臥冷氣")).toMatchObject({ devices: [{ online: "狀態未知" }] });
+    // 中控自己的設備照舊：離線就是離線。
+    expect(await b.status("書桌燈")).toMatchObject({ devices: [{ device: "書桌燈" }] });
+    expect(report(parseHome(HOME), parseHome(HOME).devices.find((d) => d.id === "light-floor")!, null).online).toBe("離線");
+  });
+
   it("an unreadable AIFA list (500, 404, timeout, bad body) never breaks lights; 「冷氣」 is not_found with a note", async () => {
     // 逾時（8 秒）太慢，最後另外用會丟 TimeoutError 的 fetch 測。
     for (const aifa of [() => ({ status: 500, body: {} }), () => ({ status: 404, body: { detail: "Not Found" } }), () => ({ status: 200, body: { items: "x" } })]) {
@@ -1149,8 +1168,8 @@ describe("H1b: Tuya IR appliances", () => {
       key: "Power",
       toggle: true,
     });
-    expect(homeControlLine(result)).toBe("⏳ 客廳 電視 按下「Power」鍵：已送出，請確認（電源鍵是切換鍵）");
-    expect(homeControlNotice(result)).toContain("不能說已開或已關");
+    expect(homeControlLine(result)).toBe("⏳ 客廳 電視 按下「Power」鍵：已送出，請確認（這是切換鍵）");
+    expect(homeControlNotice(result)).toContain("不能說開了、關了");
     const [post] = hub.irs();
     expect(post.url).toBe("/api/v1/devices/ir-tv/infrared-commands");
     expect(JSON.parse(post.body)).toEqual({ key: "Power", key_id: 1 });
@@ -1206,6 +1225,43 @@ describe("H1b: Tuya IR appliances", () => {
     expect(hub.irs()).toHaveLength(1);
   });
 
+  it("review: an intent never falls back to part of a key name — 音量▲／頻道▼ beside Up／Down; no volume key is refused, not Up", async () => {
+    const home = {
+      ...H1B_HOME,
+      devices: [
+        ...H1B_HOME.devices,
+        irDevice("ir-tv2", "臥室電視", null, irKeys("Power", "Up", "Down", "音量▲", "音量▼", "頻道▲", "頻道▼")),
+        irDevice("ir-ac3", "窗型冷氣", null, irKeys("Power", "Up", "Down", "Mode")),
+      ],
+    };
+    const hub = await h1bHub({ home });
+    const b = h1bController(hub.url);
+    expect(await b.control({ target: "臥室電視", command: "press", value: "volume_up" })).toMatchObject({ status: "unconfirmed", key: "音量▲" });
+    expect(await b.control({ target: "臥室電視", command: "press", value: "volume_down" })).toMatchObject({ key: "音量▼" });
+    expect(await b.control({ target: "臥室電視", command: "press", value: "channel_up" })).toMatchObject({ key: "頻道▲" });
+    expect(await b.control({ target: "臥室電視", command: "press", value: "頻道減" })).toMatchObject({ key: "頻道▼" });
+    const refused = { status: "refused", reason: "unsupported", message: "窗型冷氣沒有「音量加」鍵，指令沒有送出；有：Power、Up、Down、Mode。" };
+    expect(await b.control({ target: "窗型冷氣", command: "press", value: "volume_up" })).toMatchObject(refused);
+    expect(await b.control({ target: "窗型冷氣", command: "press", value: "音量加" })).toMatchObject(refused);
+    expect(hub.irs().map((r) => JSON.parse(r.body).key)).toEqual(["音量▲", "音量▼", "頻道▲", "頻道▼"]);
+  });
+
+  it("review: IR mute is a toggle — mute true and false press the same key, and nothing says 已靜音／已取消靜音", async () => {
+    const hub = await h1bHub();
+    const b = h1bController(hub.url);
+    for (const value of [true, false]) {
+      const r = await b.control({ target: "電視", command: "mute", value });
+      expect(r).toMatchObject({ status: "unconfirmed", why: "one_way", key: "Mute", action: "按下「Mute」鍵", toggle: true });
+      expect(homeControlLine(r)).toBe("⏳ 客廳 電視 按下「Mute」鍵：已送出，請確認（這是切換鍵）");
+      for (const text of [homeControlLine(r), homeControlNotice(r), JSON.stringify(r)]) {
+        expect(text).not.toContain("已靜音");
+        expect(text).not.toContain("已取消靜音");
+      }
+    }
+    expect(await b.control({ target: "電視", command: "press", value: "mute" })).toMatchObject({ key: "Mute", toggle: true });
+    expect(hub.irs().map((r) => JSON.parse(r.body))).toEqual([{ key: "Mute", key_id: 4 }, { key: "Mute", key_id: 4 }, { key: "Mute", key_id: 4 }]);
+  });
+
   it("hub replies: ir_cooldown waits once and resends with the same key; unknown → cloud_no_reply; failed; ir_keys_required; ir_key_unsupported", async () => {
     const cooled = await h1bHub({ ir: (_r, n) => (n === 1 ? { status: 429, body: { detail: { code: "ir_cooldown", message: "請稍候一秒再按下一個按鍵" } } } : IR_SENT) });
     expect(await h1bController(cooled.url).control({ target: "電視", command: "press", value: "volume_up" })).toMatchObject({ why: "one_way" });
@@ -1239,11 +1295,52 @@ describe("H1b: shared rules across routes", () => {
     const hub = await h1bHub({ home });
     const b = h1bController(hub.url);
     const asked = await b.control({ target: "冷氣", command: "power", value: true });
-    expect(asked).toEqual({ ok: true, status: "ambiguous", candidates: ["客廳的冷氣（紅外線遙控）", "客廳的冷氣（AIFA）"] });
+    expect(asked).toEqual({ ok: true, status: "ambiguous", candidates: ["客廳的冷氣（紅外線遙控）", "客廳的冷氣（AIFA）"], note: expect.stringContaining("一字不差") });
     expect(await b.control({ target: "客廳的冷氣（AIFA）", command: "power", value: true })).toMatchObject({ status: "unconfirmed", action: "開啟" });
     expect(await b.control({ target: "冷氣（紅外線遙控）", command: "power", value: true })).toMatchObject({ status: "unconfirmed", key: "Power" });
     expect(hub.sends()).toHaveLength(1);
     expect(hub.irs()).toHaveLength(1);
+  });
+
+  it("review: an AIFA 冷氣 with no room beside an IR 冷氣 in 客廳 is tagged by route and can be picked by repeating the tag", async () => {
+    const home = { ...H1B_HOME, devices: [...H1B_HOME.devices, irDevice("ir-ac2", "冷氣", "living", irKeys("Power"))] };
+    const list = aifaList();
+    const hub2 = list.items[1] as { children: Record<string, unknown>[] };
+    const roomless = { ...list, items: [{ ...hub2, children: [{ ...hub2.children[0], name: "冷氣" }] }] };
+    const hub = await h1bHub({ home, aifa: () => ({ status: 200, body: roomless }) });
+    const b = h1bController(hub.url);
+    const asked = { ok: true, status: "ambiguous", candidates: ["客廳的冷氣（紅外線遙控）", "冷氣（AIFA）"], note: expect.stringContaining("一字不差") };
+    expect(await b.control({ target: "冷氣", command: "power", value: true })).toEqual(asked);
+    expect(await b.status("冷氣")).toEqual(asked);
+    expect(await b.control({ target: "冷氣（AIFA）", command: "power", value: true })).toMatchObject({ status: "unconfirmed", action: "開啟", device: "冷氣", room: null });
+    expect(await b.control({ target: "客廳的冷氣（紅外線遙控）", command: "power", value: true })).toMatchObject({ status: "unconfirmed", key: "Power", room: "客廳" });
+    // 模型自己加上房間時，路徑仍以括號為準，不會按到紅外線的冷氣。
+    expect(await b.control({ target: "客廳的冷氣（AIFA）", command: "power", value: true })).toMatchObject({ status: "unconfirmed", action: "開啟", room: null });
+    expect(hub.sends().map((r) => r.url)).toEqual(Array(2).fill("/api/v1/integrations/aifa/devices/hub2/children/c9/power"));
+    expect(hub.irs()).toHaveLength(1);
+  });
+
+  it("review: the rate slot is taken just before the first control POST — three refusals that never POST, then six sends all go out", async () => {
+    let lists = 0;
+    const hub = await h1bHub({
+      // 第一句話時清單已超過 24 小時，重新讀取失敗；之後是新的清單。
+      aifa: () => ({ status: 200, body: aifaList(lists++ === 0 ? NOW - 86_000 : NOW - 3600) }),
+      discover: () => ({ status: 409, body: { detail: "AIFA 連線或回覆未完成，請稍後再試" } }),
+      status: (n) => ({ status: 200, body: { sent: false, status: { ...STATUS_ON, fan: n === 1 ? "auto" : "low" } } }),
+    });
+    const b = h1bController(hub.url);
+    expect(await b.control({ target: "冷氣", command: "power", value: true })).toMatchObject({ status: "refused", reason: "not_ready" });
+    expect(await b.control({ target: "冷氣", command: "ac_fan", value: "down" })).toMatchObject({ status: "refused", reason: "invalid_value", message: expect.stringContaining("不知道目前風量") });
+    expect(await b.control({ target: "冷氣", command: "ac_fan", value: "down" })).toMatchObject({ status: "refused", reason: "invalid_value", message: expect.stringContaining("已經是最低") });
+    expect(hub.sends()).toHaveLength(0);
+    for (let i = 0; i < 3; i++) expect(await b.control({ target: "書桌燈", command: "power", value: i % 2 === 0 })).toMatchObject({ status: "confirmed" });
+    expect(await b.control({ target: "冷氣", command: "power", value: true })).toMatchObject({ status: "unconfirmed" });
+    expect(await b.control({ target: "冷氣", command: "ac_temperature", value: "26" })).toMatchObject({ status: "unconfirmed" });
+    expect(await b.control({ target: "電視", command: "press", value: "volume_up" })).toMatchObject({ status: "unconfirmed" });
+    // 仍是每個意圖一次：第 7 個送出的意圖不送。
+    const before = hub.posts().length;
+    expect(await b.control({ target: "電視", command: "press", value: "volume_down" })).toMatchObject({ status: "refused", reason: "rate_limited" });
+    expect(hub.posts()).toHaveLength(before);
   });
 
   it("「冷氣26度」 is never a status metric, and ac_temperature never reaches /commands or becomes colour temperature", async () => {
@@ -1375,6 +1472,24 @@ describe("H1b: pure helpers", () => {
     expect(keyNorm("Vol-")).toBe("vol-");
     expect(keyNorm("CH_UP")).toBe("chup");
     expect(keyNorm("power-on")).toBe("poweron");
+    // 審查修正：U+2212 減號、全形＋／－、▲／▼。
+    expect(keyNorm("Vol −")).toBe(keyNorm("Vol-"));
+    expect(keyNorm("音量－")).toBe("音量-");
+    expect(keyNorm("Vol＋")).toBe("vol+");
+    expect(keyNorm("音量▲")).toBe(keyNorm("音量+"));
+    expect(keyNorm("頻道 ▼")).toBe(keyNorm("頻道-"));
+    expect(keyNorm("CH▼")).toBe("ch-");
+  });
+
+  it("review: keys sharing key_id 0 (the hub's default) are still told apart by key — 「vol」 asks which", () => {
+    const keys = [
+      { key: "Vol+", key_id: 0, label: "Vol+" },
+      { key: "Vol-", key_id: 0, label: "Vol-" },
+    ];
+    const r = matchKey("電視", keys, { command: "press", intent: null, spoken: "vol" });
+    expect(r).toEqual({ refuse: "invalid_value", message: "電視有好幾個可能的鍵：「Vol+」、「Vol-」；要按哪一個？指令沒有送出。" });
+    // 同一個鍵列兩次仍是同一個鍵。
+    expect(matchKey("電視", [keys[0], { ...keys[0] }], { command: "press", intent: "volume_up", spoken: "volume_up" })).toEqual({ key: keys[0], toggle: false });
   });
 
   it("every IR intent has a non-empty synonym row, with no bare mode words", () => {

@@ -169,6 +169,8 @@ export interface HubDevice {
   /** AIFA 冷氣：清單裡的 online，最多可能是 24 小時前的；所以 fresh 一律 false，查詢時不說成在線。 */
   available: boolean | null;
   fresh: boolean;
+  /** 只有 AIFA 子設備有：available 是哪一次讀 AIFA 清單得到的（queried_at，中控時鐘的秒；沒有時 null）。離線要連時間一起說，不說成現在。 */
+  listedAt?: number | null;
   route: DeviceRoute;
   telemetry: { metrics: HubMetric[]; status: HubDataStatus; receivedAt: number | null; source: string } | null;
 }
@@ -385,10 +387,13 @@ export type Resolution =
  */
 export function resolveTarget(home: HubSnapshot, target: string): Resolution {
   const resolved = resolveUntagged(home, target);
-  // 同名候選的回答（「冷氣（AIFA）」「冷氣（紅外線遙控）」）：名稱比對照舊，再用路徑從候選裡挑。
+  // 候選的回答（「冷氣（AIFA）」「客廳的冷氣（紅外線遙控）」）：名稱比對照舊，再用路徑從候選裡挑。
   const tag = /aifa/i.test(target) ? "aifa" : /紅外線/.test(target) ? "infrared" : null;
-  if (!tag || resolved.kind !== "ambiguous") return resolved;
-  const byRoute = resolved.candidates.filter((d) => d.route.kind === tag);
+  if (!tag) return resolved;
+  // 名稱只比對到另一條路徑的一台（「客廳的冷氣（AIFA）」，但 AIFA 冷氣沒有房間）：路徑是使用者指定的，從全部設備裡找。
+  const otherRoute = resolved.kind === "match" && resolved.devices.length === 1 && resolved.devices[0].route.kind !== tag;
+  if (resolved.kind !== "ambiguous" && !otherRoute) return resolved;
+  const byRoute = (resolved.kind === "ambiguous" ? resolved.candidates : home.devices).filter((d) => d.route.kind === tag);
   // 候選說法是「名稱」或「房間的名稱」：完全相同的優先（「客廳的冷氣」不要連「書房冷氣」也算進來）。
   const whole = norm(target);
   const said = byRoute.filter((d) => {
@@ -396,7 +401,7 @@ export function resolveTarget(home: HubSnapshot, target: string): Resolution {
     const n = norm(d.name);
     return whole === n || (!!room && (whole === norm(room) + n || whole === `${norm(room)}的${n}`));
   });
-  const picked = said.length ? said : byRoute;
+  const picked = said.length ? said : otherRoute ? byRoute.filter((d) => names(d).some((n) => whole.includes(n))) : byRoute;
   if (picked.length === 1) return { kind: "match", scope: picked[0].name, devices: picked, metric: null };
   return picked.length ? { kind: "ambiguous", candidates: picked } : resolved;
 }
@@ -467,9 +472,15 @@ function round(value: HubMetric["value"], precision: number): HubMetric["value"]
   return Number(value.toFixed(p));
 }
 
+/** 中控說離線；AIFA 子設備的 online 是讀清單當時的（最多 24 小時前），要說是什麼時候，不知道時間就說狀態未知。 */
+function offline(d: HubDevice, nowSeconds: number, timeZone: string | undefined): DeviceReport["online"] {
+  if (d.listedAt === undefined) return "離線";
+  return d.listedAt === null ? "狀態未知" : `上次讀取 AIFA 清單時離線（${clock(d.listedAt, nowSeconds, timeZone)}）`;
+}
+
 export function report(home: HubSnapshot, d: HubDevice, metric: string | null, timeZone?: string): DeviceReport {
   const room = home.rooms.find((r) => r.id === d.roomId)?.name ?? null;
-  const online = d.available === true && d.fresh ? "在線" : d.available === false ? "離線" : "狀態未知";
+  const online = d.available === true && d.fresh ? "在線" : d.available === false ? offline(d, home.serverTime, timeZone) : "狀態未知";
   const t = d.telemetry;
   if (!t) return { device: d.name, room, online, data: null, time: null, minutes_ago: null, source: null, readings: [] };
   const metrics = metric ? t.metrics.filter((m) => m.key === metric) : t.metrics;
@@ -485,21 +496,21 @@ export function report(home: HubSnapshot, d: HubDevice, metric: string | null, t
   };
 }
 
+const ROUTE_TAG: Partial<Record<DeviceRoute["kind"], string>> = { aifa: "（AIFA）", infrared: "（紅外線遙控）" };
+const TAGGED_NOTE = "使用者選了之後，target 照候選名稱一字不差填，包括括號裡的（AIFA）或（紅外線遙控）。";
+
 /**
- * 候選名稱：設備名稱裡沒有房間時加上房間（「客廳的立燈」）。
- * 名稱相同時加上路徑（「冷氣（AIFA）」「冷氣（紅外線遙控）」），使用者才分得出來。
+ * 問是哪一台：設備名稱裡沒有房間時加上房間（「客廳的立燈」）。
+ * AIFA 冷氣與紅外線家電一律加上路徑（「冷氣（AIFA）」「客廳的冷氣（紅外線遙控）」）：同名的設備一台有房間、
+ * 一台沒有時（AIFA 冷氣常常沒有房間），只看名稱分不出來，照著說也選不到。有路徑時 note 請模型照抄候選名稱。
  */
-function candidates(home: HubSnapshot, devices: HubDevice[]): string[] {
+function ambiguous(home: HubSnapshot, devices: HubDevice[]): { ok: true; status: "ambiguous"; candidates: string[]; note?: string } {
   const shown = devices.slice(0, 5);
   const labels = shown.map((d) => {
     const room = home.rooms.find((r) => r.id === d.roomId)?.name;
-    return room && !norm(d.name).includes(norm(room)) ? `${room}的${d.name}` : d.name;
+    return `${room && !norm(d.name).includes(norm(room)) ? `${room}的${d.name}` : d.name}${ROUTE_TAG[d.route.kind] ?? ""}`;
   });
-  return labels.map((label, i) => {
-    if (labels.filter((l) => l === label).length < 2) return label;
-    const kind = shown[i].route.kind;
-    return kind === "aifa" ? `${label}（AIFA）` : kind === "infrared" ? `${label}（紅外線遙控）` : label;
-  });
+  return { ok: true, status: "ambiguous", candidates: labels, ...(shown.some((d) => ROUTE_TAG[d.route.kind]) ? { note: TAGGED_NOTE } : {}) };
 }
 
 /** 一次 POST 的結果（不出 HomeBridge）。 */
@@ -516,7 +527,9 @@ type HubReply =
   /** maybeReceived：逾時、連上後中斷或 5xx，中控可能已經執行；連線被拒則一定沒收到。 */
   | { kind: "retry"; maybeReceived: boolean }
   /** 這句話的時間（UTTERANCE_MS）不夠，沒有開始 POST：中控沒有收到。 */
-  | { kind: "too_late" };
+  | { kind: "too_late" }
+  /** AIOS 自己的每分鐘上限（RATE_LIMIT），在第一次 POST 之前：中控沒有收到。 */
+  | { kind: "rate_limited"; retryAfterS: number };
 
 type ReplyMapper = (status: number, data: unknown) => HubReply;
 
@@ -704,13 +717,17 @@ function parseReport(v: unknown): ControllerReport | null {
 
 // ───────── 紅外線按鍵比對 ─────────
 
-/** 按鍵名稱正規化：NFKC、小寫、加→+、減→-、去掉空白與底線、去掉不在結尾的連字號（「ch-up」→「chup」，「Vol-」不變）。 */
+/**
+ * 按鍵名稱正規化：NFKC（全形＋／－變成 +／-）、小寫、加→+、減→-、減號 −（U+2212）→-、▲／△→+、▼／▽→-，
+ * 去掉空白與底線、去掉不在結尾的連字號（「ch-up」→「chup」，「Vol-」不變）。
+ * 所以「音量▲」「Vol −」「頻道▼」和「音量+」「Vol-」「頻道-」一樣，不必另加同義詞。
+ */
 export function keyNorm(text: string): string {
   return text
     .normalize("NFKC")
     .toLowerCase()
-    .replace(/加/g, "+")
-    .replace(/減/g, "-")
+    .replace(/[加▲△]/g, "+")
+    .replace(/[減−▼▽]/g, "-")
     .replace(/[\s_]/g, "")
     .replace(/-(?=.)/g, "");
 }
@@ -738,29 +755,33 @@ const MAX_KEY_LABELS = 8;
 /**
  * 在設備實際同步的按鍵裡找要按的那一個（模型看不到 key_id）。
  * 1. 意圖（電源、音量、頻道…）照 IR_SYNONYMS 完全相同比對；開：先找開機鍵，再找電源切換鍵；關：先找關機鍵。
+ *    意圖只再比對完全相同的按鍵名稱，不找包含的（「volume_up」不能落到導覽的「Up」，冷氣遙控上可能是溫度鍵）。
  * 2. 其他說法當成按鍵名稱：先完全相同，再找唯一一個包含它的。
- * 好幾個不同的鍵 → 問要按哪一個；找不到 → 照實說沒有這個鍵，列出最多 8 個真的有的鍵。
+ * 好幾個不同的鍵（key 與 key_id 都算；中控的 key_id 預設 0）→ 問要按哪一個；找不到 → 照實說沒有這個鍵，列出最多 8 個真的有的鍵。
+ * 電源切換鍵與靜音鍵都是切換鍵（toggle）：按一下切換一次，「取消靜音」按的也是同一個鍵。
  */
 export function matchKey(device: string, keys: IrKey[], c: Extract<HomeCommand, { command: "power" | "mute" | "press" }>): { key: IrKey; toggle: boolean } | Refusal {
   const label = (k: IrKey) => keyNorm(k.label);
-  const isPowerToggle = (k: IrKey) => SYNONYM_SETS.power.has(label(k)) || SYNONYM_SETS.power.has(keyNorm(k.key));
+  const inRow = (row: keyof typeof IR_SYNONYMS, k: IrKey) => SYNONYM_SETS[row].has(label(k)) || SYNONYM_SETS[row].has(keyNorm(k.key));
+  const isToggle = (k: IrKey) => inRow("power", k) || inRow("mute", k);
+  const id = (k: IrKey) => `${k.key}:${k.key_id}`;
   const decide = (hits: IrKey[]): { key: IrKey; toggle: boolean } | Refusal | null => {
-    const distinct = hits.filter((k, i) => hits.findIndex((x) => x.key_id === k.key_id) === i);
+    const distinct = hits.filter((k, i) => hits.findIndex((x) => id(x) === id(k)) === i);
     if (!distinct.length) return null;
-    if (distinct.length === 1) return { key: distinct[0], toggle: isPowerToggle(distinct[0]) };
+    if (distinct.length === 1) return { key: distinct[0], toggle: isToggle(distinct[0]) };
     return { refuse: "invalid_value", message: `${device}有好幾個可能的鍵：${distinct.map((k) => `「${k.label}」`).join("、")}；要按哪一個？指令沒有送出。` };
   };
   const rows: (keyof typeof IR_SYNONYMS)[] =
     c.command === "power" ? (c.value ? ["power_on", "power"] : ["power_off", "power"]) : c.command === "mute" ? ["mute"] : c.intent ? [c.intent] : [];
   for (const row of rows) {
-    const found = decide(keys.filter((k) => SYNONYM_SETS[row].has(label(k)) || SYNONYM_SETS[row].has(keyNorm(k.key))));
+    const found = decide(keys.filter((k) => inRow(row, k)));
     if (found) return found;
   }
   if (c.command === "press") {
     const t = keyNorm(c.spoken);
     const exact = decide(keys.filter((k) => label(k) === t || keyNorm(k.key) === t));
     if (exact) return exact;
-    const partial = decide(keys.filter((k) => t.length > 0 && (label(k).includes(t) || (label(k).length >= 2 && t.includes(label(k))))));
+    const partial = c.intent ? null : decide(keys.filter((k) => t.length > 0 && (label(k).includes(t) || (label(k).length >= 2 && t.includes(label(k))))));
     if (partial) return partial;
   }
   const what = c.command === "power" ? "電源" : c.command === "mute" ? "靜音" : c.intent ? IR_INTENT_TEXT[c.intent] : c.spoken;
@@ -862,7 +883,11 @@ export class HomeBridge {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly timeouts: Record<Exclude<keyof typeof H1B_TIMEOUTS_MS, "snapshot">, number>;
   private readonly pending = new Map<string, PendingCommand>();
-  /** 最近一分鐘送出的控制指令時間（只算第一次送出；同 key 重試、重新讀取、冷氣狀態讀取都不算）。三條路徑共用。 */
+  /**
+   * 最近一分鐘送出的控制指令時間，三條路徑共用。每個意圖在第一次控制 POST 之前才記一次（takeRate）：
+   * 沒有 POST 就拒絕的（AIFA 清單重新讀取失敗、冷氣設定組不出來、已經最低、時間不夠）不算；
+   * 同 key 重送、冷卻後重送、重新讀取清單後重送、重新讀取設備、/discover、/status 也都不算。
+   */
   private sent: number[] = [];
 
   constructor(private readonly options: HomeBridgeOptions) {
@@ -890,13 +915,7 @@ export class HomeBridge {
     const home = await this.snapshot();
     const resolved = resolveTarget(home, target);
     if (resolved.kind === "not_found") return { ok: true, status: "not_found", target };
-    if (resolved.kind === "ambiguous") {
-      return {
-        ok: true,
-        status: "ambiguous",
-        candidates: candidates(home, resolved.candidates),
-      };
-    }
+    if (resolved.kind === "ambiguous") return ambiguous(home, resolved.candidates);
     if (metric && !metricKey(metric)) return { ok: true, status: "no_such_reading", scope: resolved.scope, metric };
     const key = (metric ? metricKey(metric) : null) ?? resolved.metric;
     const devices = key ? resolved.devices.filter((d) => d.telemetry?.metrics.some((m) => m.key === key)) : resolved.devices;
@@ -923,11 +942,11 @@ export class HomeBridge {
     if (resolved.kind === "not_found") {
       return home.aifa === "unavailable" ? { ok: true, status: "not_found", target: req.target, note: "AIFA 冷氣清單讀不到" } : { ok: true, status: "not_found", target: req.target };
     }
-    if (resolved.kind === "ambiguous") return { ok: true, status: "ambiguous", candidates: candidates(home, resolved.candidates) };
+    if (resolved.kind === "ambiguous") return ambiguous(home, resolved.candidates);
     if (!resolved.devices.length) return { ok: true, status: "not_found", target: req.target };
     // 說的是房間或全家（即使裡面只有一台）就是房間指令，那是 H3：先問是哪一台，不一次控制多台。
     if (resolved.devices.length > 1 || resolved.scope !== resolved.devices[0].name) {
-      return { ok: true, status: "ambiguous", candidates: candidates(home, resolved.devices) };
+      return ambiguous(home, resolved.devices);
     }
 
     const device = resolved.devices[0];
@@ -979,16 +998,15 @@ export class HomeBridge {
     return null;
   }
 
-  /** 送出一個使用者意圖：速率限制（三條路徑共用、每個意圖算一次）→ 依計畫的路徑送出。deadline 只用在 AIFA／紅外線。 */
+  /** 送出一個使用者意圖：依計畫的路徑送出。速率限制在各路徑第一次控制 POST 之前（見 sent）。deadline 只用在 AIFA／紅外線。 */
   private async submit(p: Entry, deadline: number): Promise<HomeControlResult> {
-    const wait = this.takeRate();
-    if (wait !== null) {
-      return { ok: true, status: "refused", reason: "rate_limited", retry_after_s: wait, message: `一分鐘內控制指令太多，這個沒有送出，請等 ${wait} 秒再說。`, ...p.target };
-    }
     const plan = p.plan;
     switch (plan.route) {
-      case "commands":
+      case "commands": {
+        const wait = this.takeRate();
+        if (wait !== null) return this.oneWayResult({ kind: "rate_limited", retryAfterS: wait }, p, {});
         return this.commandsResult(p, await this.sendCommands({ deviceId: plan.deviceId, command: plan.command, key: p.key }));
+      }
       case "aifa_power":
       case "aifa_climate":
         return this.sendAifa(plan, p, deadline);
@@ -1022,7 +1040,8 @@ export class HomeBridge {
           : { ...base, status: "failed", reason: "hub_unreachable", message: "無法連線到武陵居中控，指令沒有送出" };
       case "cooldown":
       case "too_late":
-        // commandsReply 不會產生這兩種（H1 的 429 是 HomeBridgeError，也沒有 deadline）。
+      case "rate_limited":
+        // commandsReply 不會產生這三種（H1 的 429 是 HomeBridgeError，也沒有 deadline；速率限制在 submit）。
         return { ...base, status: "failed", reason: "internal", message: "AIOS 內部錯誤：無法解讀中控的回覆，沒有執行" };
     }
   }
@@ -1146,6 +1165,7 @@ export class HomeBridge {
    * AIFA／紅外線：一個意圖最多 POST 兩次，同一把 key 與內容。唯一的一次重送給：
    * 逾時、5xx 或連線問題（中控回傳已記下的結果）；冷卻 429（中控在記下 key 之前就拒絕，等一下再送）；
    * 清單過期 409（onStale 重新讀取清單後再送）。剩下的時間少於 MIN_SEND_WINDOW_MS 就不再開始 POST。
+   * 第一次 POST 之前才算速率限制（每個意圖一次）。
    * 第一次可能已經送到時，第二次若說「沒有送出」（409 等）不採信：中控在比對已記下的 key 之前就會先檢查清單與授權。
    */
   private async postTwice(o: {
@@ -1161,6 +1181,9 @@ export class HomeBridge {
   }): Promise<HubReply> {
     const left = () => o.deadline - this.now();
     if (left() < MIN_SEND_WINDOW_MS) return { kind: "too_late" };
+    // 這個意圖的第一次控制 POST：這時才算一次速率限制；下面的重送都不再算。
+    const wait = this.takeRate();
+    if (wait !== null) return { kind: "rate_limited", retryAfterS: wait };
     const first = await this.post(o.path, o.body, o.key, o.map, Math.min(o.firstMs, left()));
     let nextMs: number;
     if (first.kind === "retry") nextMs = o.retryMs;
@@ -1217,6 +1240,15 @@ export class HomeBridge {
           : { ...base, status: "failed", reason: "hub_unreachable", message: "無法連線到武陵居中控，指令沒有送出" };
       case "too_late":
         return { ok: true, status: "refused", reason: "not_ready", message: `中控回應太慢，「${p.action}」沒有送出，請再說一次。`, ...p.target };
+      case "rate_limited":
+        return {
+          ok: true,
+          status: "refused",
+          reason: "rate_limited",
+          retry_after_s: reply.retryAfterS,
+          message: `一分鐘內控制指令太多，這個沒有送出，請等 ${reply.retryAfterS} 秒再說。`,
+          ...p.target,
+        };
     }
   }
 
@@ -1497,7 +1529,7 @@ export function parseAifa(body: unknown, homeDevices: HubDevice[]): { aifa: Aifa
       const route: DeviceRoute = isAc
         ? { kind: "aifa", hubId, childId, climate: parseCaps(child.capabilities), listQueriedAt: queriedAt }
         : { kind: "unsupported", why: "aifa_other" };
-      devices.push({ id: aifaId(hubId, childId), name, aliases: [], kind: isAc ? "air_conditioner" : "aifa_other", roomId, available: online, fresh: false, route, telemetry: null });
+      devices.push({ id: aifaId(hubId, childId), name, aliases: [], kind: isAc ? "air_conditioner" : "aifa_other", roomId, available: online, fresh: false, listedAt: queriedAt, route, telemetry: null });
     }
   }
   if (!devices.length && body.connected !== true) return { aifa: "not_connected", devices };

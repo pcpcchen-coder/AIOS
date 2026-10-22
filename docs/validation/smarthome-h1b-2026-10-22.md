@@ -8,7 +8,7 @@
 
 | 檢查 | 結果 | 範圍 |
 | --- | --- | --- |
-| `npx vitest run` | 通過（580 個：H1b 前 537 個） | 新增 43 個：`tests/home-bridge.test.ts` 41 個、`tests/http.test.ts` 1 個、`tests/realtime-voice.test.ts` 1 個。見下方「假中控測試」。 |
+| `npx vitest run` | 通過（586 個：審查修正前 580 個，H1b 前 537 個） | H1b 新增 43 個：`tests/home-bridge.test.ts` 41 個、`tests/http.test.ts` 1 個、`tests/realtime-voice.test.ts` 1 個；審查修正再加 6 個（都在 `tests/home-bridge.test.ts`）。見下方「假中控測試」與「審查修正」。 |
 | 真實中控程式 | 通過（只有拒絕、失敗與冷卻的路徑） | SmartHomeAI 的 FastAPI 中控（示例配置），加上 fixture 的 AIFA 清單與紅外線按鍵。沒有 AIFA 帳號與 Tuya 認證，任何指令都不會到廠商。見「真實中控程式」。 |
 | `npx tsc --noEmit`、`npx vite build`、`node --check desktop/main.mjs`、`node scripts/verify-aios.mjs`、`git diff --check` | 通過 | |
 
@@ -18,7 +18,7 @@
 
 `tests/home-bridge.test.ts`：
 
-- **合併 AIFA 清單**：冷氣的房間來自 `matched_device_id` 對到的中控設備，對不到就沒有房間；查詢時說「狀態未知」，不說在線。清單回 500、404、格式不符或逾時：燈照樣控制，「冷氣」是 `not_found` 加註「AIFA 冷氣清單讀不到」；帳號沒連結時只說找不到，不加註。設定碼不是 173 的冷氣只能開關，設定在送出前就拒絕（也不讀 `/status`）；AIFA 的非冷氣家電照實拒絕。
+- **合併 AIFA 清單**：冷氣的房間來自 `matched_device_id` 對到的中控設備，對不到就沒有房間；查詢時說「狀態未知」，不說在線；離線帶讀清單的時間（見「審查修正」6）。清單回 500、404、格式不符或逾時：燈照樣控制，「冷氣」是 `not_found` 加註「AIFA 冷氣清單讀不到」；帳號沒連結時只說找不到，不加註。設定碼不是 173 的冷氣只能開關，設定在送出前就拒絕（也不讀 `/status`）；AIFA 的非冷氣家電照實拒絕。
 - **開關**：送出的內容就是 `{"power":true}`，帶 `Idempotency-Key`；結果 `unconfirmed`／`one_way`，字幕「⏳ 客廳 冷氣 開啟：已送出，請確認」；`controller_reported` 是「控制器回報：開、冷氣、26 度、風量低、擺風自動」，系統通知說明那不是冷氣的實際狀態。
 - **設定**：
   - 冷氣開著說「26 度」：先 POST `/status`（沒有 body），再 POST `/climate`，內容是 `{mode, temperature, fan, swing, feature}` 五個欄位，模式、風量、擺風照控制器回報，睡眠模式保留。
@@ -32,7 +32,7 @@
 - **慢回覆**：第一次逾時、第二次拿到已記下的結果是 `one_way`（同一把 key）；兩次都逾時是 `no_reply`；第一次逾時後第二次回 409，也是 `no_reply`，不說「沒有送出」（中控先檢查清單再比對已記下的 key）。
 - **清單超過 24 小時**：只呼叫一次 `/discover` 再送出；`/discover` 回 409 或重新讀取後找不到這台：`not_ready`，沒有送出；`/discover` 回 429：照樣送出，中控仍說過期時是 `not_ready`、`retry_after_s: 60`；清單看起來沒過期但中控回 409 過期：重新讀取一次後用同一把 key 重送；設定的順序是 `discover` → `status` → `climate`。
 - **紅外線**：
-  - 「打開電視」按 `Power`（`{key:"Power", key_id:1}`），`toggle: true`，字幕「⏳ 客廳 電視 按下「Power」鍵：已送出，請確認（電源鍵是切換鍵）」；`configured:false` 的紅外線家電照樣送出。
+  - 「打開電視」按 `Power`（`{key:"Power", key_id:1}`），`toggle: true`，字幕「⏳ 客廳 電視 按下「Power」鍵：已送出，請確認（這是切換鍵）」；`configured:false` 的紅外線家電照樣送出。
   - 「大聲一點」（`press volume_up`）按 `Vol+`；`channel_down` 按「頻道減」；`mute` 按 `Mute`。
   - 電風扇開／關優先按 `PowerOn`／`PowerOff`（不是切換鍵）；說 `timer` 完全相同、說 `Spe` 唯一包含，都按到對的鍵。
   - 「擺頭」沒有這個鍵：`unsupported`，「電風扇沒有「擺頭」鍵，指令沒有送出；有：PowerOn、PowerOff、Speed、Timer。」；同一個意圖有兩個不同的鍵（「音量加」與「Vol+」）：問要按哪一個。
@@ -50,6 +50,19 @@
 `tests/http.test.ts`：`/api/home/control` 送 `ac_swing fixed_3` 與 `press volume_up`，本機核心依序 POST `/status`、`/climate`、`/infrared-commands`，回應不含權杖。H1 的兩個測試多了一筆 `GET /api/v1/integrations/aifa`（每次都和 `/home` 一起讀）。`tests/realtime-voice.test.ts`：`ac_temperature` 的工具呼叫與 `one_way` 結果原樣交給模型，之後請模型說話。
 
 H1 的測試只有這些預期改了：紅外線電視（`ready:false`）從 `unsupported` 改成 `not_ready`；Tuya `kt`／`ktkzq` 與 Home Assistant 冷氣的拒絕文字改成「是冷氣，但不是透過 AIFA 連接」；中控設備裡的 AIFA 控制器改成「是 AIFA 控制器本身」；工具說明與模型指示的文字。假中控多回答 `GET /integrations/aifa`（帳號沒連結）。
+
+## 審查修正
+
+獨立審查 `7a7f70a` 找到 6 個問題，都已修正，各加一個回歸測試（`tests/home-bridge.test.ts`，名稱以 `review:` 開頭，另外改了 4 個既有測試的預期）。把 `server/`、`shared/` 改回修正前的程式時，這 6 個新測試與 4 個改過預期的既有測試（共 10 個）都會失敗：
+
+1. **意圖落到包含比對，按錯鍵**：`press volume_up` 在同義詞表找不到時，會用說法（`volumeup`）去找「包含」的鍵，`Up`／`Down` 這類導覽鍵就會被按下（電視有「音量▲／▼」又有 `Up`／`Down` 時按到 `Up`；紅外線冷氣遙控上可能改到溫度）。改成有意圖時只比對同義詞表與完全相同的按鍵名稱，不找包含的；找不到就拒絕並列出真的有的鍵。`keyNorm` 另外把 `▲`／`△` 當成 +、`▼`／`▽` 當成 -、減號 `−`（U+2212）當成 -（全形＋／－原本就由 NFKC 處理），所以「音量▲」「頻道▼」「Vol −」直接對到既有的「音量+」「頻道-」「Vol-」，不必另加同義詞；不會因此多出模糊的對應（沒有任何同義詞是單獨的 + 或 -）。測試：「臥室電視」（`Power`、`Up`、`Down`、`音量▲`、`音量▼`、`頻道▲`、`頻道▼`）的 `volume_up`／`volume_down`／`channel_up`／「頻道減」各按到對的鍵；「窗型冷氣」（`Power`、`Up`、`Down`、`Mode`）的 `volume_up` 與「音量加」都拒絕：「窗型冷氣沒有「音量加」鍵，指令沒有送出；有：Power、Up、Down、Mode。」，沒有任何紅外線請求。
+2. **沒有房間的 AIFA 冷氣選不到**：客廳有紅外線「冷氣」、AIFA「冷氣」沒有房間時，候選是「客廳的冷氣」「冷氣」，名稱不同所以沒加路徑，使用者說「冷氣」又是同樣兩個候選，AIFA 那台永遠選不到。改成問是哪一台時，AIFA 冷氣與紅外線家電的候選一律加上路徑，結果帶 `note`「使用者選了之後，target 照候選名稱一字不差填，包括括號裡的（AIFA）或（紅外線遙控）。」；模型指示（`home_status` 與 `home_control` 的 ambiguous）也這樣說。名稱只對到另一條路徑的一台時（模型自己說成「客廳的冷氣（AIFA）」），以括號裡的路徑為準。測試：候選是「客廳的冷氣（紅外線遙控）」「冷氣（AIFA）」（`home_status` 相同）；說「冷氣（AIFA）」與「客廳的冷氣（AIFA）」都送到 AIFA 的 `c9`，說「客廳的冷氣（紅外線遙控）」按紅外線的 `Power`。
+3. **共用 `key_id` 掩蓋了模糊**：判斷「是不是同一個鍵」只看 `key_id`，中控的 `key_id` 預設是 0，`Vol+` 與 `Vol-` 都是 0 時「vol」會直接按 `Vol+`。改成用 `key` 加 `key_id` 判斷。測試：兩個鍵都是 `key_id` 0，「vol」回「電視有好幾個可能的鍵：「Vol+」、「Vol-」；要按哪一個？指令沒有送出。」；同一個鍵列兩次仍只算一個。
+4. **紅外線靜音是切換鍵**：`mute false` 按的是和 `mute true` 同一個靜音鍵，卻沒有 `toggle`。改成按到靜音鍵（`mute`、`press mute` 或說按鍵名稱）時都帶 `toggle: true`。字幕改成不分電源或靜音的「（這是切換鍵）」，系統通知與模型指示說「按的是切換鍵（電源切換鍵或靜音鍵），按一下切換一次…不能說開了、關了、靜音了或取消靜音了」。測試：`mute true` 與 `mute false` 都按 `{key:"Mute", key_id:4}`、`toggle: true`，字幕「⏳ 客廳 電視 按下「Mute」鍵：已送出，請確認（這是切換鍵）」，字幕、系統通知與結果都不含「已靜音」「已取消靜音」。
+5. **沒有 POST 的拒絕也用掉速率限制**：每分鐘 6 個的名額原本在一開始就記下，清單重新讀取失敗、冷氣設定組不出來（不知道目前風量）、已經最低、時間不夠這些沒有送出的拒絕也算一個。改成在第一次控制 POST 之前才記（`postTwice`；H1 的 `/commands` 在 `sendCommands` 之前），仍是每個意圖一次：同 key 重送、冷卻後重送、重新讀取清單後重送、`/discover`、`/status` 都不算。測試：先三個沒有 POST 的拒絕（清單過期且 `/discover` 409、風量自動時說調小、已經最低時說調小），再 3 個燈、2 個冷氣、1 個紅外線都送出；第 7 個送出的意圖仍是 `rate_limited`，沒有請求。代價是被限制的冷氣設定仍會先讀 `/status`（不是控制指令，不影響冷氣）。
+6. **AIFA 的離線說成現在**：AIFA 冷氣的 `online:false` 來自最多 24 小時前的清單，`home_status` 卻說「離線」。改成「上次讀取 AIFA 清單時離線（12:20）」（不是今天時加日期，和讀值時間的寫法相同），清單沒有讀取時間就說「狀態未知」；中控自己的設備不變。測試：清單 1 小時前讀（12:20），`主臥冷氣` 的 `online` 與字幕都帶這個時間；`queried_at: null` 時是「狀態未知」；中控的「客廳立燈」仍是「離線」。
+
+docs/12 的 H1b 段落與 `prototype/ambient-shell/README.md` 的紅外線段落照上面改寫。
 
 ## 時間預算
 
@@ -136,7 +149,7 @@ H1 的測試只有這些預期改了：紅外線電視（`ready:false`）從 `un
      6. 「冷氣風量調小」：控制器回報低／中／高時調一格；回報自動時 Nous 說不知道目前風量，請你說低、中、高或自動。結果：＿＿。
      7. 「開冷氣 26 度」：預期 Nous 呼叫兩次（開關、設定），字幕出現兩行。結果：＿＿。
    - **電視與電風扇**
-     1. 「打開電視」：字幕「⏳ … 電視 按下「Power」鍵：已送出，請確認（電源鍵是切換鍵）」（鍵名照你家的）；Nous 不說「電視已開」。電視實際：＿＿。
+     1. 「打開電視」：字幕「⏳ … 電視 按下「Power」鍵：已送出，請確認（這是切換鍵）」（鍵名照你家的）；Nous 不說「電視已開」。電視實際：＿＿。
      2. 「電視大聲一點」：字幕「按下「Vol+」鍵」之類，音量加一格。結果：＿＿。
      3. 「電風扇開」：如果遙控器有分開的開機鍵，按開機鍵；只有電源鍵就按電源鍵並說是切換鍵。結果：＿＿。
      4. 說一個電視沒有的鍵，例如「電視按擺頭」：Nous 說沒有這個鍵並唸出幾個有的鍵，沒有送出。結果：＿＿。
