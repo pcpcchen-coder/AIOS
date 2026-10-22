@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-21T12:12:15.034Z",
+  "updated_at": "2026-10-22T01:05:38.574Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261022010402-0fb7c0",
+      "title": "Stereo distance scaling for brain renderer",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-10-22T01:04:32.249Z",
+      "started_at": "2026-10-22T01:04:02.355Z",
+      "ended_at": null,
+      "branch": "work",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 7,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261021112311-65370e",
