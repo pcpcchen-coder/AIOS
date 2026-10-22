@@ -52,6 +52,8 @@ function setup(overrides: Partial<RealtimeDeps> = {}, home: HomeFixture = {}) {
   const approvals: ApprovalRequest[] = [];
   /** 每張確認卡出現時，資料通道已送出幾個事件（檢查卡片比工具結果先排好）。 */
   const promptedAt: number[] = [];
+  /** 每張確認卡的倒數終點（毫秒）。 */
+  const expiries: number[] = [];
   const homeControls: HomeControlArgs[] = [];
   const homeConfirms: { id: string; approve: boolean }[] = [];
   const resolved: { id: string; approved: boolean; outcome: ApprovalOutcome }[] = [];
@@ -87,8 +89,9 @@ function setup(overrides: Partial<RealtimeDeps> = {}, home: HomeFixture = {}) {
             ? CONFIRMED
             : { ok: true, status: "refused", reason: "declined", message: "沒有確認，書房燈關閉沒有執行。（fixture）", device: "書房燈", room: "書房" };
       },
-      onApprovalPrompt: (request) => {
+      onApprovalPrompt: (request, expiresAt) => {
         approvals.push(request);
+        expiries.push(expiresAt);
         promptedAt.push(peer.channel.sent.length);
       },
       onApprovalResolved: (request, approved, outcome) => resolved.push({ id: request.id, approved, outcome }),
@@ -121,7 +124,7 @@ function setup(overrides: Partial<RealtimeDeps> = {}, home: HomeFixture = {}) {
     ch.emit({ type: "response.done", response: { status: "completed" } });
     ch.emit({ type: "output_audio_buffer.stopped" });
   }
-  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, searched, homeQueries, homeControls, homeConfirms, approvals, promptedAt, resolved, activity, sentTypes, userSays, modelSpeaks };
+  return { voice, peer, ch, track, phases, user, assistant, delegated, closed, exchanged, searched, homeQueries, homeControls, homeConfirms, approvals, promptedAt, expiries, resolved, activity, sentTypes, userSays, modelSpeaks };
 }
 
 afterEach(() => {
@@ -499,7 +502,7 @@ describe("RealtimeVoice home_control", () => {
     await t.voice.start();
     t.ch.emit({ type: "session.created" });
     await callControl(t, { target: "書房燈", command: "power", value: false });
-    expect(t.approvals).toEqual([{ kind: "home", id: "home_c1", device: "書房燈", room: "書房", action: "關閉" }]);
+    expect(t.approvals).toEqual([{ kind: "home", id: "home_c1", device: "書房燈", room: "書房", action: "關閉", expiresAt: Date.now() + 60_000 }]);
     const outputIndex = t.ch.sent.findIndex((e) => (e.item as { type?: string } | undefined)?.type === "function_call_output");
     expect(t.promptedAt[0]).toBeLessThanOrEqual(outputIndex);
     expect(JSON.stringify(t.ch.sent)).not.toContain("外部服務");
@@ -586,21 +589,94 @@ describe("RealtimeVoice home_control", () => {
     expect(t.ch.sent.length).toBe(sent);
   });
 
-  it("an MCP card and a home card are shown one at a time, each answered its own way", async () => {
+  it("a home card is never queued behind another card: the core drops it and the model hears busy", async () => {
     const t = setup({}, { control: () => NEEDS });
     await t.voice.start();
     t.ch.emit({ type: "session.created" });
     t.ch.emit({ type: "conversation.item.done", item: { type: "mcp_approval_request", id: "apr_m", server_label: "mail", name: "send", arguments: "{}" } });
     await callControl(t, { target: "書房燈", command: "power", value: false });
     expect(t.approvals.map((a) => a.id)).toEqual(["apr_m"]);
-    t.userSays("確認執行");
-    expect(t.ch.sent.find((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response")!.item).toMatchObject({ approval_request_id: "apr_m", approve: true });
-    expect(t.approvals.map((a) => a.id)).toEqual(["apr_m", "home_c1"]);
-    expect(t.homeConfirms).toEqual([]);
+    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: false }]);
+    expect(outputs(t)).toEqual([expect.objectContaining({ ok: true, status: "busy", device: "書房燈", action: "關閉" })]);
+    expect(t.activity.at(-1)).toContain("另一張確認卡還開著");
+    // 說出的「確認執行」只回答 MCP 那張卡，不會把家電指令一起確認。
     t.userSays("確認執行");
     await flush();
-    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: true }]);
     expect(t.ch.sent.filter((e) => (e.item as { type?: string } | undefined)?.type === "mcp_approval_response")).toHaveLength(1);
+    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: false }]);
+    expect(t.voice.pendingApproval).toBeNull();
+
+    // 卡處理完之後再說一次：照常排出家電卡。
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    expect(t.approvals.map((a) => a.id)).toEqual(["apr_m", "home_c1"]);
+    t.userSays("確認執行");
+    await flush();
+    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: false }, { id: "home_c1", approve: true }]);
+  });
+
+  it("a second home card while one is open is also busy", async () => {
+    const t = setup({}, { control: () => NEEDS });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    await callControl(t, { target: "書房燈", command: "power", value: true });
+    expect(t.approvals).toHaveLength(1);
+    expect(outputs(t).map((o) => o.status)).toEqual(["needs_confirmation", "busy"]);
+    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: false }]);
+  });
+
+  it("an MCP card that arrives while a home card is open waits, and asks the model to explain it when it surfaces", async () => {
+    const t = setup({}, { control: () => NEEDS });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    t.modelSpeaks("要關書房燈嗎？");
+    t.ch.emit({ type: "conversation.item.done", item: { type: "mcp_approval_request", id: "apr_m", server_label: "mail", name: "send", arguments: "{}" } });
+    expect(t.approvals.map((a) => a.id)).toEqual(["home_c1"]);
+    expect(JSON.stringify(t.ch.sent)).not.toContain("外部服務「mail」");
+    t.userSays("取消");
+    await flush();
+    expect(t.homeConfirms).toEqual([{ id: "home_c1", approve: false }]);
+    expect(t.approvals.map((a) => a.id)).toEqual(["home_c1", "apr_m"]);
+    t.modelSpeaks("好，沒有關。");
+    expect(notices(t).some((n) => n.includes("外部服務「mail」要執行「send」"))).toBe(true);
+  });
+
+  it("the home card never outlives the server's confirm id", async () => {
+    const t = setup({}, { control: () => ({ ...NEEDS, expires_in_s: 20 }) });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    await callControl(t, { target: "書房燈", command: "power", value: false });
+    expect(t.expiries).toEqual([Date.now() + 20_000]);
+    vi.advanceTimersByTime(19_999);
+    expect(t.resolved).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(t.resolved).toEqual([{ id: "home_c1", approved: false, outcome: "timeout" }]);
+
+    // 伺服器給的期限比 60 秒長時，仍是 60 秒。
+    const u = setup({}, { control: () => ({ ...NEEDS, expires_in_s: 90 }) });
+    await u.voice.start();
+    u.ch.emit({ type: "session.created" });
+    await callControl(u, { target: "書房燈", command: "power", value: false });
+    expect(u.expiries).toEqual([Date.now() + 60_000]);
+  });
+
+  it("a home result is spoken without waiting for an MCP call that is still running", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.mcp_call.in_progress" });
+    t.ch.emit({ type: "response.function_call_arguments.done", name: "home_control", call_id: "hc", arguments: JSON.stringify({ target: "客廳主燈", command: "power", value: false }) });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    await flush();
+    expect(outputs(t)).toEqual([CONFIRMED]);
+    expect(t.sentTypes().filter((x) => x === "response.create")).toHaveLength(1);
+    // MCP 之後才結束：它自己再接著回應一次。
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.done", response: { status: "completed" } });
+    t.ch.emit({ type: "response.output_item.done", item: { type: "mcp_call", server_label: "calendar", name: "list_events" } });
+    expect(t.sentTypes().filter((x) => x === "response.create")).toHaveLength(2);
   });
 
   it("holds the idle timer while a confirmed command is still running, and drops its result after the session ends", async () => {
@@ -636,4 +712,3 @@ describe("RealtimeVoice home_control", () => {
     expect(u.ch.sent.length).toBe(sent);
   });
 });
-

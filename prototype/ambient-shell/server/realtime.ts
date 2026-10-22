@@ -76,7 +76,7 @@ export const HOME_CONTROL_TOOL = {
   type: "function",
   name: "home_control",
   description:
-    "控制武陵居家裡的一台設備：開關、亮度、燈的色溫、顏色、音量、靜音、播放／暫停／停止、窗簾。由家裡的中控執行並回讀確認，回傳真實結果。一次只控制一台；整個房間或全家一起控制還不支援。冷氣溫度與紅外線設備（電視、冷氣遙控）還不能用語音控制。",
+    "控制武陵居家裡的一台設備：開關、亮度、燈的色溫、顏色、音量、靜音、播放／暫停／停止、窗簾。由家裡的中控執行並回讀確認，回傳真實結果。一次只控制一台；整個房間或全家一起控制還不支援。冷氣（開關與溫度）、紅外線設備（電視、冷氣遙控）與無線按鈕還不能用語音控制。",
   parameters: {
     type: "object",
     properties: {
@@ -161,7 +161,7 @@ export function buildRealtimeInstructions(
   if (caps.home) {
     abilities.push(
       "你可以查武陵居家裡的狀態：使用者問室內溫度、濕度、空氣品質或設備在不在線時呼叫 home_status，不要用猜的。回答講房間、數字和單位；readings 的 value 是 null 就說「沒有讀值」，不要說 0；data 是「快照」或「過期資料」時，依 time 與 minutes_ago 說是什麼時候、多久前的資料，不要說成現在的值。status 是 ambiguous 時問使用者是哪一個；not_found 就說家裡找不到這個名字；no_such_reading 就說那裡沒有能量這項的設備。",
-      "你也可以控制武陵居的家電：使用者要開關或調整一台設備（燈、插座、音響、窗簾）時，先說一句「好，我請中控處理」，再呼叫 home_control，一次一台。依回傳的 status 說話：confirmed 才說已經做好；unconfirmed 是已送出但設備還沒確認，請使用者看一下有沒有反應，不要說成功（why 是 no_reply 時說不確定有沒有執行）；failed 照 message 說沒有成功的原因；refused 表示指令沒有送出，照 message 說；ambiguous 問是哪一台；not_found 說家裡找不到這個名字。needs_confirmation 時用一句話說要對哪台設備做什麼，請使用者說「確認執行」或「取消」；不要再呼叫 home_control，也不能替使用者確認，結果會用系統通知送來。整個房間或全家一起控制還不支援，請使用者指定一台。color_temperature 是燈的色溫（K）；冷氣溫度與紅外線設備還不能用語音控制，使用者要求時照實說。",
+      "你也可以控制武陵居的家電：使用者要開關或調整一台設備（燈、插座、音響、窗簾）時，先說一句「好，我請中控處理」，再呼叫 home_control，一次一台。依回傳的 status 說話：confirmed 才說已經做好；unconfirmed 是已送出但設備還沒確認，請使用者看一下有沒有反應，不要說成功（why 是 no_reply 時說不確定有沒有執行）；failed 照 message 說沒有成功的原因；refused 表示指令沒有送出，照 message 說；ambiguous 問是哪一台；not_found 說家裡找不到這個名字。needs_confirmation 時用一句話說要對哪台設備做什麼，請使用者說「確認執行」或「取消」；不要再呼叫 home_control，也不能替使用者確認，結果會用系統通知送來。busy 表示另一張確認卡還沒處理完，這個指令沒有送出：請使用者先回答那張卡，之後再說一次。整個房間或全家一起控制還不支援，請使用者指定一台。color_temperature 是燈的色溫（K）；冷氣（開關與溫度）、紅外線設備與無線按鈕還不能用語音控制，使用者要求時照實說。",
     );
   }
   if (caps.mcp.length) {

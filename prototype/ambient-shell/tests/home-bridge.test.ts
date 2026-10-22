@@ -355,14 +355,15 @@ describe("realtime session with the hub configured", () => {
     expect(text).toContain("home_status");
     expect(text).toContain("home_control");
     expect(text).not.toContain("不能開關或調整家電");
-    expect(text).toContain("冷氣溫度");
+    expect(text).toContain("冷氣（開關與溫度）");
+    expect(text).toContain("busy");
     expect(text).toContain("不要說成功");
     expect(buildRealtimeInstructions([], new Date(), { webSearch: false, mcp: [] })).not.toContain("home_");
   });
 
   it("the tool's command enum is HOME_COMMANDS and says air-con and IR are not supported yet", () => {
     expect(HOME_CONTROL_TOOL.parameters.properties.command.enum).toEqual([...HOME_COMMANDS]);
-    expect(HOME_CONTROL_TOOL.description).toMatch(/冷氣溫度/);
+    expect(HOME_CONTROL_TOOL.description).toMatch(/冷氣（開關與溫度）/);
     expect(HOME_CONTROL_TOOL.description).toMatch(/紅外線/);
   });
 });
@@ -402,6 +403,13 @@ const CONTROL_HOME = {
     dev("bedside", "床頭燈", null, { can_control: false, state: { available: true, fresh: false, commands: [] } }),
     dev("speaker", "音響", null, { kind: "speaker", configured: false, can_control: false }),
     dev("ir-tv", "電視", null, { kind: "remote", infrared: { keys: [], ready: false, one_way: true }, config: { infrared_virtual: true } }),
+    // 中控匯入 Tuya 時只認得感應器、窗簾、閘道與遙控器，冷氣（kt／ktkzq）會變成 kind switch，原類別留在 config.cloud_category。
+    dev("tuya-kt", "客房冷氣", null, { kind: "switch", adapter: "tuya", config: { cloud_category: "kt" } }),
+    dev("tuya-ktkzq", "冷氣控制器", null, { kind: "switch", adapter: "tuya", config: { cloud_category: "ktkzq" } }),
+    dev("ha-climate", "主臥空調", null, { kind: "switch", adapter: "homeassistant", config: { entity_id: "climate.master_bedroom" } }),
+    dev("aifa-ac", "書房分離式", null, { kind: "other", config: { external_provider: "aifa" } }),
+    dev("tuya-wxkg", "無線按鈕", null, { kind: "remote", adapter: "tuya", config: { cloud_category: "wxkg", infrared_virtual: false } }),
+    dev("tuya-cz", "延長線", null, { kind: "switch", adapter: "tuya", config: { cloud_category: "cz" } }),
   ],
   server_time: NOW,
 };
@@ -584,6 +592,45 @@ describe("HomeBridge.control against a fake hub", () => {
     expect(hub.commands()).toHaveLength(1);
   });
 
+  it("air-cons the hub can hold (Tuya kt/ktkzq, Home Assistant climate.*, AIFA) are refused without sending; a wireless button is not called IR", async () => {
+    const hub = await controlHub();
+    const b = controller(hub.url);
+    for (const target of ["客房冷氣", "冷氣控制器", "主臥空調", "書房分離式"]) {
+      expect(await b.control({ target, command: "power", value: true })).toMatchObject({ status: "refused", reason: "unsupported", device: target, message: `${target}是冷氣，開關和溫度目前都還不能用語音控制。` });
+    }
+    const button = await b.control({ target: "無線按鈕", command: "power", value: true });
+    expect(button).toMatchObject({ status: "refused", reason: "unsupported", message: "無線按鈕這類設備（遙控器、無線按鈕）目前還不能用語音控制。" });
+    expect(JSON.stringify(button)).not.toMatch(/紅外線|冷氣/);
+    expect(hub.commands()).toHaveLength(0);
+    // 其他 Tuya 類別（cz 插座）照常送出。
+    expect(await b.control({ target: "延長線", command: "power", value: true })).toMatchObject({ status: "confirmed" });
+    expect(hub.commands()).toHaveLength(1);
+  });
+
+  it("only the hub's device_not_found 404 means not_found; any other 404 (an older hub's route) is an honest error", async () => {
+    const gone = await controlHub(() => ({ status: 404, body: { detail: { code: "device_not_found", message: "找不到這台設備" } } }));
+    expect(await controller(gone.url).control({ target: "書桌燈", command: "power", value: true })).toEqual({ ok: true, status: "not_found", target: "書桌燈" });
+    const old = await controlHub(() => ({ status: 404, body: { detail: "Not Found" } }));
+    const err = await controller(old.url).control({ target: "書桌燈", command: "power", value: true }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HomeBridgeError);
+    expect((err as HomeBridgeError).message).toContain("HTTP 404");
+    expect((err as HomeBridgeError).message).toContain("沒有送出");
+    expect(old.commands()).toHaveLength(1);
+  });
+
+  it("one same-key resend per control() call: a timeout then state_stale, or state_stale then a timeout, stop after two POSTs", async () => {
+    const stale = { status: 409, body: { detail: { code: "state_stale" } } };
+    const timedOutThenStale = await controlHub((_r, n) => (n === 1 ? { status: 200, body: confirmedBody("power"), delayMs: 400 } : stale));
+    expect(await controller(timedOutThenStale.url).control({ target: "床頭燈", command: "power", value: false })).toMatchObject({ status: "refused", reason: "not_ready" });
+    expect(timedOutThenStale.commands()).toHaveLength(2);
+    expect(timedOutThenStale.refreshes()).toHaveLength(0);
+
+    const staleThenTimedOut = await controlHub((_r, n) => (n === 1 ? stale : { status: 200, body: confirmedBody("power"), delayMs: 400 }));
+    expect(await controller(staleThenTimedOut.url).control({ target: "床頭燈", command: "power", value: false })).toMatchObject({ status: "unconfirmed", why: "no_reply" });
+    expect(staleThenTimedOut.commands()).toHaveLength(2);
+    expect(staleThenTimedOut.refreshes()).toHaveLength(1);
+  });
+
   it("a value the hub rejects (422 string detail) is refused with the hub's message", async () => {
     const hub = await controlHub(() => ({ status: 422, body: { detail: "數值必須在 0 到 100 之間" } }));
     expect(await controller(hub.url).control({ target: "書桌燈", command: "brightness", value: 50 })).toMatchObject({
@@ -636,7 +683,7 @@ describe("HomeBridge confirm path (test-only policyFor)", () => {
     const hub = await controlHub();
     const b = controller(hub.url, policy("confirm"));
     const asked = await b.control({ target: "書桌燈", command: "power", value: false });
-    expect(asked).toEqual({ ok: true, status: "needs_confirmation", confirm_id: "home_id2", device: "書桌燈", room: "書房", action: "關閉", expires_in_s: 60 });
+    expect(asked).toEqual({ ok: true, status: "needs_confirmation", confirm_id: "home_id2", device: "書桌燈", room: "書房", action: "關閉", expires_in_s: 90 });
     expect(hub.commands()).toHaveLength(0);
 
     const [first, second] = await Promise.all([b.confirm("home_id2", true), b.confirm("home_id2", true)]);

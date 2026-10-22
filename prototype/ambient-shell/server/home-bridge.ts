@@ -23,8 +23,7 @@ const COMMAND_TIMEOUT_MS = 16_000;
 const REFRESH_TIMEOUT_MS = 15_000;
 const RATE_LIMIT = 6;
 const RATE_WINDOW_MS = 60_000;
-/** 確認卡 60 秒；伺服器多留 30 秒給確認後的執行與回讀。 */
-const CONFIRM_CARD_S = 60;
+/** 伺服器端確認 ID 的期限；needs_confirmation 帶剩下的秒數，瀏覽器的確認卡取 60 秒與它的較小值。 */
 const CONFIRM_TTL_MS = 90_000;
 const MAX_PENDING = 8;
 
@@ -80,10 +79,12 @@ export interface HubDevice {
   fresh: boolean;
   /** 中控判斷的「已完成設備接入」；中控沒給時當作 true，交給中控自己拒絕。 */
   configured: boolean;
-  /** 紅外線家電或 AIFA 冷氣：要走中控的專用路徑，H1 不支援（H1b）。 */
-  separateRoute: boolean;
+  /** H1 不送 commands 的設備：冷氣與紅外線家電要走中控的專用路徑（H1b），其他遙控器／按鈕沒有可用的指令。 */
+  unsupported: UnsupportedRoute | null;
   telemetry: { metrics: HubMetric[]; status: HubDataStatus; receivedAt: number | null; source: string } | null;
 }
+
+export type UnsupportedRoute = "air_con" | "infrared" | "remote";
 
 export interface HubSnapshot {
   rooms: { id: string; name: string }[];
@@ -413,7 +414,7 @@ export class HomeBridge {
     const device = resolved.devices[0];
     const target: HomeTarget = { device: device.name, room: home.rooms.find((r) => r.id === device.roomId)?.name ?? null };
     const refuse = (reason: RefusedReason, message: string): HomeControlResult => ({ ok: true, status: "refused", reason, message, ...target });
-    if (device.separateRoute) return refuse("unsupported", `${device.name}是紅外線或冷氣設備，目前還不能用語音控制。`);
+    if (device.unsupported) return refuse("unsupported", `${device.name}${UNSUPPORTED_TEXT[device.unsupported]}`);
     if (!device.configured) return refuse("not_configured", `${device.name}還沒在中控完成設備接入，指令沒有送出。`);
 
     const policy = this.options.policyFor?.(device) ?? "allow";
@@ -425,7 +426,7 @@ export class HomeBridge {
     while (this.pending.size >= MAX_PENDING) this.pending.delete(this.pending.keys().next().value!);
     const confirmId = `home_${this.newId()}`;
     this.pending.set(confirmId, { ...entry, expiresAt: this.now() + CONFIRM_TTL_MS, run: null });
-    return { ok: true, status: "needs_confirmation", confirm_id: confirmId, action: commandText(command), expires_in_s: CONFIRM_CARD_S, ...target };
+    return { ok: true, status: "needs_confirmation", confirm_id: confirmId, action: commandText(command), expires_in_s: CONFIRM_TTL_MS / 1000, ...target };
   }
 
   /**
@@ -461,7 +462,7 @@ export class HomeBridge {
 
   /**
    * 送出一個使用者意圖。state_stale 時重新讀取設備一次，再用同一把 key 重送：中控在記下 key 之前就回 409，
-   * 所以不會執行兩次。重新讀取後仍不能控制就照實說沒有送出。
+   * 所以不會執行兩次。重新讀取後仍不能控制就照實說沒有送出。最壞的時間見 send()。
    */
   private async submit(p: Omit<PendingCommand, "expiresAt" | "run">): Promise<HomeControlResult> {
     const action = commandText(p.command);
@@ -470,8 +471,7 @@ export class HomeBridge {
     if (wait !== null) {
       return { ok: true, status: "refused", reason: "rate_limited", retry_after_s: wait, message: `一分鐘內控制指令太多，這個沒有送出，請等 ${wait} 秒再說。`, ...p.target };
     }
-    let reply = await this.send(p);
-    if (reply.kind === "stale" && (await this.refresh(p.deviceId))) reply = await this.send(p);
+    const reply = await this.send(p);
     switch (reply.kind) {
       case "result":
         if (reply.status === "confirmed") return { ...base, status: "confirmed", message: reply.message || "設備回讀已確認" };
@@ -492,16 +492,21 @@ export class HomeBridge {
     }
   }
 
-  /** POST 一次；逾時、5xx 或連線問題時用同一把 key 與內容重送一次（中控會回傳已記下的結果，不會再執行）。 */
+  /**
+   * 一個意圖最多 POST 兩次，都用同一把 key 與內容（中控會回傳已記下的結果，不會再執行）。
+   * 唯一的一次重送給第一次的逾時、5xx 或連線問題，或給 state_stale（先重新讀取設備）；重送之後不論結果都不再送。
+   * 最壞：POST 16 秒 + 重新讀取 15 秒 + POST 16 秒 = 47 秒（算法見 docs/validation/smarthome-h1-2026-10-22.md）。
+   */
   private async send(p: Omit<PendingCommand, "expiresAt" | "run">): Promise<HubReply> {
+    const path = `/api/v1/devices/${encodeURIComponent(p.deviceId)}/commands`;
     const body = JSON.stringify(toWire(p.command));
-    let maybeReceived = false;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const reply = await this.post(`/api/v1/devices/${encodeURIComponent(p.deviceId)}/commands`, body, p.key);
-      if (reply.kind !== "retry") return reply;
-      maybeReceived ||= reply.maybeReceived;
+    const first = await this.post(path, body, p.key);
+    if (first.kind === "retry") {
+      const second = await this.post(path, body, p.key);
+      return second.kind === "retry" ? { kind: "retry", maybeReceived: first.maybeReceived || second.maybeReceived } : second;
     }
-    return { kind: "retry", maybeReceived };
+    if (first.kind === "stale" && (await this.refresh(p.deviceId))) return this.post(path, body, p.key);
+    return first;
   }
 
   private async post(path: string, body: string, key: string): Promise<HubReply> {
@@ -533,7 +538,9 @@ export class HomeBridge {
     if (res.status === 409 && typeof detail === "string") return { kind: "key_conflict" };
     if (res.status === 422 && code === "unsupported_command") return { kind: "refused", reason: "unsupported", message: "沒有這項控制功能，指令沒有送出。" };
     if (res.status === 422) return { kind: "refused", reason: "invalid_value", message: message ? `中控不接受這個數值：${message}` : "中控不接受這個指令的格式。" };
-    if (res.status === 404) return { kind: "gone" };
+    if (res.status === 404 && code === "device_not_found") return { kind: "gone" };
+    // 其他 404（例如舊版中控沒有這個路徑，FastAPI 回 "Not Found"）：路徑不存在，指令沒有執行。
+    if (res.status === 404) throw new HomeBridgeError("武陵居中控沒有控制設備的介面（HTTP 404），可能是中控版本太舊；指令沒有送出。", 502);
     if (res.status >= 500) return { kind: "retry", maybeReceived: true };
     throw new HomeBridgeError(`武陵居中控回應錯誤（HTTP ${res.status}）。`, 502);
   }
@@ -606,6 +613,27 @@ function dataStatus(status: string, metrics: HubMetric[]): HubDataStatus {
   return metrics.some((m) => m.value !== null) ? "stale" : "missing";
 }
 
+/** Tuya 雲端的冷氣類別（kt 冷氣、ktkzq 冷氣控制器）；中控匯入時把它們當成 switch，只在 config.cloud_category 留下原類別。 */
+const TUYA_AIR_CON = new Set(["kt", "ktkzq"]);
+
+const UNSUPPORTED_TEXT: Record<UnsupportedRoute, string> = {
+  air_con: "是冷氣，開關和溫度目前都還不能用語音控制。",
+  infrared: "是紅外線設備，目前還不能用語音控制。",
+  remote: "這類設備（遙控器、無線按鈕）目前還不能用語音控制。",
+};
+
+/**
+ * 冷氣：AIFA、Tuya kt／ktkzq、Home Assistant 的 climate.* 實體；紅外線：中控的紅外線家電；
+ * 其他 kind 是 remote 的（例如 Tuya wxkg 無線按鈕、wnykq 紅外線控制器本身）沒有可用的控制指令。
+ */
+function unsupportedRoute(kind: string, config: Record<string, unknown>, infrared: boolean): UnsupportedRoute | null {
+  if (config.external_provider === "aifa" || kind === "air_conditioner" || TUYA_AIR_CON.has(str(config.cloud_category)) || str(config.entity_id).startsWith("climate.")) {
+    return "air_con";
+  }
+  if (infrared || config.infrared_virtual === true) return "infrared";
+  return kind === "remote" ? "remote" : null;
+}
+
 /** 解析 GET /api/v1/home；只取 AIOS 用得到的欄位。 */
 export function parseHome(body: unknown): HubSnapshot {
   if (!isRecord(body) || !Array.isArray(body.devices)) throw new Error("missing devices");
@@ -635,8 +663,7 @@ export function parseHome(body: unknown): HubSnapshot {
       available: typeof state.available === "boolean" ? state.available : null,
       fresh: state.fresh === true,
       configured: d.configured !== false,
-      separateRoute:
-        isRecord(d.infrared) || config.infrared_virtual === true || config.external_provider === "aifa" || ["remote", "air_conditioner"].includes(str(d.kind)),
+      unsupported: unsupportedRoute(str(d.kind), config, isRecord(d.infrared)),
       telemetry: t
         ? { metrics, status: dataStatus(str(t.status), metrics), receivedAt: num(t.received_at), source: str(t.source_label) }
         : null,
