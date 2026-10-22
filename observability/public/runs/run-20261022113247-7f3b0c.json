@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T11:32:47.236Z",
-  "updated_at": "2026-10-22T13:50:00.131Z",
+  "updated_at": "2026-10-22T14:00:15.759Z",
   "ended_at": null,
   "steps": [
     {
@@ -68,11 +68,16 @@
     {
       "id": "pr",
       "title": "pr",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
-      "evidence": []
+      "status": "passed",
+      "started_at": "2026-10-22T14:00:15.759Z",
+      "ended_at": "2026-10-22T14:00:15.759Z",
+      "note": "Review fixes 4462f82 (586 tests, verify-aios PASS)",
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/pull/26"
+        }
+      ]
     }
   ],
   "events": [
@@ -152,6 +157,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "Independent review of 7a7f70a: 5 findings (IR intent contains-match wrong key, unroomed AIFA ambiguity, key_id dedup, mute toggle, rate slot timing) + stale AIFA offline wording; fix round delegated"
+    },
+    {
+      "at": "2026-10-22T14:00:15.759Z",
+      "type": "step_updated",
+      "step_id": "pr",
+      "status": "passed",
+      "note": "Review fixes 4462f82 (586 tests, verify-aios PASS)"
     }
   ],
   "provenance": "Agent self-reported"
