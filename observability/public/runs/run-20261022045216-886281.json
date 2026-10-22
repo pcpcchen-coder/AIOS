@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T04:52:16.975Z",
-  "updated_at": "2026-10-22T08:05:10.558Z",
+  "updated_at": "2026-10-22T08:05:13.706Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-22T08:05:13.706Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -117,6 +117,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "Blocking: shared types + bridge; 3 workstreams on shared types; single owner per state; one implementer"
+    },
+    {
+      "at": "2026-10-22T08:05:13.706Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
