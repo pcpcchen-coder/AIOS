@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T01:04:02.355Z",
-  "updated_at": "2026-10-22T01:21:49.800Z",
+  "updated_at": "2026-10-22T01:21:53.689Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,10 +59,10 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-22T01:21:53.689Z",
       "ended_at": null,
-      "note": "",
+      "note": "Independent source and added-comment review completed; checking the small browser-discovered layout correction.",
       "evidence": []
     },
     {
@@ -152,6 +152,13 @@
       "step_id": "verify",
       "status": "running",
       "note": "Full suite passed 307 tests; targeted browser check found near-distance source-row overlap. Applying a bounded placement fix before final verification."
+    },
+    {
+      "at": "2026-10-22T01:21:53.689Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": "Independent source and added-comment review completed; checking the small browser-discovered layout correction."
     }
   ],
   "provenance": "Agent self-reported"
