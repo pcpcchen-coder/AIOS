@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T01:04:02.355Z",
-  "updated_at": "2026-10-22T01:08:08.694Z",
+  "updated_at": "2026-10-22T01:09:49.189Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,8 +23,8 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-22T01:09:49.188Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -96,6 +96,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "Traced distance events, renderer radius, reset paths and existing CSS zoom; verified panel positioning in Chromium."
+    },
+    {
+      "at": "2026-10-22T01:09:49.189Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
