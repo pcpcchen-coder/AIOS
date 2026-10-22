@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-22T03:08:22.788Z",
-  "updated_at": "2026-10-22T03:49:32.817Z",
+  "updated_at": "2026-10-22T03:49:36.145Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,8 +59,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-22T03:49:36.145Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -145,6 +145,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "tsc, 476 vitest, vite build, node --check main.mjs, verify-aios PASS; core endpoints via curl; command page rendered in Chromium with JS off; settings stepper writes voice.json; Electron menus not runnable here"
+    },
+    {
+      "at": "2026-10-22T03:49:36.145Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
