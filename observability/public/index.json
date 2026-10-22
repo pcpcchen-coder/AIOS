@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-22T08:05:14.800Z",
+  "updated_at": "2026-10-22T08:31:32.871Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,12 +9,12 @@
       "title": "H1 home_control voice tool (docs/12)",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-22T08:05:13.706Z",
+      "updated_at": "2026-10-22T08:31:31.035Z",
       "started_at": "2026-10-22T04:52:16.975Z",
       "ended_at": null,
       "branch": "claude/blissful-rubin-rbtgtk",
       "commit_sha": "",
-      "passed_steps": 3,
+      "passed_steps": 6,
       "total_steps": 7,
       "provenance": "Agent self-reported"
     },
