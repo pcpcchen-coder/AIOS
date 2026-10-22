@@ -1,0 +1,1268 @@
+{
+  "fixture": "SIMULATED API/account and external SensePipeline events; actual built application, SenseController and native Canvas in Chromium",
+  "limitations": [
+    "No physical stereo camera, image processing accuracy, real AI/account, microphone, speakers or touchscreen verified. Reduced motion provides deterministic geometry."
+  ],
+  "scope": "full",
+  "started": "2026-10-22T01:25:18.870Z",
+  "inputHashes": {
+    "src": {
+      "files": {
+        "api.ts": "cded4e7ce5b89fabac0d507a92235bdbb12feadfa5e0ca9fc6ebb004f69872f8",
+        "approval.ts": "c5976133059ea9e2203fa7c21922f1e4a83546004a47f7fd3f3571fb9836e9db",
+        "brain.ts": "8d8768e2eaa5db9fe9497bb1eda2b52835105c9a2502c917a8b6b4a6ec805f61",
+        "conversation.ts": "7fa79beefbba22951ed071ec6234fd4a615cd74982b329fa8d8570b841b8867e",
+        "echo.ts": "874319fc0fd9c60ac88611ab608d9a99adab56b79fc88a1a74c2d34bf6d21626",
+        "format.ts": "30cbce6deadaced340112f5ef91ef340fa9bd8c2aebd9e66f91be4ae091d1772",
+        "icons.ts": "716644d415e177b8fb16dfcf1f95788ed7e6fe4338f9bc9cda778491be2d3412",
+        "intent.ts": "4df7957f80e0845192f06cac248de553f358a06db4fa18482b7d5958c2db36c5",
+        "main.ts": "08d6db650879bbc7b7ab99b17966e94f1c55de1b23e11dcc18304202b9b2e8f7",
+        "presentation-policy.ts": "e9ef10ad099e1cfc32b256ee689bde9ab7edab7e7b42e868cd99c20cc9ba4b7a",
+        "realtime.ts": "bbcca96f0db2e5d0a36859a2b3caf04ed6dc84aab51c5541e2ef1a45cb411f2d",
+        "region-activity.ts": "9f1af7be82a9710f19e0e0edf9cbddb099644a1d120b6fc6ab30af2514558843",
+        "sense/controller.ts": "2bdc1d4cc1583d45aacdcd68433aba1a04a4fcad47358817160803326e7dd63b",
+        "sense/geometry.ts": "a85622390381d8a5b02ba0862f7cb527b2fdedca9b7b1b8eb519632b53f13547",
+        "sense/pipeline.ts": "4d9496168a9a56fb3d5fa2988d48edb0a2085bc88ef88d4f5e4386de0c9ab131",
+        "sense/processor.ts": "2d32bf23a67e37addd787b5c9d3be5929c2da8df58dc8cf5a1a7c1d660cc044a",
+        "sense/trackers.ts": "07b889f3ac2e29a043facf6139fccc1793d2a55804c0889ecfc0960c2534077a",
+        "shell-state.ts": "9472b155a9770c99261e4c5ba3ae359626814182bd1358cc5c5ff689caaea95f",
+        "speech-text.ts": "43310b22d1b4ec319890aff019141212ec504a9f2169ee6ab6b8e9e38d5c429c",
+        "style.css": "d73dadb8efafb2547b316590ed4c9a0b3e5e1b92c423a0b448bada2707edb753",
+        "views.ts": "a49c0ace32bb87b38f06fb1c3a2e8b2d5bc2ff07ad4cd1dcf00d6f776a512dcf",
+        "voice.ts": "f800dc248c9fd45b7b3e4c3a5a21c950cd37c96e06c42138d9757501ce26044c"
+      },
+      "sha256": "6ad0c29e7016b10715183119bb42b3c333bcce4996b9c32b18ef43c583d57bbe"
+    },
+    "shared": {
+      "files": {
+        "domain.ts": "b3ff423c9197a52f11c6af32f7a93bfa70670e7784f3d81528b1347ac818b006",
+        "home.ts": "5ceb4f4be30930327ddf9858f495b75cdb41400d69c28a4032014de4781b5cd1",
+        "progress.ts": "7c792f4de2b6541f1935a634b3f657114af445cc3868ec6ca5f886080707f582",
+        "sense.ts": "8a77ab5f11e75a67b2dbffa49fc2815771188136a113b3e372d8d78fe1d6fafe",
+        "types.ts": "811898a491430402eed62c77ead625d98be33eab2626b8a412e7ba9285989b4d"
+      },
+      "sha256": "a5b280152e6fd0e45ef1ebc12630111288778f0f41f559ea445f8306e8505917"
+    },
+    "entry": "c4352e711dcae257e71f578a8774545b3445db61144578aaec6e7211c9768bd4",
+    "dist": {
+      "files": {
+        "assets/index-B5NaHSGD.css": "9764ecb4b2ec51004f105fd7248e0b3c05ce58b95e46fa3077209bdbd59287c3",
+        "assets/index-DZwnPQdX.js": "c4e9c9b893e3c1d104043613d02c5a74bf36e283c45b766d6dc57bdaae59dae2",
+        "assets/pipeline-37zaRa1H.js": "031ef94861afa1c6e6497b43c52c3029bc8ef0878cd8bde294c5b731f82c689e",
+        "assets/vision_bundle-BR8kQ0UB.js": "ecc8ae127edd2115bd0f96cb339a657277c340b22eb21d5572ea1cebb12a0a0f",
+        "index.html": "7971696425bd55129e75098cc95a8ff37b317c4dd69397e4c4c52d28161d2792"
+      },
+      "sha256": "90ffda33c32c8aa6e82705d7aa26dcfacda4e9e2774200e698edfdcce9e05318"
+    },
+    "harness": "963d1367239fbc4520d22a606de72732df08f703d52bb1827ccb67db433786d1"
+  },
+  "servedAssets": {
+    "index.html": "7971696425bd55129e75098cc95a8ff37b317c4dd69397e4c4c52d28161d2792",
+    "assets/index-DZwnPQdX.js": "c4e9c9b893e3c1d104043613d02c5a74bf36e283c45b766d6dc57bdaae59dae2",
+    "assets/index-B5NaHSGD.css": "9764ecb4b2ec51004f105fd7248e0b3c05ce58b95e46fa3077209bdbd59287c3"
+  },
+  "fixtureModules": [
+    {
+      "path": "assets/pipeline-37zaRa1H.js",
+      "sourceSha256": "031ef94861afa1c6e6497b43c52c3029bc8ef0878cd8bde294c5b731f82c689e",
+      "servedSha256": "c3970a3b07f01eabc968fbeb7b8b945d7be7b55daf526a5bd818556a6b095bf5"
+    }
+  ],
+  "cases": [
+    {
+      "name": "measured-distance-actual-canvas-and-refresh",
+      "status": "passed",
+      "values": [
+        {
+          "meters": 1.5,
+          "scale": 0.75,
+          "frame": 3,
+          "timestampMs": 341,
+          "rx": 218.70000000000002,
+          "radius": 135,
+          "cx": 640,
+          "cy": 423,
+          "dpr": 1,
+          "requestedAfterFrame": 1,
+          "requestedAtMs": 213.90000000596046,
+          "priorStableFrame": 2,
+          "priorStableTimestampMs": 240.90000000596046
+        },
+        {
+          "meters": 2,
+          "scale": 1,
+          "frame": 6,
+          "timestampMs": 657.5,
+          "rx": 291.6,
+          "radius": 180,
+          "cx": 640,
+          "cy": 423,
+          "dpr": 1,
+          "requestedAfterFrame": 4,
+          "requestedAtMs": 452.90000000596046,
+          "priorStableFrame": 5,
+          "priorStableTimestampMs": 557.5999999940395
+        },
+        {
+          "meters": 3,
+          "scale": 1.5,
+          "frame": 8,
+          "timestampMs": 857.5999999940395,
+          "rx": 403.09411764705885,
+          "radius": 248.8235294117647,
+          "cx": 640,
+          "cy": 423,
+          "dpr": 1,
+          "requestedAfterFrame": 6,
+          "requestedAtMs": 682.9000000059605,
+          "priorStableFrame": 7,
+          "priorStableTimestampMs": 758.2000000178814
+        }
+      ],
+      "afterRefresh": {
+        "frame": 10,
+        "timestampMs": 1057.5,
+        "rx": 403.09411764705885,
+        "radius": 248.8235294117647,
+        "cx": 640,
+        "cy": 423,
+        "dpr": 1,
+        "requestedAfterFrame": 8,
+        "requestedAtMs": 910.9000000059605,
+        "priorStableFrame": 9,
+        "priorStableTimestampMs": 957.5999999940395
+      },
+      "screenshot": "/tmp/aios-distance-brain/browser-final-timestamped/far-distance-fixture.png"
+    },
+    {
+      "name": "missing-distance-and-sensor-reset-paths",
+      "status": "passed",
+      "resets": [
+        {
+          "event": {
+            "type": "presence",
+            "present": true,
+            "distance_m": null
+          },
+          "normal": {
+            "frame": 3,
+            "timestampMs": 340.40000000596046,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 1,
+            "requestedAtMs": 213.2000000178814,
+            "priorStableFrame": 2,
+            "priorStableTimestampMs": 240.09999999403954
+          },
+          "far": {
+            "frame": 6,
+            "timestampMs": 656.9000000059605,
+            "rx": 403.09411764705885,
+            "radius": 248.8235294117647,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 3,
+            "requestedAtMs": 442.09999999403954,
+            "priorStableFrame": 4,
+            "priorStableTimestampMs": 458.09999999403954
+          },
+          "reset": {
+            "frame": 8,
+            "timestampMs": 857,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 6,
+            "requestedAtMs": 671.2000000178814,
+            "priorStableFrame": 7,
+            "priorStableTimestampMs": 756.8000000119209
+          }
+        },
+        {
+          "event": {
+            "type": "presence",
+            "present": false,
+            "distance_m": null
+          },
+          "normal": {
+            "frame": 3,
+            "timestampMs": 411.19999998807907,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 1,
+            "requestedAtMs": 283.59999999403954,
+            "priorStableFrame": 2,
+            "priorStableTimestampMs": 311.40000000596046
+          },
+          "far": {
+            "frame": 6,
+            "timestampMs": 728,
+            "rx": 403.09411764705885,
+            "radius": 248.8235294117647,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 4,
+            "requestedAtMs": 522.7999999821186,
+            "priorStableFrame": 5,
+            "priorStableTimestampMs": 627.9000000059605
+          },
+          "reset": {
+            "frame": 8,
+            "timestampMs": 944.5999999940395,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 6,
+            "requestedAtMs": 756.7999999821186,
+            "priorStableFrame": 7,
+            "priorStableTimestampMs": 844.5999999940395
+          }
+        },
+        {
+          "event": {
+            "type": "sensor",
+            "state": "off",
+            "detail": "FIXTURE off"
+          },
+          "normal": {
+            "frame": 3,
+            "timestampMs": 350.69999998807907,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 1,
+            "requestedAtMs": 189.5,
+            "priorStableFrame": 2,
+            "priorStableTimestampMs": 234.09999999403954
+          },
+          "far": {
+            "frame": 5,
+            "timestampMs": 550.6999999880791,
+            "rx": 403.09411764705885,
+            "radius": 248.8235294117647,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 3,
+            "requestedAtMs": 419.5,
+            "priorStableFrame": 4,
+            "priorStableTimestampMs": 450.69999998807907
+          },
+          "reset": {
+            "frame": 8,
+            "timestampMs": 851.5999999940395,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 5,
+            "requestedAtMs": 646.5,
+            "priorStableFrame": 7,
+            "priorStableTimestampMs": 750.6999999880791
+          }
+        },
+        {
+          "event": {
+            "type": "sensor",
+            "state": "error",
+            "detail": "FIXTURE error"
+          },
+          "normal": {
+            "frame": 3,
+            "timestampMs": 362.59999999403954,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 1,
+            "requestedAtMs": 193.5,
+            "priorStableFrame": 2,
+            "priorStableTimestampMs": 245
+          },
+          "far": {
+            "frame": 5,
+            "timestampMs": 579.5,
+            "rx": 403.09411764705885,
+            "radius": 248.8235294117647,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 3,
+            "requestedAtMs": 424.09999999403954,
+            "priorStableFrame": 4,
+            "priorStableTimestampMs": 462
+          },
+          "reset": {
+            "frame": 7,
+            "timestampMs": 795.4000000059605,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 5,
+            "requestedAtMs": 651.4000000059605,
+            "priorStableFrame": 6,
+            "priorStableTimestampMs": 678.4000000059605
+          }
+        },
+        {
+          "event": {
+            "type": "sensor",
+            "state": "degraded",
+            "detail": "FIXTURE degraded"
+          },
+          "normal": {
+            "frame": 3,
+            "timestampMs": 366.69999998807907,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 1,
+            "requestedAtMs": 189.5,
+            "priorStableFrame": 2,
+            "priorStableTimestampMs": 249.90000000596046
+          },
+          "far": {
+            "frame": 5,
+            "timestampMs": 566.6999999880791,
+            "rx": 403.09411764705885,
+            "radius": 248.8235294117647,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 3,
+            "requestedAtMs": 420,
+            "priorStableFrame": 4,
+            "priorStableTimestampMs": 466.80000001192093
+          },
+          "reset": {
+            "frame": 7,
+            "timestampMs": 783.1999999880791,
+            "rx": 291.6,
+            "radius": 180,
+            "cx": 640,
+            "cy": 423,
+            "dpr": 1,
+            "requestedAfterFrame": 5,
+            "requestedAtMs": 648.5999999940395,
+            "priorStableFrame": 6,
+            "priorStableTimestampMs": 683.5
+          }
+        }
+      ],
+      "screenshot": "/tmp/aios-distance-brain/browser-final-timestamped/degraded-reset-fixture.png"
+    },
+    {
+      "name": "top-layout-distance-and-single-panel-scale",
+      "status": "passed",
+      "values": [
+        {
+          "meters": 1.5,
+          "scale": 0.75,
+          "canvas": {
+            "frame": 5,
+            "timestampMs": 550.7000000178814,
+            "rx": 76.54500000000002,
+            "radius": 47.25000000000001,
+            "cx": 640,
+            "cy": 81,
+            "dpr": 1,
+            "requestedAfterFrame": 2,
+            "requestedAtMs": 326,
+            "priorStableFrame": 3,
+            "priorStableTimestampMs": 361.40000000596046
+          },
+          "panel": {
+            "x": 347.5,
+            "y": 163,
+            "width": 585,
+            "height": 484.984375
+          }
+        },
+        {
+          "meters": 2,
+          "scale": 1,
+          "canvas": {
+            "frame": 7,
+            "timestampMs": 750.7000000178814,
+            "rx": 102.06000000000002,
+            "radius": 63.00000000000001,
+            "cx": 640,
+            "cy": 108,
+            "dpr": 1,
+            "requestedAfterFrame": 5,
+            "requestedAtMs": 564.6000000238419,
+            "priorStableFrame": 6,
+            "priorStableTimestampMs": 650.8000000119209
+          },
+          "panel": {
+            "x": 250,
+            "y": 217.34375,
+            "width": 780,
+            "height": 646.640625
+          }
+        },
+        {
+          "meters": 3,
+          "scale": 1.5,
+          "canvas": {
+            "frame": 9,
+            "timestampMs": 967.2000000178814,
+            "rx": 153.09000000000003,
+            "radius": 94.50000000000001,
+            "cx": 640,
+            "cy": 162,
+            "dpr": 1,
+            "requestedAfterFrame": 7,
+            "requestedAtMs": 794.5,
+            "priorStableFrame": 8,
+            "priorStableTimestampMs": 852.1000000238419
+          },
+          "panel": {
+            "x": 55,
+            "y": 326.015625,
+            "width": 1170,
+            "height": 969.96875
+          }
+        }
+      ],
+      "screenshot": "/tmp/aios-distance-brain/browser-final-timestamped/top-far-distance-fixture.png"
+    },
+    {
+      "name": "responsive-distance-resize-and-high-dpi",
+      "status": "passed",
+      "viewports": [
+        {
+          "viewport": {
+            "width": 1920,
+            "height": 1080
+          },
+          "values": [
+            {
+              "meters": 1.5,
+              "canvas": {
+                "frame": 3,
+                "timestampMs": 366.2999999821186,
+                "rx": 262.44,
+                "radius": 162,
+                "cx": 960,
+                "cy": 507.6000061035156,
+                "dpr": 1,
+                "requestedAfterFrame": 1,
+                "requestedAtMs": 237.19999998807907,
+                "priorStableFrame": 2,
+                "priorStableTimestampMs": 250.5
+              }
+            },
+            {
+              "meters": 2,
+              "canvas": {
+                "frame": 6,
+                "timestampMs": 683.0999999940395,
+                "rx": 349.92,
+                "radius": 216,
+                "cx": 960,
+                "cy": 507.6000061035156,
+                "dpr": 1,
+                "requestedAfterFrame": 4,
+                "requestedAtMs": 514.0999999940395,
+                "priorStableFrame": 5,
+                "priorStableTimestampMs": 583
+              }
+            },
+            {
+              "meters": 3,
+              "canvas": {
+                "frame": 8,
+                "timestampMs": 882.7999999821186,
+                "rx": 483.71294117647057,
+                "radius": 298.5882352941176,
+                "cx": 960,
+                "cy": 507.6000061035156,
+                "dpr": 1,
+                "requestedAfterFrame": 6,
+                "requestedAtMs": 753.5,
+                "priorStableFrame": 7,
+                "priorStableTimestampMs": 782.9000000059605
+              }
+            }
+          ],
+          "top": {
+            "frame": 12,
+            "timestampMs": 1299.5999999940395,
+            "rx": 183.70800000000003,
+            "radius": 113.4,
+            "cx": 960,
+            "cy": 194.39999389648438,
+            "dpr": 1,
+            "requestedAfterFrame": 9,
+            "requestedAtMs": 1077.9000000059605,
+            "priorStableFrame": 10,
+            "priorStableTimestampMs": 1105.4000000059605
+          },
+          "panel": {
+            "x": 375,
+            "y": 385.828125,
+            "width": 1170,
+            "height": 1169.359375
+          }
+        },
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "values": [
+            {
+              "meters": 1.5,
+              "canvas": {
+                "frame": 3,
+                "timestampMs": 336.19999998807907,
+                "rx": 94.77000000000001,
+                "radius": 58.5,
+                "cx": 195,
+                "cy": 396.67999267578125,
+                "dpr": 1,
+                "requestedAfterFrame": 1,
+                "requestedAtMs": 173.09999999403954,
+                "priorStableFrame": 2,
+                "priorStableTimestampMs": 219.59999999403954
+              }
+            },
+            {
+              "meters": 2,
+              "canvas": {
+                "frame": 6,
+                "timestampMs": 636.1999999880791,
+                "rx": 126.36000000000001,
+                "radius": 78,
+                "cx": 195,
+                "cy": 396.67999267578125,
+                "dpr": 1,
+                "requestedAfterFrame": 3,
+                "requestedAtMs": 433,
+                "priorStableFrame": 5,
+                "priorStableTimestampMs": 536.1999999880791
+              }
+            },
+            {
+              "meters": 3,
+              "canvas": {
+                "frame": 8,
+                "timestampMs": 852.7999999821186,
+                "rx": 185.82352941176472,
+                "radius": 114.70588235294117,
+                "cx": 195,
+                "cy": 396.67999267578125,
+                "dpr": 1,
+                "requestedAfterFrame": 6,
+                "requestedAtMs": 677.0999999940395,
+                "priorStableFrame": 7,
+                "priorStableTimestampMs": 752.6999999880791
+              }
+            }
+          ],
+          "top": {
+            "frame": 11,
+            "timestampMs": 1152.7999999821186,
+            "rx": 66.33900000000001,
+            "radius": 40.95,
+            "cx": 195,
+            "cy": 151.9199981689453,
+            "dpr": 1,
+            "requestedAfterFrame": 9,
+            "requestedAtMs": 971.6999999880791,
+            "priorStableFrame": 10,
+            "priorStableTimestampMs": 1052.7999999821186
+          },
+          "panel": {
+            "x": -79.9453125,
+            "y": 238.296875,
+            "width": 549.890625,
+            "height": 977.0625
+          }
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "values": [
+            {
+              "meters": 1.5,
+              "canvas": {
+                "frame": 3,
+                "timestampMs": 355.90000000596046,
+                "rx": 94.77000000000001,
+                "radius": 58.5,
+                "cx": 422,
+                "cy": 183.3000030517578,
+                "dpr": 1,
+                "requestedAfterFrame": 1,
+                "requestedAtMs": 192.2000000178814,
+                "priorStableFrame": 2,
+                "priorStableTimestampMs": 256
+              }
+            },
+            {
+              "meters": 2,
+              "canvas": {
+                "frame": 6,
+                "timestampMs": 672.5,
+                "rx": 126.36000000000001,
+                "radius": 78,
+                "cx": 422,
+                "cy": 183.3000030517578,
+                "dpr": 1,
+                "requestedAfterFrame": 4,
+                "requestedAtMs": 465.80000001192093,
+                "priorStableFrame": 5,
+                "priorStableTimestampMs": 572.5
+              }
+            },
+            {
+              "meters": 3,
+              "canvas": {
+                "frame": 8,
+                "timestampMs": 872.4000000059605,
+                "rx": 174.6741176470588,
+                "radius": 107.8235294117647,
+                "cx": 422,
+                "cy": 183.3000030517578,
+                "dpr": 1,
+                "requestedAfterFrame": 6,
+                "requestedAtMs": 709.6000000238419,
+                "priorStableFrame": 7,
+                "priorStableTimestampMs": 772.4000000059605
+              }
+            }
+          ],
+          "top": {
+            "frame": 11,
+            "timestampMs": 1205.800000011921,
+            "rx": 66.33900000000001,
+            "radius": 40.95,
+            "cx": 422,
+            "cy": 70.19999694824219,
+            "dpr": 1,
+            "requestedAfterFrame": 9,
+            "requestedAtMs": 1005.9000000059605,
+            "priorStableFrame": 10,
+            "priorStableTimestampMs": 1105.800000011921
+          },
+          "panel": {
+            "x": -163,
+            "y": 156.5625,
+            "width": 1170,
+            "height": 405.015625
+          }
+        }
+      ],
+      "screenshots": [
+        "/tmp/aios-distance-brain/browser-final-timestamped/top-1920x1080-far-fixture.png",
+        "/tmp/aios-distance-brain/browser-final-timestamped/top-390x844-far-fixture.png",
+        "/tmp/aios-distance-brain/browser-final-timestamped/top-844x390-far-fixture.png"
+      ],
+      "afterResize": {
+        "frame": 13,
+        "timestampMs": 1422.6000000238419,
+        "rx": 185.82352941176472,
+        "radius": 114.70588235294117,
+        "cx": 195,
+        "cy": 396.67999267578125,
+        "dpr": 1,
+        "requestedAfterFrame": 11,
+        "requestedAtMs": 1302.2000000178814,
+        "priorStableFrame": 12,
+        "priorStableTimestampMs": 1323.4000000059605
+      },
+      "highDpi": {
+        "frame": 3,
+        "timestampMs": 368,
+        "rx": 291.6,
+        "radius": 180,
+        "cx": 640,
+        "cy": 423,
+        "dpr": 2,
+        "requestedAfterFrame": 1,
+        "requestedAtMs": 239.40000000596046,
+        "priorStableFrame": 2,
+        "priorStableTimestampMs": 251.80000001192093
+      }
+    },
+    {
+      "name": "active-region-labels-and-control-clearance",
+      "status": "passed",
+      "viewports": [
+        {
+          "viewport": {
+            "width": 390,
+            "height": 844
+          },
+          "canvas": {
+            "frame": 3,
+            "timestampMs": 339.19999998807907,
+            "rx": 185.82352941176472,
+            "radius": 114.70588235294117,
+            "cx": 195,
+            "cy": 396.67999267578125,
+            "dpr": 1,
+            "requestedAfterFrame": 1,
+            "requestedAtMs": 194.2999999821186,
+            "priorStableFrame": 2,
+            "priorStableTimestampMs": 239.69999998807907
+          },
+          "labels": [
+            {
+              "text": "語言區 · 模擬任務",
+              "left": 284.5432891845703,
+              "top": 352.28106604284596,
+              "right": 378,
+              "bottom": 366.28106604284596,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "數理區 · 模擬任務",
+              "left": 69.92136046462693,
+              "top": 253.50193961844758,
+              "right": 163.37807128005662,
+              "bottom": 266.5019396184476,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "藝術區 · 模擬任務",
+              "left": 284.5432891845703,
+              "top": 502.34065046234963,
+              "right": 378,
+              "bottom": 515.3406504623497,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "聽覺區 · 模擬任務",
+              "left": 219.54308603223666,
+              "top": 252.5232106269491,
+              "right": 312.99979684766635,
+              "bottom": 265.5232106269491,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "視覺區 · 模擬任務",
+              "left": 12,
+              "top": 347.8662608715788,
+              "right": 105.45671081542969,
+              "bottom": 361.8662608715788,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "規劃區 · 模擬任務",
+              "left": 284.5432891845703,
+              "top": 307.97881622164886,
+              "right": 378,
+              "bottom": 321.97881622164886,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            }
+          ],
+          "activity": {
+            "x": 19.5,
+            "y": 623.53125,
+            "width": 351,
+            "height": 36
+          },
+          "entry": {
+            "x": 125.9921875,
+            "y": 571.53125,
+            "width": 138.015625,
+            "height": 46
+          },
+          "typingActivity": {
+            "x": 19.5,
+            "y": 60,
+            "width": 351,
+            "height": 36
+          },
+          "command": {
+            "x": 15.6015625,
+            "y": 587,
+            "width": 358.796875,
+            "height": 78
+          },
+          "topDistances": [
+            {
+              "meters": 1.5,
+              "canvas": {
+                "frame": 8,
+                "timestampMs": 839.0999999940395,
+                "rx": 33.169500000000006,
+                "radius": 20.475,
+                "cx": 195,
+                "cy": 75.95999908447266,
+                "dpr": 1,
+                "requestedAfterFrame": 5,
+                "requestedAtMs": 631.5,
+                "priorStableFrame": 7,
+                "priorStableTimestampMs": 739.0999999940395
+              },
+              "activity": {
+                "x": 19.5,
+                "y": 95.140625,
+                "width": 351,
+                "height": 18
+              },
+              "panel": {
+                "x": 57.53125,
+                "y": 119.140625,
+                "width": 274.9375,
+                "height": 488.53125
+              },
+              "closeButton": {
+                "x": 70.53125,
+                "y": 936.640625,
+                "width": 42.5,
+                "height": 26.5
+              }
+            },
+            {
+              "meters": 2,
+              "canvas": {
+                "frame": 10,
+                "timestampMs": 1039.4000000059605,
+                "rx": 44.22600000000001,
+                "radius": 27.300000000000008,
+                "cx": 195,
+                "cy": 101.27999877929688,
+                "dpr": 1,
+                "requestedAfterFrame": 8,
+                "requestedAtMs": 873.4000000059605,
+                "priorStableFrame": 9,
+                "priorStableTimestampMs": 939.1999999880791
+              },
+              "activity": {
+                "x": 19.5,
+                "y": 134.859375,
+                "width": 351,
+                "height": 18
+              },
+              "panel": {
+                "x": 11.703125,
+                "y": 158.859375,
+                "width": 366.59375,
+                "height": 651.375
+              },
+              "closeButton": {
+                "x": 28.703125,
+                "y": 1232.859375,
+                "width": 56.015625,
+                "height": 35
+              }
+            },
+            {
+              "meters": 3,
+              "canvas": {
+                "frame": 12,
+                "timestampMs": 1255.9000000059605,
+                "rx": 66.33900000000001,
+                "radius": 40.95,
+                "cx": 195,
+                "cy": 151.9199981689453,
+                "dpr": 1,
+                "requestedAfterFrame": 10,
+                "requestedAtMs": 1114.7999999821186,
+                "priorStableFrame": 11,
+                "priorStableTimestampMs": 1139
+              },
+              "activity": {
+                "x": 19.5,
+                "y": 214.296875,
+                "width": 351,
+                "height": 18
+              },
+              "panel": {
+                "x": -79.9453125,
+                "y": 238.296875,
+                "width": 549.890625,
+                "height": 977.0625
+              },
+              "closeButton": {
+                "x": -54.9453125,
+                "y": 1777.296875,
+                "width": 83.015625,
+                "height": 52
+              }
+            }
+          ]
+        },
+        {
+          "viewport": {
+            "width": 844,
+            "height": 390
+          },
+          "canvas": {
+            "frame": 3,
+            "timestampMs": 341.60000002384186,
+            "rx": 174.6741176470588,
+            "radius": 107.8235294117647,
+            "cx": 422,
+            "cy": 183.3000030517578,
+            "dpr": 1,
+            "requestedAfterFrame": 1,
+            "requestedAtMs": 182,
+            "priorStableFrame": 2,
+            "priorStableTimestampMs": 241.60000002384186
+          },
+          "labels": [
+            {
+              "text": "語言區 · 模擬任務",
+              "left": 563.3409925277685,
+              "top": 141.05031703337437,
+              "right": 656.7977033431982,
+              "bottom": 155.05031703337437,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "數理區 · 模擬任務",
+              "left": 298.4586765066244,
+              "top": 48.25793569001357,
+              "right": 391.9153873220541,
+              "bottom": 61.25793569001357,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "藝術區 · 模擬任務",
+              "left": 507.68868180313996,
+              "top": 282.1663245792755,
+              "right": 601.1453926185696,
+              "bottom": 295.1663245792755,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "聽覺區 · 模擬任務",
+              "left": 445.4304814785347,
+              "top": 47.33792824600772,
+              "right": 538.8871922939644,
+              "bottom": 60.33792824600772,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "視覺區 · 模擬任務",
+              "left": 188.49484563619717,
+              "top": 136.90039799639166,
+              "right": 281.95155645162686,
+              "bottom": 150.90039799639166,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            },
+            {
+              "text": "規劃區 · 模擬任務",
+              "left": 541.9760611638168,
+              "top": 99.40620065894531,
+              "right": 635.4327719792465,
+              "bottom": 113.40620065894531,
+              "font": "500 12px \"Noto Sans TC\", \"PingFang TC\", system-ui, sans-serif"
+            }
+          ],
+          "activity": {
+            "x": 42.203125,
+            "y": 302,
+            "width": 759.59375,
+            "height": 18
+          },
+          "entry": {
+            "x": 352.9921875,
+            "y": 250,
+            "width": 138.015625,
+            "height": 46
+          },
+          "typingActivity": {
+            "x": 42.203125,
+            "y": 60,
+            "width": 759.59375,
+            "height": 18
+          },
+          "command": {
+            "x": 112,
+            "y": 270,
+            "width": 620,
+            "height": 106
+          },
+          "topDistances": [
+            {
+              "meters": 1.5,
+              "canvas": {
+                "frame": 7,
+                "timestampMs": 758.8000000119209,
+                "rx": 33.169500000000006,
+                "radius": 20.475,
+                "cx": 422,
+                "cy": 35.099998474121094,
+                "dpr": 1,
+                "requestedAfterFrame": 5,
+                "requestedAtMs": 632.2000000178814,
+                "priorStableFrame": 6,
+                "priorStableTimestampMs": 650.1000000238419
+              },
+              "activity": {
+                "x": 42.203125,
+                "y": 54.28125,
+                "width": 759.59375,
+                "height": 18
+              },
+              "panel": {
+                "x": 129.5,
+                "y": 78.28125,
+                "width": 585,
+                "height": 202.5
+              },
+              "closeButton": {
+                "x": 148.5,
+                "y": 758.78125,
+                "width": 42.5,
+                "height": 26.5
+              }
+            },
+            {
+              "meters": 2,
+              "canvas": {
+                "frame": 10,
+                "timestampMs": 1074.800000011921,
+                "rx": 44.22600000000001,
+                "radius": 27.300000000000008,
+                "cx": 422,
+                "cy": 46.79999923706055,
+                "dpr": 1,
+                "requestedAfterFrame": 8,
+                "requestedAtMs": 877.7000000178814,
+                "priorStableFrame": 9,
+                "priorStableTimestampMs": 958.4000000059605
+              },
+              "activity": {
+                "x": 42.203125,
+                "y": 80.375,
+                "width": 759.59375,
+                "height": 18
+              },
+              "panel": {
+                "x": 32,
+                "y": 104.375,
+                "width": 780,
+                "height": 270
+              },
+              "closeButton": {
+                "x": 57,
+                "y": 1008.375,
+                "width": 56.015625,
+                "height": 35
+              }
+            },
+            {
+              "meters": 3,
+              "canvas": {
+                "frame": 12,
+                "timestampMs": 1274.7000000178814,
+                "rx": 66.33900000000001,
+                "radius": 40.95,
+                "cx": 422,
+                "cy": 70.19999694824219,
+                "dpr": 1,
+                "requestedAfterFrame": 10,
+                "requestedAtMs": 1114.800000011921,
+                "priorStableFrame": 11,
+                "priorStableTimestampMs": 1174.7000000178814
+              },
+              "activity": {
+                "x": 42.203125,
+                "y": 132.5625,
+                "width": 759.59375,
+                "height": 18
+              },
+              "panel": {
+                "x": -163,
+                "y": 156.5625,
+                "width": 1170,
+                "height": 405.015625
+              },
+              "closeButton": {
+                "x": -126,
+                "y": 1484.5625,
+                "width": 83.015625,
+                "height": 52
+              }
+            }
+          ]
+        }
+      ],
+      "screenshots": [
+        "/tmp/aios-distance-brain/browser-final-timestamped/active-390x844-far-fixture.png",
+        "/tmp/aios-distance-brain/browser-final-timestamped/active-844x390-far-fixture.png"
+      ]
+    },
+    {
+      "name": "scaled-hit-area-and-camera-off-command",
+      "status": "passed",
+      "afterOff": {
+        "frame": 10,
+        "timestampMs": 1064.2000000178814,
+        "rx": 291.6,
+        "radius": 180,
+        "cx": 640,
+        "cy": 423,
+        "dpr": 1,
+        "requestedAfterFrame": 8,
+        "requestedAtMs": 887.9000000059605,
+        "priorStableFrame": 9,
+        "priorStableTimestampMs": 947.5
+      },
+      "far": {
+        "frame": 3,
+        "timestampMs": 331,
+        "rx": 403.09411764705885,
+        "radius": 248.8235294117647,
+        "cx": 640,
+        "cy": 423,
+        "dpr": 1,
+        "requestedAfterFrame": 1,
+        "requestedAtMs": 202,
+        "priorStableFrame": 2,
+        "priorStableTimestampMs": 231.2000000178814
+      },
+      "near": {
+        "frame": 6,
+        "timestampMs": 647.7000000178814,
+        "rx": 218.70000000000002,
+        "radius": 135,
+        "cx": 640,
+        "cy": 423,
+        "dpr": 1,
+        "requestedAfterFrame": 4,
+        "requestedAtMs": 481.60000002384186,
+        "priorStableFrame": 5,
+        "priorStableTimestampMs": 547.6000000238419
+      },
+      "point": {
+        "x": 938.5882352941176,
+        "y": 423
+      },
+      "screenshot": "/tmp/aios-distance-brain/browser-final-timestamped/camera-off-reset-fixture.png"
+    }
+  ],
+  "browserErrors": [],
+  "requests": [
+    {
+      "case": "measured-distance-actual-canvas-and-refresh",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "missing-distance-and-sensor-reset-paths",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "missing-distance-and-sensor-reset-paths",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "missing-distance-and-sensor-reset-paths",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "missing-distance-and-sensor-reset-paths",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "missing-distance-and-sensor-reset-paths",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "top-layout-distance-and-single-panel-scale",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "responsive-distance-resize-and-high-dpi",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "responsive-distance-resize-and-high-dpi",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "responsive-distance-resize-and-high-dpi",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "responsive-distance-resize-and-high-dpi",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "active-region-labels-and-control-clearance",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "active-region-labels-and-control-clearance",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "scaled-hit-area-and-camera-off-command",
+      "method": "GET",
+      "path": "/api/events",
+      "body": null
+    },
+    {
+      "case": "scaled-hit-area-and-camera-off-command",
+      "method": "POST",
+      "path": "/api/settings/camera",
+      "body": {
+        "active": false
+      }
+    }
+  ],
+  "runtime": {
+    "node": "v24.19.0",
+    "chromium": "154.0.8037.57"
+  },
+  "finished": "2026-10-22T01:25:36.863Z",
+  "sourceUnchangedDuringRun": true,
+  "distUnchangedDuringRun": true,
+  "passed": true
+}

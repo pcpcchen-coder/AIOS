@@ -12,6 +12,8 @@
   --panel-border: rgba(110, 210, 255, 0.18);
   --brain-r: min(20vw, 20vh);
   --brain-top-r: min(7vw, 7vh);
+  --surface-top: calc(12vh + var(--brain-top-r) * 1.45 + 18px);
+  --brain-cta-top: min(calc(47vh + var(--brain-r) * 1.35 + 20px), calc(100dvh - 140px));
   font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -77,7 +79,7 @@ body {
 .caption {
   position: fixed;
   left: 50%;
-  top: calc(47vh + var(--brain-r) * 1.45 + 28px);
+  top: min(calc(47vh + var(--brain-r) * 1.45 + 28px), calc(100dvh - 160px));
   transform: translateX(-50%);
   width: min(640px, 92vw);
   text-align: center;
@@ -122,7 +124,7 @@ body {
 .command {
   position: fixed;
   left: 50%;
-  top: calc(47vh + var(--brain-r) * 1.45 + 24px);
+  top: min(calc(47vh + var(--brain-r) * 1.45 + 24px), calc(100dvh - 120px));
   transform: translateX(-50%);
   width: min(620px, 92vw);
   z-index: 5;
@@ -248,14 +250,14 @@ body.has-surface .command,
 .surface-root {
   position: fixed;
   left: 50%;
-  top: calc(12vh + var(--brain-top-r) * 1.45 + 18px);
+  top: var(--surface-top);
   transform: translateX(-50%);
   width: min(780px, 94vw);
   z-index: 4;
 }
 
 .surface {
-  max-height: calc(100vh - (12vh + var(--brain-top-r) * 1.45 + 18px) - 4vh);
+  max-height: calc(100vh - var(--surface-top) - 4vh);
   overflow-y: auto;
   padding: 22px 24px 18px;
   border-radius: 18px;
@@ -273,7 +275,7 @@ body.has-surface .command,
 }
 
 body.listening .surface {
-  max-height: calc(100vh - (12vh + var(--brain-top-r) * 1.45 + 18px) - 4vh - 120px);
+  max-height: calc(100vh - var(--surface-top) - 4vh - 120px);
 }
 
 .surface-header h2 {
@@ -850,7 +852,7 @@ body.listening .subtitle {
 .start-conversation {
   position: fixed;
   left: 50%;
-  top: calc(47vh + var(--brain-r) * 1.35 + 20px);
+  top: var(--brain-cta-top);
   transform: translateX(-50%);
   z-index: 4;
   border: 1px solid var(--panel-border);
@@ -864,7 +866,7 @@ body.listening .subtitle {
 
 .conversation-status {
   position: fixed;
-  top: calc(47vh + var(--brain-r) * 1.15);
+  top: min(calc(47vh + var(--brain-r) * 1.15), calc(100dvh - 170px));
   left: 50%;
   transform: translateX(-50%);
   color: var(--cyan);
@@ -938,17 +940,24 @@ body.has-surface .conversation-status {
 .region-activity {
   position: fixed;
   left: 50%;
-  top: 73%;
+  top: calc(var(--brain-cta-top) + 52px);
   transform: translateX(-50%);
-  max-width: min(90vw, 760px);
+  width: min(90vw, 760px);
   margin: 0;
   color: rgba(221, 236, 255, 0.8);
   font-size: 12px;
+  line-height: 18px;
   text-align: center;
   pointer-events: none;
 }
+body.listening .region-activity { top: 60px; }
 body.has-conversation .region-activity { top: 40px; }
-body.has-surface .region-activity { top: 21%; }
+body.has-surface .region-activity {
+  top: calc(var(--surface-top) * var(--distance-scale, 1) - 24px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 外部動作確認卡：琥珀色外框，遠處一眼辨識；用說的確認。 */
 .surface--confirm {

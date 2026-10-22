@@ -7,7 +7,7 @@ afterEach(() => vi.unstubAllGlobals());
 it("the actual renderer geometry has six nonempty distinct partitions", () => {
   const context = { createRadialGradient: () => ({ addColorStop() {} }), fillRect() {}, setTransform() {} };
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false }), innerWidth: 1280, innerHeight: 800, devicePixelRatio: 1, addEventListener() {} });
-  vi.stubGlobal("document", { createElement: () => ({ getContext: () => context }) });
+  vi.stubGlobal("document", { createElement: () => ({ getContext: () => context }), documentElement: { style: { setProperty() {} } } });
   const dataset: Record<string, string> = {};
   const canvas = { getContext: () => context, dataset, style: {} } as unknown as HTMLCanvasElement;
   new Brain(canvas);

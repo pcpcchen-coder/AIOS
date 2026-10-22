@@ -1,0 +1,140 @@
+{
+  "mode": "mock",
+  "checks": [
+    "typecheck",
+    "test",
+    "build",
+    "built HTML and mock provider",
+    "HTTP task submission, completion, labeled mock artifact and JSON persistence",
+    "direct mock chat SSE with terminal event and no unsolicited background task"
+  ],
+  "passed": true,
+  "task": {
+    "schema_version": "proto-0.1",
+    "task_id": "task_d4461f36-349d-44c3-999d-e55bae4a69a2",
+    "request_id": "req_pstack_verify0001",
+    "title": "pstack 環境驗證，模擬任務",
+    "status": "succeeded",
+    "mode": "mock",
+    "model": null,
+    "plan_ready": true,
+    "steps": [
+      {
+        "title": "規劃步驟",
+        "status": "done",
+        "started_at": "2026-10-22T01:19:10.656Z",
+        "finished_at": "2026-10-22T01:19:11.738Z",
+        "output_chars": null,
+        "domain": "planning"
+      },
+      {
+        "title": "理解需求（模擬）",
+        "status": "done",
+        "started_at": "2026-10-22T01:19:11.739Z",
+        "finished_at": "2026-10-22T01:19:13.539Z",
+        "output_chars": null,
+        "domain": "language"
+      },
+      {
+        "title": "拆解工作（模擬）",
+        "status": "done",
+        "started_at": "2026-10-22T01:19:13.539Z",
+        "finished_at": "2026-10-22T01:19:15.339Z",
+        "output_chars": null,
+        "domain": "language"
+      },
+      {
+        "title": "整理產出（模擬）",
+        "status": "done",
+        "started_at": "2026-10-22T01:19:15.339Z",
+        "finished_at": "2026-10-22T01:19:17.140Z",
+        "output_chars": null,
+        "domain": "language"
+      }
+    ],
+    "created_at": "2026-10-22T01:19:10.656Z",
+    "updated_at": "2026-10-22T01:19:17.141Z",
+    "finished_at": "2026-10-22T01:19:17.141Z",
+    "error": null,
+    "artifact_id": "artifact_9ec3ca59-373c-4243-8796-d76a28bc3457",
+    "retry_of": null
+  },
+  "artifact": {
+    "schema_version": "proto-0.1",
+    "artifact_id": "artifact_9ec3ca59-373c-4243-8796-d76a28bc3457",
+    "version": 1,
+    "created_at": "2026-10-22T01:19:17.141Z",
+    "task_id": "task_d4461f36-349d-44c3-999d-e55bae4a69a2",
+    "title": "pstack 環境驗證，模擬任務",
+    "content": "## 模擬結果\n\n你交辦的是：「pstack 環境驗證，模擬任務」。\n\n目前是**模擬模式**：系統沒有呼叫任何 AI 模型，也**沒有實際完成這件事**。\n剛才的步驟只是用計時器走過固定流程，用來展示交辦 → 進度 → 成果的介面。\n\n要讓 Claude 真的執行，請在 `.env` 設定 `ANTHROPIC_API_KEY` 後重新啟動。",
+    "mode": "mock",
+    "model": null,
+    "assumptions": [],
+    "capability_gaps": [
+      "模擬模式：未連接任何 Agent 或工具"
+    ],
+    "status": "partial"
+  },
+  "chatEvents": [
+    {
+      "type": "delta",
+      "text": "（模擬）我聽"
+    },
+    {
+      "type": "delta",
+      "text": "到你說「你好"
+    },
+    {
+      "type": "delta",
+      "text": "，這是模擬對"
+    },
+    {
+      "type": "delta",
+      "text": "話驗證。」。"
+    },
+    {
+      "type": "delta",
+      "text": "現在是模擬模"
+    },
+    {
+      "type": "delta",
+      "text": "式，沒有連接"
+    },
+    {
+      "type": "delta",
+      "text": "任何 AI "
+    },
+    {
+      "type": "delta",
+      "text": "模型，所以沒"
+    },
+    {
+      "type": "delta",
+      "text": "辦法真的回答"
+    },
+    {
+      "type": "delta",
+      "text": "。你可以說「"
+    },
+    {
+      "type": "delta",
+      "text": "設定」切換到"
+    },
+    {
+      "type": "delta",
+      "text": " Claud"
+    },
+    {
+      "type": "delta",
+      "text": "e 或 Ch"
+    },
+    {
+      "type": "delta",
+      "text": "atGPT。"
+    },
+    {
+      "type": "done",
+      "model": null
+    }
+  ]
+}

@@ -476,7 +476,10 @@ const sense = new SenseController({
     if (realtime.on) realtime.stop();
     closePreview();
   },
-  setScale: (scale) => document.documentElement.style.setProperty("--distance-scale", String(scale)),
+  setScale: (scale) => {
+    document.documentElement.style.setProperty("--distance-scale", String(scale));
+    brain.setDistanceScale(scale);
+  },
   setPresence: (present) => (document.body.dataset.present = present ? "yes" : "no"),
   setFacing: (facing) => (document.body.dataset.facing = facing ? "yes" : "no"),
   pointTo: (zone) => {

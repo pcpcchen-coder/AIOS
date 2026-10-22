@@ -80,6 +80,7 @@ const SHAPE_SCALE = 1.18;
 const NEIGHBORS = 3;
 const FRAME_MS = 1000 / 30;
 const MAX_PULSES = 70;
+const ORBIT_FIT_EXTENT = 1.7;
 
 /** 與 CSS 共用的版面參數：中心高度比例與半徑（相對於 min(寬, 高)）。 */
 export const LAYOUT = {
@@ -111,6 +112,7 @@ export class Brain {
   private cx = 0;
   private cy = 0;
   private radius = 0;
+  private distanceScale = 1;
   private shownProgress = 0;
 
   private width = 0;
@@ -152,6 +154,13 @@ export class Brain {
     cancelAnimationFrame(this.raf);
   }
 
+  setDistanceScale(scale: number): void {
+    const next = Number.isFinite(scale) && scale > 0 ? scale : 1;
+    if (next === this.distanceScale) return;
+    this.distanceScale = next;
+    this.publishAmbientRadius();
+  }
+
   setState(state: BrainVisualState): void {
     if (this.state.conversation !== state.conversation) {
       if (state.conversation === "speaking") this.tint = { color: VIOLET, strength: 0.8 };
@@ -191,9 +200,17 @@ export class Brain {
     return Math.hypot(x - this.cx, y - this.cy) < this.radius * 1.35;
   }
 
-  private target(): { cx: number; cy: number; r: number } {
-    const l = LAYOUT[this.state.layout];
-    return { cx: this.width / 2, cy: this.height * l.cy, r: Math.min(this.width, this.height) * l.r };
+  private target(layout = this.state.layout): { cx: number; cy: number; r: number } {
+    const l = LAYOUT[layout];
+    const cx = this.width / 2;
+    const cy = this.height * l.cy * (layout === "top" ? this.distanceScale : 1);
+    const requested = Math.min(this.width, this.height) * l.r * this.distanceScale;
+    const room = Math.min(cx, cy, this.height - cy);
+    return { cx, cy, r: Math.max(0, Math.min(requested, room / ORBIT_FIT_EXTENT)) };
+  }
+
+  private publishAmbientRadius(): void {
+    document.documentElement.style.setProperty("--brain-r", `${this.target("center").r}px`);
   }
 
   private resize(): void {
@@ -205,6 +222,7 @@ export class Brain {
     this.canvas.style.width = `${this.width}px`;
     this.canvas.style.height = `${this.height}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.publishAmbientRadius();
   }
 
   private buildBrain(): void {
@@ -350,7 +368,8 @@ export class Brain {
   private drawRegionLabels(R: number): void {
     if (R < 60) return; // 縮小到頂端時不放字
     const { ctx } = this;
-    ctx.font = `500 ${Math.round(Math.max(12, R / 11))}px "Noto Sans TC", "PingFang TC", system-ui, sans-serif`;
+    const fontSize = Math.round(Math.max(12, R / 11));
+    ctx.font = `500 ${fontSize}px "Noto Sans TC", "PingFang TC", system-ui, sans-serif`;
     ctx.textBaseline = "middle";
     for (const d of DOMAINS) {
       const a = this.activation[d];
@@ -372,12 +391,19 @@ export class Brain {
       ctx.moveTo(c.x, c.y);
       ctx.lineTo(ex, ey);
       ctx.stroke();
-      ctx.textAlign = ux >= 0 ? "left" : "right";
+      ctx.textAlign = "left";
       ctx.shadowColor = "rgba(2,6,16,0.9)";
       ctx.shadowBlur = 6;
       ctx.fillStyle = rgba(REGION_COLOR[d], alpha);
       const descriptions = [...new Set(this.state.activity?.filter((a) => a.domain === d).map(activityDescription))];
-      if (descriptions.length) ctx.fillText(descriptions.join(" / "), ex + (ux >= 0 ? 6 : -6), ey);
+      if (descriptions.length) {
+        let text = descriptions.join(" / ");
+        while (text.length > 1 && ctx.measureText(text).width > this.width - 24) text = `${text.slice(0, -2)}…`;
+        const textWidth = ctx.measureText(text).width;
+        const x = Math.max(12, Math.min(this.width - textWidth - 12, ux >= 0 ? ex + 6 : ex - textWidth - 6));
+        const y = Math.max(fontSize, Math.min(this.height - fontSize, ey));
+        ctx.fillText(text, x, y);
+      }
       ctx.shadowBlur = 0;
     }
   }
