@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CAMERA_PREF_KEYS,
@@ -48,32 +48,62 @@ export class CameraSettingsStore {
     return { ...install, ...prefs };
   }
 
-  /** 套用已驗證的 patch（呼叫端先用 parseCameraPatch）：寫檔後呼叫 onChange。同樣的 patch 再送一次，檔案內容不變。 */
+  /**
+   * 套用已驗證的 patch（呼叫端先用 parseCameraPatch）：先寫檔，成功後才改記憶體並呼叫 onChange。
+   * 寫檔失敗時丟出錯誤、記憶體不變（畫面與重新啟動後看到的是同一份）。同樣的 patch 再送一次，檔案內容不變。
+   */
   update(patch: CameraPrefsPatch): CameraSettings {
-    this.saved = { ...this.saved, ...patch };
-    this.write({ schema_version: FILE_VERSION, prefs: this.saved });
+    const next = { ...this.saved, ...patch };
+    this.write({ schema_version: FILE_VERSION, prefs: next });
+    this.saved = next;
     this.options.onChange();
     return this.view();
   }
 
-  /** 讀不到、版本不符或內容不合法時當作沒有保存，記一行 log，不讓核心啟動失敗。 */
+  /**
+   * 每個鍵分開驗證：不認得或不合法的鍵丟掉並記 log，其餘照用（壞掉一個鍵不會把保存的「關掉」一起丟掉）。
+   * 檔案存在卻讀不懂（無法讀取、不是 JSON、版本不符、沒有 prefs 物件）時，鏡頭保持關閉（active: false），
+   * 不退回預設的「開」；使用者說「打開鏡頭」或在設定打開時會覆寫這個檔案。
+   */
   private readSaved(): CameraPrefsPatch {
     if (!existsSync(this.file)) return {};
+    const log = this.options.log ?? console.warn;
+    let prefs: Record<string, unknown>;
     try {
-      const data = JSON.parse(readFileSync(this.file, "utf8")) as Partial<CameraFile>;
+      const data = JSON.parse(readFileSync(this.file, "utf8")) as Partial<CameraFile> | null;
+      if (!data || typeof data !== "object") throw new Error("內容不是 JSON 物件");
       if (data.schema_version !== FILE_VERSION) throw new Error(`不支援的 schema_version：${String(data.schema_version)}`);
-      return parseCameraPatch(data.prefs);
+      if (!data.prefs || typeof data.prefs !== "object" || Array.isArray(data.prefs)) throw new Error("prefs 不是物件");
+      prefs = data.prefs as Record<string, unknown>;
     } catch (err) {
-      (this.options.log ?? console.warn)(`忽略 ${this.file}（${(err as Error).message}），改用 .env 與預設值`);
-      return {};
+      log(`無法讀取 ${this.file}（${(err as Error).message}），鏡頭保持關閉；其他設定用 .env 與預設值`);
+      return { active: false };
     }
+    const saved: Record<string, unknown> = {};
+    const dropped: string[] = [];
+    for (const [key, value] of Object.entries(prefs)) {
+      try {
+        Object.assign(saved, parseCameraPatch({ [key]: value }));
+      } catch (err) {
+        dropped.push((err as Error).message);
+        // 保存的「鏡頭」值不合法時不猜成開。
+        if (key === "active") saved.active = false;
+      }
+    }
+    if (dropped.length) log(`${this.file} 有 ${dropped.length} 項設定被忽略（${dropped.join("；")}），其餘照用`);
+    return saved as CameraPrefsPatch;
   }
 
   private write(data: CameraFile): void {
     mkdirSync(this.options.dir, { recursive: true, mode: 0o700 });
     const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-    renameSync(tmp, this.file);
+    try {
+      writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+      renameSync(tmp, this.file);
+    } catch (err) {
+      rmSync(tmp, { force: true });
+      throw err;
+    }
     try {
       chmodSync(this.file, 0o600);
     } catch {

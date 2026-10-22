@@ -20,7 +20,7 @@ const LEADING = /^[\s，,。.!！?？~～…]+/;
 
 const VOICE_ON = /^(開啟|打開|啟動|進入|開)?語音(模式|對話|互動)$/;
 const VOICE_OFF = /^((關閉|關掉|結束|離開|退出|停止)語音(模式|對話|互動)?|語音(模式)?(關閉|關掉))$/;
-const SETTINGS = /^(設定|打開設定|開啟設定|切換(引擎|模型|AI)|(AI )?引擎(設定)?|模型設定|鏡頭設定|登入 ?ChatGPT|ChatGPT 登入|settings)$/i;
+const SETTINGS = /^(設定|打開設定|開啟設定|切換(引擎|模型|AI)|(AI )?引擎(設定)?|模型設定|(打開|開啟)?鏡頭設定|登入 ?ChatGPT|ChatGPT 登入|settings)$/i;
 const USE_PROVIDER = /^(改用|使用|切換到|換成|用)\s*(ChatGPT|GPT|Claude|模擬模式|模擬)(引擎|模式)?$/i;
 const DISMISS = /^(收起(來)?(吧)?|回(到)?桌布(吧)?|關閉(畫面|視窗)?|隱藏|先這樣|close|dismiss|hide)$/i;
 const STOP = /^((停止|取消|中止|終止)(這個|那個|目前的|剛才的)?(任務|工作)?|不要做了|別做了|stop|cancel)$/i;

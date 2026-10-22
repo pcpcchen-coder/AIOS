@@ -546,8 +546,9 @@ async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null
     render();
     return null;
   } catch (err) {
+    // 保存失敗（核心回 500）與核心未連線都走這裡：核心仍是上次保存的設定。
     return patch.active === false
-      ? "鏡頭已關閉，但設定沒有保存（本機核心未連線）；重新整理頁面後會再開啟。"
+      ? `鏡頭已在這個視窗關閉，但沒有保存（${(err as Error).message}）；重新整理或重新啟動後，會依上次保存的設定決定是否開啟。`
       : `鏡頭設定沒有保存：${(err as Error).message}`;
   }
 }
