@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatSeconds, onStep, stepPref, type SecondsPrefSpec } from "../shared/prefs.ts";
+import { formatSeconds, onStep, snapToStep, stepPref, type SecondsPrefSpec } from "../shared/prefs.ts";
 import { CAMERA_DISABLED_REASON, describeSeconds, VOICE_UNSAVED_REASON, type SecondsSetting } from "../shared/seconds-menu.ts";
 import { CAMERA_PREFS, DEFAULT_CAMERA_PREFS, parseCameraPatch, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VOICE_PREFS, VoicePatchError } from "../shared/voice-prefs.ts";
@@ -61,6 +61,17 @@ describe("VOICE_PREFS", () => {
     expect(() => parseVoicePatch({ realtime_idle_s: 610 })).toThrow(VoicePatchError);
     expect(() => parseVoicePatch({ voice_idle_s: 95 })).toThrow(/30–600 秒、間隔 10/);
     expect(() => parseVoicePatch({ voice_idle_s: Number.POSITIVE_INFINITY })).toThrow(VoicePatchError);
+  });
+
+  it("a value within onStep's tolerance is stored on the grid, so the menu shows no duplicate", () => {
+    expect(parseVoicePatch({ voice_idle_s: 90.000001 })).toEqual({ voice_idle_s: 90 });
+    expect(parseVoicePatch({ realtime_idle_s: 119.9999999 })).toEqual({ realtime_idle_s: 120 });
+    expect(parseCameraPatch({ look_to_talk_s: 1.6000001 })).toEqual({ look_to_talk_s: 1.6 });
+    expect(snapToStep(0.1 + 0.2, 0.1)).toBe(0.3);
+    const voice = { ...DEFAULT_VOICE_PREFS, ...parseVoicePatch({ voice_idle_s: 90.000001 }) };
+    const row = rowOf(describeSeconds({ camera, voice, voiceWritable: true, realtime }), "voice_idle_s");
+    expect(row.options.map((o) => o.label)).toEqual(["30 秒", "1 分鐘", "1 分 30 秒（預設）", "2 分鐘", "3 分鐘", "5 分鐘"]);
+    expect(row.options.filter((o) => o.checked).map((o) => o.value)).toEqual([90]);
   });
 
   it("stepPref moves one step and clamps", () => {

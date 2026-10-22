@@ -16,6 +16,7 @@ import {
   CONTROLS,
   INTENT_COMMANDS,
   LOCAL_ROUTING,
+  REPLACES_CONFIRM_CARD,
   type ApprovalDecision as TableApprovalDecision,
   type CameraEffect,
   type Channel,
@@ -185,6 +186,66 @@ describe("LOCAL_ROUTING mirrors src/main.ts", () => {
     expect(body).toContain("realtime.sendText(intent.text)");
     const sendText = realtime.slice(realtime.indexOf("  sendText(text: string): void {"), realtime.indexOf("  addContext("));
     expect(sendText).toContain("this.checkApproval(text)");
+  });
+
+  // handleCommand 每個 case 的原始碼片段（case "progress": … 到下一個 case）。
+  const handleCommand = main.slice(main.indexOf("async function handleCommand("), main.indexOf("async function cancelTask("));
+  const cases = Object.fromEntries(
+    handleCommand.split(/\n    case "/).slice(1).map((chunk) => [chunk.slice(0, chunk.indexOf('"')), chunk] as const),
+  );
+  const functionBody = (name: string) => main.slice(main.indexOf(`async function ${name}(`), main.indexOf("\n}\n", main.indexOf(`async function ${name}(`)));
+  const showsSurface = (block: string) =>
+    block.includes('dispatch({ type: "show.')
+    || (block.includes("selectProvider(") && functionBody("selectProvider").includes('dispatch({ type: "show.'))
+    || (block.includes("cancelTask(") && functionBody("cancelTask").includes('dispatch({ type: "show.'));
+
+  it("every case is found (the slicing still matches the source)", () => {
+    expect(Object.keys(cases).sort()).toEqual([...Object.keys(INTENT_COMMANDS), "task"].sort());
+  });
+
+  it("typed text reaches realtime.sendText (and so checkApproval) exactly for task and LOCAL_ROUTING.typed.alsoSendsText", () => {
+    const sending = Object.entries(cases).filter(([, block]) => block.includes("realtime.sendText(")).map(([kind]) => kind);
+    expect(sending.sort()).toEqual(["task", ...(LOCAL_ROUTING.typed.alsoSendsText ?? [])].sort());
+    for (const channel of ["push_to_talk", "voice_mode", "realtime"] as const) expect(LOCAL_ROUTING[channel].alsoSendsText).toBeUndefined();
+  });
+
+  it("an intent that also sends text has already replaced the confirm card first, so its checkApproval decides nothing", () => {
+    for (const kind of LOCAL_ROUTING.typed.alsoSendsText ?? []) {
+      const block = cases[kind];
+      expect(block.indexOf('dispatch({ type: "show.')).toBeGreaterThan(-1);
+      expect(block.indexOf('dispatch({ type: "show.')).toBeLessThan(block.indexOf("realtime.sendText("));
+      expect(REPLACES_CONFIRM_CARD).toContain(kind);
+    }
+  });
+
+  it("REPLACES_CONFIRM_CARD lists exactly the intents whose case dispatches show.*, and dispatch rejects a replaced card", () => {
+    const showing = Object.entries(cases).filter(([kind, block]) => kind !== "task" && showsSurface(block)).map(([kind]) => kind);
+    expect(showing.sort()).toEqual([...REPLACES_CONFIRM_CARD].sort());
+    const dispatchBody = main.slice(main.indexOf("function dispatch(event: ShellEvent)"), main.indexOf("// ───────────── 伺服器事件"));
+    expect(dispatchBody).toContain('shell.surface?.kind === "confirm" && next.surface?.surface_id !== shell.surface.surface_id');
+    expect(dispatchBody).toContain('realtime.resolveApproval(false, "dismissed")');
+  });
+
+  it("the typed-replaces-card caveat covers every intent in REPLACES_CONFIRM_CARD", () => {
+    const caveat = CAVEATS.find((c) => c.id === "typed-replaces-card")!;
+    expect([...new Set(caveat.cases.map((c) => c.checks.intent))].sort()).toEqual([...REPLACES_CONFIRM_CARD].sort());
+  });
+
+  it("Esc never stops a task, and the table never says it does", () => {
+    const esc = main.slice(main.indexOf('if (e.key === "Escape") {'), main.indexOf("return;", main.indexOf('if (e.key === "Escape") {')));
+    expect(esc).not.toMatch(/cancelTask|api\.cancel|"stop"/);
+    const texts = [...CAVEATS.map((c) => c.truth), ...CONTROLS.map((c) => c.does)];
+    for (const text of texts) {
+      for (const sentence of text.split(/[。；]/)) {
+        if (sentence.includes("Esc") && sentence.includes("停止任務")) expect(sentence).toContain("不會停止任務");
+      }
+    }
+  });
+
+  it("look-to-talk starts only after realtime consent was given, and the row says so", () => {
+    const sense = main.slice(main.indexOf("canAutoTalk:"), main.indexOf("\n", main.indexOf("canAutoTalk:")));
+    expect(sense).toContain('hasVoiceConsent("realtime")');
+    expect(CONTROLS.find((c) => c.id === "look")?.does).toContain("同意");
   });
 });
 

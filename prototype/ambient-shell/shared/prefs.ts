@@ -39,7 +39,8 @@ export interface PatchErrors {
 
 /**
  * 邊界驗證（HTTP body、設定檔）：只接受表裡的鍵；開關必須是 boolean；秒數必須在範圍內且落在 step 上。
- * 不默默夾住數值，錯誤一律用 errors.make 丟出（→ HTTP 400）。
+ * 不默默夾住數值，錯誤一律用 errors.make 丟出（→ HTTP 400）。通過的秒數存成格點上的值（onStep 容許 1e-6 的誤差，
+ * 90.000001 存成 90），選單與設定畫面才不會把同一個值當成預設與「（目前）」各列一次。
  */
 export function parsePrefsPatch<P>(specs: PrefSpecs<P>, input: unknown, errors: PatchErrors): Partial<P> {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw errors.make(`${errors.noun}必須是 JSON 物件`);
@@ -53,7 +54,7 @@ export function parsePrefsPatch<P>(specs: PrefSpecs<P>, input: unknown, errors: 
     } else if (typeof value !== "number" || !Number.isFinite(value) || value < spec.min || value > spec.max || !onStep(value, spec.step)) {
       throw errors.make(`${key} 必須是 ${spec.min}–${spec.max} 秒、間隔 ${spec.step}`);
     }
-    patch[key] = value;
+    patch[key] = spec.kind === "seconds" ? snapToStep(value as number, spec.step) : value;
   }
   return patch as Partial<P>;
 }
@@ -63,10 +64,15 @@ export function onStep(value: number, step: number): boolean {
   return Math.abs(n - Math.round(n)) < 1e-6;
 }
 
-/** 設定畫面的 −／+：移動一格並夾在範圍內；四捨五入到 step 的小數位，避免 1.6000000000000003。 */
+/** 最近的格點，四捨五入到 step 的小數位（避免 1.6000000000000003）。 */
+export function snapToStep(value: number, step: number): number {
+  const decimals = (String(step).split(".")[1] ?? "").length;
+  return Number((Math.round(value / step) * step).toFixed(decimals));
+}
+
+/** 設定畫面的 −／+：移動一格並夾在範圍內。 */
 export function stepPref(spec: SecondsPrefSpec, current: number, direction: 1 | -1): number {
-  const decimals = (String(spec.step).split(".")[1] ?? "").length;
-  const next = Number((current + direction * spec.step).toFixed(decimals));
+  const next = snapToStep(current + direction * spec.step, spec.step);
   return Math.min(spec.max, Math.max(spec.min, next));
 }
 

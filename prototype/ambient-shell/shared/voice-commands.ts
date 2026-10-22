@@ -30,16 +30,34 @@ export type Matcher = "camera" | "intent" | "approval";
  * 每條路徑依序執行哪些本機比對（src/main.ts 的路由；這是表裡唯一手寫的路由事實）：
  * - 打字、按麥克風、語音模式都走 handleCommand：鏡頭規則 → classify；classify 判為一般句子時，
  *   即時語音開著才送給 AI 並檢查確認語句（RealtimeVoice.sendText → checkApproval）。按麥克風與語音模式
- *   不會和即時語音同時開著，所以沒有確認語句。前面的比對認得就不再往下（firstClaimWins）。
+ *   不會和即時語音同時開著，所以沒有確認語句。前面的比對認得就不再往下（firstClaimWins），
+ *   例外見 alsoSendsText。
  * - 即時語音（說）：逐字稿同時跑鏡頭規則（onUserTranscript → handleCameraCommand）與確認語句（checkApproval），
  *   兩個互不攔截；不跑 classify，這句話也一定會送到 AI。
  */
-export const LOCAL_ROUTING: Record<Channel, { matchers: readonly Matcher[]; firstClaimWins: boolean }> = {
-  typed: { matchers: ["camera", "intent", "approval"], firstClaimWins: true },
+export interface Routing {
+  matchers: readonly Matcher[];
+  firstClaimWins: boolean;
+  /**
+   * classify 認得、處理完仍把原文交給 realtime.sendText 的意圖（即時語音開著時；AI 回答，也會跑 checkApproval）。
+   * 這些意圖在 sendText 之前已經 dispatch 了 show.*，確認卡開著時已被換掉而拒絕（main.ts dispatch 的 leftConfirm），
+   * 所以 checkApproval 這時已經沒有確認卡可決定：確認語句在這裡不算有效（channelsFor 照樣不算）。
+   */
+  alsoSendsText?: readonly LocalIntentKind[];
+}
+
+export const LOCAL_ROUTING: Record<Channel, Routing> = {
+  typed: { matchers: ["camera", "intent", "approval"], firstClaimWins: true, alsoSendsText: ["progress"] },
   push_to_talk: { matchers: ["camera", "intent"], firstClaimWins: true },
   voice_mode: { matchers: ["camera", "intent"], firstClaimWins: true },
   realtime: { matchers: ["camera", "approval"], firstClaimWins: false },
 };
+
+/**
+ * 打字時會 dispatch show.*（換上進度、設定、成果或通知畫面）的意圖：即時語音確認卡開著時，換掉確認卡就算拒絕。
+ * 測試比對 src/main.ts handleCommand 每個 case 是否（直接或經 selectProvider、cancelTask）dispatch show.*。
+ */
+export const REPLACES_CONFIRM_CARD: readonly LocalIntentKind[] = ["settings", "use_provider", "progress", "result", "stop"];
 
 /** classify 的指令類意圖（不含 empty、task）；測試在編譯期比對 src/intent.ts 的 Intent。 */
 export type LocalIntentKind = "voice_on" | "voice_off" | "settings" | "use_provider" | "dismiss" | "stop" | "progress" | "result";
@@ -228,12 +246,20 @@ export const CAVEATS: readonly Caveat[] = [
     truth: "即時語音中說鏡頭指令：本機照做，這句話也仍會送到 AI，AI 可能另外回應" },
   { id: "dismiss-ends-voice", cases: [{ says: "收起", checks: { intent: "dismiss" } }],
     truth: "收起畫面的同時也會結束語音模式或即時語音；進行中的任務不會停止（停止任務才會）" },
+  { id: "typed-replaces-card", cases: [
+      { says: "進度如何", checks: { intent: "progress", approval: null } },
+      { says: "設定", checks: { intent: "settings", approval: null } },
+      { says: "看結果", checks: { intent: "result", approval: null } },
+      { says: "改用 Claude", checks: { intent: "use_provider", approval: null } },
+      { says: "停止任務", checks: { intent: "stop", approval: "reject" } },
+    ],
+    truth: "即時語音確認卡開著時打這些字：會換上進度、設定、成果或通知畫面，確認卡被換掉就算拒絕，外部動作不執行（即使這句話本身不是確認或取消的說法）。要同意請打或說「確認執行」等確認語句" },
   { id: "realtime-not-local", cases: [
       { says: "停止任務", checks: { intent: "stop", approval: "reject" } },
       { says: "進度如何", checks: { intent: "progress", notLocalIn: ["realtime"] } },
       { says: "收起", checks: { intent: "dismiss", notLocalIn: ["realtime"] } },
     ],
-    truth: "即時語音中用說的，這些都不在本機處理，會交給 AI：問進度 AI 會查真實狀態回答；AI 沒有停止任務或收起畫面的工具。要停止任務或收起，請用打的、按 Esc 或點畫面上的按鈕。確認卡開著時，含「停止」的話會拒絕確認卡" },
+    truth: "即時語音中用說的，這些都不在本機處理，會交給 AI：問進度 AI 會查真實狀態回答；AI 沒有停止任務或收起畫面的工具。要停止任務，請打「停止任務」或按進度畫面上的停止按鈕；要收起，請打「收起」、按 Esc 或點畫面上的按鈕。Esc 只會打斷說話或收起畫面，不會停止任務。確認卡開著時，含「停止」的話會拒絕確認卡" },
   { id: "substring-progress", cases: [{ says: "交通狀況如何", checks: { camera: null, intent: "progress" } }],
     truth: "14 個字以內、句中有「進度」「狀態」「狀況」「好了沒」「做到哪」等詞（又沒有寫、整理、規劃等交辦動詞）就算查進度：例如「交通狀況如何」會打開進度，不會交給 AI。想問 AI 請把句子說完整，或用即時語音" },
   { id: "substring-result", cases: [{ says: "比賽結果", checks: { camera: null, intent: "result" } }],
@@ -255,7 +281,7 @@ export const CONTROLS: readonly Control[] = [
   { id: "esc", how: "Esc", does: "即時語音 Nous 說話時：打斷；即時語音中有畫面開著：只收起畫面；語音模式念回覆時：打斷；其他時候：收起畫面並結束語音" },
   { id: "voice-pill", how: "點右上角的語音指示", does: "結束語音模式或即時語音" },
   { id: "palm", how: "舉起張開的手掌", does: "停止 Nous 說話，不取消任務（需要鏡頭與「手掌停止播報」）" },
-  { id: "look", how: "面向螢幕", does: "看著說話：面向這麼久之後自動開始即時語音（需要鏡頭與即時語音）", seconds: "look_to_talk_s" },
+  { id: "look", how: "面向螢幕", does: "看著說話：面向這麼久之後自動開始即時語音（需要鏡頭與即時語音，而且這個視窗之前已同意過即時語音的說明；沒同意過不會自動開始，請先按「開始語音對話」同意一次）", seconds: "look_to_talk_s" },
   { id: "look-cooldown", how: "對話結束後", does: "這段時間內看著說話不再自動開始", seconds: "look_to_talk_cooldown_s" },
   { id: "voice-idle", how: "語音模式沒說話", does: "自動關閉語音模式（Nous 等回覆、念回覆時不計時）", seconds: "voice_idle_s" },
   { id: "realtime-idle", how: "即時語音沒說話", does: "自動結束即時語音，避免持續計費（Nous 回覆、查資料、等確認時不計時）", seconds: "realtime_idle_s" },

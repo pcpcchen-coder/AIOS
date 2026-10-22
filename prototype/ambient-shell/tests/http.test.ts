@@ -393,6 +393,14 @@ describe("HTTP API", () => {
     expect(await next()).toMatchObject({ type: "settings.updated", settings: { voice: { voice_idle_s: 60 } } });
     controller.abort();
     expect(JSON.parse(readFileSync(join(dir, "voice.json"), "utf8"))).toEqual({ schema_version: 1, prefs: { voice_idle_s: 60 } });
+
+    // 在 onStep 容許誤差內的值存成格點上的值：選單不會同時出現「預設」與勾選的「（目前）」。
+    const near = (await (await post("/api/settings/voice", { voice_idle_s: 90.000001 })).json()) as SettingsView;
+    expect(near.voice?.voice_idle_s).toBe(90);
+    const nearRow = near.seconds!.find((r) => r.key === "voice_idle_s")!;
+    expect(nearRow.options.map((o) => o.label)).toEqual(["30 秒", "1 分鐘", "1 分 30 秒（預設）", "2 分鐘", "3 分鐘", "5 分鐘"]);
+    expect(JSON.parse(readFileSync(join(dir, "voice.json"), "utf8")).prefs).toEqual({ voice_idle_s: 90 });
+    await post("/api/settings/voice", { voice_idle_s: 60 });
     await new Promise((r) => server!.close(r));
 
     const again = await start(5, undefined, undefined, undefined, undefined, { dir });

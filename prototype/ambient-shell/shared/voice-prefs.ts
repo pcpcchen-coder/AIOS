@@ -39,3 +39,9 @@ export class VoicePatchError extends Error {}
 export function parseVoicePatch(input: unknown): VoicePrefsPatch {
   return parsePrefsPatch<VoicePrefs>(VOICE_PREFS, input, { noun: "語音設定", make: (m) => new VoicePatchError(m) });
 }
+
+/** 頁面交給兩個閒置計時器的毫秒數（VoiceConversation、RealtimeVoice 的 idleMs）；收到核心的設定前用預設值。 */
+export function idleTimeoutsMs(voice: VoicePrefs | undefined): { voice_mode: number; realtime: number } {
+  const prefs = voice ?? DEFAULT_VOICE_PREFS;
+  return { voice_mode: prefs.voice_idle_s * 1000, realtime: prefs.realtime_idle_s * 1000 };
+}

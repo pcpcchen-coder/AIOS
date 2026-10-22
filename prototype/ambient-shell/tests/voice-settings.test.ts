@@ -34,6 +34,12 @@ describe("VoiceSettingsStore", () => {
     expect(changes()).toBe(2);
   });
 
+  it("a saved value within the step tolerance is read back on the grid", () => {
+    const dir = mkdtempSync(join(tmpdir(), "nous-voice-"));
+    writeFileSync(join(dir, "voice.json"), JSON.stringify({ schema_version: 1, prefs: { voice_idle_s: 90.000001 } }));
+    expect(make(dir).store.view().voice_idle_s).toBe(90);
+  });
+
   it("drops only the invalid saved keys and logs them", () => {
     const dir = mkdtempSync(join(tmpdir(), "nous-voice-"));
     writeFileSync(join(dir, "voice.json"), JSON.stringify({ schema_version: 1, prefs: { voice_idle_s: 95, realtime_idle_s: 180, made_up: 1 } }));

@@ -192,6 +192,7 @@ let commandsWin = null;
 
 function openCommandsWindow() {
   if (commandsWin && !commandsWin.isDestroyed()) {
+    if (commandsWin.isMinimized()) commandsWin.restore();
     commandsWin.show();
     commandsWin.focus();
     return;
@@ -231,6 +232,8 @@ function openCommandsWindow() {
 function loadCommands() {
   const target = commandsWin;
   target.loadURL(`${core.url}/help/commands`).catch((err) => {
+    // ⌘R 或核心重啟後的 loadCommands 取代了還在載入的那一次：舊的載入以 ERR_ABORTED 結束，新的照常進行。
+    if (err?.code === "ERR_ABORTED") return;
     log(`語音指令表載入失敗：${err.message ?? err}`);
     if (target.isDestroyed()) return;
     dialog.showErrorBox("無法打開語音指令表", `本機核心沒有回應（${err.message ?? err}）。稍後再試，或在「設定與資料」重新啟動核心。`);
@@ -530,9 +533,18 @@ app.on("window-all-closed", () => {
   // 留在選單列，不結束。
 });
 
+// 設定在頁面（設定畫面、語音或打字指令）改了：頁面收到核心的 settings.updated 後回報新的版本字串，這裡馬上重新讀取。
+// 不在點選單列圖示時才讀：macOS 上 setContextMenu 的選單在 mouse-down 當下就打開，非同步的讀取趕不上這一次。
+let reportedSettings = null;
 ipcMain.on("nous:state", (_e, state) => {
   if (!state || typeof state !== "object") return;
   pageState = { voice: String(state.voice ?? "off"), activeTasks: Number(state.activeTasks) || 0 };
+  const revision = String(state.settings ?? "");
+  if (revision && revision !== reportedSettings) {
+    reportedSettings = revision;
+    void refreshSettings(); // 讀完會 rebuildMenu
+    return;
+  }
   rebuildMenu();
 });
 ipcMain.on("nous:open-external", (_e, url) => {

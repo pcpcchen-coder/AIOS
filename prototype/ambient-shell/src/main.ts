@@ -7,7 +7,7 @@ import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf } from "./
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
 import { formatSeconds } from "../shared/prefs.ts";
-import { DEFAULT_VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
+import { DEFAULT_VOICE_PREFS, idleTimeoutsMs, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import {
   browserRealtimeDeps,
   realtimeSupported,
@@ -54,7 +54,8 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 /** macOS App（Electron）的 preload 提供；在一般瀏覽器裡不存在。 */
 interface DesktopBridge {
   openExternal(url: string): void;
-  reportState(state: { voice: string; activeTasks: number }): void;
+  /** settings：設定的版本字串；變了 App 就重新讀取設定，選單列不會留著舊的「（目前）」。 */
+  reportState(state: { voice: string; activeTasks: number; settings: string }): void;
 }
 declare global {
   interface Window {
@@ -98,6 +99,9 @@ const artifactErrors = new Map<string, string>();
 const userRequestIds = new Set<string>();
 let shell: ShellState = initialShell;
 let settings: SettingsView | null = null;
+/** applySettings 收到不同的設定就加一；連同每次載入頁面不同的 pageLoadId 回報給 App（重新整理後版本重算也不會撞號）。 */
+let settingsRevision = 0;
+const pageLoadId = Math.random().toString(36).slice(2, 10);
 let connected = false;
 let renderedKey: string | null = null;
 
@@ -149,7 +153,7 @@ const conversation = new VoiceConversation(
       showCommandError(reason);
     },
   },
-  { idleMs: DEFAULT_VOICE_PREFS.voice_idle_s * 1000 },
+  { idleMs: idleTimeoutsMs(undefined).voice_mode },
 );
 let pendingConsent: ConsentKind = "push";
 
@@ -179,7 +183,7 @@ const realtime = new RealtimeVoice(
     },
   },
   browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp)).sdp),
-  { idleMs: DEFAULT_VOICE_PREFS.realtime_idle_s * 1000 },
+  { idleMs: idleTimeoutsMs(undefined).realtime },
 );
 
 const session = new ConversationSession({
@@ -208,10 +212,12 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
     hideSubtitle();
   }
   const wasActive = settings?.camera?.active;
+  if (!settings || JSON.stringify(settings) !== JSON.stringify(value)) settingsRevision++;
   settings = value;
   // 只有值真的改變、而且語音正開著時才從現在重新倒數（setIdleMs 內判斷）；無關的設定更新不延長倒數。
-  conversation.setIdleMs(voicePrefs().voice_idle_s * 1000);
-  realtime.setIdleMs(voicePrefs().realtime_idle_s * 1000);
+  const idle = idleTimeoutsMs(value.voice);
+  conversation.setIdleMs(idle.voice_mode);
+  realtime.setIdleMs(idle.realtime);
   if (value.camera && !value.camera.active) cameraOffPending = false; // 伺服器已保存「關掉」
   if (value.camera && wasActive !== undefined && value.camera.active !== wasActive) cameraFailed = false;
   syncCamera();
@@ -1116,13 +1122,17 @@ function render(): void {
 }
 
 let reportedDesktopState = "";
-/** 告訴 App 目前狀態（選單列圖示在收音時改變樣式）。 */
+/**
+ * 告訴 App 目前狀態（選單列圖示在收音時改變樣式），以及設定是否變了：頁面收到核心推送的 settings.updated
+ * （設定畫面、語音或打字指令、其他分頁改的都算）時版本加一，App 收到新版本就重新讀取設定、重建選單列。
+ */
 function reportDesktopState(): void {
   const desktop = window.nousDesktop;
   if (!desktop) return;
   const state = {
     voice: realtime.on ? realtime.current : conversation.on ? conversation.current : "off",
     activeTasks: [...tasks.values()].filter(isActive).length,
+    settings: `${pageLoadId}.${settingsRevision}`,
   };
   const key = JSON.stringify(state);
   if (key === reportedDesktopState) return;

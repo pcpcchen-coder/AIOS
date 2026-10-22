@@ -1,4 +1,6 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_VOICE_PREFS, idleTimeoutsMs } from "../shared/voice-prefs.ts";
 import { RealtimeVoice, type RealtimeDeps } from "../src/realtime.ts";
 import { VoiceConversation } from "../src/voice.ts";
 
@@ -142,5 +144,26 @@ describe("realtime idle setting", () => {
     expect(t.closed).toEqual([]);
     vi.advanceTimersByTime(1_000);
     expect(t.closed).toHaveLength(1);
+  });
+});
+
+describe("the page hands settings.voice to the idle timers in milliseconds", () => {
+  it("idleTimeoutsMs converts seconds to ms and falls back to the defaults", () => {
+    expect(idleTimeoutsMs({ voice_idle_s: 60, realtime_idle_s: 300 })).toEqual({ voice_mode: 60_000, realtime: 300_000 });
+    expect(idleTimeoutsMs(undefined)).toEqual({
+      voice_mode: DEFAULT_VOICE_PREFS.voice_idle_s * 1000,
+      realtime: DEFAULT_VOICE_PREFS.realtime_idle_s * 1000,
+    });
+  });
+
+  it("applySettings passes value.voice through idleTimeoutsMs to both timers, and the constructors start from it", () => {
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    const apply = main.slice(main.indexOf("function applySettings("), main.indexOf("function chatGPTAvailable("));
+    expect(apply).toContain("const idle = idleTimeoutsMs(value.voice);");
+    expect(apply).toContain("conversation.setIdleMs(idle.voice_mode);");
+    expect(apply).toContain("realtime.setIdleMs(idle.realtime);");
+    expect(apply).not.toMatch(/setIdleMs\([^)]*_s\b/); // 秒數不直接交給計時器
+    expect(main).toContain("{ idleMs: idleTimeoutsMs(undefined).voice_mode }");
+    expect(main).toContain("{ idleMs: idleTimeoutsMs(undefined).realtime }");
   });
 });
