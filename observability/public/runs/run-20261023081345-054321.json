@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T08:13:45.853Z",
-  "updated_at": "2026-10-23T08:14:17.024Z",
+  "updated_at": "2026-10-23T08:14:20.615Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,8 +23,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-23T08:14:20.614Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -71,6 +71,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "Brain scale = distanceScale (D/2, 0.75–1.5, farther→bigger, docs/10–11) shared with text; prefs kinds bool|seconds; tray menu built from seconds-menu rows. George wants closer→bigger brain with a menu-set max factor."
+    },
+    {
+      "at": "2026-10-23T08:14:20.615Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
