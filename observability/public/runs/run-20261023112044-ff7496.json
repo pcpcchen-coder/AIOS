@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-10-23T11:20:44.814Z",
-  "updated_at": "2026-10-23T11:50:47.069Z",
-  "ended_at": null,
+  "updated_at": "2026-10-23T11:50:50.710Z",
+  "ended_at": "2026-10-23T11:50:50.709Z",
   "steps": [
     {
       "id": "how",
@@ -118,6 +118,13 @@
       "step_id": "pr",
       "status": "passed",
       "note": "Review fixes bcea82c (752 tests, verify-aios PASS); merged on George's instruction"
+    },
+    {
+      "at": "2026-10-23T11:50:50.710Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
