@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T01:32:19.672Z",
-  "updated_at": "2026-10-23T01:50:18.981Z",
+  "updated_at": "2026-10-23T02:14:28.510Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,10 +23,10 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-23T01:50:18.981Z",
-      "ended_at": null,
-      "note": "Arena: runner 1 = direct Codex OAuth route (B), runner 2 = spawn codex app-server (A)",
+      "ended_at": "2026-10-23T02:14:28.509Z",
+      "note": "Single-candidate arena after George chose route B; cross-judge found 8 must-fixes (sideband close, page ownership, unknown-not-failure, budget, transcript relay, approval window, delegation hygiene, wording) → SYNTHESIS",
       "evidence": []
     },
     {
@@ -110,6 +110,13 @@
       "step_id": "architect",
       "status": "running",
       "note": "Arena: runner 1 = direct Codex OAuth route (B), runner 2 = spawn codex app-server (A)"
+    },
+    {
+      "at": "2026-10-23T02:14:28.510Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "passed",
+      "note": "Single-candidate arena after George chose route B; cross-judge found 8 must-fixes (sideband close, page ownership, unknown-not-failure, budget, transcript relay, approval window, delegation hygiene, wording) → SYNTHESIS"
     }
   ],
   "provenance": "Agent self-reported"
