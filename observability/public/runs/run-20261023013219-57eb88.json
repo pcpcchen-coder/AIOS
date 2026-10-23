@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T01:32:19.672Z",
-  "updated_at": "2026-10-23T02:14:35.888Z",
+  "updated_at": "2026-10-23T02:56:44.614Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-23T02:14:35.887Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-23T02:56:44.613Z",
+      "note": "77e332d: RealtimeRoute (ApiKeyRoute/LiveRoute), Codex OAuth, live sideband, LiveToolCaller, shared executor, route switch; 81 new tests (fakes)",
       "evidence": []
     },
     {
@@ -131,6 +131,13 @@
       "step_id": "implement",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-23T02:56:44.613Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "77e332d: RealtimeRoute (ApiKeyRoute/LiveRoute), Codex OAuth, live sideband, LiveToolCaller, shared executor, route switch; 81 new tests (fakes)"
     }
   ],
   "provenance": "Agent self-reported"
