@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T12:08:19.817Z",
-  "updated_at": "2026-10-23T12:08:38.301Z",
+  "updated_at": "2026-10-23T12:08:42.488Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,8 +23,8 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-23T12:08:42.487Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -96,6 +96,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "比對選單列與設定頁：數值、引擎、即時語音路徑與聲音重複；鏡頭開關與顯示鏡頭畫面只在頁面"
+    },
+    {
+      "at": "2026-10-23T12:08:42.488Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
