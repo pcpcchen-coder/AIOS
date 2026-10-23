@@ -68,7 +68,7 @@ export type ApprovalDecision = "approve" | "reject";
 export type RealtimeToolName = "web_search" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control";
 
 /** 鏡頭規則的效果（CameraCommand 去掉字幕 say）。 */
-export type CameraEffect = { preview: boolean } | { set: { active?: boolean; look_to_talk?: boolean; stop_gesture?: boolean } };
+export type CameraEffect = { preview: boolean } | { set: { active?: boolean; look_to_talk?: boolean; look_to_talk_greet?: boolean; stop_gesture?: boolean } };
 
 /** 比對函式對 says 每一句的實際結果。 */
 export type Expect =
@@ -145,6 +145,10 @@ export const CAMERA_COMMANDS: readonly LocalCommand[] = [
     expect: { matcher: "camera", effect: { set: { look_to_talk: false } } } },
   { id: "look-on", says: ["打開看著說話", "開啟看著說話"], does: "打開看著說話（保存）", works: ALL, needs: CAMERA_NEEDS,
     expect: { matcher: "camera", effect: { set: { look_to_talk: true } } } },
+  { id: "greet-off", says: ["關閉打招呼", "打招呼關掉"], does: "關閉看著說話時先打招呼（保存）", works: ALL, needs: CAMERA_NEEDS,
+    expect: { matcher: "camera", effect: { set: { look_to_talk_greet: false } } } },
+  { id: "greet-on", says: ["打開打招呼", "打招呼打開"], does: "打開看著說話時先打招呼（保存）", works: ALL, needs: CAMERA_NEEDS,
+    expect: { matcher: "camera", effect: { set: { look_to_talk_greet: true } } } },
   { id: "palm-off", says: ["關閉手掌停止", "停用停止手勢"], does: "關閉手掌停止播報（保存）", works: ALL, needs: CAMERA_NEEDS,
     note: "即時語音確認卡開著時說，也會拒絕確認卡（見容易誤會）", expect: { matcher: "camera", effect: { set: { stop_gesture: false } } } },
   { id: "palm-on", says: ["打開手掌停止", "啟用停止手勢"], does: "打開手掌停止播報（保存）", works: ALL, needs: CAMERA_NEEDS,
@@ -293,6 +297,7 @@ export const CONTROLS: readonly Control[] = [
   { id: "voice-pill", how: "點右上角的語音指示", does: "結束語音模式或即時語音" },
   { id: "palm", how: "舉起張開的手掌", does: "停止 Nous 說話，不取消任務（需要鏡頭與「手掌停止播報」）" },
   { id: "look", how: "面向螢幕", does: "看著說話：面向這麼久之後自動開始即時語音（需要鏡頭與即時語音，而且這個視窗之前已同意過即時語音的說明；沒同意過不會自動開始，請先按「開始語音對話」同意一次）", seconds: "look_to_talk_s" },
+  { id: "look-greet", how: "看著說話開始後", does: "開著「看著說話時先打招呼」時，連上後等 0.6 秒，你還沒開口或打字，Nous 就先說一句招呼、問有什麼需要幫忙（每次對話最多一次；按鈕、語音指令或打字開始的不打招呼）" },
   { id: "look-cooldown", how: "對話結束後", does: "這段時間內看著說話不再自動開始", seconds: "look_to_talk_cooldown_s" },
   { id: "voice-idle", how: "語音模式沒說話", does: "自動關閉語音模式（Nous 等回覆、念回覆時不計時）", seconds: "voice_idle_s" },
   { id: "realtime-idle", how: "即時語音沒說話", does: "自動結束即時語音，避免持續計費或用掉方案額度（Nous 回覆、查資料、等確認時不計時）", seconds: "realtime_idle_s" },

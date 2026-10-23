@@ -165,6 +165,7 @@ describe("the page hands settings.voice to the idle timers in milliseconds", () 
     expect(apply).toContain("realtime.setIdleMs(idle.realtime);");
     expect(apply).not.toMatch(/setIdleMs\([^)]*_s\b/); // 秒數不直接交給計時器
     expect(main).toContain("{ idleMs: idleTimeoutsMs(undefined).voice_mode }");
-    expect(main).toContain("{ idleMs: idleTimeoutsMs(undefined).realtime }");
+    // 即時語音的建構子另外帶看著說話的招呼（greeting，George 2026-10-23）。
+    expect(main).toContain("{ idleMs: idleTimeoutsMs(undefined).realtime, greeting }");
   });
 });

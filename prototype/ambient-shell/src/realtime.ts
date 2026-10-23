@@ -1,5 +1,6 @@
 import type { HomeControlResult } from "../shared/home.ts";
 import type { HomeControlArgs } from "./api.ts";
+import { GREETING_SETTLE_MS, type GreetingOnce } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 
 // 即時語音模式（OpenAI Realtime）：像 ChatGPT 語音模式，語音直接對語音。
@@ -62,6 +63,11 @@ interface RealtimeOptions {
   idleMs: number;
   /** 確認卡多久沒回應就自動取消（毫秒），預設 60 秒。 */
   approvalMs?: number;
+  /**
+   * 看著說話開始的工作階段：session.created 之後再等 GREETING_SETTLE_MS，請模型先說一句招呼（response.create 帶這一輪的 instructions，
+   * 不加假的使用者訊息）。使用者先開口或打字就不打；改路徑時共用同一個物件，最多一次。
+   */
+  greeting?: GreetingOnce | null;
 }
 
 interface ServerEvent {
@@ -99,6 +105,11 @@ export class RealtimeVoice {
   private readonly approvals: ApprovalQueue;
 
   private idleMs: number;
+  private readonly greeting: GreetingOnce | null;
+  /** session.created 之後等 GREETING_SETTLE_MS 才送招呼；使用者開口、打字、收起都會取消。 */
+  private greetTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 連線中（session.created 之前）打的字：連上後合併成一輪送出。 */
+  private queuedText: string[] = [];
 
   constructor(
     private readonly callbacks: RealtimeCallbacks,
@@ -106,6 +117,7 @@ export class RealtimeVoice {
     options: RealtimeOptions,
   ) {
     this.idleMs = options.idleMs;
+    this.greeting = options.greeting ?? null;
     this.approvals = new ApprovalQueue(
       callbacks,
       {
@@ -227,8 +239,14 @@ export class RealtimeVoice {
     this.setPhase("listening");
   }
 
-  /** 打字輸入：當成使用者這一輪說的話送出。 */
+  /** 打字輸入：當成使用者這一輪說的話送出。連線中打的先排隊，session.created 之後送出。打字一律取消還沒送出的招呼。 */
   sendText(text: string): void {
+    this.skipGreeting();
+    if (!this.on) return;
+    if (this.phase === "connecting") {
+      this.queuedText.push(text);
+      return;
+    }
     if (!this.channel) return;
     this.resetIdle();
     if (this.responding) this.interrupt();
@@ -262,18 +280,51 @@ export class RealtimeVoice {
    * 請模型回應。送出當下就視為回應中，直到 response.done：
    * 同時有多則通知時才不會連續送出 response.create（OpenAI 會拒絕重疊的回應）。
    */
-  private requestResponse(): void {
+  private requestResponse(response?: Record<string, unknown>): void {
     this.responding = true;
     this.awaitingCreated = true;
-    this.send({ type: "response.create" });
+    this.send(response ? { type: "response.create", response } : { type: "response.create" });
+  }
+
+  /** 使用者先開口或打字：這次不打招呼，等待中的計時器也取消。 */
+  private skipGreeting(): void {
+    this.greeting?.skip();
+    this.cancelGreetTimer();
+  }
+
+  private cancelGreetTimer(): void {
+    if (this.greetTimer) clearTimeout(this.greetTimer);
+    this.greetTimer = null;
+  }
+
+  /** session.created 之後：還有待送的招呼就等 GREETING_SETTLE_MS，讓已經在說話的使用者先取消它。 */
+  private scheduleGreeting(): void {
+    if (this.greeting?.state !== "pending" || this.greetTimer) return;
+    this.greetTimer = setTimeout(() => {
+      this.greetTimer = null;
+      this.greetIfPending();
+    }, GREETING_SETTLE_MS);
+  }
+
+  /** 等待結束：看著說話開始、使用者還沒開口、設定還開著，就請模型說一句招呼。 */
+  private greetIfPending(): void {
+    if (!this.greeting || this.responding) return;
+    const instructions = this.greeting.take();
+    if (instructions) this.requestResponse({ instructions });
   }
 
   private handle(event: ServerEvent): void {
     switch (event.type) {
-      case "session.created":
+      case "session.created": {
         this.setPhase("listening");
+        const queued = this.queuedText.splice(0);
+        if (queued.length) this.sendText(queued.join("\n"));
+        this.scheduleGreeting();
         break;
+      }
       case "input_audio_buffer.speech_started":
+        // 使用者先開口：這次不打招呼（已經送出的招呼照一般插話處理）。
+        this.skipGreeting();
         this.resetIdle();
         this.setPhase("hearing");
         break;
@@ -456,6 +507,8 @@ export class RealtimeVoice {
     if (this.endTimer) clearTimeout(this.endTimer);
     this.endTimer = null;
     this.endRequested = false;
+    this.cancelGreetTimer();
+    this.queuedText = [];
     this.channel?.close();
     this.channel = null;
     this.peer?.close();

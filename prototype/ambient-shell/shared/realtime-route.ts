@@ -183,8 +183,11 @@ export type RealtimeServerEvent =
   | { type: "realtime.host"; sequence: number; session_id: string; call: HostCall }
   | { type: "realtime.live"; sequence: number; session_id: string; event: LiveCoreEvent };
 
-/** 頁面 → 核心（POST /api/realtime/input）。API key 路徑改用資料通道。 */
-export const LIVE_INPUT_KINDS = ["user_text", "notice", "context"] as const;
+/**
+ * 頁面 → 核心（POST /api/realtime/input）。API key 路徑改用資料通道。
+ * greeting：看著說話開始時的一次招呼指示（session.context.append speakable，不加「（系統通知）」；核心每個工作階段最多送一次）。
+ */
+export const LIVE_INPUT_KINDS = ["user_text", "notice", "context", "greeting"] as const;
 export type LiveInputKind = (typeof LIVE_INPUT_KINDS)[number];
 
 /** 頁面回報確認卡狀態（POST /api/realtime/approval）：核心據此判斷「確認執行」是不是在回答一張卡。 */

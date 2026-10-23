@@ -16,6 +16,7 @@ describe("CAMERA_PREFS", () => {
       look_to_talk: true,
       look_to_talk_s: 1.5,
       look_to_talk_cooldown_s: 10,
+      look_to_talk_greet: true,
       stop_gesture: true,
       brain_zoom_max: 2,
     });

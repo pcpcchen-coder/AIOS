@@ -169,6 +169,8 @@ const OFF_AFTER = "(關掉|關閉|關起來|停用)";
 const ON = "(打開|開啟|啟用)";
 const PREVIEW = "鏡頭(畫面|影像)";
 const LOOK = "看著說話";
+/** 「看著說話時先打招呼」：「關閉打招呼」「打招呼打開」「關閉看著說話時先打招呼」。單獨說「打招呼」不是指令。 */
+const GREET = "(看著說話時?)?先?打招呼";
 // 不收單獨的「手勢」：一般句子（「展開手勢研究」）太容易誤觸。
 const PALM = "(手掌停止(播報)?|停止手勢)";
 /** 可省略的客氣前後綴：「請幫我關掉鏡頭吧」＝「關掉鏡頭」。 */
@@ -189,6 +191,8 @@ export const CAMERA_RULES: readonly { pattern: RegExp; command: CameraCommand }[
   { pattern: whole(`(顯示|${ON}|看一下|看看)`, PREVIEW, "(顯示|打開|開啟)"), command: { preview: true } },
   { pattern: whole(OFF, LOOK, "(關掉|關閉|停用)"), command: { set: { look_to_talk: false }, say: "已關閉看著說話。" } },
   { pattern: whole(ON, LOOK, ON), command: { set: { look_to_talk: true }, say: "已打開看著說話。" } },
+  { pattern: whole(OFF, GREET, "(關掉|關閉|停用)"), command: { set: { look_to_talk_greet: false }, say: "已關閉看著說話時先打招呼。" } },
+  { pattern: whole(ON, GREET, ON), command: { set: { look_to_talk_greet: true }, say: "已打開看著說話時先打招呼。" } },
   { pattern: whole(OFF, PALM, "(關掉|關閉|停用)"), command: { set: { stop_gesture: false }, say: "已關閉手掌停止。" } },
   { pattern: whole(ON, PALM, ON), command: { set: { stop_gesture: true }, say: "已打開手掌停止。" } },
   { pattern: whole(OFF, "鏡頭", OFF_AFTER), command: { set: { active: false }, say: "鏡頭已關閉。" } },

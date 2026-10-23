@@ -300,7 +300,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const { sessionId, owner } = sessionAuth(body);
       const kind = body.kind;
       const text = typeof body.text === "string" ? body.text.trim() : "";
-      if (!(LIVE_INPUT_KINDS as readonly unknown[]).includes(kind)) throw new HttpError(400, "kind must be user_text, notice or context");
+      if (!(LIVE_INPUT_KINDS as readonly unknown[]).includes(kind)) throw new HttpError(400, "kind must be user_text, notice, context or greeting");
       if (!text || text.length > MAX_TEXT_CHARS) throw new HttpError(400, `text is required (≤ ${MAX_TEXT_CHARS} chars)`);
       sessionCall(() => sessions!.input(sessionId, owner, kind as LiveInputKind, text));
       return sendJson(res, 200, { ok: true });

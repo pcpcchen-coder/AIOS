@@ -42,6 +42,11 @@ export interface CameraPrefs {
   look_to_talk_s: number;
   /** 對話結束（或自動開始）後幾秒內不再自動開始。 */
   look_to_talk_cooldown_s: number;
+  /**
+   * 看著說話時先打招呼（George 2026-10-23）：看著說話開始的即時語音，連線完成後 Nous 先說一句招呼（每次對話最多一次）。
+   * 按鈕、語音指令或打字開始的不打招呼；使用者先開口就不打。
+   */
+  look_to_talk_greet: boolean;
   /** 手掌停止播報：舉起張開的手掌停止 Nous 說話（不取消任務）。 */
   stop_gesture: boolean;
   /**
@@ -50,6 +55,23 @@ export interface CameraPrefs {
    */
   brain_zoom_max: number;
 }
+
+/**
+ * 看著說話開始的即時語音連上後，請模型說的那一句招呼（兩條路徑共用）。只知道使用者面向螢幕：
+ * 不得說看到使用者、不得描述長相或環境（CLAUDE.md：沒有影像分析時不得宣稱正在觀看）。
+ */
+export const LOOK_TO_TALK_GREETING =
+  "你是 Nous。使用者剛面向螢幕開始語音對話：請用一句簡短自然的繁體中文打招呼，問有什麼需要幫忙（例如「我在，有什麼需要幫忙的嗎？」）。" +
+  "你只知道使用者面向螢幕，看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境。";
+
+/**
+ * ChatGPT 方案路徑的招呼要放進 session.context.append speakable：前面加這個固定標記，
+ * 語音層說明（server/realtime.ts buildLiveInstructions）才知道這段只是開場指示、不要念出來。
+ */
+export const GREETING_MARKER = "（開場）";
+
+/** ChatGPT 方案路徑真正送給模型的招呼（核心只送這個常數，忽略頁面送來的文字）。 */
+export const LIVE_GREETING_TEXT = `${GREETING_MARKER}${LOOK_TO_TALK_GREETING}`;
 
 /** SettingsView.camera 的形狀。 */
 export type CameraSettings = CameraInstall & CameraPrefs;
@@ -77,6 +99,10 @@ export const CAMERA_PREFS = {
   look_to_talk_cooldown_s: {
     kind: "seconds", default: 10, min: 3, max: 60, step: 1, presets: [5, 10, 15, 20, 30, 60],
     label: "對話結束後暫停", hint: "這段時間內不再自動開始，避免說完再見又被打開",
+  },
+  look_to_talk_greet: {
+    kind: "bool", default: true, label: "看著說話時先打招呼",
+    hint: "看著說話開始的對話，連上後 Nous 先問一句有什麼需要幫忙；你先開口就不打招呼",
   },
   stop_gesture: { kind: "bool", default: true, label: "手掌停止播報", hint: "舉起張開的手掌停止 Nous 說話（不取消任務）" },
   brain_zoom_max: {
