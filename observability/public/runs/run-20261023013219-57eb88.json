@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T01:32:19.672Z",
-  "updated_at": "2026-10-23T01:50:14.336Z",
+  "updated_at": "2026-10-23T01:50:18.981Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,10 +23,10 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-23T01:50:18.981Z",
       "ended_at": null,
-      "note": "",
+      "note": "Arena: runner 1 = direct Codex OAuth route (B), runner 2 = spawn codex app-server (A)",
       "evidence": []
     },
     {
@@ -103,6 +103,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "3 explorers + explainer (16 gotchas); George has no Codex CLI"
+    },
+    {
+      "at": "2026-10-23T01:50:18.981Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "running",
+      "note": "Arena: runner 1 = direct Codex OAuth route (B), runner 2 = spawn codex app-server (A)"
     }
   ],
   "provenance": "Agent self-reported"
