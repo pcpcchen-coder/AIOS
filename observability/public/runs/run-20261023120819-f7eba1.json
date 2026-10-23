@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T12:08:19.817Z",
-  "updated_at": "2026-10-23T12:24:58.501Z",
+  "updated_at": "2026-10-23T12:25:02.484Z",
   "ended_at": null,
   "steps": [
     {
@@ -50,8 +50,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-23T12:25:02.484Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -138,6 +138,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "tsc、vitest 767 項、vite build、node --check、verify-aios PASS、diff --check 全過"
+    },
+    {
+      "at": "2026-10-23T12:25:02.484Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
