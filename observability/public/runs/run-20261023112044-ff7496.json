@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T11:20:44.814Z",
-  "updated_at": "2026-10-23T11:36:08.442Z",
+  "updated_at": "2026-10-23T11:36:11.840Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-23T11:36:11.840Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -92,6 +92,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "tsc, vitest 742/742, build, desktop check, verify-aios PASS"
+    },
+    {
+      "at": "2026-10-23T11:36:11.840Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
