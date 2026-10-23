@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T01:32:19.672Z",
-  "updated_at": "2026-10-23T02:14:32.440Z",
+  "updated_at": "2026-10-23T02:14:35.888Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-23T02:14:35.887Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -124,6 +124,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "Scope: Codex OAuth + live route + route switch + shared executor; API-key route unchanged; no new deps"
+    },
+    {
+      "at": "2026-10-23T02:14:35.888Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
