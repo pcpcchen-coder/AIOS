@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { RealtimeVoice, type ApprovalOutcome, type ApprovalRequest, type HomeResult, type RealtimeDeps, type RealtimePhase } from "../src/realtime.ts";
 import type { HomeControlArgs } from "../src/api.ts";
+import { homeControlLine, type HomeControlResult } from "../shared/home.ts";
 
 // 模擬 WebRTC：資料通道收發 OpenAI Realtime 事件，不需要麥克風、喇叭或網路。
 class FakeChannel {
@@ -486,6 +487,28 @@ describe("RealtimeVoice home_control", () => {
     expect(outputs(t)).toEqual([CONFIRMED]);
     expect(t.sentTypes().at(-1)).toBe("response.create");
     expect(t.approvals).toEqual([]);
+  });
+
+  it("H1b: an AIFA ac_temperature call and its one_way result go straight through to the model (fixture), like any other command", async () => {
+    const ONE_WAY: HomeResult = {
+      ok: true,
+      status: "unconfirmed",
+      why: "one_way",
+      device: "冷氣",
+      room: "客廳",
+      action: "設定 26 度",
+      message: "已透過 AIFA 連線送出；控制器狀態不代表冷氣實際反應，請現場確認（fixture）",
+      sent_settings: "冷氣、26 度、風量低、擺風自動",
+    };
+    const t = setup({}, { control: () => ONE_WAY });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.userSays("冷氣調 26 度");
+    await callControl(t, { target: "冷氣", command: "ac_temperature", value: "26" });
+    expect(t.homeControls).toEqual([{ target: "冷氣", command: "ac_temperature", value: "26" }]);
+    expect(outputs(t)).toEqual([ONE_WAY]);
+    expect(t.sentTypes().at(-1)).toBe("response.create");
+    expect(homeControlLine(ONE_WAY as HomeControlResult)).toBe("⏳ 客廳 冷氣 設定 26 度：已送出，請確認");
   });
 
   it("missing target or command is reported to the model without calling the core", async () => {

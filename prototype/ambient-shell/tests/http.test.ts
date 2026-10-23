@@ -299,7 +299,8 @@ describe("HTTP API", () => {
     const raw = await res.text();
     expect(JSON.parse(raw)).toMatchObject({ status: "ok", devices: [{ device: "溫濕度計", minutes_ago: 1, readings: [{ value: 26.5 }] }] });
     expect(raw).not.toContain("hub-secret");
-    expect(seen).toEqual(["http://127.0.0.1:8788/api/v1/home Bearer hub-secret"]);
+    // H1b：同時讀 AIFA 冷氣清單（這個假中控沒有，讀到的格式不符就當作讀不到，不影響查詢）。
+    expect(seen).toEqual(["http://127.0.0.1:8788/api/v1/home Bearer hub-secret", "http://127.0.0.1:8788/api/v1/integrations/aifa Bearer hub-secret"]);
   });
 
   it("家電控制：驗證輸入、未設定中控時 409、經本機核心送出指令與確認卡，不外洩權杖", async () => {
@@ -337,6 +338,7 @@ describe("HTTP API", () => {
     expect(raw).not.toContain("hub-secret");
     expect(seen).toEqual([
       "GET http://127.0.0.1:8788/api/v1/home Bearer hub-secret  ",
+      "GET http://127.0.0.1:8788/api/v1/integrations/aifa Bearer hub-secret  ",
       `POST http://127.0.0.1:8788/api/v1/devices/desk/commands Bearer hub-secret nous_fixed {"command":"brightness","value":60}`,
     ]);
 
@@ -345,6 +347,40 @@ describe("HTTP API", () => {
     const confirmed = await post("/api/home/confirm", { confirm_id: "home_fixed", approve: true });
     expect(await confirmed.json()).toMatchObject({ status: "confirmed", action: "關閉" });
     expect(await (await post("/api/home/confirm", { confirm_id: "home_gone", approve: true })).json()).toMatchObject({ status: "refused", reason: "expired" });
+  });
+
+  it("家電控制（H1b，fixture）：AIFA 冷氣設定與紅外線按鍵經本機核心送到中控的專用路徑，回應不含權杖", async () => {
+    const seen: string[] = [];
+    const caps = { modes: ["auto", "cool", "dry"], fan_modes: ["auto", "low", "medium", "high"], swing_modes: ["auto", "fixed_1", "fixed_2", "fixed_3", "fixed_4", "fixed_5"], features: ["normal"], min_temperature: 17, max_temperature: 30 };
+    const hub = (async (url: string, init: RequestInit) => {
+      seen.push(`${init.method ?? "GET"} ${url.replace("http://127.0.0.1:8788", "")} ${init.body ?? ""}`);
+      const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
+      if (url.endsWith("/api/v1/home")) {
+        return json({
+          layout: { rooms: [] },
+          devices: [{ id: "ir-tv", name: "電視", kind: "remote", configured: false, config: { infrared_virtual: true }, infrared: { keys: [{ key: "Vol+", key_id: 2, label: "Vol+" }], ready: true } }],
+          server_time: 1000,
+        });
+      }
+      if (url.endsWith("/api/v1/integrations/aifa")) {
+        return json({ connected: true, queried_at: 900, items: [{ id: "h1", online: true, children: [{ id: "c1", name: "冷氣", type: "0", sub_type: "0", device_code: "173", capabilities: caps }] }] });
+      }
+      if (url.endsWith("/status")) return json({ sent: false, status: { power: true, mode: "cool", temperature: 25, fan: "low", swing: "auto", feature: "normal" } });
+      if (url.endsWith("/climate")) return json({ id: "a", status: "unconfirmed", message: "已透過 AIFA 連線送出（fixture）", controller_status: null });
+      return json({ id: "i", status: "unconfirmed", transport_status: "accepted_by_cloud", message: "Tuya 已接受紅外線指令（fixture）" });
+    }) as unknown as typeof fetch;
+    const { post } = await start(5, undefined, undefined, new HomeBridge({ url: "http://127.0.0.1:8788", token: "hub-secret", fetch: hub, newId: () => "k" }));
+    const swing = await post("/api/home/control", { target: "冷氣", command: "ac_swing", value: "fixed_3" });
+    const raw = await swing.text();
+    expect(JSON.parse(raw)).toMatchObject({ status: "unconfirmed", why: "one_way", sent_settings: "冷氣、25 度、風量低、擺風固定 3" });
+    expect(raw).not.toContain("hub-secret");
+    const press = await (await post("/api/home/control", { target: "電視", command: "press", value: "volume_up" })).json();
+    expect(press).toMatchObject({ status: "unconfirmed", why: "one_way", key: "Vol+" });
+    expect(seen.filter((x) => x.startsWith("POST"))).toEqual([
+      "POST /api/v1/integrations/aifa/devices/h1/children/c1/status ",
+      'POST /api/v1/integrations/aifa/devices/h1/children/c1/climate {"mode":"cool","temperature":25,"fan":"low","swing":"fixed_3","feature":"normal"}',
+      'POST /api/v1/devices/ir-tv/infrared-commands {"key":"Vol+","key_id":2}',
+    ]);
   });
 
   it("鏡頭設定：驗證輸入、保存到 camera.json、推送 settings.updated，重新啟動後仍保留", async () => {
