@@ -1,7 +1,7 @@
 import { parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
 import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimeCallbacks, RealtimeDeps, RealtimePhase } from "./realtime.ts";
-import type { RealtimeSession } from "./realtime-session.ts";
+import type { GreetingOnce, RealtimeSession } from "./realtime-session.ts";
 import { FallbackOfferError } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 
@@ -77,14 +77,17 @@ export class LiveVoice implements RealtimeSession {
   /** 確認卡狀態的回報要先於工具結果到達核心。 */
   private approvalSync: Promise<void> = Promise.resolve();
   private idleMs: number;
+  /** 看著說話開始的工作階段：進入聆聽後請模型先說一句招呼（核心用 session.context.append speakable，同 OpenClaw triggerGreeting）。 */
+  private readonly greeting: GreetingOnce | null;
   fallbackOffer: FallbackOffer | null = null;
 
   constructor(
     private readonly callbacks: RealtimeCallbacks,
     private readonly deps: LiveDeps,
-    options: { idleMs: number; approvalMs?: number },
+    options: { idleMs: number; approvalMs?: number; greeting?: GreetingOnce | null },
   ) {
     this.idleMs = options.idleMs;
+    this.greeting = options.greeting ?? null;
     this.approvals = new ApprovalQueue(
       callbacks,
       {
@@ -235,6 +238,7 @@ export class LiveVoice implements RealtimeSession {
   /** 打字：先比對確認卡（打「確認執行」照樣有效），再交給核心（核心當成請求處理）。 */
   sendText(text: string): void {
     if (!this.capturing) return;
+    this.greeting?.skip();
     this.resetIdle();
     this.approvals.check(text);
     void this.deps.input("user_text", text).catch(() => undefined);
@@ -258,13 +262,24 @@ export class LiveVoice implements RealtimeSession {
 
   private checkListening(): void {
     const { mic, peer, started } = this.evidence;
-    if (this.phase === "connecting" && mic && peer && started) this.setPhase("listening");
+    if (this.phase === "connecting" && mic && peer && started) {
+      this.setPhase("listening");
+      this.greetIfPending();
+    }
+  }
+
+  /** 真的進入聆聽（三項證據都到）之後：看著說話開始、使用者還沒開口、設定還開著，就請核心送一句可念的招呼指示。 */
+  private greetIfPending(): void {
+    const instructions = this.greeting?.take();
+    if (instructions) void this.deps.input("greeting", instructions).catch(() => undefined);
   }
 
   /** 逐字稿：資料通道或核心，哪個先到用哪個，依 item_id（沒有時依來源配對）去重。 */
   private transcript(source: TranscriptSource, role: "user" | "assistant", text: string, final: boolean, itemId: string | null): void {
     const clean = text.trim();
     if (!clean) return;
+    // 使用者先開口（逐字稿是真實的說話證據，同 OpenClaw 只讓真的逐字稿取消招呼）：這次不打招呼。
+    if (role === "user") this.greeting?.skip();
     if (!final) {
       if (role === "user") {
         this.resetIdle();

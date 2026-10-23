@@ -305,4 +305,20 @@ describe("LiveRoute sideband", () => {
     await conn.waitClosed();
     expect(conn.received.filter((e) => e.type === "session.close")).toHaveLength(1);
   });
+
+  it("greeting (look-to-talk, George 2026-10-23): one speakable session.context.append, verbatim, at most once per session", async () => {
+    const t = await setup();
+    const call = await t.route.connect("v=0", t.ctx);
+    const conn = await sideband!.next();
+    call.control!.input("greeting", "請用一句話打招呼（fixture）");
+    call.control!.input("greeting", "請用一句話打招呼（fixture）");
+    call.control!.input("notice", "之後的通知");
+    await conn.waitFor((e) => e.type === "session.context.append" && (e.content as { text: string }[])[0].text.startsWith("（系統通知）"));
+    const appends = conn.received.filter((e) => e.type === "session.context.append");
+    expect(appends.map((e) => [e.channel, (e.content as { text: string }[])[0].text])).toEqual([
+      ["speakable", "請用一句話打招呼（fixture）"],
+      ["speakable", "（系統通知）之後的通知"],
+    ]);
+    expect(conn.received.some((e) => e.type === "delegation.context.append")).toBe(false);
+  });
 });

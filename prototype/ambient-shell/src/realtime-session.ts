@@ -28,6 +28,56 @@ export type GaFitsSeam = RealtimeVoice extends RealtimeSession ? true : never;
 const gaFits: GaFitsSeam = true;
 void gaFits;
 
+/** 誰開始了這次即時語音：只有看著說話（鏡頭）開始的會打招呼；按鈕、語音指令、打字、同意說明後開始的都是 user。 */
+export type RealtimeStartSource = "look_to_talk" | "user";
+
+export type GreetingState = "pending" | "sent" | "skipped";
+
+/**
+ * 看著說話開始的即時語音要打的一次招呼（George 2026-10-23）。一次 startRealtime 建一個，
+ * 改路徑時兩個工作階段共用同一個物件，所以整次對話最多打一次招呼。
+ * - 工作階段確定連上（API key：session.created；ChatGPT 方案：麥克風＋peer＋session.started）時呼叫 take()；
+ * - 使用者在那之前先開口或打字：skip()，這次不打招呼；
+ * - take() 當下再讀一次設定（設定改了立即生效）：關了就不打。
+ */
+export class GreetingOnce {
+  private value: GreetingState = "pending";
+
+  constructor(
+    readonly instructions: string,
+    private readonly enabled: () => boolean = () => true,
+  ) {}
+
+  get state(): GreetingState {
+    return this.value;
+  }
+
+  /** 還沒打過、沒被取消、設定還開著：回傳要給模型的指示並標記已送出；否則 null。 */
+  take(): string | null {
+    if (this.value !== "pending") return null;
+    if (!this.enabled()) {
+      this.value = "skipped";
+      return null;
+    }
+    this.value = "sent";
+    return this.instructions;
+  }
+
+  /** 使用者先開口（或打字）：還沒送出的招呼不再送。已送出的不受影響。 */
+  skip(): void {
+    if (this.value === "pending") this.value = "skipped";
+  }
+}
+
+/**
+ * 這次開始要不要打招呼：只有看著說話開始、而且「看著說話時先打招呼」開著時才建立 GreetingOnce。
+ * enabled 在連上的那一刻再讀一次（設定畫面或語音改了立即生效）。
+ */
+export function greetingFor(source: RealtimeStartSource, greetOn: () => boolean, instructions: string): GreetingOnce | null {
+  if (source !== "look_to_talk" || !greetOn()) return null;
+  return new GreetingOnce(instructions, greetOn);
+}
+
 /** 還沒開始過的即時語音：main.ts 載入時讀 on／current 等都安全。 */
 export function idleSession(): RealtimeSession {
   return {

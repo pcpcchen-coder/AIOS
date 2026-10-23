@@ -336,6 +336,8 @@ class LiveCall implements RouteCall {
   private started = false;
   private capTimer: ReturnType<typeof setTimeout> | null = null;
   private typed = 0;
+  /** 這個工作階段已經送過招呼指示：頁面重送也不會再念一次。 */
+  private greeted = false;
 
   constructor(
     readonly answerSdp: string,
@@ -470,11 +472,18 @@ class LiveCall implements RouteCall {
    * user_text → 和交辦一樣交給 caller（打字就是請求），結果用 session.context.append 送回。
    * notice    → session.context.append speakable「（系統通知）…」（任務完成、確認卡的結果）。
    * context   → session.context.append commentary（例如手指指著哪一項；不念）。
+   * greeting  → session.context.append speakable 原文（看著說話開始時的招呼指示；同 OpenClaw quicksilver triggerGreeting），每個工作階段最多一次。
    */
   private input(kind: LiveInputKind, text: string): void {
     if (this.closed) return;
     if (kind === "user_text") {
       this.enqueue(`typed_${++this.typed}`, text, "typed");
+      return;
+    }
+    if (kind === "greeting") {
+      if (this.greeted) return;
+      this.greeted = true;
+      for (const piece of chunkForAppend(text)) this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: piece }] });
       return;
     }
     const channel = kind === "notice" ? "speakable" : "commentary";

@@ -5,7 +5,7 @@ import { ApiError, api, newRequestId, streamChat, subscribeEvents, type HomeCont
 import { ConversationSession } from "./conversation.ts";
 import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf } from "./sense/controller.ts";
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
-import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
+import { DEFAULT_CAMERA_PREFS, LOOK_TO_TALK_GREETING, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
 import { formatSeconds } from "../shared/prefs.ts";
 import { DEFAULT_VOICE_PREFS, idleTimeoutsMs, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import {
@@ -19,7 +19,7 @@ import {
   type RealtimePhase,
 } from "./realtime.ts";
 import { browserWatchLevel, LiveVoice } from "./live-voice.ts";
-import { idleSession, openRealtime, type RealtimeSession, type SessionDecision } from "./realtime-session.ts";
+import { greetingFor, idleSession, openRealtime, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
 import type { RealtimeServerEvent } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
@@ -224,17 +224,17 @@ function stopRealtime(): void {
   endRealtimeTicket();
 }
 
-function makeRealtimeSession(decision: SessionDecision): RealtimeSession {
-  const next = createRealtimeSession(decision);
+function makeRealtimeSession(decision: SessionDecision, greeting: GreetingOnce | null): RealtimeSession {
+  const next = createRealtimeSession(decision, greeting);
   // 和其他計時器一樣：建構時用預設值，再套用目前的設定（applySettings 之後的改動也走 setIdleMs）。
   next.setIdleMs(idleTimeoutsMs(settings?.voice).realtime);
   return next;
 }
 
-function createRealtimeSession(decision: SessionDecision): RealtimeSession {
+function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce | null): RealtimeSession {
   const ticket = ticketOf(decision);
   if (decision.route === "api_key") {
-    return new RealtimeVoice(realtimeCallbacks, browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp, ticket)).sdp), { idleMs: idleTimeoutsMs(undefined).realtime });
+    return new RealtimeVoice(realtimeCallbacks, browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp, ticket)).sdp), { idleMs: idleTimeoutsMs(undefined).realtime, greeting });
   }
   const base = browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp, ticket)).sdp);
   return new LiveVoice(
@@ -274,7 +274,7 @@ function createRealtimeSession(decision: SessionDecision): RealtimeSession {
       },
       speak: (text) => void speakText(text).catch(() => undefined),
     },
-    { idleMs: idleTimeoutsMs(undefined).realtime },
+    { idleMs: idleTimeoutsMs(undefined).realtime, greeting },
   );
 }
 
@@ -384,7 +384,7 @@ function closeConversation(): void {
 function openConversation(): void {
   dismissFirstHint();
   if (realtimeReady()) {
-    startRealtime();
+    startRealtime("user");
     return;
   }
   const requestId = userRequest();
@@ -576,7 +576,8 @@ const sense = new SenseController({
   isTalking: () => realtime.on || conversation.current !== "off",
   canAutoTalk: () => !!settings?.realtime?.available && realtimeSupported() && hasVoiceConsent("realtime"),
   prefs: () => settings?.camera ?? DEFAULT_CAMERA_PREFS,
-  startTalk: () => startRealtime(),
+  // 看著說話開始的對話：連上後依「看著說話時先打招呼」請模型先打一次招呼。
+  startTalk: () => startRealtime("look_to_talk"),
   interruptSpeech: () => {
     if (realtime.current === "speaking") realtime.interrupt();
     else if (conversation.current === "speaking") conversation.interrupt();
@@ -703,7 +704,8 @@ function realtimeReady(): boolean {
   return !!settings?.realtime?.available && realtimeSupported();
 }
 
-function startRealtime(): void {
+/** source：只有看著說話（鏡頭）開始的會打招呼（George 2026-10-23）；其他一律 user。 */
+function startRealtime(source: RealtimeStartSource): void {
   if (realtime.on || realtimeStarting) return;
   if (!hasVoiceConsent("realtime")) {
     askConsent("realtime");
@@ -718,10 +720,12 @@ function startRealtime(): void {
   realtimeStarting = true;
   const start = new AbortController();
   realtimeStart = start;
+  // 一次開始一個招呼：改路徑時兩個工作階段共用，所以計費通知之後照樣打招呼、但整次最多一次。
+  const greeting = greetingFor(source, () => (settings?.camera ?? DEFAULT_CAMERA_PREFS).look_to_talk_greet, LOOK_TO_TALK_GREETING);
   // 路徑在開麥克風前決定；auto 改用 API key 時先說出計費通知。
   void openRealtime({
     start: () => api.realtimeStart(sseClientId),
-    makeSession: makeRealtimeSession,
+    makeSession: (decision) => makeRealtimeSession(decision, greeting),
     announce: announceRealtime,
     refused: (message) => {
       showSubtitle(message);
@@ -1650,7 +1654,7 @@ voicePill.addEventListener("click", disableVoiceMode);
 $<HTMLButtonElement>("consent-yes").addEventListener("click", () => {
   saveVoiceConsent(pendingConsent);
   consentBox.hidden = true;
-  if (pendingConsent === "realtime") startRealtime();
+  if (pendingConsent === "realtime") startRealtime("user");
   else if (pendingConsent === "continuous") enableVoiceMode();
   else voice.start();
 });
