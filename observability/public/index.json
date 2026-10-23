@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-23T11:36:13.291Z",
+  "updated_at": "2026-10-23T11:40:37.722Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,12 +9,12 @@
       "title": "看著說話啟動後主動打招呼（可開關）",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-23T11:36:11.840Z",
+      "updated_at": "2026-10-23T11:40:35.864Z",
       "started_at": "2026-10-23T11:20:44.814Z",
       "ended_at": null,
       "branch": "",
       "commit_sha": "",
-      "passed_steps": 3,
+      "passed_steps": 4,
       "total_steps": 5,
       "provenance": "Agent self-reported"
     },
