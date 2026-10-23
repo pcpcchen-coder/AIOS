@@ -8,16 +8,16 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T12:08:19.817Z",
-  "updated_at": "2026-10-23T12:08:34.054Z",
+  "updated_at": "2026-10-23T12:08:38.301Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-23T12:08:34.053Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-23T12:08:38.301Z",
+      "note": "比對選單列與設定頁：數值、引擎、即時語音路徑與聲音重複；鏡頭開關與顯示鏡頭畫面只在頁面",
       "evidence": []
     },
     {
@@ -89,6 +89,13 @@
       "step_id": "how",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-23T12:08:38.301Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "passed",
+      "note": "比對選單列與設定頁：數值、引擎、即時語音路徑與聲音重複；鏡頭開關與顯示鏡頭畫面只在頁面"
     }
   ],
   "provenance": "Agent self-reported"
