@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T11:20:44.814Z",
-  "updated_at": "2026-10-23T11:21:14.675Z",
+  "updated_at": "2026-10-23T11:21:19.001Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,8 +23,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-23T11:21:19.000Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -71,6 +71,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "Look-to-talk → hooks.startTalk → startRealtime (main.ts:579/706) → openRealtime; both routes (GA RealtimeVoice, LiveVoice); camera prefs in CAMERA_PREFS"
+    },
+    {
+      "at": "2026-10-23T11:21:19.001Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
