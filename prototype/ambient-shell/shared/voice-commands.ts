@@ -275,10 +275,10 @@ export const CAVEATS: readonly Caveat[] = [
 ];
 
 export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
-  end_conversation: { try: ["再見", "結束對話", "先這樣", "不用了"], does: "AI 判斷你要結束時道別並結束即時語音（不保證每次都結束）",
+  end_conversation: { try: ["再見", "結束對話", "先這樣", "不用了"], does: "AI 判斷你要結束時道別並結束即時語音（不保證每次都結束）；ChatGPT 方案路徑上整句只說「再見」「掰掰」「拜拜」「結束對話」時，Nous 也會在道別念完後結束（備援）",
     needs: { text: "即時語音", live: "realtime_available" } },
   get_tasks: { try: ["任務做好了沒", "報告寫到哪了"], does: "AI 查詢真實任務狀態後用說的回答", needs: { text: "即時語音", live: "realtime_available" } },
-  web_search: { try: ["新竹今天會下雨嗎"], does: "AI 上網查詢後回答，字幕顯示來源", needs: { text: "即時語音與上網查詢（OPENAI_API_KEY）", live: "realtime_web_search" } },
+  web_search: { try: ["新竹今天會下雨嗎"], does: "AI 上網查詢後回答，字幕顯示來源", needs: { text: "即時語音與上網查詢（ChatGPT 方案路徑用 Codex 額度；API key 路徑需要 OPENAI_API_KEY）", live: "realtime_web_search" } },
   delegate_task: { try: ["幫我寫一份下週出差規劃"], does: "AI 判斷是較長的工作時交辦成背景任務，進度顯示在電子腦下方",
     needs: { text: "即時語音", live: "realtime_available" } },
   home_status: { try: ["客廳現在幾度"], does: "查武陵居的感測值與設備狀態",
@@ -289,13 +289,13 @@ export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
 };
 
 export const CONTROLS: readonly Control[] = [
-  { id: "esc", how: "Esc", does: "即時語音 Nous 說話時：打斷；即時語音中有畫面開著：只收起畫面；語音模式念回覆時：打斷；其他時候：收起畫面並結束語音" },
+  { id: "esc", how: "Esc", does: "即時語音 Nous 說話時：打斷（ChatGPT 方案路徑沒有取消回覆的指令，只會把這段回覆靜音）；即時語音中有畫面開著：只收起畫面；語音模式念回覆時：打斷；其他時候：收起畫面並結束語音" },
   { id: "voice-pill", how: "點右上角的語音指示", does: "結束語音模式或即時語音" },
   { id: "palm", how: "舉起張開的手掌", does: "停止 Nous 說話，不取消任務（需要鏡頭與「手掌停止播報」）" },
   { id: "look", how: "面向螢幕", does: "看著說話：面向這麼久之後自動開始即時語音（需要鏡頭與即時語音，而且這個視窗之前已同意過即時語音的說明；沒同意過不會自動開始，請先按「開始語音對話」同意一次）", seconds: "look_to_talk_s" },
   { id: "look-cooldown", how: "對話結束後", does: "這段時間內看著說話不再自動開始", seconds: "look_to_talk_cooldown_s" },
   { id: "voice-idle", how: "語音模式沒說話", does: "自動關閉語音模式（Nous 等回覆、念回覆時不計時）", seconds: "voice_idle_s" },
-  { id: "realtime-idle", how: "即時語音沒說話", does: "自動結束即時語音，避免持續計費（Nous 回覆、查資料、等確認時不計時）", seconds: "realtime_idle_s" },
+  { id: "realtime-idle", how: "即時語音沒說話", does: "自動結束即時語音，避免持續計費或用掉方案額度（Nous 回覆、查資料、等確認時不計時）", seconds: "realtime_idle_s" },
   { id: "app-window", how: "⌥⌘N（App）", does: "叫出／收起視窗" },
   { id: "app-voice", how: "⌥⌘V（App）", does: "開始／結束語音對話" },
   { id: "app-commands", how: "⌘/（App）", does: "打開這張語音指令表" },

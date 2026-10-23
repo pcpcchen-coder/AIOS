@@ -1,8 +1,10 @@
+import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ExecutorMode } from "../shared/types.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_MAX_CONCURRENT } from "./runner.ts";
+import { DEFAULT_LIVE_VOICE, isLiveVoice, LIVE_VOICES, ROUTE_PREFERENCES, type LiveVoiceId, type RoutePreference } from "../shared/realtime-route.ts";
 
 export interface Config {
   port: number;
@@ -24,6 +26,16 @@ export interface Config {
   openaiApiKey: string | null;
   realtimeModel: string;
   realtimeVoice: string;
+  /** 即時語音路徑偏好的預設（NOUS_REALTIME_ROUTE：auto、live、api_key）；設定畫面與選單改過後以 realtime.json 為準。 */
+  realtimeRoute: RoutePreference;
+  /** ChatGPT 方案路徑的模型（NOUS_LIVE_MODEL）：一定顯示；只有明確設定時才送出（send）。 */
+  liveModel: { display: string; send: string | null };
+  /** ChatGPT 方案路徑的聲音預設（NOUS_LIVE_VOICE，Codex 的聲音清單）。 */
+  liveVoice: LiveVoiceId;
+  /** ChatGPT 方案路徑上替語音模型執行工具的模型（NOUS_LIVE_AGENT_MODEL）；未設定時查 Codex 模型清單。 */
+  liveAgentModel: string | null;
+  /** 查 Codex 模型清單時帶的 client_version（NOUS_CODEX_CLIENT_VERSION，預設 Nous 的版本）。 */
+  codexClientVersion: string;
   /** 上網查詢用的模型（NOUS_SEARCH_MODEL），經 OPENAI_API_KEY 呼叫 Responses API 的 web_search。 */
   searchModel: string;
   /** 上網查詢的大致位置（NOUS_SEARCH_COUNTRY、NOUS_SEARCH_TIMEZONE）。 */
@@ -77,6 +89,11 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     openaiApiKey: env.OPENAI_API_KEY?.trim() || null,
     realtimeModel: env.NOUS_REALTIME_MODEL?.trim() || "gpt-realtime",
     realtimeVoice: env.NOUS_REALTIME_VOICE?.trim() || "marin",
+    realtimeRoute: parseRoute(env.NOUS_REALTIME_ROUTE),
+    liveModel: { display: env.NOUS_LIVE_MODEL?.trim() || "gpt-live-1-codex", send: env.NOUS_LIVE_MODEL?.trim() || null },
+    liveVoice: parseLiveVoice(env.NOUS_LIVE_VOICE),
+    liveAgentModel: env.NOUS_LIVE_AGENT_MODEL?.trim() || null,
+    codexClientVersion: env.NOUS_CODEX_CLIENT_VERSION?.trim() || packageVersion(),
     searchModel: env.NOUS_SEARCH_MODEL?.trim() || "gpt-5.5",
     searchCountry: env.NOUS_SEARCH_COUNTRY?.trim().toUpperCase() || "TW",
     searchTimezone: env.NOUS_SEARCH_TIMEZONE?.trim() || "Asia/Taipei",
@@ -96,6 +113,30 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       look_to_talk: (env.NOUS_LOOK_TO_TALK ?? "on").trim().toLowerCase() !== "off",
     },
   };
+}
+
+function parseRoute(raw: string | undefined): RoutePreference {
+  const value = raw?.trim().toLowerCase();
+  if (!value) return "auto";
+  if (!(ROUTE_PREFERENCES as readonly string[]).includes(value)) throw new Error(`NOUS_REALTIME_ROUTE 只能是 ${ROUTE_PREFERENCES.join("、")}，收到 "${value}"`);
+  return value as RoutePreference;
+}
+
+function parseLiveVoice(raw: string | undefined): LiveVoiceId {
+  const value = raw?.trim().toLowerCase();
+  if (!value) return DEFAULT_LIVE_VOICE;
+  // 清單外的聲音會讓伺服器回語意不明的 403：啟動時就說清楚。
+  if (!isLiveVoice(value)) throw new Error(`NOUS_LIVE_VOICE 只能是 ${LIVE_VOICES.join("、")}，收到 "${value}"`);
+  return value;
+}
+
+function packageVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown };
+    return typeof pkg.version === "string" ? pkg.version : "0.1.0";
+  } catch {
+    return "0.1.0";
+  }
 }
 
 function numberOr(value: string | undefined, fallback: number): number {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
@@ -12,6 +13,16 @@ import { CameraPatchError, parseCameraPatch, type CameraPrefsPatch, type CameraS
 import { describeSeconds } from "../shared/seconds-menu.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VoicePatchError, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
+import { ApiKeyRoute, FallbackRequired, RealtimeSessions, RouteStartError, SessionError, type RealtimeRoute } from "./realtime-routes.ts";
+import type { CodexAuth } from "./codex-auth.ts";
+import {
+  LIVE_INPUT_KINDS,
+  parseRealtimePatch,
+  RealtimePatchError,
+  type LiveInputKind,
+  type RealtimePrefs,
+  type RealtimePrefsPatch,
+} from "../shared/realtime-route.ts";
 import { COMMANDS_PATH, commandsPageHeaders, renderCommandsPage } from "./commands-page.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
@@ -19,6 +30,10 @@ import type { TaskStore } from "./store.ts";
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
 const REQUEST_ID = /^req_[A-Za-z0-9_-]{6,64}$/;
+const SESSION_ID = /^rt_[0-9a-f]{32}$/;
+const OWNER = /^own_[A-Za-z0-9_-]{20,64}$/;
+const CALL_ID = /^hc_[0-9a-f]{32}$/;
+const CLIENT_ID = /^sse_[0-9a-f]{32}$/;
 
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -55,8 +70,16 @@ export interface AppOptions {
   auth: ChatGPTAuth;
   /** 語音對話用的引擎（通常就是 ProviderManager）。 */
   chat: ChatCapable;
-  /** 即時語音模式（OpenAI Realtime）；未提供時不可用。 */
+  /** 即時語音的 API key 路徑（OpenAI Realtime GA）；未提供時這條路徑不可用。 */
   realtime?: RealtimeBridge;
+  /**
+   * 即時語音的路徑（server/realtime-routes.ts）。未提供時只有包住 realtime 的 API key 路徑（舊的組裝方式照舊可用）。
+   */
+  realtimeRoutes?: { live?: RealtimeRoute; api_key?: RealtimeRoute };
+  /** 路徑偏好與 ChatGPT 方案路徑的聲音（RealtimeSettingsStore）；未提供時固定 auto、不能修改。 */
+  realtimePrefs?: RealtimeSettingsSource;
+  /** 即時語音用的 Codex 登入（ChatGPT 方案路徑）；未提供時沒有這個登入。 */
+  codexAuth?: CodexAuth;
   /** 即時語音的上網查詢；未提供時不可用。 */
   webSearch?: WebSearch;
   /** 武陵居中控的查詢與控制（docs/12 H0、H1）；未提供時不可用。 */
@@ -76,6 +99,12 @@ export interface CameraSettingsSource {
   update(patch: CameraPrefsPatch): CameraSettings;
 }
 
+/** 即時語音路徑偏好的來源。 */
+export interface RealtimeSettingsSource {
+  view(): RealtimePrefs;
+  update(patch: RealtimePrefsPatch): RealtimePrefs;
+}
+
 /** 語音閒置秒數的來源。 */
 export interface VoiceSettingsSource {
   view(): VoicePrefs;
@@ -88,11 +117,30 @@ class HttpError extends Error {
   }
 }
 
-export function createApp(options: AppOptions): Server & { notifySettings(): void } {
-  const { store, runner, auth, chat, realtime, webSearch, home } = options;
+export function createApp(options: AppOptions): Server & { notifySettings(): void; realtimeSessions: RealtimeSessions | null } {
+  const { store, runner, auth, chat, realtime, webSearch, home, codexAuth } = options;
+  /** SSE 串流：client_id → 回應。工具呼叫只送到擁有工作階段的那一條。 */
+  const clients = new Map<string, ServerResponse>();
+  let sequence = 0;
+  const routes = options.realtimeRoutes ?? (realtime ? { api_key: new ApiKeyRoute(realtime, realtime.info().available, "") } : null);
+  const sessions = routes && (routes.api_key || routes.live)
+    ? new RealtimeSessions({
+        routes,
+        preference: () => options.realtimePrefs?.view().route ?? "auto",
+        tasks: () => store.list(),
+        liveAccount: codexAuth ? () => codexAuth.info() : undefined,
+        send: (clientId, event) => {
+          const res = clients.get(clientId);
+          if (!res) return false;
+          res.write(`data: ${JSON.stringify({ ...event, sequence: ++sequence })}\n\n`);
+          return true;
+        },
+        log: (line) => console.log(line),
+      })
+    : null;
   const settings = {
     view: (): SettingsView => {
-      const live = realtime?.info();
+      const live = sessions?.info();
       const camera = options.camera?.view();
       const voice = options.voice?.view() ?? DEFAULT_VOICE_PREFS;
       return {
@@ -106,17 +154,15 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     select: (provider: ExecutorMode) => options.settings.select(provider),
   };
   const hosts = allowedHosts(options.port, options.devPort);
-  const clients = new Set<ServerResponse>();
-  let sequence = 0;
 
   const broadcast = (event: ServerEvent) => {
     const frame = `data: ${JSON.stringify(event)}\n\n`;
-    for (const res of clients) res.write(frame);
+    for (const res of clients.values()) res.write(frame);
   };
   store.subscribe((task) => broadcast({ type: "task.updated", sequence: ++sequence, task }));
 
   const heartbeat = setInterval(() => {
-    for (const res of clients) res.write(": keep-alive\n\n");
+    for (const res of clients.values()) res.write(": keep-alive\n\n");
   }, 25_000);
   heartbeat.unref();
 
@@ -193,11 +239,49 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       }
       return sendJson(res, 200, settings.view());
     }
+    if (method === "POST" && path === "/api/settings/realtime") {
+      if (!options.realtimePrefs) throw new HttpError(409, "即時語音路徑設定未設定");
+      let patch: RealtimePrefsPatch;
+      try {
+        patch = parseRealtimePatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof RealtimePatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      try {
+        // 只影響下一次開始；正在進行的工作階段維持原本的路徑（RealtimeSessions 只在 start 讀偏好）。
+        options.realtimePrefs.update(patch);
+      } catch (err) {
+        throw new HttpError(500, `即時語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, settings.view());
+    }
     if (method === "POST" && path === "/api/chat") return streamChat(req, res);
+    if (method === "POST" && path === "/api/realtime/start") {
+      const body = await readJson(req);
+      if (!sessions) throw new HttpError(409, "即時語音模式未啟用");
+      const clientId = typeof body.client_id === "string" && CLIENT_ID.test(body.client_id) && clients.has(body.client_id) ? body.client_id : null;
+      return sendJson(res, 200, sessions.start(clientId));
+    }
     if (method === "POST" && path === "/api/realtime/call") {
       const body = await readJson(req);
       const sdp = typeof body.sdp === "string" ? body.sdp : "";
       if (!sdp.startsWith("v=0")) throw new HttpError(400, "sdp offer is required");
+      if (body.session_id !== undefined) {
+        // 經 /api/realtime/start 決定路徑的工作階段（兩條路徑）。
+        if (!sessions) throw new HttpError(409, "即時語音模式未啟用");
+        const { sessionId, owner } = sessionAuth(body);
+        try {
+          return sendJson(res, 200, await sessions.call(sdp, sessionId, owner));
+        } catch (err) {
+          if (err instanceof FallbackRequired) return sendJson(res, 409, err.offer);
+          if (err instanceof RouteStartError) throw new HttpError(err.status, err.message);
+          if (err instanceof SessionError) throw new HttpError(err.status, err.message);
+          if (err instanceof RealtimeError) throw new HttpError(err.status, err.message);
+          throw err;
+        }
+      }
+      // 沒有 session_id：原本的 API key 路徑，行為不變。
       if (!realtime) throw new HttpError(409, "即時語音模式未啟用");
       try {
         return sendJson(res, 200, await realtime.connect(sdp, store.list()));
@@ -206,18 +290,87 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         throw err;
       }
     }
+    if (method === "POST" && path === "/api/realtime/input") {
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      const kind = body.kind;
+      const text = typeof body.text === "string" ? body.text.trim() : "";
+      if (!(LIVE_INPUT_KINDS as readonly unknown[]).includes(kind)) throw new HttpError(400, "kind must be user_text, notice or context");
+      if (!text || text.length > MAX_TEXT_CHARS) throw new HttpError(400, `text is required (≤ ${MAX_TEXT_CHARS} chars)`);
+      sessionCall(() => sessions!.input(sessionId, owner, kind as LiveInputKind, text));
+      return sendJson(res, 200, { ok: true });
+    }
+    if (method === "POST" && path === "/api/realtime/approval") {
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      if (body.state !== "open" && body.state !== "resolved") throw new HttpError(400, "state must be open or resolved");
+      const state = body.state;
+      sessionCall(() => sessions!.approval(sessionId, owner, state));
+      return sendJson(res, 200, { ok: true });
+    }
+    if (method === "POST" && path === "/api/realtime/host-result") {
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      const callId = body.call_id;
+      const output = body.output;
+      if (typeof callId !== "string" || !CALL_ID.test(callId)) throw new HttpError(400, "call_id is required");
+      if (!output || typeof output !== "object" || Array.isArray(output)) throw new HttpError(400, "output must be a JSON object");
+      const accepted = sessionCall(() => sessions!.hostResult(sessionId, owner, callId, { output: output as Record<string, unknown> }));
+      return sendJson(res, 200, { ok: true, accepted });
+    }
+    if (method === "POST" && path === "/api/realtime/end") {
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      try {
+        await sessions!.end(sessionId, owner);
+      } catch (err) {
+        if (err instanceof SessionError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
+      return sendJson(res, 200, { ok: true });
+    }
     if (method === "POST" && path === "/api/realtime/web-search") {
       const body = await readJson(req);
       const query = typeof body.query === "string" ? body.query.trim() : "";
       if (!query) throw new HttpError(400, "query is required");
       if (query.length > 500) throw new HttpError(400, "query is too long");
-      if (!webSearch?.available) throw new HttpError(409, "上網查詢未啟用（需要 OPENAI_API_KEY）");
+      // ChatGPT 方案路徑的工作階段：用 Codex 額度查（同一個登入）；其他照舊用 OPENAI_API_KEY。
+      let via: "api_key" | "codex" = "api_key";
+      if (body.session_id !== undefined) {
+        const { sessionId, owner } = sessionAuth(body);
+        if (!sessions?.isOwner(sessionId, owner)) throw new HttpError(403, "不是開始這個即時語音的頁面。");
+        if (sessions.routeOf(sessionId) === "live") via = "codex";
+      }
+      if (!webSearch?.availableVia(via)) {
+        throw new HttpError(409, via === "codex" ? "上網查詢未啟用（ChatGPT 方案路徑尚未登入）" : "上網查詢未啟用（需要 OPENAI_API_KEY）");
+      }
       try {
-        return sendJson(res, 200, await webSearch.search(query));
+        return sendJson(res, 200, via === "codex" ? await webSearch.searchVia(query, "codex") : await webSearch.search(query));
       } catch (err) {
         if (err instanceof WebSearchError) throw new HttpError(err.status, err.message);
         throw err;
       }
+    }
+    if (method === "POST" && path === "/api/auth/codex/login") {
+      const body = await readJson(req);
+      if (!codexAuth) throw new HttpError(409, "ChatGPT 方案即時語音未設定");
+      const how = body.method === "device" ? "device" : "browser";
+      try {
+        return sendJson(res, 200, await codexAuth.startLogin(how));
+      } catch (err) {
+        throw new HttpError(502, (err as Error).message);
+      }
+    }
+    if (method === "POST" && path === "/api/auth/codex/cancel") {
+      await readJson(req);
+      codexAuth?.cancel();
+      return sendJson(res, 200, settings.view());
+    }
+    if (method === "POST" && path === "/api/auth/codex/logout") {
+      await readJson(req);
+      if (!codexAuth) throw new HttpError(409, "ChatGPT 方案即時語音未設定");
+      const result = await codexAuth.logout();
+      return sendJson(res, 200, { ...result, settings: settings.view() });
     }
     if (method === "POST" && path === "/api/home/status") {
       const body = await readJson(req);
@@ -303,6 +456,25 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     throw new HttpError(404, "not found");
   }
 
+  /** session_id 與 owner：格式不對 400；擁有者由 RealtimeSessions 比對。 */
+  function sessionAuth(body: Record<string, unknown>): { sessionId: string; owner: string } {
+    if (!sessions) throw new HttpError(409, "即時語音模式未啟用");
+    const sessionId = body.session_id;
+    const owner = body.owner;
+    if (typeof sessionId !== "string" || !SESSION_ID.test(sessionId)) throw new HttpError(400, "valid session_id is required");
+    if (typeof owner !== "string" || !OWNER.test(owner)) throw new HttpError(400, "valid owner is required");
+    return { sessionId, owner };
+  }
+
+  function sessionCall<T>(run: () => T): T {
+    try {
+      return run();
+    } catch (err) {
+      if (err instanceof SessionError) throw new HttpError(err.status, err.message);
+      throw err;
+    }
+  }
+
   /** 武陵居中控的呼叫：未設定時 409；連不上、權杖被拒等照實轉成 HTTP 錯誤。 */
   async function homeCall<T>(run: () => Promise<T>): Promise<T> {
     if (!home?.available) throw new HttpError(409, "尚未設定武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）");
@@ -362,13 +534,19 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
     });
-    const hello: ServerEvent = { type: "hello", sequence: ++sequence, settings: settings.view(), tasks: store.list() };
+    const clientId = `sse_${randomUUID().replaceAll("-", "")}`;
+    const hello: ServerEvent = { type: "hello", sequence: ++sequence, settings: settings.view(), tasks: store.list(), client_id: clientId };
     res.write(`data: ${JSON.stringify(hello)}\n\n`);
-    clients.add(res);
-    req.on("close", () => clients.delete(res));
+    clients.set(clientId, res);
+    req.on("close", () => {
+      clients.delete(clientId);
+      // 這條串流擁有的 live 工作階段立刻結束（不假裝重連）。
+      sessions?.clientClosed(clientId);
+    });
   }
 
   return Object.assign(server, {
+    realtimeSessions: sessions,
     /** 設定或登入狀態改變時呼叫，推送給所有畫面。 */
     notifySettings: () => broadcast({ type: "settings.updated", sequence: ++sequence, settings: settings.view() }),
   });

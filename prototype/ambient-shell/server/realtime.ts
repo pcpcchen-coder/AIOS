@@ -1,12 +1,14 @@
 import { computeProgress, sortForProgress } from "../shared/progress.ts";
 import { HOME_COMMANDS } from "../shared/home.ts";
-import type { RealtimeInfo, Task } from "../shared/types.ts";
+import type { RealtimeBaseInfo, Task } from "../shared/types.ts";
 import type { McpServerConfig } from "./config.ts";
 
-// 即時語音模式（OpenAI Realtime，語音直接對語音）：瀏覽器用 WebRTC 直接和 OpenAI 串流音訊，
-// 但連線建立（SDP 交換）經過本機核心：用 .env 的 OPENAI_API_KEY 先換一把短效的 client secret，
-// 再代為送出 SDP。API key 只留在本機核心，不會送到瀏覽器。
-// ChatGPT 方案登入雖然能換到 client secret，實測推論會 server_error，所以這裡只用 API key。
+// 即時語音的 API key 路徑（OpenAI Realtime GA，語音直接對語音），也是兩條路徑共用的工具表與規則文字。
+// 瀏覽器用 WebRTC 直接和 OpenAI 串流音訊，但連線建立（SDP 交換）經過本機核心：用 .env 的 OPENAI_API_KEY
+// 先換一把短效的 client secret，再代為送出 SDP。API key 只留在本機核心，不會送到瀏覽器。
+// 另一條路徑是 ChatGPT 方案（Codex 登入，gpt-live-1-codex），見 server/live-route.ts。
+// 注意：Sign in with ChatGPT（chatgpt-auth.ts）的權杖仍然不能用在即時語音（實測推論會 server_error）；
+// 即時語音的方案額度要用 Nous 自己的 Codex 登入（codex-auth.ts）。
 
 const API = "https://api.openai.com/v1";
 const RETRIES = 1;
@@ -143,17 +145,21 @@ const STATUS_TEXT: Record<Task["status"], string> = {
   cancelled: "已停止",
 };
 
-export function buildRealtimeInstructions(
-  tasks: Iterable<Task>,
-  now = new Date(),
-  caps: RealtimeCapabilities = { webSearch: false, mcp: [] },
-): string {
-  const list = sortForProgress(tasks)
+/** 目前的任務（最多 6 個、含真實進度）；兩條路徑的說明文字共用。 */
+export function taskLines(tasks: Iterable<Task>): string[] {
+  return sortForProgress(tasks)
     .slice(0, 6)
     .map((t) => {
       const p = computeProgress(t);
       return `- 「${t.title}」：${STATUS_TEXT[t.status]}${p.total === null ? "" : `，${p.done}/${p.total} 步`}`;
     });
+}
+
+/**
+ * 工具的使用規則（上網查詢、家電、MCP、背景任務）。API key 路徑的語音模型與 ChatGPT 方案路徑的
+ * LiveToolCaller 拿到的是同一份文字。
+ */
+export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
   const abilities: string[] = [];
   if (caps.webSearch) {
     abilities.push(
@@ -174,6 +180,16 @@ export function buildRealtimeInstructions(
     );
   }
   abilities.push(`需要較長時間產出的工作（報告、整理、規劃、研究）交給背景任務${caps.taskWebSearch ? "，背景任務也能上網查資料" : ""}。`);
+  return abilities;
+}
+
+export function buildRealtimeInstructions(
+  tasks: Iterable<Task>,
+  now = new Date(),
+  caps: RealtimeCapabilities = { webSearch: false, mcp: [] },
+): string {
+  const list = taskLines(tasks);
+  const abilities = realtimeToolRules(caps);
   return [
     "你是 Nous，使用者桌面上的語音助理，正在和使用者即時語音對話。",
     "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
@@ -184,6 +200,28 @@ export function buildRealtimeInstructions(
     "使用者問進度時呼叫 get_tasks，依真實狀態回答；排隊中的任務要說明輪到時會自動開始。",
     "收到以「（系統通知）」開頭的訊息時，用一句話轉告使用者，不要逐字念。",
     "使用者要結束對話時，用一句話道別並呼叫 end_conversation。",
+    `今天日期：${now.toISOString().slice(0, 10)}。`,
+    list.length ? `目前的任務：\n${list.join("\n")}` : "目前沒有交辦的任務。",
+  ].join("\n");
+}
+
+/**
+ * ChatGPT 方案路徑（gpt-live-1-codex）的語音層說明。這個模型沒有工具：需要做事時交辦（delegation），
+ * 由 LiveToolCaller 用同一份工具表執行。改寫自 OpenClaw realtime-quicksilver-instructions.ts:4-10，加上 Nous 的誠實規則。
+ */
+export function buildLiveInstructions(tasks: Iterable<Task>, now: Date, caps: { mcp: readonly unknown[] }): string {
+  const list = taskLines(tasks);
+  return [
+    "你是 Nous 的語音層，使用者桌面上的語音助理，正在和使用者即時語音對話。你自己沒有任何工具。",
+    "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
+    "使用者隨時會插話；被打斷後以使用者的新內容為準，不要重複剛才的話。",
+    "需要做事時（上網查詢、查家裡狀態、控制家電、交辦背景工作、查任務進度、結束對話），一律交辦（delegate），每個請求只交辦一次，等結果回來。",
+    "只轉述交辦結果；結果回來之前不能說已經做好、查到或開了（例如不能說「燈開了」）。結果說失敗或不確定時照實說。",
+    "交辦結果在 speakable 頻道時，用自己的話自然說出；commentary 頻道是安靜的背景，不要念出來。不要提到交辦、頻道或系統。",
+    "使用者說「確認執行」或「取消」時也照樣交辦；你不能替使用者確認任何事。",
+    "收到以「（系統通知）」開頭的內容時，用一句話轉告使用者，不要逐字念。",
+    "使用者要結束對話（說再見、結束對話、先這樣）時，交辦「結束對話」，並用一句話道別。",
+    ...(caps.mcp.length ? ["外部服務（MCP）在 ChatGPT 方案路徑不能用；使用者要求時照實說，需要時請他到設定切換到 API key 路徑。"] : []),
     `今天日期：${now.toISOString().slice(0, 10)}。`,
     list.length ? `目前的任務：\n${list.join("\n")}` : "目前沒有交辦的任務。",
   ].join("\n");
@@ -213,7 +251,7 @@ export class RealtimeBridge {
     };
   }
 
-  info(): RealtimeInfo {
+  info(): RealtimeBaseInfo {
     const { webSearch, mcp, home } = this.caps;
     const tools = [webSearch ? "上網查詢" : null, home ? "家電查詢與控制" : null, ...mcp.map((m) => `MCP：${m.server_label}`)]
       .filter(Boolean)

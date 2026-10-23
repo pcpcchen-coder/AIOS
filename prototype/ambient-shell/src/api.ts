@@ -2,9 +2,17 @@ import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
+import type { FallbackOffer, LiveInputKind, RealtimePrefsPatch, RouteId, StartDecision } from "../shared/realtime-route.ts";
+import { FallbackOfferError } from "./realtime-session.ts";
+
+/** 一個經 /api/realtime/start 決定的工作階段（session_id ＋ 擁有者憑證）。 */
+export interface RealtimeTicket {
+  session_id: string;
+  owner: string;
+}
 
 export class ApiError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly body: Record<string, unknown> | null = null) {
     super(message);
   }
 }
@@ -21,7 +29,7 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
     throw new ApiError(0, "無法連到本機核心（伺服器未啟動或已停止）");
   }
   const data = (await res.json().catch(() => ({}))) as { error?: string };
-  if (!res.ok) throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`);
+  if (!res.ok) throw new ApiError(res.status, data.error ?? `HTTP ${res.status}`, data as Record<string, unknown>);
   return data as T;
 }
 
@@ -39,11 +47,37 @@ export const api = {
   chatgptCancel: () => call<SettingsView>("POST", "/api/auth/chatgpt/cancel", {}),
   chatgptLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/chatgpt/logout", {}),
   chatgptWelcomeAck: () => call<SettingsView>("POST", "/api/auth/chatgpt/welcome-ack", {}),
-  /** 即時語音：把 WebRTC SDP offer 交給本機核心，由它用 API key 向 OpenAI 建立連線。 */
-  realtimeCall: (sdp: string) => call<{ sdp: string; model: string }>("POST", "/api/realtime/call", { sdp }),
-  /** 即時語音的上網查詢：由本機核心用 OPENAI_API_KEY 呼叫 web_search。 */
-  webSearch: (query: string) =>
-    call<{ ok: true; answer: string; sources: { title: string; url: string }[]; model: string }>("POST", "/api/realtime/web-search", { query }),
+  /** 即時語音：開麥克風前先決定路徑（client_id：這個頁面的 SSE 串流）。 */
+  realtimeStart: (clientId: string | null) => call<StartDecision>("POST", "/api/realtime/start", clientId ? { client_id: clientId } : {}),
+  /**
+   * 即時語音：把 WebRTC SDP offer 交給本機核心，由它代為建立連線（API key 或 ChatGPT 方案）。
+   * 沒有 ticket 是原本的 API key 呼叫。核心提議改路徑（409 ＋ fallback）時丟 FallbackOfferError。
+   */
+  realtimeCall: async (sdp: string, ticket?: RealtimeTicket) => {
+    if (!ticket) return call<{ sdp: string; model: string }>("POST", "/api/realtime/call", { sdp });
+    try {
+      return await call<{ sdp: string; model: string; route: RouteId; session_id: string }>("POST", "/api/realtime/call", { sdp, ...ticket });
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.body && "fallback" in err.body) throw new FallbackOfferError(err.body as unknown as FallbackOffer);
+      throw err;
+    }
+  },
+  realtimeInput: (ticket: RealtimeTicket, kind: LiveInputKind, text: string) => call<{ ok: true }>("POST", "/api/realtime/input", { ...ticket, kind, text }),
+  realtimeApproval: (ticket: RealtimeTicket, state: "open" | "resolved") => call<{ ok: true }>("POST", "/api/realtime/approval", { ...ticket, state }),
+  realtimeHostResult: (ticket: RealtimeTicket, callId: string, output: Record<string, unknown>) =>
+    call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/host-result", { ...ticket, call_id: callId, output }),
+  realtimeEnd: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/end", { ...ticket }),
+  /** 路徑偏好與 ChatGPT 方案路徑的聲音；下一次開始才生效。 */
+  updateRealtime: (patch: RealtimePrefsPatch) => call<SettingsView>("POST", "/api/settings/realtime", patch),
+  codexLogin: (method: "browser" | "device") =>
+    call<{ method: "browser"; authorize_url: string; port: number } | { method: "device"; verification_url: string; user_code: string; note: string | null }>(
+      "POST", "/api/auth/codex/login", { method },
+    ),
+  codexCancel: () => call<SettingsView>("POST", "/api/auth/codex/cancel", {}),
+  codexLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/codex/logout", {}),
+  /** 即時語音的上網查詢：API key 路徑用 OPENAI_API_KEY；ChatGPT 方案路徑的工作階段（帶 ticket）用 Codex 額度。 */
+  webSearch: (query: string, ticket?: RealtimeTicket) =>
+    call<{ ok: true; answer: string; sources: { title: string; url: string }[]; model: string }>("POST", "/api/realtime/web-search", ticket ? { query, ...ticket } : { query }),
   /** 武陵居家電狀態（唯讀）：由本機核心帶權杖查中控，權杖不進瀏覽器。 */
   homeStatus: (target: string, metric: string | null) =>
     call<HomeStatusResult>("POST", "/api/home/status", metric ? { target, metric } : { target }),

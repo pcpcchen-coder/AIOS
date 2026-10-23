@@ -1,7 +1,7 @@
 import "./style.css";
 import { computeProgress, isActive, queueText, sortForProgress } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
-import { ApiError, api, newRequestId, streamChat, subscribeEvents, type HomeControlArgs } from "./api.ts";
+import { ApiError, api, newRequestId, streamChat, subscribeEvents, type HomeControlArgs, type RealtimeTicket } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
 import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf } from "./sense/controller.ts";
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
@@ -15,8 +15,12 @@ import {
   type ApprovalOutcome,
   type ApprovalRequest,
   type HomeResult,
+  type RealtimeCallbacks,
   type RealtimePhase,
 } from "./realtime.ts";
+import { browserWatchLevel, LiveVoice } from "./live-voice.ts";
+import { idleSession, openRealtime, type RealtimeSession, type SessionDecision } from "./realtime-session.ts";
+import type { RealtimeServerEvent } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
@@ -45,6 +49,7 @@ import {
   VoiceConversation,
   hasVoiceConsent,
   saveVoiceConsent,
+  speakText,
   speechSupported,
   type ConsentKind,
   type ConversationState,
@@ -158,36 +163,121 @@ const conversation = new VoiceConversation(
 );
 let pendingConsent: ConsentKind = "push";
 
-// 即時語音模式（OpenAI Realtime）：有 OPENAI_API_KEY 時，「開始語音對話」改用語音直接對語音。
+// 即時語音模式：「開始語音對話」改用語音直接對語音。兩條路徑：ChatGPT 方案（Codex 登入，gpt-live-1-codex）
+// 與 OpenAI API key（gpt-realtime）。路徑在開始時由本機核心決定（/api/realtime/start），之後不中途換。
 /** 即時語音中交辦的任務：完成時請模型用語音轉告。 */
 const realtimeTaskIds = new Set<string>();
-const realtime = new RealtimeVoice(
-  {
-    onPhase: renderRealtimeState,
-    onUserTranscript: (text) => {
-      showSubtitle(`你：${text}`);
-      handleCameraCommand(text);
-    },
-    onAssistantTranscript: (text) => showSubtitle(`Nous：${text}`),
-    onDelegate: delegateFromRealtime,
-    onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
-    onWebSearch: webSearchFromRealtime,
-    onHomeStatus: homeStatusFromRealtime,
-    onHomeControl: homeControlFromRealtime,
-    onHomeConfirm: homeConfirmFromRealtime,
-    onApprovalPrompt: showApproval,
-    onApprovalResolved: closeApproval,
-    onToolActivity: (text) => showSubtitle(text),
-    onClosed: (reason) => {
-      sense.conversationEnded();
-      showSubtitle(reason);
-      dispatch({ type: "input.open" });
-      showCommandError(reason);
-    },
+/** 兩條路徑共用的 callbacks（工具、字幕、確認卡、腦區光脈衝都在這裡）：只建一次。 */
+const realtimeCallbacks: RealtimeCallbacks = {
+  onPhase: renderRealtimeState,
+  onUserTranscript: (text) => {
+    showSubtitle(`你：${text}`);
+    handleCameraCommand(text);
   },
-  browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp)).sdp),
-  { idleMs: idleTimeoutsMs(undefined).realtime },
-);
+  onAssistantTranscript: (text) => showSubtitle(`Nous：${text}`),
+  onDelegate: delegateFromRealtime,
+  onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
+  onWebSearch: webSearchFromRealtime,
+  onHomeStatus: homeStatusFromRealtime,
+  onHomeControl: homeControlFromRealtime,
+  onHomeConfirm: homeConfirmFromRealtime,
+  onApprovalPrompt: showApproval,
+  onApprovalResolved: closeApproval,
+  onToolActivity: (text) => showSubtitle(text),
+  onClosed: (reason) => {
+    endRealtimeTicket();
+    sense.conversationEnded();
+    showSubtitle(reason);
+    dispatch({ type: "input.open" });
+    showCommandError(reason);
+  },
+};
+/** 還沒開始過時是閒置物件，載入時讀 on／current 都安全。 */
+let realtime: RealtimeSession = idleSession();
+/** 這次工作階段的路徑、計費與擁有者憑證（只在這個頁面）。 */
+let realtimeTicket: SessionDecision | null = null;
+let realtimeStarting = false;
+/** 這個頁面的 SSE 串流 ID（hello 帶來）；開始 ChatGPT 方案路徑時交給核心。 */
+let sseClientId: string | null = null;
+const liveListeners = new Set<(event: RealtimeServerEvent) => void>();
+let liveAudio: HTMLAudioElement | null = null;
+
+function ticketOf(decision: SessionDecision): RealtimeTicket {
+  return { session_id: decision.session_id, owner: decision.owner };
+}
+
+/** API key 路徑的工作階段結束時告訴核心（設定畫面的「進行中」才會清掉）；live 由 LiveVoice 自己結束。 */
+function endRealtimeTicket(): void {
+  const ticket = realtimeTicket;
+  realtimeTicket = null;
+  if (ticket?.route === "api_key") void api.realtimeEnd(ticketOf(ticket)).catch(() => undefined);
+  render();
+}
+
+function stopRealtime(): void {
+  realtime.stop();
+  endRealtimeTicket();
+}
+
+function makeRealtimeSession(decision: SessionDecision): RealtimeSession {
+  const next = createRealtimeSession(decision);
+  // 和其他計時器一樣：建構時用預設值，再套用目前的設定（applySettings 之後的改動也走 setIdleMs）。
+  next.setIdleMs(idleTimeoutsMs(settings?.voice).realtime);
+  return next;
+}
+
+function createRealtimeSession(decision: SessionDecision): RealtimeSession {
+  const ticket = ticketOf(decision);
+  if (decision.route === "api_key") {
+    return new RealtimeVoice(realtimeCallbacks, browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp, ticket)).sdp), { idleMs: idleTimeoutsMs(undefined).realtime });
+  }
+  const base = browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp, ticket)).sdp);
+  return new LiveVoice(
+    realtimeCallbacks,
+    {
+      getMicrophone: base.getMicrophone,
+      createPeer: base.createPeer,
+      playRemote(stream) {
+        const audio = new Audio();
+        audio.autoplay = true;
+        audio.srcObject = stream;
+        liveAudio = audio;
+        void audio.play().catch(() => {});
+        return () => {
+          audio.pause();
+          audio.srcObject = null;
+          if (liveAudio === audio) liveAudio = null;
+        };
+      },
+      exchange: base.exchange,
+      input: async (kind, text) => void (await api.realtimeInput(ticket, kind, text)),
+      hostResult: async (callId, output) => void (await api.realtimeHostResult(ticket, callId, output)),
+      approval: async (state) => void (await api.realtimeApproval(ticket, state)),
+      end: async () => void (await api.realtimeEnd(ticket)),
+      subscribe(handlers) {
+        const listener = (event: RealtimeServerEvent) => {
+          if (event.session_id !== ticket.session_id) return;
+          if (event.type === "realtime.host") handlers.host(event.call);
+          else handlers.core(event.event);
+        };
+        liveListeners.add(listener);
+        return () => liveListeners.delete(listener);
+      },
+      watchLevel: browserWatchLevel,
+      setMuted: (muted) => {
+        if (liveAudio) liveAudio.muted = muted;
+      },
+      speak: (text) => void speakText(text).catch(() => undefined),
+    },
+    { idleMs: idleTimeoutsMs(undefined).realtime },
+  );
+}
+
+/** 說出並顯示計費通知；語音合成卡住時最多等 8 秒，再開麥克風。 */
+async function announceRealtime(notice: string): Promise<void> {
+  showSubtitle(notice, true);
+  await Promise.race([speakText(notice).catch(() => undefined), new Promise((r) => setTimeout(r, 8_000))]);
+}
 
 const session = new ConversationSession({
   stream: streamChat,
@@ -279,7 +369,7 @@ function closeConversation(): void {
   conversationEpoch++;
   session.dismiss();
   conversation.stop();
-  realtime.stop();
+  stopRealtime();
   voice.abort();
   hideSubtitle();
   dispatch({ type: "dismiss" });
@@ -490,7 +580,7 @@ const sense = new SenseController({
     // 人離開：待確認的外部動作不執行、收起畫面、結束即時語音（避免對空房間持續計費）。
     if (realtime.pendingApproval) realtime.resolveApproval(false, "dismissed");
     if (shell.surface) dispatch({ type: "dismiss" });
-    if (realtime.on) realtime.stop();
+    if (realtime.on) stopRealtime();
     closePreview();
   },
   setScale: (scale) => {
@@ -603,7 +693,7 @@ function realtimeReady(): boolean {
 }
 
 function startRealtime(): void {
-  if (realtime.on) return;
+  if (realtime.on || realtimeStarting) return;
   if (!hasVoiceConsent("realtime")) {
     askConsent("realtime");
     return;
@@ -614,7 +704,32 @@ function startRealtime(): void {
   session.dismiss();
   hideSubtitle();
   dispatch({ type: "dismiss" });
-  void realtime.start();
+  realtimeStarting = true;
+  // 路徑在開麥克風前決定；auto 改用 API key 時先說出計費通知。
+  void openRealtime({
+    start: () => api.realtimeStart(sseClientId),
+    makeSession: makeRealtimeSession,
+    announce: announceRealtime,
+    refused: (message) => {
+      showSubtitle(message);
+      dispatch({ type: "input.open" });
+      showCommandError(message);
+    },
+    began: (next, decision) => {
+      realtime = next;
+      realtimeTicket = decision;
+      render();
+    },
+  })
+    .catch((err: unknown) => {
+      const message = `無法開始即時語音：${err instanceof Error ? err.message : String(err)}`;
+      showSubtitle(message);
+      showCommandError(message);
+    })
+    .finally(() => {
+      realtimeStarting = false;
+      render();
+    });
 }
 
 const REALTIME_STATE_LABEL: Record<Exclude<RealtimePhase, "off">, string> = {
@@ -656,7 +771,8 @@ async function delegateFromRealtime(title: string): Promise<Record<string, unkno
 async function webSearchFromRealtime(query: string): Promise<Record<string, unknown>> {
   brain.pulse("step", classifyDomain(query));
   try {
-    const result = await api.webSearch(query);
+    // ChatGPT 方案路徑的查詢帶工作階段憑證：本機核心改用 Codex 額度查（不需要 OPENAI_API_KEY）。
+    const result = await api.webSearch(query, realtimeTicket?.route === "live" ? ticketOf(realtimeTicket) : undefined);
     if (result.sources.length) showSubtitle(`來源：${result.sources.map((s) => s.title).slice(0, 3).join("、")}`);
     return { ok: true, answer: result.answer, sources: result.sources.map((s) => s.title) };
   } catch (err) {
@@ -750,7 +866,7 @@ function taskSummary(): Record<string, unknown>[] {
 
 function disableVoiceMode(): void {
   if (realtime.on) {
-    realtime.stop();
+    stopRealtime();
     showSubtitle("即時語音已結束。");
     return;
   }
@@ -760,12 +876,22 @@ function disableVoiceMode(): void {
   showSubtitle("語音模式已關閉。");
 }
 
+/** 同意說明裡的計費句：依下一次會用的路徑。 */
+function realtimeBillingSentence(): string {
+  const rt = settings?.realtime;
+  if (rt?.route === "live") {
+    const fallback = rt.preference === "auto" && rt.routes.some((r) => r.id === "api_key" && r.available) ? "；ChatGPT 方案不能用時會改用 OPENAI_API_KEY 依用量計費，並先告訴你" : "";
+    return `這次計費：${rt.billing_line}，用你在 Nous 登入的 ChatGPT 方案${fallback}`;
+  }
+  return `這次計費：${rt?.billing_line ?? "OpenAI API key 計費"}，使用你在 .env 設定的 OPENAI_API_KEY，依用量計費`;
+}
+
 /** 同意說明；閒置秒數用目前的設定（選單列可改），不寫死。 */
 function consentMessage(kind: ConsentKind): string {
   const idle = voicePrefs();
   switch (kind) {
     case "realtime":
-      return `即時語音模式像 ChatGPT 語音模式：開啟期間麥克風音訊會即時串流到 OpenAI（使用你在 .env 設定的 OPENAI_API_KEY，依用量計費），AI 直接用語音回答，你隨時可以插話。要它做較長的工作時會交辦成背景任務，仍用目前選擇的引擎執行。說「再見」（由 AI 判斷）、點右上角指示、按 Esc 或 ${formatSeconds(idle.realtime_idle_s)}沒說話就會結束。本系統不保存音訊。要開啟嗎？`;
+      return `即時語音模式像 ChatGPT 語音模式：開啟期間麥克風音訊會即時串流到 OpenAI（${realtimeBillingSentence()}），AI 直接用語音回答，你隨時可以插話。要它做較長的工作時會交辦成背景任務，仍用目前選擇的引擎執行。說「再見」（由 AI 判斷）、點右上角指示、按 Esc 或 ${formatSeconds(idle.realtime_idle_s)}沒說話就會結束。本系統不保存音訊。要開啟嗎？`;
     case "push":
       return "語音辨識使用瀏覽器內建服務；在 Chrome／Edge 中，音訊會傳到瀏覽器供應商（例如 Google）的雲端辨識。只有在你按下麥克風時才收音，本系統不保存音訊。要啟用嗎？";
     case "continuous":
@@ -816,6 +942,11 @@ function dispatch(event: ShellEvent): void {
 // ───────────── 伺服器事件 ─────────────
 
 function onServerEvent(event: ServerEvent): void {
+  if (event.type === "realtime.host" || event.type === "realtime.live") {
+    // 只有擁有工作階段的頁面會收到（核心只送到開始它的 SSE 串流）。
+    for (const listener of liveListeners) listener(event);
+    return;
+  }
   if (event.type === "settings.updated") {
     const wasPending = settings?.chatgpt.pending_login;
     applySettings(event.settings);
@@ -836,12 +967,22 @@ function onServerEvent(event: ServerEvent): void {
     return;
   }
   if (event.type === "hello") {
+    const previous = sseClientId;
+    sseClientId = event.client_id ?? null;
+    if (previous && previous !== sseClientId && realtimeTicket?.route === "live" && realtime.on) {
+      // 事件串流斷過：核心已經結束了這個 ChatGPT 方案工作階段（不假裝重連）。
+      const message = "與本機核心的事件連線中斷，ChatGPT 方案即時語音已結束。";
+      realtime.stop();
+      realtimeCallbacks.onClosed(message);
+      void speakText(message).catch(() => undefined);
+    }
     applySettings(event.settings);
     tasks.clear();
     for (const t of event.tasks) tasks.set(t.task_id, t);
     render();
     return;
   }
+  if (event.type !== "task.updated") return;
   const prev = tasks.get(event.task.task_id);
   tasks.set(event.task.task_id, event.task);
   firePulses(prev, event.task);
@@ -1020,6 +1161,33 @@ const actions: ViewActions = {
     });
   },
   openCameraPreview: () => openPreview(userRequest()),
+  updateRealtime(patch) {
+    const requestId = userRequest();
+    void api.updateRealtime(patch).then(
+      (next) => {
+        applySettings(next);
+        const message = realtime.on ? "已保存；這次即時語音維持原本的路徑，下一次開始才改用。" : "已保存；下一次開始即時語音時生效。";
+        dispatch({ type: "show.settings", request_id: requestId, message });
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: `即時語音設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  codexLogin: (method) => void codexLogin(method, userRequest()),
+  async codexCancel() {
+    const next = await api.codexCancel().catch(() => null);
+    if (next) applySettings(next);
+    render();
+  },
+  async codexLogout() {
+    const requestId = userRequest();
+    try {
+      const result = await api.codexLogout();
+      applySettings(result.settings);
+      dispatch({ type: "show.settings", request_id: requestId, message: result.revoked ? "已登出即時語音用的 ChatGPT 方案。" : "已在本機登出，但未確認遠端撤銷。" });
+    } catch (err) {
+      dispatch({ type: "show.settings", request_id: requestId, message: `登出失敗：${(err as Error).message}` });
+    }
+  },
   chatgptLogin: (mode) => void chatgptLogin(mode, userRequest()),
   async chatgptCancel() {
     const next = await api.chatgptCancel().catch(() => null);
@@ -1077,6 +1245,26 @@ async function selectProvider(provider: ExecutorMode, requestId: string): Promis
     say(message);
   }
   render();
+}
+
+/** 即時語音用的 Codex 登入：瀏覽器流程開授權頁；裝置代碼流程開驗證頁並在設定顯示代碼。結果由伺服器事件回報。 */
+async function codexLogin(method: "browser" | "device", requestId: string): Promise<void> {
+  const desktop = window.nousDesktop;
+  const popup = desktop ? null : window.open("about:blank", "_blank");
+  try {
+    const result = await api.codexLogin(method);
+    const url = result.method === "browser" ? result.authorize_url : result.verification_url;
+    if (desktop) desktop.openExternal(url);
+    else if (popup) {
+      popup.opener = null;
+      popup.location.href = url;
+    } else window.open(url, "_blank", "noopener");
+    const message = result.method === "browser" ? "已開啟 ChatGPT 方案（Codex）登入頁。" : `${result.note ? `${result.note}。` : ""}請在開啟的頁面輸入代碼：${result.user_code}`;
+    dispatch({ type: "show.settings", request_id: requestId, message });
+  } catch (err) {
+    popup?.close();
+    dispatch({ type: "show.settings", request_id: requestId, message: `無法開始 ChatGPT 方案登入：${(err as Error).message}` });
+  }
 }
 
 /**
@@ -1248,7 +1436,13 @@ function renderEngineLine(): void {
     return;
   }
   engineLine.replaceChildren();
-  if (realtime.on) engineLine.append(`即時語音：OpenAI ${settings.realtime?.model ?? "Realtime"}（API key 計費）｜交辦工作：`);
+  // 路徑與計費一律照實顯示：進行中的工作階段用它自己的路徑；偏好改了只影響下一次。
+  const rt = settings.realtime;
+  const activeLine = realtimeTicket?.billing_line ?? rt?.active?.billing_line ?? null;
+  if (realtime.on) {
+    const next = rt?.billing_line && rt.billing_line !== activeLine ? `（下次開始時改用：${rt.billing_line}）` : "";
+    engineLine.append(`即時語音：${activeLine ?? rt?.billing_line ?? "—"}${next}｜交辦工作：`);
+  }
   if (settings.provider === "chatgpt") {
     const link = document.createElement("a");
     link.href = CHATGPT_USAGE_URL;
@@ -1259,6 +1453,7 @@ function renderEngineLine(): void {
   } else {
     engineLine.append(`引擎：${PROVIDER_LABEL[settings.provider]} · 說「設定」可切換`);
   }
+  if (!realtime.on && rt) engineLine.append(`｜即時語音：${rt.billing_line ?? "不可用"}`);
   engineLine.hidden = false;
 }
 

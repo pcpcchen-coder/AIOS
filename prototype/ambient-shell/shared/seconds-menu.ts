@@ -2,7 +2,7 @@
 // desktop/main.mjs 不知道任何鍵、範圍、選項、標籤或寫入路徑，照這裡的列畫出來。
 import { formatSeconds, type SecondsKeyOf, type SecondsPrefSpec } from "./prefs.ts";
 import { CAMERA_PREFS, type CameraSettings } from "./sense.ts";
-import type { RealtimeInfo } from "./types.ts";
+import type { RealtimeBaseInfo } from "./types.ts";
 import { VOICE_PREFS, type VoicePrefs } from "./voice-prefs.ts";
 
 export type CameraSecondsKey = SecondsKeyOf<typeof CAMERA_PREFS>;
@@ -42,7 +42,8 @@ export interface SecondsSource {
   voice: VoicePrefs;
   /** false：核心沒有語音設定檔可寫（只在測試組裝時發生）。 */
   voiceWritable: boolean;
-  realtime?: RealtimeInfo;
+  /** 只讀 available 與 detail（下一次開始會用的路徑）。 */
+  realtime?: RealtimeBaseInfo;
 }
 
 /** 依 CAMERA_PREFS、VOICE_PREFS 的順序，每個秒數規格一列。 */

@@ -1,6 +1,7 @@
 import type { CameraSettings } from "./sense.ts";
 import type { SecondsSetting } from "./seconds-menu.ts";
 import type { VoicePrefs } from "./voice-prefs.ts";
+import type { RealtimeRouteFields, RealtimeServerEvent } from "./realtime-route.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
 // 這裡先用 TS 型別，schema_version 標為 proto-0.1 以免與正式契約混淆。
@@ -114,7 +115,8 @@ export interface SettingsView {
   seconds?: SecondsSetting[];
 }
 
-export interface RealtimeInfo {
+/** API key 路徑（RealtimeBridge.info）提供的欄位；路徑與計費欄位由 RealtimeSessions 補上。 */
+export interface RealtimeBaseInfo {
   available: boolean;
   model: string;
   /** 是否能上網查詢（web_search 工具）。 */
@@ -127,9 +129,17 @@ export interface RealtimeInfo {
   detail: string;
 }
 
+/**
+ * 即時語音：available／model／detail／web_search／home／mcp 說的是「下一次開始會用的路徑」；
+ * 路徑偏好、兩條路徑各自的狀態、計費與正在進行的工作階段見 RealtimeRouteFields。
+ */
+export interface RealtimeInfo extends RealtimeBaseInfo, RealtimeRouteFields {}
+
 export type ServerEvent =
-  | { type: "hello"; sequence: number; settings: SettingsView; tasks: Task[] }
+  /** client_id：這條 SSE 串流的識別；開始即時語音時帶給核心，核心只把工具呼叫送到這條串流。 */
+  | { type: "hello"; sequence: number; settings: SettingsView; tasks: Task[]; client_id?: string }
   | { type: "task.updated"; sequence: number; task: Task }
-  | { type: "settings.updated"; sequence: number; settings: SettingsView };
+  | { type: "settings.updated"; sequence: number; settings: SettingsView }
+  | RealtimeServerEvent;
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
