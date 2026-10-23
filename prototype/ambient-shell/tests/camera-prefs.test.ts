@@ -93,4 +93,21 @@ describe("parseCameraPatch", () => {
     for (const bad of [1.25, 2.05]) expect(() => parseCameraPatch({ brain_zoom_max: bad })).toThrow(CameraPatchError);
     for (const bad of ["2", true, null, Number.NaN, Number.POSITIVE_INFINITY]) expect(() => parseCameraPatch({ brain_zoom_max: bad })).toThrow(CameraPatchError);
   });
+
+  it("range ends get the same float tolerance as the step: values are snapped before the range check (seconds too)", () => {
+    // 審查舉例的 2.9 + 0.1、0.7 + 0.3 在 IEEE 754 雙精度剛好是 3 和 1；真正帶雜訊的端點值用字面值和 0.3 * 3 + 0.1。
+    expect(2.9 + 0.1).toBe(3);
+    expect(0.7 + 0.3).toBe(1);
+    expect(0.3 * 3 + 0.1).toBe(0.9999999999999999);
+    for (const [noisy, snapped] of [[2.9 + 0.1, 3], [0.7 + 0.3, 1], [3.0000000000000004, 3], [0.9999999999999999, 1], [0.3 * 3 + 0.1, 1]]) {
+      expect(parseCameraPatch({ brain_zoom_max: noisy })).toEqual({ brain_zoom_max: snapped });
+    }
+    expect(parseCameraPatch({ brain_zoom_max: 1.1000000001 })).toEqual({ brain_zoom_max: 1.1 });
+    // 秒數共用同一段程式：look_to_talk_s 0.5–5，兩端的浮點雜訊同樣存成端點。
+    expect(parseCameraPatch({ look_to_talk_s: 0.4 + 0.1 })).toEqual({ look_to_talk_s: 0.5 });
+    expect(parseCameraPatch({ look_to_talk_s: 4.9 + 0.1 })).toEqual({ look_to_talk_s: 5 });
+    // 超出容許誤差的仍拒絕：不默默夾住。
+    for (const bad of [3.0001, 0.9999, 3 + 0.1]) expect(() => parseCameraPatch({ brain_zoom_max: bad })).toThrow(CameraPatchError);
+    expect(() => parseCameraPatch({ look_to_talk_s: 5.0001 })).toThrow(CameraPatchError);
+  });
 });

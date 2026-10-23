@@ -54,7 +54,7 @@ export interface PatchErrors {
 /**
  * 邊界驗證（HTTP body、設定檔）：只接受表裡的鍵；開關必須是 boolean；秒數與倍率必須在範圍內且落在 step 上。
  * 不默默夾住數值，錯誤一律用 errors.make 丟出（→ HTTP 400）。通過的數值存成格點上的值（onStep 容許 1e-6 的誤差，
- * 90.000001 存成 90），選單與設定畫面才不會把同一個值當成預設與「（目前）」各列一次。
+ * 90.000001 存成 90；範圍檢查用對到格點後的值，兩端同樣容許），選單與設定畫面才不會把同一個值當成預設與「（目前）」各列一次。
  */
 export function parsePrefsPatch<P>(specs: PrefSpecs<P>, input: unknown, errors: PatchErrors): Partial<P> {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw errors.make(`${errors.noun}必須是 JSON 物件`);
@@ -65,10 +65,15 @@ export function parsePrefsPatch<P>(specs: PrefSpecs<P>, input: unknown, errors: 
     const spec = table[key];
     if (spec.kind === "bool") {
       if (typeof value !== "boolean") throw errors.make(`${key} 必須是 true 或 false`);
-    } else if (typeof value !== "number" || !Number.isFinite(value) || value < spec.min || value > spec.max || !onStep(value, spec.step)) {
+      patch[key] = value;
+      continue;
+    }
+    // 先對到格點再檢查範圍：範圍兩端與 step 用同一個 1e-6 容許誤差（2.9 + 0.1 = 3.0000000000000004 存成 3）。
+    const snapped = typeof value === "number" && Number.isFinite(value) && onStep(value, spec.step) ? snapToStep(value, spec.step) : null;
+    if (snapped === null || snapped < spec.min || snapped > spec.max) {
       throw errors.make(`${key} 必須是 ${spec.min}–${spec.max} ${spec.kind === "factor" ? "倍" : "秒"}、間隔 ${spec.step}`);
     }
-    patch[key] = spec.kind === "bool" ? value : snapToStep(value as number, spec.step);
+    patch[key] = snapped;
   }
   return patch as Partial<P>;
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { Brain, brainGeometry, ORBIT_FIT_EXTENT, ZOOM_FIT_EXTENT, type BrainVisualState } from "../src/brain.ts";
+import { Brain, brainGeometry, HIT_EXTENT, ORBIT_FIT_EXTENT, ZOOM_FIT_EXTENT, type BrainVisualState } from "../src/brain.ts";
 import { brainZoom, SenseController, type SenseTuning } from "../src/sense/controller.ts";
 import { DEFAULT_CAMERA_PREFS, type SenseEvent } from "../shared/sense.ts";
 
@@ -38,9 +38,9 @@ function renderer(width = 1280, height = 900, opts: { reducedMotion?: boolean; p
   const canvas = { getContext: () => context, dataset: {}, style: {}, width: 0, height: 0 } as unknown as HTMLCanvasElement;
   const brain = new Brain(canvas);
   brain.start();
-  const frame = () => {
+  const frame = (ms = 120) => {
     particles = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
-    nextFrame(now += 120);
+    nextFrame(now += ms);
     return { ...drawn, r: drawn.rx / 1.62, particles };
   };
   const controller = new SenseController({
@@ -133,6 +133,77 @@ it("without reduced motion the size eases toward the target over a few frames, a
   for (let i = 0; i < 12; i++) last = t.frame();
   expect(last.r).toBeGreaterThan(target * 0.98 - 1);
   expect(Number.parseFloat(t.css.get("--brain-r")!)).toBeCloseTo(target);
+});
+
+it("easing at 30 fps: k = 1/6 per frame, so 63% after 6 frames (0.2 s) and 95% after 17 frames (about 0.57 s)", () => {
+  const t = renderer(1920, 1080, { reducedMotion: false });
+  t.frame();
+  const base = brainGeometry(1920, 1080, "center", 1, 1).r;
+  const target = brainGeometry(1920, 1080, "center", 2, 1).r;
+  t.controller.handle({ type: "presence", present: true, distance_m: 0.6 });
+  const frameMs = 1000 / 30 + 0.01; // 剛好超過 FRAME_MS 的閘門，每次都畫
+  const cross = (fraction: number) => {
+    for (let n = 1; n <= 60; n++) {
+      t.frame(frameMs);
+      if (Number.parseFloat(t.css.get("--brain-r")!) >= base + (target - base) * fraction) return n;
+    }
+    return Infinity;
+  };
+  const n63 = cross(1 - 1 / Math.E);
+  const n95 = n63 + cross(0.95);
+  // 解析解：剩下的差每幀乘 5/6；ln(0.05) ÷ ln(5/6) = 16.4 幀，ln(1/e) ÷ ln(5/6) = 5.5 幀。
+  expect(n63).toBe(Math.ceil(-1 / Math.log(5 / 6)));
+  expect(n95).toBe(Math.ceil(Math.log(0.05) / Math.log(5 / 6)));
+  expect(n63).toBe(6);
+  expect(n95).toBe(17);
+  expect((n95 * frameMs) / 1000).toBeCloseTo(0.567, 2);
+});
+
+it("the click area is an ellipse fitted to the body: inside hits at 2x, empty space below it misses, 1x edges still hit", () => {
+  const t = renderer(1920, 1080, { reducedMotion: false }); // 一般動態效果：腦形會左右擺動，範圍最大
+  // 量腦形範圍：多幀（含擺動、呼吸的各個相位）的粒子範圍聯集。
+  const extent = () => {
+    const e = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
+    let cx = 0, cy = 0;
+    for (let i = 0; i < 300; i++) {
+      const f = t.frame();
+      ({ cx, cy } = f);
+      e.minX = Math.min(e.minX, f.particles.minX); e.maxX = Math.max(e.maxX, f.particles.maxX);
+      e.minY = Math.min(e.minY, f.particles.minY); e.maxY = Math.max(e.maxY, f.particles.maxY);
+    }
+    return { ...e, cx, cy };
+  };
+  const one = extent();
+  const R1 = brainGeometry(1920, 1080, "center", 1, 1).r;
+  // 量到的範圍（相對於 R）要在 HIT_EXTENT 之內，而且只差一點餘裕：上 1.07、下 0.78、左 1.22、右 1.19。
+  const up = (one.cy - one.minY) / R1, down = (one.maxY - one.cy) / R1;
+  const left = (one.cx - one.minX) / R1, right = (one.maxX - one.cx) / R1;
+  expect(up).toBeCloseTo(1.07, 1);
+  expect(down).toBeCloseTo(0.78, 1);
+  expect(Math.max(left, right)).toBeCloseTo(1.22, 1);
+  for (const [measured, limit] of [[up, HIT_EXTENT.up], [down, HIT_EXTENT.down], [left, HIT_EXTENT.x], [right, HIT_EXTENT.x]]) {
+    expect(limit - measured).toBeGreaterThan(0.02);
+    expect(limit - measured).toBeLessThan(0.1);
+  }
+  // 1 倍：腦形四邊的邊緣點，以及往外 5 px，都還點得到（原本 1.35 R 的圓也點得到）。
+  for (const [x, y] of [[one.minX - 5, one.cy], [one.maxX + 5, one.cy], [one.cx, one.minY - 5], [one.cx, one.maxY + 5], [one.cx + R1 * 0.6, one.cy - R1 * 0.6], [one.cx - R1 * 0.7, one.cy + R1 * 0.4]]) {
+    expect(Math.hypot(x - one.cx, y - one.cy)).toBeLessThan(R1 * 1.35);
+    expect(t.brain.hitTest(x, y)).toBe(true);
+  }
+  expect(t.brain.hitTest(one.cx + R1 * 1.3, one.cy)).toBe(false);
+
+  t.controller.handle({ type: "presence", present: true, distance_m: 0.6 });
+  const two = extent();
+  const R2 = brainGeometry(1920, 1080, "center", 2, 1).r;
+  expect(R2).toBeCloseTo(432);
+  // 2 倍：腦形裡面、腦形邊緣都點得到。
+  for (const [x, y] of [[two.cx, two.cy], [two.cx + R2 * 0.8, two.cy], [two.cx, two.maxY - 2], [two.cx, two.minY + 2], [two.minX + 2, two.cy]]) {
+    expect(t.brain.hitTest(x, y)).toBe(true);
+  }
+  // 腦形下方的空白（1920×1080 的 (960, 950)，在下緣約 842 px 之下）不會開對話；原本 1.35 R（583 px）的圓會。
+  expect(two.maxY).toBeLessThan(950);
+  expect(Math.hypot(960 - two.cx, 950 - two.cy)).toBeLessThan(R2 * 1.35);
+  expect(t.brain.hitTest(960, 950)).toBe(false);
 });
 
 it.each<SenseEvent>([

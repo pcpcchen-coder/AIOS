@@ -300,7 +300,7 @@ try {
   });
   await run('scaled-hit-area-and-camera-off-command', async result => {
     await fresh('scaled-hit-area-and-camera-off-command'); await distance(3); const far = await geometry();
-    const point = {x: far.cx + far.radius * 1.5, y: far.cy}; // 1 倍的點擊範圍是 1.35 R，點不到
+    const point = {x: far.cx + far.radius * 1.5, y: far.cy}; // 1 倍的點擊範圍水平到 1.25 R（HIT_EXTENT），點不到；2 倍時在 0.75 R，點得到
     await page.mouse.click(point.x, point.y); await page.waitForTimeout(150);
     assert.equal(await page.locator('.surface--settings').count(), 0, 'outside the default hit area');
     await distance(.6); const near = await geometry();
