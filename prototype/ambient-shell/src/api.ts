@@ -2,7 +2,7 @@ import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
-import type { FallbackOffer, LiveInputKind, RealtimePrefsPatch, RouteId, StartDecision } from "../shared/realtime-route.ts";
+import type { ApprovalReport, FallbackOffer, LiveInputKind, RealtimePrefsPatch, RouteId, StartDecision } from "../shared/realtime-route.ts";
 import { FallbackOfferError } from "./realtime-session.ts";
 
 /** 一個經 /api/realtime/start 決定的工作階段（session_id ＋ 擁有者憑證）。 */
@@ -63,7 +63,7 @@ export const api = {
     }
   },
   realtimeInput: (ticket: RealtimeTicket, kind: LiveInputKind, text: string) => call<{ ok: true }>("POST", "/api/realtime/input", { ...ticket, kind, text }),
-  realtimeApproval: (ticket: RealtimeTicket, state: "open" | "resolved") => call<{ ok: true }>("POST", "/api/realtime/approval", { ...ticket, state }),
+  realtimeApproval: (ticket: RealtimeTicket, report: ApprovalReport) => call<{ ok: true }>("POST", "/api/realtime/approval", { ...ticket, ...report }),
   realtimeHostResult: (ticket: RealtimeTicket, callId: string, output: Record<string, unknown>) =>
     call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/host-result", { ...ticket, call_id: callId, output }),
   realtimeEnd: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/end", { ...ticket }),

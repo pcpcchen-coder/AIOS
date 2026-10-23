@@ -254,6 +254,18 @@ describe("live route end to end (fixture)", () => {
     expect((await t.post("/api/realtime/web-search", { query: "x", ...wrong })).status).toBe(403);
   });
 
+  it("POST /api/realtime/approval needs the card timeout on open and the outcome on resolved", async () => {
+    const t = await start();
+    const p = await page(t.base);
+    const { decision } = await startLive(t, p.clientId);
+    const ticket = { session_id: decision.session_id, owner: decision.owner };
+    expect((await t.post("/api/realtime/approval", { ...ticket, state: "open" })).status).toBe(400);
+    expect((await t.post("/api/realtime/approval", { ...ticket, state: "resolved" })).status).toBe(400);
+    expect((await t.post("/api/realtime/approval", { ...ticket, state: "resolved", outcome: "pressed" })).status).toBe(400);
+    expect((await t.post("/api/realtime/approval", { ...ticket, state: "open", timeout_ms: 60_000 })).status).toBe(200);
+    expect((await t.post("/api/realtime/approval", { ...ticket, state: "resolved", outcome: "timeout" })).status).toBe(200);
+  });
+
   it("reload: the owning SSE stream closes → session ends at once, the pending host call is rejected, and a new page can start right away", async () => {
     const t = await start({ turns: [codexTurn({ calls: [{ name: "home_status", arguments: { target: "客廳" } }] })] });
     const p = await page(t.base);

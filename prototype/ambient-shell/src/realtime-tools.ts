@@ -1,5 +1,6 @@
 import { homeControlNotice } from "../shared/home.ts";
 import { matchApproval } from "../shared/approval.ts";
+import type { ApprovalReport } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, HomeResult, RealtimeCallbacks } from "./realtime.ts";
 
 // 兩條即時語音路徑共用的工具執行器與確認卡佇列，從 RealtimeVoice（src/realtime.ts）原樣搬出：
@@ -23,8 +24,8 @@ export interface ApprovalSink {
   sendMcpApproval?(request: Extract<ApprovalRequest, { kind: "mcp" }>, approve: boolean, reason: string): void;
   /** 只有 API key 路徑：MCP 確認結束後的回應排程。 */
   mcpResolved?(outcome: ApprovalOutcome): void;
-  /** 只有 ChatGPT 方案路徑：告訴核心確認卡打開或結束（核心據此判斷「確認執行」的交辦）。 */
-  cardChanged?(state: "open" | "resolved"): void;
+  /** 只有 ChatGPT 方案路徑：告訴核心確認卡打開（帶卡片時限）或結束（帶結果），核心據此判斷「確認執行」的交辦。 */
+  cardChanged?(report: ApprovalReport): void;
 }
 
 /** 一個佇列、一次一張卡、同一套固定語句；答案依 kind 交給 OpenAI（MCP）或本機核心（家電）。 */
@@ -61,7 +62,7 @@ export class ApprovalQueue {
     const ms = Math.min(this.approvalMs, request.kind === "home" ? Math.max(0, request.expiresAt - Date.now()) : Infinity);
     const timer = setTimeout(() => this.resolve(false, "timeout"), ms);
     this.approval = { request, timer };
-    this.sink.cardChanged?.("open");
+    this.sink.cardChanged?.({ state: "open", timeout_ms: ms });
     this.callbacks.onApprovalPrompt(request, Date.now() + ms);
     // 家電卡不用另外請模型說明：needs_confirmation 的工具結果已經請它說了。
     if (request.kind === "mcp") this.sink.notify(
@@ -82,7 +83,7 @@ export class ApprovalQueue {
     if (!current) return;
     clearTimeout(current.timer);
     this.approval = null;
-    this.sink.cardChanged?.("resolved");
+    this.sink.cardChanged?.({ state: "resolved", outcome });
     const { request } = current;
     const reason = outcome === "timeout" ? "使用者沒有在時限內確認" : outcome === "dismissed" ? "使用者收起了確認畫面" : "使用者說取消";
     if (request.kind === "home") {

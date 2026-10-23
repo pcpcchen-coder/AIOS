@@ -162,6 +162,43 @@ describe("CodexAuth.withAuth", () => {
     expect(new Set(seen)).toEqual(new Set([`Bearer ${fresh}`]));
   });
 
+  it("logout during an in-flight refresh wins: the stale refresh result is discarded (and revoked), the file stays gone", async () => {
+    // 審查的探針（probe-live/logout.mts）：舊的程式在登出後被更新的結果寫回檔案，登入又活過來。
+    const dir = mkdtempSync(join(tmpdir(), "nous-codex-"));
+    writeCredentials(dir, { expires_at: Date.now() + 60_000 });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = setup({ dir, handler: async (req) => (req.url.endsWith("/oauth/token") ? (await gate, tokenResponse(accessToken(), `rt_${SECRET_TOKEN_MARK}_stale`)) : new Response("", { status: 200 })) });
+    const run = t.auth.withAuth(async () => "ran");
+    await new Promise((r) => setTimeout(r, 10));
+    await t.auth.logout();
+    release();
+    const err = await run.catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(CodexAuthError);
+    expect(existsSync(t.auth.file)).toBe(false);
+    expect(t.auth.info().signed_in).toBe(false);
+    expect(t.auth.readiness()).toMatchObject({ ready: false, reason: "not_logged_in" });
+    await expect.poll(() => t.calls.filter((c) => c.url.endsWith("/oauth/revoke")).map((c) => new URLSearchParams(c.body).get("token"))).toContain(`rt_${SECRET_TOKEN_MARK}_stale`);
+  });
+
+  it("logout during a login's token exchange: the login is not saved", async () => {
+    const ports = await freePorts(2);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = setup({ ports, handler: async (req) => (req.url.endsWith("/oauth/token") ? (await gate, tokenResponse()) : new Response("", { status: 200 })) });
+    const start = await t.auth.startLogin("browser");
+    if (start.method !== "browser") throw new Error("expected browser login");
+    const state = new URL(start.authorize_url).searchParams.get("state");
+    const callback = fetch(`http://127.0.0.1:${ports[0]}/auth/callback?state=${state}&code=code_fixture`);
+    await expect.poll(() => t.calls.some((c) => c.url.endsWith("/oauth/token"))).toBe(true);
+    await t.auth.logout();
+    release();
+    const res = await callback;
+    expect(res.status).toBe(400);
+    expect(existsSync(t.auth.file)).toBe(false);
+    expect(t.auth.info().signed_in).toBe(false);
+  });
+
   it("a 401 refreshes once and retries; a second 401 marks needs_reauth", async () => {
     const dir = mkdtempSync(join(tmpdir(), "nous-codex-"));
     writeCredentials(dir);

@@ -5,7 +5,9 @@
 import { CodexError, type CodexResponses } from "./codex-responses.ts";
 
 const API = "https://api.openai.com/v1";
-const TIMEOUT_MS = 30_000;
+/** 一次上網查詢的上限。ChatGPT 方案路徑的 Codex 那一輪也用這個時限（含第一次查模型清單），所以兩條路徑一樣。 */
+export const WEB_SEARCH_TIMEOUT_MS = 30_000;
+const TIMEOUT_MS = WEB_SEARCH_TIMEOUT_MS;
 
 export interface WebSearchOptions {
   apiKey: string | null;

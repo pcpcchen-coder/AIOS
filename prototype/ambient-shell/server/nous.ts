@@ -13,11 +13,11 @@ import { ProviderManager } from "./providers.ts";
 import { buildLiveInstructions, RealtimeBridge } from "./realtime.ts";
 import { ApiKeyRoute } from "./realtime-routes.ts";
 import { CodexAuth } from "./codex-auth.ts";
-import { CodexResponses } from "./codex-responses.ts";
+import { CodexResponses, type CodexModelCache } from "./codex-responses.ts";
 import { LiveRoute } from "./live-route.ts";
 import { CALLER_LIMITS, LiveToolCaller } from "./live-tool-caller.ts";
 import { RealtimeSettingsStore } from "./realtime-settings.ts";
-import { WebSearch } from "./web-search.ts";
+import { WEB_SEARCH_TIMEOUT_MS, WebSearch } from "./web-search.ts";
 import { HomeBridge } from "./home-bridge.ts";
 import { TaskRunner } from "./runner.ts";
 import { TaskStore } from "./store.ts";
@@ -73,8 +73,10 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   });
   // 即時語音的 ChatGPT 方案路徑：Nous 自己的 Codex 登入（不讀 ~/.codex），語音、交辦的推論與上網查詢都算 Codex 額度。
   const codexAuth = new CodexAuth({ dir: config.configDir, onChange: () => notify(), log });
-  const codex = new CodexResponses(codexAuth, { model: config.liveAgentModel, clientVersion: config.codexClientVersion, turnTimeoutMs: CALLER_LIMITS.turnTimeoutMs });
-  const codexSearch = new CodexResponses(codexAuth, { model: config.liveAgentModel, clientVersion: config.codexClientVersion, turnTimeoutMs: 30_000 });
+  // 交辦與上網查詢共用一份模型快取（/models 只查一次）；每一輪的時限都涵蓋查詢本身。
+  const modelCache: CodexModelCache = { model: null };
+  const codex = new CodexResponses(codexAuth, { model: config.liveAgentModel, clientVersion: config.codexClientVersion, turnTimeoutMs: CALLER_LIMITS.turnTimeoutMs, modelCache });
+  const codexSearch = new CodexResponses(codexAuth, { model: config.liveAgentModel, clientVersion: config.codexClientVersion, turnTimeoutMs: WEB_SEARCH_TIMEOUT_MS, modelCache });
   const realtimePrefs = new RealtimeSettingsStore({
     dir: config.configDir,
     defaults: { route: config.realtimeRoute, live_voice: config.liveVoice },

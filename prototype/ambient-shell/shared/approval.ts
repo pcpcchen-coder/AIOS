@@ -20,3 +20,21 @@ export function matchApproval(text: string): ApprovalDecision | null {
   if (APPROVE.test(t)) return "approve";
   return null;
 }
+
+/** 整句是確認語句時可以有的開頭與結尾（「好，確認執行吧」）；中間不能有別的內容。 */
+const LEAD = "(?:好的?|嗯|對|請)*";
+const TAIL = "(?:吧|啦|了|喔|哦|囉|謝謝)*";
+const EXACT_APPROVE = new RegExp(`^${LEAD}(?:確認|確定)(?:${APPROVE_VERBS.join("|")})${TAIL}$`);
+const EXACT_REJECT = new RegExp(`^${LEAD}(?:${REJECT_WORDS.join("|")})(?:${["執行", ...APPROVE_VERBS].join("|")}|掉)?${TAIL}$`);
+
+/**
+ * 整句（去掉標點與空白）就是一句確認或取消（錨定比對）；句子裡還有別的請求時回傳 null。
+ * 核心用它判斷一個交辦是不是在回答確認卡：「停止播放音樂」「不用開燈，查一下客廳溫度」是請求，不是答案。
+ */
+export function exactApproval(text: string): ApprovalDecision | null {
+  const t = text.replace(/[\s，。、！？!?,.「」『』"'：:；;～~]/g, "");
+  if (!t) return null;
+  if (EXACT_REJECT.test(t)) return "reject";
+  if (EXACT_APPROVE.test(t)) return "approve";
+  return null;
+}

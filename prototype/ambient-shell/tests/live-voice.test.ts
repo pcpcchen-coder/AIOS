@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { HostCall, LiveCoreEvent, LiveInputKind } from "../shared/realtime-route.ts";
+import type { ApprovalReport, HostCall, LiveCoreEvent, LiveInputKind } from "../shared/realtime-route.ts";
 import type { HomeControlResult } from "../shared/home.ts";
 import { LiveVoice, SPEAKING_OFF_MS, SPEAKING_ON_MS, SPEAKING_RMS, type LiveDeps } from "../src/live-voice.ts";
 import { FallbackOfferError, openRealtime, type RealtimeSession } from "../src/realtime-session.ts";
@@ -40,7 +40,7 @@ class FakePeer {
 const NEEDS_CONFIRM: HomeControlResult = { ok: true, status: "needs_confirmation", confirm_id: "home_c1", device: "書房燈", room: "書房", action: "關閉", expires_in_s: 90, message: "需要確認（fixture）" } as unknown as HomeControlResult;
 const CONFIRMED: HomeResult = { ok: true, status: "confirmed", device: "書房燈", room: "書房", action: "關閉", message: "設備回讀已確認（fixture）" } as HomeResult;
 
-function setup(options: { control?: () => HomeResult; exchange?: () => Promise<string> } = {}) {
+function setup(options: { control?: () => HomeResult; exchange?: () => Promise<string>; approvalFails?: number } = {}) {
   vi.useFakeTimers();
   const peer = new FakePeer();
   const track = { stop: vi.fn(), readyState: "live" };
@@ -55,6 +55,7 @@ function setup(options: { control?: () => HomeResult; exchange?: () => Promise<s
   const inputs: { kind: LiveInputKind; text: string }[] = [];
   const results: { id: string; output: Record<string, unknown> }[] = [];
   const approvalsPosted: string[] = [];
+  const reports: ApprovalReport[] = [];
   const prompts: ApprovalRequest[] = [];
   const resolved: { id: string; approved: boolean; outcome: ApprovalOutcome }[] = [];
   const confirms: { id: string; approve: boolean }[] = [];
@@ -71,9 +72,11 @@ function setup(options: { control?: () => HomeResult; exchange?: () => Promise<s
       log.push(`result:${id}`);
       results.push({ id, output });
     },
-    approval: async (state) => {
-      log.push(`approval:${state}`);
-      approvalsPosted.push(state);
+    approval: async (report) => {
+      reports.push(report);
+      if (options.approvalFails && options.approvalFails-- > 0) throw new Error("approval POST failed（fixture）");
+      log.push(`approval:${report.state}`);
+      approvalsPosted.push(report.state);
     },
     end: async () => void ended++,
     subscribe: (h) => {
@@ -123,7 +126,7 @@ function setup(options: { control?: () => HomeResult; exchange?: () => Promise<s
     peer.connect();
     peer.channel.emit({ type: "session.started", session: {} });
   }
-  return { voice, peer, track, phases, user, assistant, closed, spoken, inputs, results, approvalsPosted, prompts, resolved, confirms, activity, tools, log, flush, host, core, sound, live, ended: () => ended, subscribed: () => !!handlers };
+  return { voice, peer, track, phases, user, assistant, closed, spoken, inputs, results, approvalsPosted, reports, prompts, resolved, confirms, activity, tools, log, flush, host, core, sound, live, ended: () => ended, subscribed: () => !!handlers };
 }
 
 afterEach(() => {
@@ -181,6 +184,26 @@ describe("LiveVoice state comes from device evidence and real events", () => {
     expect(t.assistant).toEqual(["好，我請中控處理"]);
   });
 
+  it("a user repeating the same words is not deduplicated; only the relay copy of the same event is", async () => {
+    const t = setup();
+    await t.live();
+    t.host("home_control", { target: "書房燈", command: "power", value: false });
+    await t.flush();
+    // 第一次：資料通道與核心各送一份（同一個事件，都沒有 item_id）。
+    t.peer.channel.emit({ type: "turn.done", turn: { role: "user", transcript: "取消吧" } });
+    t.core({ kind: "transcript", role: "user", text: "取消吧", final: true, item_id: null });
+    expect(t.user).toEqual(["取消吧"]);
+    // 10 秒內同一個來源又說一次（真的又說了）：要算。
+    vi.advanceTimersByTime(3_000);
+    t.peer.channel.emit({ type: "turn.done", turn: { role: "user", transcript: "確認執行" } });
+    t.host("home_control", { target: "書房燈", command: "power", value: false }, "hc_2");
+    await t.flush();
+    t.peer.channel.emit({ type: "turn.done", turn: { role: "user", transcript: "確認執行" } });
+    await t.flush();
+    expect(t.user).toEqual(["取消吧", "確認執行", "確認執行"]);
+    expect(t.resolved.map((r) => r.outcome)).toEqual(["said_reject", "said_approve"]);
+  });
+
   it("delegation.created on the data channel is ignored (the core owns it)", async () => {
     const t = setup();
     await t.live();
@@ -206,6 +229,32 @@ describe("LiveVoice runs the shared executor for the core's host calls", () => {
     expect(t.resolved).toEqual([{ id: "home_c1", approved: true, outcome: "said_approve" }]);
     expect(t.approvalsPosted).toEqual(["open", "resolved"]);
     expect(t.inputs).toContainEqual({ kind: "notice", text: expect.stringContaining("書房燈") });
+  });
+
+  it("the card reports its own timeout on open and the outcome on resolve; a failed POST is retried once", async () => {
+    const t = setup({ approvalFails: 1 });
+    await t.live();
+    t.host("home_control", { target: "書房燈", command: "power", value: false });
+    await t.flush();
+    t.peer.channel.emit({ type: "turn.done", turn: { role: "user", transcript: "確認執行" } });
+    await t.flush();
+    // 第一次 open 失敗（fixture）→ 再送一次成功。
+    expect(t.reports).toEqual([
+      { state: "open", timeout_ms: 60_000 },
+      { state: "open", timeout_ms: 60_000 },
+      { state: "resolved", outcome: "said_approve" },
+    ]);
+    expect(t.approvalsPosted).toEqual(["open", "resolved"]);
+  });
+
+  it("a card that times out reports outcome timeout (not an answer)", async () => {
+    const t = setup();
+    await t.live();
+    t.host("home_control", { target: "書房燈", command: "power", value: false });
+    await t.flush();
+    vi.advanceTimersByTime(60_000);
+    await t.flush();
+    expect(t.reports.at(-1)).toEqual({ state: "resolved", outcome: "timeout" });
   });
 
   it("the card button resolves it the same way", async () => {
@@ -367,6 +416,48 @@ describe("openRealtime", () => {
     });
     expect(order).toEqual(["make:live", "began:live", "announce:這次改用 OpenAI API key（依用量計費）：ChatGPT 方案額度已用完", "make:api_key", "began:api_key"]);
     expect(result).not.toBeNull();
+  });
+
+  it("Esc / collapse / presence-leave during the start awaits cancels it: no session, no mic opened later", async () => {
+    const decisionAuto = { ok: true as const, session_id: "rt_a", owner: "own_a", route: "api_key" as const, model: "gpt-realtime", billing_line: "b", notice: "通知" };
+    for (const stage of ["start", "announce", "session", "fallback-announce"] as const) {
+      const order: string[] = [];
+      const abort = new AbortController();
+      const sessions = [fakeSession(stage === "fallback-announce"), fakeSession(false)];
+      const result = await openRealtime(
+        {
+          start: async () => {
+            if (stage === "start") abort.abort();
+            return stage === "fallback-announce" || stage === "session" ? { ...decisionAuto, route: "live", notice: null } : decisionAuto;
+          },
+          makeSession: (d) => {
+            order.push(`make:${d.route}`);
+            const s = sessions.shift()!;
+            return {
+              ...s,
+              start: async () => {
+                order.push(`start:${d.route}`);
+                if (stage === "session") abort.abort();
+              },
+              stop: () => void order.push(`stop:${d.route}`),
+            };
+          },
+          announce: async () => {
+            order.push("announce");
+            if (stage === "announce" || stage === "fallback-announce") abort.abort();
+          },
+          refused: () => order.push("refused"),
+          began: (_s, d) => order.push(`began:${d.route}`),
+        },
+        abort.signal,
+      );
+      expect(result, stage).toBeNull();
+      if (stage === "start") expect(order).toEqual([]);
+      if (stage === "announce") expect(order).toEqual(["announce"]);
+      // 已經開始的那個立刻停掉（麥克風關閉）；不會再開下一個。
+      if (stage === "session") expect(order).toEqual(["make:live", "began:live", "start:live", "stop:live"]);
+      if (stage === "fallback-announce") expect(order).toEqual(["make:live", "began:live", "start:live", "announce"]);
+    }
   });
 
   it("refuses with the exact reasons when neither route works", async () => {

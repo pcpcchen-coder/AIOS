@@ -72,8 +72,10 @@ export interface CodexResponsesOptions {
   model: string | null;
   /** NOUS_CODEX_CLIENT_VERSION，/models 的 client_version。 */
   clientVersion: string;
-  /** 每一輪串流的時限。 */
+  /** 每一輪的時限：涵蓋查模型清單（第一次）＋連線＋串流。 */
   turnTimeoutMs: number;
+  /** 共用的模型快取（交辦與上網查詢用同一份，/models 只查一次）。 */
+  modelCache?: CodexModelCache;
   baseUrl?: string;
   fetch?: typeof fetch;
 }
@@ -85,35 +87,46 @@ interface Deadline {
   clear(): void;
 }
 
+/** 查到的模型（第一次成功後在這個行程內沿用；失敗不快取）。 */
+export interface CodexModelCache {
+  model: Promise<string> | null;
+}
+
 const USAGE_CODES = /usage_limit_reached|usage_not_included|rate_limit_exceeded/i;
 
 export class CodexResponses {
-  private model: Promise<string> | null = null;
+  private readonly cache: CodexModelCache;
   private readonly fetch: typeof fetch;
   private readonly base: string;
 
   constructor(private readonly auth: CodexAuth, private readonly options: CodexResponsesOptions) {
     this.fetch = options.fetch ?? fetch;
     this.base = (options.baseUrl ?? CODEX_BASE_URL).replace(/\/+$/, "");
+    this.cache = options.modelCache ?? { model: null };
   }
 
   get available(): boolean {
     return this.auth.readiness().ready;
   }
 
-  /** 第一次成功後在這個行程內沿用；失敗不快取。 */
-  resolveModel(signal?: AbortSignal): Promise<string> {
+  /**
+   * 第一次成功後在這個行程內沿用（快取可以和其他 CodexResponses 共用）；失敗不快取。
+   * 查詢本身用發起者這一輪的時限（不帶任何呼叫者的中止，免得一個呼叫者中止害到等同一份查詢的其他人）；
+   * 每個呼叫者各自只等到自己這一輪的時限（turn()）。
+   */
+  resolveModel(): Promise<string> {
     if (this.options.model) return Promise.resolve(this.options.model);
-    this.model ??= this.lookupModel(signal).catch((err: unknown) => {
-      this.model = null;
+    const cache = this.cache;
+    const lookup = (cache.model ??= this.lookupModel().catch((err: unknown) => {
+      if (cache.model === lookup) cache.model = null;
       throw err;
-    });
-    return this.model;
+    }));
+    return lookup;
   }
 
-  private async lookupModel(signal?: AbortSignal): Promise<string> {
+  private async lookupModel(): Promise<string> {
     const url = `${this.base}/models?client_version=${encodeURIComponent(this.options.clientVersion)}`;
-    const deadline = this.deadline(signal);
+    const deadline = this.deadline();
     let res: Response;
     try {
       res = await this.send(url, { method: "GET" }, deadline, "取得 Codex 模型清單");
@@ -131,7 +144,17 @@ export class CodexResponses {
 
   /** 一輪串流 Responses。錯誤訊息不含權杖、帳號 ID 或 JWT。 */
   async turn(request: CodexTurnRequest): Promise<CodexTurn> {
-    const model = await this.resolveModel(request.signal);
+    // 時限涵蓋整輪：查模型清單（第一次）＋連線＋串流。DELEGATION_BUDGET_MS 與上網查詢的等待時間因此不必另外加上查詢時間。
+    const deadline = this.deadline(request.signal);
+    try {
+      const model = await withinDeadline(this.resolveModel(), deadline, this.options.turnTimeoutMs);
+      return await this.runTurn(model, request, deadline);
+    } finally {
+      deadline.clear();
+    }
+  }
+
+  private async runTurn(model: string, request: CodexTurnRequest, deadline: Deadline): Promise<CodexTurn> {
     const body = {
       model,
       instructions: request.instructions,
@@ -143,8 +166,6 @@ export class CodexResponses {
       stream: true,
       include: ["reasoning.encrypted_content"],
     };
-    // 時限涵蓋整輪（連線＋串流），不只是等標頭。
-    const deadline = this.deadline(request.signal);
     try {
       return await this.stream(model, body, deadline);
     } catch (err) {
@@ -152,8 +173,6 @@ export class CodexResponses {
       if (request.signal?.aborted) throw new CodexError({ kind: "aborted" }, "Codex 推論已中止。");
       if (deadline.timedOut()) throw new CodexError({ kind: "timeout" }, `Codex 推論逾時（${this.options.turnTimeoutMs / 1000} 秒）。`);
       throw new CodexError({ kind: "network" }, "Codex 串流中斷（網路）。");
-    } finally {
-      deadline.clear();
     }
   }
 
@@ -276,6 +295,26 @@ export class CodexResponses {
     if (status === 400) return new CodexError({ kind: "bad_request" }, `${stage}失敗（400）${message ? `：${message}` : ""}`);
     return new CodexError({ kind: "upstream", status }, `${stage}失敗${status ? `（HTTP ${status}）` : ""}${message ? `：${message}` : ""}`);
   }
+}
+
+/** 等一份共用的查詢，但只等到這一輪的時限或呼叫者中止為止。 */
+function withinDeadline<T>(work: Promise<T>, deadline: Deadline, turnTimeoutMs: number): Promise<T> {
+  const stop = () => (deadline.outer?.aborted ? new CodexError({ kind: "aborted" }, "Codex 推論已中止。") : new CodexError({ kind: "timeout" }, `取得 Codex 模型清單逾時（這一輪 ${turnTimeoutMs / 1000} 秒）。`));
+  if (deadline.signal.aborted) return Promise.reject(stop());
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(stop());
+    deadline.signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        deadline.signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        deadline.signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
 }
 
 function toWire(item: CodexInputItem): Record<string, unknown> {

@@ -1,4 +1,4 @@
-import { matchApproval } from "../shared/approval.ts";
+import { exactApproval } from "../shared/approval.ts";
 import { RESULT_UNKNOWN_TEXT, SIDE_EFFECT_TOOLS, type HostToolName } from "../shared/realtime-route.ts";
 import type { Task } from "../shared/types.ts";
 import { CodexError, type CodexInputItem, type CodexResponses, type CodexToolSpec, type FunctionToolSpec } from "./codex-responses.ts";
@@ -22,6 +22,12 @@ export interface DelegationRequest {
   source: "voice" | "typed";
   /** sideband 回報的最近幾輪逐字稿（由舊到新）。 */
   transcript: readonly TranscriptTurn[];
+  /**
+   * 交辦「排進佇列時」的確認卡狀態與時間（不是輪到它執行時）：前一個交辦跑了很久，
+   * 「確認執行」仍依使用者說出它的那一刻判斷。沒有時用執行當下的狀態。
+   */
+  approval?: ApprovalSnapshot;
+  at?: number;
 }
 
 /** 給 log 與驗證用。腦區只由頁面的執行器依實際執行的工具亮起。 */
@@ -31,9 +37,12 @@ export interface ExecutedTool {
   ms: number;
 }
 
-/** 交回語音模型的內容。speakable：模型用自己的話說出；commentary：安靜的背景。 */
+/**
+ * 交回語音模型的內容。每個交辦都以一則 speakable 結束（同 OpenClaw realtime-quicksilver-delegation-controller.ts
+ * runDelegation：成功、失敗都用 speakable 送回該交辦 ID），模型才會把這次交辦說完。
+ */
 export type DelegationResult =
-  | { ok: true; channel: "speakable" | "commentary"; text: string; tools: ExecutedTool[]; ended?: true }
+  | { ok: true; channel: "speakable"; text: string; tools: ExecutedTool[]; ended?: true }
   | { ok: false; channel: "speakable"; text: string; reason: "timeout" | "usage_limit" | "auth" | "upstream" | "unknown" | "closed"; tools: ExecutedTool[] };
 
 export const CALLER_LIMITS = {
@@ -92,20 +101,22 @@ export function buildCallerInstructions(caps: RealtimeCapabilities, tasks: Itera
 }
 
 /**
- * 確認語句的交辦（純函式）。模型永遠不會被呼叫，所以 agent 沒辦法替使用者確認：
- * - 確認卡在 APPROVAL_WINDOW_MS 內剛結束：這句話就是那張卡的答案（畫面已處理），回 commentary，不重做工具；
- * - 確認卡還開著（交辦比頁面的事件先到）：commentary，答案仍只由畫面處理；
- * - 沒有卡：speakable「目前沒有需要確認的項目」。
+ * 確認語句的交辦（純函式）。只在「整句就是確認或取消」（exactApproval，錨定比對）而且確認卡開著、
+ * 或在 APPROVAL_WINDOW_MS 內剛被使用者回答時才攔下；模型與工具都不會被呼叫，所以 agent 沒辦法替使用者確認：
+ * - 確認卡剛被回答：這句話就是那張卡的答案（畫面已處理），不重做工具；
+ * - 確認卡還開著（交辦比頁面的事件先到）：答案仍只由畫面處理；
+ * - 其他情況（沒有卡、句子裡還有別的請求，例如「停止播放音樂」「不用開燈，查一下客廳溫度」）：null，照一般請求交給 Codex。
+ * 攔下時回 speakable：每個交辦都要有一句可以說出的結尾。
  */
 export function approvalGuard(text: string, approval: ApprovalSnapshot, now: number): DelegationResult | null {
-  if (!matchApproval(text)) return null;
+  if (!exactApproval(text)) return null;
   if (approval.resolvedAt !== null && now - approval.resolvedAt <= APPROVAL_WINDOW_MS) {
-    return { ok: true, channel: "commentary", text: "使用者剛用固定語句回答了確認卡，畫面已經處理；結果會用系統通知送來。只簡短回應，不要說已經完成。", tools: [] };
+    return { ok: true, channel: "speakable", text: "畫面已經收到你對確認卡的回答，結果會另外通知。", tools: [] };
   }
   if (approval.open) {
-    return { ok: true, channel: "commentary", text: "確認卡還開著，答案只由畫面處理（使用者按卡片或清楚說「確認執行」或「取消」）；你不能替使用者確認，也不要再交辦一次。", tools: [] };
+    return { ok: true, channel: "speakable", text: "確認卡的答案由畫面處理，結果會另外通知；我不能替你確認。", tools: [] };
   }
-  return { ok: true, channel: "speakable", text: "目前沒有需要確認的項目。", tools: [] };
+  return null;
 }
 
 export interface LiveToolCallerOptions {
@@ -133,14 +144,19 @@ export class LiveToolCaller {
    *    用量上限、登入失效照實說；工具逾時以工具自己的輸出交給模型（不會變成成功）。
    */
   async run(request: DelegationRequest, signal: AbortSignal): Promise<DelegationResult> {
-    const guarded = approvalGuard(request.text, this.options.approval(), this.now());
+    const guarded = approvalGuard(request.text, request.approval ?? this.options.approval(), request.at ?? this.now());
     if (guarded) return guarded;
     const budget = new AbortController();
     const timer = setTimeout(() => budget.abort(), DELEGATION_BUDGET_MS);
     const combined = AbortSignal.any([signal, budget.signal]);
     const tools: ExecutedTool[] = [];
-    /** 有副作用的工具已送出、但還沒有可以轉述的最後一句話：之後的失敗只能說「結果不明」，不能說失敗。 */
-    let sideEffectUnsettled = false;
+    /** 已經執行的工具與它們的輸出：模型來不及轉述時，照這些輸出說（不把已知的結果說成沒做或不明）。 */
+    const executed: { name: HostToolName; output: Record<string, unknown> }[] = [];
+    /** 有副作用的工具已送出、還沒有確定的結果（等待中或 status unknown）：之後的失敗只能說「結果不明」，不能說失敗。 */
+    const unsettled = new Set<string>();
+    const done = () => summarizeOutputs(executed);
+    /** 失敗的話；之前已經有確定的工具結果時，先說那些結果。 */
+    const failed = (text: string) => (executed.length ? `已經執行：${done()}。不過${text}` : text);
     try {
       const caps = this.options.caps();
       const instructions = buildCallerInstructions(caps, this.options.tasks(), new Date(this.now()));
@@ -173,8 +189,12 @@ export class LiveToolCaller {
               // 參數不是 JSON：交給執行器照常回報缺少參數
             }
             const started = this.now();
-            if (SIDE_EFFECT_TOOLS.includes(name)) sideEffectUnsettled = true;
+            const key = `${hostCalls}:${call.call_id}`;
+            if (SIDE_EFFECT_TOOLS.includes(name)) unsettled.add(key);
             output = await untilAborted(this.options.host.call(name, args, combined), combined);
+            // 確定的結果（成功、失敗、需要確認…）就不再是「不明」；只有 status unknown 仍然不明。
+            if (output.status !== "unknown") unsettled.delete(key);
+            executed.push({ name, output });
             tools.push({ name, ok: output.ok !== false, ms: this.now() - started });
             this.options.log?.(`即時語音（ChatGPT 方案）：工具 ${name} ${output.status === "unknown" ? "結果不明" : output.ok === false ? "失敗" : "完成"}`);
             if (name === "end_conversation") ended = true;
@@ -182,28 +202,43 @@ export class LiveToolCaller {
           input.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(output) });
         }
       }
-      if (sideEffectUnsettled) return { ok: false, channel: "speakable", text: `${RESULT_UNKNOWN_TEXT}。`, reason: "unknown", tools };
+      // 輪數用完、模型沒有說最後一句：照已經執行的工具輸出說，已知的結果不說成沒做或不明。
+      if (unsettled.size) return { ok: false, channel: "speakable", text: `${RESULT_UNKNOWN_TEXT}。${executed.length ? `已經回報的結果：${done()}。` : ""}`, reason: "unknown", tools };
+      if (executed.length) return { ok: true, channel: "speakable", text: `${done()}。`, tools, ...(ended ? { ended: true as const } : {}) };
       return { ok: false, channel: "speakable", text: "沒有完成：處理步驟超過上限，請再說一次。", reason: "upstream", tools };
     } catch (err) {
       if (signal.aborted) return { ok: false, channel: "speakable", text: "即時語音已結束，這次交辦沒有完成。", reason: "closed", tools };
+      const sideEffectUnsettled = unsettled.size > 0;
       if (budget.signal.aborted || (err instanceof CodexError && err.failure.kind === "aborted")) {
         if (sideEffectUnsettled) return { ok: false, channel: "speakable", text: `${RESULT_UNKNOWN_TEXT}。`, reason: "unknown", tools };
-        return { ok: false, channel: "speakable", text: `沒有完成：處理超過時間（${Math.round(DELEGATION_BUDGET_MS / 1000)} 秒）。`, reason: "timeout", tools };
+        return { ok: false, channel: "speakable", text: failed(`沒有完成：處理超過時間（${Math.round(DELEGATION_BUDGET_MS / 1000)} 秒）。`), reason: "timeout", tools };
       }
-      if (err instanceof HostGone) return { ok: false, channel: "speakable", text: sideEffectUnsettled ? `${RESULT_UNKNOWN_TEXT}。` : "沒有完成：畫面已離開。", reason: sideEffectUnsettled ? "unknown" : "closed", tools };
+      if (err instanceof HostGone) return { ok: false, channel: "speakable", text: sideEffectUnsettled ? `${RESULT_UNKNOWN_TEXT}。` : failed("沒有完成：畫面已離開。"), reason: sideEffectUnsettled ? "unknown" : "closed", tools };
       if (err instanceof CodexError) {
         const failure = err.failure;
-        // 有副作用的指令已經送出：不管之後哪裡失敗，都不能說沒做。
+        // 有副作用的指令已經送出、結果不明：不管之後哪裡失敗，都不能說沒做。
         if (sideEffectUnsettled) return { ok: false, channel: "speakable", text: `${RESULT_UNKNOWN_TEXT}。`, reason: "unknown", tools };
-        if (failure.kind === "usage_limit") return { ok: false, channel: "speakable", text: `沒有完成：${err.message}。`, reason: "usage_limit", tools };
-        if (failure.kind === "auth") return { ok: false, channel: "speakable", text: "沒有完成：ChatGPT 方案登入已失效，請重新登入。", reason: "auth", tools };
-        return { ok: false, channel: "speakable", text: `沒有完成：${err.message}`, reason: failure.kind === "timeout" ? "timeout" : "upstream", tools };
+        if (failure.kind === "usage_limit") return { ok: false, channel: "speakable", text: failed(`沒有完成：${err.message}。`), reason: "usage_limit", tools };
+        if (failure.kind === "auth") return { ok: false, channel: "speakable", text: failed("沒有完成：ChatGPT 方案登入已失效，請重新登入。"), reason: "auth", tools };
+        return { ok: false, channel: "speakable", text: failed(`沒有完成：${err.message}`), reason: failure.kind === "timeout" ? "timeout" : "upstream", tools };
       }
       throw err;
     } finally {
       clearTimeout(timer);
     }
   }
+}
+
+/** 工具輸出的一句話摘要（只用工具自己回傳的文字，不加油添醋）。 */
+export function summarizeOutputs(executed: readonly { name: HostToolName; output: Record<string, unknown> }[]): string {
+  return executed
+    .map(({ name, output }) => {
+      const say = (key: string) => (typeof output[key] === "string" && (output[key] as string).trim() ? (output[key] as string).trim().replace(/[。.]+$/, "") : null);
+      if (output.status === "unknown") return RESULT_UNKNOWN_TEXT;
+      if (output.ok === false) return `沒有成功：${say("error") ?? say("message") ?? name}`;
+      return say("message") ?? say("answer") ?? `${name} 已執行`;
+    })
+    .join("；");
 }
 
 /** 上限一到就不再等（即使下層沒有回應中止訊號）。 */

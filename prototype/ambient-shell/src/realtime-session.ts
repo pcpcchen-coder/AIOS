@@ -74,23 +74,37 @@ export interface OpenRealtimeDeps {
  * 3. session = makeSession(decision)；await session.start()。
  * 4. live 建立失敗而核心提議改路徑（fallbackOffer.fallback）：live 的麥克風已經關掉，
  *    先 announce 計費通知，再開 API key 的工作階段（麥克風這時才再開）。最多一次；進入聆聽之後不會發生。
+ * signal：使用者在等待期間按 Esc、收起或人離開（stopRealtime／closeConversation 會中止它）。每個 await 之後都檢查；
+ * 已中止就不再開新的工作階段，已經開始的那個立刻 stop()（麥克風不會在使用者收起之後才打開）。
  */
-export async function openRealtime(deps: OpenRealtimeDeps): Promise<RealtimeSession | null> {
+export async function openRealtime(deps: OpenRealtimeDeps, signal?: AbortSignal): Promise<RealtimeSession | null> {
+  const cancelled = () => !!signal?.aborted;
   const decision = await deps.start();
+  if (cancelled()) return null;
   if (!decision.ok) {
     deps.refused(decision.message);
     return null;
   }
   if (decision.notice) await deps.announce(decision.notice);
+  if (cancelled()) return null;
   const first = deps.makeSession(decision);
   deps.began(first, decision);
   await first.start();
+  if (cancelled()) {
+    first.stop();
+    return null;
+  }
   const offer = first.fallbackOffer;
   if (!offer?.fallback) return first;
   await deps.announce(offer.fallback.notice);
+  if (cancelled()) return null;
   const second = deps.makeSession(offer.fallback);
   deps.began(second, offer.fallback);
   await second.start();
+  if (cancelled()) {
+    second.stop();
+    return null;
+  }
   return second;
 }
 

@@ -5,7 +5,7 @@ import { billingLine, LIVE_VOICES, unavailableText, type LiveInputKind, type Liv
 import { CodexAuthError, CodexUnauthorized, NOUS_ORIGINATOR, type CodexAuth, type CodexRequestAuth } from "./codex-auth.ts";
 import { redact } from "./codex-responses.ts";
 import type { DelegationRequest, DelegationResult, TranscriptTurn } from "./live-tool-caller.ts";
-import { RouteStartError, type LiveControl, type Readiness, type RealtimeRoute, type RouteCall, type SessionContext } from "./realtime-routes.ts";
+import { RouteStartError, type ApprovalSnapshot, type LiveControl, type Readiness, type RealtimeRoute, type RouteCall, type SessionContext } from "./realtime-routes.ts";
 
 // 即時語音的 ChatGPT 方案路徑：gpt-live-1-codex，用 Nous 自己的 Codex 登入。負責 chatgpt.com 的通話建立與
 // api.openai.com 的 sideband；網址、標頭與 frameless 的線路事件只在這個檔案（與共用的 shared/frameless.ts 解析器）。
@@ -404,18 +404,21 @@ class LiveCall implements RouteCall {
   private enqueue(id: string, text: string, source: "voice" | "typed"): void {
     if (this.seen.has(id)) return;
     this.seen.add(id);
-    this.chain = this.chain.then(() => this.delegate(id, text, source)).catch((err: unknown) => {
+    // 確認卡狀態與時間在「使用者說出這句話」時記下，不是輪到它執行時（前一個交辦可能跑很久）。
+    const asked = { approval: this.ctx.approval(), at: this.ctx.now() };
+    this.chain = this.chain.then(() => this.delegate(id, text, source, asked)).catch((err: unknown) => {
       this.log?.(`即時語音（ChatGPT 方案）交辦出錯：${redact((err as Error).message)}`);
     });
   }
 
   /**
-   * delegation.created → 頁面顯示「思考中」→ caller.run（自己的上限）→ 結果用 delegation.context.append 送回
+   * delegation.created → 頁面顯示「思考中」→ caller.run（自己的上限）→ 結果用 delegation.context.append speakable 送回
    * （typed 用 session.context.append）→ finished／failed／unknown。空內容直接請使用者再說一次，不呼叫 caller。
+   * caller 丟出例外也一樣：說一句失敗、送 failed，頁面才會清掉「思考中」、閒置計時才會繼續。
    */
-  private async delegate(id: string, text: string, source: "voice" | "typed"): Promise<void> {
+  private async delegate(id: string, text: string, source: "voice" | "typed", asked: { approval: ApprovalSnapshot; at: number }): Promise<void> {
     if (this.closed) return;
-    const append = (result: { channel: "speakable" | "commentary"; text: string }) => {
+    const append = (result: { channel: "speakable"; text: string }) => {
       if (this.closed) return;
       for (const piece of chunkForAppend(result.text)) {
         const content = [{ type: "input_text", text: piece }];
@@ -432,12 +435,16 @@ class LiveCall implements RouteCall {
       // 只在真的有工具還在跑時說一次（真實事件，不是假進度）。
       if (!this.closed && !progressed && this.ctx.host.outstanding > 0 && source === "voice") {
         progressed = true;
-        append({ channel: "speakable", text: "還在處理，再等一下。" });
+        // 獨立的一句話（session.context.append，不帶交辦 ID），不會變成這次交辦的結果（同 OpenClaw sendSessionContext）。
+        for (const piece of chunkForAppend("還在處理，再等一下。")) this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: piece }] });
       }
     }, LIVE_TIMEOUTS_MS.progressNote);
     let result: DelegationResult;
     try {
-      result = await this.caller.run({ id, text, source, transcript: [...this.transcript] }, this.abort.signal);
+      result = await this.caller.run({ id, text, source, transcript: [...this.transcript], ...asked }, this.abort.signal);
+    } catch (err) {
+      this.log?.(`即時語音（ChatGPT 方案）交辦出錯：${redact((err as Error).message)}`);
+      result = { ok: false, channel: "speakable", text: "沒有完成：處理這個請求時出錯了，請再說一次。", reason: "upstream", tools: [] };
     } finally {
       clearTimeout(progress);
     }

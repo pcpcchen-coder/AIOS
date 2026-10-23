@@ -51,13 +51,25 @@ describe("planStart", () => {
             expect(plan).toEqual({ kind: "start", route: "live", fallback: key.ready ? "api_key" : null, notice: null });
           } else if (key.ready) {
             expect(plan).toMatchObject({ kind: "start", route: "api_key", fallback: null });
-            if (plan.kind === "start") expect(plan.notice).toBe(`這次改用 OpenAI API key（依用量計費）：${live.message}`);
+            // 從來沒登入 ChatGPT 方案＝只用 API key 的設定：安靜開始；設定過但不能用才說計費通知。
+            if (plan.kind === "start") expect(plan.notice).toBe(live.reason === "not_logged_in" ? null : `這次改用 OpenAI API key（依用量計費）：${live.message}`);
           } else {
             expect(plan.kind).toBe("refuse");
           }
         }
       }
     }
+  });
+
+  it("auto + never logged in starts the API key route silently; a configured-but-broken live announces", () => {
+    // 審查的探針（probe-live/plan.mts）：只用 API key 的使用者每次開始都會聽到改路徑的通知。
+    expect(planStart("auto", NOT_LOGGED_IN, READY)).toEqual({ kind: "start", route: "api_key", fallback: null, notice: null });
+    for (const reason of ["needs_reauth", "usage_limit", "upstream"] as const) {
+      const live: Readiness = { ready: false, reason, message: unavailableText(reason) };
+      expect(planStart("auto", live, READY)).toMatchObject({ kind: "start", route: "api_key", notice: `這次改用 OpenAI API key（依用量計費）：${live.message}` });
+    }
+    // 明確選了 live：照實說為什麼不能用，不改路徑。
+    expect(planStart("live", NOT_LOGGED_IN, READY)).toMatchObject({ kind: "refuse", reasons: { live: "not_logged_in" } });
   });
 
   it("refuses with both reasons in one sentence", () => {
@@ -202,6 +214,38 @@ describe("RealtimeSessions", () => {
     expect(String(output.message)).toContain(RESULT_UNKNOWN_TEXT);
     expect(JSON.stringify(output)).not.toMatch(/失敗|failed/);
     expect(t.sent.map((s) => s.event)).toContainEqual(expect.objectContaining({ type: "realtime.live", event: { kind: "tool_unknown", name: "home_control", message: RESULT_UNKNOWN_TEXT } }));
+  });
+
+  it("approval: only a spoken answer opens the answer window; timeout or dismiss just closes the card", async () => {
+    vi.useFakeTimers();
+    const t = setup("live");
+    const d = t.sessions.start("sse_a");
+    if (!d.ok) throw new Error("expected start");
+    await t.sessions.call("v=0", d.session_id, d.owner);
+    const ctx = t.live.ctx!;
+    t.sessions.approval(d.session_id, d.owner, { state: "open", timeout_ms: 60_000 });
+    expect(ctx.approval()).toEqual({ open: true, resolvedAt: null });
+    t.sessions.approval(d.session_id, d.owner, { state: "resolved", outcome: "timeout" });
+    expect(ctx.approval()).toEqual({ open: false, resolvedAt: null });
+    t.sessions.approval(d.session_id, d.owner, { state: "open", timeout_ms: 60_000 });
+    t.sessions.approval(d.session_id, d.owner, { state: "resolved", outcome: "dismissed" });
+    expect(ctx.approval()).toEqual({ open: false, resolvedAt: null });
+    t.sessions.approval(d.session_id, d.owner, { state: "open", timeout_ms: 60_000 });
+    t.sessions.approval(d.session_id, d.owner, { state: "resolved", outcome: "said_approve" });
+    expect(ctx.approval()).toEqual({ open: false, resolvedAt: Date.now() });
+  });
+
+  it("approval: when the page's 「resolved」 never arrives, the open card expires after its own timeout", async () => {
+    vi.useFakeTimers();
+    const t = setup("live");
+    const d = t.sessions.start("sse_a");
+    if (!d.ok) throw new Error("expected start");
+    await t.sessions.call("v=0", d.session_id, d.owner);
+    t.sessions.approval(d.session_id, d.owner, { state: "open", timeout_ms: 30_000 });
+    vi.advanceTimersByTime(30_000);
+    expect(t.live.ctx!.approval().open).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(t.live.ctx!.approval()).toEqual({ open: false, resolvedAt: null });
   });
 
   it("a closed event from the route ends the session and rejects pending host calls (no fallback mid-session)", async () => {

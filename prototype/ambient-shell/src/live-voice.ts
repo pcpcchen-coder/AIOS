@@ -1,5 +1,5 @@
 import { parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
-import { RESULT_UNKNOWN_TEXT, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind } from "../shared/realtime-route.ts";
+import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimeCallbacks, RealtimeDeps, RealtimePhase } from "./realtime.ts";
 import type { RealtimeSession } from "./realtime-session.ts";
 import { FallbackOfferError } from "./realtime-session.ts";
@@ -18,7 +18,8 @@ export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "createPe
   exchange(offerSdp: string): Promise<string>;
   input(kind: LiveInputKind, text: string): Promise<void>;
   hostResult(callId: string, output: Record<string, unknown>): Promise<void>;
-  approval(state: "open" | "resolved"): Promise<void>;
+  /** POST /api/realtime/approval；失敗時 LiveVoice 會再試一次。 */
+  approval(report: ApprovalReport): Promise<void>;
   end(): Promise<void>;
   /** 只收這個工作階段的 SSE realtime.host／realtime.live。回傳取消訂閱。 */
   subscribe(handlers: { host(call: HostCall): void; core(event: LiveCoreEvent): void }): () => void;
@@ -39,6 +40,9 @@ export const LOCAL_GOODBYES = ["再見", "掰掰", "拜拜", "結束對話"] as 
 const END_GRACE_MS = 1_500;
 const END_FALLBACK_MS = 10_000;
 const DEDUP_TEXT_MS = 10_000;
+
+/** 逐字稿的來源：資料通道（oai-events）或核心轉送的 sideband。 */
+type TranscriptSource = "channel" | "core";
 
 export class LiveVoice implements RealtimeSession {
   private phase: RealtimePhase = "off";
@@ -63,9 +67,13 @@ export class LiveVoice implements RealtimeSession {
   private muted = false;
   /** 聆聽中的證據。 */
   private evidence = { mic: false, peer: false, started: false };
-  /** 逐字稿去重：資料通道與核心可能各送一次。 */
+  /** 逐字稿去重：資料通道與核心可能各送一次。有 item_id 時依 item_id。 */
   private readonly seenItems = new Set<string>();
-  private readonly seenTexts = new Map<string, number>();
+  /**
+   * 沒有 item_id 時：每個來源各自記下還沒被另一個來源配對到的逐字稿。另一個來源送來同一句、而且還有沒配對的那一份，
+   * 才算同一個事件的重複；同一個來源的重複（使用者 10 秒內又說一次「確認執行」）是真的又說了一次。
+   */
+  private readonly unmatched: Record<TranscriptSource, Map<string, number[]>> = { channel: new Map(), core: new Map() };
   /** 確認卡狀態的回報要先於工具結果到達核心。 */
   private approvalSync: Promise<void> = Promise.resolve();
   private idleMs: number;
@@ -87,10 +95,13 @@ export class LiveVoice implements RealtimeSession {
         pendingChanged: (kind, delta) => {
           if (kind === "home") this.homePending = Math.max(0, this.homePending + delta);
         },
-        cardChanged: (state) => {
+        cardChanged: (report) => {
           const generation = this.generation;
+          const post = () => (generation === this.generation ? this.deps.approval(report) : undefined);
+          // 送不到就再試一次；仍然失敗時，核心會在卡片自己的時限後把它當成已關閉（不會永遠以為卡還開著）。
           this.approvalSync = this.approvalSync
-            .then(() => (generation === this.generation ? this.deps.approval(state) : undefined))
+            .then(post)
+            .catch(post)
             .catch(() => undefined);
         },
       },
@@ -250,8 +261,8 @@ export class LiveVoice implements RealtimeSession {
     if (this.phase === "connecting" && mic && peer && started) this.setPhase("listening");
   }
 
-  /** 逐字稿：資料通道或核心，哪個先到用哪個，依 item_id（沒有時依內容與時間）去重。 */
-  private transcript(role: "user" | "assistant", text: string, final: boolean, itemId: string | null): void {
+  /** 逐字稿：資料通道或核心，哪個先到用哪個，依 item_id（沒有時依來源配對）去重。 */
+  private transcript(source: TranscriptSource, role: "user" | "assistant", text: string, final: boolean, itemId: string | null): void {
     const clean = text.trim();
     if (!clean) return;
     if (!final) {
@@ -266,12 +277,8 @@ export class LiveVoice implements RealtimeSession {
       if (this.seenItems.has(key)) return;
       this.seenItems.add(key);
       if (this.seenItems.size > 200) this.seenItems.delete(this.seenItems.values().next().value!);
-    } else {
-      const textKey = `${role}:${clean}`;
-      const at = this.seenTexts.get(textKey);
-      if (at !== undefined && Date.now() - at < DEDUP_TEXT_MS) return;
-      this.seenTexts.set(textKey, Date.now());
-      if (this.seenTexts.size > 100) this.seenTexts.delete(this.seenTexts.keys().next().value!);
+    } else if (this.isRelayCopy(source, `${role}:${clean}`)) {
+      return;
     }
     if (role === "user") {
       this.callbacks.onUserTranscript(clean);
@@ -290,6 +297,24 @@ export class LiveVoice implements RealtimeSession {
     if (this.endRequested) this.scheduleEnd(END_GRACE_MS);
   }
 
+  /** 另一個來源已經送過同一句、還沒配對：這份是同一個事件的另一份，配對掉。否則記成這個來源的一份。 */
+  private isRelayCopy(source: TranscriptSource, key: string): boolean {
+    const now = Date.now();
+    const fresh = (list: number[] | undefined) => (list ?? []).filter((at) => now - at < DEDUP_TEXT_MS);
+    const other = this.unmatched[source === "channel" ? "core" : "channel"];
+    const waiting = fresh(other.get(key));
+    if (waiting.length) {
+      waiting.shift();
+      if (waiting.length) other.set(key, waiting);
+      else other.delete(key);
+      return true;
+    }
+    const own = this.unmatched[source];
+    own.set(key, [...fresh(own.get(key)), now]);
+    if (own.size > 100) own.delete(own.keys().next().value!);
+    return false;
+  }
+
   private handle(event: FramelessEvent): void {
     switch (event.kind) {
       case "session.started":
@@ -297,7 +322,7 @@ export class LiveVoice implements RealtimeSession {
         this.checkListening();
         break;
       case "transcript":
-        this.transcript(event.role, event.text, event.final, event.item_id);
+        this.transcript("channel", event.role, event.text, event.final, event.item_id);
         break;
       case "audio.cleared":
         if (this.speaking) {
@@ -325,7 +350,7 @@ export class LiveVoice implements RealtimeSession {
         this.checkListening();
         break;
       case "transcript":
-        this.transcript(event.role, event.text, event.final, event.item_id);
+        this.transcript("core", event.role, event.text, event.final, event.item_id);
         break;
       case "delegation":
         if (event.state === "started") {
@@ -457,6 +482,8 @@ export class LiveVoice implements RealtimeSession {
     this.hostCalls = 0;
     this.homePending = 0;
     this.evidence = { mic: false, peer: false, started: false };
+    this.unmatched.channel.clear();
+    this.unmatched.core.clear();
     this.approvals.clear();
   }
 

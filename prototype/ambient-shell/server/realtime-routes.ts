@@ -6,7 +6,8 @@ import {
   ROUTE_BILLING,
   SIDE_EFFECT_TOOLS,
   unavailableText,
-  type ApprovalState,
+  isApprovalAnswer,
+  type ApprovalReport,
   type FallbackOffer,
   type HostResult,
   type HostToolName,
@@ -23,6 +24,7 @@ import {
   type UnavailableReason,
 } from "../shared/realtime-route.ts";
 import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
+import { WEB_SEARCH_TIMEOUT_MS } from "./web-search.ts";
 
 // George 要的接縫：一個小的 RealtimeRoute 介面，每條路徑一個模組
 // （ApiKeyRoute＝包住不改的 RealtimeBridge；server/live-route.ts＝Codex／gpt-live-1-codex），
@@ -117,11 +119,17 @@ export interface ToolHost {
   readonly outstanding: number;
 }
 
-/** 每個工具等頁面回覆的時限。home_control＝home-bridge UTTERANCE_MS（60 秒）＋2 秒；web_search＝web-search TIMEOUT_MS（30 秒）＋2 秒。 */
+/** 頁面轉交工具結果（POST host-result）的餘裕。 */
+export const HOST_REPLY_MARGIN_MS = 2_000;
+
+/**
+ * 每個工具等頁面回覆的時限。home_control＝home-bridge UTTERANCE_MS（60 秒）＋2 秒；
+ * web_search＝WEB_SEARCH_TIMEOUT_MS（30 秒；Codex 那一輪的時限也是它，含第一次查模型清單）＋2 秒。
+ */
 export const HOST_TIMEOUT_MS: Record<HostToolName, number> = {
   home_control: 62_000,
   home_status: 20_000,
-  web_search: 32_000,
+  web_search: WEB_SEARCH_TIMEOUT_MS + HOST_REPLY_MARGIN_MS,
   delegate_task: 10_000,
   get_tasks: 5_000,
   end_conversation: 5_000,
@@ -150,7 +158,8 @@ export function fallbackNotice(reason: string): string {
  * live    → live 可用就用，否則拒絕（說 live 的原因）。絕不用 api_key 計費。
  * api_key → api_key 可用就用，否則拒絕。
  * auto    → live 可用：用 live，api_key 可用時保留一次改路徑的機會。
- *           live 不可用、api_key 可用：用 api_key，並附上計費通知。
+ *           live 不可用、api_key 可用：用 api_key。live 從來沒登入（not_logged_in）就是只用 API key 的設定，
+ *           照舊安靜開始；live 設定過但現在不能用（需要重新登入、額度用完…）才附上計費通知。
  *           都不可用：拒絕，一句話說出兩個原因。
  * 沒有接上的路徑（null）當作不存在：只有 api_key 的設定照舊行為。
  */
@@ -172,7 +181,7 @@ export function planStart(pref: RoutePreference, live: Readiness | null, apiKey:
   const l = live!;
   const k = apiKey!;
   if (l.ready) return { kind: "start", route: "live", fallback: k.ready ? "api_key" : null, notice: null };
-  if (k.ready) return { kind: "start", route: "api_key", fallback: null, notice: fallbackNotice(l.message) };
+  if (k.ready) return { kind: "start", route: "api_key", fallback: null, notice: l.reason === "not_logged_in" ? null : fallbackNotice(l.message) };
   return refuse({ live: l.reason, api_key: k.reason }, [l.message, k.message]);
 }
 
@@ -234,8 +243,15 @@ interface LiveSession {
   clientId: string;
   call: RouteCall | null;
   pendingHost: Map<string, PendingHost>;
-  approval: ApprovalSnapshot;
+  /** openUntil：卡片自己的時限；頁面的「結束」回報沒送到時，核心過了這個時間就不再當成卡還開著。 */
+  approval: ApprovalSnapshot & { openUntil: number | null };
   closed: boolean;
+}
+
+/** 核心眼中的確認卡狀態：開著的卡過了自己的時限就算關了（不會永遠以為卡還開著）。 */
+export function effectiveApproval(state: ApprovalSnapshot & { openUntil: number | null }, now: number): ApprovalSnapshot {
+  const open = state.open && (state.openUntil === null || now <= state.openUntil);
+  return { open, resolvedAt: state.resolvedAt };
 }
 
 export class RealtimeSessions {
@@ -357,7 +373,7 @@ export class RealtimeSessions {
       clientId: decision.clientId!,
       call: null,
       pendingHost: new Map(),
-      approval: { open: false, resolvedAt: null },
+      approval: { open: false, resolvedAt: null, openUntil: null },
       closed: false,
     };
     this.live = session;
@@ -400,11 +416,14 @@ export class RealtimeSessions {
     live.call.control.input(kind, text);
   }
 
-  /** POST /api/realtime/approval：頁面回報確認卡打開或結束。 */
-  approval(sessionId: string, owner: string, state: ApprovalState): void {
+  /**
+   * POST /api/realtime/approval：頁面回報確認卡打開（帶卡片的時限）或結束（帶結果）。
+   * 只有使用者說出的回答（said_*）才會開始「剛回答過」的時窗；逾時、收起、結束只是關卡。
+   */
+  approval(sessionId: string, owner: string, report: ApprovalReport): void {
     const live = this.owned(sessionId, owner);
-    if (state === "open") live.approval = { ...live.approval, open: true };
-    else live.approval = { open: false, resolvedAt: this.now() };
+    if (report.state === "open") live.approval = { open: true, resolvedAt: live.approval.resolvedAt, openUntil: this.now() + report.timeout_ms };
+    else live.approval = { open: false, resolvedAt: isApprovalAnswer(report.outcome) ? this.now() : live.approval.resolvedAt, openUntil: null };
   }
 
   /** POST /api/realtime/host-result：交回一個等待中的工具結果；不認得或已逾時的 call_id 丟掉。 */
@@ -482,7 +501,7 @@ export class RealtimeSessions {
       sessionId,
       tasks: this.options.tasks,
       now: this.now,
-      approval: () => live?.approval ?? { open: false, resolvedAt: null },
+      approval: () => (live ? effectiveApproval(live.approval, this.now()) : { open: false, resolvedAt: null }),
       emit: (event) => {
         if (!live || live.closed) return;
         this.options.send(live.clientId, { type: "realtime.live", session_id: sessionId, event });

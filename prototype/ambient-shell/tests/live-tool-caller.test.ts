@@ -1,10 +1,11 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { exactApproval } from "../shared/approval.ts";
 import { RESULT_UNKNOWN_TEXT } from "../shared/realtime-route.ts";
 import { CodexAuth } from "../server/codex-auth.ts";
-import { CodexError, CodexResponses, type CodexTurn, type CodexTurnRequest } from "../server/codex-responses.ts";
+import { CodexError, CodexResponses, type CodexModelCache, type CodexTurn, type CodexTurnRequest } from "../server/codex-responses.ts";
 import {
   APPROVAL_WINDOW_MS,
   approvalGuard,
@@ -16,7 +17,8 @@ import {
   MAX_HOST_TIMEOUT_MS,
 } from "../server/live-tool-caller.ts";
 import { buildRealtimeInstructions, realtimeToolRules, REALTIME_TOOLS } from "../server/realtime.ts";
-import { HOST_TIMEOUT_MS, hostTimeoutOutput, type ApprovalSnapshot, type ToolHost } from "../server/realtime-routes.ts";
+import { HOST_REPLY_MARGIN_MS, HOST_TIMEOUT_MS, hostTimeoutOutput, type ApprovalSnapshot, type ToolHost } from "../server/realtime-routes.ts";
+import { WEB_SEARCH_TIMEOUT_MS } from "../server/web-search.ts";
 import { codexTurn, scriptedFetch, writeCredentials } from "./fixtures/fake-chatgpt.ts";
 
 // LiveToolCaller：把 gpt-live-1-codex 的交辦文字變成和 API key 路徑相同的工具呼叫。Codex Responses 與頁面都是假的（fixture）。
@@ -162,33 +164,100 @@ describe("LiveToolCaller.run", () => {
 
 describe("approval phrases (the agent can never confirm)", () => {
   const now = 1_000_000;
-  it("a card resolved within N seconds: the delegation is that answer, commentary only, no model, no tool", async () => {
-    const t = caller([], {}, { open: false, resolvedAt: now - (APPROVAL_WINDOW_MS - 1) }, () => now);
+  const RESOLVED: ApprovalSnapshot = { open: false, resolvedAt: now - (APPROVAL_WINDOW_MS - 1) };
+  const OPEN: ApprovalSnapshot = { open: true, resolvedAt: null };
+
+  it("a card resolved within N seconds: the delegation is that answer — speakable, no model, no tool", async () => {
+    const t = caller([], {}, RESOLVED, () => now);
     const result = await t.c.run(request("確認執行"), new AbortController().signal);
-    expect(result).toMatchObject({ ok: true, channel: "commentary" });
+    expect(result).toMatchObject({ ok: true, channel: "speakable" });
+    expect(result.text).not.toMatch(/完成|做好/);
     expect(t.requests).toHaveLength(0);
     expect(t.hostCalls).toHaveLength(0);
   });
 
-  it("reverse order — the sideband delegation arrives before the page resolves the open card: still commentary, never executed", async () => {
+  it("reverse order — the sideband delegation arrives before the page resolves the open card: speakable, never executed", async () => {
     // 頁面先回報卡片打開（工具結果之前就送到），交辦比「確認執行」的卡片結束先到。
-    const state: ApprovalSnapshot = { open: true, resolvedAt: null };
+    const state: ApprovalSnapshot = { ...OPEN };
     const t = caller([], {}, state, () => now);
     const result = await t.c.run(request("確認執行"), new AbortController().signal);
-    expect(result).toMatchObject({ ok: true, channel: "commentary" });
-    expect(result.text).toContain("你不能替使用者確認");
-    // 之後頁面才結束卡片：再晚到的重複交辦也只是 commentary。
+    expect(result).toMatchObject({ ok: true, channel: "speakable" });
+    expect(result.text).toContain("不能替你確認");
+    // 之後頁面才結束卡片：再晚到的重複交辦也只是回答那張卡。
     state.open = false;
     state.resolvedAt = now + 500;
-    expect(approvalGuard("確認執行", state, now + 1_000)).toMatchObject({ channel: "commentary" });
+    expect(approvalGuard("確認執行", state, now + 1_000)).toMatchObject({ channel: "speakable" });
     expect(t.requests).toHaveLength(0);
     expect(t.hostCalls).toHaveLength(0);
   });
 
-  it("no card and none resolved recently: 「目前沒有需要確認的項目」; outside the window it is not an answer", () => {
-    expect(approvalGuard("確認執行", NO_CARD, now)).toMatchObject({ channel: "speakable", text: "目前沒有需要確認的項目。" });
-    expect(approvalGuard("確認執行", { open: false, resolvedAt: now - APPROVAL_WINDOW_MS - 1 }, now)).toMatchObject({ channel: "speakable" });
-    expect(approvalGuard("客廳燈打開", NO_CARD, now)).toBeNull();
+  it("no card open and none answered recently: even 「確認執行」 goes to Codex (never 「目前沒有需要確認」)", async () => {
+    expect(approvalGuard("確認執行", NO_CARD, now)).toBeNull();
+    expect(approvalGuard("確認執行", { open: false, resolvedAt: now - APPROVAL_WINDOW_MS - 1 }, now)).toBeNull();
+    expect(approvalGuard("客廳燈打開", OPEN, now)).toBeNull();
+    const t = caller([turn({ text: "目前沒有要確認的事。" })], {}, NO_CARD, () => now);
+    const result = await t.c.run(request("確認執行"), new AbortController().signal);
+    expect(t.requests).toHaveLength(1);
+    expect(result.text).toBe("目前沒有要確認的事。");
+  });
+
+  // 審查的探針（probe-live/guard.mts）：這些是請求，不是確認卡的答案。舊的子字串比對會回「目前沒有需要確認的項目」而不呼叫 Codex。
+  const REQUESTS = ["停止播放音樂", "把燈關掉，不要開冷氣", "別忘了明天的會議，幫我建立任務", "不用開燈，查一下客廳溫度", "取消明天的鬧鐘"];
+  for (const state of [NO_CARD, OPEN, RESOLVED]) {
+    it(`requests that merely contain a reject word reach Codex (card ${state.open ? "open" : state.resolvedAt ? "just answered" : "none"})`, async () => {
+      for (const text of REQUESTS) {
+        expect(approvalGuard(text, state, now)).toBeNull();
+        const t = caller([turn({ text: "好" })], {}, state, () => now);
+        const result = await t.c.run(request(text), new AbortController().signal);
+        expect(t.requests, text).toHaveLength(1);
+        expect(result.text).not.toContain("沒有需要確認");
+      }
+    });
+  }
+
+  it("exactApproval is anchored: the whole utterance must be the phrase", () => {
+    for (const text of ["確認執行", "確認執行。", "好，確認執行吧", "確定寄出", "請確認刪除"]) expect(exactApproval(text), text).toBe("approve");
+    for (const text of ["取消", "不要", "算了", "不用了", "取消執行", "不要執行！", "好，取消吧"]) expect(exactApproval(text), text).toBe("reject");
+    for (const text of [...REQUESTS, "開客廳的燈", "確認執行客廳燈打開", "確認一下溫度", ""]) expect(exactApproval(text), text).toBeNull();
+  });
+
+  it("the guard uses the snapshot taken when the delegation was enqueued, not the state when it runs", async () => {
+    // 執行時卡片已經過了時窗；但使用者說這句話時卡片還開著。
+    const t = caller([turn({ text: "不該被呼叫" })], {}, NO_CARD, () => now + 60_000);
+    const result = await t.c.run({ ...request("確認執行"), approval: OPEN, at: now }, new AbortController().signal);
+    expect(t.requests).toHaveLength(0);
+    expect(result).toMatchObject({ ok: true, channel: "speakable" });
+  });
+});
+
+describe("side-effect outcome is unknown only while it really is", () => {
+  const control = (n: number) => ({ call_id: `c${n}`, name: "home_control", arguments: JSON.stringify({ target: "客廳燈", command: "power", value: "true" }) });
+  const confirmed = async () => ({ ok: true, status: "confirmed", message: "客廳燈已開啟（設備回讀）" });
+
+  it("a definitive home_control result followed by a Codex failure is not 「結果不明」", async () => {
+    const t = caller([turn({ calls: [control(1)] }), new CodexError({ kind: "network" }, "Codex 串流中斷（網路）。")], { call: confirmed });
+    const result = await t.c.run(request("客廳燈打開"), new AbortController().signal);
+    expect(result.text).not.toContain(RESULT_UNKNOWN_TEXT);
+    expect(result.text).toContain("客廳燈已開啟（設備回讀）");
+    expect(result).toMatchObject({ ok: false, reason: "upstream" });
+  });
+
+  it("status unknown keeps it unknown", async () => {
+    const t = caller([turn({ calls: [control(1)] }), new CodexError({ kind: "network" }, "x")], { call: async (name) => hostTimeoutOutput(name) });
+    const result = await t.c.run(request("客廳燈打開"), new AbortController().signal);
+    expect(result).toMatchObject({ ok: false, reason: "unknown", text: `${RESULT_UNKNOWN_TEXT}。` });
+  });
+
+  it("turns run out with known results: the executed outputs are spoken, not 「沒有完成」 or 「結果不明」", async () => {
+    const status = (n: number) => ({ call_id: `s${n}`, name: "home_status", arguments: JSON.stringify({ target: "客廳" }) });
+    const t = caller([turn({ calls: [control(1)] }), turn({ calls: [status(1)] }), turn({ calls: [status(2)] })], {
+      call: async (name) => (name === "home_control" ? confirmed() : { ok: true, message: "客廳 26 度（fixture）" }),
+    });
+    const result = await t.c.run(request("開燈再查溫度"), new AbortController().signal);
+    expect(result).toMatchObject({ ok: true, channel: "speakable" });
+    expect(result.text).toContain("客廳燈已開啟（設備回讀）");
+    expect(result.text).toContain("客廳 26 度（fixture）");
+    expect(result.text).not.toMatch(/沒有完成|結果不明/);
   });
 });
 
@@ -228,5 +297,69 @@ describe("CodexResponses (fake chatgpt.com)", () => {
     expect(err.failure).toMatchObject({ kind: "usage_limit", plan: "plus" });
     expect(err.message).toMatch(/ChatGPT 方案額度已用完，約 10 分鐘後重置/);
     expect(err.message).not.toContain(t.creds.access);
+  });
+});
+
+describe("model lookup is inside each turn's time budget", () => {
+  const MODELS = () => new Response(JSON.stringify({ models: [{ slug: "a", visibility: "list", priority: 1 }] }));
+  /** 會理會中止訊號的假 fetch（真的 fetch 也是）；handler 回 null 表示永遠不回。 */
+  function abortableFetch(handler: (url: string) => Promise<Response | null>) {
+    const urls: string[] = [];
+    const impl = (async (input: string | URL, init: RequestInit = {}) => {
+      urls.push(String(input));
+      return new Promise<Response>((resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+        void handler(String(input)).then((res) => res && resolve(res), reject);
+      });
+    }) as unknown as typeof fetch;
+    return { fetch: impl, urls };
+  }
+  function responses(fetchImpl: typeof fetch, turnTimeoutMs: number, modelCache?: CodexModelCache) {
+    const dir = mkdtempSync(join(tmpdir(), "nous-codex-budget-"));
+    writeCredentials(dir);
+    const auth = new CodexAuth({ dir, onChange: () => {}, fetch: scriptedFetch(() => new Response("{}", { status: 500 })).fetch });
+    return new CodexResponses(auth, { model: null, clientVersion: "0.1.0", turnTimeoutMs, baseUrl: "https://chatgpt.fixture/backend-api/codex", fetch: fetchImpl, modelCache });
+  }
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+  it("a slow /models plus a slow stream still ends at turnTimeoutMs (not lookup + turn)", async () => {
+    vi.useFakeTimers();
+    const f = abortableFetch(async (url) => (url.includes("/models") ? (await sleep(15_000), MODELS()) : null));
+    const r = responses(f.fetch, CALLER_LIMITS.turnTimeoutMs);
+    let settled: unknown = null;
+    const turn = r.turn({ instructions: "i", input: [], tools: [] }).catch((e: unknown) => (settled = e));
+    await vi.advanceTimersByTimeAsync(CALLER_LIMITS.turnTimeoutMs);
+    await turn;
+    expect(settled).toBeInstanceOf(CodexError);
+    expect((settled as CodexError).failure.kind).toBe("timeout");
+  });
+
+  it("codex and codexSearch share one model cache: /models is fetched once", async () => {
+    const f = abortableFetch(async (url) => (url.includes("/models") ? MODELS() : codexTurn({ text: "好" })));
+    const cache: CodexModelCache = { model: null };
+    const a = responses(f.fetch, CALLER_LIMITS.turnTimeoutMs, cache);
+    const b = responses(f.fetch, WEB_SEARCH_TIMEOUT_MS, cache);
+    await a.turn({ instructions: "i", input: [], tools: [] });
+    await b.turn({ instructions: "i", input: [], tools: [] });
+    expect(f.urls.filter((u) => u.includes("/models"))).toHaveLength(1);
+    const nous = readFileSync(new URL("../server/nous.ts", import.meta.url), "utf8");
+    expect(nous.match(/new CodexResponses\([^)]*modelCache \}\)/g)).toHaveLength(2);
+    expect(nous).toContain("turnTimeoutMs: WEB_SEARCH_TIMEOUT_MS");
+  });
+
+  it("live web search (lookup + turn) fits inside the page's wait for web_search", async () => {
+    // Codex 上網查詢那一輪的時限＝WEB_SEARCH_TIMEOUT_MS，含第一次查模型清單；頁面多等 HOST_REPLY_MARGIN_MS 轉交結果。
+    expect(HOST_TIMEOUT_MS.web_search).toBe(WEB_SEARCH_TIMEOUT_MS + HOST_REPLY_MARGIN_MS);
+    expect(WEB_SEARCH_TIMEOUT_MS + HOST_REPLY_MARGIN_MS).toBe(32_000);
+    vi.useFakeTimers();
+    const f = abortableFetch(async (url) => (url.includes("/models") ? (await sleep(WEB_SEARCH_TIMEOUT_MS - 1_000), MODELS()) : null));
+    const r = responses(f.fetch, WEB_SEARCH_TIMEOUT_MS);
+    let at: number | null = null;
+    const started = Date.now();
+    const turn = r.turn({ instructions: "i", input: [], tools: [] }).catch(() => (at = Date.now() - started));
+    await vi.advanceTimersByTimeAsync(HOST_TIMEOUT_MS.web_search);
+    await turn;
+    expect(at).not.toBeNull();
+    expect(at!).toBeLessThanOrEqual(WEB_SEARCH_TIMEOUT_MS);
   });
 });

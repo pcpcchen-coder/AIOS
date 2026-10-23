@@ -190,6 +190,14 @@ export type LiveInputKind = (typeof LIVE_INPUT_KINDS)[number];
 /** 頁面回報確認卡狀態（POST /api/realtime/approval）：核心據此判斷「確認執行」是不是在回答一張卡。 */
 export type ApprovalState = "open" | "resolved";
 
+/** 確認卡結束的方式（同頁面的 ApprovalOutcome）。只有 said_* 是使用者的回答；逾時、收起、結束都不是。 */
+export const APPROVAL_CARD_OUTCOMES = ["said_approve", "said_reject", "timeout", "dismissed", "closed"] as const;
+export type ApprovalCardOutcome = (typeof APPROVAL_CARD_OUTCOMES)[number];
+export const isApprovalAnswer = (outcome: ApprovalCardOutcome) => outcome === "said_approve" || outcome === "said_reject";
+
+/** POST /api/realtime/approval 的內容：打開時帶卡片自己的時限（核心在時限後自動當成已關閉），結束時帶結果。 */
+export type ApprovalReport = { state: "open"; timeout_ms: number } | { state: "resolved"; outcome: ApprovalCardOutcome };
+
 // ---- realtime.json（路徑偏好與 ChatGPT 方案路徑的聲音） ----
 
 export interface RealtimePrefs {

@@ -197,6 +197,8 @@ let realtime: RealtimeSession = idleSession();
 /** 這次工作階段的路徑、計費與擁有者憑證（只在這個頁面）。 */
 let realtimeTicket: SessionDecision | null = null;
 let realtimeStarting = false;
+/** 進行中的開始流程；stopRealtime 中止它，之後的 await 回來時不會再開麥克風。 */
+let realtimeStart: AbortController | null = null;
 /** 這個頁面的 SSE 串流 ID（hello 帶來）；開始 ChatGPT 方案路徑時交給核心。 */
 let sseClientId: string | null = null;
 const liveListeners = new Set<(event: RealtimeServerEvent) => void>();
@@ -215,6 +217,9 @@ function endRealtimeTicket(): void {
 }
 
 function stopRealtime(): void {
+  realtimeStart?.abort();
+  realtimeStart = null;
+  realtimeStarting = false;
   realtime.stop();
   endRealtimeTicket();
 }
@@ -252,7 +257,7 @@ function createRealtimeSession(decision: SessionDecision): RealtimeSession {
       exchange: base.exchange,
       input: async (kind, text) => void (await api.realtimeInput(ticket, kind, text)),
       hostResult: async (callId, output) => void (await api.realtimeHostResult(ticket, callId, output)),
-      approval: async (state) => void (await api.realtimeApproval(ticket, state)),
+      approval: async (report) => void (await api.realtimeApproval(ticket, report)),
       end: async () => void (await api.realtimeEnd(ticket)),
       subscribe(handlers) {
         const listener = (event: RealtimeServerEvent) => {
@@ -580,7 +585,7 @@ const sense = new SenseController({
     // 人離開：待確認的外部動作不執行、收起畫面、結束即時語音（避免對空房間持續計費）。
     if (realtime.pendingApproval) realtime.resolveApproval(false, "dismissed");
     if (shell.surface) dispatch({ type: "dismiss" });
-    if (realtime.on) stopRealtime();
+    if (realtime.on || realtimeStarting) stopRealtime();
     closePreview();
   },
   setScale: (scale) => {
@@ -705,6 +710,8 @@ function startRealtime(): void {
   hideSubtitle();
   dispatch({ type: "dismiss" });
   realtimeStarting = true;
+  const start = new AbortController();
+  realtimeStart = start;
   // 路徑在開麥克風前決定；auto 改用 API key 時先說出計費通知。
   void openRealtime({
     start: () => api.realtimeStart(sseClientId),
@@ -720,14 +727,19 @@ function startRealtime(): void {
       realtimeTicket = decision;
       render();
     },
-  })
+  }, start.signal)
     .catch((err: unknown) => {
+      if (start.signal.aborted) return;
       const message = `無法開始即時語音：${err instanceof Error ? err.message : String(err)}`;
       showSubtitle(message);
       showCommandError(message);
     })
     .finally(() => {
-      realtimeStarting = false;
+      // 只清自己的狀態：中止之後又開始了新的一次時，不動新的那次。
+      if (realtimeStart === start) {
+        realtimeStart = null;
+        realtimeStarting = false;
+      }
       render();
     });
 }

@@ -113,6 +113,8 @@ export interface CallbackResult {
   message: string;
 }
 
+const STALE_LOGIN = "登入期間已登出，這次登入沒有保存。";
+
 export class CodexAuth {
   readonly file: string;
   private data: CodexCredentialFile | null;
@@ -121,6 +123,11 @@ export class CodexAuth {
   private pending: PendingBrowser | PendingDevice | null = null;
   /** 單一進行中的更新：所有呼叫者等同一個 promise（refresh token 會輪替，不能並行更新）。 */
   private refreshing: Promise<void> | null = null;
+  /**
+   * 登入的世代：登出或換了新的登入就加一。進行中的更新或換 token 在 await 之後先比對世代，
+   * 不同就丟掉結果（不寫檔、不復活已登出的登入），並盡力撤銷拿到的 refresh token。
+   */
+  private generation = 0;
   private readonly fetch: typeof fetch;
   private readonly now: () => number;
   private readonly issuer: string;
@@ -193,6 +200,7 @@ export class CodexAuth {
   /** 刪除 codex-credentials.json；盡力到 {issuer}/oauth/revoke 撤銷 refresh token（失敗不影響本機登出）。 */
   async logout(): Promise<{ revoked: boolean }> {
     this.cancel();
+    this.generation++;
     const data = this.data;
     this.data = null;
     this.needsReauth = false;
@@ -200,17 +208,7 @@ export class CodexAuth {
     rmSync(this.file, { force: true });
     let revoked = !data;
     if (data) {
-      try {
-        const res = await this.fetch(`${this.issuer}/oauth/revoke`, {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({ token: data.refresh_token, token_type_hint: "refresh_token", client_id: CODEX_CLIENT_ID }),
-        });
-        revoked = res.ok;
-        await res.text().catch(() => "");
-      } catch {
-        revoked = false;
-      }
+      revoked = await this.revoke(data.refresh_token);
       if (!revoked) this.lastError = "已在本機登出，但未確認遠端撤銷。";
     }
     this.options.onChange();
@@ -266,11 +264,19 @@ export class CodexAuth {
 
   private async refresh(): Promise<void> {
     const data = this.current();
+    const generation = this.generation;
     let result: TokenResult;
     try {
       result = await this.tokenRequest({ grant_type: "refresh_token", refresh_token: data.refresh_token, client_id: CODEX_CLIENT_ID });
     } catch {
+      if (generation !== this.generation) this.current();
       throw new CodexAuthError("network", "無法更新 ChatGPT 方案登入（網路問題），請稍後再試。");
+    }
+    if (generation !== this.generation) {
+      // 更新期間使用者登出（或換了登入）：這個結果屬於已經不存在的登入，丟掉。
+      if (result.ok && typeof result.body.refresh_token === "string") void this.revoke(result.body.refresh_token);
+      this.current();
+      throw new CodexAuthError("not_logged_in");
     }
     if (!result.ok) {
       if (result.code && UNUSABLE_REFRESH.has(result.code)) {
@@ -295,6 +301,21 @@ export class CodexAuth {
     };
     this.write(next);
     this.data = next;
+  }
+
+  /** 盡力到 {issuer}/oauth/revoke 撤銷一個 refresh token；回傳是否確認撤銷。 */
+  private async revoke(refreshToken: string): Promise<boolean> {
+    try {
+      const res = await this.fetch(`${this.issuer}/oauth/revoke`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: refreshToken, token_type_hint: "refresh_token", client_id: CODEX_CLIENT_ID }),
+      });
+      await res.text().catch(() => "");
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   private markReauth(message: string): void {
@@ -441,6 +462,7 @@ export class CodexAuth {
   }
 
   private async exchange(input: { code: string; verifier: string; redirectUri: string }): Promise<CallbackResult> {
+    const generation = this.generation;
     let result: TokenResult;
     try {
       result = await this.tokenRequest({
@@ -451,7 +473,13 @@ export class CodexAuth {
         redirect_uri: input.redirectUri,
       });
     } catch {
+      if (generation !== this.generation) return { ok: false, message: STALE_LOGIN };
       return this.fail("登入失敗：無法連線到 auth.openai.com。");
+    }
+    if (generation !== this.generation) {
+      // 換 token 期間使用者登出了：不存這個登入，盡力撤銷。
+      if (result.ok && typeof result.body.refresh_token === "string") void this.revoke(result.body.refresh_token);
+      return { ok: false, message: STALE_LOGIN };
     }
     if (!result.ok) return this.fail(`換取 token 失敗：${result.error}`);
     const t = result.body;
@@ -471,6 +499,8 @@ export class CodexAuth {
       plan: account.plan,
       obtained_at: this.now(),
     };
+    // 新的登入：之前還在跑的更新屬於舊登入，結果一律丟掉。
+    this.generation++;
     this.write(data);
     this.data = data;
     this.needsReauth = false;

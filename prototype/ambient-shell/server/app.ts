@@ -16,9 +16,12 @@ import { allowedHosts, checkRequest } from "./http-guard.ts";
 import { ApiKeyRoute, FallbackRequired, RealtimeSessions, RouteStartError, SessionError, type RealtimeRoute } from "./realtime-routes.ts";
 import type { CodexAuth } from "./codex-auth.ts";
 import {
+  APPROVAL_CARD_OUTCOMES,
   LIVE_INPUT_KINDS,
   parseRealtimePatch,
   RealtimePatchError,
+  type ApprovalCardOutcome,
+  type ApprovalReport,
   type LiveInputKind,
   type RealtimePrefs,
   type RealtimePrefsPatch,
@@ -29,6 +32,8 @@ import type { TaskStore } from "./store.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
+/** 確認卡時限的上限（頁面預設 60 秒；家電卡不超過確認 ID 的期限）。 */
+const MAX_APPROVAL_MS = 10 * 60_000;
 const REQUEST_ID = /^req_[A-Za-z0-9_-]{6,64}$/;
 const SESSION_ID = /^rt_[0-9a-f]{32}$/;
 const OWNER = /^own_[A-Za-z0-9_-]{20,64}$/;
@@ -303,9 +308,18 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (method === "POST" && path === "/api/realtime/approval") {
       const body = await readJson(req);
       const { sessionId, owner } = sessionAuth(body);
-      if (body.state !== "open" && body.state !== "resolved") throw new HttpError(400, "state must be open or resolved");
-      const state = body.state;
-      sessionCall(() => sessions!.approval(sessionId, owner, state));
+      let report: ApprovalReport;
+      if (body.state === "open") {
+        const ms = body.timeout_ms;
+        if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0 || ms > MAX_APPROVAL_MS) throw new HttpError(400, `timeout_ms must be a number between 0 and ${MAX_APPROVAL_MS}`);
+        report = { state: "open", timeout_ms: ms };
+      } else if (body.state === "resolved") {
+        if (!(APPROVAL_CARD_OUTCOMES as readonly unknown[]).includes(body.outcome)) throw new HttpError(400, `outcome must be one of ${APPROVAL_CARD_OUTCOMES.join(", ")}`);
+        report = { state: "resolved", outcome: body.outcome as ApprovalCardOutcome };
+      } else {
+        throw new HttpError(400, "state must be open or resolved");
+      }
+      sessionCall(() => sessions!.approval(sessionId, owner, report));
       return sendJson(res, 200, { ok: true });
     }
     if (method === "POST" && path === "/api/realtime/host-result") {
