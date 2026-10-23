@@ -34,8 +34,13 @@ export interface Config {
   liveVoice: LiveVoiceId;
   /** ChatGPT 方案路徑上替語音模型執行工具的模型（NOUS_LIVE_AGENT_MODEL）；未設定時查 Codex 模型清單。 */
   liveAgentModel: string | null;
-  /** 查 Codex 模型清單時帶的 client_version（NOUS_CODEX_CLIENT_VERSION，預設 Nous 的版本）。 */
+  /**
+   * 查 Codex 模型清單時帶的 client_version（NOUS_CODEX_CLIENT_VERSION）。Codex 只列出支援這個版本的模型，
+   * 帶 Nous 自己的版本（0.1.0）會拿到空清單，所以預設用和 OpenClaw 相同的 Codex 版本號。
+   */
   codexClientVersion: string;
+  /** Nous 自己的版本（package.json），只用在 User-Agent。 */
+  nousVersion: string;
   /** 上網查詢用的模型（NOUS_SEARCH_MODEL），經 OPENAI_API_KEY 呼叫 Responses API 的 web_search。 */
   searchModel: string;
   /** 上網查詢的大致位置（NOUS_SEARCH_COUNTRY、NOUS_SEARCH_TIMEZONE）。 */
@@ -93,7 +98,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     liveModel: { display: env.NOUS_LIVE_MODEL?.trim() || "gpt-live-1-codex", send: env.NOUS_LIVE_MODEL?.trim() || null },
     liveVoice: parseLiveVoice(env.NOUS_LIVE_VOICE),
     liveAgentModel: env.NOUS_LIVE_AGENT_MODEL?.trim() || null,
-    codexClientVersion: env.NOUS_CODEX_CLIENT_VERSION?.trim() || packageVersion(),
+    codexClientVersion: env.NOUS_CODEX_CLIENT_VERSION?.trim() || DEFAULT_CODEX_CLIENT_VERSION,
+    nousVersion: packageVersion(),
     searchModel: env.NOUS_SEARCH_MODEL?.trim() || "gpt-5.5",
     searchCountry: env.NOUS_SEARCH_COUNTRY?.trim().toUpperCase() || "TW",
     searchTimezone: env.NOUS_SEARCH_TIMEZONE?.trim() || "Asia/Taipei",
@@ -129,6 +135,9 @@ function parseLiveVoice(raw: string | undefined): LiveVoiceId {
   if (!isLiveVoice(value)) throw new Error(`NOUS_LIVE_VOICE 只能是 ${LIVE_VOICES.join("、")}，收到 "${value}"`);
   return value;
 }
+
+/** 查 Codex 模型清單用的版本號（OpenClaw extensions/openai/base-url.ts 的 OPENAI_CODEX_CLIENT_VERSION）。 */
+export const DEFAULT_CODEX_CLIENT_VERSION = "0.162.1";
 
 function packageVersion(): string {
   try {

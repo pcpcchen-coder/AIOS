@@ -101,7 +101,7 @@ maxTurns × turnTimeoutMs + maxHostCalls × max(HOST_TIMEOUT_MS) + marginMs
 **家中測試要回答的問題**（不阻擋這次的提交）：
 
 - 伺服器接受 `originator: nous` 嗎？不接受時錯誤要照實顯示；不要改成假裝是 Codex CLI，除非 George 決定這麼做。
-- `/models?client_version=0.1.0` 會回傳清單嗎？不會時在 `.env` 設 `NOUS_LIVE_AGENT_MODEL`，並記下所用的值。
+- `/models?client_version=…` 會回傳清單嗎？實機已確認帶 `0.1.0` 是空清單，預設改成 `0.162.1`（見第 4 節）；仍是空清單時在 `.env` 設 `NOUS_LIVE_AGENT_MODEL` 或 `NOUS_CODEX_CLIENT_VERSION`，並記下所用的值。
 - 瀏覽器的資料通道有沒有送 frameless 逐字稿？沒有的話，頁面改用核心轉送的 `realtime.live transcript`，字幕照樣出現。記下是哪一種情況。
 - 「回覆中」的音量門檻 `SPEAKING_RMS = 0.02` 實際好不好用。
 
@@ -118,11 +118,16 @@ maxTurns × turnTimeoutMs + maxHostCalls × max(HOST_TIMEOUT_MS) + marginMs
 - 確認卡流程記為只有 fixture。
 - 沒做到步驟 9 時記為「未達到」。
 
-## 4. 真實結果（George 家中測試，尚未執行）
+## 4. 真實結果（George 家中測試）
 
 | 步驟 | 結果 | 證據 |
 |---|---|---|
-| 1–11 | 尚未執行 | — |
+| Codex 登入、建立通話、sideband | 正常：`nous.log` 有「已開始（gpt-live-1-codex）」 | George 2026-10-23 的 `nous.log` |
+| 語音層交辦 | 正常：問「你幫我看一下客廳的溫度」，收到交辦 | 同上 |
+| 交辦執行（查客廳溫度） | **失敗**：Codex 模型清單是空的（`bad_request`）。原因是 `/models` 帶了 Nous 自己的版本 `client_version=0.1.0`；改成預設 `0.162.1`（和 OpenClaw 相同）後待重測 | 同上；修正與回歸測試 `tests/codex-client-version.test.ts` |
+| 其他步驟 | 尚未執行 | — |
 | 計費證據 | 尚未執行 | — |
+
+同一份 `nous.log` 也記到 sideband 上目前沒有處理的事件：`session.input_audio.append`、`turn.created`、`turn.delta`、`delegation.context.appended`、`session.usage.updated`。它們不影響功能，先只記錄。
 
 在這一節填寫之前，所有關於 ChatGPT 方案路徑的結論都只來自 fixture，不代表真實的語音、帳號或計費行為。

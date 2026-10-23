@@ -75,8 +75,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const codexAuth = new CodexAuth({ dir: config.configDir, onChange: () => notify(), log });
   // 交辦與上網查詢共用一份模型快取（/models 只查一次）；每一輪的時限都涵蓋查詢本身。
   const modelCache: CodexModelCache = { model: null };
-  const codex = new CodexResponses(codexAuth, { model: config.liveAgentModel, clientVersion: config.codexClientVersion, turnTimeoutMs: CALLER_LIMITS.turnTimeoutMs, modelCache });
-  const codexSearch = new CodexResponses(codexAuth, { model: config.liveAgentModel, clientVersion: config.codexClientVersion, turnTimeoutMs: WEB_SEARCH_TIMEOUT_MS, modelCache });
+  const codex = new CodexResponses(codexAuth, { model: config.liveAgentModel, clientVersion: config.codexClientVersion, userAgentVersion: config.nousVersion, turnTimeoutMs: CALLER_LIMITS.turnTimeoutMs, modelCache });
+  const codexSearch = new CodexResponses(codexAuth, { model: config.liveAgentModel, clientVersion: config.codexClientVersion, userAgentVersion: config.nousVersion, turnTimeoutMs: WEB_SEARCH_TIMEOUT_MS, modelCache });
   const realtimePrefs = new RealtimeSettingsStore({
     dir: config.configDir,
     defaults: { route: config.realtimeRoute, live_voice: config.liveVoice },
@@ -105,7 +105,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     auth: codexAuth,
     voice: () => realtimePrefs.view().live_voice,
     model: config.liveModel,
-    clientVersion: config.codexClientVersion,
+    clientVersion: config.nousVersion,
     capabilities: () => ({ webSearch: true, home: home.available }),
     instructions: (ctx) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp }),
     caller: (ctx) =>
