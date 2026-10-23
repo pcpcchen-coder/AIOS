@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-23T12:24:52.172Z",
+  "updated_at": "2026-10-23T12:24:56.132Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,7 +9,7 @@
       "title": "設定以選單列為主：移除更多設定頁重複項目",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-23T12:24:50.349Z",
+      "updated_at": "2026-10-23T12:24:54.517Z",
       "started_at": "2026-10-23T12:08:19.817Z",
       "ended_at": null,
       "branch": "claude/menu-settings-consolidate",
