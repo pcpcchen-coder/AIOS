@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T01:32:19.672Z",
-  "updated_at": "2026-10-23T02:14:28.510Z",
+  "updated_at": "2026-10-23T02:14:32.440Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-23T02:14:32.440Z",
+      "ended_at": "2026-10-23T02:14:32.440Z",
+      "note": "Scope: Codex OAuth + live route + route switch + shared executor; API-key route unchanged; no new deps",
       "evidence": []
     },
     {
@@ -117,6 +117,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "Single-candidate arena after George chose route B; cross-judge found 8 must-fixes (sideband close, page ownership, unknown-not-failure, budget, transcript relay, approval window, delegation hygiene, wording) → SYNTHESIS"
+    },
+    {
+      "at": "2026-10-23T02:14:32.440Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "passed",
+      "note": "Scope: Codex OAuth + live route + route switch + shared executor; API-key route unchanged; no new deps"
     }
   ],
   "provenance": "Agent self-reported"
