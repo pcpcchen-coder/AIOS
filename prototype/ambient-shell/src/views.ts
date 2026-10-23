@@ -6,6 +6,8 @@ import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type SettingsView,
 import { CAMERA_PREF_KEYS, CAMERA_PREFS, stepCameraPref, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
 import { formatSeconds, stepPref } from "../shared/prefs.ts";
 import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
+import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
+import type { RealtimeInfo } from "../shared/types.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -26,6 +28,12 @@ export interface ViewActions {
   openCameraPreview(): void;
   /** 語音閒置秒數的 −／+：送出單一鍵的 patch（數值已依 VOICE_PREFS 夾在範圍內）。 */
   updateVoice(patch: VoicePrefsPatch): void;
+  /** 即時語音的路徑偏好與 ChatGPT 方案路徑的聲音（下一次開始才生效）。 */
+  updateRealtime(patch: RealtimePrefsPatch): void;
+  /** 即時語音用的 Codex 登入（和上面的 Continue with ChatGPT 分開）。 */
+  codexLogin(method: "browser" | "device"): void;
+  codexCancel(): void;
+  codexLogout(): void;
 }
 
 const MAX_LISTED = 8;
@@ -366,18 +374,106 @@ export function renderSettings(settings: SettingsView | null, message: string | 
     g.last_error && h("p", { class: "error-text" }, g.last_error),
     welcome,
     list,
-    settings.realtime &&
-      h(
-        "p",
-        { class: "small" },
-        h("strong", {}, "即時語音："),
-        `${settings.realtime.available ? "可用" : "不可用"} · ${settings.realtime.detail}`,
-      ),
     account.length > 0 && h("div", { class: "account" }, ...account),
+    settings.realtime && renderRealtimeSettings(settings.realtime, actions),
     h("p", { class: "muted small" }, "新交辦的任務會用目前選擇的引擎；已在執行的任務不受影響。"),
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
     footer(actions),
+  );
+}
+
+/**
+ * 即時語音：路徑（自動／ChatGPT 方案／API key）、每條路徑的狀態與計費、即時語音用的 Codex 登入。
+ * 計費一律照實顯示；切換只影響下一次開始，進行中的工作階段維持原本的路徑。
+ */
+export function renderRealtimeSettings(rt: RealtimeInfo, actions: ViewActions): HTMLElement {
+  const active = rt.active;
+  const status = active
+    ? `進行中：${active.billing_line}${rt.billing_line && rt.billing_line !== active.billing_line ? `（下次開始時改用：${rt.billing_line}）` : ""}`
+    : rt.billing_line
+      ? `下次開始：${rt.billing_line}`
+      : `不可用：${rt.detail}`;
+  const prefs = h("div", { class: "actions", role: "radiogroup", "aria-label": "即時語音路徑" });
+  for (const pref of ROUTE_PREFERENCES) {
+    const selected = rt.preference === pref;
+    const b = button(ROUTE_PREFERENCE_LABEL[pref], () => actions.updateRealtime({ route: pref }), selected ? "btn--primary" : "");
+    b.setAttribute("role", "radio");
+    b.setAttribute("aria-checked", String(selected));
+    prefs.append(b);
+  }
+  const routes = h("ul", { class: "provider-list" });
+  for (const r of rt.routes) {
+    const label = r.id === "live" ? "ChatGPT 方案（Codex 登入）" : "OpenAI API key";
+    const item = h(
+      "li",
+      { class: `provider${active?.route === r.id ? " provider--selected" : ""}` },
+      h(
+        "div",
+        { class: "provider-text" },
+        h("strong", {}, `${label} · ${r.billing_line}`),
+        h("span", { class: "muted small" }, r.available ? `可用 · 工具：${r.tools}` : `不可用：${r.reason ? unavailableText(r.reason) : r.detail}`),
+      ),
+    );
+    if (active?.route === r.id) item.append(h("span", { class: "chip chip--running" }, "進行中"));
+    routes.append(item);
+  }
+  const live = rt.routes.find((r) => r.id === "live");
+  const voices = live
+    ? h(
+        "div",
+        { class: "actions", role: "radiogroup", "aria-label": "ChatGPT 方案路徑的聲音" },
+        ...live.voices.map((v) => {
+          const selected = live.voice === v;
+          const b = button(v, () => isLiveVoice(v) && actions.updateRealtime({ live_voice: v }), selected ? "btn--primary" : "btn--ghost");
+          b.setAttribute("role", "radio");
+          b.setAttribute("aria-checked", String(selected));
+          return b;
+        }),
+      )
+    : null;
+  const account: Child[] = [];
+  const a = rt.live_account;
+  if (a) {
+    if (a.pending?.method === "browser") {
+      account.push(h("p", { class: "notice" }, `已在瀏覽器開啟 ChatGPT 方案（Codex）登入（回呼埠 ${a.pending.port}）。完成後會自動更新。`), button("取消登入", actions.codexCancel, "btn--ghost"));
+    } else if (a.pending?.method === "device") {
+      account.push(
+        h("p", { class: "notice" }, `到 ${a.pending.verification_url} 輸入代碼：${a.pending.user_code}`),
+        button("取消登入", actions.codexCancel, "btn--ghost"),
+      );
+    } else if (a.signed_in) {
+      account.push(
+        h("p", { class: "small" }, `即時語音用的 ChatGPT 方案：${a.email ?? "已登入"}${a.plan ? ` · ${a.plan}` : ""}`),
+        h("div", { class: "actions" }, usageLink(), button("登出（即時語音）", actions.codexLogout, "btn--ghost")),
+      );
+    } else {
+      account.push(
+        h(
+          "div",
+          { class: "actions" },
+          button(a.needs_reauth ? "重新登入 ChatGPT 方案（Codex）" : "用 ChatGPT 方案登入（Codex）", () => actions.codexLogin("browser"), "btn--primary"),
+          button("用裝置代碼登入", () => actions.codexLogin("device")),
+        ),
+      );
+    }
+    if (a.last_error) account.push(h("p", { class: "error-text" }, a.last_error));
+  }
+  return h(
+    "section",
+    { class: "camera-settings" },
+    h("h3", {}, "即時語音"),
+    h("p", { class: "small" }, h("strong", {}, status)),
+    prefs,
+    routes,
+    live && h("p", { class: "muted small" }, "ChatGPT 方案路徑的聲音："),
+    voices,
+    ...account,
+    h(
+      "p",
+      { class: "muted small" },
+      "這個登入只給即時語音用，和上面的 Continue with ChatGPT 分開；Nous 不讀也不改 Codex CLI 的 ~/.codex。MCP 只在 API key 路徑可用。切換只影響下一次開始。",
+    ),
   );
 }
 

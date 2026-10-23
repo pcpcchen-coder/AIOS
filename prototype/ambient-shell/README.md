@@ -147,9 +147,9 @@ npm start                 # 建置前端並啟動本機核心
 
 | 可以這樣問 | AI 可能會做什麼 | 條件 |
 |---|---|---|
-| 「再見」「結束對話」「先這樣」「不用了」 | AI 判斷你要結束時道別並結束即時語音（不保證每次都結束） | 需要即時語音 |
+| 「再見」「結束對話」「先這樣」「不用了」 | AI 判斷你要結束時道別並結束即時語音（不保證每次都結束）；ChatGPT 方案路徑上整句只說「再見」「掰掰」「拜拜」「結束對話」時，Nous 也會在道別念完後結束（備援） | 需要即時語音 |
 | 「任務做好了沒」「報告寫到哪了」 | AI 查詢真實任務狀態後用說的回答 | 需要即時語音 |
-| 「新竹今天會下雨嗎」 | AI 上網查詢後回答，字幕顯示來源 | 需要即時語音與上網查詢（OPENAI_API_KEY） |
+| 「新竹今天會下雨嗎」 | AI 上網查詢後回答，字幕顯示來源 | 需要即時語音與上網查詢（ChatGPT 方案路徑用 Codex 額度；API key 路徑需要 OPENAI_API_KEY） |
 | 「幫我寫一份下週出差規劃」 | AI 判斷是較長的工作時交辦成背景任務，進度顯示在電子腦下方 | 需要即時語音 |
 | 「客廳現在幾度」 | 查武陵居的感測值與設備狀態 | 需要即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN） |
 | 「客廳主燈關掉」「書桌燈調到 60%」「色溫調到 3000K」「冷氣調 26 度」「電視大聲一點」 | 請中控控制一台家電，照中控的回讀說結果：確認了才說好了；「已送出、未確認」要你看一下，不算成功。AIFA 冷氣（開關、溫度、模式、風量）與紅外線家電（一次按一個遙控鍵）沒有回讀，只會說「已送出，請確認」。一次一台 | 需要即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN） |
@@ -158,13 +158,13 @@ npm start                 # 建置前端並啟動本機核心
 
 | 操作 | 作用 |
 |---|---|
-| Esc | 即時語音 Nous 說話時：打斷；即時語音中有畫面開著：只收起畫面；語音模式念回覆時：打斷；其他時候：收起畫面並結束語音 |
+| Esc | 即時語音 Nous 說話時：打斷（ChatGPT 方案路徑沒有取消回覆的指令，只會把這段回覆靜音）；即時語音中有畫面開著：只收起畫面；語音模式念回覆時：打斷；其他時候：收起畫面並結束語音 |
 | 點右上角的語音指示 | 結束語音模式或即時語音 |
 | 舉起張開的手掌 | 停止 Nous 說話，不取消任務（需要鏡頭與「手掌停止播報」） |
 | 面向螢幕 | 看著說話：面向這麼久之後自動開始即時語音（需要鏡頭與即時語音，而且這個視窗之前已同意過即時語音的說明；沒同意過不會自動開始，請先按「開始語音對話」同意一次）；預設 1.5 秒，選單列「秒數設定」或設定畫面可調 |
 | 對話結束後 | 這段時間內看著說話不再自動開始；預設 10 秒，選單列「秒數設定」或設定畫面可調 |
 | 語音模式沒說話 | 自動關閉語音模式（Nous 等回覆、念回覆時不計時）；預設 1 分 30 秒，選單列「秒數設定」或設定畫面可調 |
-| 即時語音沒說話 | 自動結束即時語音，避免持續計費（Nous 回覆、查資料、等確認時不計時）；預設 2 分鐘，選單列「秒數設定」或設定畫面可調 |
+| 即時語音沒說話 | 自動結束即時語音，避免持續計費或用掉方案額度（Nous 回覆、查資料、等確認時不計時）；預設 2 分鐘，選單列「秒數設定」或設定畫面可調 |
 | ⌥⌘N（App） | 叫出／收起視窗 |
 | ⌥⌘V（App） | 開始／結束語音對話 |
 | ⌘/（App） | 打開這張語音指令表 |
@@ -215,17 +215,36 @@ Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒
 
 模型不寫死：有設定 `NOUS_MODEL` 就用它；否則在第一個任務時經 Models API 取最新的 `NOUS_MODEL_FAMILY`（預設 `opus`）系列。預設開啟伺服器端 refusal fallback（beta `server-side-fallback-2026-07-01`），所選模型不支援時設 `NOUS_FALLBACKS=off`。
 
-### 即時語音模式（OpenAI Realtime）
+### 即時語音模式（兩條路徑：ChatGPT 方案或 OpenAI API key）
 
-`.env` 設了 `OPENAI_API_KEY` 時，「開始語音對話」改用 OpenAI Realtime（預設 `gpt-realtime`，可用 `NOUS_REALTIME_MODEL`、`NOUS_REALTIME_VOICE` 調整），像 ChatGPT 語音模式一樣語音直接對語音：
+「開始語音對話」在有可用路徑時改用語音直接對語音，像 ChatGPT 語音模式。有兩條路徑，在 **設定 → 即時語音** 或 macOS App 選單列 **即時語音 → 路徑** 切換（不用改 `.env`、不用重新啟動；切換只影響下一次開始，進行中的對話維持原本的路徑）：
+
+| 路徑 | 怎麼啟用 | 計費（畫面一律顯示） |
+|---|---|---|
+| **ChatGPT 方案（Codex 登入）** | 設定 → 即時語音 → 「用 ChatGPT 方案登入（Codex）」，在瀏覽器登入 | `ChatGPT 方案（Codex 額度）· gpt-live-1-codex`：語音、交辦時的推論與上網查詢都用方案的 Codex 額度，不需要 API key |
+| **OpenAI API key** | `.env` 填 `OPENAI_API_KEY` | `OpenAI API key 計費 · gpt-realtime`：依用量計費（原本的路徑，行為不變） |
+
+路徑偏好有三種：**自動**（預設；先用 ChatGPT 方案，不能用時改用 API key）、**ChatGPT 方案**（絕不改用 API key 計費）、**API key**。自動改用 API key **只在開始時**發生，而且會先說出並顯示「這次改用 OpenAI API key（依用量計費）：<原因>」；對話中途不會換路徑。兩條都不能用時照實說原因（例如「ChatGPT 方案路徑尚未登入；未設定 OPENAI_API_KEY」）。設定畫面、即時語音列、選單列與輸入列下方的引擎列都顯示目前的路徑與計費。`NOUS_REALTIME_ROUTE`（`auto`／`live`／`api_key`）只是預設值。
+
+**ChatGPT 方案路徑（gpt-live-1-codex）** 照 OpenClaw 的做法，由本機核心自己登入 Codex 介面（不需要安裝 Codex CLI）：
+
+- 登入：Nous 自己的 PKCE 登入，用 Codex 的公開 client（`app_EMoamEEZ73f0CkXaXp7hrann`），回呼在 `http://127.0.0.1:1455/auth/callback`；1455 被占用（例如 OpenClaw 或 Codex 正在登入）時改用 1457，兩個都被占用時改用裝置代碼登入（到 `auth.openai.com/codex/device` 輸入代碼）。憑證存在 `~/.config/nous/codex-credentials.json`（0600），和 Sign in with ChatGPT 的 `chatgpt-credentials.json` 分開。**Nous 從不讀、不更新、不寫 Codex CLI 的 `~/.codex`**，所以不會把你的 Codex CLI 或 OpenClaw 登出。token 接近到期時才更新（同一時間只更新一次）；沒有 ChatGPT 帳號 ID 的登入會被拒絕。
+- 連線：核心代為 `POST chatgpt.com/backend-api/codex/realtime/calls`（JSON：SDP、說明文字、聲音、`delegation:{type:"client"}`；預設不送 model），再開 `wss://api.openai.com/v1/live/{callId}` 的控制連線（sideband）。權杖只在核心，不進瀏覽器、SSE、HTTP 回應或 log；CSP 仍只允許 `connect-src 'self'`。
+- 工具：`gpt-live-1-codex` 沒有函式工具，需要做事時會「交辦」。核心用同一個 Codex 登入呼叫 Codex Responses，給它和 API key 路徑**同一份工具表與規則**，每個工具再交給**頁面上同一個執行器**（`src/realtime-tools.ts`）執行。所以交辦工作、進度、成果畫面、字幕、確認卡、電子腦光脈衝與完成時的語音通知在兩條路徑上是同一段程式。上網查詢改走 Codex 的 hosted `web_search`（Codex 額度）；背景任務仍由目前選擇的 AI 引擎執行。
+- 誠實規則：「聆聽中」要麥克風軌道、peer 已連線、收到 `session.started`；「回覆中」看遠端音量。家電指令照中控回讀說話；有副作用的工具（家電、交辦）沒有在時限內回報時只說「結果不明，請確認」，不說失敗。確認卡只由按鈕或你說出的「確認執行／取消」決定，Codex 那邊不能替你確認。控制連線斷線、登入失效或時間到時直接結束並說出原因，不改路徑。
+- 這條路徑沒有：遠端 MCP（請切換到 API key 路徑）、取消回覆的指令（Esc 只把這段回覆靜音）。一個核心同時只能有一個 ChatGPT 方案即時語音；開始它的頁面重新整理或關閉時立刻結束，重新整理後可以馬上再開始。
+- 聲音：`arbor、breeze、cove（預設）、ember、juniper、maple、sol、spruce、vale`，在設定或選單列切換（`NOUS_LIVE_VOICE` 是預設值）。`NOUS_LIVE_MODEL`（顯示用預設 `gpt-live-1-codex`，設定了才送出）、`NOUS_LIVE_AGENT_MODEL`（交辦時的 Codex 模型；未設定時查 Codex 模型清單）。
+- 這是 OpenAI 未公開文件的介面（OpenClaw 也用這條）。實作完成，但**還沒有在真實帳號上驗證**：所有測試都是假的 chatgpt.com、假的 sideband 與假的頁面；George 的家中測試步驟與門檻見 [`docs/validation/live-voice-2026-10-23.md`](../../docs/validation/live-voice-2026-10-23.md)。
+
+**OpenAI API key 路徑（gpt-realtime）** 和之前一樣（預設 `gpt-realtime`，可用 `NOUS_REALTIME_MODEL`、`NOUS_REALTIME_VOICE` 調整）：
 
 - 瀏覽器用 WebRTC 把麥克風串流到 OpenAI，由 `semantic_vad` 判斷說完了沒；使用者一開口，OpenAI 會截斷正在播放的回覆（插話）。
 - SDP 交換經本機核心 `POST /api/realtime/call`：核心用 API key 換一把 120 秒的 client secret，再代為送出 SDP。API key 不會送到瀏覽器，頁面 CSP 仍只允許 `connect-src 'self'`。
 - 模型的工具：`web_search`（上網查即時資料：天氣、新聞、價格等；由本機核心 `POST /api/realtime/web-search` 用同一把 key 呼叫 Responses API 的 `web_search`，預設模型 `gpt-5.5`、位置台灣，可用 `NOUS_SEARCH_*` 調整，來源顯示在字幕）、`delegate_task`（交辦需要較長時間的工作，**由目前選擇的引擎執行**，例如 ChatGPT 方案；查詢類問題不交辦）、`get_tasks`（查真實進度）、`end_conversation`（道別後結束）。任務完成時會以「（系統通知）」請模型用一句話轉告；多則通知會排隊，一次只要求一個回應。
-- 遠端 MCP：在 `NOUS_REALTIME_MCP` 填 JSON 陣列，伺服器會直接掛到 Realtime 工作階段，由 OpenAI 端連線呼叫。`require_approval` 預設 `always`：需要核准的動作（寄出、發布等）會顯示琥珀色確認卡，列出服務、工具與參數，並請模型用一句話說明；使用者**說「確認執行」**才執行，說「取消」、60 秒沒回應、或收起確認卡都不執行。判斷由本機的固定語句規則（`src/approval.ts`）做，不由模型轉述同意；只說「好」不算，句中有取消類詞語一律視為取消。不需要按任何東西。
+- 遠端 MCP：在 `NOUS_REALTIME_MCP` 填 JSON 陣列，伺服器會直接掛到 Realtime 工作階段，由 OpenAI 端連線呼叫。`require_approval` 預設 `always`：需要核准的動作（寄出、發布等）會顯示琥珀色確認卡，列出服務、工具與參數，並請模型用一句話說明；使用者**說「確認執行」**才執行，說「取消」、60 秒沒回應、或收起確認卡都不執行。判斷由本機的固定語句規則（`shared/approval.ts`）做，不由模型轉述同意；只說「好」不算，句中有取消類詞語一律視為取消。不需要按任何東西。
 - 背景任務與文字對話：引擎支援時也帶上網搜尋（ChatGPT：Responses `web_search`；Claude：`NOUS_CLAUDE_WEB_SEARCH`，預設 `web_search_20250305`）。被拒時自動改送不帶工具的請求，並把「未經查證」寫進能力缺口。`NOUS_TASK_WEB_SEARCH=off` 可關閉。
 - 打字輸入也會進同一段即時對話；有畫面開著時 Esc 只關畫面，沒說話一段時間（預設 2 分鐘，可調，見「語音閒置秒數」）自動結束以免持續計費。
-- ChatGPT 方案登入能換到 Realtime client secret，但實測推論一律 `server_error`，所以這個模式只用 API key。
+- 注意兩種 ChatGPT 登入不同：上面 AI 引擎的 **Sign in with ChatGPT**（`chatgpt-credentials.json`）用在背景任務與文字對話，它的權杖仍然不能用在即時語音（實測推論 `server_error`）；即時語音的方案額度要用另外的 **Codex 登入**（`codex-credentials.json`）。
 
 ### 雙目鏡頭（docs/11）
 
@@ -301,6 +320,10 @@ prototype/ambient-shell/
 │   ├── presentation-policy.ts
 │   ├── intent.ts           # 確定性指令判斷
 │   ├── views.ts            # 進度、成果、失敗畫面
+│   ├── realtime.ts         # 即時語音 API key 路徑的頁面模組（RealtimeVoice）
+│   ├── live-voice.ts       # 即時語音 ChatGPT 方案路徑的頁面模組（LiveVoice）
+│   ├── realtime-tools.ts   # 兩條路徑共用的工具執行器與確認卡佇列
+│   ├── realtime-session.ts # 頁面的接縫（RealtimeSession、openRealtime）
 │   ├── voice.ts            # 按下說話與連續語音對話模式（Web Speech API + speechSynthesis，需同意）
 │   ├── conversation.ts     # 語音與文字共用的回合、歷史、取消及可見性
 │   ├── speech-text.ts      # 語音模式要念的短句（由任務狀態計算）
@@ -314,6 +337,13 @@ prototype/ambient-shell/
 │   ├── claude-executor.ts  # Claude 規劃與串流執行
 │   ├── chatgpt-auth.ts     # Sign in with ChatGPT（OAuth、ID token 驗證、refresh、登出）
 │   ├── chatgpt-executor.ts # ChatGPT 方案用量：/v1/responses 串流
+│   ├── realtime.ts         # 即時語音 API key 路徑（RealtimeBridge）＋兩條路徑共用的工具表與規則
+│   ├── realtime-routes.ts  # RealtimeRoute 介面、選路徑（planStart）、工作階段與擁有者、ApiKeyRoute
+│   ├── live-route.ts       # 即時語音 ChatGPT 方案路徑：Codex 通話建立＋sideband
+│   ├── live-tool-caller.ts # 把交辦變成同一組工具呼叫（Codex Responses）
+│   ├── codex-auth.ts       # 即時語音用的 Codex 登入（不碰 ~/.codex）
+│   ├── codex-responses.ts  # Codex Responses 用戶端（交辦推論、hosted web_search）
+│   ├── realtime-settings.ts # 路徑偏好與聲音（realtime.json）
 │   ├── home-bridge.ts      # 武陵居中控查詢與控制：名稱比對、讀值整理、送指令與確認卡；AIFA 冷氣與紅外線按鍵（docs/12 H0、H1、H1b）
 │   ├── camera-settings.ts  # 鏡頭使用者設定（camera.json）
 │   ├── voice-settings.ts   # 語音閒置秒數（voice.json）
@@ -349,8 +379,9 @@ npm run typecheck
 - `NOUS_CAMERA` 決定頁面是否允許使用鏡頭，改了要重新啟動核心；設定畫面的「鏡頭」開關只能在已允許時開關鏡頭。安裝項目（鏡頭名稱、左右眼順序、螢幕寬度、鏡頭偏移）只能在 `.env` 改。
 - 關閉手掌停止只是不理會手勢，手勢模型仍每幀執行，不會省下 CPU。
 - 桌面 App 和瀏覽器分頁同時開著時，兩邊都會嘗試開鏡頭。
-- Agent 工具：即時語音可上網查詢（web_search）並可掛遠端 MCP；背景任務與文字對話在引擎支援時可上網搜尋（不支援時自動改回不帶工具並標示缺口）。讀寫本機檔案尚未提供；外部副作用的完整 Action Gate 尚未實作，目前 MCP 需核准的動作以確認卡＋語音固定語句逐次確認。
-- 家電控制一次一台，不支援房間指令；冷氣只支援 AIFA 冷氣，紅外線家電只能一次按一個鍵，兩者都沒有回讀，只會說「已送出，請確認」；不是 AIFA 的冷氣與無線按鈕不支援。家電查詢與控制只在即時語音模式（需要 OPENAI_API_KEY）提供，瀏覽器語音辨識與文字對話沒有這兩個工具。
+- 即時語音的 ChatGPT 方案路徑（gpt-live-1-codex）只用假的 chatgpt.com、sideband 與頁面測過，未在真實帳號驗證；它依賴未公開文件的端點與 alpha 標頭，OpenAI 改格式時會在開始時照實報錯（自動模式改用 API key 並告知）。這條路徑沒有 MCP，Esc 只能靜音不能取消回覆，交辦最長等 187 秒（計算見驗證文件）。
+- Agent 工具：即時語音可上網查詢（web_search）；遠端 MCP 只在 API key 路徑；背景任務與文字對話在引擎支援時可上網搜尋（不支援時自動改回不帶工具並標示缺口）。讀寫本機檔案尚未提供；外部副作用的完整 Action Gate 尚未實作，目前 MCP 需核准的動作以確認卡＋語音固定語句逐次確認。
+- 家電控制一次一台，不支援房間指令；冷氣只支援 AIFA 冷氣，紅外線家電只能一次按一個鍵，兩者都沒有回讀，只會說「已送出，請確認」；不是 AIFA 的冷氣與無線按鈕不支援。家電查詢與控制只在即時語音模式（ChatGPT 方案或 API key 路徑）提供，瀏覽器語音辨識與文字對話沒有這兩個工具。
 - 單一使用者、單一螢幕；資料以明文 JSON 存在本機。
 
 ## 與正式規格的關係

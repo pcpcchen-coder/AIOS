@@ -25,6 +25,12 @@ const REALTIME_MODELS = [
 const VOICES = ["marin", "cedar", "alloy", "ash", "ballad", "coral", "echo", "sage", "shimmer", "verse"];
 const CONCURRENCY = [2, 4, 6, 8];
 const PROVIDER_LABEL = { chatgpt: "ChatGPT", claude: "Claude", mock: "模擬" };
+/** 即時語音路徑（和 shared/realtime-route.ts 的 ROUTE_PREFERENCES 同一組值；核心驗證）。 */
+const REALTIME_ROUTES = [
+  { id: "auto", label: "自動（先用 ChatGPT 方案，不能用時改用 API key 並告知）" },
+  { id: "live", label: "ChatGPT 方案（Codex 額度）" },
+  { id: "api_key", label: "OpenAI API key（依用量計費）" },
+];
 
 const DEFAULT_PREFS = {
   realtimeModel: "gpt-realtime",
@@ -318,6 +324,21 @@ function secondsMenu() {
   return items;
 }
 
+/** 即時語音用的 Codex 登入：核心開好回呼（1455，被占用時 1457，再不行改裝置代碼），系統瀏覽器開登入頁。 */
+async function codexLogin() {
+  try {
+    const result = await api("/api/auth/codex/login", { method: "browser" });
+    if (result.method === "browser") void shell.openExternal(result.authorize_url);
+    else {
+      void shell.openExternal(result.verification_url);
+      dialog.showMessageBox({ message: "ChatGPT 方案（Codex）裝置代碼登入", detail: `${result.note ? `${result.note}。\n` : ""}在開啟的頁面輸入代碼：${result.user_code}` });
+    }
+  } catch (err) {
+    dialog.showErrorBox("無法開始 ChatGPT 方案登入", String(err.message ?? err));
+  }
+  await refreshSettings();
+}
+
 /** 送出後直接套用回應（不等 15 秒的輪詢）；失敗時說明真實原因，並重新讀取實際保存的值。 */
 async function setSeconds(row, value) {
   try {
@@ -342,10 +363,19 @@ function rebuildMenu() {
   const providers = settings?.providers ?? [];
   const envWatchNote = "存檔後會自動重新啟動核心套用";
 
+  const liveRoute = realtime?.routes?.find((r) => r.id === "live");
+  const liveAccount = realtime?.live_account;
+  // 路徑與計費一律照實顯示：進行中的工作階段用它自己的路徑；偏好改了只影響下一次開始。
+  const realtimeLine = !realtime
+    ? "讀取中…"
+    : realtime.active
+      ? `${realtime.active.billing_line}（進行中）${realtime.billing_line && realtime.billing_line !== realtime.active.billing_line ? `；下次：${realtime.billing_line}` : ""}`
+      : realtime.billing_line ?? `不可用（${realtime.detail}）`;
+
   const template = [
     { label: `Nous · 引擎：${PROVIDER_LABEL[provider] ?? "讀取中…"}`, enabled: false },
     {
-      label: `即時語音：${realtime?.available ? `可用（${prefs.realtimeModel}）` : "未設定 OPENAI_API_KEY"} · 語音${VOICE_LABEL[pageState.voice] ?? ""}`,
+      label: `即時語音：${realtimeLine} · 語音${VOICE_LABEL[pageState.voice] ?? ""}`,
       enabled: false,
     },
     { label: pageState.activeTasks > 0 ? `進行中的任務：${pageState.activeTasks} 個` : "目前沒有進行中的任務", enabled: false },
@@ -375,7 +405,45 @@ function rebuildMenu() {
     {
       label: "即時語音",
       submenu: [
-        { label: "模型", enabled: false },
+        { label: "路徑（下一次開始生效，不用重新啟動）", enabled: false },
+        ...REALTIME_ROUTES.map((r) =>
+          radio(r.label, realtime?.preference === r.id, async () => {
+            try {
+              settings = await api("/api/settings/realtime", { route: r.id });
+            } catch (err) {
+              dialog.showErrorBox("即時語音路徑沒有保存", String(err.message ?? err));
+              await refreshSettings();
+              return;
+            }
+            rebuildMenu();
+          }, !!realtime),
+        ),
+        { type: "separator" },
+        {
+          label: liveAccount?.signed_in ? `ChatGPT 方案（Codex）：${liveAccount.email ?? "已登入"}` : "ChatGPT 方案（Codex）登入…",
+          sublabel: liveRoute && !liveRoute.available ? liveRoute.detail : undefined,
+          click: () => void codexLogin(),
+          enabled: !!liveAccount && !liveAccount.signed_in,
+        },
+        {
+          label: `聲音（ChatGPT 方案）：${liveRoute?.voice ?? "—"}`,
+          enabled: !!liveRoute,
+          submenu: (liveRoute?.voices ?? []).map((v) =>
+            radio(v === "cove" ? "cove（預設）" : v, liveRoute?.voice === v, async () => {
+              try {
+                settings = await api("/api/settings/realtime", { live_voice: v });
+              } catch (err) {
+                dialog.showErrorBox("聲音沒有保存", String(err.message ?? err));
+                await refreshSettings();
+                return;
+              }
+              rebuildMenu();
+            }),
+          ),
+        },
+        { label: "ChatGPT 方案用量", click: () => shell.openExternal("https://chatgpt.com/settings/usage") },
+        { type: "separator" },
+        { label: "模型（API key 路徑）", enabled: false },
         ...REALTIME_MODELS.map((m) =>
           radio(m.label, prefs.realtimeModel === m.id, async () => {
             const previous = prefs.realtimeModel;
@@ -386,7 +454,7 @@ function rebuildMenu() {
         ),
         { type: "separator" },
         {
-          label: `聲音：${prefs.realtimeVoice}`,
+          label: `聲音（API key 路徑）：${prefs.realtimeVoice}`,
           submenu: VOICES.map((v) =>
             radio(v === "marin" ? "marin（預設）" : v, prefs.realtimeVoice === v, async () => {
               const previous = prefs.realtimeVoice;

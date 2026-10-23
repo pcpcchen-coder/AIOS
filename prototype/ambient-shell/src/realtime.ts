@@ -1,6 +1,6 @@
-import { homeControlNotice, type HomeControlResult } from "../shared/home.ts";
+import type { HomeControlResult } from "../shared/home.ts";
 import type { HomeControlArgs } from "./api.ts";
-import { matchApproval } from "./approval.ts";
+import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 
 // 即時語音模式（OpenAI Realtime）：像 ChatGPT 語音模式，語音直接對語音。
 // 麥克風音訊經 WebRTC 串流到 OpenAI，由伺服器端 VAD 判斷你何時說完；你一開口，
@@ -10,6 +10,7 @@ import { matchApproval } from "./approval.ts";
 // 設定了遠端 MCP 伺服器時，由 OpenAI 端直接呼叫；需要核准的動作顯示確認卡，
 // 使用者說出固定語句（「確認執行」或「取消」）才回覆 OpenAI，不需要按任何東西。
 // 家電控制（home_control）由本機核心執行；設為需要確認的設備用同一張確認卡，答案交給本機核心，不經 OpenAI。
+// 這是 API key 路徑的頁面模組；工具執行與確認卡在 src/realtime-tools.ts，ChatGPT 方案路徑（src/live-voice.ts）共用同一份。
 
 export type RealtimePhase = "off" | "connecting" | "listening" | "hearing" | "thinking" | "speaking";
 
@@ -94,18 +95,47 @@ export class RealtimeVoice {
   /** 開著或排隊中的家電確認卡，加上確認後還在執行的家電指令：期間不計閒置。 */
   private homePending = 0;
   private handledApprovals = new Set<string>();
-  /** 等待使用者語音確認的請求：一次只顯示一張確認卡，其餘排隊。 */
-  private approvalQueue: ApprovalRequest[] = [];
-  private approval: { request: ApprovalRequest; timer: ReturnType<typeof setTimeout> } | null = null;
+  /** 等待使用者語音確認的請求：一次只顯示一張確認卡，其餘排隊（兩條路徑共用的佇列）。 */
+  private readonly approvals: ApprovalQueue;
 
   private idleMs: number;
 
   constructor(
     private readonly callbacks: RealtimeCallbacks,
     private readonly deps: RealtimeDeps,
-    private readonly options: RealtimeOptions,
+    options: RealtimeOptions,
   ) {
     this.idleMs = options.idleMs;
+    this.approvals = new ApprovalQueue(
+      callbacks,
+      {
+        generation: () => this.generation,
+        notify: (text) => this.notify(text),
+        addContext: (text) => this.addContext(text),
+        resetIdle: () => this.resetIdle(),
+        pendingChanged: (kind, delta) => {
+          if (kind === "mcp") this.mcpPending = delta > 0 ? this.mcpPending + 1 : Math.max(0, this.mcpPending - 1);
+          else this.homePending = delta > 0 ? this.homePending + 1 : Math.max(0, this.homePending - 1);
+        },
+        sendMcpApproval: (request, approve, reason) =>
+          this.send({
+            type: "conversation.item.create",
+            item: {
+              id: `mcp_approval_${request.id}`,
+              type: "mcp_approval_response",
+              approval_request_id: request.id,
+              approve,
+              ...(approve ? {} : { reason }),
+            },
+          }),
+        mcpResolved: (outcome) => {
+          this.mcpCalled = true;
+          // 說出確認語句的這一輪已經（或即將）有回應：等它結束再接著回應，避免重疊的 response.create。
+          this.finishMcp(outcome !== "said_approve" && outcome !== "said_reject");
+        },
+      },
+      options.approvalMs ?? 60_000,
+    );
   }
 
   /**
@@ -283,7 +313,7 @@ export class RealtimeVoice {
         const item = event.item as { type?: string; id?: string; server_label?: string; name?: string; arguments?: string } | undefined;
         if (item?.type === "mcp_approval_request" && item.id && !this.handledApprovals.has(item.id)) {
           this.handledApprovals.add(item.id);
-          this.queueApproval({ kind: "mcp", id: item.id, server: item.server_label ?? "", name: item.name ?? "", arguments: item.arguments ?? "{}" });
+          this.approvals.queue({ kind: "mcp", id: item.id, server: item.server_label ?? "", name: item.name ?? "", arguments: item.arguments ?? "{}" });
         }
         break;
       }
@@ -334,158 +364,44 @@ export class RealtimeVoice {
     }
   }
 
-  private async runTool(name: string, callId: string, rawArgs: string): Promise<void> {
+  /** 工具呼叫：計數留在這裡（GA 的回應排程），執行交給共用的 executeRealtimeTool。 */
+  private runTool(name: string, callId: string, rawArgs: string): void {
     this.pendingTools += 1;
     this.functionsCalled = true;
     const generation = this.generation;
-    let output: Record<string, unknown>;
-    try {
-      const args = JSON.parse(rawArgs || "{}") as { title?: unknown; query?: unknown; target?: unknown; metric?: unknown; command?: unknown; value?: unknown };
-      if (name === "end_conversation") {
+    void executeRealtimeTool(name, rawArgs, {
+      callbacks: this.callbacks,
+      approvals: this.approvals,
+      generation,
+      stale: (g) => g !== this.generation,
+      end: () => {
         // 不需要模型再接著說：道別已在同一輪回覆中。
         this.endRequested = true;
         this.pendingTools -= 1;
         this.functionsCalled = false;
         this.send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: callId, output: JSON.stringify({ ok: true }) } });
-        return;
-      }
-      if (name === "delegate_task") {
-        const title = typeof args.title === "string" ? args.title.trim() : "";
-        output = title ? await this.callbacks.onDelegate(title) : { ok: false, error: "缺少任務描述" };
-      } else if (name === "web_search") {
-        const query = typeof args.query === "string" ? args.query.trim() : "";
-        if (!query) {
-          output = { ok: false, error: "缺少查詢內容" };
-        } else {
-          this.callbacks.onToolActivity(`上網查詢：${query}`);
-          output = await this.callbacks.onWebSearch(query);
-        }
-      } else if (name === "home_status") {
-        const target = typeof args.target === "string" ? args.target.trim() : "";
-        const metric = typeof args.metric === "string" && args.metric.trim() ? args.metric.trim() : null;
-        if (!target) {
-          output = { ok: false, error: "缺少要查的房間或設備" };
-        } else {
-          this.callbacks.onToolActivity(`查詢家裡：${target}`);
-          output = await this.callbacks.onHomeStatus(target, metric);
-        }
-      } else if (name === "home_control") {
-        const target = typeof args.target === "string" ? args.target.trim() : "";
-        const command = typeof args.command === "string" ? args.command.trim() : "";
-        const value = typeof args.value === "string" || typeof args.value === "number" || typeof args.value === "boolean" ? args.value : null;
-        if (!target || !command) {
-          output = { ok: false, error: "缺少要控制的設備或動作" };
-        } else {
-          const result = await this.callbacks.onHomeControl({ target, command, value });
-          output = result;
-          if (result.ok && result.status === "needs_confirmation") {
-            if (generation !== this.generation || this.approval || this.approvalQueue.length) {
-              // 已經有確認卡開著或排隊：家電卡不排隊（說出的「確認執行」會被算到前一張卡），請本機核心丟掉這張。
-              void this.callbacks.onHomeConfirm(result.confirm_id, false).catch(() => undefined);
-              output = { ok: true, status: "busy", device: result.device, room: result.room, action: result.action, message: "另一張確認卡還沒處理完，這個家電指令沒有送出；等那張確認或取消之後，再請使用者說一次。" };
-              if (generation === this.generation) this.callbacks.onToolActivity(`沒有送出：另一張確認卡還開著（${result.device} ${result.action}）`);
-            } else {
-              // 先排好確認卡再交回結果：模型請使用者確認時，說出的「確認執行」已經有卡可以比對。
-              const expiresAt = Date.now() + Math.max(0, result.expires_in_s) * 1000;
-              this.queueApproval({ kind: "home", id: result.confirm_id, device: result.device, room: result.room, action: result.action, expiresAt });
-            }
-          }
-        }
-      } else if (name === "get_tasks") {
-        output = await this.callbacks.onGetTasks();
-      } else {
-        output = { ok: false, error: `未知的工具：${name}` };
-      }
-    } catch (err) {
-      output = { ok: false, error: err instanceof Error ? err.message : String(err) };
-    }
-    if (generation !== this.generation) return;
-    this.send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: callId, output: JSON.stringify(output) } });
-    this.pendingTools -= 1;
-    this.continueAfterTools();
+      },
+      deliver: (output) => {
+        if (generation !== this.generation) return;
+        this.send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: callId, output: JSON.stringify(output) } });
+        this.pendingTools -= 1;
+        this.continueAfterTools();
+      },
+    });
   }
 
-  /** 排進確認卡佇列；確認前 OpenAI 端（MCP）或本機核心（家電）都不會執行這個動作。 */
-  private queueApproval(request: ApprovalRequest): void {
-    if (request.kind === "mcp") this.mcpPending += 1;
-    else this.homePending += 1;
-    this.approvalQueue.push(request);
-    if (!this.approval) this.showNextApproval();
-  }
-
-  private showNextApproval(): void {
-    const request = this.approvalQueue.shift();
-    if (!request) return;
-    // 家電卡不超過伺服器端確認 ID 的期限：卡上還有時間時，同意一定還有效。
-    const ms = Math.min(this.options.approvalMs ?? 60_000, request.kind === "home" ? Math.max(0, request.expiresAt - Date.now()) : Infinity);
-    const timer = setTimeout(() => this.resolveApproval(false, "timeout"), ms);
-    this.approval = { request, timer };
-    this.callbacks.onApprovalPrompt(request, Date.now() + ms);
-    // 家電卡不用另外請模型說明：needs_confirmation 的工具結果已經請它說了。
-    if (request.kind === "mcp") this.notify(
-      `外部服務「${request.server}」要執行「${request.name}」，需要使用者確認。請用一句話說明要做什麼、對象和影響，並請使用者說「確認執行」或「取消」。不要替使用者確認。`,
-    );
-  }
-
-  /** 使用者說的話（或打的字）是否為確認卡的固定語句。 */
+  /** 使用者說的話（或打的字）是否為確認卡的固定語句（共用佇列判斷）。 */
   private checkApproval(text: string): void {
-    if (!this.approval) return;
-    const decision = matchApproval(text);
-    if (decision) this.resolveApproval(decision === "approve", decision === "approve" ? "said_approve" : "said_reject");
+    this.approvals.check(text);
   }
 
   /** 結束目前的確認卡並回覆 OpenAI；畫面被收起時由呼叫端以 dismissed 拒絕。 */
   resolveApproval(approve: boolean, outcome: ApprovalOutcome): void {
-    const current = this.approval;
-    if (!current) return;
-    clearTimeout(current.timer);
-    this.approval = null;
-    const { request } = current;
-    const reason = outcome === "timeout" ? "使用者沒有在時限內確認" : outcome === "dismissed" ? "使用者收起了確認畫面" : "使用者說取消";
-    if (request.kind === "home") {
-      this.answerHome(request, approve, outcome);
-      this.callbacks.onApprovalResolved(request, approve, outcome);
-      this.showNextApproval();
-      return;
-    }
-    this.send({
-      type: "conversation.item.create",
-      item: {
-        id: `mcp_approval_${request.id}`,
-        type: "mcp_approval_response",
-        approval_request_id: request.id,
-        approve,
-        ...(approve ? {} : { reason }),
-      },
-    });
-    this.callbacks.onApprovalResolved(request, approve, outcome);
-    this.callbacks.onToolActivity(approve ? `已確認：${request.server} · ${request.name}` : `沒有執行：${request.server} · ${request.name}（${reason}）`);
-    this.mcpCalled = true;
-    // 說出確認語句的這一輪已經（或即將）有回應：等它結束再接著回應，避免重疊的 response.create。
-    this.finishMcp(outcome !== "said_approve" && outcome !== "said_reject");
-    this.showNextApproval();
-  }
-
-  /**
-   * 家電確認卡的答案交給本機核心；不送 mcp_approval_response、不碰工具計數（工具呼叫早已交回）。
-   * 結果用系統通知轉告；說「取消」的那一輪模型已經在回應，只補上背景資訊，不另外要求回應。
-   * 對話已結束時不通知（字幕由呼叫端顯示）。
-   */
-  private answerHome(request: Extract<ApprovalRequest, { kind: "home" }>, approve: boolean, outcome: ApprovalOutcome): void {
-    const generation = this.generation;
-    const settle = (result: HomeResult) => {
-      if (generation !== this.generation) return;
-      this.homePending = Math.max(0, this.homePending - 1);
-      this.resetIdle();
-      const text = result.ok ? homeControlNotice(result) : `家電指令出錯：${result.error}`;
-      if (outcome === "said_reject") this.addContext(`（系統）${text}`);
-      else this.notify(text);
-    };
-    this.callbacks.onHomeConfirm(request.id, approve).then(settle, (err: unknown) => settle({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+    this.approvals.resolve(approve, outcome);
   }
 
   get pendingApproval(): ApprovalRequest | null {
-    return this.approval?.request ?? null;
+    return this.approvals.current;
   }
 
   private finishMcp(continueNow = true): void {
@@ -552,15 +468,7 @@ export class RealtimeVoice {
     this.mcpPending = 0;
     this.homePending = 0;
     this.handledApprovals.clear();
-    const open = [...(this.approval ? [this.approval.request] : []), ...this.approvalQueue];
-    if (this.approval) clearTimeout(this.approval.timer);
-    this.approval = null;
-    this.approvalQueue = [];
-    for (const request of open) {
-      this.callbacks.onApprovalResolved(request, false, "closed");
-      // 讓本機核心忘掉這張卡；generation 已經換了，結果不會再通知。
-      if (request.kind === "home") this.answerHome(request, false, "closed");
-    }
+    this.approvals.clear();
     this.functionsCalled = false;
     this.mcpCalled = false;
     this.responding = false;

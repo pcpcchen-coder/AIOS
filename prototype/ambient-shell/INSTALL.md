@@ -87,21 +87,37 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 ### 即時語音模式（選填，像 ChatGPT 語音模式）
 
-想要「語音直接對語音」、可以隨時插話的對話，在 `.env` 填入 OpenAI API key（到 <https://platform.openai.com/api-keys> 申請，依用量計費，語音比文字貴）：
+想要「語音直接對語音」、可以隨時插話的對話，有兩條路徑，擇一或兩個都設定：
+
+**A. ChatGPT 方案（Codex 登入，`gpt-live-1-codex`，用方案的 Codex 額度，不需要 API key）**
+
+1. 啟動後說或打「設定」，在「即時語音」區按 **用 ChatGPT 方案登入（Codex）**；macOS App 也可以在選單列 **即時語音 → ChatGPT 方案（Codex）登入…**。
+2. 瀏覽器會開 `auth.openai.com` 的登入頁，登入自己的 ChatGPT 帳號並同意。完成頁面顯示「已登入 ChatGPT 方案（Codex）」，設定顯示你的 email 與方案。
+3. 不需要安裝 Codex CLI。這個登入和上面 AI 引擎的 **Continue with ChatGPT** 是分開的兩個登入；Nous 也**不讀、不改 Codex CLI 的 `~/.codex`**，不會把 Codex CLI 或 OpenClaw 登出。
+4. 回呼埠：Codex 的登入只接受 1455 與 1457。1455 被占用（例如 OpenClaw、Codex 或 Continue with ChatGPT 正在登入）時自動改用 1457；兩個都被占用時改用**裝置代碼**：設定會顯示一組代碼，到開啟的 `auth.openai.com/codex/device` 頁面輸入。也可以直接按「用裝置代碼登入」。
+
+**B. OpenAI API key（`gpt-realtime`，依用量計費，語音比文字貴）**：在 `.env` 填入 key（到 <https://platform.openai.com/api-keys> 申請）：
 
 ```
 OPENAI_API_KEY=sk-...
 ```
 
-存檔後重新 `npm start`，終端機會顯示「即時語音：可用」。之後按「開始語音對話」就會用 OpenAI Realtime（`gpt-realtime`）：
+存檔後重新 `npm start`。
+
+**選路徑**：設定 →「即時語音」或 App 選單列 **即時語音 → 路徑**，有三種：**自動**（預設：先用 ChatGPT 方案，不能用時改用 API key，並先說出「這次改用 OpenAI API key（依用量計費）：原因」）、**ChatGPT 方案**（不能用就照實說原因，絕不改用 API key 計費）、**API key**。不用改 `.env`、不用重新啟動；切換只影響下一次開始。設定、選單列、輸入列下方都會顯示目前的路徑與計費，例如「ChatGPT 方案（Codex 額度）· gpt-live-1-codex」或「OpenAI API key 計費 · gpt-realtime」。終端機啟動時也會印出這一行（不會印出權杖）。
+
+按「開始語音對話」之後：
 
 - 語音直接對語音，不經過瀏覽器的語音辨識，對話是連續的；你一開口，它就停下來聽。
-- 要它做較長的工作時，它會交辦成背景任務。**任務仍用上面選的引擎執行**（例如 ChatGPT 方案），不會用 API key 跑任務。
-- 任務完成時它會用語音告訴你；問「進度如何」它會查真實狀態再回答。
-- 點右上角指示、按 Esc，或沒說話一段時間（預設 2 分鐘，可在「設定」或 App 選單列「秒數設定」調整）就會結束，避免忘記關而持續計費。說「再見」或「結束對話」時由 AI 判斷要不要結束，不保證每次都結束。
-- API key 只留在本機核心，不會送到瀏覽器。
+- 要它做較長的工作時，它會交辦成背景任務。**任務仍用上面選的引擎執行**（例如 ChatGPT 方案），兩條路徑都一樣；進度、成果畫面與完成時的語音通知也一樣。
+- 問「進度如何」它會查真實狀態再回答；「新竹今天會下雨嗎」會上網查（ChatGPT 方案路徑用 Codex 額度，API key 路徑用同一把 key）。
+- 點右上角指示、按 Esc，或沒說話一段時間（預設 2 分鐘，可在「設定」或 App 選單列「秒數設定」調整）就會結束。說「再見」或「結束對話」時由 AI 判斷要不要結束，不保證每次都結束（ChatGPT 方案路徑上整句只說「再見」時，念完道別也會結束）。
+- 權杖與 API key 只留在本機核心，不會送到瀏覽器。
+- ChatGPT 方案路徑沒有遠端 MCP（要用 MCP 請切到 API key 路徑），Esc 只能把正在念的回覆靜音。同一時間只能有一個 ChatGPT 方案即時語音；重新整理頁面會立刻結束它，之後可以馬上再開始。
 
-ChatGPT 方案登入不能用即時語音（實測 OpenAI 會回 server_error），所以這個模式一定要 API key。沒填 key 時，「開始語音對話」沿用原本的語音模式（瀏覽器語音辨識＋ChatGPT 文字回覆＋電腦語音）。
+兩條都沒有設定時，「開始語音對話」沿用原本的語音模式（瀏覽器語音辨識＋ChatGPT 文字回覆＋電腦語音）。
+
+> 注意：上面 AI 引擎的 Continue with ChatGPT（Sign in with ChatGPT）登入不能用在即時語音（實測 OpenAI 會回 server_error）；即時語音的方案額度一定要用這裡的 Codex 登入。ChatGPT 方案路徑尚未在真實帳號上驗證，見 `docs/validation/live-voice-2026-10-23.md`。
 
 ### 雙目鏡頭（選填，Waveshare AR0144）
 
@@ -182,7 +198,7 @@ Nous 原型已啟動：http://localhost:8787
 | 按「結束對話」、輸入「收起」，或非播報時按 Esc | 停止收音、生成及播報，既有背景任務繼續執行 |
 | 麥克風按鈕 | 按下說話（第一次會先詢問是否同意使用瀏覽器的雲端語音辨識） |
 | 說或打「開啟語音模式」／按聲波按鈕 | 語音對話模式：像 ChatGPT 語音模式一樣直接聊天，它說話時可以插話（說「停」或直接講）；要它做較長的工作時會自動交辦成任務。建議戴耳機。說「關閉語音模式」結束，閒置預設 1 分 30 秒自動關閉（可調） |
-| 有設定 `OPENAI_API_KEY` 時按「開始語音對話」 | 即時語音模式（OpenAI Realtime）：語音直接對語音、隨時插話；工作交辦給目前的引擎。右上角顯示「即時語音 · 聆聽中／回覆中」，點它結束；說「再見」時由 AI 判斷是否結束 |
+| 即時語音有可用路徑（ChatGPT 方案登入或 `OPENAI_API_KEY`）時按「開始語音對話」 | 即時語音模式：語音直接對語音、隨時插話；工作交辦給目前的引擎。右上角顯示「即時語音 · 聆聽中／回覆中」，點它結束；說「再見」時由 AI 判斷是否結束 |
 
 完整的語音與打字指令（哪些在本機處理、哪些交給 AI、容易誤會的說法）見 [README 的指令表](./README.md#語音與打字指令表)；核心啟動後也可以打開 <http://localhost:8787/help/commands>，macOS App 在選單列「語音指令表」（⌘/）。
 
@@ -207,12 +223,25 @@ Nous 原型已啟動：http://localhost:8787
 | 麥克風權限被拒 | 點網址列左側的鎖頭圖示，把麥克風改為「允許」後重新整理 |
 | 即時語音顯示「OPENAI_API_KEY 無效或未授權（401）」 | 檢查 `.env` 的 `OPENAI_API_KEY` 是否完整、沒有多餘空白，改完重新 `npm start` |
 | 即時語音顯示「額度不足或超過速率限制（429）」 | 到 <https://platform.openai.com/settings/organization/billing> 確認 API 帳戶有餘額 |
-| 設定裡「即時語音：不可用」 | `.env` 沒有 `OPENAI_API_KEY`，或填了之後沒有重新 `npm start` |
+| 設定裡「即時語音：不可用」 | 兩條路徑都不能用：沒有用 ChatGPT 方案（Codex）登入，`.env` 也沒有 `OPENAI_API_KEY`（或填了之後沒有重新 `npm start`）。原因會照實列出 |
+| 「ChatGPT 方案路徑尚未登入」 | 設定 →「即時語音」→ 用 ChatGPT 方案登入（Codex） |
+| 「ChatGPT 方案登入已失效，請重新登入」 | refresh token 被拒（例如在別處撤銷）；按「重新登入 ChatGPT 方案（Codex）」 |
+| 「這個登入沒有 ChatGPT 帳號 ID，無法使用方案額度」 | 這個帳號沒有 ChatGPT 工作區／方案；換一個有方案的帳號登入 |
+| 「ChatGPT 方案額度已用完，約 N 分鐘後重置」 | Codex 額度用完：等重置，或按「管理用量」；路徑是「自動」而且有 API key 時，下一次開始會改用 API key 並先告知 |
+| 「ChatGPT 方案拒絕這次即時語音（403）…」 | 帳號、方案或聲音其中之一不被接受，伺服器沒說是哪一個；先把聲音改回 cove 再試，或確認方案能用 Codex |
+| 「NOUS_LIVE_MODEL 的值不被接受」 | 伺服器不接受指定的 model：從 `.env` 刪掉 `NOUS_LIVE_MODEL`（預設不送 model），重新 `npm start` |
+| 「無法連線到 chatgpt.com 或 api.openai.com」或「接不上控制連線（sideband）」 | 網路或 proxy 擋住；公司網路試 `NODE_USE_ENV_PROXY=1 npm start` |
+| 「與 ChatGPT 方案即時語音的控制連線中斷，即時語音已結束」 | 對話中控制連線斷了：不會中途改路徑，重新按「開始語音對話」 |
+| 「已經有一個 ChatGPT 方案即時語音在進行中」 | 另一個分頁或 App 視窗正在用；先在那邊結束 |
+| 登入時說「1455、1457 都被占用…改用裝置代碼登入」 | OpenClaw 或 Codex 正在登入；照畫面在開啟的頁面輸入代碼，或先關掉那邊的登入 |
+| 家電指令說「結果不明，請確認」 | 中控沒有在時限內回報結果：指令可能已經執行，也可能沒有，請看一下設備 |
 
 ## 8. 資料存放位置
 
 - 任務與成果：`prototype/ambient-shell/data/`（本機 JSON 檔，不會上傳）
 - ChatGPT 登入憑證與引擎選擇：`~/.config/nous/`（Windows 為 `C:\Users\你的帳號\.config\nous\`）。要完全移除 ChatGPT 連結：先在設定按「登出 ChatGPT」，再到 ChatGPT 設定中斷開 Nous
 - 鏡頭與手勢設定：`~/.config/nous/camera.json`（只存你改過的項目，不含任何影像）。刪除這個檔案再重新啟動，就回到 `.env` 與預設值
+- 即時語音用的 ChatGPT 方案（Codex）登入：`~/.config/nous/codex-credentials.json`（權限 0600）。要移除：設定 →「即時語音」按「登出（即時語音）」（會刪除這個檔案並盡力撤銷遠端 token）。Nous 不讀、不改 Codex CLI 的 `~/.codex`
+- 即時語音路徑偏好與 ChatGPT 方案路徑的聲音：`~/.config/nous/realtime.json`（只存你改過的項目）。刪除後回到 `.env` 的 `NOUS_REALTIME_ROUTE`／`NOUS_LIVE_VOICE` 或預設（自動、cove）
 - 語音閒置秒數：`~/.config/nous/voice.json`（只存你改過的項目）。刪除後重新啟動回到預設（語音模式 1 分 30 秒、即時語音 2 分鐘）
 - 想清空紀錄：先停止 `npm start`，刪除 `data` 資料夾，再重新啟動
