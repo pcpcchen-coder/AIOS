@@ -64,6 +64,15 @@ export const LOOK_TO_TALK_GREETING =
   "你是 Nous。使用者剛面向螢幕開始語音對話：請用一句簡短自然的繁體中文打招呼，問有什麼需要幫忙（例如「我在，有什麼需要幫忙的嗎？」）。" +
   "你只知道使用者面向螢幕，看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境。";
 
+/**
+ * ChatGPT 方案路徑的招呼要放進 session.context.append speakable：前面加這個固定標記，
+ * 語音層說明（server/realtime.ts buildLiveInstructions）才知道這段只是開場指示、不要念出來。
+ */
+export const GREETING_MARKER = "（開場）";
+
+/** ChatGPT 方案路徑真正送給模型的招呼（核心只送這個常數，忽略頁面送來的文字）。 */
+export const LIVE_GREETING_TEXT = `${GREETING_MARKER}${LOOK_TO_TALK_GREETING}`;
+
 /** SettingsView.camera 的形狀。 */
 export type CameraSettings = CameraInstall & CameraPrefs;
 

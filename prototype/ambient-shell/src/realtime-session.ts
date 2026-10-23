@@ -21,6 +21,8 @@ export interface RealtimeSession {
   resolveApproval(approve: boolean, outcome: ApprovalOutcome): void;
   /** live 建立失敗、auto 可以改路徑時，核心給的改路徑提議（start() 結束後讀）。 */
   readonly fallbackOffer?: FallbackOffer | null;
+  /** 改路徑時：連線中打的、這個工作階段還沒送出的字（openRealtime 交給下一個工作階段）。 */
+  readonly unsentText?: readonly string[];
 }
 
 // 編譯期檢查：API key 路徑的類別不用改就符合接縫。
@@ -34,10 +36,20 @@ export type RealtimeStartSource = "look_to_talk" | "user";
 export type GreetingState = "pending" | "sent" | "skipped";
 
 /**
+ * 工作階段就緒（API key：session.created；ChatGPT 方案：麥克風＋peer＋session.started）之後，等這麼久才送招呼，
+ * 讓「已經在說話的使用者」有時間產生取消招呼的證據（API key：input_audio_buffer.speech_started；ChatGPT 方案：使用者逐字稿，含未完成的）。
+ * 這兩個事件都要等聲音送到伺服器、VAD／轉寫判斷之後才回來，至少一個網路來回加上偵測，約數百毫秒；
+ * 600 ms 留一些餘裕，同時讓招呼在就緒後約一秒內開始，聽起來仍是「馬上」。
+ * OpenClaw FaceTime（talk-driver.ts FACETIME_GREETING_MEDIA_SETTLE_MS = 100）只等媒體路由穩定，所以短得多。
+ * 這是估計值，沒有量測過：家中實測（docs/validation/look-to-talk-greet-2026-10-23.md 第 1、4 項）記錄是否合適。
+ */
+export const GREETING_SETTLE_MS = 600;
+
+/**
  * 看著說話開始的即時語音要打的一次招呼（George 2026-10-23）。一次 startRealtime 建一個，
  * 改路徑時兩個工作階段共用同一個物件，所以整次對話最多打一次招呼。
- * - 工作階段確定連上（API key：session.created；ChatGPT 方案：麥克風＋peer＋session.started）時呼叫 take()；
- * - 使用者在那之前先開口或打字：skip()，這次不打招呼；
+ * - 工作階段確定連上（API key：session.created；ChatGPT 方案：麥克風＋peer＋session.started）之後再等 GREETING_SETTLE_MS 才呼叫 take()；
+ * - 使用者在那之前（含等待的這段時間）先開口或打字：skip()，這次不打招呼；
  * - take() 當下再讀一次設定（設定改了立即生效）：關了就不打。
  */
 export class GreetingOnce {
@@ -70,11 +82,11 @@ export class GreetingOnce {
 }
 
 /**
- * 這次開始要不要打招呼：只有看著說話開始、而且「看著說話時先打招呼」開著時才建立 GreetingOnce。
- * enabled 在連上的那一刻再讀一次（設定畫面或語音改了立即生效）。
+ * 這次開始要不要打招呼：看著說話開始的一律建立 GreetingOnce，「看著說話時先打招呼」在要送出的那一刻（take()）才讀，
+ * 所以連線中才在設定畫面或用語音打開也會打招呼、關掉就不打。其他開始方式回 null。
  */
 export function greetingFor(source: RealtimeStartSource, greetOn: () => boolean, instructions: string): GreetingOnce | null {
-  if (source !== "look_to_talk" || !greetOn()) return null;
+  if (source !== "look_to_talk") return null;
   return new GreetingOnce(instructions, greetOn);
 }
 
@@ -155,6 +167,8 @@ export async function openRealtime(deps: OpenRealtimeDeps, signal?: AbortSignal)
     second.stop();
     return null;
   }
+  // live 連線中打的字沒送出：交給 API key 的工作階段（它連線中會先排隊，連上後送出）。
+  for (const text of first.unsentText ?? []) second.sendText(text);
   return second;
 }
 

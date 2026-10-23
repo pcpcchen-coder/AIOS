@@ -1,8 +1,9 @@
 import { parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
+import { LIVE_GREETING_TEXT } from "../shared/sense.ts";
 import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimeCallbacks, RealtimeDeps, RealtimePhase } from "./realtime.ts";
 import type { GreetingOnce, RealtimeSession } from "./realtime-session.ts";
-import { FallbackOfferError } from "./realtime-session.ts";
+import { FallbackOfferError, GREETING_SETTLE_MS } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 
 // ChatGPT 方案路徑（gpt-live-1-codex）的頁面模組。和 RealtimeVoice 用同一份 RealtimeCallbacks（main.ts 建一次）、
@@ -79,7 +80,13 @@ export class LiveVoice implements RealtimeSession {
   private idleMs: number;
   /** 看著說話開始的工作階段：進入聆聽後請模型先說一句招呼（核心用 session.context.append speakable，同 OpenClaw triggerGreeting）。 */
   private readonly greeting: GreetingOnce | null;
+  /** 進入聆聽之後等 GREETING_SETTLE_MS 才送招呼；使用者逐字稿（含未完成的）、打字、收起都會取消。 */
+  private greetTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 連線中（進入聆聽之前）打的字：連上後合併成一則送出。 */
+  private queuedText: string[] = [];
   fallbackOffer: FallbackOffer | null = null;
+  /** 改路徑時還沒送出的連線中打字（openRealtime 交給 API key 的工作階段）。 */
+  unsentText: readonly string[] = [];
 
   constructor(
     private readonly callbacks: RealtimeCallbacks,
@@ -143,6 +150,7 @@ export class LiveVoice implements RealtimeSession {
     if (this.on) return;
     const generation = ++this.generation;
     this.fallbackOffer = null;
+    this.unsentText = [];
     this.setPhase("connecting");
     try {
       const mic = await this.deps.getMicrophone();
@@ -202,6 +210,7 @@ export class LiveVoice implements RealtimeSession {
       if (err instanceof FallbackOfferError && err.offer.fallback) {
         // 核心提議改用 API key：安靜地關掉這次（麥克風也關），由 openRealtime 先說計費通知再開新的。
         this.fallbackOffer = err.offer;
+        this.unsentText = this.queuedText.splice(0);
         this.generation++;
         this.teardown();
         this.setPhase("off");
@@ -235,10 +244,14 @@ export class LiveVoice implements RealtimeSession {
     this.setPhase(this.delegations.size ? "thinking" : "listening");
   }
 
-  /** 打字：先比對確認卡（打「確認執行」照樣有效），再交給核心（核心當成請求處理）。 */
+  /** 打字：先比對確認卡（打「確認執行」照樣有效），再交給核心（核心當成請求處理）。連線中打的先排隊，進入聆聽後送出。打字一律取消還沒送出的招呼。 */
   sendText(text: string): void {
-    if (!this.capturing) return;
-    this.greeting?.skip();
+    this.skipGreeting();
+    if (!this.on) return;
+    if (!this.capturing) {
+      this.queuedText.push(text);
+      return;
+    }
     this.resetIdle();
     this.approvals.check(text);
     void this.deps.input("user_text", text).catch(() => undefined);
@@ -264,14 +277,35 @@ export class LiveVoice implements RealtimeSession {
     const { mic, peer, started } = this.evidence;
     if (this.phase === "connecting" && mic && peer && started) {
       this.setPhase("listening");
-      this.greetIfPending();
+      const queued = this.queuedText.splice(0);
+      if (queued.length) this.sendText(queued.join("\n"));
+      this.scheduleGreeting();
     }
   }
 
-  /** 真的進入聆聽（三項證據都到）之後：看著說話開始、使用者還沒開口、設定還開著，就請核心送一句可念的招呼指示。 */
+  /** 使用者先開口或打字：這次不打招呼，等待中的計時器也取消。 */
+  private skipGreeting(): void {
+    this.greeting?.skip();
+    this.cancelGreetTimer();
+  }
+
+  private cancelGreetTimer(): void {
+    if (this.greetTimer) clearTimeout(this.greetTimer);
+    this.greetTimer = null;
+  }
+
+  /** 真的進入聆聽（三項證據都到）之後：還有待送的招呼就等 GREETING_SETTLE_MS，讓已經在說話的使用者先取消它。 */
+  private scheduleGreeting(): void {
+    if (this.greeting?.state !== "pending" || this.greetTimer) return;
+    this.greetTimer = setTimeout(() => {
+      this.greetTimer = null;
+      this.greetIfPending();
+    }, GREETING_SETTLE_MS);
+  }
+
+  /** 等待結束：使用者還沒開口、設定還開著，就請核心送一句可念的招呼（核心只送固定的 LIVE_GREETING_TEXT）。 */
   private greetIfPending(): void {
-    const instructions = this.greeting?.take();
-    if (instructions) void this.deps.input("greeting", instructions).catch(() => undefined);
+    if (this.greeting?.take()) void this.deps.input("greeting", LIVE_GREETING_TEXT).catch(() => undefined);
   }
 
   /** 逐字稿：資料通道或核心，哪個先到用哪個，依 item_id（沒有時依來源配對）去重。 */
@@ -279,7 +313,7 @@ export class LiveVoice implements RealtimeSession {
     const clean = text.trim();
     if (!clean) return;
     // 使用者先開口（逐字稿是真實的說話證據，同 OpenClaw 只讓真的逐字稿取消招呼）：這次不打招呼。
-    if (role === "user") this.greeting?.skip();
+    if (role === "user") this.skipGreeting();
     if (!final) {
       if (role === "user") {
         this.resetIdle();
@@ -479,6 +513,8 @@ export class LiveVoice implements RealtimeSession {
     this.endRequested = false;
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.cancelGreetTimer();
+    this.queuedText = [];
     this.channel?.close();
     this.channel = null;
     this.peer?.close();
