@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-23T08:51:40.081Z",
+  "updated_at": "2026-10-23T08:51:43.475Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261023081345-054321",
       "title": "靠近時電子腦放大＋可設定倍率",
       "playbook": "feature",
-      "status": "running",
-      "updated_at": "2026-10-23T08:51:38.398Z",
+      "status": "passed",
+      "updated_at": "2026-10-23T08:51:42.056Z",
       "started_at": "2026-10-23T08:13:45.853Z",
-      "ended_at": null,
+      "ended_at": "2026-10-23T08:51:42.055Z",
       "branch": "",
       "commit_sha": "",
       "passed_steps": 5,

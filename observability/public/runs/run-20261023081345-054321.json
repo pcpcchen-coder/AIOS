@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-10-23T08:13:45.853Z",
-  "updated_at": "2026-10-23T08:51:38.398Z",
-  "ended_at": null,
+  "updated_at": "2026-10-23T08:51:42.056Z",
+  "ended_at": "2026-10-23T08:51:42.055Z",
   "steps": [
     {
       "id": "how",
@@ -118,6 +118,13 @@
       "step_id": "pr",
       "status": "passed",
       "note": "Review fixes 0e4a84d (723 tests, verify-aios PASS)"
+    },
+    {
+      "at": "2026-10-23T08:51:42.056Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
