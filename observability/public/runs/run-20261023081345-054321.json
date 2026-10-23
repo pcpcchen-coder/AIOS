@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T08:13:45.853Z",
-  "updated_at": "2026-10-23T08:14:20.615Z",
+  "updated_at": "2026-10-23T08:37:33.117Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,10 +23,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-23T08:14:20.614Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-23T08:37:33.116Z",
+      "note": "6cb8ecb: brain_zoom_max factor pref (1–3, default 2), closer→bigger 2.5→0.6 m, text unchanged",
       "evidence": []
     },
     {
@@ -78,6 +78,13 @@
       "step_id": "implement",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-23T08:37:33.117Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "6cb8ecb: brain_zoom_max factor pref (1–3, default 2), closer→bigger 2.5→0.6 m, text unchanged"
     }
   ],
   "provenance": "Agent self-reported"
