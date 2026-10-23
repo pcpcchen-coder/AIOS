@@ -125,6 +125,7 @@ maxTurns × turnTimeoutMs + maxHostCalls × max(HOST_TIMEOUT_MS) + marginMs
 | Codex 登入、建立通話、sideband | 正常：`nous.log` 有「已開始（gpt-live-1-codex）」 | George 2026-10-23 的 `nous.log` |
 | 語音層交辦 | 正常：問「你幫我看一下客廳的溫度」，收到交辦 | 同上 |
 | 交辦執行（查客廳溫度） | **失敗**：Codex 模型清單是空的（`bad_request`）。原因是 `/models` 帶了 Nous 自己的版本 `client_version=0.1.0`；改成預設 `0.162.1`（和 OpenClaw 相同）後待重測 | 同上；修正與回歸測試 `tests/codex-client-version.test.ts` |
+| 交辦執行（修正後重測） | 正常：Codex 模式問客廳溫度，回答中控的讀值（George 口頭回報「可以了」） | George 2026-10-23 口頭回報；沒有截圖或秒數紀錄 |
 | 其他步驟 | 尚未執行 | — |
 | 計費證據 | 尚未執行 | — |
 
