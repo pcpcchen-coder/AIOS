@@ -3,8 +3,8 @@ import { confirmIcon } from "./icons.ts";
 import { marked } from "marked";
 import { computeProgress, isActive, sortForProgress, summarize } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type SettingsView, type Task, type TaskStep } from "../shared/types.ts";
-import { CAMERA_PREF_KEYS, CAMERA_PREFS, stepCameraPref, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
-import { formatSeconds, stepPref } from "../shared/prefs.ts";
+import { CAMERA_PREF_KEYS, CAMERA_PREFS, stepCameraPref, type CameraNumberKey, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
+import { formatNumberPref, formatSeconds, stepPref } from "../shared/prefs.ts";
 import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
@@ -499,7 +499,7 @@ function renderVoiceSettings(voice: VoicePrefs, realtimeAvailable: boolean, acti
       ),
     );
   }
-  return h("section", { class: "camera-settings" }, h("h3", {}, "語音"), list, h("p", { class: "muted small" }, "改了立即生效：開著的語音從現在起重新計時。macOS App 也可以在選單列「秒數設定」調整。"));
+  return h("section", { class: "camera-settings" }, h("h3", {}, "語音"), list, h("p", { class: "muted small" }, "改了立即生效：開著的語音從現在起重新計時。macOS App 也可以在選單列「秒數與倍率設定」調整。"));
 }
 
 /** 鏡頭與手勢：逐項走 CAMERA_PREFS（順序、標籤、提示、範圍都從那裡來）。 */
@@ -518,7 +518,7 @@ function renderCameraSettings(camera: CameraSettings, realtimeAvailable: boolean
       control.setAttribute("aria-pressed", String(on));
       control.setAttribute("aria-label", `${spec.label}：${on ? "開" : "關"}`);
     } else {
-      const k = key as "look_to_talk_s" | "look_to_talk_cooldown_s";
+      const k = key as CameraNumberKey;
       const value = camera[k];
       const minus = button("−", () => actions.updateCamera({ [k]: stepCameraPref(k, value, -1) }));
       const plus = button("+", () => actions.updateCamera({ [k]: stepCameraPref(k, value, 1) }));
@@ -526,7 +526,8 @@ function renderCameraSettings(camera: CameraSettings, realtimeAvailable: boolean
       plus.disabled = value >= spec.max;
       minus.setAttribute("aria-label", `${spec.label}減少`);
       plus.setAttribute("aria-label", `${spec.label}增加`);
-      control = h("div", { class: "stepper" }, minus, h("span", { class: "stepper-value" }, `${value} 秒`), plus);
+      const shown = spec.kind === "seconds" ? `${value} 秒` : formatNumberPref(spec, value);
+      control = h("div", { class: "stepper" }, minus, h("span", { class: "stepper-value" }, shown), plus);
     }
     const hint = key === "look_to_talk" && !realtimeAvailable ? `${spec.hint}；需要即時語音（目前不可用）` : spec.hint;
     list.append(

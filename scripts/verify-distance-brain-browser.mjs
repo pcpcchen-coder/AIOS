@@ -10,6 +10,10 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const app = join(root, 'prototype/ambient-shell');
 const flag = name => { const i = process.argv.indexOf(`--${name}`); return i < 0 ? null : process.argv[i + 1]; };
 const output = resolve(flag('output') || `/tmp/aios-distance-brain-browser-${Date.now()}`);
+// 2026-10-23（George）：待機的電子腦改成靠近放大（brain_zoom_max，2.5 m 以外 1 倍、0.6 m 以內最大倍率），
+// 字級與頂端縮略圖仍是 D ÷ 2 m。前兩個與 responsive／hit-area 案例的待機斷言已改成新規則；
+// proximity-zoom 案例另存 SIMULATED 截圖（--screenshots 指定目錄時另外複製一份）。
+const screenshotDir = flag('screenshots') ? resolve(flag('screenshots')) : null;
 const selectedCase = flag('case');
 await mkdir(output, {recursive: true});
 const moduleName = process.env.PLAYWRIGHT_MODULE || 'playwright';
@@ -37,9 +41,9 @@ const fixtureSettings = () => ({schema_version: 'proto-0.1', provider: 'mock', p
   {id: 'mock', label: '模擬模式', available: true, detail: 'FIXTURE no AI request'},
   {id: 'claude', label: 'Claude', available: false, detail: 'FIXTURE unavailable'},
 ], chatgpt: {signed_in: false, email: null, plan_usage: false, needs_reauth: false, welcome_ack: true, pending_login: false, last_error: null},
-  realtime: {available: false, model: 'FIXTURE', voice: 'FIXTURE'},
+  realtime: {available: false, model: 'FIXTURE', voice: 'FIXTURE', detail: 'FIXTURE unavailable', preference: 'auto', route: null, billing: null, billing_line: null, routes: [], live_account: null, active: null},
   camera: {enabled: true, label: 'FIXTURE synthetic stereo events', left_first: true, screen_width_mm: 398, screen_offset_mm: 110,
-    active: true, look_to_talk: false, look_to_talk_s: 1.5, look_to_talk_cooldown_s: 10, stop_gesture: false}});
+    active: true, look_to_talk: false, look_to_talk_s: 1.5, look_to_talk_cooldown_s: 10, stop_gesture: false, brain_zoom_max: 2}});
 function task(domain = 'language') {
   const now = new Date().toISOString();
   return {schema_version: 'proto-0.1', task_id: `task_fixture_${domain}`, request_id: `req_fixture_${domain}`, title: `FIXTURE ${domain}`,
@@ -130,7 +134,7 @@ function installObservation() {
   };
   window.addEventListener('DOMContentLoaded', () => {
     const banner = document.createElement('div');
-    banner.textContent = 'FIXTURE synthetic stereo distance/API · Real Canvas · No physical camera or AI';
+    banner.textContent = 'SIMULATED · FIXTURE synthetic stereo distance/API · Real Canvas · No physical camera or AI';
     banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;padding:1px;background:#ffec70;color:#111;font:700 10px/12px sans-serif;text-align:center;z-index:999999;pointer-events:none';
     document.body.append(banner);
   });
@@ -138,7 +142,8 @@ function installObservation() {
 async function fresh(name, options = {}) {
   await context?.close();
   current = {name, settings: fixtureSettings(), tasks: options.tasks || [], sequence: 0};
-  context = await browser.newContext({viewport: options.viewport || {width: 1280, height: 900}, reducedMotion: 'reduce', deviceScaleFactor: options.dpr || 1});
+  if (options.zoomMax !== undefined) current.settings.camera.brain_zoom_max = options.zoomMax;
+  context = await browser.newContext({viewport: options.viewport || {width: 1280, height: 900}, reducedMotion: options.motion || 'reduce', deviceScaleFactor: options.dpr || 1});
   await context.addInitScript(installObservation);
   page = await context.newPage();
   page.on('pageerror', error => report.browserErrors.push({case: name, error: String(error)}));
@@ -170,7 +175,11 @@ async function closeSettings() {
   await page.keyboard.press('Escape');
   await page.locator('.surface--settings').waitFor({state: 'detached'});
 }
-async function screenshot(name) { const path = join(output, `${name}.png`); await page.screenshot({path, fullPage: true}); return path; }
+async function screenshot(name) {
+  const path = join(output, `${name}.png`); await page.screenshot({path, fullPage: true});
+  if (screenshotDir && name.includes('SIMULATED')) { await mkdir(screenshotDir, {recursive: true}); await page.screenshot({path: join(screenshotDir, `${name}.png`), fullPage: true}); }
+  return path;
+}
 async function bounds(selector) { return page.locator(selector).boundingBox(); }
 function fits(box, viewport, label) {
   assert.ok(box && box.x >= -1 && box.y >= -1 && box.x + box.width <= viewport.width + 1 && box.y + box.height <= viewport.height + 1, `${label} within viewport: ${JSON.stringify(box)}`);
@@ -191,24 +200,27 @@ try {
   report.runtime = {node: process.version, chromium: browser.version()};
   await run('measured-distance-actual-canvas-and-refresh', async result => {
     await fresh('measured-distance-actual-canvas-and-refresh'); result.values = [];
-    for (const [meters, expectedScale] of [[1.5, .75], [2, 1], [3, 1.5]]) {
+    // 字級比例不變（D ÷ 2 m）；待機的電子腦靠近放大（最大 2 倍）。
+    for (const [meters, expectedScale, zoom] of [[3, 1.5, 1], [1.5, .75, 1.53], [.6, .75, 2]]) {
       await distance(meters); const value = await geometry(); assert.equal(await cssScale(), expectedScale);
-      result.values.push({meters, scale: expectedScale, ...value});
+      assert.equal(await page.evaluate(() => document.body.dataset.brainZoom ?? '1'), String(zoom)); // 沒有改變過就沒有通知
+      result.values.push({meters, scale: expectedScale, zoom, ...value});
     }
-    const [near, normal, far] = result.values;
-    assert.ok(near.radius < normal.radius && normal.radius < far.radius, 'actual Canvas grows with measured distance');
-    assert.ok(Math.abs(near.radius / normal.radius - .75) < .01, 'near distance is applied once');
-    assert.ok(far.radius / normal.radius <= 1.51, 'far distance is not applied twice');
+    const [far, mid, near] = result.values;
+    assert.ok(Math.abs(far.radius - 180) < .02, 'beyond 2.5 m the standby brain keeps its default size');
+    assert.ok(far.radius < mid.radius && mid.radius < near.radius, 'actual Canvas grows as the person approaches');
+    assert.ok(Math.abs(mid.radius / far.radius - 1.53) < .01, 'zoom is applied once');
+    assert.ok(near.radius / far.radius >= 1.95, '0.6 m at max 2 is clearly larger');
     emit({type: 'task.updated', task: task()}); emit({type: 'settings.updated', settings: current.settings});
-    result.afterRefresh = await geometry(); assert.ok(Math.abs(result.afterRefresh.radius - far.radius) < .02, 'ordinary render preserves measured scale');
+    result.afterRefresh = await geometry(); assert.ok(Math.abs(result.afterRefresh.radius - near.radius) < .02, 'ordinary render preserves the zoom');
     result.screenshot = await screenshot('far-distance-fixture');
   });
   await run('missing-distance-and-sensor-reset-paths', async result => {
     result.resets = [];
     for (const event of [{type: 'presence', present: true, distance_m: null}, {type: 'presence', present: false, distance_m: null},
       ...['off', 'error', 'degraded'].map(state => ({type: 'sensor', state, detail: `FIXTURE ${state}`}))]) {
-      await fresh('missing-distance-and-sensor-reset-paths'); await distance(2); const normal = await geometry();
-      await distance(3); const far = await geometry(); assert.ok(far.radius > normal.radius);
+      await fresh('missing-distance-and-sensor-reset-paths'); await distance(3); const normal = await geometry();
+      await distance(.6); const far = await geometry(); assert.ok(far.radius > normal.radius); // far = 放大後（名稱沿用）
       await sense(event); const reset = await geometry(); assert.equal(await cssScale(), 1);
       assert.ok(Math.abs(reset.radius - normal.radius) < .02, `real hook resets Canvas for ${JSON.stringify(event)}`);
       result.resets.push({event, normal, far, reset});
@@ -233,13 +245,15 @@ try {
       await fresh('responsive-distance-resize-and-high-dpi', {viewport}); const values = [];
       for (const meters of [1.5, 2, 3]) {
         await distance(meters); const value = await geometry();
-        assert.ok(value.cx - value.rx >= -1 && value.cx + value.rx <= viewport.width + 1 && value.cy - value.rx >= -1 && value.cy + value.rx <= viewport.height + 1, 'native orbit envelope fits');
+        // 放大時淡淡的軌道可以超出邊緣；腦形本身（水平 1.25 R、垂直 1.1 R）不行。3 m 不放大，整個軌道都要在視窗內。
+        const [ex, ey] = meters >= 2.5 ? [value.rx, value.rx] : [value.radius * 1.25, value.radius * 1.1];
+        assert.ok(value.cx - ex >= -1 && value.cx + ex <= viewport.width + 1 && value.cy - ey >= -1 && value.cy + ey <= viewport.height + 1, 'native brain envelope fits');
         fits(await bounds('#start-conversation'), viewport, 'ambient entry');
         await page.mouse.click(2, 2); await page.keyboard.press('Enter');
         fits(await bounds('#command-input'), viewport, 'text fallback'); await page.keyboard.press('Escape');
         values.push({meters, canvas: value});
       }
-      assert.ok(values[0].canvas.radius < values[1].canvas.radius && values[1].canvas.radius < values[2].canvas.radius);
+      assert.ok(values[0].canvas.radius > values[1].canvas.radius && values[1].canvas.radius > values[2].canvas.radius, 'closer is bigger');
       await openSettings(); const top = await geometry();
       result.viewports.push({viewport, values, top, panel: await bounds('.surface--settings')});
       result.screenshots ||= []; result.screenshots.push(await screenshot(`top-${viewport.width}x${viewport.height}-far-fixture`));
@@ -247,8 +261,10 @@ try {
     }
     await page.setViewportSize({width: 390, height: 844}); result.afterResize = await geometry(); assert.equal(await cssScale(), 1.5);
     await fresh('responsive-distance-resize-and-high-dpi', {viewport: {width: 1280, height: 900}, dpr: 2});
-    await distance(2); result.highDpi = await geometry(); assert.equal(result.highDpi.dpr, 2);
+    await distance(3); result.highDpi = await geometry(); assert.equal(result.highDpi.dpr, 2);
     assert.ok(Math.abs(result.highDpi.radius - 180) < .1, 'DPR does not apply distance a second time');
+    await distance(1.5); result.highDpiNear = await geometry();
+    assert.ok(Math.abs(result.highDpiNear.radius - 180 * 1.53) < .1, 'DPR does not apply the zoom a second time');
   });
   await run('active-region-labels-and-control-clearance', async result => {
     result.viewports = [];
@@ -284,22 +300,57 @@ try {
   });
   await run('scaled-hit-area-and-camera-off-command', async result => {
     await fresh('scaled-hit-area-and-camera-off-command'); await distance(3); const far = await geometry();
-    const point = {x: far.cx + far.radius * 1.2, y: far.cy};
-    await page.mouse.click(point.x, point.y); await page.locator('.surface--settings').waitFor(); await closeSettings();
-    await distance(1.5); const near = await geometry();
+    const point = {x: far.cx + far.radius * 1.5, y: far.cy}; // 1 倍的點擊範圍是 1.35 R，點不到
     await page.mouse.click(point.x, point.y); await page.waitForTimeout(150);
-    assert.equal(await page.locator('.surface--settings').count(), 0, 'hit area shrinks with actual brain');
+    assert.equal(await page.locator('.surface--settings').count(), 0, 'outside the default hit area');
+    await distance(.6); const near = await geometry();
+    await page.mouse.click(point.x, point.y); await page.locator('.surface--settings').waitFor(); await closeSettings();
     await distance(3); await page.mouse.click(2, 2); await page.keyboard.press('Enter');
     await page.locator('#command-input').fill('鏡頭關掉'); await page.locator('#command-input').press('Enter');
     result.afterOff = await geometry(); assert.equal(await cssScale(), 1);
     assert.equal(current.settings.camera.active, false); assert.ok(await page.evaluate(() => window.__distanceFixture.stops > 0));
     result.far = far; result.near = near; result.point = point; result.screenshot = await screenshot('camera-off-reset-fixture');
   });
+  await run('proximity-zoom-factor-1-and-2-and-settings-row', async result => {
+    const viewport = {width: 1920, height: 1080};
+    result.values = [];
+    for (const zoomMax of [2, 3]) {
+      await fresh('proximity-zoom-factor-1-and-2-and-settings-row', {viewport, zoomMax});
+      for (const meters of [3, 2.5, 2, 1.55, 1.2, .6]) { await distance(meters); result.values.push({zoomMax, meters, zoom: Number(await page.evaluate(() => document.body.dataset.brainZoom ?? '1')), canvas: await geometry()}); }
+    }
+    await fresh('proximity-zoom-factor-1-and-2-and-settings-row', {viewport, zoomMax: 2});
+    await distance(3); const one = await geometry(); result.factor1 = one;
+    result.screenshots = [await screenshot('brain-zoom-factor-1-at-3m-SIMULATED')];
+    await distance(.6); const two = await geometry(); result.factor2 = two;
+    assert.ok(two.radius / one.radius >= 1.95, `factor 2 at 0.6 m is clearly larger: ${two.radius} vs ${one.radius}`);
+    result.screenshots.push(await screenshot('brain-zoom-factor-2-at-0.6m-SIMULATED'));
+    // 設定畫面：倍率列顯示目前的值（不在選項裡也一樣），＋ 送出 0.1 的一格。
+    current.settings.camera.brain_zoom_max = 2.3; emit({type: 'settings.updated', settings: current.settings});
+    await openSettings();
+    const row = page.locator('.surface--settings li.pref', {hasText: '靠近時電子腦放大倍率'});
+    assert.equal(await row.locator('.stepper-value').textContent(), '2.3 倍');
+    await row.getByRole('button', {name: '靠近時電子腦放大倍率增加'}).click();
+    await page.waitForFunction(() => document.querySelector('.surface--settings')?.textContent?.includes('2.4 倍'));
+    assert.deepEqual(report.requests.filter(r => r.case === 'proximity-zoom-factor-1-and-2-and-settings-row' && r.path === '/api/settings/camera').map(r => r.body), [{brain_zoom_max: 2.4}]);
+    result.settingsRow = await row.textContent();
+    result.screenshots.push(await screenshot('settings-brain-zoom-row-SIMULATED'));
+    await closeSettings();
+    // 一般動態效果：大小緩動，不是一次跳到。
+    await fresh('proximity-zoom-factor-1-and-2-and-settings-row', {viewport, zoomMax: 2, motion: 'no-preference'});
+    await distance(3); await page.waitForTimeout(800);
+    const before = await page.evaluate(() => window.__distanceDraw.radius);
+    await distance(.6);
+    const samples = [];
+    for (let i = 0; i < 12; i++) { await page.waitForTimeout(60); samples.push(await page.evaluate(() => ({t: performance.now(), r: window.__distanceDraw.radius}))); }
+    result.easing = {before, samples};
+    assert.ok(samples.some(s => s.r > before * 1.05 && s.r < two.radius * 0.95), 'an intermediate size is drawn between factor 1 and 2');
+    assert.ok(samples.at(-1).r > two.radius * 0.95, 'reaches the target within about 0.7 s');
+  });
 } finally {
   report.finished = new Date().toISOString();
   report.sourceUnchangedDuringRun = JSON.stringify(await sourceHashes()) === JSON.stringify({src: inputHashes.src, shared: inputHashes.shared, entry: inputHashes.entry});
   report.distUnchangedDuringRun = JSON.stringify(await hashes(join(app, 'dist'))) === JSON.stringify(inputHashes.dist);
-  report.passed = report.cases.length === (selectedCase ? 1 : 6) && report.cases.every(c => c.status === 'passed') && report.browserErrors.length === 0 && report.sourceUnchangedDuringRun && report.distUnchangedDuringRun;
+  report.passed = report.cases.length === (selectedCase ? 1 : 7) && report.cases.every(c => c.status === 'passed') && report.browserErrors.length === 0 && report.sourceUnchangedDuringRun && report.distUnchangedDuringRun;
   await context?.close(); await browser?.close(); for (const response of clients) response.end();
   await new Promise(resolve => server.close(resolve));
   await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2));

@@ -316,7 +316,7 @@ export function commandContext(view: SettingsView): CommandContext {
     realtimeAvailable: !!view.realtime?.available,
     webSearch: !!view.realtime?.available && !!view.realtime.web_search,
     home: !!view.realtime?.available && !!view.realtime.home,
-    seconds: Object.fromEntries((view.seconds ?? []).map((row) => [row.key, row.value])),
+    seconds: Object.fromEntries((view.seconds ?? []).filter((row) => row.kind === "seconds").map((row) => [row.key, row.value])),
   };
 }
 
@@ -366,7 +366,7 @@ function localRow(row: LocalCommand, ctx: CommandContext | null): TableRow {
 function secondsText(key: SecondsKey, ctx: CommandContext | null): string {
   const spec: SecondsPrefSpec = key in VOICE_PREFS ? VOICE_PREFS[key as keyof typeof VOICE_PREFS] : CAMERA_PREFS[key as CameraSecondsKey];
   const current = ctx?.seconds[key];
-  const where = "選單列「秒數設定」或設定畫面可調";
+  const where = "選單列「秒數與倍率設定」或設定畫面可調";
   return current === undefined
     ? `預設 ${formatSeconds(spec.default)}，${where}`
     : `目前 ${formatSeconds(current)}（預設 ${formatSeconds(spec.default)}），${where}`;

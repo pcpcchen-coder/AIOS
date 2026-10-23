@@ -589,8 +589,14 @@ const sense = new SenseController({
     closePreview();
   },
   setScale: (scale) => {
+    // 字級與內容面板（docs/10 §2：遠一點放大）；電子腦只有頂端縮略圖跟著它。
     document.documentElement.style.setProperty("--distance-scale", String(scale));
     brain.setDistanceScale(scale);
+  },
+  // 待機的電子腦靠近時放大（設定「靠近時電子腦放大倍率」）。
+  setBrainZoom: (factor) => {
+    document.body.dataset.brainZoom = String(factor);
+    brain.setProximityZoom(factor);
   },
   setPresence: (present) => (document.body.dataset.present = present ? "yes" : "no"),
   setFacing: (facing) => (document.body.dataset.facing = facing ? "yes" : "no"),

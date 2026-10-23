@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { formatSeconds, onStep, snapToStep, stepPref, type SecondsPrefSpec } from "../shared/prefs.ts";
-import { CAMERA_DISABLED_REASON, describeSeconds, VOICE_UNSAVED_REASON, type SecondsSetting } from "../shared/seconds-menu.ts";
+import { formatFactor, formatSeconds, onStep, snapToStep, stepPref, type NumberPrefSpec, type SecondsPrefSpec } from "../shared/prefs.ts";
+import { CAMERA_DISABLED_REASON, describeMenuPrefs, describeSeconds, VOICE_UNSAVED_REASON, type MenuPrefSetting, type SecondsSetting } from "../shared/seconds-menu.ts";
 import { CAMERA_PREFS, DEFAULT_CAMERA_PREFS, parseCameraPatch, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VOICE_PREFS, VoicePatchError } from "../shared/voice-prefs.ts";
 
@@ -12,6 +12,12 @@ const SECONDS = TABLES.flatMap(({ name, specs, parse }) =>
   Object.entries(specs)
     .filter(([, spec]) => spec.kind === "seconds")
     .map(([key, spec]) => [`${name}.${key}`, key, spec as SecondsPrefSpec, parse] as const),
+);
+
+const FACTORS = TABLES.flatMap(({ name, specs, parse }) =>
+  Object.entries(specs)
+    .filter(([, spec]) => spec.kind === "factor")
+    .map(([key, spec]) => [`${name}.${key}`, key, spec as NumberPrefSpec, parse] as const),
 );
 
 const camera: CameraSettings = {
@@ -33,7 +39,7 @@ describe("seconds pref specs", () => {
     ]);
   });
 
-  it.each(SECONDS)("%s: presets are ascending, unique, on step, in range, include the default, and pass the store's parse", (_id, key, spec, parse) => {
+  it.each([...SECONDS, ...FACTORS])("%s: presets are ascending, unique, on step, in range, include the default, and pass the store's parse", (_id, key, spec, parse) => {
     expect(spec.presets.length).toBeGreaterThan(1);
     for (let i = 1; i < spec.presets.length; i++) expect(spec.presets[i]).toBeGreaterThan(spec.presets[i - 1]);
     expect(spec.presets).toContain(spec.default);
@@ -43,6 +49,16 @@ describe("seconds pref specs", () => {
       expect(onStep(v, spec.step)).toBe(true);
       expect(parse({ [key]: v })).toEqual({ [key]: v });
     }
+  });
+});
+
+describe("factor pref specs", () => {
+  it("covers the one factor setting", () => {
+    expect(FACTORS.map(([id]) => id)).toEqual(["CAMERA_PREFS.brain_zoom_max"]);
+  });
+
+  it.each([[1, "1 倍"], [1.5, "1.5 倍"], [2, "2 倍"], [2.3, "2.3 倍"], [3, "3 倍"]])("formatFactor(%s) → %s", (factor, text) => {
+    expect(formatFactor(factor)).toBe(text);
   });
 });
 
@@ -87,6 +103,65 @@ describe("formatSeconds", () => {
     [60, "1 分鐘"], [90, "1 分 30 秒"], [120, "2 分鐘"], [600, "10 分鐘"],
   ])("%s → %s", (seconds, text) => {
     expect(formatSeconds(seconds)).toBe(text);
+  });
+});
+
+describe("describeMenuPrefs (tray rows: seconds and factor)", () => {
+  function zoomRow(rows: MenuPrefSetting[]): MenuPrefSetting {
+    return rows.find((r) => r.key === "brain_zoom_max")!;
+  }
+
+  it("adds the brain zoom factor row after the camera seconds, with its presets and the live value checked", () => {
+    const rows = describeMenuPrefs({ camera, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime });
+    expect(rows.map((r) => [r.key, r.kind, r.group])).toEqual([
+      ["look_to_talk_s", "seconds", "camera"],
+      ["look_to_talk_cooldown_s", "seconds", "camera"],
+      ["brain_zoom_max", "factor", "camera"],
+      ["voice_idle_s", "seconds", "voice"],
+      ["realtime_idle_s", "seconds", "voice"],
+    ]);
+    expect(zoomRow(rows)).toEqual({
+      key: "brain_zoom_max",
+      kind: "factor",
+      group: "camera",
+      group_label: "鏡頭",
+      label: "靠近時電子腦放大倍率",
+      value: 2,
+      value_label: "2 倍",
+      options: [
+        { value: 1, label: "1 倍", checked: false },
+        { value: 1.5, label: "1.5 倍", checked: false },
+        { value: 2, label: "2 倍（預設）", checked: true },
+        { value: 2.5, label: "2.5 倍", checked: false },
+        { value: 3, label: "3 倍", checked: false },
+      ],
+      disabled_reason: null,
+      note: CAMERA_PREFS.brain_zoom_max.hint,
+      write_path: "/api/settings/camera",
+    });
+    expect(CAMERA_PREFS.brain_zoom_max.hint).toContain("0.6 m");
+    expect(CAMERA_PREFS.brain_zoom_max.hint).toContain("2.5 m");
+  });
+
+  it("an off-preset live factor is inserted as a checked 「（目前）」 option", () => {
+    const row = zoomRow(describeMenuPrefs({ camera: { ...camera, brain_zoom_max: 2.3 }, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime }));
+    expect(row.value_label).toBe("2.3 倍");
+    expect(row.options.map((o) => [o.label, o.checked])).toEqual([
+      ["1 倍", false], ["1.5 倍", false], ["2 倍（預設）", false], ["2.3 倍（目前）", true], ["2.5 倍", false], ["3 倍", false],
+    ]);
+  });
+
+  it("the factor row is disabled with the camera, notes when the camera is off, and ignores look-to-talk", () => {
+    expect(zoomRow(describeMenuPrefs({ voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime })).disabled_reason).toBe(CAMERA_DISABLED_REASON);
+    const off = zoomRow(describeMenuPrefs({ camera: { ...camera, active: false, look_to_talk: false }, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime }));
+    expect(off).toMatchObject({ disabled_reason: null, note: "鏡頭目前關閉，量不到距離，電子腦不會放大" });
+    const noLook = zoomRow(describeMenuPrefs({ camera: { ...camera, look_to_talk: false }, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime }));
+    expect(noLook.note).toBe(CAMERA_PREFS.brain_zoom_max.hint);
+  });
+
+  it("describeSeconds is describeMenuPrefs without the factor rows", () => {
+    const source = { camera, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime };
+    expect(describeSeconds(source)).toEqual(describeMenuPrefs(source).filter((r) => r.kind === "seconds"));
   });
 });
 

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CAMERA_PREFS, type CameraSettings, type PointZone, type SensorState } from "../shared/sense.ts";
+import { BRAIN_ZOOM_FAR_M, BRAIN_ZOOM_NEAR_M, DEFAULT_CAMERA_PREFS, type CameraSettings, type PointZone, type SensorState } from "../shared/sense.ts";
 import { pageHeaders } from "../server/app.ts";
 import { loadConfig } from "../server/config.ts";
 import { classify } from "../src/intent.ts";
 import {
+  brainZoom,
   cameraShouldRun,
   distanceScale,
   matchCameraCommand,
@@ -16,7 +17,8 @@ function setup(opts: { canAutoTalk?: boolean | (() => boolean); prefs?: SenseTun
   let now = 0;
   let talking = false;
   const log: string[] = [];
-  const state = { scale: 1, present: false, facing: false, zone: null as PointZone | null, sensor: "off" as SensorState };
+  const zooms: number[] = [];
+  const state = { scale: 1, zoom: 1, present: false, facing: false, zone: null as PointZone | null, sensor: "off" as SensorState };
   const c = new SenseController({
     now: () => now,
     isTalking: () => talking,
@@ -28,6 +30,10 @@ function setup(opts: { canAutoTalk?: boolean | (() => boolean); prefs?: SenseTun
     interruptSpeech: () => log.push("interrupt"),
     onLeave: () => log.push("leave"),
     setScale: (s) => (state.scale = s),
+    setBrainZoom: (z) => {
+      state.zoom = z;
+      zooms.push(z);
+    },
     setPresence: (p) => (state.present = p),
     setFacing: (f) => (state.facing = f),
     pointTo: (z) => (state.zone = z),
@@ -38,6 +44,7 @@ function setup(opts: { canAutoTalk?: boolean | (() => boolean); prefs?: SenseTun
     c,
     log,
     state,
+    zooms,
     advance: (ms: number) => {
       now += ms;
       c.tick();
@@ -59,6 +66,61 @@ describe("SenseController", () => {
     const t = setup();
     t.c.handle({ type: "presence", present: true, distance_m: 2.6 });
     expect(t.state).toMatchObject({ present: true, scale: 1.3 });
+  });
+
+  it("text scaling is unchanged by the brain zoom (docs/10 §2: D ÷ 2 m, farther → bigger)", () => {
+    for (const [d, scale] of [[0.6, 0.75], [1.5, 0.75], [2, 1], [2.6, 1.3], [3, 1.5], [4, 1.5]] as const) expect(distanceScale(d)).toBe(scale);
+    const t = setup({ prefs: { ...DEFAULT_CAMERA_PREFS, brain_zoom_max: 3 } });
+    t.c.handle({ type: "presence", present: true, distance_m: 0.6 });
+    expect(t.state).toMatchObject({ scale: 0.75, zoom: 3 });
+    t.c.handle({ type: "presence", present: true, distance_m: 3 });
+    expect(t.state).toMatchObject({ scale: 1.5, zoom: 1 });
+  });
+
+  it.each([1.5, 2, 3])("brainZoom with max %s: 1 at or beyond 2.5 m, max at or inside 0.6 m, linear between, 1 for null", (max) => {
+    expect([BRAIN_ZOOM_NEAR_M, BRAIN_ZOOM_FAR_M]).toEqual([0.6, 2.5]);
+    for (const far of [2.5, 3, 4]) expect(brainZoom(far, max)).toBe(1);
+    for (const near of [0.6, 0.5]) expect(brainZoom(near, max)).toBe(max);
+    expect(brainZoom(1.55, max)).toBeCloseTo(1 + (max - 1) / 2, 2); // 中點
+    expect(brainZoom(1.5, max)).toBeGreaterThan(brainZoom(2, max));
+    expect(brainZoom(null, max)).toBe(1);
+    expect(brainZoom(Number.NaN, max)).toBe(1);
+  });
+
+  it("brainZoom: max 1 (off) or invalid max never zooms", () => {
+    for (const max of [1, 0.5, Number.NaN]) expect(brainZoom(0.6, max)).toBe(1);
+    expect(brainZoom(1.55, 2)).toBe(1.5);
+    expect(brainZoom(1.55, 3)).toBe(2);
+  });
+
+  it("brain zoom follows real presence events and the live max; null, leaving and sensor stop reset it to 1", () => {
+    const prefs: SenseTuning = { ...DEFAULT_CAMERA_PREFS };
+    const t = setup({ canAutoTalk: false, prefs });
+    expect(t.zooms).toEqual([]); // 沒有事件就沒有動畫
+    t.c.handle({ type: "presence", present: true, distance_m: 0.6 });
+    expect(t.state.zoom).toBe(2);
+    prefs.brain_zoom_max = 3; // 設定改了，不重建控制器，下一次 tick 生效
+    t.advance(200);
+    expect(t.state.zoom).toBe(3);
+    t.advance(200);
+    expect(t.zooms).toEqual([2, 3]); // 倍率不變時不重複通知
+    t.c.handle({ type: "presence", present: true, distance_m: null });
+    expect(t.state.zoom).toBe(1);
+    t.c.handle({ type: "presence", present: true, distance_m: 1 });
+    expect(t.state.zoom).toBeGreaterThan(1);
+    t.c.handle({ type: "presence", present: false, distance_m: null });
+    expect(t.state.zoom).toBe(1);
+    t.c.handle({ type: "presence", present: true, distance_m: 1 });
+    t.c.handle({ type: "sensor", state: "starting", detail: "starting" });
+    expect(t.state.zoom).toBeGreaterThan(1); // starting 保留最近的距離，和字級一樣
+    for (const state of ["off", "error", "degraded"] as const) {
+      t.c.handle({ type: "presence", present: true, distance_m: 1 });
+      t.c.handle({ type: "sensor", state, detail: state });
+      expect(t.state.zoom).toBe(1);
+      prefs.brain_zoom_max = 3;
+      t.advance(200);
+      expect(t.state.zoom).toBe(1); // 沒有距離時改設定也不放大
+    }
   });
 
   it("look-to-talk: present and facing for 1.2 s starts realtime once, then cools down after it ends", () => {
