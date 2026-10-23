@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T11:20:44.814Z",
-  "updated_at": "2026-10-23T11:36:04.416Z",
+  "updated_at": "2026-10-23T11:36:08.442Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "verify",
       "title": "verify",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-23T11:36:08.442Z",
+      "ended_at": "2026-10-23T11:36:08.442Z",
+      "note": "tsc, vitest 742/742, build, desktop check, verify-aios PASS",
       "evidence": []
     },
     {
@@ -85,6 +85,13 @@
       "step_id": "implement",
       "status": "passed",
       "note": "d1239a4: look_to_talk_greet pref; GreetingOnce per look-to-talk start; GA response.create after session.created; live session.context.append speakable after session.started"
+    },
+    {
+      "at": "2026-10-23T11:36:08.442Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "passed",
+      "note": "tsc, vitest 742/742, build, desktop check, verify-aios PASS"
     }
   ],
   "provenance": "Agent self-reported"
