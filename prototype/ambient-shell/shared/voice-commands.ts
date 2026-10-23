@@ -176,7 +176,7 @@ export const INTENT_COMMANDS: { readonly [K in LocalIntentKind]: NonEmpty<LocalC
   ],
   settings: [
     { id: "settings", says: ["設定", "鏡頭設定", "切換引擎", "打開鏡頭設定"], works: HANDLE_COMMAND,
-      does: "打開設定畫面（AI 引擎、語音秒數、鏡頭）", expect: { matcher: "intent", kind: "settings" } },
+      does: "打開設定畫面（瀏覽器：AI 引擎、語音秒數、鏡頭；macOS App：帳號與登入，字幕指出其他設定在選單列：「鏡頭設定」在「鏡頭與語音設定」、「切換引擎」在「AI 引擎」）", expect: { matcher: "intent", kind: "settings" } },
   ],
   use_provider: [
     { id: "use-claude", says: ["改用 Claude", "換成 Claude"], works: HANDLE_COMMAND, does: "交辦的工作改用 Claude",
@@ -371,7 +371,7 @@ function localRow(row: LocalCommand, ctx: CommandContext | null): TableRow {
 function secondsText(key: SecondsKey, ctx: CommandContext | null): string {
   const spec: SecondsPrefSpec = key in VOICE_PREFS ? VOICE_PREFS[key as keyof typeof VOICE_PREFS] : CAMERA_PREFS[key as CameraSecondsKey];
   const current = ctx?.seconds[key];
-  const where = "選單列「秒數與倍率設定」或設定畫面可調";
+  const where = "macOS App：選單列「鏡頭與語音設定」；瀏覽器：設定畫面可調";
   return current === undefined
     ? `預設 ${formatSeconds(spec.default)}，${where}`
     : `目前 ${formatSeconds(current)}（預設 ${formatSeconds(spec.default)}），${where}`;

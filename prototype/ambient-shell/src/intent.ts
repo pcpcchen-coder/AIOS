@@ -54,3 +54,25 @@ export function classify(input: string): Intent {
   }
   return { kind: "task", text };
 }
+
+/** 「設定」類說法指的是哪一塊：鏡頭（「鏡頭設定」）、引擎（「切換引擎」「模型設定」）或一般（「設定」「登入 ChatGPT」）。 */
+export type SettingsTopic = "camera" | "engine" | "general";
+
+export function settingsTopic(input: string): SettingsTopic {
+  const command = normalizeCommand(input.trim());
+  if (/鏡頭/.test(command)) return "camera";
+  if (/引擎|模型|AI/i.test(command)) return "engine";
+  return "general";
+}
+
+/**
+ * 打開設定畫面時說的話（字幕與語音模式的播報）。瀏覽器版是完整的設定畫面；macOS App（desktop）的設定頁只有
+ * 帳號與登入，其他設定在選單列，所以照實指出在選單列的哪裡。
+ */
+export function settingsReply(input: string, ctx: { desktop: boolean; cameraEnabled: boolean }): string {
+  if (!ctx.desktop) return ctx.cameraEnabled ? "這是 AI 引擎與鏡頭設定。" : "這是 AI 引擎設定。";
+  const topic = settingsTopic(input);
+  if (topic === "camera") return "這是帳號與登入；鏡頭設定在選單列 Nous 圖示的「鏡頭與語音設定」。";
+  if (topic === "engine") return "這是帳號與登入；切換引擎在選單列 Nous 圖示的「AI 引擎」。";
+  return "這是帳號與登入；鏡頭、秒數與引擎在選單列的 Nous 圖示裡。";
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { classify } from "../src/intent.ts";
+import { classify, settingsReply, settingsTopic } from "../src/intent.ts";
+import { INTENT_COMMANDS } from "../shared/voice-commands.ts";
 
 describe("classify", () => {
   it.each([
@@ -53,5 +54,41 @@ describe("classify", () => {
 
   it("空白輸入", () => {
     expect(classify("   ").kind).toBe("empty");
+  });
+});
+
+describe("settingsReply (what Nous says when the settings screen opens)", () => {
+  const settingsRow = INTENT_COMMANDS.settings.find((r) => r.id === "settings")!;
+
+  it("the browser keeps the full-settings sentence for every phrase", () => {
+    for (const says of settingsRow.says) {
+      expect(settingsReply(says, { desktop: false, cameraEnabled: true })).toBe("這是 AI 引擎與鏡頭設定。");
+      expect(settingsReply(says, { desktop: false, cameraEnabled: false })).toBe("這是 AI 引擎設定。");
+    }
+  });
+
+  it("the macOS App says the page is accounts only and points each phrase in the command table to the menu bar", () => {
+    const replies = Object.fromEntries(settingsRow.says.map((says) => [says, settingsReply(says, { desktop: true, cameraEnabled: true })]));
+    expect(replies).toEqual({
+      設定: "這是帳號與登入；鏡頭、秒數與引擎在選單列的 Nous 圖示裡。",
+      鏡頭設定: "這是帳號與登入；鏡頭設定在選單列 Nous 圖示的「鏡頭與語音設定」。",
+      切換引擎: "這是帳號與登入；切換引擎在選單列 Nous 圖示的「AI 引擎」。",
+      打開鏡頭設定: "這是帳號與登入；鏡頭設定在選單列 Nous 圖示的「鏡頭與語音設定」。",
+    });
+    // 指令表的說明和實際的話一致。
+    expect(settingsRow.does).toContain("「鏡頭與語音設定」");
+    expect(settingsRow.does).toContain("「AI 引擎」");
+  });
+
+  it.each([
+    ["請打開鏡頭設定。", "camera"],
+    ["模型設定", "engine"],
+    ["AI 引擎設定", "engine"],
+    ["引擎", "engine"],
+    ["登入 ChatGPT", "general"],
+    ["settings", "general"],
+  ] as const)("%s → %s (and still classified as settings)", (text, topic) => {
+    expect(classify(text).kind).toBe("settings");
+    expect(settingsTopic(text)).toBe(topic);
   });
 });

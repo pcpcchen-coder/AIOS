@@ -89,7 +89,7 @@ export function buildCallerInstructions(caps: RealtimeCapabilities, tasks: Itera
   return [
     "你是 Nous 的工具執行層。即時語音模型沒有工具，會把使用者的請求交給你；你用工具完成，你最後一則訊息會交給語音模型用口語轉述給使用者。",
     ...realtimeToolRules({ ...caps, mcp: [] }),
-    "外部服務（MCP）在這條路徑不能用；使用者要求時照實說，需要時請他到設定切換到 API key 路徑。",
+    "外部服務（MCP）在這條路徑不能用；使用者要求時照實說，需要時請他到設定（macOS App：選單列「即時語音」）把路徑切換到 API key。",
     "最後一則訊息：一到三句繁體中文（台灣用語），只講工具回傳的事實；不要提工具名稱或 JSON。",
     "沒有呼叫工具就不能說做好了；工具失敗照實說；工具回傳 status 是 unknown 時只能說「結果不明，請確認」。",
     "needs_confirmation：說要對哪台設備做什麼，請使用者按畫面上的確認卡或說「確認執行」；你不能確認。",

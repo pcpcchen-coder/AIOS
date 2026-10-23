@@ -91,7 +91,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 **A. ChatGPT 方案（Codex 登入，`gpt-live-1-codex`，用方案的 Codex 額度，不需要 API key）**
 
-1. 啟動後說或打「設定」，在「即時語音」區按 **用 ChatGPT 方案登入（Codex）**；macOS App 也可以在選單列 **即時語音 → ChatGPT 方案（Codex）登入…**。
+1. 啟動後說或打「設定」，在「即時語音」區按 **用 ChatGPT 方案登入（Codex）**（macOS App 的設定頁只有帳號與登入，也在這裡）；macOS App 也可以在選單列 **即時語音 → ChatGPT 方案（Codex）登入…**。
 2. 瀏覽器會開 `auth.openai.com` 的登入頁，登入自己的 ChatGPT 帳號並同意。完成頁面顯示「已登入 ChatGPT 方案（Codex）」，設定顯示你的 email 與方案。
 3. 不需要安裝 Codex CLI。這個登入和上面 AI 引擎的 **Continue with ChatGPT** 是分開的兩個登入；Nous 也**不讀、不改 Codex CLI 的 `~/.codex`**，不會把 Codex CLI 或 OpenClaw 登出。
 4. 回呼埠：Codex 的登入只接受 1455 與 1457。1455 被占用（例如 OpenClaw、Codex 或 Continue with ChatGPT 正在登入）時自動改用 1457；兩個都被占用時改用**裝置代碼**：設定會顯示一組代碼，到開啟的 `auth.openai.com/codex/device` 頁面輸入。也可以直接按「用裝置代碼登入」。
@@ -104,14 +104,14 @@ OPENAI_API_KEY=sk-...
 
 存檔後重新 `npm start`。
 
-**選路徑**：設定 →「即時語音」或 App 選單列 **即時語音 → 路徑**，有三種：**自動**（預設：先用 ChatGPT 方案，不能用時改用 API key，並先說出「這次改用 OpenAI API key（依用量計費）：原因」）、**ChatGPT 方案**（不能用就照實說原因，絕不改用 API key 計費）、**API key**。不用改 `.env`、不用重新啟動；切換只影響下一次開始。設定、選單列、輸入列下方都會顯示目前的路徑與計費，例如「ChatGPT 方案（Codex 額度）· gpt-live-1-codex」或「OpenAI API key 計費 · gpt-realtime」。終端機啟動時也會印出這一行（不會印出權杖）。
+**選路徑**：設定 →「即時語音」（瀏覽器版）或 App 選單列 **即時語音 → 路徑**，有三種：**自動**（預設：先用 ChatGPT 方案，不能用時改用 API key，並先說出「這次改用 OpenAI API key（依用量計費）：原因」）、**ChatGPT 方案**（不能用就照實說原因，絕不改用 API key 計費）、**API key**。不用改 `.env`、不用重新啟動；切換只影響下一次開始。設定、選單列、輸入列下方都會顯示目前的路徑與計費，例如「ChatGPT 方案（Codex 額度）· gpt-live-1-codex」或「OpenAI API key 計費 · gpt-realtime」。終端機啟動時也會印出這一行（不會印出權杖）。
 
 按「開始語音對話」之後：
 
 - 語音直接對語音，不經過瀏覽器的語音辨識，對話是連續的；你一開口，它就停下來聽。
 - 要它做較長的工作時，它會交辦成背景任務。**任務仍用上面選的引擎執行**（例如 ChatGPT 方案），兩條路徑都一樣；進度、成果畫面與完成時的語音通知也一樣。
 - 問「進度如何」它會查真實狀態再回答；「新竹今天會下雨嗎」會上網查（ChatGPT 方案路徑用 Codex 額度，API key 路徑用同一把 key）。
-- 點右上角指示、按 Esc，或沒說話一段時間（預設 2 分鐘，可在「設定」或 App 選單列「秒數與倍率設定」調整）就會結束。說「再見」或「結束對話」時由 AI 判斷要不要結束，不保證每次都結束（ChatGPT 方案路徑上整句只說「再見」時，念完道別也會結束）。
+- 點右上角指示、按 Esc，或沒說話一段時間（預設 2 分鐘；macOS App：選單列「鏡頭與語音設定」；瀏覽器：「設定」畫面調整）就會結束。說「再見」或「結束對話」時由 AI 判斷要不要結束，不保證每次都結束（ChatGPT 方案路徑上整句只說「再見」時，念完道別也會結束）。
 - 權杖與 API key 只留在本機核心，不會送到瀏覽器。
 - ChatGPT 方案路徑沒有遠端 MCP（要用 MCP 請切到 API key 路徑），Esc 只能把正在念的回覆靜音。同一時間只能有一個 ChatGPT 方案即時語音；重新整理頁面會立刻結束它，之後可以馬上再開始。
 

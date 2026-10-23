@@ -16,7 +16,7 @@ import {
   LiveToolCaller,
   MAX_HOST_TIMEOUT_MS,
 } from "../server/live-tool-caller.ts";
-import { buildRealtimeInstructions, realtimeToolRules, REALTIME_TOOLS } from "../server/realtime.ts";
+import { buildLiveInstructions, buildRealtimeInstructions, realtimeToolRules, REALTIME_TOOLS } from "../server/realtime.ts";
 import { HOST_REPLY_MARGIN_MS, HOST_TIMEOUT_MS, hostTimeoutOutput, type ApprovalSnapshot, type ToolHost } from "../server/realtime-routes.ts";
 import { WEB_SEARCH_TIMEOUT_MS } from "../server/web-search.ts";
 import { codexTurn, scriptedFetch, writeCredentials } from "./fixtures/fake-chatgpt.ts";
@@ -87,6 +87,14 @@ describe("tool registry and rules are the GA ones", () => {
     for (const rule of realtimeToolRules(CAPS)) expect(buildRealtimeInstructions([], new Date(), CAPS)).toContain(rule);
     expect(text).toContain("你不能確認");
     expect(text).toContain(RESULT_UNKNOWN_TEXT);
+  });
+
+  it("telling the user where to switch to the API key route is right for both the browser and the macOS App", () => {
+    const where = "到設定（macOS App：選單列「即時語音」）把路徑切換到 API key";
+    expect(buildCallerInstructions(CAPS, [], new Date("2026-10-23T00:00:00Z"))).toContain(where);
+    const mcp = [{ name: "notes", url: "https://mcp.example.com" }] as unknown as Parameters<typeof buildLiveInstructions>[2]["mcp"];
+    expect(buildLiveInstructions([], new Date(), { mcp })).toContain(where);
+    expect(buildLiveInstructions([], new Date(), { mcp: [] })).not.toContain("API key");
   });
 });
 
