@@ -26,7 +26,8 @@ import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
 import { formatCount } from "./format.ts";
 import { homeControlLine, homeStatusLine } from "../shared/home.ts";
-import { classify } from "./intent.ts";
+import { classify, settingsReply } from "./intent.ts";
+import { runDesktopCommand } from "./desktop-command.ts";
 import { evaluateSurface } from "./presentation-policy.ts";
 import { initialShell, reduceShell, type ShellEvent, type ShellState } from "./shell-state.ts";
 import {
@@ -1081,7 +1082,14 @@ async function handleCommand(text: string): Promise<void> {
     case "settings":
       input.value = "";
       dispatch({ type: "show.settings", request_id: requestId });
-      say(settings?.camera?.enabled ? "這是 AI 引擎與鏡頭設定。" : "這是 AI 引擎設定。");
+      {
+        // macOS App 的設定頁只有帳號與登入：照實指出其他設定在選單列。App 沒有瀏覽器語音模式，say 不會出聲，
+        // 所以語音模式沒開時直接顯示字幕。
+        const desktop = !!window.nousDesktop;
+        const reply = settingsReply(text, { desktop, cameraEnabled: !!settings?.camera?.enabled });
+        if (desktop && !conversation.on) showSubtitle(`Nous：${reply}`);
+        else say(reply);
+      }
       return;
     case "use_provider":
       input.value = "";
@@ -1395,12 +1403,13 @@ function reportDesktopState(): void {
 window.addEventListener("nous:command", (event) => {
   const command = (event as CustomEvent<string>).detail;
   dismissFirstHint();
-  if (command === "voice") {
-    if (realtime.on || conversation.on) disableVoiceMode();
-    else openConversation();
-  } else if (command === "progress") actions.showProgress();
-  else if (command === "settings") actions.openSettings();
-  else if (command === "type") dispatch({ type: "input.open" });
+  runDesktopCommand(command, {
+    voice: () => (realtime.on || conversation.on ? disableVoiceMode() : openConversation()),
+    progress: actions.showProgress,
+    settings: actions.openSettings,
+    type: () => dispatch({ type: "input.open" }),
+    cameraPreview: actions.openCameraPreview,
+  });
 });
 
 function renderRegionActivity(activity: readonly RegionActivity[]): void {
@@ -1544,7 +1553,8 @@ function renderSurface(): void {
   let el: HTMLElement;
   const confirm = s.kind === "confirm" ? pendingConfirms.get(s.request_id) : undefined;
   if (confirm) el = renderConfirm(confirm);
-  else if (s.kind === "settings") el = renderSettings(settings, s.message, actions);
+  // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
+  else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop });
   else if (s.kind === "progress") el = renderProgress([...tasks.values()], s.message, actions);
   else if (s.kind === "artifact" && task) {
     const artifactId = s.artifact_id!;

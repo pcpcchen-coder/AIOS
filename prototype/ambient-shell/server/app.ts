@@ -10,7 +10,7 @@ import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { WebSearchError, type WebSearch } from "./web-search.ts";
 import { HomeBridgeError, type ControlRequest, type HomeBridge } from "./home-bridge.ts";
 import { CameraPatchError, parseCameraPatch, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
-import { describeMenuPrefs } from "../shared/seconds-menu.ts";
+import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/seconds-menu.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VoicePatchError, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
 import { ApiKeyRoute, FallbackRequired, RealtimeSessions, RouteStartError, SessionError, type RealtimeRoute } from "./realtime-routes.ts";
@@ -154,6 +154,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         ...(camera ? { camera } : {}),
         voice,
         seconds: describeMenuPrefs({ camera, voice, voiceWritable: !!options.voice, realtime: live }),
+        camera_preview_disabled_reason: cameraPreviewDisabledReason(camera),
       };
     },
     select: (provider: ExecutorMode) => options.settings.select(provider),

@@ -314,8 +314,26 @@ export function renderError(task: Task, actions: ViewActions): HTMLElement {
 
 // ───────────── 設定（AI 引擎） ─────────────
 
-export function renderSettings(settings: SettingsView | null, message: string | null, actions: ViewActions): HTMLElement {
+export interface SettingsRenderOptions {
+  /**
+   * 在 macOS App 裡（頁面有 window.nousDesktop）：設定以選單列為主體，這頁只留帳號與登入和狀態，
+   * 不畫和選單列重複的引擎選擇、即時語音路徑與聲音、語音秒數、鏡頭與手勢。瀏覽器版（false）畫完整的設定畫面。
+   */
+  desktop?: boolean;
+}
+
+/** App 內設定頁的說明：其他設定在選單列的哪裡。 */
+export const DESKTOP_SETTINGS_NOTE =
+  "其他設定在選單列的 Nous 圖示裡：切換引擎在「AI 引擎」；即時語音的路徑與聲音在「即時語音」；鏡頭開關、秒數與倍率在「鏡頭與語音設定」。";
+
+export function renderSettings(
+  settings: SettingsView | null,
+  message: string | null,
+  actions: ViewActions,
+  options: SettingsRenderOptions = {},
+): HTMLElement {
   if (!settings) return surfaceShell("settings", h("p", { class: "muted" }, "正在讀取設定…"), footer(actions));
+  if (options.desktop) return renderDesktopAccounts(settings, message, actions);
   const g = settings.chatgpt;
 
   const list = h("ul", { class: "provider-list" });
@@ -333,39 +351,8 @@ export function renderSettings(settings: SettingsView | null, message: string | 
     list.append(item);
   }
 
-  const account: Child[] = [];
-  if (g.pending_login) {
-    account.push(
-      h("p", { class: "notice" }, "已在新分頁開啟 ChatGPT 登入。完成後會自動回到這裡。"),
-      button("取消登入", actions.chatgptCancel, "btn--ghost"),
-    );
-  } else if (g.signed_in) {
-    account.push(
-      h("p", { class: "small" }, `ChatGPT 帳號：${g.email ?? "已登入"}${g.plan_usage ? "" : "（未授權使用方案額度）"}`),
-      h(
-        "div",
-        { class: "actions" },
-        !g.plan_usage && button("重新授權", () => actions.chatgptLogin("auto"), "btn--primary"),
-        usageLink(),
-        button("使用其他帳號", () => actions.chatgptLogin("new")),
-        button("登出 ChatGPT", actions.chatgptLogout, "btn--ghost"),
-      ),
-    );
-  } else if (g.needs_reauth) {
-    account.push(button("重新登入 ChatGPT", () => actions.chatgptLogin("auto"), "btn--primary"));
-  }
-
-  // 第一次以 ChatGPT 方案使用時的說明（UI/UX guidelines）
-  const welcome =
-    settings.provider === "chatgpt" && g.signed_in && g.plan_usage && !g.welcome_ack
-      ? h(
-          "div",
-          { class: "welcome" },
-          h("strong", {}, "你正在使用 ChatGPT 方案"),
-          h("p", {}, "在 Nous 交辦的 AI 任務會使用你的 ChatGPT 方案額度。可以到 ChatGPT 設定管理用量。"),
-          button("知道了", actions.ackWelcome, "btn--primary"),
-        )
-      : null;
+  const account = chatgptAccount(settings, actions);
+  const welcome = chatgptWelcome(settings, actions);
 
   return surfaceShell(
     "settings",
@@ -384,10 +371,84 @@ export function renderSettings(settings: SettingsView | null, message: string | 
 }
 
 /**
+ * macOS App 內的設定頁：只有帳號與登入（ChatGPT 引擎帳號、即時語音用的 Codex 帳號）和狀態。
+ * 引擎選擇、即時語音路徑與聲音、秒數、鏡頭與手勢都在選單列，這裡不重複畫。
+ */
+function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions): HTMLElement {
+  const g = settings.chatgpt;
+  const account = chatgptAccount(settings, actions, true);
+  // 瀏覽器版的「Continue with ChatGPT」在引擎清單裡；這頁沒有引擎清單，未登入時直接放登入按鈕。
+  if (!g.pending_login && !g.signed_in && !g.needs_reauth) {
+    account.push(h("div", { class: "actions" }, button("Continue with ChatGPT", () => actions.chatgptLogin("auto"), "btn--primary")));
+  }
+  const current = settings.providers.find((p) => p.id === settings.provider);
+  return surfaceShell(
+    "settings",
+    h("header", { class: "surface-header" }, h("p", { class: "eyebrow" }, "設定"), h("h2", {}, "帳號與登入")),
+    message && h("p", { class: "notice" }, message),
+    g.last_error && h("p", { class: "error-text" }, g.last_error),
+    chatgptWelcome(settings, actions),
+    h(
+      "section",
+      { class: "camera-settings" },
+      h("h3", {}, "ChatGPT（AI 引擎）"),
+      h("p", { class: "muted small" }, `目前的引擎：${current?.label ?? settings.provider}${current && !current.available ? `（不可用：${current.detail}）` : ""}`),
+      account.length > 0 && h("div", { class: "account" }, ...account),
+    ),
+    settings.realtime && renderRealtimeSettings(settings.realtime, actions, { desktop: true }),
+    h("p", { class: "muted small" }, DESKTOP_SETTINGS_NOTE),
+    footer(actions),
+  );
+}
+
+/** ChatGPT 引擎帳號：登入中、已登入（重新授權／用量／其他帳號／登出）、需要重新登入。 */
+function chatgptAccount(settings: SettingsView, actions: ViewActions, desktop = false): Child[] {
+  const g = settings.chatgpt;
+  const account: Child[] = [];
+  if (g.pending_login) {
+    account.push(
+      // App 的外部連結由系統瀏覽器打開（desktop/main.mjs setWindowOpenHandler），不是新分頁。
+      h("p", { class: "notice" }, desktop ? "已在瀏覽器開啟 ChatGPT 登入。完成後會自動回到這裡。" : "已在新分頁開啟 ChatGPT 登入。完成後會自動回到這裡。"),
+      button("取消登入", actions.chatgptCancel, "btn--ghost"),
+    );
+  } else if (g.signed_in) {
+    account.push(
+      h("p", { class: "small" }, `ChatGPT 帳號：${g.email ?? "已登入"}${g.plan_usage ? "" : "（未授權使用方案額度）"}`),
+      h(
+        "div",
+        { class: "actions" },
+        !g.plan_usage && button("重新授權", () => actions.chatgptLogin("auto"), "btn--primary"),
+        usageLink(),
+        button("使用其他帳號", () => actions.chatgptLogin("new")),
+        button("登出 ChatGPT", actions.chatgptLogout, "btn--ghost"),
+      ),
+    );
+  } else if (g.needs_reauth) {
+    account.push(button("重新登入 ChatGPT", () => actions.chatgptLogin("auto"), "btn--primary"));
+  }
+  return account;
+}
+
+/** 第一次以 ChatGPT 方案使用時的說明（UI/UX guidelines）。 */
+function chatgptWelcome(settings: SettingsView, actions: ViewActions): HTMLElement | null {
+  const g = settings.chatgpt;
+  return settings.provider === "chatgpt" && g.signed_in && g.plan_usage && !g.welcome_ack
+      ? h(
+          "div",
+          { class: "welcome" },
+          h("strong", {}, "你正在使用 ChatGPT 方案"),
+          h("p", {}, "在 Nous 交辦的 AI 任務會使用你的 ChatGPT 方案額度。可以到 ChatGPT 設定管理用量。"),
+          button("知道了", actions.ackWelcome, "btn--primary"),
+        )
+      : null;
+}
+
+/**
  * 即時語音：路徑（自動／ChatGPT 方案／API key）、每條路徑的狀態與計費、即時語音用的 Codex 登入。
  * 計費一律照實顯示；切換只影響下一次開始，進行中的工作階段維持原本的路徑。
+ * options.desktop：macOS App 內只畫狀態與 Codex 帳號，路徑與聲音的按鈕在選單列「即時語音」。
  */
-export function renderRealtimeSettings(rt: RealtimeInfo, actions: ViewActions): HTMLElement {
+export function renderRealtimeSettings(rt: RealtimeInfo, actions: ViewActions, options: SettingsRenderOptions = {}): HTMLElement {
   const active = rt.active;
   const status = active
     ? `進行中：${active.billing_line}${rt.billing_line && rt.billing_line !== active.billing_line ? `（下次開始時改用：${rt.billing_line}）` : ""}`
@@ -459,6 +520,21 @@ export function renderRealtimeSettings(rt: RealtimeInfo, actions: ViewActions): 
     }
     if (a.last_error) account.push(h("p", { class: "error-text" }, a.last_error));
   }
+  if (options.desktop) {
+    return h(
+      "section",
+      { class: "camera-settings" },
+      h("h3", {}, "即時語音（ChatGPT 方案（Codex）帳號）"),
+      h("p", { class: "small" }, h("strong", {}, status)),
+      routes,
+      ...account,
+      h(
+        "p",
+        { class: "muted small" },
+        "這個登入只給即時語音用，和上面 AI 引擎的 ChatGPT 帳號分開；Nous 不讀也不改 Codex CLI 的 ~/.codex。路徑與聲音在選單列「即時語音」切換，只影響下一次開始。",
+      ),
+    );
+  }
   return h(
     "section",
     { class: "camera-settings" },
@@ -499,7 +575,7 @@ function renderVoiceSettings(voice: VoicePrefs, realtimeAvailable: boolean, acti
       ),
     );
   }
-  return h("section", { class: "camera-settings" }, h("h3", {}, "語音"), list, h("p", { class: "muted small" }, "改了立即生效：開著的語音從現在起重新計時。macOS App 也可以在選單列「秒數與倍率設定」調整。"));
+  return h("section", { class: "camera-settings" }, h("h3", {}, "語音"), list, h("p", { class: "muted small" }, "改了立即生效：開著的語音從現在起重新計時。macOS App 在選單列「鏡頭與語音設定」調整。"));
 }
 
 /** 鏡頭與手勢：逐項走 CAMERA_PREFS（順序、標籤、提示、範圍都從那裡來）。 */

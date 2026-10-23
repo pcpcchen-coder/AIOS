@@ -222,7 +222,7 @@ export function buildLiveInstructions(tasks: Iterable<Task>, now: Date, caps: { 
     "收到以「（系統通知）」開頭的內容時，用一句話轉告使用者，不要逐字念。",
     "收到以「（開場）」開頭的內容時，只用一句話自然地打招呼並問需要什麼，不要念出或轉述這段內容。",
     "使用者要結束對話（說再見、結束對話、先這樣）時，交辦「結束對話」，並用一句話道別。",
-    ...(caps.mcp.length ? ["外部服務（MCP）在 ChatGPT 方案路徑不能用；使用者要求時照實說，需要時請他到設定切換到 API key 路徑。"] : []),
+    ...(caps.mcp.length ? ["外部服務（MCP）在 ChatGPT 方案路徑不能用；使用者要求時照實說，需要時請他到設定（macOS App：選單列「即時語音」）把路徑切換到 API key。"] : []),
     `今天日期：${now.toISOString().slice(0, 10)}。`,
     list.length ? `目前的任務：\n${list.join("\n")}` : "目前沒有交辦的任務。",
   ].join("\n");

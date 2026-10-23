@@ -4,6 +4,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, session, shell, Tray } from "electron";
+import { radio, settingsMenu } from "./settings-menu.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const asset = (name) => join(here, "assets", name);
@@ -289,39 +290,9 @@ async function refreshSettings() {
   rebuildMenu();
 }
 
-function radio(label, checked, click, enabled = true) {
-  return { label, type: "radio", checked, enabled, click };
-}
-
-/**
- * 「秒數與倍率設定」子選單：照核心給的 settings.seconds 畫（秒數與倍率的列；鍵、範圍、選項、標籤、單位、
- * 寫入路徑都由核心推導），這裡不寫任何秒數或倍率。不能用時，原因放在子選單第一項（sublabel 只有 macOS 14.4 以上才顯示）。
- */
+/** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  const rows = settings?.seconds;
-  if (!rows) return [{ label: "讀取中…", enabled: false }];
-  const items = [];
-  let group = null;
-  for (const row of rows) {
-    if (row.group !== group) {
-      if (group !== null) items.push({ type: "separator" });
-      items.push({ label: row.group_label, enabled: false });
-      group = row.group;
-    }
-    const enabled = row.disabled_reason === null;
-    items.push({
-      label: `${row.label}：${row.value_label}`,
-      sublabel: row.disabled_reason ?? row.note,
-      submenu: [
-        ...(enabled ? [] : [{ label: row.disabled_reason, enabled: false }, { type: "separator" }]),
-        ...row.options.map((o) => radio(o.label, o.checked, () => void setMenuPref(row, o.value), enabled)),
-        { type: "separator" },
-        { label: row.note, enabled: false },
-      ],
-    });
-  }
-  items.push({ type: "separator" }, { label: "更多設定…", click: () => command("settings") });
-  return items;
+  return settingsMenu(settings, { command, setMenuPref });
 }
 
 /** 即時語音用的 Codex 登入：核心開好回呼（1455，被占用時 1457，再不行改裝置代碼），系統瀏覽器開登入頁。 */
@@ -339,12 +310,13 @@ async function codexLogin() {
   await refreshSettings();
 }
 
-/** 送出後直接套用回應（不等 15 秒的輪詢）；失敗時說明真實原因，並重新讀取實際保存的值。 */
+/** 送出後直接套用回應（不等 15 秒的輪詢）；失敗時說明真實原因，並重新讀取實際保存的值（checkbox 不會停在沒保存的狀態）。 */
 async function setMenuPref(row, value) {
   try {
     settings = await api(row.write_path, { [row.key]: value });
   } catch (err) {
-    dialog.showErrorBox(row.kind === "factor" ? "倍率沒有保存" : "秒數沒有保存", String(err.message ?? err));
+    const title = row.kind === "bool" ? `「${row.label}」沒有保存` : row.kind === "factor" ? "倍率沒有保存" : "秒數沒有保存";
+    dialog.showErrorBox(title, String(err.message ?? err));
     await refreshSettings();
     return;
   }
@@ -465,6 +437,7 @@ function rebuildMenu() {
           ),
         },
         { type: "separator" },
+        { label: "帳號與登入…", click: () => command("settings") },
         { label: "填入 OpenAI API key…", click: openEnvFile },
         { label: "OpenAI 用量與上限", click: () => shell.openExternal("https://platform.openai.com/usage") },
       ],
@@ -480,7 +453,7 @@ function rebuildMenu() {
         }),
       ),
     },
-    { label: "秒數與倍率設定", submenu: secondsMenu() },
+    { label: "鏡頭與語音設定", submenu: secondsMenu() },
     { label: "語音指令表", click: openCommandsWindow },
     { type: "separator" },
     {
@@ -601,7 +574,7 @@ app.on("window-all-closed", () => {
   // 留在選單列，不結束。
 });
 
-// 設定在頁面（設定畫面、語音或打字指令）改了：頁面收到核心的 settings.updated 後回報新的版本字串，這裡馬上重新讀取。
+// 設定在頁面（帳號頁、語音或打字指令）改了：頁面收到核心的 settings.updated 後回報新的版本字串，這裡馬上重新讀取。
 // 不在點選單列圖示時才讀：macOS 上 setContextMenu 的選單在 mouse-down 當下就打開，非同步的讀取趕不上這一次。
 let reportedSettings = null;
 ipcMain.on("nous:state", (_e, state) => {
@@ -668,7 +641,7 @@ app.whenReady().then(async () => {
         submenu: [
           { label: "開始／結束語音對話", accelerator: "Alt+Command+V", click: () => command("voice") },
           { label: "看進度", accelerator: "Command+P", click: () => command("progress") },
-          { label: "AI 引擎設定", accelerator: "Command+,", click: () => command("settings") },
+          { label: "帳號與登入…", accelerator: "Command+,", click: () => command("settings") },
           { label: "語音指令表", accelerator: "Command+/", click: openCommandsWindow },
           { type: "separator" },
           { role: "reload", label: "重新載入" },

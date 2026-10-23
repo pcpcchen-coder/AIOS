@@ -111,8 +111,13 @@ export interface SettingsView {
   camera?: CameraSettings;
   /** 語音閒置秒數（voice.json）；本機核心一定提供，未提供時用 DEFAULT_VOICE_PREFS。 */
   voice?: VoicePrefs;
-  /** 所有數值設定（秒數與倍率，kind 區分），給選單列直接畫；由核心推導（describeMenuPrefs）。欄位名沿用舊名。 */
+  /**
+   * 選單列「鏡頭與語音設定」的所有列：數值設定（秒數與倍率）與鏡頭開關，以 kind（seconds／factor／bool）區分，
+   * 給選單列直接畫；由核心推導（describeMenuPrefs）。欄位名沿用最早只有秒數時的舊名。
+   */
   seconds?: MenuPrefSetting[];
+  /** 選單列「顯示鏡頭畫面」不能用的原因（cameraPreviewDisabledReason）；null＝可以用。未提供時選單不畫這一項。 */
+  camera_preview_disabled_reason?: string | null;
 }
 
 /** API key 路徑（RealtimeBridge.info）提供的欄位；路徑與計費欄位由 RealtimeSessions 補上。 */

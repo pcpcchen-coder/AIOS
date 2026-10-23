@@ -21,6 +21,12 @@ import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
 import type { SettingsView, Task } from "../shared/types.ts";
 import { commandSections } from "../shared/voice-commands.ts";
+import { isNumberRow, type MenuNumberSetting } from "../shared/seconds-menu.ts";
+
+/** 選單列的數值列（秒數與倍率）。 */
+function numberRow(view: SettingsView, key: string): MenuNumberSetting {
+  return view.seconds!.filter(isNumberRow).find((r) => r.key === key)!;
+}
 
 describe("checkRequest", () => {
   const hosts = allowedHosts(8787, 5173);
@@ -440,8 +446,11 @@ describe("HTTP API", () => {
     const none = await start();
     const defaults = (await (await fetch(`${none.base}/api/settings`)).json()) as SettingsView;
     expect(defaults.voice).toEqual({ voice_idle_s: 90, realtime_idle_s: 120 });
-    expect(defaults.seconds?.map((r) => r.key)).toEqual(["look_to_talk_s", "look_to_talk_cooldown_s", "brain_zoom_max", "voice_idle_s", "realtime_idle_s"]);
+    expect(defaults.seconds?.map((r) => r.key)).toEqual([
+      "active", "look_to_talk", "look_to_talk_s", "look_to_talk_cooldown_s", "look_to_talk_greet", "stop_gesture", "brain_zoom_max", "voice_idle_s", "realtime_idle_s",
+    ]);
     expect(defaults.seconds?.filter((r) => r.group === "camera").every((r) => r.disabled_reason !== null)).toBe(true);
+    expect(defaults.camera_preview_disabled_reason).toBe("鏡頭未啟用（.env 設定 NOUS_CAMERA=on 後重新啟動）");
     expect((await none.post("/api/settings/voice", { voice_idle_s: 60 })).status).toBe(409);
     await new Promise((r) => server!.close(r));
 
@@ -468,7 +477,7 @@ describe("HTTP API", () => {
     expect(res.status).toBe(200);
     const view = (await res.json()) as SettingsView;
     expect(view.voice).toEqual({ voice_idle_s: 60, realtime_idle_s: 120 });
-    const row = view.seconds!.find((r) => r.key === "voice_idle_s")!;
+    const row = numberRow(view, "voice_idle_s");
     expect(row).toMatchObject({ value: 60, value_label: "1 分鐘", disabled_reason: null, write_path: "/api/settings/voice" });
     expect(row.options.filter((o) => o.checked).map((o) => o.value)).toEqual([60]);
     expect(await next()).toMatchObject({ type: "settings.updated", settings: { voice: { voice_idle_s: 60 } } });
@@ -478,7 +487,7 @@ describe("HTTP API", () => {
     // 在 onStep 容許誤差內的值存成格點上的值：選單不會同時出現「預設」與勾選的「（目前）」。
     const near = (await (await post("/api/settings/voice", { voice_idle_s: 90.000001 })).json()) as SettingsView;
     expect(near.voice?.voice_idle_s).toBe(90);
-    const nearRow = near.seconds!.find((r) => r.key === "voice_idle_s")!;
+    const nearRow = numberRow(near, "voice_idle_s");
     expect(nearRow.options.map((o) => o.label)).toEqual(["30 秒", "1 分鐘", "1 分 30 秒（預設）", "2 分鐘", "3 分鐘", "5 分鐘"]);
     expect(JSON.parse(readFileSync(join(dir, "voice.json"), "utf8")).prefs).toEqual({ voice_idle_s: 90 });
     await post("/api/settings/voice", { voice_idle_s: 60 });
@@ -500,9 +509,31 @@ describe("HTTP API", () => {
   it("鏡頭秒數經 POST /api/settings/camera 改變時，回應的 seconds 列跟著更新（選單列直接套用回應）", async () => {
     const { post } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" } });
     const view = (await (await post("/api/settings/camera", { look_to_talk_s: 1.6 })).json()) as SettingsView;
-    const row = view.seconds!.find((r) => r.key === "look_to_talk_s")!;
+    const row = numberRow(view, "look_to_talk_s");
     expect(row).toMatchObject({ value: 1.6, disabled_reason: null, write_path: "/api/settings/camera" });
     expect(row.options.find((o) => o.checked)).toEqual({ value: 1.6, label: "1.6 秒（目前）", checked: true });
+  });
+
+  it("鏡頭開關也是選單列的列（kind bool）：/api/settings 帶出目前的值，POST /api/settings/camera 改了回應跟著更新", async () => {
+    const { base, post, dir } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" } });
+    const before = (await (await fetch(`${base}/api/settings`)).json()) as SettingsView;
+    const bools = before.seconds!.filter((r) => r.kind === "bool");
+    expect(bools.map((r) => [r.key, r.value, r.disabled_reason, r.write_path])).toEqual([
+      ["active", true, null, "/api/settings/camera"],
+      ["look_to_talk", true, null, "/api/settings/camera"],
+      ["look_to_talk_greet", true, null, "/api/settings/camera"],
+      ["stop_gesture", true, null, "/api/settings/camera"],
+    ]);
+    expect(before.camera_preview_disabled_reason).toBeNull();
+    const off = (await (await post("/api/settings/camera", { active: false })).json()) as SettingsView;
+    expect(off.camera_preview_disabled_reason).toMatch(/^鏡頭目前關閉/);
+    await post("/api/settings/camera", { active: true });
+    const view = (await (await post("/api/settings/camera", { look_to_talk: false })).json()) as SettingsView;
+    const rows = Object.fromEntries(view.seconds!.map((r) => [r.key, r]));
+    expect(rows.look_to_talk).toMatchObject({ kind: "bool", value: false, value_label: "關" });
+    expect(rows.look_to_talk_greet).toMatchObject({ value: true, note: "看著說話目前關閉，這個開關暫時用不到" });
+    expect(rows.look_to_talk_s).toMatchObject({ note: "看著說話目前關閉，這個秒數暫時用不到" });
+    expect(JSON.parse(readFileSync(join(dir, "camera.json"), "utf8")).prefs).toEqual({ active: true, look_to_talk: false });
   });
 
   it("靠近放大倍率經 POST /api/settings/camera 保存：嚴格驗證、寫入 camera.json、回應的倍率列跟著更新", async () => {
@@ -510,7 +541,7 @@ describe("HTTP API", () => {
     for (const bad of [3.5, 0.5, 1.25, "2"]) expect((await post("/api/settings/camera", { brain_zoom_max: bad })).status).toBe(400);
     const view = (await (await post("/api/settings/camera", { brain_zoom_max: 2.7 })).json()) as SettingsView;
     expect(view.camera?.brain_zoom_max).toBe(2.7);
-    const row = view.seconds!.find((r) => r.key === "brain_zoom_max")!;
+    const row = numberRow(view, "brain_zoom_max");
     expect(row).toMatchObject({ kind: "factor", value: 2.7, value_label: "2.7 倍", disabled_reason: null, write_path: "/api/settings/camera" });
     expect(row.options.find((o) => o.checked)).toEqual({ value: 2.7, label: "2.7 倍（目前）", checked: true });
     expect(JSON.parse(readFileSync(join(dir, "camera.json"), "utf8")).prefs).toEqual({ brain_zoom_max: 2.7 });

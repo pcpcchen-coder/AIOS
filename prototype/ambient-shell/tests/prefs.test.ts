@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatFactor, formatSeconds, onStep, snapToStep, stepPref, type NumberPrefSpec, type SecondsPrefSpec } from "../shared/prefs.ts";
-import { CAMERA_DISABLED_REASON, describeMenuPrefs, describeSeconds, VOICE_UNSAVED_REASON, type MenuPrefSetting, type SecondsSetting } from "../shared/seconds-menu.ts";
+import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, describeSeconds, isNumberRow, VOICE_UNSAVED_REASON, type MenuBoolSetting, type MenuNumberSetting, type MenuPrefSetting, type SecondsSetting } from "../shared/seconds-menu.ts";
 import { CAMERA_PREFS, DEFAULT_CAMERA_PREFS, parseCameraPatch, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VOICE_PREFS, VoicePatchError } from "../shared/voice-prefs.ts";
 
@@ -107,15 +107,19 @@ describe("formatSeconds", () => {
 });
 
 describe("describeMenuPrefs (tray rows: seconds and factor)", () => {
-  function zoomRow(rows: MenuPrefSetting[]): MenuPrefSetting {
-    return rows.find((r) => r.key === "brain_zoom_max")!;
+  function zoomRow(rows: MenuPrefSetting[]): MenuNumberSetting {
+    return rows.filter(isNumberRow).find((r) => r.key === "brain_zoom_max")!;
   }
 
   it("adds the brain zoom factor row after the camera seconds, with its presets and the live value checked", () => {
     const rows = describeMenuPrefs({ camera, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime });
     expect(rows.map((r) => [r.key, r.kind, r.group])).toEqual([
+      ["active", "bool", "camera"],
+      ["look_to_talk", "bool", "camera"],
       ["look_to_talk_s", "seconds", "camera"],
       ["look_to_talk_cooldown_s", "seconds", "camera"],
+      ["look_to_talk_greet", "bool", "camera"],
+      ["stop_gesture", "bool", "camera"],
       ["brain_zoom_max", "factor", "camera"],
       ["voice_idle_s", "seconds", "voice"],
       ["realtime_idle_s", "seconds", "voice"],
@@ -124,7 +128,7 @@ describe("describeMenuPrefs (tray rows: seconds and factor)", () => {
       key: "brain_zoom_max",
       kind: "factor",
       group: "camera",
-      group_label: "鏡頭",
+      group_label: "鏡頭與手勢",
       label: "靠近時電子腦放大倍率",
       value: 2,
       value_label: "2 倍",
@@ -159,9 +163,71 @@ describe("describeMenuPrefs (tray rows: seconds and factor)", () => {
     expect(noLook.note).toBe(CAMERA_PREFS.brain_zoom_max.hint);
   });
 
-  it("describeSeconds is describeMenuPrefs without the factor rows", () => {
+  it("describeSeconds is describeMenuPrefs without the factor and bool rows", () => {
     const source = { camera, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime };
     expect(describeSeconds(source)).toEqual(describeMenuPrefs(source).filter((r) => r.kind === "seconds"));
+  });
+});
+
+describe("describeMenuPrefs (tray rows: camera switches)", () => {
+  function boolRows(rows: MenuPrefSetting[]): MenuBoolSetting[] {
+    return rows.filter((r): r is MenuBoolSetting => r.kind === "bool");
+  }
+  const unavailable = { available: false, model: "gpt-realtime", detail: "未設定 OPENAI_API_KEY" };
+
+  it("one checkbox row per CAMERA_PREFS bool, in table order, with the live value and the spec's label and hint", () => {
+    const rows = boolRows(describeMenuPrefs({ camera: { ...camera, stop_gesture: false }, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime }));
+    expect(rows.map((r) => r.key)).toEqual(Object.entries(CAMERA_PREFS).filter(([, s]) => s.kind === "bool").map(([k]) => k));
+    expect(rows.map((r) => [r.label, r.value, r.value_label])).toEqual([
+      ["鏡頭", true, "開"],
+      ["看著說話", true, "開"],
+      ["看著說話時先打招呼", true, "開"],
+      ["手掌停止播報", false, "關"],
+    ]);
+    for (const r of rows) {
+      expect(r).toMatchObject({ group: "camera", group_label: "鏡頭與手勢", disabled_reason: null, write_path: "/api/settings/camera" });
+      expect(r.note).toBe(CAMERA_PREFS[r.key].hint);
+      expect(r).not.toHaveProperty("options");
+    }
+  });
+
+  it("all switches are disabled with CAMERA_DISABLED_REASON when the camera is not enabled or not configured (defaults shown)", () => {
+    for (const source of [{ camera: { ...camera, enabled: false } }, {}]) {
+      const rows = boolRows(describeMenuPrefs({ ...source, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime }));
+      expect(rows).toHaveLength(4);
+      expect(rows.every((r) => r.disabled_reason === CAMERA_DISABLED_REASON)).toBe(true);
+    }
+    const none = boolRows(describeMenuPrefs({ voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime }));
+    expect(none.map((r) => r.value)).toEqual([true, true, true, true]);
+  });
+
+  it("look_to_talk notes that realtime voice is needed when it is unavailable (same hint as the settings page)", () => {
+    for (const rt of [unavailable, undefined]) {
+      const row = boolRows(describeMenuPrefs({ camera, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime: rt })).find((r) => r.key === "look_to_talk")!;
+      expect(row).toMatchObject({ disabled_reason: null, note: `${CAMERA_PREFS.look_to_talk.hint}；需要即時語音（目前不可用）` });
+    }
+  });
+
+  it("camera switched off: the other switches note that, like the zoom row; the 鏡頭 switch keeps its hint", () => {
+    const rows = boolRows(describeMenuPrefs({ camera: { ...camera, active: false, look_to_talk: false }, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime: unavailable }));
+    expect(rows.map((r) => [r.key, r.disabled_reason, r.note])).toEqual([
+      ["active", null, CAMERA_PREFS.active.hint],
+      ["look_to_talk", null, "鏡頭目前關閉，這個開關暫時用不到"],
+      ["look_to_talk_greet", null, "鏡頭目前關閉，這個開關暫時用不到"],
+      ["stop_gesture", null, "鏡頭目前關閉，這個開關暫時用不到"],
+    ]);
+  });
+
+  it("cameraPreviewDisabledReason: not enabled → CAMERA_DISABLED_REASON; switched off → 「鏡頭目前關閉…」; on → null", () => {
+    expect(cameraPreviewDisabledReason(undefined)).toBe(CAMERA_DISABLED_REASON);
+    expect(cameraPreviewDisabledReason({ ...camera, enabled: false })).toBe(CAMERA_DISABLED_REASON);
+    expect(cameraPreviewDisabledReason({ ...camera, active: false })).toBe(CAMERA_OFF_PREVIEW_REASON);
+    expect(cameraPreviewDisabledReason(camera)).toBeNull();
+  });
+
+  it("the greeting switch notes when look-to-talk is off, without disabling it", () => {
+    const row = boolRows(describeMenuPrefs({ camera: { ...camera, look_to_talk: false }, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime })).find((r) => r.key === "look_to_talk_greet")!;
+    expect(row).toMatchObject({ disabled_reason: null, value: true, note: "看著說話目前關閉，這個開關暫時用不到" });
   });
 });
 
@@ -169,8 +235,8 @@ describe("describeSeconds", () => {
   it("one row per seconds spec in table order, each with exactly one checked option equal to the live value", () => {
     const rows = describeSeconds({ camera, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime });
     expect(rows.map((r) => [r.key, r.group, r.group_label, r.write_path])).toEqual([
-      ["look_to_talk_s", "camera", "鏡頭", "/api/settings/camera"],
-      ["look_to_talk_cooldown_s", "camera", "鏡頭", "/api/settings/camera"],
+      ["look_to_talk_s", "camera", "鏡頭與手勢", "/api/settings/camera"],
+      ["look_to_talk_cooldown_s", "camera", "鏡頭與手勢", "/api/settings/camera"],
       ["voice_idle_s", "voice", "語音", "/api/settings/voice"],
       ["realtime_idle_s", "voice", "語音", "/api/settings/voice"],
     ]);
