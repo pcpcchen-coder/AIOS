@@ -72,6 +72,8 @@ export interface CodexResponsesOptions {
   model: string | null;
   /** NOUS_CODEX_CLIENT_VERSION，/models 的 client_version。 */
   clientVersion: string;
+  /** User-Agent 的版本（Nous 自己的版本）；未給時用 clientVersion。 */
+  userAgentVersion?: string;
   /** 每一輪的時限：涵蓋查模型清單（第一次）＋連線＋串流。 */
   turnTimeoutMs: number;
   /** 共用的模型快取（交辦與上網查詢用同一份，/models 只查一次）。 */
@@ -251,7 +253,7 @@ export class CodexResponses {
         try {
           res = await this.fetch(url, {
             ...init,
-            headers: { ...(init.headers as Record<string, string> | undefined), ...auth.headers(), originator: NOUS_ORIGINATOR, "User-Agent": `nous/${this.options.clientVersion}` },
+            headers: { ...(init.headers as Record<string, string> | undefined), ...auth.headers(), originator: NOUS_ORIGINATOR, "User-Agent": `nous/${this.options.userAgentVersion ?? this.options.clientVersion}` },
             signal: combined,
           });
         } catch {
