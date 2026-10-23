@@ -1,5 +1,5 @@
 import type { CameraSettings } from "./sense.ts";
-import type { SecondsSetting } from "./seconds-menu.ts";
+import type { MenuPrefSetting } from "./seconds-menu.ts";
 import type { VoicePrefs } from "./voice-prefs.ts";
 import type { RealtimeRouteFields, RealtimeServerEvent } from "./realtime-route.ts";
 // 前後端共用的資料契約（原型版）。
@@ -111,8 +111,8 @@ export interface SettingsView {
   camera?: CameraSettings;
   /** 語音閒置秒數（voice.json）；本機核心一定提供，未提供時用 DEFAULT_VOICE_PREFS。 */
   voice?: VoicePrefs;
-  /** 所有秒數設定，給選單列直接畫；由核心推導（describeSeconds）。 */
-  seconds?: SecondsSetting[];
+  /** 所有數值設定（秒數與倍率，kind 區分），給選單列直接畫；由核心推導（describeMenuPrefs）。欄位名沿用舊名。 */
+  seconds?: MenuPrefSetting[];
 }
 
 /** API key 路徑（RealtimeBridge.info）提供的欄位；路徑與計費欄位由 RealtimeSessions 補上。 */

@@ -440,7 +440,7 @@ describe("HTTP API", () => {
     const none = await start();
     const defaults = (await (await fetch(`${none.base}/api/settings`)).json()) as SettingsView;
     expect(defaults.voice).toEqual({ voice_idle_s: 90, realtime_idle_s: 120 });
-    expect(defaults.seconds?.map((r) => r.key)).toEqual(["look_to_talk_s", "look_to_talk_cooldown_s", "voice_idle_s", "realtime_idle_s"]);
+    expect(defaults.seconds?.map((r) => r.key)).toEqual(["look_to_talk_s", "look_to_talk_cooldown_s", "brain_zoom_max", "voice_idle_s", "realtime_idle_s"]);
     expect(defaults.seconds?.filter((r) => r.group === "camera").every((r) => r.disabled_reason !== null)).toBe(true);
     expect((await none.post("/api/settings/voice", { voice_idle_s: 60 })).status).toBe(409);
     await new Promise((r) => server!.close(r));
@@ -503,6 +503,17 @@ describe("HTTP API", () => {
     const row = view.seconds!.find((r) => r.key === "look_to_talk_s")!;
     expect(row).toMatchObject({ value: 1.6, disabled_reason: null, write_path: "/api/settings/camera" });
     expect(row.options.find((o) => o.checked)).toEqual({ value: 1.6, label: "1.6 秒（目前）", checked: true });
+  });
+
+  it("靠近放大倍率經 POST /api/settings/camera 保存：嚴格驗證、寫入 camera.json、回應的倍率列跟著更新", async () => {
+    const { post, dir } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" } });
+    for (const bad of [3.5, 0.5, 1.25, "2"]) expect((await post("/api/settings/camera", { brain_zoom_max: bad })).status).toBe(400);
+    const view = (await (await post("/api/settings/camera", { brain_zoom_max: 2.7 })).json()) as SettingsView;
+    expect(view.camera?.brain_zoom_max).toBe(2.7);
+    const row = view.seconds!.find((r) => r.key === "brain_zoom_max")!;
+    expect(row).toMatchObject({ kind: "factor", value: 2.7, value_label: "2.7 倍", disabled_reason: null, write_path: "/api/settings/camera" });
+    expect(row.options.find((o) => o.checked)).toEqual({ value: 2.7, label: "2.7 倍（目前）", checked: true });
+    expect(JSON.parse(readFileSync(join(dir, "camera.json"), "utf8")).prefs).toEqual({ brain_zoom_max: 2.7 });
   });
 
   it("語音指令表頁：在 SPA fallback 之前、沒有 script、CSP 只允許自己的 inline style，依目前設定標註前提", async () => {

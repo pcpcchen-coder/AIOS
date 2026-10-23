@@ -80,13 +80,56 @@ const SHAPE_SCALE = 1.18;
 const NEIGHBORS = 3;
 const FRAME_MS = 1000 / 30;
 const MAX_PULSES = 70;
-const ORBIT_FIT_EXTENT = 1.7;
+/** 外圈軌道（1.62 R）加呼吸（1.018）與餘裕：不放大時整個圖形，包含淡淡的軌道，都留在視窗內。 */
+export const ORBIT_FIT_EXTENT = 1.7;
+/**
+ * 靠近放大時要留在視窗內的範圍（相對於 R，水平 x／垂直 y）。只有淡淡的裝飾軌道可以超出視窗邊緣：
+ * - 腦形本身：投影後最遠約水平 1.22 R（左；右 1.19 R）、往上 1.07 R、往下只有 0.78 R（含呼吸與粒子大小；
+ *   tests/brain-distance.test.ts 檢查粒子不出視窗），取 1.25／1.1。上下不對稱：限制放大的是往上的 1.07 R，
+ *   下緣離底邊還有空間（1920×1080、R = 461.5 時下緣約 865 px）。
+ * - 有真實進度環時（progress 不是 null）：進度環 1.45 R 加呼吸與餘裕，取 1.5，進度的起點（正上方）不會被切掉。
+ * 若仍用 ORBIT_FIT_EXTENT，16:9 視窗最多只能放大約 1.38 倍，看不出差別。聆聽光環（1.32 R）在放大很多時上下緣可能超出視窗，左右仍看得到。
+ */
+export const ZOOM_FIT_EXTENT = { body: { x: 1.25, y: 1.1 }, progress: { x: 1.5, y: 1.5 } } as const;
+
+/**
+ * 點擊範圍（相對於 R）：腦形量到的範圍加一點餘裕。原本是 1.35 R 的圓，2 倍時半徑 583 px（1920×1080），
+ * 幾乎蓋滿畫面，點腦形下方的空白也會開對話。腦形上下不對稱，所以上、下分開：
+ * - 量到的腦形（tests/brain-distance.test.ts 用粒子範圍檢查）：左 1.22 R、右 1.19 R、上 1.07 R、下 0.78 R。
+ * - 加 0.03–0.07 R 餘裕（1 倍時 R = 216 px，約 7–16 px）：水平 1.25、上 1.1、下 0.85。1 倍時點腦形邊緣仍點得到。
+ */
+export const HIT_EXTENT = { x: 1.25, up: 1.1, down: 0.85 } as const;
 
 /** 與 CSS 共用的版面參數：中心高度比例與半徑（相對於 min(寬, 高)）。 */
 export const LAYOUT = {
   center: { cy: 0.47, r: 0.2 },
   top: { cy: 0.12, r: 0.07 },
 } as const;
+
+/**
+ * 電子腦的中心與半徑（CSS 像素）。兩個比例分開：
+ * - 待機（center）只用 zoom：靠近放大（controller.ts brainZoom，George 2026-10-23）。不再跟字級的 D ÷ 2 m。
+ * - 頂端縮略圖（top）仍用字級的 textScale：內容面板的位置（--surface-top × --distance-scale）跟著它，
+ *   放大縮略圖會蓋住面板。
+ * 半徑受視窗限制：不放大時整個軌道都在視窗內（ORBIT_FIT_EXTENT），放大時改以腦形或進度環為界（ZOOM_FIT_EXTENT）。
+ */
+export function brainGeometry(
+  width: number,
+  height: number,
+  layout: BrainVisualState["layout"],
+  zoom: number,
+  textScale: number,
+  progressRing = false,
+): { cx: number; cy: number; r: number } {
+  const l = LAYOUT[layout];
+  const scale = layout === "center" ? zoom : textScale;
+  const cx = width / 2;
+  const cy = height * l.cy * (layout === "top" ? textScale : 1);
+  const requested = Math.min(width, height) * l.r * scale;
+  const fit = layout === "center" && zoom > 1 ? ZOOM_FIT_EXTENT[progressRing ? "progress" : "body"] : { x: ORBIT_FIT_EXTENT, y: ORBIT_FIT_EXTENT };
+  const room = Math.min(cx / fit.x, Math.min(cy, height - cy) / fit.y);
+  return { cx, cy, r: Math.max(0, Math.min(requested, room)) };
+}
 
 export class Brain {
   private ctx: CanvasRenderingContext2D;
@@ -112,7 +155,12 @@ export class Brain {
   private cx = 0;
   private cy = 0;
   private radius = 0;
+  /** 字級的距離比例（D ÷ 2 m）；只用在頂端縮略圖。 */
   private distanceScale = 1;
+  /** 待機圖形的靠近放大倍率（brainZoom）。 */
+  private zoom = 1;
+  /** 已發布到 CSS 的 --brain-r（跟著畫面上的半徑一起緩動，下方的字幕與輸入框才不會先跳）。 */
+  private ambientRadius = 0;
   private shownProgress = 0;
 
   private width = 0;
@@ -154,11 +202,18 @@ export class Brain {
     cancelAnimationFrame(this.raf);
   }
 
+  /** 字級的距離比例（SenseHooks.setScale）：只影響頂端縮略圖。 */
   setDistanceScale(scale: number): void {
-    const next = Number.isFinite(scale) && scale > 0 ? scale : 1;
-    if (next === this.distanceScale) return;
-    this.distanceScale = next;
-    this.publishAmbientRadius();
+    this.distanceScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  }
+
+  /**
+   * 待機圖形的靠近放大倍率（SenseHooks.setBrainZoom）。只由實測距離事件與使用者設定驅動；
+   * 畫面在 step() 裡緩動到新的大小：每幀 k = min(1, dt × 5)，30 fps 時時間常數約 0.2 秒、約 0.55 秒到 95%
+   * （tests/brain-distance.test.ts 的 easing 測試）；減少動態效果時直接跳到。
+   */
+  setProximityZoom(factor: number): void {
+    this.zoom = Number.isFinite(factor) && factor > 0 ? factor : 1;
   }
 
   setState(state: BrainVisualState): void {
@@ -195,22 +250,23 @@ export class Brain {
     if (kind === "error") this.tint = { color: AMBER, strength: 1 };
   }
 
-  /** 點擊座標（CSS 像素）是否落在電子腦上。 */
+  /** 點擊座標（CSS 像素）是否落在電子腦上：貼著腦形的橢圓（HIT_EXTENT），上下分開。 */
   hitTest(x: number, y: number): boolean {
-    return Math.hypot(x - this.cx, y - this.cy) < this.radius * 1.35;
+    const dy = y - this.cy;
+    const rx = this.radius * HIT_EXTENT.x;
+    const ry = this.radius * (dy < 0 ? HIT_EXTENT.up : HIT_EXTENT.down);
+    if (rx <= 0 || ry <= 0) return false;
+    return ((x - this.cx) / rx) ** 2 + (dy / ry) ** 2 < 1;
   }
 
   private target(layout = this.state.layout): { cx: number; cy: number; r: number } {
-    const l = LAYOUT[layout];
-    const cx = this.width / 2;
-    const cy = this.height * l.cy * (layout === "top" ? this.distanceScale : 1);
-    const requested = Math.min(this.width, this.height) * l.r * this.distanceScale;
-    const room = Math.min(cx, cy, this.height - cy);
-    return { cx, cy, r: Math.max(0, Math.min(requested, room / ORBIT_FIT_EXTENT)) };
+    return brainGeometry(this.width, this.height, layout, this.zoom, this.distanceScale, this.state.progress !== null);
   }
 
-  private publishAmbientRadius(): void {
-    document.documentElement.style.setProperty("--brain-r", `${this.target("center").r}px`);
+  /** 待機半徑發布到 CSS（--brain-r）：下方字幕、輸入框依它排位置。 */
+  private publishAmbientRadius(r: number): void {
+    this.ambientRadius = r;
+    document.documentElement.style.setProperty("--brain-r", `${r}px`);
   }
 
   private resize(): void {
@@ -222,7 +278,7 @@ export class Brain {
     this.canvas.style.width = `${this.width}px`;
     this.canvas.style.height = `${this.height}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.publishAmbientRadius();
+    this.publishAmbientRadius(this.target("center").r);
   }
 
   private buildBrain(): void {
@@ -446,6 +502,12 @@ export class Brain {
     this.cx += (target.cx - this.cx) * k;
     this.cy += (target.cy - this.cy) * k;
     this.radius += (target.r - this.radius) * k;
+    // CSS 的待機半徑用同樣的緩動；差不到 0.5 px 時直接到位，避免每一幀都改樣式。
+    const ambient = this.target("center").r;
+    if (ambient !== this.ambientRadius) {
+      const next = this.ambientRadius + (ambient - this.ambientRadius) * k;
+      this.publishAmbientRadius(Math.abs(ambient - next) < 0.5 ? ambient : next);
+    }
 
     if (this.state.progress !== null) {
       this.shownProgress += (this.state.progress - this.shownProgress) * (reduced ? 1 : Math.min(1, dt * 4));

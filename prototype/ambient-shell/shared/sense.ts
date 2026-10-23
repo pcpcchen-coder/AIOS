@@ -44,12 +44,24 @@ export interface CameraPrefs {
   look_to_talk_cooldown_s: number;
   /** 手掌停止播報：舉起張開的手掌停止 Nous 說話（不取消任務）。 */
   stop_gesture: boolean;
+  /**
+   * 靠近時電子腦的最大放大倍率（George 2026-10-23）：站在 BRAIN_ZOOM_NEAR_M 以內時電子腦放大到這個倍率，
+   * BRAIN_ZOOM_FAR_M 以外是 1 倍（src/sense/controller.ts brainZoom）。1 = 不放大。字級不受影響（仍是 D ÷ 2 m）。
+   */
+  brain_zoom_max: number;
 }
 
 /** SettingsView.camera 的形狀。 */
 export type CameraSettings = CameraInstall & CameraPrefs;
 
 export type CameraPrefsPatch = Partial<CameraPrefs>;
+
+/**
+ * 電子腦靠近放大的距離端點（公尺）：FAR 以外 1 倍，NEAR 以內到使用者設定的最大倍率，中間依距離線性內插
+ * （src/sense/controller.ts brainZoom）。PresenceTracker 只回報 0.5–4 m，NEAR 取 0.6 m 讓最大倍率實際到得了。
+ */
+export const BRAIN_ZOOM_NEAR_M = 0.6;
+export const BRAIN_ZOOM_FAR_M = 2.5;
 
 /**
  * 唯一的使用者設定清單：預設值、伺服器驗證、設定畫面都由此推導；順序就是設定畫面的順序。
@@ -67,9 +79,17 @@ export const CAMERA_PREFS = {
     label: "對話結束後暫停", hint: "這段時間內不再自動開始，避免說完再見又被打開",
   },
   stop_gesture: { kind: "bool", default: true, label: "手掌停止播報", hint: "舉起張開的手掌停止 Nous 說話（不取消任務）" },
+  brain_zoom_max: {
+    kind: "factor", default: 2, min: 1, max: 3, step: 0.1, presets: [1, 1.5, 2, 2.5, 3],
+    label: "靠近時電子腦放大倍率",
+    hint: `站到 ${BRAIN_ZOOM_NEAR_M} m 以內放大到這個倍率，${BRAIN_ZOOM_FAR_M} m 以外不放大；1 倍＝不放大，字級不受影響`,
+  },
 } as const satisfies PrefSpecs<CameraPrefs>;
 
 export type CameraPrefKey = keyof CameraPrefs;
+
+/** 數值（秒數或倍率）的鏡頭設定鍵。 */
+export type CameraNumberKey = { [K in CameraPrefKey]: CameraPrefs[K] extends number ? K : never }[CameraPrefKey];
 
 export const CAMERA_PREF_KEYS = Object.keys(CAMERA_PREFS) as CameraPrefKey[];
 
@@ -79,14 +99,14 @@ export class CameraPatchError extends Error {}
 
 /**
  * 邊界驗證（HTTP body、camera.json）：只接受 CAMERA_PREFS 裡的鍵；開關必須是 boolean；
- * 秒數必須在範圍內且落在 step 上。不默默夾住數值，錯誤一律丟 CameraPatchError（→ HTTP 400）。
+ * 秒數與倍率必須在範圍內且落在 step 上。不默默夾住數值，錯誤一律丟 CameraPatchError（→ HTTP 400）。
  */
 export function parseCameraPatch(input: unknown): CameraPrefsPatch {
   return parsePrefsPatch<CameraPrefs>(CAMERA_PREFS, input, { noun: "鏡頭設定", make: (m) => new CameraPatchError(m) });
 }
 
 /** 設定畫面的 −／+：移動一格並夾在範圍內。 */
-export function stepCameraPref(key: "look_to_talk_s" | "look_to_talk_cooldown_s", current: number, direction: 1 | -1): number {
+export function stepCameraPref(key: CameraNumberKey, current: number, direction: 1 | -1): number {
   return stepPref(CAMERA_PREFS[key], current, direction);
 }
 

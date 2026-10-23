@@ -2,6 +2,8 @@
 // 規則：鏡頭只提供指向與在場資訊；手勢與指向都不能觸發外部動作（確認只認語音固定語句）。
 
 import {
+  BRAIN_ZOOM_FAR_M,
+  BRAIN_ZOOM_NEAR_M,
   DEFAULT_CAMERA_PREFS,
   lookToTalkDwellMs,
   type CameraPrefs,
@@ -14,7 +16,7 @@ import {
 import { AttentionTracker, LookToTalk, type LookTiming } from "./trackers.ts";
 
 /** 控制器每次 tick／handle 都重新讀的使用者設定（不快取，設定改變下一次 tick 就生效）。 */
-export type SenseTuning = Pick<CameraPrefs, "look_to_talk" | "look_to_talk_s" | "look_to_talk_cooldown_s" | "stop_gesture">;
+export type SenseTuning = Pick<CameraPrefs, "look_to_talk" | "look_to_talk_s" | "look_to_talk_cooldown_s" | "stop_gesture" | "brain_zoom_max">;
 
 export interface SenseHooks {
   now(): number;
@@ -29,6 +31,8 @@ export interface SenseHooks {
   onLeave(): void;
   /** 依實測距離縮放字級（docs/10 §2：× D ÷ 2.0 m）。 */
   setScale(scale: number): void;
+  /** 電子腦待機圖形的靠近放大倍率（brainZoom；1 = 不放大）。和字級分開：靠近時放大。 */
+  setBrainZoom(factor: number): void;
   setPresence(present: boolean): void;
   setFacing(facing: boolean): void;
   /** 指向的畫面區塊（使用者看到的左／中／右）；null 為清除。 */
@@ -44,9 +48,23 @@ export function distanceScale(distanceM: number | null): number {
   return Math.min(1.5, Math.max(0.75, Math.round((distanceM / 2) * 100) / 100));
 }
 
+/**
+ * 電子腦的靠近放大（George 2026-10-23，取代 docs/11 §57 對電子腦的距離比例；字級仍用 distanceScale）：
+ * BRAIN_ZOOM_FAR_M（2.5 m）以外 1 倍，BRAIN_ZOOM_NEAR_M（0.6 m）以內 max 倍，中間依距離線性內插，四捨五入到 0.01。
+ * 線性：每靠近 1 m 放大 (max − 1) ÷ 1.9 倍，整段都看得出變化。距離為空、max 不合法或 ≤ 1 時為 1。
+ */
+export function brainZoom(distanceM: number | null, max: number): number {
+  if (distanceM === null || !Number.isFinite(distanceM) || !Number.isFinite(max) || max <= 1) return 1;
+  const t = Math.min(1, Math.max(0, (BRAIN_ZOOM_FAR_M - distanceM) / (BRAIN_ZOOM_FAR_M - BRAIN_ZOOM_NEAR_M)));
+  return Math.round((1 + (max - 1) * t) * 100) / 100;
+}
+
 export class SenseController {
   private present = false;
   private facing = false;
+  /** 最近一次在場事件的實測距離；離開、鏡頭停止時清成 null。設定改了在下一次 tick 重算放大倍率。 */
+  private distance: number | null = null;
+  private zoom = 1;
   private readonly look = new LookToTalk();
 
   constructor(private readonly hooks: SenseHooks) {}
@@ -62,10 +80,14 @@ export class SenseController {
             this.hooks.setFacing(false);
             this.hooks.pointTo(null);
             this.hooks.setScale(1);
+            this.distance = null;
             this.hooks.onLeave();
           }
         }
-        if (event.present) this.hooks.setScale(distanceScale(event.distance_m));
+        if (event.present) {
+          this.hooks.setScale(distanceScale(event.distance_m));
+          this.distance = event.distance_m;
+        }
         break;
       case "attention":
         this.facing = event.facing && this.present;
@@ -86,15 +108,17 @@ export class SenseController {
           this.hooks.setFacing(false);
           this.hooks.pointTo(null);
           this.hooks.setScale(1);
+          this.distance = null;
         }
         break;
     }
-    this.tick();
+    this.tick(); // 也依新的距離套用電子腦放大倍率
   }
 
   /** 定期呼叫（約每 200 ms）：在場且面向螢幕夠久時，自動開始即時語音。 */
   tick(): void {
     const prefs = this.prefs();
+    this.applyZoom(prefs);
     // 不能自動開始時不累計停留，也不設冷卻（否則重新打開後會有看不見的冷卻）。
     if (!prefs.look_to_talk || !this.hooks.canAutoTalk()) {
       this.look.reset();
@@ -111,6 +135,14 @@ export class SenseController {
   /** 對話結束時呼叫，避免說完「再見」又被立刻自動開啟。 */
   conversationEnded(): void {
     this.look.ended(this.hooks.now());
+  }
+
+  /** 只在倍率改變時通知（tick 每 200 ms 呼叫一次，設定改了下一次 tick 就套用）。 */
+  private applyZoom(prefs = this.prefs()): void {
+    const zoom = brainZoom(this.distance, prefs.brain_zoom_max);
+    if (zoom === this.zoom) return;
+    this.zoom = zoom;
+    this.hooks.setBrainZoom(zoom);
   }
 
   private prefs(): SenseTuning {

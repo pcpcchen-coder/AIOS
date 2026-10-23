@@ -294,8 +294,8 @@ function radio(label, checked, click, enabled = true) {
 }
 
 /**
- * 「秒數設定」子選單：照核心給的 settings.seconds 畫（鍵、範圍、選項、標籤、寫入路徑都由核心推導），
- * 這裡不寫任何秒數。不能用時，原因放在子選單第一項（sublabel 只有 macOS 14.4 以上才顯示）。
+ * 「秒數與倍率設定」子選單：照核心給的 settings.seconds 畫（秒數與倍率的列；鍵、範圍、選項、標籤、單位、
+ * 寫入路徑都由核心推導），這裡不寫任何秒數或倍率。不能用時，原因放在子選單第一項（sublabel 只有 macOS 14.4 以上才顯示）。
  */
 function secondsMenu() {
   const rows = settings?.seconds;
@@ -314,7 +314,7 @@ function secondsMenu() {
       sublabel: row.disabled_reason ?? row.note,
       submenu: [
         ...(enabled ? [] : [{ label: row.disabled_reason, enabled: false }, { type: "separator" }]),
-        ...row.options.map((o) => radio(o.label, o.checked, () => void setSeconds(row, o.value), enabled)),
+        ...row.options.map((o) => radio(o.label, o.checked, () => void setMenuPref(row, o.value), enabled)),
         { type: "separator" },
         { label: row.note, enabled: false },
       ],
@@ -340,11 +340,11 @@ async function codexLogin() {
 }
 
 /** 送出後直接套用回應（不等 15 秒的輪詢）；失敗時說明真實原因，並重新讀取實際保存的值。 */
-async function setSeconds(row, value) {
+async function setMenuPref(row, value) {
   try {
     settings = await api(row.write_path, { [row.key]: value });
   } catch (err) {
-    dialog.showErrorBox("秒數沒有保存", String(err.message ?? err));
+    dialog.showErrorBox(row.kind === "factor" ? "倍率沒有保存" : "秒數沒有保存", String(err.message ?? err));
     await refreshSettings();
     return;
   }
@@ -480,7 +480,7 @@ function rebuildMenu() {
         }),
       ),
     },
-    { label: "秒數設定", submenu: secondsMenu() },
+    { label: "秒數與倍率設定", submenu: secondsMenu() },
     { label: "語音指令表", click: openCommandsWindow },
     { type: "separator" },
     {

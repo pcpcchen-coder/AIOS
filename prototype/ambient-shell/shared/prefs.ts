@@ -8,8 +8,8 @@ export interface BoolPrefSpec {
   hint: string;
 }
 
-export interface SecondsPrefSpec {
-  kind: "seconds";
+/** 數值設定共用的欄位：秒數與倍率都用同一套驗證、−／+ 與選單選項。 */
+interface NumberPrefFields {
   default: number;
   min: number;
   max: number;
@@ -23,13 +23,27 @@ export interface SecondsPrefSpec {
   hint: string;
 }
 
-export type PrefSpec<T> = T extends boolean ? BoolPrefSpec : SecondsPrefSpec;
+export interface SecondsPrefSpec extends NumberPrefFields {
+  kind: "seconds";
+}
+
+/** 倍率（例如「靠近時電子腦放大倍率」）：顯示成「2 倍」，驗證規則與秒數相同。 */
+export interface FactorPrefSpec extends NumberPrefFields {
+  kind: "factor";
+}
+
+export type NumberPrefSpec = SecondsPrefSpec | FactorPrefSpec;
+
+export type PrefSpec<T> = T extends boolean ? BoolPrefSpec : NumberPrefSpec;
 
 /** 一張設定表：每個鍵一個規格，順序就是設定畫面與選單的順序。 */
 export type PrefSpecs<P> = { [K in keyof P]: PrefSpec<P[K]> };
 
 /** 表裡的秒數鍵。 */
 export type SecondsKeyOf<S> = { [K in keyof S]: S[K] extends { kind: "seconds" } ? K : never }[keyof S];
+
+/** 表裡的倍率鍵。 */
+export type FactorKeyOf<S> = { [K in keyof S]: S[K] extends { kind: "factor" } ? K : never }[keyof S];
 
 export interface PatchErrors {
   /** 訊息裡的名稱：「鏡頭設定」「語音設定」。 */
@@ -38,23 +52,28 @@ export interface PatchErrors {
 }
 
 /**
- * 邊界驗證（HTTP body、設定檔）：只接受表裡的鍵；開關必須是 boolean；秒數必須在範圍內且落在 step 上。
- * 不默默夾住數值，錯誤一律用 errors.make 丟出（→ HTTP 400）。通過的秒數存成格點上的值（onStep 容許 1e-6 的誤差，
- * 90.000001 存成 90），選單與設定畫面才不會把同一個值當成預設與「（目前）」各列一次。
+ * 邊界驗證（HTTP body、設定檔）：只接受表裡的鍵；開關必須是 boolean；秒數與倍率必須在範圍內且落在 step 上。
+ * 不默默夾住數值，錯誤一律用 errors.make 丟出（→ HTTP 400）。通過的數值存成格點上的值（onStep 容許 1e-6 的誤差，
+ * 90.000001 存成 90；範圍檢查用對到格點後的值，兩端同樣容許），選單與設定畫面才不會把同一個值當成預設與「（目前）」各列一次。
  */
 export function parsePrefsPatch<P>(specs: PrefSpecs<P>, input: unknown, errors: PatchErrors): Partial<P> {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw errors.make(`${errors.noun}必須是 JSON 物件`);
-  const table = specs as Record<string, BoolPrefSpec | SecondsPrefSpec>;
+  const table = specs as Record<string, BoolPrefSpec | NumberPrefSpec>;
   const patch: Record<string, boolean | number> = {};
   for (const [key, value] of Object.entries(input)) {
     if (!Object.hasOwn(table, key)) throw errors.make(`未知的${errors.noun}：${key}`);
     const spec = table[key];
     if (spec.kind === "bool") {
       if (typeof value !== "boolean") throw errors.make(`${key} 必須是 true 或 false`);
-    } else if (typeof value !== "number" || !Number.isFinite(value) || value < spec.min || value > spec.max || !onStep(value, spec.step)) {
-      throw errors.make(`${key} 必須是 ${spec.min}–${spec.max} 秒、間隔 ${spec.step}`);
+      patch[key] = value;
+      continue;
     }
-    patch[key] = spec.kind === "seconds" ? snapToStep(value as number, spec.step) : value;
+    // 先對到格點再檢查範圍：範圍兩端與 step 用同一個 1e-6 容許誤差（2.9 + 0.1 = 3.0000000000000004 存成 3）。
+    const snapped = typeof value === "number" && Number.isFinite(value) && onStep(value, spec.step) ? snapToStep(value, spec.step) : null;
+    if (snapped === null || snapped < spec.min || snapped > spec.max) {
+      throw errors.make(`${key} 必須是 ${spec.min}–${spec.max} ${spec.kind === "factor" ? "倍" : "秒"}、間隔 ${spec.step}`);
+    }
+    patch[key] = snapped;
   }
   return patch as Partial<P>;
 }
@@ -71,7 +90,7 @@ export function snapToStep(value: number, step: number): number {
 }
 
 /** 設定畫面的 −／+：移動一格並夾在範圍內。 */
-export function stepPref(spec: SecondsPrefSpec, current: number, direction: 1 | -1): number {
+export function stepPref(spec: NumberPrefSpec, current: number, direction: 1 | -1): number {
   const next = snapToStep(current + direction * spec.step, spec.step);
   return Math.min(spec.max, Math.max(spec.min, next));
 }
@@ -87,4 +106,14 @@ export function formatSeconds(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const rest = Number((seconds - minutes * 60).toFixed(3));
   return rest === 0 ? `${minutes} 分鐘` : `${minutes} 分 ${rest} 秒`;
+}
+
+/** 「1 倍」「1.5 倍」「2 倍」：倍率設定的選單、設定畫面共用。 */
+export function formatFactor(factor: number): string {
+  return `${Number(factor.toFixed(3))} 倍`;
+}
+
+/** 依規格的種類格式化數值設定。 */
+export function formatNumberPref(spec: NumberPrefSpec, value: number): string {
+  return spec.kind === "factor" ? formatFactor(value) : formatSeconds(value);
 }
