@@ -167,6 +167,7 @@ export class LiveToolCaller {
       let ended = false;
       for (let turn = 0; turn < CALLER_LIMITS.maxTurns; turn++) {
         const result = await untilAborted(this.options.responses.turn({ instructions, input, tools: specs, signal: combined }), combined);
+        this.options.log?.(`即時語音（ChatGPT 方案）：交辦第 ${turn + 1} 輪（${result.model}）${result.calls.length ? `要呼叫 ${result.calls.map((c) => c.name).join("、")}` : "直接回答，沒有呼叫工具"}`);
         if (!result.calls.length) {
           const text = result.text || (tools.length ? "處理好了，但沒有可以轉述的結果。" : "我沒有聽懂，請再說一次。");
           return ended ? { ok: true, channel: "speakable", text, tools, ended: true } : { ok: true, channel: "speakable", text, tools };
@@ -216,6 +217,7 @@ export class LiveToolCaller {
       if (err instanceof HostGone) return { ok: false, channel: "speakable", text: sideEffectUnsettled ? `${RESULT_UNKNOWN_TEXT}。` : failed("沒有完成：畫面已離開。"), reason: sideEffectUnsettled ? "unknown" : "closed", tools };
       if (err instanceof CodexError) {
         const failure = err.failure;
+        this.options.log?.(`即時語音（ChatGPT 方案）：交辦呼叫 Codex 失敗（${failure.kind}${"status" in failure ? ` ${String(failure.status)}` : ""}）：${err.message}`);
         // 有副作用的指令已經送出、結果不明：不管之後哪裡失敗，都不能說沒做。
         if (sideEffectUnsettled) return { ok: false, channel: "speakable", text: `${RESULT_UNKNOWN_TEXT}。`, reason: "unknown", tools };
         if (failure.kind === "usage_limit") return { ok: false, channel: "speakable", text: failed(`沒有完成：${err.message}。`), reason: "usage_limit", tools };

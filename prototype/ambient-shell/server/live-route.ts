@@ -327,6 +327,8 @@ class LiveCall implements RouteCall {
   private readonly transcript: TranscriptTurn[] = [];
   /** 這個工作階段見過的交辦 ID（永久保留）：晚到的重複事件不會再跑一次。 */
   private readonly seen = new Set<string>();
+  /** 診斷用：已記過的未處理事件類型。 */
+  private readonly unhandled = new Set<string>();
   /** 交辦一個接一個（兩個家電請求不會交錯，同 OpenClaw）。 */
   private chain: Promise<void> = Promise.resolve();
   private readonly abort = new AbortController();
@@ -354,6 +356,7 @@ class LiveCall implements RouteCall {
       }
       const frameless = parseFramelessEvent(parsed);
       if (frameless) this.onEvent(frameless);
+      else this.noteUnhandled(parsed);
     });
     // sideband 斷線或出錯就是結束：不改路徑、不假裝重連（SYNTHESIS 必修 1）。
     const lost = () => this.terminate("connection_lost", "與 ChatGPT 方案即時語音的控制連線中斷，即時語音已結束。");
@@ -368,10 +371,19 @@ class LiveCall implements RouteCall {
     this.capTimer.unref?.();
   }
 
+  /** 診斷：沒處理的 sideband 事件，每種類型只記一次（只記類型，不記內容）。 */
+  private noteUnhandled(raw: unknown): void {
+    const type = raw && typeof raw === "object" ? (raw as { type?: unknown }).type : undefined;
+    if (typeof type !== "string" || /audio\.delta$/.test(type) || this.unhandled.has(type)) return;
+    this.unhandled.add(type);
+    this.log?.(`即時語音（ChatGPT 方案）：未處理的事件 ${type.slice(0, 80)}`);
+  }
+
   private onEvent(event: FramelessEvent): void {
     switch (event.kind) {
       case "session.started":
         if (!this.started) {
+          this.log?.(`即時語音（ChatGPT 方案）：已開始（${this.model}）`);
           this.started = true;
           this.ctx.emit({ kind: "started", expires_at: event.expires_at });
         }
@@ -385,6 +397,7 @@ class LiveCall implements RouteCall {
         this.ctx.emit({ kind: "transcript", role: event.role, text: event.text, final: event.final, item_id: event.item_id });
         break;
       case "delegation":
+        this.log?.(`即時語音（ChatGPT 方案）：收到交辦「${preview(event.text)}」`);
         this.enqueue(event.id, event.text, "voice");
         break;
       case "error":
@@ -477,6 +490,7 @@ class LiveCall implements RouteCall {
   /** 核心這邊發現結束（斷線、錯誤、時間到）：通知頁面，工作階段跟著結束。 */
   private terminate(reason: "connection_lost" | "expired" | "auth" | "usage_limit", message: string): void {
     if (this.closed) return;
+    this.log?.(`即時語音（ChatGPT 方案）：結束（${reason}）`);
     this.ctx.emit({ kind: "closed", reason, message });
     void this.close("ended");
   }
@@ -500,4 +514,10 @@ class LiveCall implements RouteCall {
       // 已關閉
     }
   }
+}
+
+/** 紀錄用的短摘要（只留本機 log，最多 40 字）。 */
+function preview(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 40 ? `${flat.slice(0, 40)}…` : flat;
 }
