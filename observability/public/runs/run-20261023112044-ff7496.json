@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-23T11:20:44.814Z",
-  "updated_at": "2026-10-23T11:40:35.864Z",
+  "updated_at": "2026-10-23T11:50:47.069Z",
   "ended_at": null,
   "steps": [
     {
@@ -50,11 +50,16 @@
     {
       "id": "pr",
       "title": "pr",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
-      "evidence": []
+      "status": "passed",
+      "started_at": "2026-10-23T11:50:47.069Z",
+      "ended_at": "2026-10-23T11:50:47.069Z",
+      "note": "Review fixes bcea82c (752 tests, verify-aios PASS); merged on George's instruction",
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/pull/31"
+        }
+      ]
     }
   ],
   "events": [
@@ -106,6 +111,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "Review of d1239a4: 5 findings (speak-first skip unreachable → settle timer; live greeting needs marker + instruction; server-fixed greeting text; typed-while-connecting; pref on mid-connect); fix round delegated"
+    },
+    {
+      "at": "2026-10-23T11:50:47.069Z",
+      "type": "step_updated",
+      "step_id": "pr",
+      "status": "passed",
+      "note": "Review fixes bcea82c (752 tests, verify-aios PASS); merged on George's instruction"
     }
   ],
   "provenance": "Agent self-reported"
