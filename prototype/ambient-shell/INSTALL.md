@@ -1,8 +1,8 @@
 # 安裝與執行指南（本機）
 
-這份指南帶你在自己的電腦上跑起 Nous 電子腦原型。全程約 10 分鐘。
+這份指南用於啟動目前的 Node.js 原型。下載、套件安裝與帳號授權所需時間依網路和裝置而定。功能與實測範圍見 [目前實作狀態](../../docs/Current_Implementation_Status.md)，後續規劃見 [功能擴充評估](../../docs/13_Feature_Expansion_Assessment_2026-10-24.md)。
 
-> **macOS 也可以直接用 App**：下載 Releases 裡的 `Nous.app`，不用裝 Node.js、不用開終端機，選單列有 Nous 圖示可以設定。見 [desktop/README.md](./desktop/README.md)。
+> macOS 可使用 [v0.1.0 預覽版](https://github.com/pcpcchen-coder/AIOS/releases/tag/nous-desktop-v0.1.0) 的 `Nous-0.1.0-mac-arm64.zip`。這是既有預先建置產物，尚未核對是否包含 2026-10-23 最新 main 的功能。要用目前原碼版本，依下列流程啟動，或按 [macOS 打包指南](./desktop/README.md#自己打包) 自行打包。
 
 ## 0. 需要的東西
 
@@ -11,7 +11,7 @@
 | Node.js | 22.12 以上（建議 LTS） |
 | Git | 任一近期版本 |
 | 瀏覽器 | Chrome 或 Edge（語音輸入只在這兩個可用） |
-| Anthropic API key | 選填。沒有也能跑，但只會是「模擬模式」 |
+| AI 帳號或 API key | Claude 需 `ANTHROPIC_API_KEY`；ChatGPT 文字引擎與 Codex 即時語音各自登入；API 即時語音需 `OPENAI_API_KEY`。都沒有時仍可明確選擇模擬模式 |
 
 ## 1. 安裝 Node.js 與 Git
 
@@ -43,24 +43,24 @@ git clone https://github.com/pcpcchen-coder/AIOS.git
 cd AIOS/prototype/ambient-shell
 ```
 
-repo 若是私有的，`git clone` 會要求登入 GitHub：用瀏覽器授權，或用 Personal Access Token 當密碼（見 repo 根目錄的 `SETUP.md`）。
+公開 repo 可直接下載。需要提交或推送修改時，再依根目錄的 `SETUP.md` 設定 GitHub 寫入授權。
 
-已經 clone 過的話，改成更新：
+已經 clone 過時，先保存本機修改，再更新 main：
 
 ```bash
 cd AIOS
 git checkout main
-git pull
+git pull --ff-only
 cd prototype/ambient-shell
 ```
 
 ## 3. 安裝套件
 
 ```bash
-npm install
+npm ci
 ```
 
-看到 `found 0 vulnerabilities` 或類似結尾就完成了。
+確認安裝指令成功結束，沒有 `npm ERR!`。安全性稽核摘要與安裝是否成功是不同結果；看到 `0 vulnerabilities` 不代表原型已能啟動。完成啟動後還須確認下方的服務訊息與頁面。
 
 ## 4. 選擇 AI 引擎
 
@@ -117,7 +117,7 @@ OPENAI_API_KEY=sk-...
 
 兩條都沒有設定時，「開始語音對話」沿用原本的語音模式（瀏覽器語音辨識＋ChatGPT 文字回覆＋電腦語音）。
 
-> 注意：上面 AI 引擎的 Continue with ChatGPT（Sign in with ChatGPT）登入不能用在即時語音（實測 OpenAI 會回 server_error）；即時語音的方案額度一定要用這裡的 Codex 登入。ChatGPT 方案路徑尚未在真實帳號上驗證，見 `docs/validation/live-voice-2026-10-23.md`。
+> 注意：上面 AI 引擎的 Continue with ChatGPT（Sign in with ChatGPT）登入不能用在即時語音（實測 OpenAI 會回 server_error）；即時語音的方案額度一定要用這裡的 Codex 登入。Codex 即時語音已在家中 Mac 留下登入、通話與 sideband log；修正後查溫度只有口頭成功回報。全流程、其他工具與計費核對仍未完成，見 [即時語音驗證 §4](../../docs/validation/live-voice-2026-10-23.md#4-真實結果george-家中測試)。這些結果不構成 Continue with ChatGPT 文字引擎的驗證。
 
 ### 雙目鏡頭（選填，Waveshare AR0144）
 
@@ -164,6 +164,7 @@ OPENAI_API_KEY=sk-...
 - AIFA 冷氣可以開關、調溫度、模式、風量與擺風；紅外線家電（電視、電風扇）一次按一個遙控鍵。這兩種都沒有回讀，Nous 只會說「已送出，請確認」，請看一下有沒有反應。紅外線按鍵要先在中控的紅外線控制器按「同步」；AIFA 冷氣要先在中控連結 AIFA 帳號。不是 AIFA 的冷氣（Tuya、Home Assistant）與無線按鈕還不能用語音控制。
 - 設備要先在中控完成接入；中控顯示狀態過期時，Nous 會請中控重新讀取一次再送，仍不行就會說沒有送出。
 - 每分鐘最多 6 個控制指令。
+- H1 預設所有設備為 `allow`，可直接送出指令。每設備需要確認或停用的中控政策接線尚待 H2；目前不能把家電流程視為已具完整 Action Gate。
 
 權杖只留在本機核心，不會送到瀏覽器或 OpenAI。
 
@@ -173,15 +174,15 @@ OPENAI_API_KEY=sk-...
 npm start
 ```
 
-看到下面這行就成功了：
+看到下面這行，表示本機服務已啟動：
 
 ```
 Nous 原型已啟動：http://localhost:8787
 ```
 
-用 Chrome 或 Edge 打開 <http://localhost:8787>。
+用 Chrome 或 Edge 打開 <http://localhost:8787>，確認電子腦與設定畫面能顯示。這只確認本機啟動，帳號、模型、麥克風、鏡頭與家電還須各自測試。
 
-在這個已準備的雲端環境中，Node.js 為 24.19，對外請求須沿用環境的 HTTPS proxy。從原型目錄使用 `NODE_USE_ENV_PROXY=1 NOUS_CONFIG_DIR=/workspace/.nous-cloud npm start`。若網路政策仍封鎖 OpenAI 網域，先在環境設定檢閱儲存網路草稿。瀏覽器登入回呼與麥克風仍需在可連到同一個本機核心的裝置上操作。
+在需要 HTTPS proxy 的受管環境，可依該環境設定使用 `NODE_USE_ENV_PROXY=1 npm start`。登入回呼與麥克風仍須在能連到同一本機核心的裝置上操作；雲端服務啟動不能代替本機音訊驗證。
 
 要關閉時，在終端機按 `Ctrl + C`。下次只要回到 `AIOS/prototype/ambient-shell` 再執行 `npm start`。
 
@@ -208,7 +209,7 @@ Nous 原型已啟動：http://localhost:8787
 | 狀況 | 處理方式 |
 |---|---|
 | `node: command not found`／「不是內部或外部命令」 | Node.js 沒裝好，或裝完沒重開終端機 |
-| `npm install` 出現 `EBADENGINE` 或 vitest 相關錯誤 | Node 版本太舊，升級到 22.12 以上 |
+| `npm ci` 出現 `EBADENGINE` 或 vitest 相關錯誤 | Node 版本太舊，升級到 22.12 以上 |
 | `EADDRINUSE: address already in use 127.0.0.1:8787` | 8787 埠被佔用：關掉舊的 `npm start`，或在 `.env` 加 `PORT=8790` 後改開 <http://localhost:8790> |
 | 頁面顯示「前端尚未建置」 | 你執行的是 `npm run dev:server`；改用 `npm start` |
 | 畫面左上角紅字「與本機核心的連線中斷」 | 終端機裡的 `npm start` 已停止，重新啟動即可 |
@@ -239,7 +240,8 @@ Nous 原型已啟動：http://localhost:8787
 
 ## 8. 資料存放位置
 
-- 任務與成果：`prototype/ambient-shell/data/`（本機 JSON 檔，不會上傳）
+- 任務與成果：`prototype/ambient-shell/data/`，以本機 JSON 保存。重啟後未完成任務標為失敗；重試會建立新任務並完整重跑，沒有檢查點續跑
+- 一般對話歷史：只存在目前頁面記憶體，重新整理、切換引擎或帳號、登出時清除，沒有持久化或跨裝置同步
 - ChatGPT 登入憑證與引擎選擇：`~/.config/nous/`（Windows 為 `C:\Users\你的帳號\.config\nous\`）。要完全移除 ChatGPT 連結：先在設定按「登出 ChatGPT」，再到 ChatGPT 設定中斷開 Nous
 - 鏡頭與手勢設定：`~/.config/nous/camera.json`（只存你改過的項目，不含任何影像）。刪除這個檔案再重新啟動，就回到 `.env` 與預設值
 - 即時語音用的 ChatGPT 方案（Codex）登入：`~/.config/nous/codex-credentials.json`（權限 0600）。要移除：設定 →「即時語音」按「登出（即時語音）」（會刪除這個檔案並盡力撤銷遠端 token）。Nous 不讀、不改 Codex CLI 的 `~/.codex`

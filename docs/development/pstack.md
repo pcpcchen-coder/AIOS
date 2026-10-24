@@ -1,5 +1,7 @@
 # 使用 pstack 開發 AIOS
 
+> 2026-10-24：先讀 [目前實作與驗證](../Current_Implementation_Status.md)，再選本次工作流程。已有 Node／Electron 原型；本指南的 pstack recorder 驗證不是產品 gate。新功能的估時、Quest 與 OpenClaw 分工見 [13 功能評估](../13_Feature_Expansion_Assessment_2026-10-24.md)。
+
 本專案將 pstack 0.15.29 固定在 `cursor/plugins` 的 commit `88d47514b82e7c44f00f2b2a72ff6dd12158038c`。官方技能與 MIT 授權保存在 `vendor/pstack`，版本及檔案雜湊保存在 `vendor/pstack.lock.json`。
 
 ## 開始工作

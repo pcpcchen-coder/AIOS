@@ -1,7 +1,9 @@
 # Nous 原型：漂浮電子腦 × ChatGPT 對話 × 按需任務
 
 > 以電子腦呈現語音對話。登入自己的 ChatGPT 帳號後啟動收音，可插話，也可打字接著聊。需要較長工作時，AI 可沿用原型的背景任務流程。
-> **這不是 07 的 PR-01／G0 驗收交付**，也不改變 repo README 的 gate 狀態（見文末〈與正式規格的關係〉）。
+> 本原型不代表 07 的 PR-01 或 G0 驗收完成。完整現況、證據等級與尚未完成的 gate 見 [目前實作狀態](../../docs/Current_Implementation_Status.md)；功能優先序與 Quest 擴充見 [2026-10-24 功能擴充評估](../../docs/13_Feature_Expansion_Assessment_2026-10-24.md)。
+
+現行執行環境是 TypeScript、Vite、Node HTTP/SSE 與 Electron macOS 包裝。正式規格中的 Tauri、Python kernel、Quest 客戶端、跨裝置同步仍是規劃；OpenClaw 是部分即時語音協定的參考，repo 沒有整合 OpenClaw agent。
 
 ![待機：只有電子腦](./docs/screenshots/01-ambient.jpg)
 
@@ -209,10 +211,10 @@ npm start                 # 建置前端並啟動本機核心
 | 引擎 | 怎麼啟用 | 行為 |
 |---|---|---|
 | Claude | `.env` 設 `ANTHROPIC_API_KEY` | 依 API 用量計費。規劃 → 逐步串流執行 → 彙整 |
-| ChatGPT | 設定畫面（macOS App：選單列「AI 引擎 → 登入／帳號設定…」打開的帳號頁）按 **Continue with ChatGPT**，在瀏覽器登入並同意 | 使用你的 **ChatGPT 方案額度**（不需要 API key）。走 OpenAI 官方的 [Sign in with ChatGPT](https://developers.openai.com/siwc) 開源／本機 app 流程，推論呼叫 `POST /v1/responses`（`store:false`、`stream:true`）。輸入列下方會顯示「使用 ChatGPT 方案 · 管理用量」 |
+| ChatGPT | 設定畫面（macOS App：選單列「AI 引擎 → 登入／帳號設定…」打開的帳號頁）按 **Continue with ChatGPT**，在瀏覽器登入並同意 | 程式預期使用 ChatGPT 方案額度，尚未以真實帳號驗證這條文字引擎的授權與推論。實作依據是 [Sign in with ChatGPT](https://developers.openai.com/siwc) 開源／本機 app 流程，推論呼叫 `POST /v1/responses`（`store:false`、`stream:true`）。輸入列下方會顯示「使用 ChatGPT 方案 · 管理用量」 |
 | 模擬 | 在設定中明確選擇，作為開發驗證 | 用計時器走固定步驟或回傳模擬對話，**未呼叫任何模型**；全程標示「模擬」。未登入時的 ChatGPT 對話入口會要求登入 |
 
-Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒有工具（不上網、不讀寫檔、不寄信），需要這些能力的部分會在成果中列為「能力缺口」。
+Claude 與 ChatGPT 背景任務使用同一套提示詞（`server/prompts.ts`）。引擎支援時可上網搜尋，被拒時改送不帶工具的請求並列出「未經查證」的能力缺口。兩者尚未提供任意本機檔案讀寫或寄信工具；即時語音的 MCP 與家電工具是另一條執行路徑。
 
 **ChatGPT 登入細節**（依官方文件實作）：第一次以 `client_id=dynamic_agent_client` 動態註冊，之後沿用核發的 `client_id`；每台電腦一個 `ext_agent_host_id`（`urn:uuid:…`）；PKCE＋state＋nonce，回呼在 `http://127.0.0.1:1455/auth/callback`；驗證 ID token 簽章（JWKS）、issuer、audience、nonce，並確認取得 `chatgpt.tokens.use.direct` 才允許推論。access token 一小時到期，接近到期自動 refresh；登出時撤銷 refresh token。憑證存在 `~/.config/nous/chatgpt-credentials.json`（權限 0600），不放在 repo、不進瀏覽器儲存。用量上限、登入失效等錯誤會顯示「管理用量」或「開啟設定」。
 
@@ -237,7 +239,7 @@ Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒
 - 誠實規則：「聆聽中」要麥克風軌道、peer 已連線、收到 `session.started`；「回覆中」看遠端音量。家電指令照中控回讀說話；有副作用的工具（家電、交辦）沒有在時限內回報時只說「結果不明，請確認」，不說失敗。確認卡只由按鈕或你說出的「確認執行／取消」決定，Codex 那邊不能替你確認。控制連線斷線、登入失效或時間到時直接結束並說出原因，不改路徑。
 - 這條路徑沒有：遠端 MCP（請切換到 API key 路徑）、取消回覆的指令（Esc 只把這段回覆靜音）。一個核心同時只能有一個 ChatGPT 方案即時語音；開始它的頁面重新整理或關閉時立刻結束，重新整理後可以馬上再開始。
 - 聲音：`arbor、breeze、cove（預設）、ember、juniper、maple、sol、spruce、vale`，在設定畫面（瀏覽器版）或 macOS App 選單列切換（`NOUS_LIVE_VOICE` 是預設值）。`NOUS_LIVE_MODEL`（顯示用預設 `gpt-live-1-codex`，設定了才送出）、`NOUS_LIVE_AGENT_MODEL`（交辦時的 Codex 模型；未設定時查 Codex 模型清單）。
-- 這是 OpenAI 未公開文件的介面（OpenClaw 也用這條）。實作完成，但**還沒有在真實帳號上驗證**：所有測試都是假的 chatgpt.com、假的 sideband 與假的頁面；George 的家中測試步驟與門檻見 [`docs/validation/live-voice-2026-10-23.md`](../../docs/validation/live-voice-2026-10-23.md)。
+- 這是 OpenAI 未公開文件的介面，實作參考 OpenClaw。自動化測試使用假端點、sideband 與頁面。另有 2026-10-23 家中 Mac 測試：`nous.log` 記錄真實 Codex 登入、建立通話、sideband 與語音交辦；客廳溫度查詢修正模型清單版本後只有 George 口頭回報成功。其他端到端步驟與計費證據尚未完成，不能標為整條路徑驗收通過。證據與門檻見 [即時語音驗證 §4](../../docs/validation/live-voice-2026-10-23.md#4-真實結果george-家中測試)。
 
 **OpenAI API key 路徑（gpt-realtime）** 和之前一樣（預設 `gpt-realtime`，可用 `NOUS_REALTIME_MODEL`、`NOUS_REALTIME_VOICE` 調整）：
 
@@ -300,7 +302,7 @@ Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒
 
 已驗證：假中控測試，以及真實中控程式（SmartHomeAI，示例配置；示例設備沒有真實位址，所以只走得到「狀態未更新」「未完成接入」「不支援」「失敗」這幾種結果；H1b 用寫進中控的 fixture 清單與按鍵，沒有 AIFA 帳號與 Tuya 認證，只走得到「失敗」「沒有送出」與冷卻重送），見 [H0 驗證紀錄](../../docs/validation/smarthome-h0-2026-10-21.md)、[H1 驗證紀錄](../../docs/validation/smarthome-h1-2026-10-22.md)、[H1b 驗證紀錄](../../docs/validation/smarthome-h1b-2026-10-22.md)。George 已在家裡用即時語音開關燈（口頭回報）；冷氣與紅外線家電尚未在家裡實測。
 
-任務與成果存在 `data/`（已排除於 git），重啟後可喚回；重啟時尚未完成的任務會標為「中斷」失敗，不假裝仍在執行。
+任務與成果存在 `data/`（已排除於 git），重啟後可喚回。重啟時尚未完成的任務會標為「中斷」失敗；按重試會建立關聯到原任務的新任務，重新規劃並完整執行，沒有從中斷步驟續跑。一般對話歷史仍只在頁面記憶體中，沒有知識庫或跨裝置記憶。
 
 ## 與產品紅線的對照
 
@@ -309,6 +311,7 @@ Claude 與 ChatGPT 用同一套提示詞（`server/prompts.ts`）。兩者都沒
 | 無 App launcher、側欄、Dashboard、預設聊天主頁 | 待機只有電子腦；輸入框按需浮出，Esc 即收 |
 | Surface 必須有可驗證的 `visibility_reason` | `src/presentation-policy.ts` 在渲染前檢查；`request_id` 必須是本次真實的使用者輸入 |
 | 收起只關視圖，停止任務才取消 | reducer 的 `dismiss` 不產生取消；取消只由「停止任務」發出（有測試） |
+| 外部副作用須經 Action Gate 與當次確認 | 尚未完整實作。MCP 有逐次確認卡；家電 H1 預設 `allow`，每設備政策接線待 H2，不能算完整 gate 通過 |
 | mock 必須標示 | 模擬模式全程標示，成果寫明未完成 |
 | 失敗、timeout 回報真實狀態 | SDK 錯誤轉成可讀原因（401／429／連線／逾時／拒絕）；截圖 `05-error.jpg` 為真實 API 回應的 401 |
 | 動畫只由真實事件驅動 | 光脈衝、進度環只來自任務事件；步驟數未知時不畫進度 |
@@ -378,20 +381,20 @@ npm run typecheck
 
 ## 已知限制
 
-- 未用真實 API key 或真實 ChatGPT 帳號跑過完整成功流程（開發環境沒有帳號）。已驗證：Claude 與 OpenAI 真實 API 的 401 失敗路徑；ChatGPT 登入流程以本機簽發的 ID token 和假端點做自動化測試；`auth.openai.com` 授權頁在開發環境被 Cloudflare 機器人驗證擋住，未能實際走完登入。
-- ChatGPT 方案用量目前是 OpenAI 的預覽功能，Plus 方案的五小時用量上限與其他 app 共用。
-- 語音用瀏覽器內建的 Web Speech API（雲端辨識）與 speechSynthesis（電腦語音），沒有本地喚醒詞；路線是「語音轉文字 → AI 對話 → 文字轉語音」三段串接，延遲比 ChatGPT 的語音對語音模型長。
+- Continue with ChatGPT 文字引擎的真實登入與推論仍未驗證；這和 Codex 即時語音登入是兩套流程。Claude 與 OpenAI API 有真實 401 失敗路徑證據，沒有完整成功流程的驗收紀錄。較早開發環境中的 OAuth 測試使用本機 ID token 與假端點，授權頁也曾被 Cloudflare 驗證阻擋。
+- ChatGPT 文字引擎的預覽授權與 Codex 即時語音路徑都受帳號、方案及上游介面限制。以當次登入結果與官方用量頁為準；本 repo 尚無完整計費核對證據。
+- 瀏覽器語音模式用內建的 Web Speech API（雲端辨識）與 speechSynthesis（電腦語音），沒有本地喚醒詞；路線是「語音轉文字 → AI 對話 → 文字轉語音」三段串接，延遲比 ChatGPT 的語音對語音模型長。
 - 插話靠「比對聽到的字和正在念的字」分辨回音與使用者：大多數字都在念的內容裡就當回音，出現新的字或「停／等一下」就打斷。用喇叭時同音異字的回音可能誤觸插話，戴耳機最準。念完 2.5 秒內與剛念內容相同的長句會被忽略。語音模式只用模擬的語音 API（含模擬喇叭回音）做過自動化測試，麥克風與喇叭未在實機驗證。
 - 鏡頭互動依 docs/11 實作在場、面向、停止手勢與手臂指向（未經實機驗證，未做雙目校正）；不做眼睛視線。沒有記憶與知識層。
 - 鏡頭畫面與鏡頭設定的自動化測試用假鏡頭與假模型（啟動／關閉不重複回報、載入中或播放中關閉不留下模型與舊畫面）；兩格畫面的顯示與左右眼差異已在 Chromium 以真實 MediaPipe 播放合成的雙目影像檢查（`docs/validation/camera-preview-2026-10-21.md`），**未在 AR0144 實機上驗證**；每幀多三次縮小繪圖的負擔尚未量測。
 - `NOUS_CAMERA` 決定頁面是否允許使用鏡頭，改了要重新啟動核心；設定畫面（macOS App：選單列）的「鏡頭」開關只能在已允許時開關鏡頭。安裝項目（鏡頭名稱、左右眼順序、螢幕寬度、鏡頭偏移）只能在 `.env` 改。
 - 關閉手掌停止只是不理會手勢，手勢模型仍每幀執行，不會省下 CPU。
 - 桌面 App 和瀏覽器分頁同時開著時，兩邊都會嘗試開鏡頭。
-- 即時語音的 ChatGPT 方案路徑（gpt-live-1-codex）只用假的 chatgpt.com、sideband 與頁面測過，未在真實帳號驗證；它依賴未公開文件的端點與 alpha 標頭，OpenAI 改格式時會在開始時照實報錯（自動模式改用 API key 並告知）。這條路徑沒有 MCP，Esc 只能靜音不能取消回覆，交辦最長等 187 秒（計算見驗證文件）。
+- 即時語音的 ChatGPT 方案路徑（gpt-live-1-codex）有局部真實登入與通話 log，以及修正後查溫度的口頭回報；尚未完成全流程與計費驗收。它依賴未公開文件的端點與 alpha 標頭，上游格式改變時可能失效，開始失敗時依選路規則報錯或改用 API key 並告知。這條路徑沒有 MCP，Esc 只能靜音不能取消回覆，交辦最長等 187 秒（計算見驗證文件）。
 - Agent 工具：即時語音可上網查詢（web_search）；遠端 MCP 只在 API key 路徑；背景任務與文字對話在引擎支援時可上網搜尋（不支援時自動改回不帶工具並標示缺口）。讀寫本機檔案尚未提供；外部副作用的完整 Action Gate 尚未實作，目前 MCP 需核准的動作以確認卡＋語音固定語句逐次確認。
 - 家電控制一次一台，不支援房間指令；冷氣只支援 AIFA 冷氣，紅外線家電只能一次按一個鍵，兩者都沒有回讀，只會說「已送出，請確認」；不是 AIFA 的冷氣與無線按鈕不支援。家電查詢與控制只在即時語音模式（ChatGPT 方案或 API key 路徑）提供，瀏覽器語音辨識與文字對話沒有這兩個工具。
 - 單一使用者、單一螢幕；資料以明文 JSON 存在本機。
 
 ## 與正式規格的關係
 
-本原型依使用者要求建立於獨立資料夾，借用 06／07 的 Shell 狀態、`visibility_reason` 與 Task 狀態概念，但**沒有**照 07 §2 的 monorepo 結構，也沒有 `packages/shared/schemas` 的版本化 JSON Schema（型別標為 `proto-0.1`）。正式實作仍從 08 的 PR-00 開始；本原型可作為 PR-01／PR-02 的視覺與互動參考。
+本原型依使用者要求建立於獨立資料夾，借用 06／07 的 Shell 狀態、`visibility_reason` 與 Task 狀態概念，但**沒有**照 07 §2 的 monorepo 結構，也沒有 `packages/shared/schemas` 的版本化 JSON Schema（型別標為 `proto-0.1`）。下一個正式批次須先核對 [目前實作狀態](../../docs/Current_Implementation_Status.md)，把現有模組對應到 08 的 PR-00 及後續 gate，再選擇遷移範圍。保留已實作的任務、語音、感知與設定流程，不因早期目錄規格重建原型；本原型本身不構成 PR-01 或 PR-02 驗收完成。

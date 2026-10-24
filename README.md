@@ -23,7 +23,9 @@
 
 ---
 
-## 使用體驗（2026-09-16 更新）
+## 目標使用體驗
+
+以下是產品方向。已實作能力與待驗證事項以後面的現況表及現況文件為準，校正眼動與完整 Agent 工具工作尚未因此實現。
 
 **提出需求 → AI Agents 解決問題 → 呈現成果 → 看向內容並用語音追問 → 收起後回到電子腦。**
 
@@ -40,35 +42,42 @@
 
 ---
 
-## 專案狀態
+## 專案狀態（2026-10-24）
 
-🟡 **設計階段（Pre-Alpha）** — Repo 目前是設計文件；2026-09-16 補充互動規格，2026-10-07 完成匯總與生態更新（[08](./docs/08_Consolidation_and_Update_2026-10.md)）。除獨立原型 [`prototype/ambient-shell`](./prototype/ambient-shell)（漂浮電子腦＋文字／按下說話交辦＋按需看進度，非 gate 驗收）外，尚無正式 Shell、喚醒語音或視線實作。
+**Pre-Alpha，已有可執行原型。** 實作集中在 [`prototype/ambient-shell`](./prototype/ambient-shell)：Node HTTP＋SSE、TypeScript＋Vite、Electron 桌面殼與本機 JSON 保存。Python kernel、Tauri、Claude Agent SDK 與完整 monorepo 仍是設計選項，不代表現有程式架構。
 
-**已完成**：
-- ✅ 完整 12 個月技術藍圖（7 大模組架構）
-- ✅ OSS 元件對應表（利用社群力量壓縮 41 週開發時間）
-- ✅ 3 個月加速路徑（週級行動計畫）
-- ✅ 生成式互動系統設計（無固定 UI 的終極形態）
-- ✅ 進度彙總與下一階段規劃
-- ✅ 電子腦桌面、無 App、語音＋視線互動規格
-- ✅ 開發批次、資料契約、Agent prompt 與可手算驗收案例（待實作驗證）
-- ✅ 2026-10 匯總：決策日誌 v2、生態變化影響、架構修正提案、gate 時程估計
-- ✅ `CLAUDE.md` v0.1 開發規則
+| 領域 | 現況 | 驗證界線 |
+|---|---|---|
+| 電子腦與任務 | 六區事件動畫、按需成果、佇列、取消、重試與成果保存 | 原型已實作；不是正式 G0–G3 通過聲明 |
+| 模型與語音 | Claude／ChatGPT／模擬；瀏覽器語音與 WebRTC 即時語音雙路徑 | Mac 的 Codex live 登入、通話及溫度查詢有部分實機紀錄；完整流程與計費尚未驗收 |
+| 鏡頭與手勢 | 在場、名目距離、頭向、張掌停止播報、手臂三區指向、靠近放大 | 頭向不是眼動；雙目未實測校正，準確率與硬體驗收待做 |
+| 家電 | H0 查詢、H1 一般控制、H1b AIFA／紅外線 | 開關燈有口頭實機紀錄；H1b 待實機；H2 設備政策、H3 房間群控、H4 背景 MCP 尚未實作 |
+| 保存與安全 | JSON 任務／成果、呈現政策、部分工具確認機制 | 未完任務重啟後失敗；缺 checkpoint、完整成果版本、通用 Action Gate 與長期記憶 |
+| Quest／OpenClaw | 已完成本次功能評估 | 沒有 Quest 客戶端或 OpenClaw agent adapter；語音參考 OpenClaw 不等於已整合 agent |
 
-**進行中**：
-- 🧪 獨立原型 `prototype/ambient-shell`：電子腦待機、交辦任務、問進度才呈現（Claude 執行或明示的模擬模式）
-- 🚧 ADR-001 記憶層定案（Letta V1 server 已退役，見 08 §3.3）
-- 🚧 商標／網域查核、目標測試硬體清單
-- 🚧 敘事文件與定位聲明
+本次基準 `1f44c6b` 的 48 個測試檔、790 項測試、型別檢查、建置與隔離 mock HTTP 流程通過。這些結果不替代真模型、麥克風、Quest、相機與家電驗收。詳見 [現況與證據](./docs/Current_Implementation_Status.md)。
 
-**未來**（估計，2026-10-12 開工、每週 20–25 小時；見 08 §6）：
-- ⏳ PR-00：monorepo、CI、Tauri 麥克風／攝影機權限 spike
-- ⏳ G0：電子腦 Shell 與按需呈現政策
-- ⏳ G1：真實語音 → Agent → 成果閉環
-- ⏳ G2：webcam 校正與看＋說操作
-- ⏳ G3：硬體、故障、效能驗收後邀請 Alpha 使用者
+接下來的建議順序是：現況與產品 CI → 共用能力／Action Gate → 可回復任務與成果版本 → 裝置配對 → Quest 空間成果 → OpenClaw 受限 worker 與語音接力。這是尚待實作的擴充路線，不改寫既有 gate 驗收結果。完整 MVP、風險、工時與驗收見 [功能擴充評估](./docs/13_Feature_Expansion_Assessment_2026-10-24.md)。
 
-原 3 個月路線保留作歷史參考。G3 估計落在 2027-01 下旬，G2 視線實測是最大變數；未過時以語音版 Alpha 先行。
+## 執行原型
+
+需要 Node.js 22.12 以上。
+
+```bash
+git clone https://github.com/pcpcchen-coder/AIOS.git
+cd AIOS/prototype/ambient-shell
+npm ci
+npm start
+```
+
+開啟 `http://localhost:8787`。核心只接受本機連線，Quest 無法直接連這個 localhost。未設定模型與帳號時可使用明示的模擬模式；模型與語音設定見 [安裝指南](./prototype/ambient-shell/INSTALL.md)。macOS 有 [預覽版下載與自行打包說明](./prototype/ambient-shell/desktop/README.md)，既有 Release 不保證包含 main 最新功能。
+
+開發驗證從 repo 根目錄執行：
+
+```bash
+node scripts/check-pstack.mjs
+node scripts/verify-aios.mjs
+```
 
 ---
 
@@ -76,10 +85,12 @@
 
 開發流程使用 [pstack 專案指南](./docs/development/pstack.md)，Agent 規則見 [AGENTS.md](./AGENTS.md)。
 
-所有設計文件位於 [`docs/`](./docs) 目錄。**先讀 08 掌握現況與修正，再讀 06–07 的最新產品規格**，最後依需要查閱 01–05。
+文件位於 [`docs/`](./docs)。**先讀現況與證據，再讀 06–07 的產品規則及 10–12 的專題更新**。08 是 2026-10-07 的歷史快照，01–05 的舊排程與選型不是當前實作。完整閱讀路徑見 [文件索引](./docs/README.md)。
 
 | # | 文件 | 內容 | 適合誰讀 |
 |---|---|---|---|
+| **現況** | [目前實作與驗證](./docs/Current_Implementation_Status.md) | 程式目錄、能力、證據層級、缺口與驗證方式 | 所有人，先讀 |
+| **13** | [功能擴充評估](./docs/13_Feature_Expansion_Assessment_2026-10-24.md) | Quest、OpenClaw、語音、感測、多裝置的優先序與 roadmap | 規劃與協作開發 |
 | **01** | [完整技術藍圖](./docs/01_Complete_Technical_Blueprint.md) | 7 大模組架構、技術選型、12 個月時程 | 想理解全貌者 |
 | **02** | [OSS 元件對應表](./docs/02_OSS_Component_Map.md) | 每個模組對應的社群開源專案 | 想快速實作者 |
 | **03** | [3 個月加速路徑](./docs/03_3Month_Accelerated_Roadmap.md) | 週級行動計畫 | 開發者 |
@@ -87,7 +98,8 @@
 | **05** | [進度彙總與規劃](./docs/05_Progress_and_Next_Steps.md) | 專案快照與最新需求增補 | 想加入專案者 |
 | **06** | [電子腦、語音與視線體驗](./docs/06_Ambient_Voice_Gaze_Experience.md) | 最新產品規格、狀態機、呈現政策與架構 | 產品與開發者 |
 | **07** | [開發與驗收計畫](./docs/07_Ambient_Implementation_and_Acceptance.md) | 目錄、契約、prompt、批次、驗收案例 | 實作者與驗收者 |
-| **08** | [2026-10 匯總與更新](./docs/08_Consolidation_and_Update_2026-10.md) | 現況、決策日誌 v2、生態變化、修正提案、新時程 | 所有人，先讀 |
+| **08** | [2026-10 匯總與更新](./docs/08_Consolidation_and_Update_2026-10.md) | 10 月初決策、生態研究及舊時程快照 | 歷史決策參考 |
+| **10–12** | [專題文件](./docs/README.md) | 遠距 UI、雙目互動與智慧家庭的設計及實作對照 | 對應功能開發者 |
 
 ---
 
@@ -103,7 +115,9 @@
 
 ---
 
-## 技術棧（規劃中）
+## 技術棧
+
+目前執行的是 Node.js HTTP＋SSE、無框架 TypeScript 前端、Vite、Electron、Anthropic Messages SDK、MediaPipe 與本機 JSON。型別標記為 `proto-0.1`。以下是既有設計文件中的目標選型，須經獨立決策與驗證才採用；這次文件更新沒有遷移技術棧。
 
 - **Kernel**: Claude Opus 5.5（規劃）＋ Sonnet 系列（worker），型號經 Models API 取得、不寫死
 - **Memory Layer**: 提案改為本地 Markdown 記憶檔 + SQLite FTS5／sqlite-vec 索引；[Mem0](https://github.com/mem0ai/mem0) 備援（原選 Letta 的 V1 server 已退役，見 08）
@@ -124,6 +138,7 @@
 
 - **@pcpcchen-coder** — 主要開發者、架構決策
 - **Claude Code** — AI Pair Programmer
+- **開發分工方向** — Claude 主力負責 AIOS 核心，ChatGPT／Codex 負責 Quest 端；執行時仍依模型與能力設定選路徑，不按裝置綁定供應商
 
 ## 授權
 
@@ -131,7 +146,7 @@
 
 ## 聯絡
 
-專案處於設計階段，暫不接受 PR。歡迎透過 GitHub Issues 討論架構決策。
+專案處於原型開發階段。功能與架構討論使用 GitHub Issues，變更以可檢閱 PR 與對應驗證證據追蹤；本次文件更新不代表所有規劃已承諾實作或已通過驗收。
 
 ---
 

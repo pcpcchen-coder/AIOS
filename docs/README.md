@@ -1,28 +1,37 @@
-# Nous 設計文件
+# Nous 文件索引
 
-最新產品方向：**電子腦動態桌布 → 語音提出需求 → AI Agents 完成工作 → 按需呈現 → 看＋說繼續操作**。
+更新日期：2026-10-24。產品方向是「電子腦待機 → 語音提出需求 → 實際工作 → 按需成果 → 指向並追問」。目前已有 Node／TypeScript／Electron 原型，正式 G0–G3 驗收狀態仍需逐項證據。
 
-先讀 08（2026-10 現況與修正），再讀 06–07，最後依需要查閱既有核心架構。Repo 目前仍為設計階段，文件中的工作批次與驗收項目尚未完成實作。
+## 先讀目前狀態，再讀產品規則
 
-| 檔案 | 內容 | 定位 |
-|---|---|---|
-| [08_Consolidation_and_Update_2026-10.md](./08_Consolidation_and_Update_2026-10.md) | 完整進度、決策日誌 v2、生態變化、架構修正提案、gate 時程 | 最新現況與規劃基線 |
-| [10_Distance_UI_18inch_2026-10.md](./10_Distance_UI_18inch_2026-10.md) | 18 吋遠距（2 m）畫面 × 語音設計：字級、狀態四重編碼、視線限制、9 個狀態畫面 | 設計提案，待實機驗證 |
-| [11_Stereo_Camera_Interaction_2026-10.md](./11_Stereo_Camera_Interaction_2026-10.md) | AR0144 雙目鏡頭的遠距互動：在場與距離、面向螢幕、停止手勢、手臂指向；本機處理 | 設計提案，待實測 |
-| [12_SmartHome_Integration_Plan_2026-10.md](./12_SmartHome_Integration_Plan_2026-10.md) | 武陵居智慧家電整合（AIOS 端）：HomeBridge、home_status／home_control 語音工具、中控逐台語音控制設定（允許／需確認／關閉）、批次 H0–H4 | 規劃；H0、H1 已在原型實作（待實機驗證），對應 SmartHomeAI `docs/AIOS接入規劃.md` |
-| [06_Ambient_Voice_Gaze_Experience.md](./06_Ambient_Voice_Gaze_Experience.md) | 電子腦、無 App、語音、視線、按需呈現與狀態架構 | 最新產品規格 |
-| [07_Ambient_Implementation_and_Acceptance.md](./07_Ambient_Implementation_and_Acceptance.md) | 目錄、契約、prompt、開發批次、驗收與量測 | 最新執行依據 |
-| [01_Complete_Technical_Blueprint.md](./01_Complete_Technical_Blueprint.md) | 核心架構與原 12 個月藍圖 | 基礎設計 |
-| [02_OSS_Component_Map.md](./02_OSS_Component_Map.md) | 開源元件對應表 | 選型參考，採用前驗證 |
-| [03_3Month_Accelerated_Roadmap.md](./03_3Month_Accelerated_Roadmap.md) | 原週級工作拆解與新 gate 對照 | 歷史排程參考 |
-| [04_Generative_Interaction_System.md](./04_Generative_Interaction_System.md) | 意圖、生成式呈現、技能持久化 | 基礎互動設計，已補充新方向 |
-| [05_Progress_and_Next_Steps.md](./05_Progress_and_Next_Steps.md) | 原始進度快照與 2026-09-16 增補 | 專案脈絡 |
+| 文件 | 用途與效力 |
+|---|---|
+| [目前實作與驗證](./Current_Implementation_Status.md) | 現行入口：實際目錄、已實作／待驗收／缺口、測試與實機證據 |
+| [13 功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md) | Quest、OpenClaw、即時語音、感測與多裝置的構想；F0–F10、Q0–Q4 均未因此實作 |
+| [06 電子腦、語音與視線體驗](./06_Ambient_Voice_Gaze_Experience.md) | 產品規則、呈現政策與行為要求；目標架構須與現況分開 |
+| [07 開發與驗收計畫](./07_Ambient_Implementation_and_Acceptance.md) | 正式契約、gate、驗收方法；規劃目錄不是現存程式目錄 |
+| [10 遠距 UI](./10_Distance_UI_18inch_2026-10.md) | 18 吋與遠距畫面規格，距離縮放已有原型實作，實機可讀性待驗 |
+| [11 雙目鏡頭互動](./11_Stereo_Camera_Interaction_2026-10.md) | 頭向、距離估計、停止手勢、三區指向及設定已實作；非眼動，雙目未校正 |
+| [12 智慧家庭](./12_SmartHome_Integration_Plan_2026-10.md) | H0、H1、H1b 有程式；部分家中口頭紀錄；H2–H4 待實作 |
 
-## 閱讀路徑
+## 歷史藍圖與決策
 
-- 只有 10 分鐘：08 §0 一頁摘要，再看 06 的產品定義與使用情境。
-- 理解架構：06 → 01 → 04 → 02。
-- 開始實作：根目錄 `CLAUDE.md` → 08 §6 → 06 → 07。
-- 了解決策演進：05，再對照 06–07。
+| 文件 | 閱讀方式 |
+|---|---|
+| [01 完整技術藍圖](./01_Complete_Technical_Blueprint.md) | 七模組目標架構與原 12 個月方案；不能當成目前能力表 |
+| [02 OSS 元件對應](./02_OSS_Component_Map.md) | 整合策略與當時選型；版本、價格、授權採用前另查 |
+| [03 三個月路線](./03_3Month_Accelerated_Roadmap.md) | 舊週級排程；不代表目前進度或承諾日期 |
+| [04 生成式互動](./04_Generative_Interaction_System.md) | 基礎互動設計；06–07 覆蓋舊常駐 Dashboard／側欄敘述 |
+| [05 進度與下一步](./05_Progress_and_Next_Steps.md) | 原始進度快照及需求演進 |
+| [08 2026-10 匯總](./08_Consolidation_and_Update_2026-10.md) | 2026-10-07 歷史現況、ADR 提案與舊排程；「當時尚無程式」不是今日現況 |
 
-優先順序：08 的已決項 > 06–07 > 01–05。08 標為「提案」的架構修正（記憶層、MCP Apps Surface、Tasks、觀測）需經 ADR／spike 確認後才改寫原文件。06–07 對 Shell、輸入、呈現政策及 Alpha 驗收的定義，優先於舊文件的常駐 Dashboard、技能側欄、語音延後與固定發布月份。
+編號 09「Spoken Brief 交辦單」是既有 Project 外部文件參照，未隨 repo 提供。此索引沒有宣稱 repo 已包含該文件。
+
+## 執行、開發與證據
+
+- [根目錄設定入口](../SETUP.md)、[原型操作說明](../prototype/ambient-shell/README.md)、[安裝指南](../prototype/ambient-shell/INSTALL.md)、[macOS 桌面指南](../prototype/ambient-shell/desktop/README.md)。
+- [開發規則](../CLAUDE.md)、[Agent 工作流程](../AGENTS.md)、[pstack 指南](./development/pstack.md)。
+- [對話模組設計](./development/chatgpt-conversation-design.md)、[六區動畫](./development/brain-regions.md)，各自說明所涵蓋批次。
+- [驗證紀錄索引](./validation/README.md)，區分 fixture、使用者口頭回報、本次程式測試與待實機事項。
+
+目前實作以程式及對應驗證紀錄為準。產品規則以 CLAUDE.md、06–07 及明確日期的專題決定為依據；新功能評估不自動修改既有規則或讓 gate 通過。若新舊文件不一致，先核對其日期、作用範圍與證據，保留歷史內容並更正現況入口。

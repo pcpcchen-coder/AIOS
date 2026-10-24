@@ -1,6 +1,10 @@
 # Nous — Ambient Shell 開發與驗收計畫
 
-版本：v0.1 · 日期：2026-09-16 · 狀態：待實作；本文件不是已通過的測試報告。
+版本：v0.1 · 計畫日期：2026-09-16 · 效力說明更新：2026-10-24。部分能力已有原型；本文件定義驗收要求，不是已通過的測試報告。
+
+> **2026-10-24 閱讀導覽**：先讀 [實作現況](./Current_Implementation_Status.md) 與既有 `prototype/ambient-shell`，再依本文件找出 gate 缺口。新優先序見 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。程式基準為 `1f44c6b`（2026-10-23）。原型已有電子腦、任務／成果、雙路語音及感測，不應從 PR-01 重新建立。
+>
+> 本地喚醒、正式 monorepo、Tauri、Python kernel、Agent SDK、校正眼動與完整 G0–G3 驗收仍不能據原型推定完成。[11 雙目鏡頭互動設計](./11_Stereo_Camera_Interaction_2026-10.md) 的頭向、停止手勢及三區手臂指向不等於本文件的 gaze 校正；遠距先用語音編號選取。新評估中的 F0–F10、Q0–Q4 是候選功能與 Quest 分期，不取代 G0–G3。
 
 需求來源：[06 電子腦、語音與視線互動規格](./06_Ambient_Voice_Gaze_Experience.md)。本文件把產品方向拆成可交付工作；所有數值是待校準的工程目標，不是性能承諾。
 
@@ -22,7 +26,7 @@ MVP 必做：
 
 ## 2. 建議檔案結構
 
-這是沿用 03 規劃 monorepo 的**未來目錄**，目前 repo 只有設計文件；以下檔案尚未建立。
+這是沿用 03 規劃 monorepo 的**未來目錄**，不是目前程式樹。現有可執行程式在 `prototype/ambient-shell`，以 `src/`、`server/` 與 `shared/` 分工。先盤點與延伸原型，再決定是否遷移；表中各路徑與責任不能當成已存在的模組。
 
 | 路徑 | 責任 |
 |---|---|
@@ -31,20 +35,20 @@ MVP 必做：
 | `apps/desktop/src/input/gaze/` | GazeProvider adapter、校正、FocusResolver |
 | `apps/desktop/src/presentation/` | Surface、固定目標區、受控元件與可及性 |
 | `apps/desktop/src-tauri/` | 宿主權限、感測器與原生能力橋接 |
-| `apps/kernel/` | 既有 Python FastAPI 核心、Task／Artifact 保存 |
+| `apps/kernel/` | 規劃的 Python FastAPI 核心、Task／Artifact 保存；現有原型為 Node 伺服器與 JSON 保存 |
 | `packages/shared/src/contracts/` | 事件、意圖、任務、Artifact、Surface 契約 |
 | `packages/shared/schemas/` | 語言無關 JSON Schema，供 TS／Python 驗證 |
-| `packages/agents/` | 既有 Claude Agent SDK 封裝與角色 prompt |
+| `packages/agents/` | 規劃的 Claude Agent SDK 封裝與角色 prompt；不代表原型已接入 Agent SDK |
 | `packages/presentation-policy/` | 確定性揭露政策、焦點與動作有效性檢查 |
 | `tests/fixtures/` | 合成語音／焦點事件、已知答案資料、回放資料 |
 | `tests/acceptance/` | 核心流程、故障注入、真實硬體紀錄 |
 | `docs/validation/` | 實測環境、結果與已知限制，不存原始私密影像 |
 
-TS 與 Python 共用有版本的 JSON 契約，不假設 Python 後端能直接使用 tRPC。既有核心選型保持，新增模組經 adapter 接入。
+TS 與 Python 共用有版本的 JSON 契約，不假設 Python 後端能直接使用 tRPC。這是未來跨語言整合的約束；原型目前為 TypeScript，不要求為了目錄一致而先重寫 Python 核心。新增模組先盤點既有邊界，再經 adapter 接入。
 
 ## 3. 最小資料契約
 
-下列範例用來設計 schema 與 fixture，尚未提供可執行型別或 runtime。新增欄位需版本化；驗證器拒絕缺失或未知的關鍵操作欄位。
+下列範例是目標 schema 與 fixture 草案，不代表已按此格式完成版本化 runtime。原型已有 `shared/types.ts` 等型別，實作時先比較現有契約與此草案的差異。新增欄位需版本化；驗證器拒絕缺失或未知的關鍵操作欄位。
 
 ### 3.1 共用事件封套
 
@@ -167,14 +171,17 @@ Artifact 至少記錄 `artifact_id / version / task_id / content_ref / sources /
 如果缺少有效 request／subscription，回傳無新增 Surface 的計畫。
 ```
 
-### 4.3 下一次交給開發 Agent 的命令
+### 4.3 盤點既有原型後補足驗收的命令
 
 ```text
-請在 pcpcchen-coder/AIOS 實作 07 的 PR-01 與 PR-02。
-先讀 README、06、07，再讀 01–04 中與本任務相關的既有架構。
-目前 repo 是設計文件；先檢查是否已有他人新增程式，再建立或延伸骨架。
-交付 Shell 狀態機、電子腦待機視覺及確定性 Presentation Policy。
-用明示的 fixtures 展示狀態；不得把 mock 聲稱為真實語音、視線或 Agent 執行。
+請在 pcpcchen-coder/AIOS 盤點既有原型，再選一個 07 驗收缺口實作。
+先讀 CLAUDE.md、AGENTS.md、README、實作現況、06、07、11 及相關驗證紀錄。
+檢查 prototype/ambient-shell 的 src、server、shared、測試及 Electron 殼。
+列出已存在的電子腦、任務、成果、語音與感測能力及尚缺的驗收證據。
+不要重建骨架，也不要因檔名不同而忽略既有實作。
+依本次目標選定一個批次，延伸既有程式並說明對應的 PR-xx 與 gate 缺口。
+未有 ADR 決策前，不把原型自動遷到 Tauri、Python 或新 monorepo。
+感測的頭向與手臂指向不等於 gaze；fixtures、mock 與 replay 必須明示。
 不建立 App launcher、常駐 sidebar、首頁 Dashboard 或預設聊天主頁。
 為狀態切換、收起不取消、無授權不得顯示與過期事件加入有意義的測試。
 提供啟動方法、測試結果、畫面驗證及未完成項目；完成本批後回報下一 gate。
@@ -182,7 +189,7 @@ Artifact 至少記錄 `artifact_id / version / task_id / content_ref / sources /
 
 ## 5. 分批工作與相依性
 
-下表的 PR 編號是工作批次名稱，不表示已建立 GitHub PR 或 Issue。
+下表的 PR 編號是原計畫的工作批次名稱，不表示已建立 GitHub PR 或 Issue，也不是今日完成狀態。部分內容已有原型，須逐項比對程式與驗收證據，不重複從 PR-01 開始。
 
 | 批次 | 主要交付 | 依賴 | 驗收重點 |
 |---|---|---|---|
