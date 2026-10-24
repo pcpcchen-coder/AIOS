@@ -27,7 +27,7 @@ npm start                 # 建置前端並啟動本機核心
 
 開啟 <http://localhost:8787>。伺服器只綁 `127.0.0.1`。
 
-開發時可分兩個終端機：`npm run dev:server`（核心，8787）與 `npm run dev:web`（Vite，5173，`/api` 轉給核心）。
+開發時可分兩個終端機：`npm run dev:server`（核心，8787）與 `npm run dev:web`（Vite，5173，`/api` 轉給核心）。Vite 的 dev／preview 與核心送出同一組頁面安全標頭（`server/page-headers.ts`；dev 只多允許 Vite 注入的內嵌 CSS），`connect-src 'self'` 會擋下 MediaPipe 內建、每 60 秒送往 `odml.pa.googleapis.com` 的用量紀錄；官方不提供關閉選項（[google-ai-edge/mediapipe#6291](https://github.com/google-ai-edge/mediapipe/issues/6291)）。
 
 點電子腦或「開始語音對話」，依提示登入 ChatGPT，再次按下語音入口並同意雲端語音辨識。登入不會自動開啟麥克風。ChatGPT 帳號需要取得既有 Sign in with ChatGPT 預覽流程的授權；本次未完成真實帳號的登入或推論驗證，不能保證每個方案皆可使用。不要把 ChatGPT 密碼或憑證填入 `.env`。
 

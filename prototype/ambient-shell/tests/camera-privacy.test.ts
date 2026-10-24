@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // 鏡頭畫面只畫到本頁畫布：前端程式不得讀回像素、轉成檔案或網址、或錄下串流（CLAUDE.md：原始影像不得寫檔、進 trace 或外傳）。
-const FORBIDDEN = /\b(getImageData|toDataURL|toBlob|captureStream|createObjectURL)\b/;
+const FORBIDDEN = /\b(getImageData|readPixels|toDataURL|toBlob|convertToBlob|captureStream|createObjectURL|MediaRecorder)\b/;
 
 function files(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
