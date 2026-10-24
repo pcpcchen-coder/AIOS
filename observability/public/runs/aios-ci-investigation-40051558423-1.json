@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "repo": "pcpcchen-coder/AIOS",
+  "run_id": "aios-ci-investigation-40051558423-1",
+  "title": "AIOS pstack observability E2E (scripted CI, not native Agent)",
+  "playbook": "investigation-ci",
+  "branch": "main",
+  "commit_sha": "96297c0d4d948da2297d233809398a2e5a0ee938",
+  "status": "failed",
+  "started_at": "2026-10-24T01:50:12.538Z",
+  "updated_at": "2026-10-24T01:50:13.643Z",
+  "ended_at": "2026-10-24T01:50:13.643Z",
+  "steps": [
+    {
+      "id": "inspect",
+      "title": "inspect",
+      "status": "passed",
+      "started_at": "2026-10-24T01:50:12.595Z",
+      "ended_at": "2026-10-24T01:50:12.630Z",
+      "note": "Observed pinned pstack sources, playbook and local Recorder",
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/tree/96297c0d4d948da2297d233809398a2e5a0ee938/vendor/pstack"
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "title": "verify",
+      "status": "failed",
+      "started_at": "2026-10-24T01:50:12.685Z",
+      "ended_at": "2026-10-24T01:50:13.582Z",
+      "note": "CI integrity or test failure",
+      "evidence": []
+    },
+    {
+      "id": "report",
+      "title": "report",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-24T01:50:12.539Z",
+      "type": "run_started",
+      "step_id": null,
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-10-24T01:50:12.596Z",
+      "type": "step_updated",
+      "step_id": "inspect",
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-10-24T01:50:12.630Z",
+      "type": "step_updated",
+      "step_id": "inspect",
+      "status": "passed",
+      "note": "Observed pinned pstack sources, playbook and local Recorder"
+    },
+    {
+      "at": "2026-10-24T01:50:12.685Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-10-24T01:50:13.582Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "failed",
+      "note": "CI integrity or test failure"
+    },
+    {
+      "at": "2026-10-24T01:50:13.643Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "failed",
+      "note": ""
+    }
+  ],
+  "provenance": "Scripted CI investigation, not native pstack Agent"
+}
