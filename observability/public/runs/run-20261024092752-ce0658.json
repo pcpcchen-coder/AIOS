@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "claude/family-id-00",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-10-24T09:27:52.708Z",
-  "updated_at": "2026-10-24T10:24:13.071Z",
-  "ended_at": null,
+  "updated_at": "2026-10-24T10:24:16.358Z",
+  "ended_at": "2026-10-24T10:24:16.358Z",
   "steps": [
     {
       "id": "how",
@@ -201,6 +201,13 @@
       "step_id": "pr",
       "status": "passed",
       "note": "PR #36"
+    },
+    {
+      "at": "2026-10-24T10:24:16.358Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
