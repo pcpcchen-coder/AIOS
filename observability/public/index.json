@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-24T09:28:29.501Z",
+  "updated_at": "2026-10-24T09:28:32.812Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,12 +9,12 @@
       "title": "家人辨識 ID-00：ADR 與模型 spike",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-24T09:28:27.930Z",
+      "updated_at": "2026-10-24T09:28:31.474Z",
       "started_at": "2026-10-24T09:27:52.708Z",
       "ended_at": null,
       "branch": "claude/family-id-00",
       "commit_sha": "",
-      "passed_steps": 0,
+      "passed_steps": 1,
       "total_steps": 8,
       "provenance": "Agent self-reported"
     },
