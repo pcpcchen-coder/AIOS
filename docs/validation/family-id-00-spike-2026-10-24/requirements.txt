@@ -1,0 +1,5 @@
+# 驗證工具，非產品程式：opencv-golden.py 與 opencv-reference.py 的依賴（ID-00）。
+# opencv-python-headless 的 PyPI 版本號是 5.0.0.93（OpenCV 5.0.0 的第 93 次打包），寫 ==5.0.0 會找不到。
+# 用法：python -m venv <暫存資料夾> && <暫存資料夾>/bin/pip install -r requirements.txt
+opencv-python-headless==5.0.0.93
+numpy==2.5.4
