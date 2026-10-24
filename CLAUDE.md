@@ -1,14 +1,16 @@
 # CLAUDE.md — Nous 開發規則 v0.1（2026-10-07）
 
-給在本 repo 工作的開發 agent（Claude Code 等）。規格以 `docs/06`、`docs/07` 為準，現況與修正提案見 `docs/08`。
+給在本 repo 工作的開發 agent（Claude Code 等）。規格以 `docs/06`、`docs/07` 及明確日期的專題決定為準；目前實作與證據見 [`docs/Current_Implementation_Status.md`](./docs/Current_Implementation_Status.md)。`docs/08` 是 2026-10-07 的歷史規劃快照，不能當作今日現況。
 
 本專案採用 pstack 開發流程。開始非簡單修改前，讀取 [`AGENTS.md`](./AGENTS.md) 的專案適配規則及 [`使用指南`](./docs/development/pstack.md)，再依對應 playbook 工作。
 
 ## 開工前
 
-1. 讀 `README.md`、`docs/08`、`docs/06`、`docs/07`，再讀 01–04 中與本任務相關段落。
+1. 讀 `README.md`、`docs/Current_Implementation_Status.md`、`docs/06`、`docs/07` 及相關專題；需要歷史決策時再讀 `docs/08` 與 01–05。
 2. 檢查 repo 是否已有他人新增的程式；延伸既有結構，不重建。
-3. 一次只做一個批次（07 的 PR-xx 或 08 的 PR-00／S1–S4）。
+3. 一次只做一個可驗收批次。07 的 PR-xx 與 08 的 PR-00／S1–S4 是原規劃標籤，先對照既有程式，不依舊 prompt 重建。新功能評估 F0–F10／Q0–Q4 仍是提案，不自動更改 gate 或 ADR。
+
+目前程式是 `prototype/ambient-shell` 的 Node HTTP＋SSE、無框架 TypeScript／Vite、Electron 與 JSON 保存。Claude 使用 Anthropic Messages SDK，尚未遷移 Python、Tauri 或完整 Agent SDK。鏡頭已有頭向與手勢實作，但不是眼動校正。開發分工以 Claude 為核心主力、ChatGPT／Codex 為 Quest 端方向；不得由此限制執行時模型供應商。
 
 ## 產品紅線（違反即不合格）
 
@@ -36,8 +38,8 @@
 
 ## 技術慣例
 
-- TypeScript 為主（前端、shared、presentation-policy）；Python 只用於 `apps/kernel`。
-- TS 與 Python 共用 `packages/shared/schemas` 的版本化 JSON Schema；不假設 Python 可用 tRPC。
+- TypeScript 為目前原型主體。若採用原規劃的 Python 核心，Python 才放在 `apps/kernel`，不得把此路徑說成已存在。
+- 跨語言核心採用時，共用版本化 JSON Schema；`packages/shared/schemas` 目前尚未建立，不假設 Python 可用 tRPC。
 - 模型型號不得寫死，經設定或 Models API 取得。
 - 使用者以 API key 驗證；不得接入 claude.ai 登入。
 - 套件鎖版本；sqlite-vec 為 pre-v1，升版需單獨 PR。

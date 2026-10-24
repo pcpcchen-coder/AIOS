@@ -1,19 +1,21 @@
 # Nous macOS App
 
+現行桌面包裝使用 Electron 與 Node.js 本機核心。Tauri、Quest 客戶端及跨裝置同步尚未實作；現況與驗證範圍見 [目前實作狀態](../../../docs/Current_Implementation_Status.md)，規劃見 [功能擴充評估](../../../docs/13_Feature_Expansion_Assessment_2026-10-24.md)。
+
 把 Nous 電子腦包成 macOS App：內建本機核心，不用開終端機；上方選單列有 Nous 圖示，常用動作和設定都在裡面。App 的設定以選單列為主體：視窗裡的設定頁只剩「帳號與登入」（ChatGPT 引擎帳號與即時語音用的 ChatGPT 方案（Codex）帳號），其他設定都在選單列；瀏覽器版（終端機啟動、沒有選單列）保留完整的設定畫面。
 
 ![App 圖示](./assets/icon-1024.png)
 
 ## 安裝
 
-1. 到 repo 的 Releases 下載 `Nous-x.y.z-mac-arm64.zip`（Apple Silicon），解壓後把 `Nous.app` 拖進「應用程式」。
-2. 第一次打開：App 沒有 Apple 開發者簽章（只有本機 ad-hoc 簽章），macOS 會擋。到「系統設定 → 隱私權與安全性」最下方按「強制打開」；或在終端機執行：
+1. [v0.1.0 預覽版](https://github.com/pcpcchen-coder/AIOS/releases/tag/nous-desktop-v0.1.0) 提供 `Nous-0.1.0-mac-arm64.zip`，適用 Apple Silicon。這是既有預先建置產物，尚未核對是否含 2026-10-23 最新 main 的功能。要使用目前原碼版本，依下方「自己打包」建置；使用 zip 時，解壓後把 `Nous.app` 拖進「應用程式」。
+2. 預設打包流程使用本機 ad-hoc 簽章，沒有 Apple 公證。若 macOS 阻擋你已確認來源的 App，到「系統設定 → 隱私權與安全性」最下方按「強制打開」；或在終端機執行：
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/Nous.app
    ```
 
-3. 填 API key：選單列 Nous 圖示 →「即時語音 → 填入 OpenAI API key…」，會用「文字編輯」打開設定檔。把 key 貼在 `OPENAI_API_KEY=` 後面，存檔後 App 會自動重新啟動核心套用。
+3. 選擇即時語音路徑。可在選單列「即時語音」用 ChatGPT 方案（Codex）登入，或選「填入 OpenAI API key…」打開設定檔。用 API key 時，把 key 貼在 `OPENAI_API_KEY=` 後面，存檔後 App 會重新啟動核心套用。兩種登入與計費路徑的實測範圍見 [即時語音驗證](../../../docs/validation/live-voice-2026-10-23.md)。
 4. 第一次開始語音對話時，macOS 會詢問麥克風權限，按「允許」。
 
 ## 選單列圖示
@@ -25,7 +27,7 @@
 | 開始／結束語音對話（⌥⌘V） | 即時語音（全域快捷鍵） |
 | 打字對話、看進度 | 直接打開對應畫面 |
 | AI 引擎 | 切換執行交辦工作的引擎：ChatGPT／Claude／模擬；「登入／帳號設定…」打開視窗裡的「帳號與登入」頁（ChatGPT 登入） |
-| 即時語音 | 路徑（自動／ChatGPT 方案／API key；下一次開始生效，不用重新啟動）、ChatGPT 方案（Codex）登入、ChatGPT 方案路徑的聲音、ChatGPT 方案用量；API key 路徑的模型（`gpt-realtime` 或便宜約 3 倍的 `gpt-realtime-mini`）與聲音（改了會重新啟動核心）、「帳號與登入…」（同一個帳號頁，可登出或用裝置代碼登入）、填入 API key、OpenAI 用量 |
+| 即時語音 | 路徑（自動／ChatGPT 方案／API key；下一次開始生效，不用重新啟動）、ChatGPT 方案（Codex）登入、ChatGPT 方案路徑的聲音、ChatGPT 方案用量；API key 路徑的模型（`gpt-realtime` 或 `gpt-realtime-mini`，實際費率依 OpenAI 當期定價）與聲音（改了會重新啟動核心）、「帳號與登入…」（同一個帳號頁，可登出或用裝置代碼登入）、填入 API key、OpenAI 用量 |
 | 同時處理任務數 | 2／4／6／8 |
 | 鏡頭與語音設定 | 「鏡頭與手勢」：鏡頭、看著說話、面向螢幕幾秒後開始對話、對話結束後暫停、看著說話時先打招呼、手掌停止播報、靠近時電子腦放大倍率（1、1.5、2、2.5、3 倍，預設 2 倍），這一段最後是「顯示鏡頭畫面」；「語音」：語音模式閒置多久自動關閉、即時語音閒置多久自動結束。開關是打勾項目；秒數與倍率是一組預設選項，目前的值打勾，值是用語音或瀏覽器版設定畫面的 −／+ 調的、不在選項裡時多一項「（目前）」。點了立即保存並套用，不用重新啟動核心；保存失敗會跳出原因並重新讀取實際保存的值。用語音或打字指令改了設定（例如「關閉看著說話」），頁面會通知 App 重新讀取，選單列跟著更新。鏡頭未啟用（沒有 `NOUS_CAMERA=on`）時鏡頭的開關、秒數、倍率與「顯示鏡頭畫面」都停用，原因寫在「鏡頭與手勢」標題下方的灰色說明項（macOS 14.4 以下也看得到）、各項的說明文字（sublabel，macOS 14.4 以上）與數值項子選單的第一項。用「鏡頭」開關關掉鏡頭時，「顯示鏡頭畫面」停用並寫「鏡頭目前關閉…」，其他開關仍可改，說明寫「鏡頭目前關閉，這個開關暫時用不到」。即時語音不可用時「看著說話」的說明寫「需要即時語音（目前不可用）」。順序、標籤、選項與寫入路徑都由本機核心推導（`GET /api/settings` 的 `seconds`），選單不寫死任何設定鍵 |
 | 語音指令表 | 打開唯讀的「Nous 語音指令表」視窗：所有本機指令、在哪裡有效、容易誤會的說法、可以問 AI 的事、不用說話的操作與目前秒數。內容依打開當下的設定產生（頁尾寫產生時間），改了設定要重新整理（⌘R）。不會打斷正在進行的對話 |
@@ -67,8 +69,10 @@ App 內容（`app.asar`）只有程式、前端與圖示，不含任何 `.env`�
 需要 macOS、Node.js 22.12 以上、Xcode Command Line Tools（`swift`、`iconutil`、`codesign`）。
 
 ```bash
-cd prototype/ambient-shell && npm install
-cd desktop && npm install
+cd prototype/ambient-shell
+npm ci
+cd desktop
+npm ci
 npm run icons    # 重新產生圖示（已附在 assets/，改了 scripts/make-icons.swift 才需要）
 npm start        # 開發：組好內容後直接用 Electron 開
 npm run package  # 打包成 release/Nous-darwin-arm64/Nous.app 與 zip
@@ -76,17 +80,14 @@ npm run package  # 打包成 release/Nous-darwin-arm64/Nous.app 與 zip
 
 `scripts/build.mjs` 先用 vite 建前端、用 esbuild 把本機核心（`server/nous.ts`）打成單檔 `server.mjs`，再組成 `build/app`；`scripts/package.mjs` 用 `@electron/packager`（Electron 44.7.0）打包、簽章並壓 zip。
 
-### 固定簽章（建議：更新後不用再按一次鏡頭與麥克風權限）
+### 固定簽章與本機權限
 
-沒有憑證時，打包會用 ad-hoc 簽章。ad-hoc 簽章的「指定要求」是這次打包的雜湊值（`codesign -d -r- Nous.app` 會看到 `cdhash H"…"`），每次打包都不同，所以 macOS 會把更新後的 App 當成新 App：
+沒有憑證時，打包會用 ad-hoc 簽章。重新建置後的指定要求可能改變，可用 `codesign -d -r- Nous.app` 檢查。macOS 可能將更新後的包裝視為不同的 App，再次詢問鏡頭與麥克風權限；鏡頭停在啟動中時也應檢查系統權限。
 
-- 重新詢問鏡頭與麥克風權限；
-- 還沒按「允許」之前，鏡頭會一直停在「鏡頭啟動中」。
-
-在自己的 Mac 上建立一張固定的自簽憑證就能避免（只需一次）：
+打包程式支援固定的自簽憑證，用來保留同一個本機簽署身分。是否保留鏡頭與麥克風授權仍須在你的 Mac、安裝位置與更新流程驗證。可依下列步驟建立憑證：
 
 1. 打開「鑰匙圈存取」，選單「鑰匙圈存取 → 憑證輔助程式 → 製作憑證…」。
 2. 名稱填 `Nous Local Signing`，身分類型選「自簽根憑證」，憑證類型選「程式碼簽署」，按「製作」。
 3. 重新執行 `npm run package`，終端機會顯示「簽章：Nous Local Signing（固定身分…）」。
 
-換成固定簽章後的第一次啟動會再問一次權限，之後更新都會保留。也可以用 `NOUS_SIGN_IDENTITY="憑證名稱" npm run package` 指定其他憑證（例如 Xcode 的 Apple Development）。這張自簽憑證只對你自己的 Mac 有意義；從 Releases 下載的版本仍是 ad-hoc 簽章。
+換成固定簽章後可能再詢問一次權限。後續每次更新仍應檢查簽署身分與實際收音、攝影機權限，不保證所有環境都保留授權。也可以用 `NOUS_SIGN_IDENTITY="憑證名稱" npm run package` 指定其他憑證（例如 Xcode 的 Apple Development）。這張自簽憑證只對你自己的 Mac 有意義；預覽版的實際簽章須在下載後查驗，不能以本機自簽憑證保證其他人的安裝結果。

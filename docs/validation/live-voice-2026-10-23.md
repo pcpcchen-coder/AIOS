@@ -2,7 +2,7 @@
 
 批次：`prototype/ambient-shell` 的即時語音加上第二條路徑。Nous 自己做 Codex 登入，經 `chatgpt.com/backend-api/codex/realtime/calls` 與 `wss://api.openai.com/v1/live/{callId}` 用 `gpt-live-1-codex`，做法和 OpenClaw 相同。原本的 `OPENAI_API_KEY`（`gpt-realtime`）路徑保留，使用者可以切換。
 
-**本文件的狀態：只有 fixture 結果。** 開發環境沒有 ChatGPT 帳號，也沒有麥克風與喇叭，所以沒有呼叫任何真實的 OpenAI 端點。下面的「家中測試」由 George 在自己的 Mac 上執行，結果填進最後一節，並標明是真實結果。
+**本文件的範圍：開發環境結果是 fixture；§4 另有部分家中實機紀錄。** 開發環境沒有 ChatGPT 帳號，也沒有麥克風與喇叭，因此該環境沒有呼叫真實 OpenAI 端點。George 的 Mac 登入、通話、sideband 有 log；修正後查溫度只有口頭成功回報，其他測項與計費仍待驗。2026-10-24 僅更正這段總述，保留下面的原始測試與結果，不將部分成功升格成完整驗收。全案見 [目前實作與驗證](../Current_Implementation_Status.md)。
 
 ## 1. 用假端點測了什麼（fixture）
 

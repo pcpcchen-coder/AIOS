@@ -1,6 +1,9 @@
 # Nous 10 — 18 吋遠距 UI 設計（畫面 × 語音）
 
 版本：v0.2 · 日期：2026-10-21 · 狀態：設計提案（待實機 2 m 驗證）
+
+> 2026-10-24 對照：原型已有距離縮放與靠近放大程式及 fixture 證據，真實 2 m 可讀性、雙目距離精度仍待驗。全案現況見 [目前實作與驗證](./Current_Implementation_Status.md)，Quest 空間成果另見 [13 功能評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。本文件的螢幕像素尺寸不可直接套成 Quest 空間字級。
+
 關聯：06（電子腦／語音／視線）、09（Spoken Brief 交辦單，見 Project 文件）
 設計稿：claude.ai Design 畫布「Nous 遠距 UI · 18 吋」；原始檔在 [`docs/design/distance-ui-18in/`](./design/distance-ui-18in/)（`.dc.html`，1920 × 1080 實尺寸）
 

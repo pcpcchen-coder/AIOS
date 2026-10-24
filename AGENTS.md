@@ -1,6 +1,8 @@
 # AIOS agent workflow
 
-Read `CLAUDE.md` and follow its product rules, documentation order, batch boundaries, and evidence requirements. The implemented application is `prototype/ambient-shell`. The monorepo, Tauri shell, gaze, and local voice pipeline in the design documents are planned work.
+Read `CLAUDE.md` and follow its product rules, documentation order, batch boundaries, and evidence requirements. Start with `docs/Current_Implementation_Status.md` for current capabilities and evidence, then the applicable product specifications. The implemented application is `prototype/ambient-shell`: Node HTTP/SSE, plain TypeScript/Vite, Electron and JSON task/artifact persistence. The monorepo, Python kernel, Tauri shell, calibrated eye gaze and local wake/ASR/TTS pipeline in the design documents are planned work. Head-facing, stereo-pose and gesture code already exists; it does not establish hardware accuracy. Extend the current prototype rather than recreating it from a historical roadmap.
+
+The feature assessment in `docs/13_Feature_Expansion_Assessment_2026-10-24.md` proposes Quest, OpenClaw and multi-device work. Its F0–F10 and Q0–Q4 labels are proposals, not implemented features or passed G0–G3 gates. Claude leads core development and ChatGPT/Codex leads Quest engineering; runtime providers remain configurable.
 
 ## Use pstack for engineering work
 

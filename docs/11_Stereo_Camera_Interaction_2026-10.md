@@ -1,6 +1,8 @@
 # Nous 11 — 雙目鏡頭的遠距互動設計（AR0144）
 
 版本：v0.3 · 日期：2026-10-21 · 狀態：四種用法已在原型實作（`prototype/ambient-shell/src/sense/`），v0.3 加上鏡頭畫面與使用者設定；數值仍由廠商規格推算，尚未校正與實測
+
+> 2026-10-24 對照：[目前實作與驗證](./Current_Implementation_Status.md) 是全案現況入口。這裡的面向是頭向，非眼動；`AR0144_NOMINAL` 未被真實校正取代。距離／指向／停止的百分比是驗收目標，不能從 fixture 推論達標。Quest 頭手輸入與穿戴融合是 [13 的後續構想](./13_Feature_Expansion_Assessment_2026-10-24.md)，不代表這份桌面相機程式已支援 Quest。
 關聯：06 §4（視線）、10（18 吋遠距 UI）、this-is-yourX `stereo_camera/` 與 ADR-0002、ADR-0005
 
 ---
