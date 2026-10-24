@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-24T09:27:52.708Z",
-  "updated_at": "2026-10-24T10:12:14.258Z",
+  "updated_at": "2026-10-24T10:12:17.855Z",
   "ended_at": null,
   "steps": [
     {
@@ -68,8 +68,8 @@
     {
       "id": "fix",
       "title": "fix",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-24T10:12:17.854Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -175,6 +175,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "獨立審查：0 blocker、4 major、多項 minor/nit"
+    },
+    {
+      "at": "2026-10-24T10:12:17.855Z",
+      "type": "step_updated",
+      "step_id": "fix",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
