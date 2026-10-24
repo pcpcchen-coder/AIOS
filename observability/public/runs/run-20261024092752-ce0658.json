@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-24T09:27:52.708Z",
-  "updated_at": "2026-10-24T10:12:17.855Z",
+  "updated_at": "2026-10-24T10:24:09.398Z",
   "ended_at": null,
   "steps": [
     {
@@ -68,10 +68,10 @@
     {
       "id": "fix",
       "title": "fix",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-24T10:12:17.854Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-24T10:24:09.398Z",
+      "note": "18 項全修；813 項測試通過",
       "evidence": []
     },
     {
@@ -182,6 +182,13 @@
       "step_id": "fix",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-24T10:24:09.398Z",
+      "type": "step_updated",
+      "step_id": "fix",
+      "status": "passed",
+      "note": "18 項全修；813 項測試通過"
     }
   ],
   "provenance": "Agent self-reported"
