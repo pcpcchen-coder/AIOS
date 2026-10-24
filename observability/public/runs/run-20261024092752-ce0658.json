@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-24T09:27:52.708Z",
-  "updated_at": "2026-10-24T10:04:51.768Z",
+  "updated_at": "2026-10-24T10:04:55.119Z",
   "ended_at": null,
   "steps": [
     {
@@ -50,8 +50,8 @@
     {
       "id": "verify",
       "title": "verify",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-24T10:04:55.119Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -147,6 +147,13 @@
       "step_id": "implement",
       "status": "passed",
       "note": "ADR草案、spike、雲端量測"
+    },
+    {
+      "at": "2026-10-24T10:04:55.119Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
