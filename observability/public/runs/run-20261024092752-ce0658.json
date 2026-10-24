@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-24T09:27:52.708Z",
-  "updated_at": "2026-10-24T09:28:41.158Z",
+  "updated_at": "2026-10-24T09:28:44.493Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "running",
+      "status": "skipped",
       "started_at": "2026-10-24T09:28:41.157Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-24T09:28:44.493Z",
+      "note": "spike批次小，不跑arena",
       "evidence": []
     },
     {
@@ -126,6 +126,13 @@
       "step_id": "architect",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-24T09:28:44.493Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "skipped",
+      "note": "spike批次小，不跑arena"
     }
   ],
   "provenance": "Agent self-reported"
