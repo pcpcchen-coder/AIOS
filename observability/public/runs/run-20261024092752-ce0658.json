@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-24T09:27:52.708Z",
-  "updated_at": "2026-10-24T09:28:37.783Z",
+  "updated_at": "2026-10-24T09:28:41.158Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,8 +32,8 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-24T09:28:41.157Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -119,6 +119,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "George：從ID-00開始，YuNet與MediaPipe兩者都比"
+    },
+    {
+      "at": "2026-10-24T09:28:41.158Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
