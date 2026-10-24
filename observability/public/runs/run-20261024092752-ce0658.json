@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-24T09:27:52.708Z",
-  "updated_at": "2026-10-24T09:28:47.790Z",
+  "updated_at": "2026-10-24T10:04:51.768Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-24T09:28:47.790Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-24T10:04:51.768Z",
+      "note": "ADR草案、spike、雲端量測",
       "evidence": []
     },
     {
@@ -140,6 +140,13 @@
       "step_id": "implement",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-24T10:04:51.768Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "ADR草案、spike、雲端量測"
     }
   ],
   "provenance": "Agent self-reported"
