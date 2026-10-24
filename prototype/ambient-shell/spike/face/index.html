@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <!-- 開發工具頁：只在本機 127.0.0.1 提供；不連外、不保存影像。connect-src 'self' 只允許同源載入模型與 wasm；ws://127.0.0.1:5180 只給 face:spike 開發伺服器的 HMR（埠號同 vite.config.ts）。 -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' ws://127.0.0.1:5180; img-src 'self' data:; style-src 'self' 'unsafe-inline'; media-src 'self' mediastream:"
+    />
+    <title>ID-00 人臉 spike（開發工具）</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root { color-scheme: dark; --bg: #101318; --fg: #e8ebf0; --muted: #98a2b3; --line: #2a3140; --yunet: #39d98a; --mp: #ffb020; }
+      body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .note { color: var(--muted); margin: 0 0 12px; max-width: 70em; }
+      fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px; }
+      legend { color: var(--muted); }
+      label { margin-right: 12px; }
+      button { margin: 4px 8px 4px 0; }
+      canvas { max-width: 100%; border: 1px solid var(--line); background: #000; }
+      pre { white-space: pre-wrap; background: #0b0d11; border: 1px solid var(--line); border-radius: 8px; padding: 8px; max-height: 40em; overflow: auto; }
+      .legend-yunet { color: var(--yunet); }
+      .legend-mp { color: var(--mp); }
+    </style>
+    <script type="module" src="./page.ts"></script>
+  </head>
+  <body>
+    <h1>ID-00 人臉 spike（開發工具，不是 Nous 產品畫面）</h1>
+    <p class="note">
+      比較 YuNet（onnxruntime-web）與 MediaPipe Face Detector，並以 SFace 計算兩張臉的 cosine。只用來量測 runtime 與耗時，不是辨識功能、不登記家人、不作任何授權依據。
+      影像只在本頁記憶體處理：不寫檔、不進 trace、不送網路；停止鏡頭或重新整理即清除畫格與參考特徵。cosine 只是 sanity check，不代表準確率。
+    </p>
+
+    <fieldset>
+      <legend>模型</legend>
+      <label>onnxruntime 執行緒 <input id="threads" type="number" min="1" max="8" value="1" /></label>
+      <label>MediaPipe delegate <select id="mp-delegate"><option>CPU</option><option>GPU</option></select></label>
+      <button id="load" type="button">載入模型</button>
+      <span id="load-status" role="status"></span>
+    </fieldset>
+
+    <fieldset>
+      <legend>(a) 靜態圖片</legend>
+      <input id="images" type="file" accept="image/*" multiple />
+      <label>臉寬 <select id="face-width"><option value="">原尺寸置入 1280×720</option><option>60</option><option>100</option><option>150</option></select></label>
+      <label>重複次數 <input id="iterations" type="number" min="1" max="200" value="20" /></label>
+      <button id="run-images" type="button">量測</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>(b) 本機鏡頭（只在記憶體處理）</legend>
+      <label>鏡頭名稱包含 <input id="camera-label" value="CCB" size="10" /></label>
+      <button id="camera-start" type="button">開鏡頭</button>
+      <button id="camera-stop" type="button">停止並清除</button>
+      <button id="camera-ref" type="button">以目前最大臉為參考</button>
+      <span id="camera-status" role="status"></span>
+    </fieldset>
+
+    <p><span class="legend-yunet">■ YuNet</span>　<span class="legend-mp">■ MediaPipe short range</span></p>
+    <canvas id="view" width="1280" height="720"></canvas>
+    <pre id="out"></pre>
+  </body>
+</html>

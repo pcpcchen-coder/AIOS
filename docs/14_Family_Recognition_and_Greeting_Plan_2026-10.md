@@ -1,8 +1,8 @@
 # 靠近時辨識已登記家人，互動後稱名問候
 
-日期：2026-10-24。狀態：規劃，尚未實作。程式查核基準：AIOS main `96297c0d4d948da2297d233809398a2e5a0ee938`。
+日期：2026-10-24。狀態：規劃；**ID-00 部分交付**：[ADR-0001 草案](./adr/ADR-0001-local-family-recognition.md)＋不接進產品的 runtime spike（[驗證紀錄](./validation/family-id-00-spike-2026-10-24.md)，只有雲端 CPU／WASM 數字）；ID-00 放行條件待 Mac＋AR0144 實測。辨識、登記與稱名問候尚未實作。程式查核基準：AIOS main `96297c0d4d948da2297d233809398a2e5a0ee938`。
 
-依使用者要求納入 repo，入口見 [文件索引](./README.md) 與 [目前實作狀態](./Current_Implementation_Status.md)。本次發布只有規劃與導覽更新，沒有新增辨識程式、家人資料或通過任何實機 gate。
+依使用者要求納入 repo，入口見 [文件索引](./README.md) 與 [目前實作狀態](./Current_Implementation_Status.md)。規劃發布當時（`5af2c24`）只有規劃與導覽更新，沒有新增辨識程式、家人資料或通過任何實機 gate；之後的 ID-00 進度見上方狀態行。
 
 本規劃將人臉辨識與既有「看著說話」的面向等待同步執行。認出熟人只建立短暫的稱呼候選；使用者面向滿足已設定條件、啟動互動且語音就緒後，才說「George，我在」。不為了叫出姓名而延後對話。
 
@@ -198,4 +198,4 @@ sequenceDiagram
 - [live 前端固定招呼](https://github.com/pcpcchen-coder/AIOS/blob/96297c0d4d948da2297d233809398a2e5a0ee938/prototype/ambient-shell/src/live-voice.ts#L306) 與 [server 固定招呼](https://github.com/pcpcchen-coder/AIOS/blob/96297c0d4d948da2297d233809398a2e5a0ee938/prototype/ambient-shell/server/live-route.ts#L475)
 - [AR0144 名目幾何與現有身分辨識政策](https://github.com/pcpcchen-coder/AIOS/blob/96297c0d4d948da2297d233809398a2e5a0ee938/docs/11_Stereo_Camera_Interaction_2026-10.md)
 
-規劃階段僅讀取程式、核對時序並產出文件；本次依使用者要求發布規劃與導覽。沒有啟動鏡頭、建立家人資料、修改 runtime 或進行辨識實測。
+以下為規劃發布當時的狀態：規劃階段僅讀取程式、核對時序並產出文件；該次依使用者要求發布規劃與導覽。沒有啟動鏡頭、建立家人資料、修改 runtime 或進行辨識實測。ID-00 之後的交付見上方狀態行。

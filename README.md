@@ -91,7 +91,7 @@ node scripts/verify-aios.mjs
 |---|---|---|---|
 | **現況** | [目前實作與驗證](./docs/Current_Implementation_Status.md) | 程式目錄、能力、證據層級、缺口與驗證方式 | 所有人，先讀 |
 | **13** | [功能擴充評估](./docs/13_Feature_Expansion_Assessment_2026-10-24.md) | Quest、OpenClaw、語音、感測、多裝置的優先序與 roadmap | 規劃與協作開發 |
-| **14** | [家人辨識與稱名問候規劃](./docs/14_Family_Recognition_and_Greeting_Plan_2026-10.md) | 面向等待期間同步辨識，互動開始後才說「George，我在」；尚未實作 | 核心與感測開發者 |
+| **14** | [家人辨識與稱名問候規劃](./docs/14_Family_Recognition_and_Greeting_Plan_2026-10.md) | 面向等待期間同步辨識，互動開始後才說「George，我在」；辨識尚未實作。ID-00 有 [ADR-0001 草案](./docs/adr/ADR-0001-local-family-recognition.md) 與不接進產品的 [runtime spike 紀錄](./docs/validation/family-id-00-spike-2026-10-24.md) | 核心與感測開發者 |
 | **01** | [完整技術藍圖](./docs/01_Complete_Technical_Blueprint.md) | 7 大模組架構、技術選型、12 個月時程 | 想理解全貌者 |
 | **02** | [OSS 元件對應表](./docs/02_OSS_Component_Map.md) | 每個模組對應的社群開源專案 | 想快速實作者 |
 | **03** | [3 個月加速路徑](./docs/03_3Month_Accelerated_Roadmap.md) | 週級行動計畫 | 開發者 |
