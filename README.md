@@ -91,6 +91,7 @@ node scripts/verify-aios.mjs
 |---|---|---|---|
 | **現況** | [目前實作與驗證](./docs/Current_Implementation_Status.md) | 程式目錄、能力、證據層級、缺口與驗證方式 | 所有人，先讀 |
 | **13** | [功能擴充評估](./docs/13_Feature_Expansion_Assessment_2026-10-24.md) | Quest、OpenClaw、語音、感測、多裝置的優先序與 roadmap | 規劃與協作開發 |
+| **14** | [Companion Mode 陪聊模式](./docs/14_Companion_Mode_Spec_2026-10-24.md) | **設計提案，尚未實作**；主開關、接話方式、回答長度、冷卻時間、隱私與驗收；[開發批次](./docs/development/companion-mode-implementation-plan.md) | UI／語音開發者 |
 | **01** | [完整技術藍圖](./docs/01_Complete_Technical_Blueprint.md) | 7 大模組架構、技術選型、12 個月時程 | 想理解全貌者 |
 | **02** | [OSS 元件對應表](./docs/02_OSS_Component_Map.md) | 每個模組對應的社群開源專案 | 想快速實作者 |
 | **03** | [3 個月加速路徑](./docs/03_3Month_Accelerated_Roadmap.md) | 週級行動計畫 | 開發者 |
