@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BRAIN_ZOOM_FAR_M, BRAIN_ZOOM_NEAR_M, DEFAULT_CAMERA_PREFS, type CameraSettings, type PointZone, type SensorState } from "../shared/sense.ts";
-import { pageHeaders } from "../server/app.ts";
+import { pageHeaders } from "../server/page-headers.ts";
 import { loadConfig } from "../server/config.ts";
 import { classify } from "../src/intent.ts";
 import {

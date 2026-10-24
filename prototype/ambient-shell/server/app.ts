@@ -27,6 +27,7 @@ import {
   type RealtimePrefsPatch,
 } from "../shared/realtime-route.ts";
 import { COMMANDS_PATH, commandsPageHeaders, renderCommandsPage } from "./commands-page.ts";
+import { pageHeaders } from "./page-headers.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
 
@@ -51,19 +52,6 @@ const CONTENT_TYPES: Record<string, string> = {
   ".wasm": "application/wasm",
   ".task": "application/octet-stream",
 };
-
-/**
- * 頁面安全標頭。鏡頭啟用時（NOUS_CAMERA=on）才允許本頁使用鏡頭，並允許編譯本機的 MediaPipe wasm；
- * 影像處理仍只在本機（connect-src 'self'）。
- */
-export function pageHeaders(camera: boolean): Record<string, string> {
-  return {
-    "Content-Security-Policy": `default-src 'self'; script-src 'self'${camera ? " 'wasm-unsafe-eval'" : ""}; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`,
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
-    "Permissions-Policy": `camera=(${camera ? "self" : ""}), microphone=(self), geolocation=()`,
-  };
-}
 
 export interface AppOptions {
   store: TaskStore;
