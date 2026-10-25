@@ -1,0 +1,40 @@
+{
+  "comment": "家人辨識 ID-01 的本機模型與 runtime（npm run face:setup -- --product 安裝；不進 git、不進 dist、不進 release zip）。雜湊為 2026-10-24／25 實際下載與 onnxruntime-web 1.30.0 套件內容。",
+  "url_prefix": "/face-runtime/",
+  "files": [
+    {
+      "name": "face_detection_yunet_2023mar.onnx",
+      "role": "detector",
+      "url": "https://huggingface.co/opencv/face_detection_yunet/resolve/3cc26e7f1014a5ee5d74a42acee58bafc9d0a310/face_detection_yunet_2023mar.onnx",
+      "sha256": "8f2383e4dd3cfbb4553ea8718107fc0423210dc964f9f4280604804ed2552fa4",
+      "license": "MIT（OpenCV Zoo face_detection_yunet/LICENSE）"
+    },
+    {
+      "name": "face_recognition_sface_2021dec.onnx",
+      "role": "recognizer",
+      "url": "https://huggingface.co/opencv/face_recognition_sface/resolve/3d7082438a6e4551e840c9b2bb60b71e8da4b524/face_recognition_sface_2021dec.onnx",
+      "sha256": "0ba9fbfa01b5270c96627c4ef784da859931e02f04419c829e83484087c34e79",
+      "license": "Apache-2.0（OpenCV Zoo face_recognition_sface/LICENSE；訓練資料條款未查清，ADR-0001 §9）"
+    },
+    {
+      "name": "ort-wasm-simd-threaded.wasm",
+      "role": "runtime",
+      "package": "onnxruntime-web/dist",
+      "sha256": "3398c10d07d229bd91b364548e130e0e51a8e5704b88c7c083ebbeb78842dee2",
+      "license": "MIT（onnxruntime-web 1.30.0）"
+    },
+    {
+      "name": "ort-wasm-simd-threaded.mjs",
+      "role": "runtime",
+      "package": "onnxruntime-web/dist",
+      "sha256": "e13f7f94fc51b4ca72b12faeb1ee95f4ace6dfbc8939bc718aabdc0a27c4299b",
+      "license": "MIT（onnxruntime-web 1.30.0）"
+    }
+  ],
+  "model_version": {
+    "detector": "yunet-2023mar@8f2383e4",
+    "recognizer": "sface-2021dec@0ba9fbfa",
+    "align": "opencv-aligncrop-5pt@048f050d",
+    "preproc": "yunet640-cvlinear-bgr-v1"
+  }
+}

@@ -178,6 +178,11 @@ export class LookToTalk {
     return true;
   }
 
+  /** 正在累計面向停留（ID-02 的同步辨識只在這段 delay 內開始取樣；它不影響停留的計時）。 */
+  get dwelling(): boolean {
+    return this.since !== null;
+  }
+
   /** 看著說話不可用（關閉或無法自動開始）時呼叫：清掉累計中的停留，不設冷卻。 */
   reset(): void {
     this.since = null;

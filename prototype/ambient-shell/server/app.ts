@@ -27,6 +27,9 @@ import {
   type RealtimePrefsPatch,
 } from "../shared/realtime-route.ts";
 import { COMMANDS_PATH, commandsPageHeaders, renderCommandsPage } from "./commands-page.ts";
+import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity.ts";
+import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
+import { pageHeaders } from "./page-headers.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
 
@@ -50,18 +53,20 @@ const CONTENT_TYPES: Record<string, string> = {
   ".json": "application/json; charset=utf-8",
   ".wasm": "application/wasm",
   ".task": "application/octet-stream",
+  // onnxruntime 的 wasm 載入器（/face-runtime/）與 YuNet、SFace 模型。
+  ".mjs": "text/javascript; charset=utf-8",
+  ".onnx": "application/octet-stream",
 };
 
 /**
- * 頁面安全標頭。鏡頭啟用時（NOUS_CAMERA=on）才允許本頁使用鏡頭，並允許編譯本機的 MediaPipe wasm；
- * 影像處理仍只在本機（connect-src 'self'）。
+ * JavaScript 回應的 CSP。頁面的 CSP 只管頁面；dedicated worker 套用的是它自己腳本回應的 CSP，沒有這個標頭時
+ * worker 不受 connect-src 限制。家人辨識的 worker 要編譯 onnxruntime wasm（'wasm-unsafe-eval'）並從同源讀模型；
+ * 除此之外一律只允許同源，不能連外。這不放寬頁面的 CSP。
  */
-export function pageHeaders(camera: boolean): Record<string, string> {
+export function scriptHeaders(): Record<string, string> {
   return {
-    "Content-Security-Policy": `default-src 'self'; script-src 'self'${camera ? " 'wasm-unsafe-eval'" : ""}; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`,
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'none'; style-src 'none'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
-    "Permissions-Policy": `camera=(${camera ? "self" : ""}), microphone=(self), geolocation=()`,
   };
 }
 
@@ -93,6 +98,13 @@ export interface AppOptions {
   camera?: CameraSettingsSource;
   /** 語音閒置秒數（通常是 VoiceSettingsStore）；未提供時用預設值且不能修改。 */
   voice?: VoiceSettingsSource;
+  /**
+   * 家人辨識的狀態（IdentityService）：只有可用與否與人數。身分資料（姓名、識別碼、特徵）只走 Electron IPC，
+   * 這裡沒有任何身分路由。未提供（瀏覽器版）時回報不可用。
+   */
+  identity?: { status(): IdentityStatus };
+  /** 家人辨識模型與 onnxruntime wasm 的資料夾（只提供清單上的檔名）；未提供時 /face-runtime/ 一律 404。 */
+  faceRuntimeDir?: string | null;
   port: number;
   devPort: number;
   distDir: string | null;
@@ -155,6 +167,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         voice,
         seconds: describeMenuPrefs({ camera, voice, voiceWritable: !!options.voice, realtime: live }),
         camera_preview_disabled_reason: cameraPreviewDisabledReason(camera),
+        identity: options.identity?.status() ?? BROWSER_IDENTITY_STATUS,
       };
     },
     select: (provider: ExecutorMode) => options.settings.select(provider),
@@ -185,6 +198,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         res.end(method === "HEAD" ? undefined : renderCommandsPage(settings.view(), new Date()));
       } else if (url.pathname.startsWith("/api/")) {
         await handleApi(req, res, url.pathname);
+      } else if (url.pathname.startsWith("/face-runtime/")) {
+        serveFaceRuntime(res, req.method ?? "GET", url.pathname, options.faceRuntimeDir);
       } else {
         serveStatic(res, url.pathname, options.distDir, !!options.camera?.view().enabled);
       }
@@ -267,7 +282,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const body = await readJson(req);
       if (!sessions) throw new HttpError(409, "即時語音模式未啟用");
       const clientId = typeof body.client_id === "string" && CLIENT_ID.test(body.client_id) && clients.has(body.client_id) ? body.client_id : null;
-      return sendJson(res, 200, sessions.start(clientId));
+      // source 只決定要不要發看著說話的互動 ID（ID-02），不是授權；其他值都當成 user。
+      return sendJson(res, 200, sessions.start(clientId, body.source === "look_to_talk" ? "look_to_talk" : "user"));
     }
     if (method === "POST" && path === "/api/realtime/call") {
       const body = await readJson(req);
@@ -609,6 +625,22 @@ function serveStatic(res: ServerResponse, pathname: string, distDir: string | nu
   const type = CONTENT_TYPES[extname(file)] ?? "application/octet-stream";
   const headers: Record<string, string> = { "Content-Type": type };
   if (type.startsWith("text/html")) Object.assign(headers, pageHeaders(camera), { "Cache-Control": "no-cache" });
+  if (type.startsWith("text/javascript")) Object.assign(headers, scriptHeaders());
   res.writeHead(200, headers);
   res.end(readFileSync(file));
+}
+
+/** 家人辨識的模型與 onnxruntime wasm：只給清單上的檔名，沒有 SPA fallback；不存在 404，雜湊不符 503。 */
+function serveFaceRuntime(res: ServerResponse, method: string, pathname: string, dir: string | null | undefined): void {
+  if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");
+  const file = faceRuntimePath(dir, pathname);
+  if (!file || !existsSync(file)) throw new HttpError(404, "not found");
+  // 每次讀取都核對雜湊：啟動後才被換掉的檔案也不會送出去。
+  const body = readVerifiedFaceRuntime(file);
+  if (!body) throw new HttpError(503, "face runtime file failed verification");
+  const type = CONTENT_TYPES[extname(file)] ?? "application/octet-stream";
+  const headers: Record<string, string> = { "Content-Type": type, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" };
+  if (type.startsWith("text/javascript")) Object.assign(headers, scriptHeaders());
+  res.writeHead(200, headers);
+  res.end(method === "HEAD" ? undefined : body);
 }

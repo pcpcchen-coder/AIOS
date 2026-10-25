@@ -119,6 +119,7 @@ describe("describeMenuPrefs (tray rows: seconds and factor)", () => {
       ["look_to_talk_s", "seconds", "camera"],
       ["look_to_talk_cooldown_s", "seconds", "camera"],
       ["look_to_talk_greet", "bool", "camera"],
+      ["look_to_talk_greet_name", "bool", "camera"],
       ["stop_gesture", "bool", "camera"],
       ["brain_zoom_max", "factor", "camera"],
       ["voice_idle_s", "seconds", "voice"],
@@ -182,6 +183,7 @@ describe("describeMenuPrefs (tray rows: camera switches)", () => {
       ["鏡頭", true, "開"],
       ["看著說話", true, "開"],
       ["看著說話時先打招呼", true, "開"],
+      ["打招呼時稱呼認出的家人", true, "開"],
       ["手掌停止播報", false, "關"],
     ]);
     for (const r of rows) {
@@ -194,11 +196,11 @@ describe("describeMenuPrefs (tray rows: camera switches)", () => {
   it("all switches are disabled with CAMERA_DISABLED_REASON when the camera is not enabled or not configured (defaults shown)", () => {
     for (const source of [{ camera: { ...camera, enabled: false } }, {}]) {
       const rows = boolRows(describeMenuPrefs({ ...source, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime }));
-      expect(rows).toHaveLength(4);
+      expect(rows).toHaveLength(5);
       expect(rows.every((r) => r.disabled_reason === CAMERA_DISABLED_REASON)).toBe(true);
     }
     const none = boolRows(describeMenuPrefs({ voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime }));
-    expect(none.map((r) => r.value)).toEqual([true, true, true, true]);
+    expect(none.map((r) => r.value)).toEqual([true, true, true, true, true]);
   });
 
   it("look_to_talk notes that realtime voice is needed when it is unavailable (same hint as the settings page)", () => {
@@ -214,6 +216,7 @@ describe("describeMenuPrefs (tray rows: camera switches)", () => {
       ["active", null, CAMERA_PREFS.active.hint],
       ["look_to_talk", null, "鏡頭目前關閉，這個開關暫時用不到"],
       ["look_to_talk_greet", null, "鏡頭目前關閉，這個開關暫時用不到"],
+      ["look_to_talk_greet_name", null, "鏡頭目前關閉，這個開關暫時用不到"],
       ["stop_gesture", null, "鏡頭目前關閉，這個開關暫時用不到"],
     ]);
   });
@@ -223,6 +226,14 @@ describe("describeMenuPrefs (tray rows: camera switches)", () => {
     expect(cameraPreviewDisabledReason({ ...camera, enabled: false })).toBe(CAMERA_DISABLED_REASON);
     expect(cameraPreviewDisabledReason({ ...camera, active: false })).toBe(CAMERA_OFF_PREVIEW_REASON);
     expect(cameraPreviewDisabledReason(camera)).toBeNull();
+  });
+
+  it("ID-02：the naming switch notes when look-to-talk or the greeting is off, without disabling it", () => {
+    const row = (cam: typeof camera) => boolRows(describeMenuPrefs({ camera: cam, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime })).find((r) => r.key === "look_to_talk_greet_name")!;
+    expect(row(camera)).toMatchObject({ disabled_reason: null, value: true, label: "打招呼時稱呼認出的家人", note: CAMERA_PREFS.look_to_talk_greet_name.hint });
+    expect(row({ ...camera, look_to_talk: false })).toMatchObject({ disabled_reason: null, note: "看著說話目前關閉，這個開關暫時用不到" });
+    expect(row({ ...camera, look_to_talk_greet: false })).toMatchObject({ disabled_reason: null, note: "看著說話時先打招呼目前關閉，這個開關暫時用不到" });
+    expect(CAMERA_PREFS.look_to_talk_greet_name.hint).toMatch(/macOS App.*雲端語音.*未校準/);
   });
 
   it("the greeting switch notes when look-to-talk is off, without disabling it", () => {

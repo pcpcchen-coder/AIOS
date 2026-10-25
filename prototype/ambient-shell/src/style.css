@@ -13,7 +13,7 @@
   --brain-r: min(20vw, 20vh);
   --brain-top-r: min(7vw, 7vh);
   --surface-top: calc(12vh + var(--brain-top-r) * 1.45 + 18px);
-  --brain-cta-top: min(calc(47vh + var(--brain-r) * 1.35 + 20px), calc(100dvh - 140px));
+  --brain-cta-top: min(calc(var(--brain-cy, 47vh) + var(--brain-r) * 1.35 + 20px), calc(100dvh - 140px));
   font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -79,7 +79,7 @@ body {
 .caption {
   position: fixed;
   left: 50%;
-  top: min(calc(47vh + var(--brain-r) * 1.45 + 28px), calc(100dvh - 160px));
+  top: min(calc(var(--brain-cy, 47vh) + var(--brain-r) * 1.45 + 28px), calc(100dvh - 160px));
   transform: translateX(-50%);
   width: min(640px, 92vw);
   text-align: center;
@@ -124,7 +124,7 @@ body {
 .command {
   position: fixed;
   left: 50%;
-  top: min(calc(47vh + var(--brain-r) * 1.45 + 24px), calc(100dvh - 120px));
+  top: min(calc(var(--brain-cy, 47vh) + var(--brain-r) * 1.45 + 24px), calc(100dvh - 120px));
   transform: translateX(-50%);
   width: min(620px, 92vw);
   z-index: 5;
@@ -866,7 +866,7 @@ body.listening .subtitle {
 
 .conversation-status {
   position: fixed;
-  top: min(calc(47vh + var(--brain-r) * 1.15), calc(100dvh - 170px));
+  top: min(calc(var(--brain-cy, 47vh) + var(--brain-r) * 1.15), calc(100dvh - 170px));
   left: 50%;
   transform: translateX(-50%);
   color: var(--cyan);
@@ -1105,4 +1105,61 @@ body[data-camera-preview="open"] .subtitle {
 .confirm-icon {
   flex: none;
   filter: drop-shadow(0 0 14px rgba(255, 181, 71, 0.45));
+}
+
+/* ───── 家人辨識（選單列打開的設定畫面，docs/14 ID-01） ───── */
+
+.family-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.family-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.family-person-text {
+  flex: 1;
+  display: grid;
+  gap: 2px;
+  overflow-wrap: anywhere;
+}
+
+.family-step,
+.family-try,
+.family-status,
+.family-explain {
+  margin-top: 14px;
+}
+
+.family-step input[type="text"] {
+  width: 100%;
+  max-width: 320px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
+}
+
+.family-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.family-result {
+  font-size: 20px;
+  margin: 8px 0;
 }

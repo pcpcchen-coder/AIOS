@@ -91,7 +91,8 @@ node scripts/verify-aios.mjs
 |---|---|---|---|
 | **現況** | [目前實作與驗證](./docs/Current_Implementation_Status.md) | 程式目錄、能力、證據層級、缺口與驗證方式 | 所有人，先讀 |
 | **13** | [功能擴充評估](./docs/13_Feature_Expansion_Assessment_2026-10-24.md) | Quest、OpenClaw、語音、感測、多裝置的優先序與 roadmap | 規劃與協作開發 |
-| **14** | [Companion Mode 陪聊模式](./docs/14_Companion_Mode_Spec_2026-10-24.md) | **設計提案，尚未實作**；主開關、接話方式、回答長度、冷卻時間、隱私與驗收；[開發批次](./docs/development/companion-mode-implementation-plan.md) | UI／語音開發者 |
+| **14** | [家人辨識與稱名問候規劃](./docs/14_Family_Recognition_and_Greeting_Plan_2026-10.md) | 面向等待期間同步辨識，互動開始後才說「George，我在」。[ADR-0001 草案](./docs/adr/ADR-0001-local-family-recognition.md)；ID-00 [spike](./docs/validation/family-id-00-spike-2026-10-24.md)、ID-01 [登記與試認](./docs/validation/family-id-01-2026-10-25.md)、ID-02 [看著說話時稱名問候](./docs/validation/family-id-02-2026-10-25.md)（只有雲端 fixture 驗證、門檻未校準，實際音訊待 Mac 實測） | 核心與感測開發者 |
+| **15** | [Companion Mode 陪聊模式](./docs/15_Companion_Mode_Spec_2026-10-24.md) | **設計提案，尚未實作**；主開關、接話方式、回答長度、冷卻時間、隱私與驗收；[開發批次](./docs/development/companion-mode-implementation-plan.md) | UI／語音開發者 |
 | **01** | [完整技術藍圖](./docs/01_Complete_Technical_Blueprint.md) | 7 大模組架構、技術選型、12 個月時程 | 想理解全貌者 |
 | **02** | [OSS 元件對應表](./docs/02_OSS_Component_Map.md) | 每個模組對應的社群開源專案 | 想快速實作者 |
 | **03** | [3 個月加速路徑](./docs/03_3Month_Accelerated_Roadmap.md) | 週級行動計畫 | 開發者 |

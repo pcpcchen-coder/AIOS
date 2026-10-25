@@ -8,28 +8,43 @@ export function radio(label, checked, click, enabled = true) {
   return { label, type: "radio", checked, enabled, click };
 }
 
-/** 「顯示鏡頭畫面」接在這一段的最後（核心的 camera 分段）。 */
+/** 「顯示鏡頭畫面」與「家人辨識…」接在這一段的最後（核心的 camera 分段）。 */
 const PREVIEW_GROUP = "camera";
 
 /**
  * @param settings GET /api/settings 的回應（還沒讀到時是 null）
- * @param handlers command(name)：把選單動作交給頁面；setMenuPref(row, value)：POST { [row.key]: value } 到 row.write_path
+ * @param handlers command(name)：把選單動作交給頁面；setMenuPref(row, value)：POST { [row.key]: value } 到 row.write_path；
+ *   openFamily()：「家人辨識…」（主程序先記下點擊時間，10 秒內頁面才能開管理 session，再交給頁面打開畫面）
  */
-export function settingsMenu(settings, { command, setMenuPref }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily }) {
   const rows = settings?.seconds;
   if (!rows) return [{ label: "讀取中…", enabled: false }];
   const previewReason = settings.camera_preview_disabled_reason;
+  const identity = settings.identity;
   const items = [];
   let group = null;
   const closeGroup = () => {
+    if (group !== PREVIEW_GROUP) return;
     // undefined：核心沒有提供這一項（不畫）；null：可以用。
-    if (group !== PREVIEW_GROUP || previewReason === undefined) return;
-    items.push({
-      label: "顯示鏡頭畫面",
-      sublabel: previewReason ?? undefined,
-      enabled: previewReason === null,
-      click: () => command("camera-preview"),
-    });
+    if (previewReason !== undefined) {
+      items.push({
+        label: "顯示鏡頭畫面",
+        sublabel: previewReason ?? undefined,
+        enabled: previewReason === null,
+        click: () => command("camera-preview"),
+      });
+    }
+    // 家人辨識（ADR-0001）：停用原因與限制都由核心的 settings.identity 給（不含姓名）。
+    // 停用時另外放一行灰色說明（sublabel 只有 macOS 14.4 以上才顯示）。
+    if (identity !== undefined) {
+      items.push({
+        label: "家人辨識…",
+        sublabel: identity.disabled_reason ?? identity.limited_reason ?? undefined,
+        enabled: identity.available,
+        click: () => openFamily?.(),
+      });
+      if (identity.disabled_reason) items.push({ label: `家人辨識：${identity.disabled_reason}`, enabled: false });
+    }
   };
   for (const row of rows) {
     if (row.group !== group) {

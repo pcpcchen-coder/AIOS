@@ -11,16 +11,22 @@ import { loadConfig } from "./config.ts";
 import { MockExecutor } from "./mock-executor.ts";
 import { ProviderManager } from "./providers.ts";
 import { buildLiveInstructions, RealtimeBridge } from "./realtime.ts";
-import { ApiKeyRoute } from "./realtime-routes.ts";
+import { ApiKeyRoute, type RealtimeSessions } from "./realtime-routes.ts";
+import type { RouteId } from "../shared/realtime-route.ts";
 import { CodexAuth } from "./codex-auth.ts";
 import { CodexResponses, type CodexModelCache } from "./codex-responses.ts";
-import { LiveRoute } from "./live-route.ts";
+import { LiveRoute, type LiveGreeting } from "./live-route.ts";
+import { GreetingPicker } from "./greeting-picker.ts";
 import { CALLER_LIMITS, LiveToolCaller } from "./live-tool-caller.ts";
 import { RealtimeSettingsStore } from "./realtime-settings.ts";
 import { WEB_SEARCH_TIMEOUT_MS, WebSearch } from "./web-search.ts";
 import { HomeBridge } from "./home-bridge.ts";
 import { TaskRunner } from "./runner.ts";
 import { TaskStore } from "./store.ts";
+import { checkFaceRuntime, FACE_MODEL_VERSION } from "./face-runtime.ts";
+import { GalleryStore, type SecretBox } from "./identity-store.ts";
+import { IdentityService, type ConfirmFn, type IdentityContext } from "./identity-service.ts";
+import type { IdentityResponse } from "../shared/identity.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
 
@@ -34,12 +40,36 @@ export interface NousOptions {
   /** 指定的連接埠被占用時改用其他空閒埠（App 用）；終端機版維持報錯。 */
   fallbackPort?: boolean;
   log?: (line: string) => void;
+  /**
+   * 家人辨識（ADR-0001；只有 macOS App 注入）。核心持有資料與比對；身分資料只經 Electron IPC（handle），不走 HTTP。
+   * 沒有注入（瀏覽器版）時 settings.identity 回報「瀏覽器版不可用」。
+   */
+  identity?: IdentityInjection;
+}
+
+export interface IdentityInjection {
+  /** gallery 的資料夾（App：userData/identity）。 */
+  dir: string;
+  /** 包裝資料金鑰（App：safeStorage；只在 darwin 且可加密時 available）。 */
+  secretBox: SecretBox;
+  /** Time Machine 排除（App：tmutil addexclusion）。 */
+  excludeFromBackup?: (dir: string) => Promise<void>;
+  /** 登記、刪除與清除前的原生確認（App：dialog.showMessageBox）。 */
+  confirm: ConfirmFn;
+  /** 模型與 onnxruntime wasm 的資料夾（App：userData/face-runtime；npm run face:setup -- --product 安裝）。 */
+  modelDir?: string | null;
 }
 
 export interface NousHandle {
   port: number;
   url: string;
   close(): Promise<void>;
+  /** 只有注入 identity 時存在；主程序的 IPC 處理器把頁面的請求轉到這裡。 */
+  identity?: {
+    handle(request: unknown, ctx: IdentityContext): Promise<IdentityResponse>;
+    /** 主視窗導覽、重新載入或 renderer 結束時，主程序呼叫它結束管理 session。 */
+    closeSessions(): void;
+  };
 }
 
 const LABEL = { claude: "Claude", chatgpt: "ChatGPT（Sign in with ChatGPT）", mock: "模擬（mock）" } as const;
@@ -101,6 +131,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     home: home.available,
   });
   const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available });
+  // 開場句挑選（固定清單、依本機時段、避開上一次）：家人辨識的決策與 live 保底共用一個。
+  const greetings = new GreetingPicker();
   const live = new LiveRoute({
     auth: codexAuth,
     voice: () => realtimePrefs.view().live_voice,
@@ -110,6 +142,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     instructions: (ctx) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp }),
     caller: (ctx) =>
       new LiveToolCaller({ responses: codex, caps: liveCaps, host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log }),
+    // 看著說話的問候（ID-02）：頁面只帶互動 ID，短句由家人辨識的核心決策組成；瀏覽器版（沒有 identity）一律「我在」。
+    greeting: liveGreetingSource(() => identity, greetings),
     log,
   });
   const apiKeyRoute = new ApiKeyRoute(realtime, !!config.openaiApiKey, config.realtimeVoice);
@@ -117,6 +151,31 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const voice = new VoiceSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   const store = new TaskStore(options.dataDir);
   const runner = new TaskRunner(store, providers, config.maxConcurrent);
+  // 雜湊核對沒過（缺檔或不符）就不提供 /face-runtime/，頁面也就載不到未核對的模型。
+  const runtime = checkFaceRuntime(options.identity?.modelDir ?? null);
+  const faceRuntimeDir = runtime.state === "ok" ? (options.identity?.modelDir ?? null) : null;
+  if (options.identity && runtime.state !== "ok") log(`家人辨識模型：${runtime.state}（${runtime.problems.join("、") || "未設定資料夾"}）`);
+  const identity = options.identity
+    ? new IdentityService({
+        store: new GalleryStore({ dir: options.identity.dir, secretBox: options.identity.secretBox, excludeFromBackup: options.identity.excludeFromBackup, log }),
+        confirm: options.identity.confirm,
+        camera: () => {
+          const cam = camera.view();
+          return cam.enabled && cam.active;
+        },
+        ambient: () => {
+          const cam = camera.view();
+          return { look_to_talk: cam.look_to_talk, look_to_talk_greet: cam.look_to_talk_greet, look_to_talk_greet_name: cam.look_to_talk_greet_name };
+        },
+        runtime,
+        model: FACE_MODEL_VERSION,
+        // 問候決策只接受 /api/realtime/start 發出、真的連上的互動 ID（server 在下面建立，呼叫時已存在）。
+        claimGreeting: greetingClaims(() => server.realtimeSessions),
+        picker: greetings,
+        log,
+        onChange: () => notify(),
+      })
+    : null;
   const server = createApp({
     store,
     runner,
@@ -131,6 +190,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     home,
     camera,
     voice,
+    identity: identity ?? undefined,
+    faceRuntimeDir,
     port,
     devPort: config.devPort,
     distDir: options.distDir,
@@ -159,16 +220,35 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const cam = camera.view();
   log(`雙目鏡頭：${cam.enabled ? `啟用（${cam.label}，影像只在本機處理${cam.active ? "" : "；使用者已在設定關閉"}）` : "未啟用（NOUS_CAMERA=on 開啟）"}`);
   log(`憑證與設定目錄：${config.configDir}`);
+  const idStatus = identity?.status();
+  // gallery 要到第一次開 session 才載入：這裡只記模型與鏡頭的狀態，不碰 Keychain。
+  log(`家人辨識：${idStatus ? (idStatus.disabled_reason ?? `可用（模型 ${runtime.state}${idStatus.limited_reason ? `；${idStatus.limited_reason}` : ""}；門檻未校準；家人資料在第一次打開時才載入）`) : "瀏覽器版不可用"}`);
 
   return {
     port,
     url: `http://localhost:${port}`,
+    ...(identity ? { identity: { handle: (request: unknown, ctx: IdentityContext) => identity.handle(request, ctx), closeSessions: () => identity.closeSessions() } } : {}),
     close: () =>
       new Promise<void>((resolve) => {
+        // 先讓家人辨識進入關閉狀態：結束 session，等待中的原生確認回來後也不寫檔。
+        identity?.shutdown();
         server.closeAllConnections();
         server.close(() => resolve());
       }),
   };
+}
+
+/**
+ * live 路徑的問候文字來源（ID-02）：頁面 POST greeting 的文字只當互動 ID，連同這個 live 工作階段的 ID 交給
+ * IdentityService.takeLiveGreeting；沒有家人辨識（瀏覽器版）或取不到時，由核心從固定清單挑一句不含名字的（例如「我在」「早安」）。
+ */
+export function liveGreetingSource(identity: () => IdentityService | null, picker: GreetingPicker): (interaction: string, sessionId: string) => LiveGreeting {
+  return (interaction, sessionId) => identity()?.takeLiveGreeting(interaction, sessionId) ?? picker.plainLive();
+}
+
+/** IdentityService 的 claimGreeting：把核心發出的互動 ID 換成真的連上的工作階段（RealtimeSessions.claimGreeting）。 */
+export function greetingClaims(sessions: () => RealtimeSessions | null): (interaction: string) => { route: RouteId; session_id: string } | null {
+  return (interaction) => sessions()?.claimGreeting(interaction) ?? null;
 }
 
 /** 先試指定的埠；被占用時讓系統分配一個空閒埠。 */

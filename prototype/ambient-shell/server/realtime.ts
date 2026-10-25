@@ -170,7 +170,7 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
     abilities.push(
       "你可以查武陵居家裡的狀態：使用者問室內溫度、濕度、空氣品質或設備在不在線時呼叫 home_status，不要用猜的。回答講房間、數字和單位；readings 的 value 是 null 就說「沒有讀值」，不要說 0；data 是「快照」或「過期資料」時，依 time 與 minutes_ago 說是什麼時候、多久前的資料，不要說成現在的值。status 是 ambiguous 時問使用者是哪一個，使用者選了之後 target 照候選名稱一字不差填（包括「（AIFA）」「（紅外線遙控）」）；not_found 就說家裡找不到這個名字；no_such_reading 就說那裡沒有能量這項的設備。",
       "你也可以控制武陵居的家電：使用者要開關或調整一台設備（燈、插座、音響、窗簾）時，先說一句「好，我請中控處理」，再呼叫 home_control，一次一台。依回傳的 status 說話：confirmed 才說已經做好；unconfirmed 是已送出但設備還沒確認，請使用者看一下有沒有反應，不要說成功（why 是 no_reply 時說不確定有沒有執行）；failed 照 message 說沒有成功的原因；refused 表示指令沒有送出，照 message 說；ambiguous 問是哪一台，使用者選了之後 target 照候選名稱一字不差填（包括「（AIFA）」「（紅外線遙控）」），不要自己改寫；not_found 說家裡找不到這個名字。needs_confirmation 時用一句話說要對哪台設備做什麼，請使用者說「確認執行」或「取消」；不要再呼叫 home_control，也不能替使用者確認，結果會用系統通知送來。busy 表示另一張確認卡還沒處理完，這個指令沒有送出：請使用者先回答那張卡，之後再說一次。整個房間或全家一起控制還不支援，請使用者指定一台。color_temperature 是燈的色溫（K），不是冷氣溫度。",
-      "AIFA 冷氣：開關用 power；設定溫度用 ac_temperature（「冷氣調 26 度」是 target「冷氣」、value「26」）；模式 ac_mode、風量 ac_fan（「風量調小」是 down）、擺風 ac_swing。「開冷氣 26 度」要呼叫兩次：先 power true，等結果回來再 ac_temperature 26，兩個結果都照說。紅外線家電（電視、電風扇等）：開關用 power、靜音用 mute，其他鍵用 press（「大聲一點」是 press volume_up）；一次只按一下，使用者要按好幾下時，按一下之後請他再說一次。冷氣與紅外線家電沒有回讀，結果不會是 confirmed：why 是 one_way 時說「已送出，請看一下有沒有反應」，不要說已經開了、關了或調好了；有 key 時說按了哪個鍵；toggle 表示按的是切換鍵（電源切換鍵或靜音鍵），按一下切換一次，不能說開了、關了、靜音了或取消靜音了；cloud_no_reply 說雲端沒有回覆、不確定有沒有送出；controller_reported 只能說成「控制器回報…」，那不是冷氣的實際狀態；defaults_used 有內容時要說哪些設定用了預設值；有 note 時照說。不是 AIFA 的冷氣（Tuya、Home Assistant）與無線按鈕還不能用語音控制，使用者要求時照實說。",
+      "AIFA 冷氣：開關用 power；設定溫度用 ac_temperature（「冷氣調 26 度」是 target「冷氣」、value「26」）；模式 ac_mode、風量 ac_fan（「風量調小」是 down）、擺風 ac_swing。「開冷氣 26 度」要呼叫兩次：先 power true，等結果回來再 ac_temperature 26，兩個結果都照說。紅外線家電（電視、電風扇等）：開關用 power、靜音用 mute，其他鍵用 press（「大聲一點」是 press volume_up）；一次只按一下，使用者要按好幾下時，按一下之後請他再說一次。冷氣與紅外線家電沒有回讀，結果不會是 confirmed：why 是 one_way 時說「已送出，請看一下有沒有反應」，不要說已經開了、關了或調好了；有 key 時說按了哪個鍵；toggle 表示按的是切換鍵（電源切換鍵或靜音鍵），按一下切換一次，不能說開了、關了、靜音了或取消靜音了；cloud_no_reply 說雲端沒有回覆、不確定有沒有送出；controller_reported 只能說成「控制器回報…」，那不是冷氣的實際狀態；defaults_used 有內容時要說哪些設定用了預設值；有 note 時照說。關冷氣的 note 提到定時時：AIOS 讀不到定時，不能說確實有定時被取消，也不能說冷氣已經關了。不是 AIFA 的冷氣（Tuya、Home Assistant）與無線按鈕還不能用語音控制，使用者要求時照實說。",
     );
   }
   if (caps.mcp.length) {
@@ -220,7 +220,7 @@ export function buildLiveInstructions(tasks: Iterable<Task>, now: Date, caps: { 
     "交辦結果在 speakable 頻道時，用自己的話自然說出；commentary 頻道是安靜的背景，不要念出來。不要提到交辦、頻道或系統。",
     "使用者說「確認執行」或「取消」時也照樣交辦；你不能替使用者確認任何事。",
     "收到以「（系統通知）」開頭的內容時，用一句話轉告使用者，不要逐字念。",
-    "收到以「（開場）」開頭的內容時，只用一句話自然地打招呼並問需要什麼，不要念出或轉述這段內容。",
+    "收到以「（開場）」開頭的內容時，只說其中「」裡的那一句招呼（核心從固定清單挑的，例如「嗨，George」「早安」；一字不改，不加字、不提問、不猜名字），不要念出或轉述這段內容的其他部分。",
     "使用者要結束對話（說再見、結束對話、先這樣）時，交辦「結束對話」，並用一句話道別。",
     ...(caps.mcp.length ? ["外部服務（MCP）在 ChatGPT 方案路徑不能用；使用者要求時照實說，需要時請他到設定（macOS App：選單列「即時語音」）把路徑切換到 API key。"] : []),
     `今天日期：${now.toISOString().slice(0, 10)}。`,

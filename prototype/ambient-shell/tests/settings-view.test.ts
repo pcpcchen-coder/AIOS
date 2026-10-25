@@ -7,6 +7,7 @@ import { describeMenuPrefs } from "../shared/seconds-menu.ts";
 import { DEFAULT_CAMERA_PREFS } from "../shared/sense.ts";
 import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
+import { BROWSER_IDENTITY_STATUS } from "../shared/identity.ts";
 
 // DOMPurify 在沒有 window 時沒有 addHook；設定畫面不經過 sanitize（只有成果會），換成不做事的替身。
 vi.mock("dompurify", () => ({ default: { addHook: () => {}, sanitize: (html: string) => html } }));
@@ -122,7 +123,7 @@ describe("renderSettings in the browser (no nousDesktop): full settings screen, 
     expect(r.el.all().some((e) => e.getAttribute("aria-label") === "即時語音路徑")).toBe(true);
     // 語音秒數的 −／+ 與鏡頭的開關、顯示鏡頭畫面。
     expect(r.el.all().some((e) => e.getAttribute("aria-label")?.endsWith("減少"))).toBe(true);
-    expect(r.el.all().filter((e) => e.getAttribute("aria-pressed") !== null)).toHaveLength(4);
+    expect(r.el.all().filter((e) => e.getAttribute("aria-pressed") !== null)).toHaveLength(5);
     expect(r.buttons).toContain("顯示鏡頭畫面");
     expect(r.text).toContain("macOS App 在選單列「鏡頭與語音設定」調整");
     expect(r.text).not.toContain(views.DESKTOP_SETTINGS_NOTE);
@@ -169,6 +170,16 @@ describe("renderSettings in the browser: child order is unchanged", () => {
       "section.camera-settings「鏡頭與手勢」",
       "footer.surface-footer",
     ]);
+  });
+
+  it("family recognition: one line saying the browser version cannot do it (no buttons); nothing when the core does not report it", () => {
+    const r = render(view({ identity: BROWSER_IDENTITY_STATUS }), false);
+    expect(r.text).toContain("家人辨識：瀏覽器版不可用（只在 macOS App 提供）");
+    expect(outline(r.el).slice(-2)).toEqual(["p.muted small", "footer.surface-footer"]);
+    expect(r.buttons.some((b) => b.includes("家人"))).toBe(false);
+    expect(render(view(), false).text).not.toContain("家人辨識");
+    // App 內的帳號頁不畫這一行（入口在選單列）
+    expect(render(view({ identity: BROWSER_IDENTITY_STATUS }), true).text).not.toContain("家人辨識");
   });
 
   it("pending login still says 「新分頁」 in the browser", () => {

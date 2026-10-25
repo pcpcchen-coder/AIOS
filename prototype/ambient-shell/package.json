@@ -13,22 +13,26 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p spike/face/tsconfig.json",
     "test": "vitest run",
     "vision:setup": "node scripts/vision-setup.mjs",
+    "face:setup": "node scripts/face-setup.mjs",
+    "face:spike": "vite --config spike/face/vite.config.ts",
+    "face:bench": "node scripts/face-spike-bench.mjs",
     "docs:commands": "tsx scripts/write-commands-doc.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.131.0",
     "@mediapipe/tasks-vision": "1.1.1",
-    "dompurify": "3.4.16",
-    "marked": "18.0.14"
+    "dompurify": "3.4.17",
+    "marked": "18.0.14",
+    "onnxruntime-web": "1.30.0"
   },
   "devDependencies": {
     "@types/node": "25.9.9",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
-    "vite": "8.3.2",
+    "vite": "8.3.4",
     "vitest": "5.0.3"
   }
 }

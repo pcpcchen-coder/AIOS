@@ -269,7 +269,7 @@ export const CAVEATS: readonly Caveat[] = [
   { id: "card-ok-is-not-yes", cases: [{ says: "好", checks: { approval: null, camera: null } }],
     truth: "確認卡開著時只說「好」不算同意，也不算取消：指令不會送出，確認卡繼續等你說「確認執行」或「取消」，60 秒後自動取消" },
   { id: "home-aircon", cases: [{ says: "冷氣調 26 度", checks: { camera: null, approval: null, notLocalIn: ["realtime"] } }],
-    truth: "不是本機指令，會交給 AI。AIFA 冷氣：先讀控制器記得的設定再送出 26 度，讀不到的項目用預設值並說出來；冷氣不會回報，所以只會說「已送出，請確認」，不會說調好了，冷氣關著時也不代表會開機（要開請說「開冷氣」）。紅外線遙控的冷氣只能按它的遙控鍵；色溫（2500–9000 K）只用在燈" },
+    truth: "不是本機指令，會交給 AI。AIFA 冷氣：先讀控制器記得的設定再送出 26 度，讀不到的項目用預設值並說出來（模式預設自動、溫度 26 度、風量與擺風自動）；冷氣不會回報，所以只會說「已送出，請確認」，不會說調好了，冷氣關著時也不代表會開機（要開請說「開冷氣」）。紅外線遙控的冷氣只能按它的遙控鍵；色溫（2500–9000 K）只用在燈" },
   { id: "home-room-wide", cases: [{ says: "客廳的燈全部關掉", checks: { camera: null, approval: null, notLocalIn: ["realtime"] } }],
     truth: "一次只控制一台：說整個房間或「全部」時，AI 會問你是哪一台，不會一次關掉整個房間" },
   { id: "substring-progress", cases: [{ says: "交通狀況如何", checks: { camera: null, intent: "progress" } }],
@@ -288,7 +288,7 @@ export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
   home_status: { try: ["客廳現在幾度"], does: "查武陵居的感測值與設備狀態",
     needs: { text: "即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）", live: "realtime_home" } },
   home_control: { try: ["客廳主燈關掉", "書桌燈調到 60%", "色溫調到 3000K", "冷氣調 26 度", "電視大聲一點"],
-    does: "請中控控制一台家電，照中控的回讀說結果：確認了才說好了；「已送出、未確認」要你看一下，不算成功。AIFA 冷氣（開關、溫度、模式、風量）與紅外線家電（一次按一個遙控鍵）沒有回讀，只會說「已送出，請確認」。一次一台",
+    does: "請中控控制一台家電，照中控的回讀說結果：確認了才說好了；「已送出、未確認」要你看一下，不算成功。AIFA 冷氣（開關、溫度、模式、風量）與紅外線家電（一次按一個遙控鍵）沒有回讀，只會說「已送出，請確認」。關 AIFA 冷氣時，中控會一併取消它的定時，Nous 會說出來（不知道原本有沒有定時）。一次一台",
     needs: { text: "即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）", live: "realtime_home" } },
 };
 
@@ -297,7 +297,7 @@ export const CONTROLS: readonly Control[] = [
   { id: "voice-pill", how: "點右上角的語音指示", does: "結束語音模式或即時語音" },
   { id: "palm", how: "舉起張開的手掌", does: "停止 Nous 說話，不取消任務（需要鏡頭與「手掌停止播報」）" },
   { id: "look", how: "面向螢幕", does: "看著說話：面向這麼久之後自動開始即時語音（需要鏡頭與即時語音，而且這個視窗之前已同意過即時語音的說明；沒同意過不會自動開始，請先按「開始語音對話」同意一次）", seconds: "look_to_talk_s" },
-  { id: "look-greet", how: "看著說話開始後", does: "開著「看著說話時先打招呼」時，連上後等 0.6 秒，你還沒開口或打字，Nous 就先說一句招呼、問有什麼需要幫忙（每次對話最多一次；按鈕、語音指令或打字開始的不打招呼）" },
+  { id: "look-greet", how: "看著說話開始後", does: "開著「看著說話時先打招呼」時，連上後等 0.6 秒，你還沒開口或打字，Nous 就先說一句短的開場（例如「我在」「你好」，依時段「早安」）；macOS App 認出已登記的家人時說「嗨，George」「George，我在」之類（「打招呼時稱呼認出的家人」，門檻未校準）。每次對話最多一次；按鈕、語音指令或打字開始的不打招呼" },
   { id: "look-cooldown", how: "對話結束後", does: "這段時間內看著說話不再自動開始", seconds: "look_to_talk_cooldown_s" },
   { id: "voice-idle", how: "語音模式沒說話", does: "自動關閉語音模式（Nous 等回覆、念回覆時不計時）", seconds: "voice_idle_s" },
   { id: "realtime-idle", how: "即時語音沒說話", does: "自動結束即時語音，避免持續計費或用掉方案額度（Nous 回覆、查資料、等確認時不計時）", seconds: "realtime_idle_s" },

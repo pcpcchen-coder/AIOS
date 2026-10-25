@@ -1,6 +1,6 @@
 # 實作 Companion Mode（AIOS 原型開發交辦與驗收）
 
-> 文件性質：**How-to／開發批次規劃，尚未執行** · 2026-10-24 · 依據：[Companion Mode 功能規格](../14_Companion_Mode_Spec_2026-10-24.md)。
+> 文件性質：**How-to／開發批次規劃，尚未執行** · 2026-10-24 · 依據：[Companion Mode 功能規格](../15_Companion_Mode_Spec_2026-10-24.md)。
 >
 > 工作前先讀 [現況](../Current_Implementation_Status.md)、[AGENTS.md](../../AGENTS.md)、[CLAUDE.md](../../CLAUDE.md)、[pstack 使用指南](./pstack.md)。目前現存原型為 `prototype/ambient-shell`；不要以舊 Python kernel、Tauri 或已存在的本地 ASR 為前提。
 
@@ -91,7 +91,7 @@ git diff --check
 ```text
 請依 AIOS repo 的 AGENTS.md、CLAUDE.md、pstack 規範工作。
 先讀 docs/Current_Implementation_Status.md、
-docs/14_Companion_Mode_Spec_2026-10-24.md 與本開發批次。
+docs/15_Companion_Mode_Spec_2026-10-24.md 與本開發批次。
 
 本次只執行「CM-P1：偏好、主開關與強制停止」：
 - 在 prototype/ambient-shell 現有 Node/TypeScript/Electron 上增量實作。

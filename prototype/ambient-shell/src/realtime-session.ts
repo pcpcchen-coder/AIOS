@@ -1,4 +1,6 @@
+import type { GreetingRoute } from "../shared/identity.ts";
 import type { FallbackOffer, RouteId, StartDecision } from "../shared/realtime-route.ts";
+import { LOOK_TO_TALK_GREETING } from "../shared/sense.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimePhase, RealtimeVoice } from "./realtime.ts";
 
 // 頁面唯一的接縫：main.ts 只跟 RealtimeSession 說話，不直接碰哪條路徑的類別。
@@ -33,7 +35,11 @@ void gaFits;
 /** 誰開始了這次即時語音：只有看著說話（鏡頭）開始的會打招呼；按鈕、語音指令、打字、同意說明後開始的都是 user。 */
 export type RealtimeStartSource = "look_to_talk" | "user";
 
-export type GreetingState = "pending" | "sent" | "skipped";
+/**
+ * 問候的生命週期（和辨識結果分開，docs/14 §3）：pending → deciding（向核心要問候決策）→ sent；
+ * 使用者先開口、打字、收起或設定關閉時 → skipped。deciding 期間取消也算 skipped，決策回來後不送。
+ */
+export type GreetingState = "pending" | "deciding" | "sent" | "skipped";
 
 /**
  * 工作階段就緒（API key：session.created；ChatGPT 方案：麥克風＋peer＋session.started）之後，等這麼久才送招呼，
@@ -46,38 +52,90 @@ export type GreetingState = "pending" | "sent" | "skipped";
 export const GREETING_SETTLE_MS = 600;
 
 /**
- * 看著說話開始的即時語音要打的一次招呼（George 2026-10-23）。一次 startRealtime 建一個，
+ * 送出前向核心要的內容（docs/14 §6）。api_key：這一輪 response.create 的 instructions（只含核心組好的短句）；
+ * live：POST /api/realtime/input greeting 的文字，只是互動 ID，短句留在核心、由核心自己送進 sideband。
+ */
+export type GreetingDecide = (route: GreetingRoute) => Promise<string>;
+
+/** 不稱名的內容：瀏覽器版、沒有辨識或決策失敗時用。API key 是固定的「我在」指示；live 只送互動 ID（核心取不到決策就送「我在」）。 */
+export function plainGreeting(interaction: string): GreetingDecide {
+  return async (route) => (route === "api_key" ? LOOK_TO_TALK_GREETING : interaction);
+}
+
+/** 一次看著說話開始的互動 ID（頁面亂數產生；不含身分，核心只拿來配對問候決策）。 */
+export function newInteractionId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return `int_${[...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
+}
+
+export interface GreetingOptions {
+  /** 這次互動的 ID（看著說話開始時建立；同一次的 live 與 API key 工作階段共用）。 */
+  interaction?: string;
+  /** 送出前的決策（macOS App：經 IPC 問核心）；未提供時不稱名。 */
+  decide?: GreetingDecide;
+  /** 問候結束（sent 或 skipped）時呼叫一次：頁面停止為這次互動取樣。 */
+  settled?: (state: "sent" | "skipped") => void;
+}
+
+/**
+ * 看著說話開始的即時語音要打的一次招呼（George 2026-10-23；ID-02 起內容由核心決定）。一次 startRealtime 建一個，
  * 改路徑時兩個工作階段共用同一個物件，所以整次對話最多打一次招呼。
  * - 工作階段確定連上（API key：session.created；ChatGPT 方案：麥克風＋peer＋session.started）之後再等 GREETING_SETTLE_MS 才呼叫 take()；
- * - 使用者在那之前（含等待的這段時間）先開口或打字：skip()，這次不打招呼；
- * - take() 當下再讀一次設定（設定改了立即生效）：關了就不打。
+ * - 使用者在那之前（含等待與決策的這段時間）先開口或打字：skip()，這次不打招呼；
+ * - take() 當下再讀一次設定（設定改了立即生效）：關了就不打；決策回來後再讀一次。
+ * - 一旦標記 sent 就不再送（送出狀態未知時也不重送，docs/14 I6）。
  */
 export class GreetingOnce {
   private value: GreetingState = "pending";
+  readonly interaction: string;
+  private readonly decide: GreetingDecide;
+  private readonly settled: (state: "sent" | "skipped") => void;
 
   constructor(
-    readonly instructions: string,
     private readonly enabled: () => boolean = () => true,
-  ) {}
+    options: GreetingOptions = {},
+  ) {
+    this.interaction = options.interaction ?? newInteractionId();
+    this.decide = options.decide ?? plainGreeting(this.interaction);
+    this.settled = options.settled ?? (() => {});
+  }
 
   get state(): GreetingState {
     return this.value;
   }
 
-  /** 還沒打過、沒被取消、設定還開著：回傳要給模型的指示並標記已送出；否則 null。 */
-  take(): string | null {
+  /** 還沒打過、沒被取消、設定還開著：向核心要內容並標記已送出；否則 null。 */
+  async take(route: GreetingRoute): Promise<string | null> {
     if (this.value !== "pending") return null;
     if (!this.enabled()) {
-      this.value = "skipped";
+      this.finish("skipped");
       return null;
     }
-    this.value = "sent";
-    return this.instructions;
+    this.value = "deciding";
+    let payload: string;
+    try {
+      payload = await this.decide(route);
+    } catch {
+      // 決策失敗（IPC 錯誤、核心重新啟動）：照常問候，但不帶名字。
+      payload = await plainGreeting(this.interaction)(route);
+    }
+    if (this.value !== "deciding") return null;
+    if (!this.enabled()) {
+      this.finish("skipped");
+      return null;
+    }
+    this.finish("sent");
+    return payload;
   }
 
-  /** 使用者先開口（或打字）：還沒送出的招呼不再送。已送出的不受影響。 */
+  /** 使用者先開口（或打字、收起）：還沒送出的招呼不再送（含正在等決策的）。已送出的不受影響。 */
   skip(): void {
-    if (this.value === "pending") this.value = "skipped";
+    if (this.value === "pending" || this.value === "deciding") this.finish("skipped");
+  }
+
+  private finish(state: "sent" | "skipped"): void {
+    this.value = state;
+    this.settled(state);
   }
 }
 
@@ -85,9 +143,9 @@ export class GreetingOnce {
  * 這次開始要不要打招呼：看著說話開始的一律建立 GreetingOnce，「看著說話時先打招呼」在要送出的那一刻（take()）才讀，
  * 所以連線中才在設定畫面或用語音打開也會打招呼、關掉就不打。其他開始方式回 null。
  */
-export function greetingFor(source: RealtimeStartSource, greetOn: () => boolean, instructions: string): GreetingOnce | null {
+export function greetingFor(source: RealtimeStartSource, greetOn: () => boolean, options: GreetingOptions = {}): GreetingOnce | null {
   if (source !== "look_to_talk") return null;
-  return new GreetingOnce(instructions, greetOn);
+  return new GreetingOnce(greetOn, options);
 }
 
 /** 還沒開始過的即時語音：main.ts 載入時讀 on／current 等都安全。 */

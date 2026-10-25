@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { RealtimeBaseInfo } from "../shared/types.ts";
 import { chunkForAppend, parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
-import { LIVE_GREETING_TEXT } from "../shared/sense.ts";
+import { GREETING_PLAIN, LIVE_GREETING_TEXT } from "../shared/sense.ts";
 import { billingLine, LIVE_VOICES, unavailableText, type LiveInputKind, type LiveVoiceId, type RouteOption, type UnavailableReason } from "../shared/realtime-route.ts";
 import { CodexAuthError, CodexUnauthorized, NOUS_ORIGINATOR, type CodexAuth, type CodexRequestAuth } from "./codex-auth.ts";
 import { redact } from "./codex-responses.ts";
@@ -77,11 +77,37 @@ export interface LiveRouteOptions {
   /** 這條路徑提供的工具（給設定畫面的文字）。 */
   capabilities: () => { webSearch: boolean; home: boolean };
   clientVersion: string;
+  /**
+   * 看著說話的問候（ID-02）：頁面 POST greeting 帶來的文字只當成互動 ID，交給這個函式取核心已組好的短句
+   * （IdentityService.takeLiveGreeting）。沒有提供或取不到時送「我在」（LIVE_GREETING_TEXT）。頁面的文字永遠不會成為內容。
+   */
+  greeting?: (interaction: string, sessionId: string) => LiveGreeting | null;
   fetch?: typeof fetch;
   WebSocket?: SidebandSocketCtor;
   urls?: { call: string; sideband: (callId: string) => string };
   sleep?: (ms: number) => Promise<void>;
   log?: (line: string) => void;
+}
+
+/** 核心挑好的開場：送進 sideband 的整段文字，以及要念的那一句（用來在逐字稿緩衝裡認出問候、交辦時遮掉）。 */
+export interface LiveGreeting {
+  text: string;
+  sentence: string;
+}
+
+/** 比對用：去掉空白與標點（模型可能多一個驚嘆號或句號）。 */
+function normalizeSpoken(text: string): string {
+  return text.replace(/[\s\p{P}\p{S}]/gu, "");
+}
+
+/**
+ * 這一則助理逐字稿是不是開場問候（審查 2026-10-25，George 要求交辦時遮掉）：包含核心送出的那一句，
+ * 或是那一句被打斷時的開頭（「George，我」）。
+ */
+export function isGreetingTurn(text: string, sentence: string): boolean {
+  const t = normalizeSpoken(text);
+  const s = normalizeSpoken(sentence);
+  return t.length > 0 && s.length > 0 && (t.includes(s) || s.startsWith(t));
 }
 
 export class LiveRoute implements RealtimeRoute {
@@ -199,7 +225,7 @@ export class LiveRoute implements RealtimeRoute {
       void this.hangup(urls.sideband(created.callId), ids);
       throw new RouteStartError("upstream", 502, unavailableText("upstream", { message: "接不上控制連線（sideband）" }), true);
     }
-    return new LiveCall(created.answer, this.options.model.display, socket, ctx, this.options.caller(ctx), this.options.log);
+    return new LiveCall(created.answer, this.options.model.display, socket, ctx, this.options.caller(ctx), this.options.log, this.options.greeting);
   }
 
   /** 盡力掛斷：再試一次 sideband（短時限），接上就送 session.close。 */
@@ -339,6 +365,8 @@ class LiveCall implements RouteCall {
   private typed = 0;
   /** 這個工作階段已經送過招呼指示：頁面重送也不會再念一次。 */
   private greeted = false;
+  /** 送出的開場句，等模型念出後在逐字稿緩衝裡標成問候（交辦時不附這一則）；認出或下一則助理逐字稿之後清掉。 */
+  private greetingSentence: string | null = null;
 
   constructor(
     readonly answerSdp: string,
@@ -347,6 +375,7 @@ class LiveCall implements RouteCall {
     private readonly ctx: SessionContext,
     private readonly caller: DelegationRunner,
     private readonly log?: (line: string) => void,
+    private readonly greetingText?: (interaction: string, sessionId: string) => LiveGreeting | null,
   ) {
     this.control = { input: (kind, text) => this.input(kind, text) };
     socket.addEventListener("message", (event) => {
@@ -394,7 +423,14 @@ class LiveCall implements RouteCall {
         break;
       case "transcript":
         if (event.final && event.text.trim()) {
-          this.transcript.push({ role: event.role, text: event.text.trim() });
+          // 開場問候那一則標起來：交辦給 Codex 的最近逐字稿不附它（server/live-tool-caller.ts requestText）。
+          // 只看送出開場後的第一則助理逐字稿；使用者自己說的話（例如「幫 George 寫信」）不受影響。
+          let greeting = false;
+          if (event.role === "assistant" && this.greetingSentence !== null) {
+            greeting = isGreetingTurn(event.text, this.greetingSentence);
+            this.greetingSentence = null;
+          }
+          this.transcript.push({ role: event.role, text: event.text.trim(), ...(greeting ? { greeting: true } : {}) });
           if (this.transcript.length > TRANSCRIPT_RING) this.transcript.shift();
         }
         this.ctx.emit({ kind: "transcript", role: event.role, text: event.text, final: event.final, item_id: event.item_id });
@@ -473,8 +509,9 @@ class LiveCall implements RouteCall {
    * user_text → 和交辦一樣交給 caller（打字就是請求），結果用 session.context.append 送回。
    * notice    → session.context.append speakable「（系統通知）…」（任務完成、確認卡的結果）。
    * context   → session.context.append commentary（例如手指指著哪一項；不念）。
-   * greeting  → session.context.append speakable 固定的 LIVE_GREETING_TEXT（「（開場）」開頭的招呼指示；同 OpenClaw quicksilver triggerGreeting）。
-   *              頁面送來的文字一律忽略（只用來通過長度檢查）；真的在開著的 sideband 送出才記成已送，每個工作階段最多一次。
+   * greeting  → session.context.append speakable 核心從固定清單挑好的招呼（「（開場）」開頭，只要模型照念其中「」裡那一句，例如「嗨，George」「早安」；
+   *              同 OpenClaw quicksilver triggerGreeting）。頁面送來的文字只當成互動 ID 去取核心的決策（ID-02），取不到就送「我在」；
+   *              頁面文字永遠不會變成內容。真的在開著的 sideband 送出才記成已送，每個工作階段最多一次。
    */
   private input(kind: LiveInputKind, text: string): void {
     if (this.closed) return;
@@ -485,7 +522,9 @@ class LiveCall implements RouteCall {
     if (kind === "greeting") {
       // sideband 還沒開（或正在關）：不記成已送，之後重送仍有效；送出之後才記，所以不會送兩次。
       if (this.greeted || this.closed || this.socket.readyState !== 1) return;
-      for (const piece of chunkForAppend(LIVE_GREETING_TEXT)) this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: piece }] });
+      const greeting = this.greetingText?.(text, this.ctx.sessionId) ?? { text: LIVE_GREETING_TEXT, sentence: GREETING_PLAIN };
+      this.greetingSentence = greeting.sentence;
+      for (const piece of chunkForAppend(greeting.text)) this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: piece }] });
       this.greeted = true;
       return;
     }

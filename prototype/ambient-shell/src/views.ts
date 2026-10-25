@@ -366,6 +366,8 @@ export function renderSettings(
     h("p", { class: "muted small" }, "新交辦的任務會用目前選擇的引擎；已在執行的任務不受影響。"),
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
+    // 家人辨識只在 macOS App（加密保存需要 safeStorage）；瀏覽器版照實說不可用，不提供任何操作。
+    settings.identity && !settings.identity.available && h("p", { class: "muted small" }, `家人辨識：${settings.identity.disabled_reason ?? "不可用"}`),
     footer(actions),
   );
 }
@@ -610,7 +612,7 @@ function renderCameraSettings(camera: CameraSettings, realtimeAvailable: boolean
       h(
         "li",
         // 秒數與「看著說話時先打招呼」都是看著說話的子項，縮排顯示。
-        { class: `pref${spec.kind === "seconds" || key === "look_to_talk_greet" ? " pref--sub" : ""}` },
+        { class: `pref${spec.kind === "seconds" || key === "look_to_talk_greet" || key === "look_to_talk_greet_name" ? " pref--sub" : ""}` },
         h("div", { class: "provider-text" }, h("strong", {}, spec.label), h("span", { class: "muted small" }, hint)),
         control,
       ),

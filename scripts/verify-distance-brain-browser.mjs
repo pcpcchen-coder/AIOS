@@ -106,7 +106,7 @@ function installObservation() {
   const nativeClear = CanvasRenderingContext2D.prototype.clearRect;
   CanvasRenderingContext2D.prototype.clearRect = function (...args) {
     const result = nativeClear.apply(this, args);
-    if (this.canvas.id === 'brain') { frame++; window.__distanceLabels = []; }
+    if (this.canvas.id === 'brain') { frame++; window.__distanceLabels = []; window.__lastParticles = window.__particles || []; window.__particles = []; }
     return result;
   };
   const nativeEllipse = CanvasRenderingContext2D.prototype.ellipse;
@@ -116,6 +116,17 @@ function installObservation() {
       const transform = this.getTransform();
       const dpr = this.canvas.width / this.canvas.getBoundingClientRect().width;
       window.__distanceDraw = {frame, timestampMs: performance.now(), rx: args[2], radius: args[2] / 1.62, cx: transform.e / dpr, cy: transform.f / dpr, dpr};
+    }
+    return result;
+  };
+  // 粒子（小方塊）的位置：放大置中時量和按鈕、字幕的重疊。
+  const nativeFillRect = CanvasRenderingContext2D.prototype.fillRect;
+  CanvasRenderingContext2D.prototype.fillRect = function (x, y, w, h) {
+    const result = nativeFillRect.call(this, x, y, w, h);
+    if (this.canvas.id === 'brain' && w < 10 && h < 10) {
+      const t = this.getTransform(), dpr = this.canvas.width / this.canvas.getBoundingClientRect().width;
+      const p = new DOMPoint(x + w / 2, y + h / 2).matrixTransform(t);
+      (window.__particles ||= []).push({x: p.x / dpr, y: p.y / dpr});
     }
     return result;
   };
@@ -346,11 +357,73 @@ try {
     assert.ok(samples.some(s => s.r > before * 1.05 && s.r < two.radius * 0.95), 'an intermediate size is drawn between factor 1 and 2');
     assert.ok(samples.at(-1).r > two.radius * 0.95, 'reaches the target within about 0.7 s');
   });
+  // 2026-10-25（George）：放大到原位放不下時移到畫面正中間，不超出畫面；腦形下緣可以在按鈕、提示字、字幕後面，按鈕仍要點得到。
+  await run('proximity-zoom-centered-max-3', async result => {
+    const viewport = {width: 1920, height: 1080};
+    await fresh('proximity-zoom-centered-max-3', {viewport, zoomMax: 3});
+    await page.evaluate(() => { window.__clicks = []; document.addEventListener('click', e => window.__clicks.push(e.target.closest('[id]')?.id ?? e.target.tagName), true); });
+    await distance(3); const far = await geometry(); result.far = far;
+    assert.ok(Math.abs(far.cy - 507.6) < .1 && Math.abs(far.radius - 216) < .1, `3 m stays at the home position: ${JSON.stringify(far)}`);
+    await distance(.6); const near = await geometry(); result.near = near;
+    // 1080 ÷ 1.95 ≈ 553.85 px（2.56 倍）；腦形框（往上 1.1 R、往下 0.85 R）的中心 = cy − 0.125 R = 540。
+    assert.ok(Math.abs(near.radius - 1080 / 1.95) < .2, `0.6 m at max 3 reaches the window-height limit: ${near.radius}`);
+    result.visualCenter = near.cy - 0.125 * near.radius;
+    assert.ok(Math.abs(result.visualCenter - 540) < .5, `visual centre is the screen centre: ${result.visualCenter}`);
+    result.css = await page.evaluate(() => ({r: getComputedStyle(document.documentElement).getPropertyValue('--brain-r'), cy: getComputedStyle(document.documentElement).getPropertyValue('--brain-cy')}));
+    assert.ok(Math.abs(Number.parseFloat(result.css.cy) - near.cy) < .6, `--brain-cy follows the drawing: ${JSON.stringify(result.css)}`);
+    // 粒子與 DOM 元素的重疊（照實記錄，不判定可讀與否）。
+    const overlap = async () => page.evaluate(() => {
+      const ps = window.__lastParticles || [];
+      const ys = ps.map(p => p.y);
+      const out = {particles: ps.length, minY: Math.min(...ys), maxY: Math.max(...ys), elements: {}};
+      for (const id of ['start-conversation', 'first-hint', 'region-activity', 'caption', 'conversation-status', 'conversation-reply', 'subtitle', 'command']) {
+        const el = document.getElementById(id);
+        if (!el || el.hidden) continue;
+        const style = getComputedStyle(el); const b = el.getBoundingClientRect();
+        if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0 || !b.width) continue;
+        out.elements[id] = {top: b.top, bottom: b.bottom, left: b.left, right: b.right, background: style.backgroundColor, zIndex: style.zIndex,
+          particlesInside: ps.filter(p => p.x >= b.left && p.x <= b.right && p.y >= b.top && p.y <= b.bottom).length,
+          bodyBelowTop: Math.max(...ys) > b.top};
+      }
+      return out;
+    });
+    result.standby = await overlap();
+    assert.ok(result.standby.minY >= 0 && result.standby.maxY <= 1080, `particles inside the window: ${result.standby.minY}–${result.standby.maxY}`);
+    result.screenshots = [await screenshot('brain-zoom-max-3-centered-at-0.6m-SIMULATED')];
+    // 字幕與對話狀態在這個 fixture 裡不會和置中的電子腦同時出現（任務有進度環時不置中；對話在這裡會開 Surface），
+    // 所以直接顯示 FIXTURE 樣本文字，只為了量 CSS 排出的位置和粒子的重疊。
+    await page.evaluate(() => {
+      const caption = document.getElementById('caption');
+      caption.innerHTML = '<p class="caption-title">FIXTURE 正在處理：樣本任務標題</p><p class="caption-detail">FIXTURE 第 1 步，共 3 步</p>';
+      caption.hidden = false;
+      const status = document.getElementById('conversation-status');
+      status.textContent = 'FIXTURE 聆聽中…'; status.hidden = false;
+    });
+    await page.waitForTimeout(250);
+    result.samples = await overlap();
+    result.screenshots.push(await screenshot('brain-zoom-max-3-centered-caption-status-samples-SIMULATED'));
+    await page.evaluate(() => { document.getElementById('caption').hidden = true; document.getElementById('conversation-status').hidden = true; });
+    // 按鈕仍由按鈕接到點擊（DOM 疊在 Canvas 之上）。
+    const button = await bounds('#start-conversation'); result.button = button;
+    const point = {x: button.x + button.width / 2, y: button.y + button.height / 2};
+    result.hitAtButton = await page.evaluate(({x, y}) => document.elementFromPoint(x, y)?.closest('[id]')?.id, point);
+    assert.equal(result.hitAtButton, 'start-conversation', 'the button is on top of the Canvas');
+    await page.mouse.click(point.x, point.y);
+    await page.waitForTimeout(400);
+    result.clicks = await page.evaluate(() => window.__clicks);
+    assert.equal(result.clicks[0], 'start-conversation', `the click goes to the button: ${JSON.stringify(result.clicks)}`);
+    result.afterClick = await overlap();
+    result.afterClickBody = await page.evaluate(() => ({classes: document.body.className, status: document.getElementById('conversation-status')?.textContent ?? null}));
+    result.screenshots.push(await screenshot('brain-zoom-max-3-centered-after-button-click-SIMULATED'));
+    await page.keyboard.press('Escape');
+    await distance(3); const back = await geometry(); result.back = back;
+    assert.ok(Math.abs(back.cy - far.cy) < .1 && Math.abs(back.radius - far.radius) < .1, `stepping back returns home: ${JSON.stringify(back)}`);
+  });
 } finally {
   report.finished = new Date().toISOString();
   report.sourceUnchangedDuringRun = JSON.stringify(await sourceHashes()) === JSON.stringify({src: inputHashes.src, shared: inputHashes.shared, entry: inputHashes.entry});
   report.distUnchangedDuringRun = JSON.stringify(await hashes(join(app, 'dist'))) === JSON.stringify(inputHashes.dist);
-  report.passed = report.cases.length === (selectedCase ? 1 : 7) && report.cases.every(c => c.status === 'passed') && report.browserErrors.length === 0 && report.sourceUnchangedDuringRun && report.distUnchangedDuringRun;
+  report.passed = report.cases.length === (selectedCase ? 1 : 8) && report.cases.every(c => c.status === 'passed') && report.browserErrors.length === 0 && report.sourceUnchangedDuringRun && report.distUnchangedDuringRun;
   await context?.close(); await browser?.close(); for (const response of clients) response.end();
   await new Promise(resolve => server.close(resolve));
   await writeFile(join(output, 'report.json'), JSON.stringify(report, null, 2));
