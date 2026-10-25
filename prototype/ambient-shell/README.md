@@ -285,6 +285,18 @@ Claude 與 ChatGPT 背景任務使用同一套提示詞（`server/prompts.ts`）
 - 影像只在這台電腦的頁面內處理，離開感知管線的只有上面四種事件；`connect-src 'self'` 不變，模型與 wasm 由本機核心提供。鏡頭只在 `NOUS_CAMERA=on` 時被頁面政策允許。
 - 雙目參數目前用廠商規格推算（焦距約 1005 px、基線 52 mm），**尚未做 ChArUco 校正與實機驗證**；左右眼順序以 `NOUS_CAMERA_LEFT_FIRST` 指定。準確度與門檻依 docs/11 §7 實測後調整。
 
+### 人臉 spike（docs/14 ID-00，開發工具）
+
+`spike/face/` 是量測 YuNet、MediaPipe Face Detector 與 SFace 能否在瀏覽器內跑、要花多久的獨立頁面。它**不是**家人辨識功能：沒有接進主畫面或感知管線，不登記家人、不保存特徵，也不影響問候。主程式的 `npm run build` 不包含它。
+
+```bash
+npm run face:setup   # 下載並核對 5 個模型（約 40 MB）與 wasm 到 spike/face/public/（不進 git）
+npm run face:spike   # http://127.0.0.1:5180，只在本機
+npm run face:bench -- --output <repo 外的資料夾>   # headless 量測（需另裝 Playwright，見驗證紀錄 §9）
+```
+
+頁面可選靜態圖片或本機鏡頭（先開預設鏡頭取得權限，再切到名稱含 CCB 的鏡頭）。影像只在頁面記憶體處理，不寫檔、不送網路（CSP `connect-src 'self'`）；停止鏡頭即清除畫格與參考特徵。cosine 只是 sanity check，不是準確率。設計與資料規則見 [ADR-0001 草案](../../docs/adr/ADR-0001-local-family-recognition.md)，量測與 Mac 實測步驟見 [ID-00 驗證](../../docs/validation/family-id-00-spike-2026-10-24.md)。
+
 ### 武陵居家電查詢與控制（docs/12 H0、H1、H1b）
 
 `.env` 設 `SMARTHOME_URL` 與 `SMARTHOME_TOKEN` 後，即時語音多兩個工具：`home_status` 回答「客廳現在幾度」「書房二氧化碳多少」「客廳主燈在不在線」；`home_control` 執行「客廳主燈關掉」「書桌燈調到 60%」「色溫調到 3000K」「冷氣調 26 度」「電視大聲一點」。
@@ -363,6 +375,7 @@ prototype/ambient-shell/
 │   ├── mock-executor.ts
 │   ├── store.ts            # JSON 持久化
 │   └── app.ts / http-guard.ts / config.ts / index.ts
+├── spike/face/             # ID-00 人臉 spike（開發工具，不接進產品；見 docs/adr/ADR-0001）
 ├── shared/                 # 前後端共用型別與進度計算；prefs.ts、voice-prefs.ts（設定規格）、
 │                           # seconds-menu.ts（選單列鏡頭開關、秒數與倍率）、voice-commands.ts（指令表唯一來源）
 └── tests/                  # vitest
