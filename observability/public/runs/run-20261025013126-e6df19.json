@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T01:31:26.861Z",
-  "updated_at": "2026-10-25T01:50:43.373Z",
+  "updated_at": "2026-10-25T01:50:46.983Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,8 +59,8 @@
     {
       "id": "fix",
       "title": "fix",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-25T01:50:46.982Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -152,6 +152,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "0 blocker、1 major（置中不足，George 選真置中）、多項 minor"
+    },
+    {
+      "at": "2026-10-25T01:50:46.983Z",
+      "type": "step_updated",
+      "step_id": "fix",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
