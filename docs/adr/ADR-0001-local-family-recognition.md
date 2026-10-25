@@ -1,6 +1,6 @@
 # ADR-0001：本機家人辨識的資料生命週期與 runtime
 
-狀態：**草案（Proposed）**，尚待 George 決定 §9 各項。日期：2026-10-24。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00。
+狀態：**草案（Proposed）**；George 已於 2026-10-25 決定 §9 大部分項目，偵測器與 SFace 訓練資料風險仍待決。日期：2026-10-24。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00。
 
 本 ADR 只定義邊界與候選做法。程式只有不接進產品流程的 runtime spike（`prototype/ambient-shell/spike/face/`），沒有家人登記、特徵保存、辨識結果或稱名問候。spike 量測見 [驗證紀錄](../validation/family-id-00-spike-2026-10-24.md)。
 
@@ -61,7 +61,7 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 
 **trace 與 log**：任何 trace、log、錯誤回報、SSE 事件與驗證證據都不得包含特徵向量、`person_id`、姓名或相似度數值。只允許記錄狀態（`matched`／`unknown`／`ambiguous`／`unavailable`）、耗時、模型版本與世代。除錯需要更多資訊時，在本機記憶體內檢視，不落盤。
 
-**登記**：只能在已解鎖、可管理的本機設定由使用者明確開始，選擇姓名並提供多角度樣本（14 §5）。不接受對鏡頭說「我是 George」覆蓋。登記時只保存特徵，不保存照片。每一位被登記的人都要本人在場、聽過說明並同意，不能由他人代為登記；本人可以隨時要求刪除。未成年家人能否登記、由誰同意、是否另設限制，列為 §9 待決，決定前不支援。
+**登記**：只能在已解鎖、可管理的本機設定由使用者明確開始，選擇姓名並提供多角度樣本（14 §5）。不接受對鏡頭說「我是 George」覆蓋。登記時只保存特徵，不保存照片。每一位被登記的人都要本人在場、聽過說明並同意，不能由他人代為登記；本人可以隨時要求刪除。未成年家人可以登記：本人在場，並由家長（George）在登記時確認同意（2026-10-25 決定，§9）。
 
 **特徵保存**：每位家人一筆記錄，包含 `person_id`、可口語化的名稱、多個特徵向量、`model_id`（例如 `sface-2021dec@0ba9fbfa…`）、`detector_id`、對齊方式版本、建立與更新時間、`gallery_version`。特徵視為敏感識別資料，不能當成匿名資料。換模型或改前處理時，舊特徵不可混用，必須重新登記；不做跨模型轉換。
 
