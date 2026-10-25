@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-25T02:01:03.925Z",
+  "updated_at": "2026-10-25T02:01:07.161Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261025013126-e6df19",
       "title": "三個小決定：電子腦置中放大、關冷氣說明定時、冷氣預設自動",
       "playbook": "feature",
-      "status": "running",
-      "updated_at": "2026-10-25T02:01:02.693Z",
+      "status": "passed",
+      "updated_at": "2026-10-25T02:01:05.969Z",
       "started_at": "2026-10-25T01:31:26.861Z",
-      "ended_at": null,
+      "ended_at": "2026-10-25T02:01:05.969Z",
       "branch": "claude/small-decisions",
       "commit_sha": "",
       "passed_steps": 7,
