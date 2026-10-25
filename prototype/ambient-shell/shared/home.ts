@@ -204,13 +204,13 @@ export type SendFacts = {
   key?: string;
   /** 紅外線：按的是切換鍵（電源切換鍵或靜音鍵），按一下切換一次：不能說成開了、關了、靜音了或取消靜音了。 */
   toggle?: true;
-  /** AIFA 冷氣設定：實際送出的完整設定，例如「冷氣、26 度、風量自動、擺風自動」。 */
+  /** AIFA 冷氣設定：實際送出的完整設定，例如「模式冷氣、26 度、風量自動、擺風自動」。 */
   sent_settings?: string;
   /** AIFA 冷氣設定：控制器沒有回報、改用預設值的項目，要說出來。 */
   defaults_used?: string[];
   /** AIFA：「控制器回報：…」，是控制器記得的設定，不是冷氣的實際狀態。 */
   controller_reported?: string;
-  /** 補充說明，例如「這個設定不代表會開機」。 */
+  /** 補充說明，例如「這個設定不代表會開機」；AIFA 關冷氣時是「中控會一併取消定時」（不知道原本有沒有定時）。 */
   note?: string;
 };
 
@@ -278,7 +278,7 @@ export function homeControlNotice(r: HomeControlResult): string {
       if (r.why === "one_way") return `${where(r)}「${r.action}」已送出，但這類設備不會回報結果；請使用者看一下有沒有反應，不要說成功。${factsText(r)}`;
       if (r.why === "cloud_no_reply") return `${where(r)}「${r.action}」雲端沒有回覆，不確定有沒有送出（中控不會自動重送）；請使用者看一下，不要說成功。${factsText(r)}`;
       return r.why === "no_reply"
-        ? `${where(r)}「${r.action}」中控沒有回覆，不確定有沒有執行；請使用者看一下設備，不要說成功。`
+        ? `${where(r)}「${r.action}」中控沒有回覆，不確定有沒有執行；請使用者看一下設備，不要說成功。${factsText(r)}`
         : `${where(r)}「${r.action}」已送出，但設備還沒確認；請使用者看一下有沒有反應，不要說成功。`;
     case "failed":
       return `${where(r)}「${r.action}」沒有成功：${r.message}`;

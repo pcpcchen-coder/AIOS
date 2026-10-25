@@ -8,7 +8,9 @@
 |---|---|
 | [目前實作與驗證](./Current_Implementation_Status.md) | 現行入口：實際目錄、已實作／待驗收／缺口、測試與實機證據 |
 | [13 功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md) | Quest、OpenClaw、即時語音、感測與多裝置的構想；F0–F10、Q0–Q4 均未因此實作 |
-| [14 家人辨識與稱名問候](./14_Family_Recognition_and_Greeting_Plan_2026-10.md) | 利用既有面向 delay 同步辨識，互動後才稱名；ID-00–03 為規劃，尚未實作 |
+| [14 家人辨識與稱名問候](./14_Family_Recognition_and_Greeting_Plan_2026-10.md) | 利用既有面向 delay 同步辨識，互動後才稱名；ID-00 spike、ID-01 登記與試認、ID-02 看著說話時稱名問候已有程式（ID-02 只有雲端 fixture 驗證，門檻未校準） |
+| [ADR-0001 本機家人辨識（草案）](./adr/ADR-0001-local-family-recognition.md) | 資料生命週期、金鑰、雲端語音與身分非授權的邊界；模型授權查核；待 George 決定事項 |
+| [15 Companion Mode 功能規格](./15_Companion_Mode_Spec_2026-10-24.md) | **待實作提案**：可開關的自然陪聊、四項偏好、背景收音權限與真實狀態、隱私、語音所有權和驗收 |
 | [06 電子腦、語音與視線體驗](./06_Ambient_Voice_Gaze_Experience.md) | 產品規則、呈現政策與行為要求；目標架構須與現況分開 |
 | [07 開發與驗收計畫](./07_Ambient_Implementation_and_Acceptance.md) | 正式契約、gate、驗收方法；規劃目錄不是現存程式目錄 |
 | [10 遠距 UI](./10_Distance_UI_18inch_2026-10.md) | 18 吋與遠距畫面規格，距離縮放已有原型實作，實機可讀性待驗 |
@@ -32,6 +34,7 @@
 
 - [根目錄設定入口](../SETUP.md)、[原型操作說明](../prototype/ambient-shell/README.md)、[安裝指南](../prototype/ambient-shell/INSTALL.md)、[macOS 桌面指南](../prototype/ambient-shell/desktop/README.md)。
 - [開發規則](../CLAUDE.md)、[Agent 工作流程](../AGENTS.md)、[pstack 指南](./development/pstack.md)。
+- [Companion Mode 分批實作計畫](./development/companion-mode-implementation-plan.md)：CM-P1～P4、Agent 任務 Prompt、驗收與回報格式（尚未實作）。
 - [對話模組設計](./development/chatgpt-conversation-design.md)、[六區動畫](./development/brain-regions.md)，各自說明所涵蓋批次。
 - [驗證紀錄索引](./validation/README.md)，區分 fixture、使用者口頭回報、本次程式測試與待實機事項。
 

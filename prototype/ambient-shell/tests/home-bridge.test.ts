@@ -3,7 +3,10 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { parseHttpUrl } from "../server/config.ts";
 import {
+  AC_OFF_TIMER_NOTE,
+  AC_OFF_TIMER_NOTE_UNSURE,
   buildClimate,
+  CLIMATE_DEFAULTS,
   COOLDOWN_WAIT_MS,
   H1B_TIMEOUTS_MS,
   HomeBridge,
@@ -22,7 +25,7 @@ import {
   type HomeBridgeOptions,
   type VoicePolicy,
 } from "../server/home-bridge.ts";
-import { buildRealtimeInstructions, buildRealtimeTools, HOME_CONTROL_TOOL } from "../server/realtime.ts";
+import { buildRealtimeInstructions, buildRealtimeTools, HOME_CONTROL_TOOL, realtimeToolRules } from "../server/realtime.ts";
 import { AC_FANS, AC_FEATURES, AC_MODES, AC_SWINGS, HOME_COMMANDS, homeControlLine, homeControlNotice, homeStatusLine, IR_INTENTS, type HomeControlResult, type HomeStatusResult } from "../shared/home.ts";
 
 // 假中控（fixture）：欄位名稱照武陵居中控 GET /api/v1/home 的實際回應，設備與讀值是虛構的，不代表真實家裡。
@@ -999,7 +1002,7 @@ describe("H1b: AIFA power and climate", () => {
   it("「26 度」 with the AC on: reads /status first and keeps the reported mode, fan, swing and feature", async () => {
     const hub = await h1bHub({ status: () => ({ status: 200, body: { sent: false, status: { ...STATUS_ON, feature: "sleep" } } }) });
     const result = await h1bController(hub.url).control({ target: "冷氣", command: "ac_temperature", value: "26度" });
-    expect(result).toMatchObject({ status: "unconfirmed", why: "one_way", action: "設定 26 度", sent_settings: "冷氣、26 度、風量低、擺風自動、睡眠" });
+    expect(result).toMatchObject({ status: "unconfirmed", why: "one_way", action: "設定 26 度", sent_settings: "模式冷氣、26 度、風量低、擺風自動、睡眠" });
     expect(result).not.toHaveProperty("defaults_used");
     expect(result).not.toHaveProperty("note");
     expect(homeControlLine(result)).toBe("⏳ 客廳 冷氣 設定 26 度：已送出，請確認");
@@ -1008,12 +1011,12 @@ describe("H1b: AIFA power and climate", () => {
     expect(JSON.parse(hub.sends()[0].body)).toEqual({ mode: "cool", temperature: 26, fan: "low", swing: "auto", feature: "sleep" });
   });
 
-  it("「26 度」 with the AC off: mode comes from the defaults, said out loud, and it does not claim the AC turns on", async () => {
+  it("「26 度」 with the AC off: mode comes from the defaults (自動, George 2026-10-25), said out loud, and it does not claim the AC turns on", async () => {
     const hub = await h1bHub({ status: () => ({ status: 200, body: { sent: false, status: STATUS_OFF } }) });
     const result = await h1bController(hub.url).control({ target: "冷氣", command: "ac_temperature", value: 26 });
-    expect(JSON.parse(hub.sends()[0].body)).toEqual({ mode: "cool", temperature: 26, fan: "high", swing: "fixed_2", feature: "normal" });
-    expect(result).toMatchObject({ status: "unconfirmed", why: "one_way", defaults_used: ["模式：冷氣"], note: expect.stringContaining("不代表會開機") });
-    expect(homeControlNotice(result)).toContain("預設值：模式：冷氣");
+    expect(JSON.parse(hub.sends()[0].body)).toEqual({ mode: "auto", temperature: 26, fan: "high", swing: "fixed_2", feature: "normal" });
+    expect(result).toMatchObject({ status: "unconfirmed", why: "one_way", sent_settings: "模式自動、26 度、風量高、擺風固定 2", defaults_used: ["模式：自動"], note: expect.stringContaining("不代表會開機") });
+    expect(homeControlNotice(result)).toContain("預設值：模式：自動");
     expect(JSON.stringify(result)).not.toMatch(/已開|已經開/);
   });
 
@@ -1028,14 +1031,14 @@ describe("H1b: AIFA power and climate", () => {
     for (const status of [() => ({ status: 200, body: {}, delayMs: 400 }), () => ({ status: 409, body: { detail: "AIFA 控制連線未完成，沒有送出開關指令" } })]) {
       const hub = await h1bHub({ status });
       const result = await h1bController(hub.url).control({ target: "冷氣", command: "ac_swing", value: "fixed_3" });
-      expect(JSON.parse(hub.sends()[0].body)).toEqual({ mode: "cool", temperature: 26, fan: "auto", swing: "fixed_3", feature: "normal" });
-      expect(result).toMatchObject({ defaults_used: ["風量：自動", "模式：冷氣", "溫度：26 度", "特殊功能：一般"], note: expect.stringContaining("讀不到控制器的開關狀態") });
+      expect(JSON.parse(hub.sends()[0].body)).toEqual({ mode: "auto", temperature: 26, fan: "auto", swing: "fixed_3", feature: "normal" });
+      expect(result).toMatchObject({ defaults_used: ["風量：自動", "模式：自動", "溫度：26 度", "特殊功能：一般"], note: expect.stringContaining("讀不到控制器的開關狀態") });
     }
   });
 
   it("風量調小 steps down from the reported fan; unknown or auto fan, or already lowest, is refused without a climate send", async () => {
     const hub = await h1bHub({ status: () => ({ status: 200, body: { sent: false, status: { ...STATUS_ON, fan: "medium" } } }) });
-    expect(await h1bController(hub.url).control({ target: "冷氣", command: "ac_fan", value: "down" })).toMatchObject({ status: "unconfirmed", action: "風量調小", sent_settings: "冷氣、24 度、風量低、擺風自動" });
+    expect(await h1bController(hub.url).control({ target: "冷氣", command: "ac_fan", value: "down" })).toMatchObject({ status: "unconfirmed", action: "風量調小", sent_settings: "模式冷氣、24 度、風量低、擺風自動" });
 
     for (const [fan, message] of [["auto", "不知道目前風量，請說低、中、高或自動"], [null, "不知道目前風量"], ["low", "已經是最低"]] as const) {
       const h = await h1bHub({ status: () => ({ status: 200, body: { sent: false, status: { ...STATUS_ON, fan } } }) });
@@ -1104,6 +1107,58 @@ describe("H1b: AIFA power and climate", () => {
     const thenStale = await h1bHub({ send: (_r, n) => (n === 1 ? { ...AIFA_SENT, delayMs: 400 } : { status: 409, body: { detail: "找不到已授權的 AIFA 冷氣" } }) });
     expect(await h1bController(thenStale.url).control({ target: "冷氣", command: "power", value: true })).toMatchObject({ status: "unconfirmed", why: "no_reply" });
     expect(thenStale.sends()).toHaveLength(2);
+  });
+
+  it("no_reply notices now carry the send facts (2026-10-25 behaviour change): an ac_temperature with no hub reply says what was sent", async () => {
+    // 原本 no_reply 的系統通知不帶附加事實；為了讓關冷氣的定時說明在確認卡之後也念到，改成接上 factsText，
+    // 所以 AIFA 設定與紅外線的 no_reply 通知也會帶「送出的設定」「用了預設值」「按的是切換鍵」等。
+    const silent = await h1bHub({ status: () => ({ status: 200, body: { sent: false, status: STATUS_ON } }), send: () => ({ ...AIFA_SENT, delayMs: 400 }) });
+    const r = await h1bController(silent.url).control({ target: "冷氣", command: "ac_temperature", value: 26 });
+    expect(r).toMatchObject({ status: "unconfirmed", why: "no_reply", sent_settings: "模式冷氣、26 度、風量低、擺風自動" });
+    const notice = homeControlNotice(r);
+    expect(notice).toContain("中控沒有回覆，不確定有沒有執行；請使用者看一下設備，不要說成功。");
+    expect(notice).toContain("送出的設定：模式冷氣、26 度、風量低、擺風自動。");
+    expect(notice).not.toContain("定時");
+  });
+
+  it("「關冷氣」 says the hub cancels the AC's timer (George 2026-10-25): the note is only the sentence for the user; the don'ts are in the tool rules", async () => {
+    // 已送出：中控執行了關機，照中控做法定時會被取消；不知道原本有沒有定時。
+    const hub = await h1bHub();
+    const off = await h1bController(hub.url).control({ target: "冷氣", command: "power", value: false });
+    expect(off).toMatchObject({ status: "unconfirmed", why: "one_way", action: "關閉", note: AC_OFF_TIMER_NOTE });
+    expect(AC_OFF_TIMER_NOTE).toBe("如果這台冷氣有設定定時，中控關機時會一併取消，需要的話請重新設定。");
+    expect(homeControlNotice(off)).toContain(AC_OFF_TIMER_NOTE);
+    expect(homeControlLine(off)).toBe("⏳ 客廳 冷氣 關閉：已送出，請確認");
+    expect(JSON.parse(hub.sends()[0].body)).toEqual({ power: false });
+    // 不能說的話在工具規則裡（API key 路徑與 ChatGPT 方案路徑共用 realtimeToolRules），不在 note。
+    for (const note of [AC_OFF_TIMER_NOTE, AC_OFF_TIMER_NOTE_UNSURE]) expect(note).not.toMatch(/不能說|AIOS/);
+    const rules = realtimeToolRules({ webSearch: false, home: true, mcp: [] }).join("");
+    expect(rules).toContain("關冷氣的 note 提到定時時：AIOS 讀不到定時，不能說確實有定時被取消，也不能說冷氣已經關了。");
+
+    // 開冷氣不提定時。
+    expect(await h1bController(hub.url).control({ target: "冷氣", command: "power", value: true })).not.toHaveProperty("note");
+
+    // 中控沒有回覆：加上「如果中控有執行這次關機」；確認卡之後的系統通知也帶上。
+    const silent = await h1bHub({ send: () => ({ ...AIFA_SENT, delayMs: 400 }) });
+    const unsure = await h1bController(silent.url).control({ target: "冷氣", command: "power", value: false });
+    expect(unsure).toMatchObject({ status: "unconfirmed", why: "no_reply", note: AC_OFF_TIMER_NOTE_UNSURE });
+    expect(AC_OFF_TIMER_NOTE_UNSURE).toContain("如果中控有執行這次關機");
+    expect(homeControlNotice(unsure)).toContain(AC_OFF_TIMER_NOTE_UNSURE);
+
+    // 失敗、沒有送出：中控沒有關機，不說。
+    const failed = await h1bHub({ send: () => ({ status: 200, body: { id: "a", status: "failed", message: "AIFA 控制連線未完成，沒有送出開關指令", controller_status: null } }) });
+    const r1 = await h1bController(failed.url).control({ target: "冷氣", command: "power", value: false });
+    expect(r1).toMatchObject({ status: "failed" });
+    expect(JSON.stringify(r1)).not.toContain("定時");
+    const notOwned = await h1bHub({ send: () => ({ status: 409, body: { detail: "找不到已授權的 AIFA 冷氣" } }) });
+    const r2 = await h1bController(notOwned.url).control({ target: "冷氣", command: "power", value: false });
+    expect(r2).toMatchObject({ status: "refused" });
+    expect(JSON.stringify(r2)).not.toContain("定時");
+
+    // 紅外線家電的關機不是中控的 AIFA 路徑，不提定時。
+    const ir = await h1bController(hub.url).control({ target: "電視", command: "power", value: false });
+    expect(ir).toMatchObject({ key: "Power" });
+    expect(JSON.stringify(ir)).not.toContain("定時");
   });
 });
 
@@ -1381,7 +1436,7 @@ describe("H1b: shared rules across routes", () => {
     expect(hub.statuses()).toHaveLength(0);
     expect(await b.confirm(ac.confirm_id, false)).toMatchObject({ status: "refused", reason: "declined", message: "沒有確認，冷氣設定 26 度沒有執行。" });
     const again = (await b.control({ target: "冷氣", command: "ac_temperature", value: "26" })) as Extract<HomeControlResult, { status: "needs_confirmation" }>;
-    expect(await b.confirm(again.confirm_id, true)).toMatchObject({ status: "unconfirmed", sent_settings: "冷氣、26 度、風量低、擺風自動" });
+    expect(await b.confirm(again.confirm_id, true)).toMatchObject({ status: "unconfirmed", sent_settings: "模式冷氣、26 度、風量低、擺風自動" });
     expect(hub.posts().map((r) => r.url.split("/").pop())).toEqual(["infrared-commands", "status", "climate"]);
   });
 
@@ -1501,10 +1556,15 @@ describe("H1b: pure helpers", () => {
   it("buildClimate fills from the report, then the defaults, and lists each default", () => {
     const caps = { minC: 17, maxC: 30, modes: [...AC_MODES], fans: [...AC_FANS], swings: [...AC_SWINGS], features: [...AC_FEATURES] };
     expect(buildClimate({ command: "ac_temperature", celsius: 22 }, null, caps)).toEqual({
-      packet: { mode: "cool", temperature: 22, fan: "auto", swing: "auto", feature: "normal" },
-      text: "冷氣、22 度、風量自動、擺風自動",
-      defaultsUsed: ["風量：自動", "模式：冷氣", "擺風：自動", "特殊功能：一般"],
+      packet: { mode: "auto", temperature: 22, fan: "auto", swing: "auto", feature: "normal" },
+      text: "模式自動、22 度、風量自動、擺風自動",
+      defaultsUsed: ["風量：自動", "模式：自動", "擺風：自動", "特殊功能：一般"],
     });
+    // 模式預設是自動，不分季節（George 2026-10-25）；這台不支援自動時才退到它的第一個模式。
+    expect(CLIMATE_DEFAULTS.mode).toBe("auto");
+    expect(buildClimate({ command: "ac_temperature", celsius: 22 }, null, { ...caps, modes: ["cool", "dry"] })).toMatchObject({ packet: { mode: "cool" }, defaultsUsed: expect.arrayContaining(["模式：冷氣"]) });
+    // 控制器有回報模式時照回報，不用預設。
+    expect(buildClimate({ command: "ac_temperature", celsius: 22 }, { power: true, mode: "cool", temperature: 25, fan: "low", swing: "auto", feature: "normal" }, caps)).toMatchObject({ packet: { mode: "cool" }, defaultsUsed: [] });
     expect(buildClimate({ command: "ac_fan", value: "up" }, { power: true, mode: "dry", temperature: 25, fan: "high", swing: "auto", feature: "turbo" }, caps)).toEqual({ error: "風量已經是最高，指令沒有送出。" });
   });
 

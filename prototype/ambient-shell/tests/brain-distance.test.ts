@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { Brain, brainGeometry, HIT_EXTENT, ORBIT_FIT_EXTENT, ZOOM_FIT_EXTENT, type BrainVisualState } from "../src/brain.ts";
+import { Brain, brainGeometry, HIT_EXTENT, LAYOUT, ORBIT_FIT_EXTENT, ZOOM_FIT_EXTENT, type BrainVisualState } from "../src/brain.ts";
 import { brainZoom, SenseController, type SenseTuning } from "../src/sense/controller.ts";
 import { DEFAULT_CAMERA_PREFS, type SenseEvent } from "../shared/sense.ts";
 
@@ -269,6 +269,97 @@ it("a real progress ring keeps the zoomed brain small enough for the ring; witho
   expect(ring.r).toBeCloseTo(brainGeometry(1920, 1080, "center", 2, 1, true).r);
   expect(ring.r).toBeLessThan(body.r);
   expect(ring.r / 216).toBeGreaterThan(1.5);
+});
+
+// 2026-10-25（George）：放大到原位放不下時，把電子腦移到畫面正中間，不超出畫面。腦形可以用整個視窗高度，
+// 下緣延伸到「開始語音對話」按鈕與字幕後面（DOM 疊在 Canvas 之上）。
+const BODY = ZOOM_FIT_EXTENT.body;
+/** 腦形框（往上 y、往下 down）的中心：看起來的中心。 */
+const visualCenter = (g: { cy: number; r: number }) => g.cy + ((BODY.down - BODY.y) / 2) * g.r;
+
+it("at the largest zoom the body box fills the window height and its visual centre is the screen centre", () => {
+  const home = brainGeometry(1920, 1080, "center", 2, 1);
+  expect(home).toEqual({ cx: 960, cy: 1080 * LAYOUT.center.cy, r: 432 }); // 2 倍放得下：照舊
+  const at3 = brainGeometry(1920, 1080, "center", 3, 1);
+  expect(at3.r).toBeCloseTo(1080 / (BODY.y + BODY.down)); // 1080 ÷ 1.95 ≈ 553.8 px
+  expect(at3.r / 216).toBeCloseTo(2.56, 2); // 原本停在 2.14 倍
+  expect(visualCenter(at3)).toBeCloseTo(540);
+  expect(at3.cy - BODY.y * at3.r).toBeCloseTo(0);
+  expect(at3.cy + BODY.down * at3.r).toBeCloseTo(1080);
+  // 矮視窗也一樣到正中間；受寬度限制的直式視窗留在原位；有進度環時不移動。
+  const short = brainGeometry(1366, 768, "center", 3, 1);
+  expect(visualCenter(short)).toBeCloseTo(384);
+  expect(short.r / 153.6).toBeCloseTo(2.56, 2);
+  expect(brainGeometry(390, 844, "center", 3, 1)).toEqual(brainGeometry(390, 844, "center", 2, 1));
+  const ring = brainGeometry(1920, 1080, "center", 3, 1, true);
+  expect(ring.cy).toBeCloseTo(home.cy);
+  expect(ring.r).toBeCloseTo((1080 * LAYOUT.center.cy) / ZOOM_FIT_EXTENT.progress.y);
+});
+
+it("between the home limit and the largest zoom the brain moves smoothly toward the centre, not just sliding along the top", () => {
+  for (const [w, h] of [[1920, 1080], [1366, 768], [844, 390]]) {
+    const homeLimit = brainGeometry(w, h, "center", 2.14, 1).r; // 原位上限附近
+    let prev = brainGeometry(w, h, "center", 1.005, 1);
+    let leftTop = 0;
+    for (let z = 1.01; z <= 3.0001; z += 0.005) {
+      const g = brainGeometry(w, h, "center", z, 1);
+      // 連續、單調：每 0.005 倍半徑與中心的變化都很小（沒有跳動）。
+      expect(g.r).toBeGreaterThanOrEqual(prev.r - 1e-9);
+      expect(g.cy).toBeGreaterThanOrEqual(prev.cy - 1e-9);
+      expect(Math.abs(g.r - prev.r)).toBeLessThan(2);
+      expect(Math.abs(g.cy - prev.cy)).toBeLessThan(h * 0.003); // 1080 高時 3.2 px
+      // 不超出視窗。
+      expect(g.cy - BODY.y * g.r).toBeGreaterThanOrEqual(-1e-6);
+      expect(g.cy + BODY.down * g.r).toBeLessThanOrEqual(h + 1e-6);
+      if (g.r > homeLimit + 1) leftTop = Math.max(leftTop, g.cy - BODY.y * g.r);
+      prev = g;
+    }
+    // 中間倍率時上緣離開頂端（不是貼頂往下滑）：至少 2% 視窗高。
+    expect(leftTop).toBeGreaterThan(h * 0.02);
+    expect(visualCenter(prev)).toBeCloseTo(h / 2);
+  }
+  // 2 倍以內完全照舊：中心在 47%。
+  for (const z of [1.2, 1.5, 2]) expect(brainGeometry(1920, 1080, "center", z, 1).cy).toBe(1080 * LAYOUT.center.cy);
+});
+
+it("the move follows real distance events only: it eases toward the centre up close, publishes --brain-cy, and returns home when stepping back", () => {
+  const t = renderer(1920, 1080, { reducedMotion: false, prefs: { ...DEFAULT_CAMERA_PREFS, brain_zoom_max: 3 } });
+  const homeCy = 1080 * LAYOUT.center.cy;
+  for (let i = 0; i < 40; i++) t.frame(1000 / 30);
+  expect(t.frame(1000 / 30).cy).toBeCloseTo(homeCy);
+  expect(Number.parseFloat(t.css.get("--brain-cy")!)).toBeCloseTo(homeCy);
+  // 沒有距離事件時不移動。
+  for (let i = 0; i < 40; i++) expect(t.frame(1000 / 30).cy).toBeCloseTo(homeCy);
+
+  t.controller.handle({ type: "presence", present: true, distance_m: 0.6 });
+  const target = brainGeometry(1920, 1080, "center", 3, 1);
+  const first = t.frame(1000 / 30);
+  expect(first.cy).toBeGreaterThan(homeCy);
+  expect(first.cy).toBeLessThan(target.cy - 1); // 緩動，不是一次跳到
+  for (let i = 0; i < 40; i++) t.frame(1000 / 30);
+  const near = t.frame(1000 / 30);
+  expect(near.cy).toBeCloseTo(target.cy, 0);
+  expect(Number.parseFloat(t.css.get("--brain-cy")!)).toBeCloseTo(target.cy, 0);
+  expect(Number.parseFloat(t.css.get("--brain-r")!)).toBeCloseTo(target.r, 0);
+  // 點擊範圍跟著新的中心。
+  expect(t.brain.hitTest(960, target.cy + target.r * 0.7)).toBe(true);
+
+  // 量放大、置中後的腦形範圍（含擺動與呼吸）：在視窗內，量到的上下中點接近畫面中間。
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < 300; i++) {
+    const f = t.frame(1000 / 30);
+    minY = Math.min(minY, f.particles.minY);
+    maxY = Math.max(maxY, f.particles.maxY);
+  }
+  expect(minY).toBeGreaterThanOrEqual(0);
+  expect(maxY).toBeLessThanOrEqual(1080);
+  expect(Math.abs((minY + maxY) / 2 - 540)).toBeLessThan(1080 * 0.03);
+
+  // 往後走：倍率回到 1，中心回原位。
+  t.controller.handle({ type: "presence", present: true, distance_m: 3 });
+  for (let i = 0; i < 60; i++) t.frame(1000 / 30);
+  expect(t.frame(1000 / 30).cy).toBeCloseTo(homeCy, 0);
+  expect(Number.parseFloat(t.css.get("--brain-cy")!)).toBeCloseTo(homeCy, 0);
 });
 
 it("resize preserves the zoom, updates CSS radius and keeps DPR backing size", () => {

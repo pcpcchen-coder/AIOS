@@ -378,7 +378,7 @@ describe("HTTP API", () => {
     const { post } = await start(5, undefined, undefined, new HomeBridge({ url: "http://127.0.0.1:8788", token: "hub-secret", fetch: hub, newId: () => "k" }));
     const swing = await post("/api/home/control", { target: "冷氣", command: "ac_swing", value: "fixed_3" });
     const raw = await swing.text();
-    expect(JSON.parse(raw)).toMatchObject({ status: "unconfirmed", why: "one_way", sent_settings: "冷氣、25 度、風量低、擺風固定 3" });
+    expect(JSON.parse(raw)).toMatchObject({ status: "unconfirmed", why: "one_way", sent_settings: "模式冷氣、25 度、風量低、擺風固定 3" });
     expect(raw).not.toContain("hub-secret");
     const press = await (await post("/api/home/control", { target: "電視", command: "press", value: "volume_up" })).json();
     expect(press).toMatchObject({ status: "unconfirmed", why: "one_way", key: "Vol+" });
@@ -447,7 +447,7 @@ describe("HTTP API", () => {
     const defaults = (await (await fetch(`${none.base}/api/settings`)).json()) as SettingsView;
     expect(defaults.voice).toEqual({ voice_idle_s: 90, realtime_idle_s: 120 });
     expect(defaults.seconds?.map((r) => r.key)).toEqual([
-      "active", "look_to_talk", "look_to_talk_s", "look_to_talk_cooldown_s", "look_to_talk_greet", "stop_gesture", "brain_zoom_max", "voice_idle_s", "realtime_idle_s",
+      "active", "look_to_talk", "look_to_talk_s", "look_to_talk_cooldown_s", "look_to_talk_greet", "look_to_talk_greet_name", "stop_gesture", "brain_zoom_max", "voice_idle_s", "realtime_idle_s",
     ]);
     expect(defaults.seconds?.filter((r) => r.group === "camera").every((r) => r.disabled_reason !== null)).toBe(true);
     expect(defaults.camera_preview_disabled_reason).toBe("鏡頭未啟用（.env 設定 NOUS_CAMERA=on 後重新啟動）");
@@ -522,6 +522,7 @@ describe("HTTP API", () => {
       ["active", true, null, "/api/settings/camera"],
       ["look_to_talk", true, null, "/api/settings/camera"],
       ["look_to_talk_greet", true, null, "/api/settings/camera"],
+      ["look_to_talk_greet_name", true, null, "/api/settings/camera"],
       ["stop_gesture", true, null, "/api/settings/camera"],
     ]);
     expect(before.camera_preview_disabled_reason).toBeNull();

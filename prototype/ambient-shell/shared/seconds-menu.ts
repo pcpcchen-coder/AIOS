@@ -76,7 +76,7 @@ export interface SecondsSource {
 
 /**
  * 依 CAMERA_PREFS、VOICE_PREFS 的順序，每個規格一列（開關、秒數與倍率）：選單列「鏡頭與語音設定」照這個畫。
- * 保持表的順序，「看著說話」的秒數與「看著說話時先打招呼」緊接在它後面。
+ * 保持表的順序，「看著說話」的秒數與「看著說話時先打招呼」「打招呼時稱呼認出的家人」緊接在它後面。
  */
 export function describeMenuPrefs(source: SecondsSource): MenuPrefSetting[] {
   const rows: MenuPrefSetting[] = [];
@@ -92,6 +92,10 @@ export function describeMenuPrefs(source: SecondsSource): MenuPrefSetting[] {
       // 和設定畫面「鏡頭與手勢」同一個提示。
       if (k === "look_to_talk" && !source.realtime?.available) note = `${spec.hint}；需要即時語音（目前不可用）`;
       if (camera && k === "look_to_talk_greet" && !camera.look_to_talk) note = "看著說話目前關閉，這個開關暫時用不到";
+      if (camera && k === "look_to_talk_greet_name") {
+        if (!camera.look_to_talk) note = "看著說話目前關閉，這個開關暫時用不到";
+        else if (!camera.look_to_talk_greet) note = "看著說話時先打招呼目前關閉，這個開關暫時用不到";
+      }
       // 鏡頭關著時其他開關都用不到（和倍率列「鏡頭目前關閉…」一致）；這個說明優先。
       if (camera && k !== "active" && !camera.active) note = "鏡頭目前關閉，這個開關暫時用不到";
       rows.push({
