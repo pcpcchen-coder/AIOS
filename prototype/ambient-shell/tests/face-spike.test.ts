@@ -12,7 +12,7 @@ import {
   similarityTransform,
   warpAffineToChw,
   type Affine,
-} from "../spike/face/sface.ts";
+} from "../src/sense/face/sface.ts";
 import {
   decodeYuNet,
   nmsBoxes,
@@ -22,7 +22,7 @@ import {
   toSourceCoords,
   type FiveLandmarks,
   type YuNetStrideOutput,
-} from "../spike/face/yunet.ts";
+} from "../src/sense/face/yunet.ts";
 
 // ID-00 spike 的前後處理（docs/14、ADR-0001）。golden 來源見 docs/validation/family-id-00-spike-2026-10-24/opencv-golden.py：
 // NMS 與 warpAffine 直接呼叫 opencv-python-headless 5.0.0；similarity 的 golden 是 OpenCV 演算法（getSimilarityTransformMatrix）

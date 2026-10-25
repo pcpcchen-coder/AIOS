@@ -16,8 +16,8 @@ import {
   type StageTiming,
   type YuNetVariant,
 } from "./runtime.ts";
-import { cosineSimilarity } from "./sface.ts";
-import type { FaceBox, YuNetFace } from "./yunet.ts";
+import { cosineSimilarity } from "../../src/sense/face/sface.ts";
+import type { FaceBox, YuNetFace } from "../../src/sense/face/yunet.ts";
 
 const FRAME_W = 1280;
 const FRAME_H = 720;

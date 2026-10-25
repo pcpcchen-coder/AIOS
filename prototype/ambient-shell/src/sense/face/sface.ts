@@ -1,4 +1,4 @@
-// ID-00 spike：SFace 的對齊、輸入張量與比對（純函式）。不接進產品流程，見 docs/14 與 ADR-0001。
+// SFace 的對齊、輸入張量與比對（純函式）。ID-00 spike 寫成、ID-01 搬進產品（docs/14、ADR-0001），worker 與 spike 頁共用。
 // 照 OpenCV 官方實作改寫：opencv/opencv modules/objdetect/src/face_recognize.cpp（FaceRecognizerSFImpl），
 // 查核 commit 048f050d5dca7385255583910af704c7c727ac9e。
 // - alignCrop：5 點 similarity transform 到 112×112 範本，warpAffine INTER_LINEAR、邊界補 0。

@@ -16,5 +16,5 @@ export function radio(label: string, checked: boolean, click: () => void, enable
 
 export function settingsMenu(
   settings: SettingsView | null,
-  handlers: { command(name: string): void; setMenuPref(row: MenuPrefSetting, value: number | boolean): unknown },
+  handlers: { command(name: string): void; setMenuPref(row: MenuPrefSetting, value: number | boolean): unknown; openFamily?(): void },
 ): MenuItemTemplate[];

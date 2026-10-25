@@ -1,6 +1,6 @@
 # 靠近時辨識已登記家人，互動後稱名問候
 
-日期：2026-10-24。狀態：規劃；**ID-00 部分交付**：[ADR-0001 草案](./adr/ADR-0001-local-family-recognition.md)＋不接進產品的 runtime spike（[驗證紀錄](./validation/family-id-00-spike-2026-10-24.md)，只有雲端 CPU／WASM 數字）；ID-00 放行條件待 Mac＋AR0144 實測。辨識、登記與稱名問候尚未實作。程式查核基準：AIOS main `96297c0d4d948da2297d233809398a2e5a0ee938`。
+日期：2026-10-24。狀態：規劃；**ID-00 部分交付**：[ADR-0001 草案](./adr/ADR-0001-local-family-recognition.md)＋不接進產品的 runtime spike（[驗證紀錄](./validation/family-id-00-spike-2026-10-24.md)，只有雲端 CPU／WASM 數字）；ID-00 放行條件待 Mac＋AR0144 實測。**ID-01 有程式、只有雲端驗證**（2026-10-25，分支 `claude/family-id-01`，[驗證紀錄](./validation/family-id-01-2026-10-25.md)）：macOS App 選單列打開的「家人辨識」畫面內可登記、刪除、試認，特徵以 safeStorage 包裝的金鑰加密保存；辨識只在該畫面內運作，**門檻未校準、未在 Mac 實測**。看著說話時同步辨識與稱名問候（ID-02）尚未實作。程式查核基準：AIOS main `96297c0d4d948da2297d233809398a2e5a0ee938`。
 
 依使用者要求納入 repo，入口見 [文件索引](./README.md) 與 [目前實作狀態](./Current_Implementation_Status.md)。規劃發布當時（`5af2c24`）只有規劃與導覽更新，沒有新增辨識程式、家人資料或通過任何實機 gate；之後的 ID-00 進度見上方狀態行。
 

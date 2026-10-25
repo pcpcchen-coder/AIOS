@@ -1,8 +1,8 @@
 # ADR-0001：本機家人辨識的資料生命週期與 runtime
 
-狀態：**草案（Proposed）**；George 已於 2026-10-25 決定 §9 大部分項目，偵測器與 SFace 訓練資料風險仍待決。日期：2026-10-24。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00。
+狀態：**草案（Proposed）**；George 已於 2026-10-25 決定 §9 大部分項目，偵測器與 SFace 訓練資料風險仍待決。日期：2026-10-24，2026-10-25 依 ID-01 實作修訂 §2.1、§2.2、§10。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00、ID-01。
 
-本 ADR 只定義邊界與候選做法。程式只有不接進產品流程的 runtime spike（`prototype/ambient-shell/spike/face/`），沒有家人登記、特徵保存、辨識結果或稱名問候。spike 量測見 [驗證紀錄](../validation/family-id-00-spike-2026-10-24.md)。
+ID-00 是不接進產品流程的 runtime spike（`prototype/ambient-shell/spike/face/`，量測見 [驗證紀錄](../validation/family-id-00-spike-2026-10-24.md)）。ID-01（2026-10-25，分支 `claude/family-id-01`）實作了登記、刪除、加密保存、本機辨識（只在選單列打開的「家人辨識」畫面內）與品質、失效狀態，只有雲端驗證，**沒有 Mac 實機結果、門檻未校準、沒有稱名問候**，見 [ID-01 驗證紀錄](../validation/family-id-01-2026-10-25.md)。
 
 編號說明：這是本 repo `docs/adr/` 的第一份 ADR。[08](../08_Consolidation_and_Update_2026-10.md) 提到的 ADR-001–005 是當時的提案標籤，沒有在 repo 建檔；[11](../11_Stereo_Camera_Interaction_2026-10.md) 引用的 ADR-0002、ADR-0005 屬於另一個 repo（this-is-yourX）。三者不是同一個編號序列。
 
@@ -40,12 +40,33 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 ```
 
 - 推論放在 renderer 的專用 worker，原因是像素已經在 renderer；把影像經 IPC 送到主程序反而多一條影像通道。
-- 登記特徵（gallery）不交給 renderer。renderer 只送出當次特徵，核心回傳狀態與 person ID。這樣生成 UI 或前端錯誤無法讀到全部家人的特徵。
-- **IPC 是新的攻擊面**，需要在 ID-01 明確設計：
-  - Web Worker 不能直接呼叫 Electron IPC。特徵向量由 worker `postMessage` 給 renderer 主執行緒，再經 preload 以 `contextBridge` 暴露的**新** API（例如 `nous.identity.match(feature, trackGeneration)`）送到主程序。目前 `desktop/preload.cjs` 沒有這個 API，需要新增。
-  - 這個 API 只接受固定長度（128）的 Float32 向量與整數世代，回傳 `IdentityObservation`；不提供列出家人、讀取 gallery、讀名稱以外欄位或匯出的功能。
-  - 威脅面：renderer 內任何程式（含生成 UI 若越界）都能呼叫這個 API，可藉反覆查詢推測某張臉是否已登記。對策是主程序端限速（與 4 Hz 取樣相符）、只在鏡頭運作且看著說話啟用時接受、回應不含相似度數值。生成 UI 本來就不得接觸 preload API（CLAUDE.md 紅線），此 API 也不例外。
-- 刪除、停用、關鏡頭時，主程序除了清自己的狀態，也要通知 renderer：worker 取消進行中的推論、丟棄暫存的特徵與候選，並遞增 renderer 端的追蹤世代。
+- 登記特徵（gallery）不交給 renderer。renderer 只送出當次特徵，核心回傳狀態（matched 才帶 person ID）。這樣生成 UI 或前端錯誤無法讀到全部家人的特徵。
+
+#### 2.1.1 核心持有資料與邏輯、IPC 只做傳輸（2026-10-25，ID-01 採用）
+
+比較過兩個方案：
+
+| | 方案 A：核心持有（採用） | 方案 B：主程序（`desktop/main.mjs`）自己持有 |
+|---|---|---|
+| gallery、比對、證據規則、名稱驗證 | 核心（`server/identity-service.ts`、`identity-store.ts`，TypeScript）。核心本來就跑在 Electron 主程序（`main.mjs` 以 `import(server.mjs)` 呼叫 `startNous`） | 寫在 `main.mjs` 或旁邊的 `.mjs`，沒有型別 |
+| 測試 | vitest 直接測核心（假 SecretBox＋真 AES-GCM、假時鐘、log spy） | 要模擬 Electron 才測得到，Linux 雲端只能 `node --check` |
+| 設定與選單列 | 核心算出 `settings.identity`（只有狀態與人數），選單列與頁面讀同一份 | 主程序另外組狀態，和核心的設定是兩份 |
+| IPC 面 | 一個通道 `nous:identity`，op 白名單、形狀過濾，轉給 `core.identity.handle` | 每個功能一個通道，邏輯和傳輸混在一起 |
+| 缺點 | 核心重啟時 session 失效，畫面要從選單列重開 | — |
+
+做法：
+
+- `startNous` 多一個選項 `identity: { dir, secretBox, excludeFromBackup, confirm, modelDir }`。只有 macOS App 注入；瀏覽器版（`npm start`）沒有注入，`settings.identity` 回報「瀏覽器版不可用」。
+  - `secretBox`：`main.mjs` 以 `safeStorage` 實作，只在 `darwin` 且 `isEncryptionAvailable()`（且不是 `basic_text` 後端）時 `available()`。
+  - `confirm`：原生確認對話框（`dialog.showMessageBox`）。核心在登記（同意文字；未成年時要勾家長確認）、刪除與清除全部時呼叫，回 true 才寫檔；renderer 無法偽造。這是 CLAUDE.md「永久刪除須經 Action Gate 與當次明確確認」的實作。
+- **身分資料不走 loopback HTTP**。`server/app.ts` 沒有任何傳特徵、person ID 或姓名的路由；`GET /api/settings`（與 SSE 的 `hello`、`settings.updated`）的 `identity` 只有選單需要的 `available`、`disabled_reason`、`limited_reason`（鏡頭與模型造成的限制）。人數、世代、gallery 狀態只經 IPC 給已開 session 的頁面（審查 2026-10-25）。
+- **薄 IPC**：preload 只多一個 `nousDesktop.identity(request)`（`ipcRenderer.invoke("nous:identity")`）。主程序的處理器先檢查 `event.sender === win.webContents`、`event.senderFrame === sender.mainFrame`、frame 網址以核心網址開頭，再以純函式 `desktop/identity-ipc.mjs` 過濾 op 白名單與欄位形狀（多的欄位丟掉），然後交給核心。語意驗證（特徵正規化、名稱、人數、一致性）由核心負責。
+- **管理 session**：只有使用者在選單列點「家人辨識…」後 10 秒內，主視窗本機核心的頁面才能開（主程序記錄點擊時間，`open_session` 時一次性消耗）；沒點選單時語音或頁面腳本自己開會被拒（`not_user_initiated`）。一次只有一個 session；畫面收起、閒置 10 分鐘、開滿 15 分鐘、主視窗 `did-navigate`（含重新載入）或 `render-process-gone`（主程序呼叫 `closeSessions`）、核心關閉（`shutdown`）都會失效。probe、登記、刪除都要有效 session，每個 session 每秒最多 6 次請求。
+- **核心重啟與並行**：核心關閉時先進入關閉狀態，等待中的原生確認回來後一律不寫；會改資料的操作（登記、刪除、清除）同時只能有一個，避免疊出多個對話框或用到過期的去重資料；寫入前核對磁碟上的 `gallery_version` 與記憶體相同，不同就拒絕（`stale_gallery`），不拿舊資料覆蓋。
+- **ID-01 沒有背景持續辨識**：辨識只在「家人辨識」畫面內的「試認」與登記取樣時運作。看著說話時同步辨識與稱名屬於 ID-02，原本「只在鏡頭運作且看著說話啟用時接受」的條件到 ID-02 再接。
+- **比對在核心**：回應不含相似度分數。每位家人的分數取該人各樣本 cosine 的最大值；最高分 ≥ `match` 且領先第二名 ≥ `margin` 才算這一格指向此人，分數接近是 ambiguous，低於門檻是 unknown。只比對模型與前處理版本（detector／recognizer／align／preproc）都相符的家人，不符的標 `needs_reenroll`。之後再經證據規則（`shared/identity.ts` 的 `decideIdentity`）：同一取樣世代內至少 3 格、跨至少 500 ms、全部指向同一人，最新一格不超過 1 秒；**「不認得」與「兩位分不清」也要同樣的證據才回，之前一律是中性的 collecting**，單一格不能拿來探測某張臉是否已登記（審查 2026-10-25）；相鄰兩格斷開超過 500 ms，或世代、`epoch`、`gallery_version` 改變就清空；多張臉一律 ambiguous，不挑最大的臉；品質不足是 unavailable。
+- 威脅面照實保留：renderer 內任何程式（含生成 UI 若越界）在 session 內都能呼叫 probe；拿一張臉連續送 3 格以上，仍可從穩定結果推測它是否已登記。對策是 session 只能由使用者點選單列開啟、時長上限、限速、回應不含分數、gallery 相關結果要累積證據才回、重複登記只回「可能已登記」不回是哪一位。生成 UI 本來就不得接觸 preload API（CLAUDE.md 紅線）。
+- 刪除、清除與收起畫面時：核心清掉證據並遞增 `epoch`；頁面停止取樣、結束 worker（模型與暫存一併釋放）、丟掉記憶體中的樣本，取樣世代加一，晚到的結果因世代不符被丟掉。
 - 第一版上限 2–5 位登記家人（14 §5）；超過上限拒絕新登記，不自動覆蓋。
 - 每次取樣約 4 Hz、同時最多一個待處理推論；結果帶追蹤世代，世代不符一律丟棄（14 §3、§4）。
 
@@ -70,7 +91,13 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 **停用／刪除**：
 
 - 停用：記錄保留但不參與比對，`gallery_version` 遞增。
-- 刪除：從加密檔移除該人所有特徵與名稱，並**輪換資料金鑰（crypto-erasure）**：產生新的資料金鑰，以新金鑰重新加密剩下的記錄，原子替換檔案與包裝後的金鑰，再把舊金鑰從記憶體清零並刪除其包裝檔。`gallery_version` 遞增，並記錄目前的金鑰世代（`key_generation`）。不留「已刪除但可還原」的副本。
+- 刪除：從加密檔移除該人所有特徵與名稱，並**輪換資料金鑰（crypto-erasure）**：產生新的資料金鑰，以新金鑰重新加密剩下的記錄，原子替換檔案，再把舊金鑰的 Buffer 清零。`gallery_version` 與金鑰世代（`key_generation`）遞增。不留「已刪除但可還原」的副本。
+- **包裝後的金鑰與密文放在同一個檔**（2026-10-25，ID-01）：`userData/identity/gallery.v1.json`（0600，資料夾 0700）內含 `wrapped_key`、`nonce`、`tag`、`ciphertext` 與檔頭；AES-256-GCM、每次隨機 nonce，AAD 綁住檔頭（含 `wrapped_key`）。每次寫入（登記、刪除）都換新資料金鑰；寫入順序是 tmp（0600）→ fsync → rename → fsync 資料夾，啟動時清掉中斷留下的 tmp。同一個檔的好處是金鑰與密文一起原子替換，不會出現「新密文配舊金鑰」的中間狀態；代價是快照裡的舊檔同時帶著當時的包裝金鑰（見下方備份與快照）。
+- **第一次開 session 才載入**：啟動與 `GET /api/settings` 都不碰 Keychain、不建資料夾、不跑 `tmutil`（審查 2026-10-25）。safeStorage 啟動後才變成可用時，也是先載入既有 gallery 才允許寫入，不會用只含新成員的資料覆蓋。
+- 解不開分兩種：**`key_unavailable`**（SecretBox 解不開資料金鑰，例如沒有允許鑰匙圈）可重試，畫面說明允許鑰匙圈或重新啟動，不提供清除；**`corrupt`**（格式不符、tag 不是 16 位元組、GCM 驗證失敗、內容損壞）**不覆寫、不退回明文**，只提供經原生確認的「清除全部家人資料」。包裝金鑰本身被改時也會表現為 `key_unavailable`。
+- 載入時逐一檢查特徵（128 維、有限值、‖v‖≈1）；不合格的人照實標為壞資料，列表看得到、可以刪除，但不參與比對。
+- **沒有防回滾**：有人用較舊的 gallery 檔整個替換現有檔時，只要舊檔仍能用同一把應用程式金鑰解開就會被接受（例如被刪的人又回來）。寫入前的 `gallery_version` 核對只防止同一台機器上兩個核心互相覆蓋，不防替換檔案。
+- 殘餘風險（照實記錄）：`safeStorage` 的應用程式金鑰不輪換，Time Machine 或 APFS 本機快照中的舊 gallery 檔理論上仍可用同一台 Mac 解開（`tests/identity-store.test.ts` 以替身照實重現）；`safeStorage` 以字串進出，資料金鑰的 base64 字串與解密後的 JSON 字串留在 V8 heap 直到被回收，無法主動清零。
 - 兩者都要立即：清掉核心記憶體中的解密 gallery 快取；撤銷所有指向該 person ID 的候選與 `GreetingDecision`；遞增追蹤世代，讓晚到的推論與比對結果因世代不符被拒絕。
 - 關鏡頭、sensor degraded、模型錯誤：同樣清除候選並遞增世代（14 §3、I5、I8、I9）。
 - 備份與快照：Time Machine 與 APFS 本機快照會保留**舊的加密檔**。只輪換金鑰還不夠：若舊的「包裝後資料金鑰」也在同一份快照裡，而 Keychain 中包裝它的應用程式金鑰仍在，舊 gallery 仍可被解開。因此：
@@ -106,11 +133,11 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 | MediaPipe BlazeFace short range | `blaze_face_short_range.tflite`，`mediapipe-models/face_detector/…/float16/1/`；SHA-256 `b4578f35…152f` | Apache-2.0 | 官方模型卡（2021-06-09）「LICENSED UNDER Apache License, Version 2.0」 | 模型卡把「超過 2 m 的人」與「任何形式的監控或身分辨識」列為範圍外 |
 | MediaPipe BlazeFace full range | `blaze_face_full_range.tflite`，同上路徑 `/float16/1/`；SHA-256 `3698b18f…181b` | Apache-2.0 | 官方 full range 模型卡 | 範圍外同樣列出身分辨識；適用距離寫到 5 m |
 | `@mediapipe/tasks-vision` | 1.1.1（既有依賴） | Apache-2.0 | 既有 | |
-| `onnxruntime-web` | 1.30.0（精確版本，devDependency） | MIT | `npm view onnxruntime-web@1.30.0 license` 與各套件 `package.json` | 傳遞依賴：`onnxruntime-common` 1.30.0 MIT、`long` 5.3.2 Apache-2.0、`flatbuffers` 25.9.23 Apache-2.0、`protobufjs` 7.6.6 BSD-3-Clause、`platform` 1.3.6 MIT、`guid-typescript` 1.0.9 ISC，以及 `protobufjs` 的 9 個 `@protobufjs/*`（aspromise、base64、codegen、eventemitter、fetch、float、path、pool、utf8）皆 BSD-3-Clause。`protobufjs` 7.6.6 有 install script（lock 中 `hasInstallScript: true`，執行 `node scripts/postinstall`）；讀過內容，只比對上層 `package.json` 的版本寫法並可能印出警告，不連網、不寫檔 |
+| `onnxruntime-web` | 1.30.0（精確版本；ID-00 為 devDependency，ID-01 起為 dependency） | MIT | `npm view onnxruntime-web@1.30.0 license` 與各套件 `package.json` | 傳遞依賴：`onnxruntime-common` 1.30.0 MIT、`long` 5.3.2 Apache-2.0、`flatbuffers` 25.9.23 Apache-2.0、`protobufjs` 7.6.6 BSD-3-Clause、`platform` 1.3.6 MIT、`guid-typescript` 1.0.9 ISC，以及 `protobufjs` 的 9 個 `@protobufjs/*`（aspromise、base64、codegen、eventemitter、fetch、float、path、pool、utf8）皆 BSD-3-Clause。`protobufjs` 7.6.6 有 install script（lock 中 `hasInstallScript: true`，執行 `node scripts/postinstall`）；讀過內容，只比對上層 `package.json` 的版本寫法並可能印出警告，不連網、不寫檔 |
 
 權重與程式的授權已查核：沒有 AGPL、GPL 或 NC 授權。MediaPipe 模型卡的「身分辨識範圍外」不是授權限制，而是官方對用途的聲明：若選 BlazeFace 當偵測前端再接 SFace，等於把它用在模型卡排除的場景。這是傾向選 YuNet 的理由之一（§6）。
 
-`onnxruntime-web` 目前是 devDependency，因為只有 spike 使用，主程式 build 與 Electron 包都不含它。ID-01 若採用 YuNet 或 SFace，需改為 dependency，並在桌面打包中確認 wasm 檔案與 CSP。
+`onnxruntime-web` 在 ID-00 是 devDependency。ID-01 改為 dependency：worker 的 JS 打包進前端（約 57 kB），14 MB 的 wasm 與兩個模型則不打包，只由 `npm run face:setup -- --product` 安裝到 App 的資料夾（§10）。
 
 ## 4. 前後處理的出處
 
@@ -124,7 +151,7 @@ spike 的 TypeScript 模組逐項對照 OpenCV 官方實作（opencv/opencv comm
 ## 5. 對既有防護的改動
 
 - `tests/camera-privacy.test.ts` 原本禁止 `src/` 任何讀回像素的 API，這條不變。新增一段遞迴掃描 `spike/face/`：只允許 `runtime.ts` 呼叫 `getImageData`，並禁止匯出、錄影、網路、遠端動態 import 與本機儲存 API；另檢查 `src/`、`server/`、`shared/`、`desktop/` 不以任何形式（含動態與副作用 import）引用 spike、主程式入口不含 spike。
-- 正式實作（ID-01）的推論 worker 會需要同類例外。屆時應把允許範圍限制在單一檔案，並以同樣方式檢查，不把整個前端放寬。
+- 正式實作（ID-01）的推論 worker 需要同類例外，已限制在單一檔案：`src/` 的 `getImageData` 只准 `sense/identity-worker.ts`，`createImageBitmap` 只准 `sense/pipeline.ts` 的取樣出口；`src/` 全面另禁 `MediaRecorder`、`ImageCapture`、`readPixels`、`convertToBlob`、`showSaveFilePicker`；worker 與其輔助模組另禁網路、本機儲存與 `/api/`（`tests/camera-privacy.test.ts`）。
 
 ## 6. 偵測器選擇
 
@@ -143,7 +170,7 @@ spike 的 TypeScript 模組逐項對照 OpenCV 官方實作（opencv/opencv comm
 | 紅線 | 本 ADR 的處理 |
 |---|---|
 | 不建立 App launcher、App 圖示、常駐側欄、首頁 Dashboard、預設聊天主頁 | 辨識沒有新畫面。spike 頁是開發者工具，獨立 Vite 設定、只綁 127.0.0.1，不是主程式的 entry，不在主畫面或選單出現 |
-| 每個 Surface 必須帶可驗證的 `visibility_reason` | 辨識本身不產生 Surface；認出熟人不浮出任何畫面（14 I1）。日後的登記與刪除畫面由使用者在設定中開啟，沿用 `user_request` |
+| 每個 Surface 必須帶可驗證的 `visibility_reason` | 辨識本身不產生 Surface；認出熟人不浮出任何畫面（14 I1）。ID-01 的「家人辨識」畫面只由選單列「鏡頭與語音設定 → 家人辨識…」開啟，`visibility_reason` 為 `user_request`，Presentation Policy 照常檢查；不是 launcher 或常駐畫面 |
 | 注視只選定目標，不觸發副作用；眨眼不是點擊 | 辨識只產生稱呼候選，不觸發展開、提交或刪除。問候仍由既有的看著說話啟動條件觸發 |
 | 「收起」只關視圖，「停止任務」才取消 | 不改變；收起時取消尚未送出的問候（14 §3 條件 6） |
 | 外部副作用須經 Action Gate 與當次明確確認 | 身分不作授權依據（§2.5），不能代替確認 |
@@ -175,7 +202,13 @@ spike 的 TypeScript 模組逐項對照 OpenCV 官方實作（opencv/opencv comm
 
 ## 10. ID-01 待辦（已知、不需 George 決定）
 
-- `onnxruntime-web` 改為 dependency，並在桌面打包中確認 wasm 檔案與 CSP。
-- 新增 preload `contextBridge` 身分比對 API、主程序限速與世代檢查（§2.1）。
-- YuNet 640 的 letterbox 路徑用 canvas 縮放，與 OpenCV `resize` 的插值不同，**spike 沒有對 OpenCV 核對這條路徑**（交叉核對用的是 2026may 原尺寸路徑）。若採用 YuNet 640，需補一次核對或改用自寫的縮放。
-- 推論改到 worker，並以 OffscreenCanvas 或 `VideoFrame` 重量 pre 耗時。
+2026-10-25 在分支 `claude/family-id-01` 的處理（雲端驗證，見 [ID-01 驗證紀錄](../validation/family-id-01-2026-10-25.md)）：
+
+- [x] `onnxruntime-web` 改為 dependency（精確 1.30.0）。前端改用它的「外部 wasm」版本（Vite 條件 `onnxruntime-web-use-extern-wasm`），wasm 與模型**不進 dist、不進 release zip**，只由 `npm run face:setup -- --product` 安裝到 App 的資料夾，核心核對雜湊後從 `/face-runtime/` 提供。JS 回應加上 worker 用的 CSP（`connect-src 'self'`、`'wasm-unsafe-eval'`），頁面的 CSP 不放寬；雲端 headless Chromium 確認 worker 內 `fetch` 外部網址與 `eval` 被擋。Electron 中的實際行為待 Mac 驗證。
+- [x] preload 的身分 API、主程序的發送者與形狀檢查、核心的限速與世代檢查（§2.1.1）。Electron 的 `ipcMain`／`contextBridge` 實際執行待 Mac 驗證。
+- [x] 審查（2026-10-25）修正：刪除先寫檔成功才清零特徵；載入時驗證特徵；gallery 相關結果要累積證據才回；session 時長上限與導覽／重新載入／renderer 結束時關閉；核心關閉與並行寫入的保護；金鑰與檔案損壞分開；gallery 延後到第一次開 session 載入；`authTagLength` 16；settings 只給選單欄位；`/face-runtime/` 每次讀取核對雜湊；寫檔用 `writeFileSync(fd)`。
+- [x] YuNet 640 的 letterbox 改成自寫的 OpenCV `cv::resize`（INTER_LINEAR、8 位元定點）移植，縮小時與 `cv2.resize` 逐像素相同（`tests/face-letterbox.test.ts`）；產品 worker 對 OpenCV `FaceDetectorYN`（2023mar、640）＋`FaceRecognizerSF` 的雲端交叉核對：臉數一致、特徵 cosine 0.99993–0.99996。
+- [x] 推論移到 module worker（`src/sense/identity-worker.ts`，產品中唯一能讀像素的檔案）。雲端 1 執行緒的單格耗時另見驗證紀錄；**與既有感測迴圈同時跑的影響只能在 Mac 上量**。
+- [ ] 門檻校準（`CALIBRATED = false`）：需要家人自願的保留樣本與陌生人（ID-03）。
+- [ ] Mac＋AR0144 實測：safeStorage／Keychain 提示、`tmutil isexcluded`、IPC、登記與試認、停止手勢與 CPU、Electron 中的 worker CSP、刪除後重啟（驗證紀錄 §6）。
+- [ ] 每位家人的「停用」（保留但不比對）延到之後；ID-01 只有刪除。

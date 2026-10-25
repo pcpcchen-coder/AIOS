@@ -1,4 +1,5 @@
-// ID-00 spike：YuNet 人臉偵測的前後處理（純函式，不碰 DOM 或模型）。不接進產品流程，見 docs/14 與 ADR-0001。
+// YuNet 人臉偵測的前後處理（純函式，不碰 DOM 或模型）。ID-00 spike 寫成、ID-01 搬進產品（docs/14、ADR-0001）：
+// 家人辨識 worker（src/sense/identity-worker.ts）與 spike 頁共用這一份。
 // 照 OpenCV 官方實作改寫：
 // - 解碼與 padding：opencv/opencv modules/objdetect/src/face_detect.cpp（FaceDetectorYNImpl::postProcess、padWithDivisor），
 //   查核 commit 048f050d5dca7385255583910af704c7c727ac9e。
@@ -169,4 +170,74 @@ export function toSourceCoords(face: YuNetFace, scale: number): YuNetFace {
     box: { x: face.box.x / scale, y: face.box.y / scale, width: face.box.width / scale, height: face.box.height / scale },
     landmarks: face.landmarks.map(p) as unknown as FiveLandmarks,
   };
+}
+
+/**
+ * 整個畫格的 RGBA → YuNet 640 的輸入張量（NCHW、BGR、0–255）。照 OpenCV 的做法：先 cv::resize（INTER_LINEAR）
+ * 到 drawnW×drawnH（8 位元輸出），再貼左上角、右下補 0。
+ * ID-00 的 spike 用 canvas drawImage 縮放，插值和 OpenCV 不同、也沒有核對（ADR-0001 §10）；產品 worker 改用這個函式，
+ * 不再依賴瀏覽器的縮放演算法，也少讀一次像素。
+ * 座標對應同 cv::resize：sx = (dx + 0.5)·(srcW / dstW) − 0.5，超出邊界時夾到第一或最後一格。
+ * 權重照 OpenCV 8U 線性插值的定點算法（imgproc/src/resize.cpp：11 位元係數，水平整數相乘，
+ * 垂直 VResizeLinearVec_32s8u 的 ((S0>>4)·b0>>16) + ((S1>>4)·b1>>16) + 2 >> 2）。縮小時與 cv2.resize 逐像素相同
+ * （tests/face-letterbox.test.ts）；放大時個別像素差 1（產品只會縮小）。
+ */
+export function letterboxToChw(rgba: ArrayLike<number>, srcW: number, srcH: number, lb: Letterbox, order: "rgb" | "bgr" = "bgr"): Float32Array {
+  if (rgba.length < srcW * srcH * 4) throw new Error("rgba buffer too small");
+  const plane = lb.inputW * lb.inputH;
+  const out = new Float32Array(plane * 3);
+  const xs = resizeAxis(lb.drawnW, srcW);
+  const ys = resizeAxis(lb.drawnH, srcH);
+  const [c0, c2] = order === "rgb" ? [0, 2] : [2, 0];
+  const channels = [c0, 1, c2] as const;
+  for (let y = 0; y < lb.drawnH; y++) {
+    const r0 = ys.i0[y]! * srcW;
+    const r1 = ys.i1[y]! * srcW;
+    const b0 = ys.w0[y]!;
+    const b1 = ys.w1[y]!;
+    for (let x = 0; x < lb.drawnW; x++) {
+      const p = xs.i0[x]!;
+      const q = xs.i1[x]!;
+      const a0 = xs.w0[x]!;
+      const a1 = xs.w1[x]!;
+      const o = y * lb.inputW + x;
+      for (let k = 0; k < 3; k++) {
+        const ch = channels[k]!;
+        const s0 = rgba[(r0 + p) * 4 + ch]! * a0 + rgba[(r0 + q) * 4 + ch]! * a1;
+        const s1 = rgba[(r1 + p) * 4 + ch]! * a0 + rgba[(r1 + q) * 4 + ch]! * a1;
+        const v = ((((s0 >> 4) * b0) >> 16) + (((s1 >> 4) * b1) >> 16) + 2) >> 2;
+        out[k * plane + o] = v < 0 ? 0 : v > 255 ? 255 : v;
+      }
+    }
+  }
+  return out;
+}
+
+/** cv::resize INTER_LINEAR 一個軸的來源索引與 11 位元係數（OpenCV 以 float 計算 fx，這裡用 Math.fround 對齊）。 */
+function resizeAxis(dst: number, src: number): { i0: Int32Array; i1: Int32Array; w0: Int32Array; w1: Int32Array } {
+  const scale = src / dst;
+  const i0 = new Int32Array(dst);
+  const i1 = new Int32Array(dst);
+  const w0 = new Int32Array(dst);
+  const w1 = new Int32Array(dst);
+  for (let d = 0; d < dst; d++) {
+    const s = Math.fround((d + 0.5) * scale - 0.5);
+    let s0 = Math.floor(s);
+    let f = Math.fround(s - s0);
+    if (s0 < 0) {
+      s0 = 0;
+      f = 0;
+    }
+    if (s0 >= src - 1) {
+      s0 = src - 1;
+      f = 0;
+    }
+    i0[d] = s0;
+    i1[d] = Math.min(s0 + 1, src - 1);
+    // OpenCV 是 saturate_cast<short>（cvRound：剛好 .5 時取偶數）；Math.round 是 .5 進位。兩者只在乘積剛好落在 .5 時差 1，
+    // 2048 倍的權重落在 .5 需要 f 是 1/4096 的奇數倍，產品的 0.5 倍縮小不會遇到（golden 逐像素相同）。
+    w0[d] = Math.round(Math.fround(Math.fround(1 - f) * 2048));
+    w1[d] = 2048 - w0[d]!;
+  }
+  return { i0, i1, w0, w1 };
 }

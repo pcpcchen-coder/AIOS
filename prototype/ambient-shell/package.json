@@ -25,11 +25,11 @@
     "@anthropic-ai/sdk": "0.131.0",
     "@mediapipe/tasks-vision": "1.1.1",
     "dompurify": "3.4.16",
-    "marked": "18.0.14"
+    "marked": "18.0.14",
+    "onnxruntime-web": "1.30.0"
   },
   "devDependencies": {
     "@types/node": "25.9.9",
-    "onnxruntime-web": "1.30.0",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vite": "8.3.2",
