@@ -74,17 +74,17 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 - 兩者都要立即：清掉核心記憶體中的解密 gallery 快取；撤銷所有指向該 person ID 的候選與 `GreetingDecision`；遞增追蹤世代，讓晚到的推論與比對結果因世代不符被拒絕。
 - 關鏡頭、sensor degraded、模型錯誤：同樣清除候選並遞增世代（14 §3、I5、I8、I9）。
 - 備份與快照：Time Machine 與 APFS 本機快照會保留**舊的加密檔**。只輪換金鑰還不夠：若舊的「包裝後資料金鑰」也在同一份快照裡，而 Keychain 中包裝它的應用程式金鑰仍在，舊 gallery 仍可被解開。因此：
-  - 資料金鑰的存放處要能真正被刪除且不跟著檔案快照走。用 `safeStorage` 時包裝後的金鑰必然是 `userData` 裡的檔案，只能以 Time Machine 排除（`tmutil addexclusion`）降低風險，APFS 本機快照仍可能保留。直接把資料金鑰存成 Keychain 項目（僅限本機、不同步）可以在輪換時刪除該項目，是較完整的 crypto-erasure；這是 §9 第 3 項要決定的事。
+  - 資料金鑰的存放處要能真正被刪除且不跟著檔案快照走。用 `safeStorage` 時包裝後的金鑰必然是 `userData` 裡的檔案，只能以 Time Machine 排除（`tmutil addexclusion`）降低風險，APFS 本機快照仍可能保留。直接把資料金鑰存成 Keychain 項目（僅限本機、不同步）可以在輪換時刪除該項目，是較完整的 crypto-erasure；George 於 2026-10-25 決定先採 `safeStorage`（見 §9）。
   - 設定畫面的刪除說明要寫清楚：刪除後新的資料無法還原；在此之前已存在的系統備份與快照中，舊資料是否仍可解開取決於上述金鑰存放方式。
   - 加密檔本身也加入 Time Machine 排除，減少舊密文副本。
 
 ### 2.3 加密金鑰
 
 - **候選：Electron `safeStorage`**。桌面版的核心本來就跑在 Electron 主程序（`desktop/main.mjs` 載入 `server.mjs`），可以直接呼叫。macOS 上 `safeStorage` 以 Keychain 中的應用程式金鑰加密。做法：產生隨機資料金鑰，以 `safeStorage.encryptString` 包裝後存檔；gallery 用該資料金鑰以 AES-256-GCM 加密。每次刪除人物時輪換資料金鑰（§2.2），檔頭記錄 `key_generation`。
-- **替代：資料金鑰直接存為 macOS Keychain 項目**（`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`、不同步 iCloud）。輪換時刪除舊項目，舊快照中的密文即使留存也沒有可用的金鑰。需要原生模組與簽章流程（§9 第 3 項）。
+- **替代：資料金鑰直接存為 macOS Keychain 項目**（`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`、不同步 iCloud）。輪換時刪除舊項目，舊快照中的密文即使留存也沒有可用的金鑰。需要原生模組與簽章流程；2026-10-25 決定暫不採用（§9）。
 - `safeStorage.isEncryptionAvailable()` 為 false 時，不建立 gallery，辨識功能顯示為不可用，不退回明文。
 - **瀏覽器版（`npm start` + 一般瀏覽器）沒有同等保護**：核心是純 Node 程序，沒有 Keychain 綁定。這個模式下明示關閉辨識，原有對話與看著說話照常運作。
-- 待 George 決定是否改用直接存取 macOS Keychain 的原生模組；那會多一個原生依賴與簽章流程。
+- 2026-10-25 George 決定採 `safeStorage`，不加 Keychain 原生模組（§9）。
 
 ### 2.4 雲端語音
 
@@ -159,15 +159,19 @@ spike 的 TypeScript 模組逐項對照 OpenCV 官方實作（opencv/opencv comm
 - 風險：SFace 訓練資料條款未查清；雲端耗時不代表 Mac；BlazeFace 與 YuNet 在 AR0144 實際畫質下的表現未知；cosine 門檻尚無校準資料。
 - 既有依賴的發現：`@mediapipe/tasks-vision` 1.1.1 內建用量紀錄，會嘗試 POST 到 `odml.pa.googleapis.com/v1/log`（程式中可見的欄位是任務類型與耗時統計，沒有影像）。spike 頁的 CSP 會擋下，spike 量測已觀察到被擋。主程式只有經本機核心提供頁面時（`npm start` 與 Electron）才帶 CSP `connect-src 'self'`；**Vite 開發伺服器（`npm run dev:web`）目前沒有 CSP，這時用量紀錄會送出**。這是既有問題，另案處理。正式實作不得放寬 CSP，詳見驗證紀錄 §6。
 
-## 9. 尚待 George 決定
+## 9. George 的決定與仍待決事項
+
+2026-10-25 George 已決定：
+
+- 金鑰（原第 3 項）：採 Electron `safeStorage`，不另做 Keychain 原生模組。已知限制照實保留：包裝後的資料金鑰是 `userData` 裡的檔案，Time Machine 或 APFS 本機快照中的舊 gallery 可能仍解得開（§2.2）。ID-01 仍做刪除時輪換金鑰，並以 `tmutil addexclusion` 把 gallery 與包裝金鑰排除在 Time Machine 之外以降低風險；刪除說明要告訴使用者這個限制。
+- 雲端稱名（原第 4 項）：預設稱名；設定裡可以關掉。雲端只收到姓名短句，不收臉部影像、特徵或家人名單。
+- 登記入口與瀏覽器版（原第 5、6 項）：入口放在 macOS App 選單列「鏡頭與語音設定」裡的「家人辨識…」，多角度樣本起點 5–10 張（ID-01 實測後再調）。瀏覽器版不支援辨識，明示「辨識不可用」，原有對話與看著說話照常。
+- 未成年家人（原第 7 項）：可以登記，由家長（George）在登記時確認同意；規則與成人相同：只用於稱呼、不作授權、可隨時刪除。
+
+仍待決：
 
 1. 偵測器：在 Mac 實測後選 YuNet（目前傾向）或 MediaPipe full range。實測步驟見驗證紀錄 §8。
 2. SFace 訓練資料風險是否可接受，或要求先換成訓練資料條款清楚的模型。
-3. 金鑰：Electron `safeStorage`（包裝後金鑰存檔，舊快照中可能可還原）是否足夠，或要把資料金鑰存成 Keychain 項目以做到完整 crypto-erasure（§2.2、§2.3）。
-4. 「不在雲端語音稱名」選項的預設值（開或關）。
-5. 登記入口放在哪個已有的設定畫面，以及多角度樣本的數量（起點 5–10 張）。
-6. 瀏覽器版是否接受「辨識不可用」，或另需設計。
-7. 未成年家人能否登記、由誰同意、是否另設限制（§2.2）。
 
 ## 10. ID-01 待辦（已知、不需 George 決定）
 
