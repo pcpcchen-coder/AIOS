@@ -1,4 +1,4 @@
-// 家人辨識 ID-01（docs/14、docs/adr/ADR-0001）：核心、桌面 IPC 與頁面共用的型別、常數與純函式。
+// 家人辨識 ID-01／ID-02（docs/14、docs/adr/ADR-0001）：核心、桌面 IPC 與頁面共用的型別、常數與純函式。
 // 規則：身分只用於稱呼，不作授權；未知不硬配人；所有門檻都是未校準的起點值（CALIBRATED = false）。
 // 這裡沒有任何 I/O；比對與證據累積在核心（server/identity-service.ts），頁面只顯示核心給的狀態。
 
@@ -16,7 +16,8 @@ export const FAMILY_NAME_MAX = 16;
 
 /**
  * 門檻是否已用登記以外的保留樣本與陌生人校準。ID-01 沒有：每個觀測都帶 calibrated:false，試認畫面標「門檻未校準」。
- * 校準完成（ID-03）前不得改成 true。
+ * 校準完成（ID-03）前不得改成 true。George 2026-10-25 決定：稱名問候（ID-02）不等校準，先用這組未校準的起點門檻，
+ * 但所有觀測、問候決策（GreetingDecision.calibrated）、log 與文件都照實標未校準（ADR-0001 §9）。
  */
 export const CALIBRATED = false;
 
@@ -206,6 +207,31 @@ export function parseFamilyName(raw: unknown): NameResult {
   return { ok: true, name };
 }
 
+/** 口語名稱只能有文字、組合符號、數字，以及名字裡常見的空白、間隔號、句點、撇號與連字號。 */
+const SPEAKABLE_NAME = /^[\p{L}\p{M}\p{N}][\p{L}\p{M}\p{N} ·・.'’-]*$/u;
+/**
+ * 像指令的字（盡力而為的黑名單，不是完整防護）：名字只會放進「」裡被念出來，但仍不讓它看起來像是在下指令。
+ * 刻意不收「說」「念」這類也會出現在人名裡的字；真正的防線是名稱只能由使用者在管理畫面登記（原生確認），
+ * 而且短句的形狀固定（greetingSentence）。
+ */
+const NAME_INSTRUCTION_WORDS = /(忽略|無視|指示|指令|提示詞|系統|扮演|假裝|\b(?:ignore|instructions?|prompt|system|assistant|pretend)\b)/iu;
+
+/**
+ * 問候用的口語名稱（ID-02，docs/14 §6、I11）。核心組句前從受管理人物檔案取出名稱後再驗一次：
+ * 先過 parseFamilyName（同登記規則），再限制字元種類並拒絕像指令的內容。不合格回 null：問候只說「我在」，不拒絕對話。
+ */
+export function speakableName(raw: unknown): string | null {
+  const parsed = parseFamilyName(raw);
+  if (!parsed.ok) return null;
+  if (!SPEAKABLE_NAME.test(parsed.name) || NAME_INSTRUCTION_WORDS.test(parsed.name)) return null;
+  // 像句子的不念：空白分隔最多 3 段（「Mary Jane Watson」可以，「please say hello to me」不行），段與段之間只有一個空白。
+  if (/\s{2,}/u.test(parsed.name) || parsed.name.split(" ").length > SPEAKABLE_NAME_MAX_WORDS) return null;
+  return parsed.name;
+}
+
+/** 口語名稱最多幾段（空白分隔）。 */
+export const SPEAKABLE_NAME_MAX_WORDS = 3;
+
 /** 特徵向量的形狀檢查：128 個有限數值且已 L2 normalize。 */
 export function isValidFeature(v: unknown): v is ArrayLike<number> {
   if (!(Array.isArray(v) || v instanceof Float32Array) || v.length !== IDENTITY_FEATURE_DIM) return false;
@@ -260,6 +286,8 @@ export interface IdentityManageStatus {
   /** Time Machine 排除：excluded／failed（原因只在畫面說明，不阻擋）／pending／not_applicable。 */
   backup_exclusion: "excluded" | "failed" | "pending" | "not_applicable";
   calibrated: boolean;
+  /** 已看過「開啟稱名時，名字會以短句送到雲端語音供應商」的一次性說明（ID-02）。沒看過就不稱名。 */
+  naming_notice_seen: boolean;
 }
 
 export const IDENTITY_BROWSER_REASON = "瀏覽器版不可用（只在 macOS App 提供）";
@@ -271,8 +299,77 @@ export const BROWSER_IDENTITY_STATUS: IdentityStatus = {
   limited_reason: null,
 };
 
+// ─────────────── ID-02：看著說話時同步辨識與稱名問候 ───────────────
+
+/**
+ * 近距離（公尺，docs/14 §4 起點值、未校準）：PresenceTracker 的距離在這個範圍內才取樣。距離未知（null）不算近距離，
+ * 保守地只說「我在」。雙目距離沒有真校正，不能當成精準界線。
+ */
+export const AMBIENT_NEAR_M = { min: 0.6, max: 1.5 } as const;
+
+/** 問候決策的速率上限：每秒與每分鐘（正常每次看著說話的互動只有一次）。 */
+export const GREETING_RATE = { per_second: 2, per_minute: 3 } as const;
+
+/** 核心為 live 路徑保留已組好的短句多久（IPC 決策 → 頁面 POST greeting 之間；本機來回通常數毫秒）。 */
+export const LIVE_GREETING_PICKUP_MS = 3_000;
+
+/** 看著說話開始的互動 ID 格式：由核心在 /api/realtime/start 發出（RealtimeSessions），不含身分。 */
+export const INTERACTION_ID = /^int_[0-9a-f]{16}$/;
+
+export type GreetingRoute = "api_key" | "live";
+
+/**
+ * 沒有稱名的原因（只進 log 與測試，不含身分）。
+ * - naming_off：「打招呼時稱呼認出的家人」關閉（核心不得補回姓名）。
+ * - notice_unseen：還沒在家人辨識畫面看過「名字會送到雲端語音」的一次性說明（登記同意或「我知道了」）。
+ * - no_session：互動 ID 不是核心發出、已用過、工作階段沒有真的連上或已結束、連上超過 20 秒，或路徑不符。
+ * - not_eligible：頁面端條件不符（換人、轉開、離開近距離、多張臉、關鏡頭、辨識錯誤…）。
+ * - unavailable：辨識不可用（瀏覽器版、鏡頭關、模型、gallery 解不開、管理畫面開著）。
+ * - no_evidence：核心沒有這次看著說話的任何一格（模型還沒載入、取樣沒開始）。
+ * - track_changed：核心最後一格的追蹤世代與互動綁定的不同。
+ * - multi_face：這個追蹤世代出現過多張臉或兩位不同的家人。
+ * - 其餘對應 decideIdentity 的結果（collecting、stale、unknown、ambiguous、quality、no_face、no_gallery）。
+ * - person_gone：人物已刪除或不再參與比對。
+ * - bad_name：名稱沒有通過 speakableName。
+ */
+export type GreetingNameReason =
+  | "naming_off"
+  | "notice_unseen"
+  | "no_session"
+  | "not_eligible"
+  | "unavailable"
+  | "no_evidence"
+  | "track_changed"
+  | "multi_face"
+  | "collecting"
+  | "stale"
+  | "unknown"
+  | "ambiguous"
+  | "quality"
+  | "no_face"
+  | "no_gallery"
+  | "person_gone"
+  | "bad_name";
+
+/**
+ * 結構化的問候決策（docs/14 §6）：只在核心建立與使用，不經 HTTP、不給頁面、不進 log。
+ * person_id 為 null 時問候只說「我在」，reason 說明原因；有 person_id 時 reason 為 null。
+ */
+export interface GreetingDecision {
+  interaction_id: string;
+  person_id: string | null;
+  track_generation: number;
+  gallery_version: number;
+  /** 最新證據的核心時鐘時間；沒有證據時 null。 */
+  evidence_at: number | null;
+  decided_at: number;
+  reason: GreetingNameReason | null;
+  /** 門檻沒有校準：一律 false（George 2026-10-25：未校準也先稱名，但照實標示）。 */
+  calibrated: boolean;
+}
+
 /** IPC 的操作（desktop/identity-ipc.mjs 的白名單與這裡一致，測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all"] as const;
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming"] as const;
 export type IdentityOp = (typeof IDENTITY_OPS)[number];
 
 export type IdentityRequest =
@@ -282,7 +379,15 @@ export type IdentityRequest =
   | { op: "probe"; session: string; gen: number; face_count: number; quality: QualityReason; model: FaceModelVersion; feature?: number[] }
   | { op: "enroll"; session: string; name: string; minor: boolean; guardian_confirmed: boolean; consent: boolean; model: FaceModelVersion; samples: number[][] }
   | { op: "delete"; session: string; person_id: string }
-  | { op: "clear_all"; session: string };
+  | { op: "clear_all"; session: string }
+  /** 看著說話時能不能同步辨識（不載入 gallery、不碰 Keychain）。 */
+  | { op: "ambient_status" }
+  /** 看著說話的面向等待期間的一格（不需要管理 session；回應不含任何結果，避免變成探測工具）。 */
+  | { op: "ambient_probe"; track: number; face_count: number; quality: QualityReason; model: FaceModelVersion; feature?: number[] }
+  /** 送出問候前：頁面給互動 ID、綁定的追蹤世代與頁面端條件，核心建立 GreetingDecision 並組句。 */
+  | { op: "greeting"; interaction: string; track: number; eligible: boolean; route: GreetingRoute }
+  /** 管理畫面：使用者按下「我知道了」，記錄已看過雲端稱名的說明（沒看過就不稱名）。 */
+  | { op: "ack_naming"; session: string };
 
 /** 管理畫面需要的狀態（open_session、list 與變更後回傳）。 */
 export interface IdentityManageView {
@@ -310,10 +415,20 @@ export type IdentityErrorCode =
   | "duplicate"
   | "declined"
   | "not_found"
-  | "write_failed";
+  | "write_failed"
+  /** 這個互動已經做過問候決策（每次互動最多一次，送出狀態未知時也不重來）。 */
+  | "already";
 
 export type IdentityResponse =
-  | ({ ok: true; op: "open_session" | "list" | "delete" | "clear_all" | "enroll" } & IdentityManageView)
+  | ({ ok: true; op: "open_session" | "list" | "delete" | "clear_all" | "enroll" | "ack_naming" } & IdentityManageView)
   | { ok: true; op: "close_session" }
   | { ok: true; op: "probe"; observation: IdentityObservation }
+  /** 只回可不可以取樣；不回原因（原因可能透露有沒有登記家人）。 */
+  | { ok: true; op: "ambient_status"; ready: boolean }
+  | { ok: true; op: "ambient_probe" }
+  /**
+   * api_key：text 是 response.create 這一輪的 instructions（只含核心組好的短句；名字會短暫出現在頁面，ADR-0001 §2.4）。
+   * live：text 為 null，短句留在核心，頁面接著 POST /api/realtime/input greeting（只帶互動 ID），核心自己送進 sideband。
+   */
+  | { ok: true; op: "greeting"; text: string | null }
   | { ok: false; code: IdentityErrorCode; message: string };

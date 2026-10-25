@@ -14,8 +14,16 @@ import {
   parseFamilyName,
   pushEvidence,
   QUALITY_REASONS,
+  GREETING_RATE,
+  INTERACTION_ID,
+  LIVE_GREETING_PICKUP_MS,
   sameModelVersion,
+  speakableName,
+  type EvidenceScope,
   type EvidenceState,
+  type GreetingDecision,
+  type GreetingNameReason,
+  type GreetingRoute,
   type FaceModelVersion,
   type FamilyMember,
   type FrameMatch,
@@ -26,6 +34,8 @@ import {
   type IdentityStatus,
   type QualityReason,
 } from "../shared/identity.ts";
+import { greetingInstructions, liveGreetingText } from "../shared/sense.ts";
+import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
 import type { GalleryStore, GalleryVersions, StoredPerson } from "./identity-store.ts";
 
@@ -41,6 +51,18 @@ import type { GalleryStore, GalleryVersions, StoredPerson } from "./identity-sto
 //   才是這一格的 matched；之後還要通過 shared/identity.ts 的證據規則（≥3 格、≥500 ms、最新 ≤1 秒）。
 // - 永久刪除與登記都要主程序的原生確認（confirm，頁面無法偽造），被拒就不寫檔。
 // - log 只記狀態、原因、耗時、世代與模型版本；不記姓名、person_id、特徵或分數。
+//
+// ID-02（看著說話時同步辨識與稱名問候，docs/14 §2、§3、§6）：
+// - ambient_probe：不需要管理 session，但只在「看著說話」「看著說話時先打招呼」「打招呼時稱呼認出的家人」都開、鏡頭開、
+//   模型雜湊相符、沒有管理畫面開著時接受。證據依頁面的追蹤世代（track）分開累積；回應不含任何辨識結果，
+//   頁面因此無法拿它探測某張臉是否已登記。這個追蹤世代出現過多張臉或兩位不同的家人就整段作廢（不稱名）。
+// - greeting：送出問候前呼叫一次（每個互動 ID 最多一次；每秒 2 次、每分鐘 3 次）。互動 ID 必須是 RealtimeSessions 在
+//   看著說話開始時發出、還沒用過、工作階段真的連上 20 秒內（claimGreeting），否則不帶名字。核心建立 GreetingDecision
+//   （docs/14 §3 的條件），從受管理人物檔案取名稱、以 speakableName 再驗一次，從 shared/sense.ts 的固定清單挑一句（依本機時段、避開上一次；例如「George，我在」「早安，George」「我在」）。
+//   稱名設定關閉、或還沒看過雲端稱名說明時一律不帶名字。API key 路徑回傳組好的 instructions；live 路徑把短句留在核心，
+//   綁定那個 live 工作階段，由 server/live-route.ts 取用（takeLiveGreeting）。
+// - ambient_status／ambient_probe 被拒時不說原因（原因可能透露有沒有登記家人）。
+// - 身分只用於稱呼：GreetingDecision 不給任何授權流程使用。
 
 export const SESSION_IDLE_MS = 10 * 60_000;
 /** session 從開啟起算的上限（不論有沒有在用）。 */
@@ -56,11 +78,27 @@ export type ConfirmRequest =
 /** 主程序的原生確認對話框（dialog.showMessageBox）；回 true 才寫檔。 */
 export type ConfirmFn = (request: ConfirmRequest) => Promise<boolean>;
 
+/** 看著說話時同步辨識需要的使用者設定（camera.json；核心每次都重新讀，改了立即生效）。 */
+export interface AmbientPrefs {
+  look_to_talk: boolean;
+  look_to_talk_greet: boolean;
+  look_to_talk_greet_name: boolean;
+}
+
 export interface IdentityServiceOptions {
   store: GalleryStore;
   confirm: ConfirmFn;
   /** 鏡頭是否啟用且開著（NOUS_CAMERA=on 且使用者沒關）。 */
   camera: () => boolean;
+  /** 看著說話與稱名的設定；未提供時（舊的組裝、測試）視為全部關閉，不做同步辨識也不稱名。 */
+  ambient?: () => AmbientPrefs;
+  /**
+   * 核心發出的互動 ID 換成真的工作階段（RealtimeSessions.claimGreeting）：沒提供或回 null 時不稱名。
+   * 成功一次之後同一個 ID 就不能再用。
+   */
+  claimGreeting?: (interaction: string) => { route: GreetingRoute; session_id: string } | null;
+  /** 開場句挑選（固定清單、依時段、避開上一次）；未提供時建一個（Math.random、這台電腦的時區）。 */
+  picker?: GreetingPicker;
   /** 模型與 runtime 的雜湊核對結果（啟動時算一次）。 */
   runtime: FaceRuntimeCheck;
   model: FaceModelVersion;
@@ -141,6 +179,23 @@ function scores(people: readonly StoredPerson[], feature: Float32Array): { perso
 
 type GalleryState = "unloaded" | "ready" | "key_unavailable" | "corrupt";
 
+/** 看著說話時的證據（一個追蹤世代一份；換世代就丟掉）。 */
+interface AmbientTrack {
+  track: number;
+  evidence: EvidenceState;
+  /** 這個世代第一次 matched 的人；之後出現另一位就 mixed。 */
+  firstMatch: string | null;
+  /** 出現過多張臉，或兩位不同的家人：整個世代不稱名（docs/14 §3 條件 2）。 */
+  mixed: boolean;
+}
+
+const AMBIENT_REFUSED = "目前不能取樣";
+
+const QUIET_OPS = new Set(["probe", "ambient_probe", "ambient_status", "greeting", "ack_naming"]);
+
+/** 記住多少個已決策的互動 ID（每個互動最多一次決策）。 */
+const DECIDED_KEEP = 32;
+
 const LIMIT_MODELS_MISSING = "辨識模型未安裝（npm run face:setup -- --product）；只能查看與刪除";
 const LIMIT_MODELS_BAD = "辨識模型雜湊不符，已停用新增與試認；只能查看與刪除";
 const LIMIT_CAMERA = "鏡頭未啟用或已關閉；只能查看與刪除";
@@ -162,10 +217,21 @@ export class IdentityService {
   private mutating = false;
   /** 核心關閉中（shutdown）：之後的請求一律拒絕，等待中的確認回來也不寫。 */
   private closed = false;
+  /** 看著說話的同步辨識（ID-02）。 */
+  private ambient: AmbientTrack | null = null;
+  private readonly ambientCalls: number[] = [];
+  private readonly greetingCalls: number[] = [];
+  private readonly greetingMinute: number[] = [];
+  /** 已做過問候決策的互動 ID。 */
+  private readonly decided: string[] = [];
+  /** live 路徑：已組好、等 server/live-route.ts 取用的短句（一次只有一個互動）。 */
+  private pendingLive: { interaction: string; session_id: string; named: boolean; text: string; sentence: string; at: number } | null = null;
+  private readonly picker: GreetingPicker;
 
   constructor(private readonly options: IdentityServiceOptions) {
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (() => {});
+    this.picker = options.picker ?? new GreetingPicker({ now: this.now });
   }
 
   private encryptionAvailable(): boolean {
@@ -225,6 +291,7 @@ export class IdentityService {
       models: this.options.runtime.state,
       backup_exclusion: this.options.store.backupExclusion(),
       calibrated: CALIBRATED,
+      naming_notice_seen: this.options.store.namingNoticeSeen(),
     };
   }
 
@@ -239,7 +306,14 @@ export class IdentityService {
   /** 核心關閉：結束 session，之後一律拒絕；等待中的原生確認回來後也不寫。 */
   shutdown(): void {
     this.closed = true;
+    this.dropAmbient();
     this.closeSessions();
+  }
+
+  /** 登記資料改變或核心關閉：撤銷看著說話的證據與等待取用的短句（docs/14 §3 條件 4、ADR-0001 §2.2）。 */
+  private dropAmbient(): void {
+    this.ambient = null;
+    this.pendingLive = null;
   }
 
   /** IPC 進來的請求（已由 desktop/identity-ipc.mjs 過濾形狀；這裡仍完整驗證，核心為權威）。 */
@@ -252,7 +326,8 @@ export class IdentityService {
       op = (IDENTITY_OPS as readonly unknown[]).includes(req.op) ? (req.op as string) : "unknown";
       if (this.closed) throw new RequestError("closed", "Nous 核心正在重新啟動，請稍後從選單列重新打開");
       const res = await this.dispatch(op, req, ctx);
-      if (op !== "probe") this.log(`identity: ${op} ok（${Math.round(this.now() - started)} ms，epoch ${this.epoch}，gallery_version ${this.versions.gallery_version}）`);
+      // 取樣（probe、ambient_probe 約 4 Hz）與狀態查詢不逐筆記；問候決策自己記一行原因。
+      if (!QUIET_OPS.has(op)) this.log(`identity: ${op} ok（${Math.round(this.now() - started)} ms，epoch ${this.epoch}，gallery_version ${this.versions.gallery_version}）`);
       return res;
     } catch (err) {
       if (err instanceof RequestError) {
@@ -269,6 +344,9 @@ export class IdentityService {
 
   private async dispatch(op: string, req: Record<string, unknown>, ctx: IdentityContext): Promise<IdentityResponse> {
     if (op === "open_session") return this.openSession(ctx);
+    if (op === "ambient_status") return this.ambientStatus();
+    if (op === "ambient_probe") return this.ambientProbe(req);
+    if (op === "greeting") return this.greeting(req);
     if (op === "close_session") {
       this.closeSession(req.session);
       return { ok: true, op: "close_session" };
@@ -285,6 +363,10 @@ export class IdentityService {
         return this.mutate(() => this.remove(session, req));
       case "clear_all":
         return this.mutate(() => this.clearAll(session));
+      case "ack_naming":
+        this.options.store.markNamingNoticeSeen(new Date(this.now()).toISOString());
+        this.log("identity: 已看過雲端稱名說明");
+        return { ok: true, op: "ack_naming", ...this.manageView(session) };
       default:
         throw new RequestError("bad_request", "不認得的操作");
     }
@@ -404,6 +486,148 @@ export class IdentityService {
     return { ok: true, op: "probe", observation: decideIdentity(session.evidence, now, scope) };
   }
 
+  // ─────────────── ID-02：看著說話時同步辨識與問候決策 ───────────────
+
+  private ambientPrefs(): AmbientPrefs {
+    return this.options.ambient?.() ?? { look_to_talk: false, look_to_talk_greet: false, look_to_talk_greet_name: false };
+  }
+
+  /** 看著說話時同步辨識不能做的原因；null＝可以。不載入 gallery（不碰 Keychain）。 */
+  private ambientBlock(): string | null {
+    const prefs = this.ambientPrefs();
+    if (!prefs.look_to_talk || !prefs.look_to_talk_greet) return "看著說話或打招呼關閉";
+    if (!prefs.look_to_talk_greet_name) return "稱名關閉";
+    const st = this.status();
+    if (!st.available) return st.disabled_reason ?? "家人辨識不可用";
+    if (st.limited_reason) return st.limited_reason;
+    if (this.session) return "家人辨識畫面開著";
+    if (this.gallery === "key_unavailable" || this.gallery === "corrupt") return "家人資料解不開";
+    if (this.gallery === "unloaded" ? !this.options.store.exists() : this.comparable().length === 0) return "沒有可比對的家人";
+    return null;
+  }
+
+  private ambientStatus(): IdentityResponse {
+    return { ok: true, op: "ambient_status", ready: this.ambientBlock() === null };
+  }
+
+  /** 取樣與問候決策各自限速（每秒 6 格；問候決策每秒 2 次、每分鐘 3 次，正常每次互動只有一次）。 */
+  private ambientRate(calls: number[], max: number, windowMs = 1000): void {
+    const now = this.now();
+    const recent = calls.filter((t) => now - t < windowMs);
+    calls.splice(0, calls.length, ...recent);
+    if (calls.length >= max) throw new RequestError("rate_limited", "請求太頻繁");
+    calls.push(now);
+  }
+
+  private ambientScope(track: number): EvidenceScope {
+    return { gen: track, epoch: this.epoch, gallery_version: this.versions.gallery_version };
+  }
+
+  /**
+   * 看著說話的面向等待期間的一格。回應一律只有 ok（不回 matched／unknown），頁面拿不到結果；
+   * 證據留在核心，送出問候前由 greeting 讀取。第一次（gallery 檔存在時）才載入 gallery。
+   */
+  private ambientProbe(req: Record<string, unknown>): IdentityResponse {
+    this.ambientRate(this.ambientCalls, SESSION_RATE_PER_S);
+    // 被拒時不說原因：「沒有可比對的家人」之類的原因會透露有沒有登記家人。
+    if (this.ambientBlock()) throw new RequestError("unavailable", AMBIENT_REFUSED);
+    this.ensureLoaded();
+    if (this.gallery !== "ready") throw new RequestError("unavailable", AMBIENT_REFUSED);
+    this.requireModel(req);
+    const track = req.track;
+    if (typeof track !== "number" || !Number.isInteger(track) || track < 0) throw new RequestError("bad_request", "track 格式不對");
+    const match = this.matchFrame(req);
+    const now = this.now();
+    if (!this.ambient || this.ambient.track !== track) this.ambient = { track, evidence: EMPTY_EVIDENCE, firstMatch: null, mixed: false };
+    const a = this.ambient;
+    if (match.kind === "ambiguous" && match.reason === "multi_face") a.mixed = true;
+    if (match.kind === "matched") {
+      a.firstMatch ??= match.person_id;
+      if (a.firstMatch !== match.person_id) a.mixed = true;
+    }
+    a.evidence = pushEvidence(a.evidence, { t: now, gen: track, match }, this.ambientScope(track));
+    return { ok: true, op: "ambient_probe" };
+  }
+
+  /**
+   * 送出問候前的決策（docs/14 §3）。頁面負責它看得到的條件（eligible：同一互動與追蹤世代、仍在近距離面向、
+   * 只有一張臉、辨識沒有出錯）；核心負責其餘：同一追蹤世代、沒有混到別人、證據 ≥3 格且最新 ≤1 秒、person 仍存在且
+   * gallery 版本沒變、稱名設定仍開。任一項不符就不帶名字（仍說「我在」）。每個互動 ID 最多決策一次。
+   */
+  private greeting(req: Record<string, unknown>): IdentityResponse {
+    const interaction = req.interaction;
+    if (typeof interaction !== "string" || !INTERACTION_ID.test(interaction)) throw new RequestError("bad_request", "interaction 格式不對");
+    const track = req.track;
+    if (typeof track !== "number" || !Number.isInteger(track) || track < 0) throw new RequestError("bad_request", "track 格式不對");
+    if (typeof req.eligible !== "boolean") throw new RequestError("bad_request", "eligible 格式不對");
+    if (req.route !== "api_key" && req.route !== "live") throw new RequestError("bad_request", "route 格式不對");
+    const route: GreetingRoute = req.route;
+    if (this.decided.includes(interaction)) throw new RequestError("already", "這次互動已經決定過問候");
+    this.ambientRate(this.greetingCalls, GREETING_RATE.per_second);
+    this.ambientRate(this.greetingMinute, GREETING_RATE.per_minute, 60_000);
+    this.decided.push(interaction);
+    if (this.decided.length > DECIDED_KEEP) this.decided.shift();
+
+    // 互動 ID 必須換得到核心自己知道的、真的連上的工作階段（頁面自己編的 ID 不給名字）。
+    const claim = this.options.claimGreeting?.(interaction) ?? null;
+    const session = claim && claim.route === route ? claim : null;
+    const decision = this.decide(interaction, track, req.eligible, session !== null);
+    const person = decision.person_id ? this.people.find((p) => p.person_id === decision.person_id) : undefined;
+    const name = person ? speakableName(person.name) : null;
+    // 從固定清單挑一句（依時段、避開上一次）；log 只記模板編號，不記句子。
+    const picked = this.picker.pick(name);
+    const sentence = picked.sentence;
+    // 只有原因與數字（給 Mac 實測對照時序）：證據格數、跨度與最新一格多久以前；不記姓名、person_id 或分數。
+    const ev = this.ambient?.track === track ? this.ambient.evidence.frames : [];
+    const span = ev.length ? Math.round(ev.at(-1)!.t - ev[0]!.t) : 0;
+    const age = decision.evidence_at === null ? "—" : `${Math.round(decision.decided_at - decision.evidence_at)} ms`;
+    this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前，模板 ${picked.id}，門檻未校準）`);
+    // 證據只為這一次問候存在：決策後丟掉，晚到的推論不能讓下一次互動沿用。
+    this.ambient = null;
+    if (route === "api_key") return { ok: true, op: "greeting", text: greetingInstructions(sentence) };
+    this.pendingLive = session ? { interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence), sentence, at: this.now() } : null;
+    return { ok: true, op: "greeting", text: null };
+  }
+
+  /** 建立 GreetingDecision（只在核心）。名稱驗證不過時改成不稱名。 */
+  private decide(interaction: string, track: number, eligible: boolean, claimed: boolean): GreetingDecision {
+    const now = this.now();
+    const base = { interaction_id: interaction, track_generation: track, gallery_version: this.versions.gallery_version, decided_at: now, calibrated: CALIBRATED };
+    const last = this.ambient?.track === track ? this.ambient.evidence.frames.at(-1) : undefined;
+    const plain = (reason: GreetingNameReason): GreetingDecision => ({ ...base, person_id: null, evidence_at: last?.t ?? null, reason });
+    if (!this.ambientPrefs().look_to_talk_greet_name) return plain("naming_off");
+    if (!claimed) return plain("no_session");
+    if (!this.options.store.namingNoticeSeen()) return plain("notice_unseen");
+    if (!eligible) return plain("not_eligible");
+    if (this.ambientBlock()) return plain("unavailable");
+    const a = this.ambient;
+    if (!a) return plain("no_evidence");
+    if (a.track !== track) return plain("track_changed");
+    if (a.mixed) return plain("multi_face");
+    const obs = decideIdentity(a.evidence, now, this.ambientScope(track));
+    if (obs.state !== "matched" || !obs.person_id) {
+      const reason: GreetingNameReason = obs.state === "unknown" ? "unknown" : obs.state === "ambiguous" ? (obs.reason === "multi_face" ? "multi_face" : "ambiguous") : ((obs.reason ?? "collecting") as GreetingNameReason);
+      return plain(reason);
+    }
+    const person = this.comparable().find((p) => p.person_id === obs.person_id);
+    if (!person) return plain("person_gone");
+    if (!speakableName(person.name)) return plain("bad_name");
+    return { ...base, person_id: person.person_id, evidence_at: last?.t ?? null, reason: null };
+  }
+
+  /**
+   * server/live-route.ts 取用 live 路徑的短句（頁面 POST greeting 帶來的只有互動 ID）。只有同一個互動、同一個 live 工作階段、
+   * LIVE_GREETING_PICKUP_MS 內才給，取一次就清掉；稱名在這之間被關掉時改挑一句不含名字的。找不到時回 null
+   * （server/nous.ts 的 liveGreetingSource 改挑一句不含名字的）。回傳整段文字與那一句（逐字稿緩衝用來認出問候）。
+   */
+  takeLiveGreeting(interaction: string, sessionId: string): { text: string; sentence: string } | null {
+    const pending = this.pendingLive;
+    this.pendingLive = null;
+    if (!pending || pending.interaction !== interaction || pending.session_id !== sessionId || this.now() - pending.at > LIVE_GREETING_PICKUP_MS) return null;
+    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) return this.picker.plainLive();
+    return { text: pending.text, sentence: pending.sentence };
+  }
+
   /** 等待原生確認之後：核心關閉、session 換掉或 gallery 已被改過就不寫。 */
   private afterConfirm(session: Session, what: string): void {
     if (this.closed) throw new RequestError("closed", `Nous 核心正在重新啟動，${what}`);
@@ -455,6 +679,8 @@ export class IdentityService {
       features: samples,
     };
     this.commit([...this.people, person]);
+    // 登記的同意說明已寫明「開啟稱名時，名字會以短句送到雲端語音供應商」：同意並保存後也算看過（ID-02）。
+    this.options.store.markNamingNoticeSeen(at);
     return { ok: true, op: "enroll", ...this.manageView(session) };
   }
 
@@ -484,6 +710,7 @@ export class IdentityService {
     // 這次執行期間世代不倒退（舊結果因版本不符被丟掉）；檔案已刪，重新啟動後世代從 0 重新開始。
     this.versions = { key_generation: this.versions.key_generation + 1, gallery_version: this.versions.gallery_version + 1 };
     session.evidence = EMPTY_EVIDENCE;
+    this.dropAmbient();
     this.bump();
     return { ok: true, op: "clear_all", ...this.manageView(session) };
   }
@@ -500,6 +727,7 @@ export class IdentityService {
     this.expectedDisk = this.versions.gallery_version;
     this.people = people;
     if (this.session) this.session.evidence = EMPTY_EVIDENCE;
+    this.dropAmbient();
     this.bump();
   }
 

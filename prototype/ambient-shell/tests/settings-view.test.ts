@@ -123,7 +123,7 @@ describe("renderSettings in the browser (no nousDesktop): full settings screen, 
     expect(r.el.all().some((e) => e.getAttribute("aria-label") === "即時語音路徑")).toBe(true);
     // 語音秒數的 −／+ 與鏡頭的開關、顯示鏡頭畫面。
     expect(r.el.all().some((e) => e.getAttribute("aria-label")?.endsWith("減少"))).toBe(true);
-    expect(r.el.all().filter((e) => e.getAttribute("aria-pressed") !== null)).toHaveLength(4);
+    expect(r.el.all().filter((e) => e.getAttribute("aria-pressed") !== null)).toHaveLength(5);
     expect(r.buttons).toContain("顯示鏡頭畫面");
     expect(r.text).toContain("macOS App 在選單列「鏡頭與語音設定」調整");
     expect(r.text).not.toContain(views.DESKTOP_SETTINGS_NOTE);

@@ -612,7 +612,7 @@ function renderCameraSettings(camera: CameraSettings, realtimeAvailable: boolean
       h(
         "li",
         // 秒數與「看著說話時先打招呼」都是看著說話的子項，縮排顯示。
-        { class: `pref${spec.kind === "seconds" || key === "look_to_talk_greet" ? " pref--sub" : ""}` },
+        { class: `pref${spec.kind === "seconds" || key === "look_to_talk_greet" || key === "look_to_talk_greet_name" ? " pref--sub" : ""}` },
         h("div", { class: "provider-text" }, h("strong", {}, spec.label), h("span", { class: "muted small" }, hint)),
         control,
       ),

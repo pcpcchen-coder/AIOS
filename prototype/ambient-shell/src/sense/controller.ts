@@ -40,6 +40,22 @@ export interface SenseHooks {
   setSensor(state: SensorState, detail: string): void;
   /** 目前的使用者設定；未提供時用 CAMERA_PREFS 的預設。 */
   prefs?(): SenseTuning;
+  /**
+   * 每次事件與 tick 之後的狀態（ID-02：看著說話時同步辨識依它決定取樣與追蹤世代）。只讀，不能影響看著說話的計時。
+   */
+  onSense?(snapshot: SenseSnapshot): void;
+}
+
+/** 給同步辨識的感知狀態（不含影像或座標）。 */
+export interface SenseSnapshot {
+  present: boolean;
+  facing: boolean;
+  /** 最近的實測距離（公尺）；未知為 null。 */
+  distance_m: number | null;
+  /** 鏡頭裝置事件為 ok（starting、degraded、error、off 都不是）。 */
+  sensor_ok: boolean;
+  /** 看著說話正在累計面向停留（在場、面向、沒有在對話、不在冷卻）：同步辨識只在這段 delay 內開始取樣。 */
+  dwelling: boolean;
 }
 
 /** 字級縮放範圍：1.5–3 m（docs/10、11）；超出範圍不再放大。 */
@@ -65,6 +81,7 @@ export class SenseController {
   /** 最近一次在場事件的實測距離；離開、鏡頭停止時清成 null。設定改了在下一次 tick 重算放大倍率。 */
   private distance: number | null = null;
   private zoom = 1;
+  private sensorOk = false;
   private readonly look = new LookToTalk();
 
   constructor(private readonly hooks: SenseHooks) {}
@@ -100,6 +117,7 @@ export class SenseController {
         this.hooks.pointTo(this.present ? event.zone : null);
         break;
       case "sensor":
+        this.sensorOk = event.state === "ok";
         this.hooks.setSensor(event.state, event.detail);
         if (event.state !== "ok" && event.state !== "starting") {
           this.present = false;
@@ -122,6 +140,7 @@ export class SenseController {
     // 不能自動開始時不累計停留，也不設冷卻（否則重新打開後會有看不見的冷卻）。
     if (!prefs.look_to_talk || !this.hooks.canAutoTalk()) {
       this.look.reset();
+      this.report();
       return;
     }
     const start = this.look.update(
@@ -129,7 +148,13 @@ export class SenseController {
       { present: this.present, facing: this.facing, talking: this.hooks.isTalking() },
       lookTiming(prefs),
     );
+    // 照原時間開始對話（辨識不延長、不阻擋開始），之後才回報狀態：startTalk 已建立互動，同步辨識接著為它取樣，不會在中間停一下。
     if (start) this.hooks.startTalk();
+    this.report();
+  }
+
+  private report(): void {
+    this.hooks.onSense?.({ present: this.present, facing: this.facing, distance_m: this.distance, sensor_ok: this.sensorOk, dwelling: this.look.dwelling });
   }
 
   /** 對話結束時呼叫，避免說完「再見」又被立刻自動開啟。 */

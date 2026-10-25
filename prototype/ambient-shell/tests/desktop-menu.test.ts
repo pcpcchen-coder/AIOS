@@ -52,6 +52,7 @@ describe("settingsMenu（鏡頭與語音設定）", () => {
       "面向螢幕幾秒後開始對話：1.5 秒",
       "對話結束後暫停：10 秒",
       "看著說話時先打招呼",
+      "打招呼時稱呼認出的家人",
       "手掌停止播報",
       "靠近時電子腦放大倍率：2 倍",
       "顯示鏡頭畫面",
@@ -61,7 +62,7 @@ describe("settingsMenu（鏡頭與語音設定）", () => {
       "即時語音閒置多久自動結束：2 分鐘",
     ]);
     expect(m.labels.some((l) => l?.includes("更多設定"))).toBe(false);
-    for (const label of ["鏡頭", "看著說話", "看著說話時先打招呼", "手掌停止播報"]) {
+    for (const label of ["鏡頭", "看著說話", "看著說話時先打招呼", "打招呼時稱呼認出的家人", "手掌停止播報"]) {
       expect(m.items.filter((i) => i.label === label)).toHaveLength(1);
       expect(m.find(label)).toMatchObject({ type: "checkbox", checked: true, enabled: true });
     }
@@ -94,7 +95,7 @@ describe("settingsMenu（鏡頭與語音設定）", () => {
       const m = build(view(camera));
       expect(m.labels.slice(0, 2)).toEqual(["鏡頭與手勢", CAMERA_DISABLED_REASON]);
       expect(m.items[1]).toEqual({ label: CAMERA_DISABLED_REASON, enabled: false });
-      for (const label of ["鏡頭", "看著說話", "看著說話時先打招呼", "手掌停止播報"]) {
+      for (const label of ["鏡頭", "看著說話", "看著說話時先打招呼", "打招呼時稱呼認出的家人", "手掌停止播報"]) {
         expect(m.find(label)).toMatchObject({ type: "checkbox", enabled: false, sublabel: CAMERA_DISABLED_REASON });
       }
       const seconds = m.items.find((i) => i.label?.startsWith("面向螢幕幾秒後開始對話"))!;
@@ -111,7 +112,7 @@ describe("settingsMenu（鏡頭與語音設定）", () => {
     expect(m.find("顯示鏡頭畫面")).toMatchObject({ enabled: false, sublabel: CAMERA_OFF_PREVIEW_REASON });
     expect(CAMERA_OFF_PREVIEW_REASON).toMatch(/^鏡頭目前關閉/);
     expect(m.find("鏡頭")).toMatchObject({ checked: false, enabled: true });
-    for (const label of ["看著說話", "看著說話時先打招呼", "手掌停止播報"]) {
+    for (const label of ["看著說話", "看著說話時先打招呼", "打招呼時稱呼認出的家人", "手掌停止播報"]) {
       expect(m.find(label)).toMatchObject({ enabled: true, sublabel: "鏡頭目前關閉，這個開關暫時用不到" });
     }
   });

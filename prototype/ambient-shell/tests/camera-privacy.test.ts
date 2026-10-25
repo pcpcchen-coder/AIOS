@@ -139,7 +139,7 @@ describe("face spike privacy boundary (static)", () => {
 // 家人辨識（ID-01）：推論 worker 與取樣、品質、前後處理模組不得使用網路 API、匯出／存檔 API（showSaveFilePicker 等）、
 // 本機儲存或 /api（以字面掃描，間接呼叫抓不到）；身分資料不走 HTTP；身分相關檔案的 log／console 呼叫不帶特徵、姓名或
 // person_id 等識別字（同樣是字面掃描，執行期另以 log spy 檢查）；模型與 onnxruntime wasm 不進 dist／public。
-const IDENTITY_RENDERER = [join("sense", "identity-worker.ts"), join("sense", "identity-client.ts"), join("sense", "identity-protocol.ts"), join("sense", "face", "yunet.ts"), join("sense", "face", "sface.ts"), join("sense", "face", "quality.ts")];
+const IDENTITY_RENDERER = [join("sense", "identity-worker.ts"), join("sense", "identity-client.ts"), join("sense", "identity-ambient.ts"), join("sense", "identity-protocol.ts"), join("sense", "face", "yunet.ts"), join("sense", "face", "sface.ts"), join("sense", "face", "quality.ts")];
 
 describe("family recognition privacy boundary (static)", () => {
   const app = join(import.meta.dirname, "..");
@@ -172,10 +172,23 @@ describe("family recognition privacy boundary (static)", () => {
     expect(appTs).not.toMatch(/person_id|\.handle\(|enroll|probe|gallery/);
     expect([...appTs.matchAll(/options\.identity\b[^\n]*/g)].map((m) => m[0])).toEqual(["options.identity?.status() ?? BROWSER_IDENTITY_STATUS,"]);
     // 頁面端也不經 HTTP 送身分資料：只用 window.nousDesktop.identity（IPC）
-    for (const name of ["family-view.ts", join("sense", "identity-client.ts"), "main.ts"]) {
+    for (const name of ["family-view.ts", join("sense", "identity-client.ts"), join("sense", "identity-ambient.ts"), "main.ts"]) {
       const text = readFileSync(join(src, name), "utf8");
       expect(text, name).not.toMatch(/api\.\w*(identity|family|enroll|probe)/i);
     }
+  });
+
+  it("ID-02：names are composed only in the core — the page never builds a named sentence (except the enrollment preview of the user's own typed name)", () => {
+    const pageFiles = readdirSync(src, { recursive: true, encoding: "utf8" }).filter((f) => f.endsWith(".ts"));
+    const composing = pageFiles.filter((f) => /\b(greetingSentence|speakableName|liveGreetingText|greetingInstructions)\(/.test(readFileSync(join(src, f), "utf8")));
+    // family-view.ts 只在登記畫面預覽使用者自己打的名稱會怎麼念（namePreview），不送出、不讀 gallery。
+    expect(composing).toEqual(["family-view.ts"]);
+    const view = readFileSync(join(src, "family-view.ts"), "utf8");
+    const uses = [...view.matchAll(/\b(greetingSentence|speakableName)\(/g)].length;
+    const preview = view.slice(view.indexOf("export function namePreview("), view.indexOf("/** 核心給的觀測"));
+    expect([...preview.matchAll(/\b(greetingSentence|speakableName)\(/g)].length).toBe(uses);
+    const liveRoute = readFileSync(join(app, "server", "live-route.ts"), "utf8");
+    expect(liveRoute).not.toMatch(/person_id|speakableName/);
   });
 
   it("logs and console output in identity code never include names, person ids, features or scores", () => {

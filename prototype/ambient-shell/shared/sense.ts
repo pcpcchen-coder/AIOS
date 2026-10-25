@@ -47,6 +47,12 @@ export interface CameraPrefs {
    * 按鈕、語音指令或打字開始的不打招呼；使用者先開口就不打。
    */
   look_to_talk_greet: boolean;
+  /**
+   * 問候時稱呼認出的家人（George 2026-10-25，ID-02；預設開）：macOS App 在看著說話的面向等待期間同步辨識已登記的家人，
+   * 可靠認出時問候說「名字，我在」，名字會成為雲端語音供應商收到的短句。關掉：只說「我在」，看著說話時也不做辨識。
+   * 門檻未校準；瀏覽器版不支援辨識，這個開關沒有作用。
+   */
+  look_to_talk_greet_name: boolean;
   /** 手掌停止播報：舉起張開的手掌停止 Nous 說話（不取消任務）。 */
   stop_gesture: boolean;
   /**
@@ -56,13 +62,92 @@ export interface CameraPrefs {
   brain_zoom_max: number;
 }
 
+/** 問候的固定部分（docs/14 §1、§6）：沒有可靠姓名時的基本句，也是瀏覽器版與決策失敗時用的句子。 */
+export const GREETING_PLAIN = "我在";
+
+/** 本機時段（George 2026-10-25）：5–11 點早安、11–18 點午安、18 點以後晚上好（「晚安」在中文多指道晚安，不用）；0–4 點不加問候語。 */
+export type DaySlot = "morning" | "afternoon" | "evening" | null;
+
+export function daySlot(hour: number): DaySlot {
+  if (hour >= 5 && hour < 11) return "morning";
+  if (hour >= 11 && hour < 18) return "afternoon";
+  if (hour >= 18) return "evening";
+  return null;
+}
+
 /**
- * 看著說話開始的即時語音連上後，請模型說的那一句招呼（兩條路徑共用）。只知道使用者面向螢幕：
- * 不得說看到使用者、不得描述長相或環境（CLAUDE.md：沒有影像分析時不得宣稱正在觀看）。
+ * 這台電腦（或指定時區）現在是幾點（0–23）。時區的取法同 server/home-bridge.ts：未指定就用這台電腦的時區。
  */
-export const LOOK_TO_TALK_GREETING =
-  "你是 Nous。使用者剛面向螢幕開始語音對話：請用一句簡短自然的繁體中文打招呼，問有什麼需要幫忙（例如「我在，有什麼需要幫忙的嗎？」）。" +
-  "你只知道使用者面向螢幕，看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境。";
+export function localHour(now: number, timeZone?: string): number {
+  const hour = Number(new Date(now).toLocaleString("en-US", { hour: "numeric", hourCycle: "h23", timeZone }));
+  return Number.isInteger(hour) && hour >= 0 && hour < 24 ? hour : new Date(now).getHours();
+}
+
+/**
+ * 問候短句的固定清單（George 2026-10-25：要多一點變化，但不讓模型自由生成，也不改成提問）。
+ * - id 只是編號，核心 log 只記它，不記句子；
+ * - named：要有名字（名字必須是核心從受管理人物檔案取出、經 shared/identity.ts speakableName 驗證過的口語名稱）；
+ * - slot：只在那個時段可以用（null＝任何時段）。
+ * 全部都是短句、不是問句。頁面與客戶端傳來的文字不能走到這裡（server/greeting-picker.ts 挑句）。
+ */
+export interface GreetingTemplate {
+  id: string;
+  named: boolean;
+  slot: DaySlot;
+  render(name: string | null): string;
+}
+
+export const GREETING_TEMPLATES: readonly GreetingTemplate[] = [
+  { id: "n0", named: true, slot: null, render: (n) => `${n}，我在` },
+  { id: "n1", named: true, slot: null, render: (n) => `嗨，${n}` },
+  { id: "n2", named: true, slot: null, render: (n) => `${n}，你好` },
+  { id: "n3", named: true, slot: null, render: (n) => `我在這，${n}` },
+  { id: "n4", named: true, slot: "morning", render: (n) => `早安，${n}` },
+  { id: "n5", named: true, slot: "afternoon", render: (n) => `午安，${n}` },
+  { id: "n6", named: true, slot: "evening", render: (n) => `晚上好，${n}` },
+  { id: "p0", named: false, slot: null, render: () => GREETING_PLAIN },
+  { id: "p1", named: false, slot: null, render: () => "嗨，我在" },
+  { id: "p2", named: false, slot: null, render: () => "你好" },
+  { id: "p3", named: false, slot: "morning", render: () => "早安" },
+  { id: "p4", named: false, slot: "afternoon", render: () => "午安" },
+  { id: "p5", named: false, slot: "evening", render: () => "晚上好" },
+];
+
+/** 這個時段可以用的模板（有名字或沒名字）。 */
+export function greetingCandidates(named: boolean, slot: DaySlot): GreetingTemplate[] {
+  return GREETING_TEMPLATES.filter((t) => t.named === named && (t.slot === null || t.slot === slot));
+}
+
+/**
+ * 從固定清單隨機挑一句（亂數由呼叫端注入，測試可固定）。可選的不只一句時，避開上一次用過的模板。
+ * name 為 null 時只挑不含名字的句子。
+ */
+export function pickGreeting(name: string | null, slot: DaySlot, last: string | null, random: () => number): { id: string; sentence: string } {
+  const all = greetingCandidates(name !== null, slot);
+  const pool = all.length > 1 ? all.filter((t) => t.id !== last) : all;
+  const t = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))]!;
+  return { id: t.id, sentence: t.render(name) };
+}
+
+/** 基本句（不分時段）：登記畫面預覽用（「George，我在」或「我在」）。 */
+export function greetingSentence(name: string | null): string {
+  return GREETING_TEMPLATES.find((t) => t.id === (name ? "n0" : "p0"))!.render(name);
+}
+
+/**
+ * 看著說話開始的即時語音連上後，請模型照念的那一句（兩條路徑共用）。只知道使用者面向螢幕：
+ * 不得說看到使用者、不得描述長相或環境（CLAUDE.md：沒有影像分析時不得宣稱正在觀看）；也不得自己猜名字。
+ * 模型仍可能改寫：驗收要看實際逐字稿，不能只看這段指示（docs/validation/family-id-02-2026-10-25.md）。
+ */
+export function greetingInstructions(sentence: string): string {
+  return (
+    `你是 Nous。使用者剛面向螢幕開始語音對話：請用繁體中文只說這一句，一字不改，不要加字、不要提問：「${sentence}」。` +
+    "你看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境；除了這一句裡已有的名字，不要說出或猜測任何名字。"
+  );
+}
+
+/** 沒有姓名、也沒有核心挑句時的問候指示（API key 路徑：瀏覽器版與決策失敗時用它）。 */
+export const LOOK_TO_TALK_GREETING = greetingInstructions(GREETING_PLAIN);
 
 /**
  * ChatGPT 方案路徑的招呼要放進 session.context.append speakable：前面加這個固定標記，
@@ -70,8 +155,13 @@ export const LOOK_TO_TALK_GREETING =
  */
 export const GREETING_MARKER = "（開場）";
 
-/** ChatGPT 方案路徑真正送給模型的招呼（核心只送這個常數，忽略頁面送來的文字）。 */
-export const LIVE_GREETING_TEXT = `${GREETING_MARKER}${LOOK_TO_TALK_GREETING}`;
+/** ChatGPT 方案路徑真正送給模型的招呼（核心組成；頁面送來的文字只是互動 ID，不會變成內容）。 */
+export function liveGreetingText(sentence: string): string {
+  return `${GREETING_MARKER}${greetingInstructions(sentence)}`;
+}
+
+/** 核心沒有挑句時 ChatGPT 方案路徑送的招呼（LiveRoute 沒有接上 greeting 來源時的保底）。 */
+export const LIVE_GREETING_TEXT = liveGreetingText(GREETING_PLAIN);
 
 /** SettingsView.camera 的形狀。 */
 export type CameraSettings = CameraInstall & CameraPrefs;
@@ -102,7 +192,11 @@ export const CAMERA_PREFS = {
   },
   look_to_talk_greet: {
     kind: "bool", default: true, label: "看著說話時先打招呼",
-    hint: "看著說話開始的對話，連上後 Nous 先問一句有什麼需要幫忙；你先開口就不打招呼",
+    hint: "看著說話開始的對話，連上後 Nous 先說「我在」；你先開口就不打招呼",
+  },
+  look_to_talk_greet_name: {
+    kind: "bool", default: true, label: "打招呼時稱呼認出的家人",
+    hint: "只在 macOS App：認出已登記的家人時說「名字，我在」，名字會送到雲端語音；關掉只說「我在」（門檻未校準）",
   },
   stop_gesture: { kind: "bool", default: true, label: "手掌停止播報", hint: "舉起張開的手掌停止 Nous 說話（不取消任務）" },
   brain_zoom_max: {

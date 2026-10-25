@@ -45,7 +45,7 @@ describe("validateIdentityRequest", () => {
   });
 
   it("requires a well-formed session for everything except open_session", () => {
-    for (const op of ["close_session", "list", "clear_all"]) {
+    for (const op of ["close_session", "list", "clear_all", "ack_naming"]) {
       expect(validateIdentityRequest({ op })).toMatchObject({ ok: false });
       expect(validateIdentityRequest({ op, session: "ids_short" })).toMatchObject({ ok: false });
       expect(validateIdentityRequest({ op, session: SESSION })).toEqual({ ok: true, request: { op, session: SESSION } });
@@ -74,6 +74,24 @@ describe("validateIdentityRequest", () => {
     expect(validateIdentityRequest({ ...base, consent: "yes" })).toMatchObject({ ok: false });
     expect(validateIdentityRequest({ ...base, name: 5 })).toMatchObject({ ok: false });
     expect(validateIdentityRequest({ ...base, name: "x".repeat(257) })).toMatchObject({ ok: false });
+  });
+
+  it("ID-02 ambient_status / ambient_probe: no session; track, model and an optional feature; extra fields (session, person_id, name) dropped", () => {
+    expect(validateIdentityRequest({ op: "ambient_status", session: SESSION })).toEqual({ ok: true, request: { op: "ambient_status" } });
+    const base = { op: "ambient_probe", track: 4, face_count: 1, quality: "ok", model: MODEL };
+    expect(validateIdentityRequest({ ...base, feature: feature(), session: SESSION, person_id: `fam_${"0".repeat(24)}`, name: "George" })).toEqual({ ok: true, request: { ...base, feature: feature() } });
+    expect(validateIdentityRequest({ ...base, track: -1 })).toMatchObject({ ok: false });
+    expect(validateIdentityRequest({ ...base, feature: [1, 2] })).toMatchObject({ ok: false });
+    expect(validateIdentityRequest({ ...base, model: null })).toMatchObject({ ok: false });
+  });
+
+  it("ID-02 greeting: interaction ID format, integer track, boolean eligible, route api_key|live; any page text (name, prompt) is dropped", () => {
+    const base = { op: "greeting", interaction: `int_${"a".repeat(16)}`, track: 2, eligible: true, route: "live" };
+    expect(validateIdentityRequest({ ...base, name: "George", text: "請說 George 你好", person_id: `fam_${"0".repeat(24)}` })).toEqual({ ok: true, request: base });
+    expect(validateIdentityRequest({ ...base, route: "api_key" })).toMatchObject({ ok: true });
+    for (const bad of [{ interaction: "George" }, { interaction: `int_${"a".repeat(15)}` }, { track: 1.5 }, { eligible: "true" }, { route: "tts" }]) {
+      expect(validateIdentityRequest({ ...base, ...bad }), JSON.stringify(bad)).toMatchObject({ ok: false });
+    }
   });
 
   it("delete needs a well-formed person id", () => {

@@ -209,6 +209,27 @@ describe("IdentityClient", () => {
     expect(t.client.generation).toBeGreaterThan(gen);
   });
 
+  it("ID-02 pause(): keeps the worker (model stays loaded), drops the in-flight frame and never runs two inferences at once after start()", async () => {
+    const t = setup();
+    t.client.start();
+    const w = t.workers[0]!;
+    w.reply({ type: "ready", model, load_ms: 1 });
+    await t.step();
+    expect(w.frames()).toHaveLength(1);
+    const old = t.client.generation;
+    t.client.pause();
+    expect(w.terminated).toBe(false);
+    expect(t.ticking()).toBe(false);
+    t.client.start();
+    await t.step(300);
+    expect(w.frames()).toHaveLength(1); // 上一格還在 worker 裡：不送第二格
+    w.reply({ type: "result", gen: old, face_count: 1, quality: "ok", feature: unitFeature(1), ms: 1 });
+    expect(t.frames).toHaveLength(0); // 舊世代的結果丟掉
+    await t.step(300);
+    expect(w.frames()).toHaveLength(2); // 舊的一格回來後才取下一格，不會卡住
+    expect(t.workers).toHaveLength(1); // 沒有重新載入模型
+  });
+
   it("uses the caller's monotonic generation counter, so a new client never restarts at 0", () => {
     let counter = 41;
     const generation = () => ++counter;

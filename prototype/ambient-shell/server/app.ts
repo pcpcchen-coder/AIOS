@@ -282,7 +282,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const body = await readJson(req);
       if (!sessions) throw new HttpError(409, "即時語音模式未啟用");
       const clientId = typeof body.client_id === "string" && CLIENT_ID.test(body.client_id) && clients.has(body.client_id) ? body.client_id : null;
-      return sendJson(res, 200, sessions.start(clientId));
+      // source 只決定要不要發看著說話的互動 ID（ID-02），不是授權；其他值都當成 user。
+      return sendJson(res, 200, sessions.start(clientId, body.source === "look_to_talk" ? "look_to_talk" : "user"));
     }
     if (method === "POST" && path === "/api/realtime/call") {
       const body = await readJson(req);
