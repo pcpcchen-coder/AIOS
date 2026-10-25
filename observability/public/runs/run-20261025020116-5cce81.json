@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T02:01:16.858Z",
-  "updated_at": "2026-10-25T02:01:53.270Z",
+  "updated_at": "2026-10-25T02:01:56.920Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,8 +23,8 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-25T02:01:56.919Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -105,6 +105,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "讀14、ADR-0001、ID-00"
+    },
+    {
+      "at": "2026-10-25T02:01:56.920Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
