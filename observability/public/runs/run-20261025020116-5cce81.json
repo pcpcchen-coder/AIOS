@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T02:01:16.858Z",
-  "updated_at": "2026-10-25T02:02:01.035Z",
+  "updated_at": "2026-10-25T02:02:04.857Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,8 +32,8 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-25T02:02:04.856Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -119,6 +119,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "George：先做人臉辨識；ADR"
+    },
+    {
+      "at": "2026-10-25T02:02:04.857Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
