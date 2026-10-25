@@ -1,6 +1,6 @@
 # 目前實作、驗證與缺口
 
-更新日期：2026-10-24，Asia/Taipei。程式基準：[`1f44c6b`](https://github.com/pcpcchen-coder/AIOS/commit/1f44c6b384d8819e99c5d5a7689069119adf6d53)。本次更新只調整文件，不變更產品能力或宣稱 G0–G3 通過。
+更新日期：2026-10-24，Asia/Taipei。程式基準：[`1f44c6b`](https://github.com/pcpcchen-coder/AIOS/commit/1f44c6b384d8819e99c5d5a7689069119adf6d53)。本次更新只調整文件，不變更產品能力或宣稱 G0–G3 通過。2026-10-25 另依家人辨識 ID-01 分支（`claude/family-id-01`，尚未合併）更新「已登記家人辨識」一列；這不是 G0–G3 的實機驗收。
 
 AIOS 已有可執行的 Nous 桌面原型。先使用或延伸 [`prototype/ambient-shell`](../prototype/ambient-shell)，再依具體需求採用目標架構。Claude 是核心開發主力，ChatGPT／Codex 負責 Quest 工程方向；執行時的模型由設定與能力決定，不按裝置綁定供應商。
 
@@ -32,6 +32,7 @@ AIOS 已有可執行的 Nous 桌面原型。先使用或延伸 [`prototype/ambie
 | MCP | API key 即時語音可配置 | 確認相關邏輯已測 | ChatGPT live 路徑無 MCP；不是完整本地 MCP host |
 | 通用 Action Gate | 部分確認機制 | 局部已測 | HomeBridge H1 預設 allow；H2 設備政策尚未接入，不是所有操作都出確認卡 |
 | Quest、多裝置、OpenClaw worker | 無 | 無 | 擴充評估，不是已實作能力 |
+| 已登記家人辨識與稱名問候 | ID-01：登記、刪除、加密保存、本機辨識（只在 macOS App 選單列打開的「家人辨識」畫面內試認）；**沒有稱名問候（ID-02）、沒有背景辨識** | 證據規則、名稱驗證、加密保存（假 SecretBox＋真 AES-GCM）、核心 session／登記／刪除／比對、IPC 過濾、隱私靜態檢查；產品 worker 對 OpenCV 交叉核對；雲端 headless 端到端（假鏡頭、IPC 以替身模擬） | [14 規劃](./14_Family_Recognition_and_Greeting_Plan_2026-10.md)；[ADR-0001 草案](./adr/ADR-0001-local-family-recognition.md)；[ID-00 spike](./validation/family-id-00-spike-2026-10-24.md)、[ID-01 驗證](./validation/family-id-01-2026-10-25.md)。**未在 Mac 實測**（safeStorage、Electron IPC、AR0144、CPU 與停止手勢）；**門檻未校準**；瀏覽器版不可用 |
 | 長期記憶、知識圖譜、技能晉升 | 無完整實作 | 無完整驗收 | 保存任務／成果不等於長期個人記憶 |
 
 一般對話歷史存在目前頁面記憶體，重新載入會清除。已保存任務與成果不因此消失。兩者的生命週期不能混用。
@@ -59,6 +60,8 @@ OpenClaw 是部分語音協議、常數與實作做法的參考來源，沒有 G
 ## 下一步與文件效力
 
 本次 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md) 建議先做共用能力政策、可回復任務、裝置配對，再完成 Quest 空間成果與 OpenClaw 受限 worker。F0–F10 是功能建議，Q0–Q4 是建議驗收階段；本次只交付其中的文件盤點，F0 所提產品 CI 尚未新增。
+
+新增的 [家人辨識與稱名問候規劃](./14_Family_Recognition_and_Greeting_Plan_2026-10.md) 將近距離辨識與既有看著說話的等待同步進行；認出熟人仍保持安靜，啟動互動且語音就緒後才稱名。辨識不延長等待，失敗用通用問候。ID-00 已交付 ADR 草案與不接進產品的 runtime spike（雲端 CPU／WASM 量測）；ID-01 已有登記、刪除、加密保存與畫面內試認的程式與雲端驗證，未在 Mac 實測、門檻未校準；ID-02–03（看著說話時同步辨識、稱名問候、真機與保留樣本驗收）仍是規劃，不構成能力完成或身分授權。
 
 正式產品規則仍由 [CLAUDE.md](../CLAUDE.md)、[06](./06_Ambient_Voice_Gaze_Experience.md)、[07](./07_Ambient_Implementation_and_Acceptance.md) 及有明確日期的專題決定規範。不要因本文件或測試全綠將 G0–G3 改為通過。01–05 與 08 保留歷史設計、當時選型和排程；其舊版本、價格與外部生態資料未在本次全面重新查證。
 

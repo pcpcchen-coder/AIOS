@@ -1,0 +1,16 @@
+OpenCV 5.0.0, frame 1280x720
+biden_2013.jpg: faces mine=1 cv=1 IoU=1.0000 maxLandmarkDiffPx=0.000 scoreDiff=0.0000 alignedMaxAbsDiff=0.50 alignedMeanAbsDiff=0.249 cos(mine,cv)=1.0000
+biden_2021.jpg: faces mine=1 cv=1 IoU=1.0000 maxLandmarkDiffPx=0.000 scoreDiff=0.0000 alignedMaxAbsDiff=0.50 alignedMeanAbsDiff=0.246 cos(mine,cv)=0.9999
+harris_2017.jpg: faces mine=1 cv=1 IoU=1.0000 maxLandmarkDiffPx=0.000 scoreDiff=0.0000 alignedMaxAbsDiff=0.50 alignedMeanAbsDiff=0.245 cos(mine,cv)=1.0000
+harris_2021.jpg: faces mine=1 cv=1 IoU=1.0000 maxLandmarkDiffPx=0.000 scoreDiff=0.0000 alignedMaxAbsDiff=0.50 alignedMeanAbsDiff=0.247 cos(mine,cv)=0.9999
+obama_2012.jpg: faces mine=1 cv=1 IoU=1.0000 maxLandmarkDiffPx=0.000 scoreDiff=0.0000 alignedMaxAbsDiff=0.50 alignedMeanAbsDiff=0.250 cos(mine,cv)=1.0000
+biden_2013.jpg × biden_2021.jpg: mine=0.7469 opencv=0.7472
+biden_2013.jpg × harris_2017.jpg: mine=0.1865 opencv=0.1844
+biden_2013.jpg × harris_2021.jpg: mine=0.1157 opencv=0.1155
+biden_2013.jpg × obama_2012.jpg: mine=0.0876 opencv=0.0876
+biden_2021.jpg × harris_2017.jpg: mine=0.2300 opencv=0.2306
+biden_2021.jpg × harris_2021.jpg: mine=0.2164 opencv=0.2176
+biden_2021.jpg × obama_2012.jpg: mine=0.1025 opencv=0.1056
+harris_2017.jpg × harris_2021.jpg: mine=0.7880 opencv=0.7892
+harris_2017.jpg × obama_2012.jpg: mine=0.1584 opencv=0.1597
+harris_2021.jpg × obama_2012.jpg: mine=0.2188 opencv=0.2204

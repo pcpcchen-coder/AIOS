@@ -2,6 +2,7 @@ import type { CameraSettings } from "./sense.ts";
 import type { MenuPrefSetting } from "./seconds-menu.ts";
 import type { VoicePrefs } from "./voice-prefs.ts";
 import type { RealtimeRouteFields, RealtimeServerEvent } from "./realtime-route.ts";
+import type { IdentityStatus } from "./identity.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
 // 這裡先用 TS 型別，schema_version 標為 proto-0.1 以免與正式契約混淆。
@@ -118,6 +119,8 @@ export interface SettingsView {
   seconds?: MenuPrefSetting[];
   /** 選單列「顯示鏡頭畫面」不能用的原因（cameraPreviewDisabledReason）；null＝可以用。未提供時選單不畫這一項。 */
   camera_preview_disabled_reason?: string | null;
+  /** 家人辨識的可用狀態與人數（不含姓名與 person_id）；身分資料只走 macOS App 的 IPC。未提供時選單不畫「家人辨識…」。 */
+  identity?: IdentityStatus;
 }
 
 /** API key 路徑（RealtimeBridge.info）提供的欄位；路徑與計費欄位由 RealtimeSessions 補上。 */

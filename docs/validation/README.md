@@ -5,6 +5,8 @@
 | 紀錄 | 證據範圍與限制 |
 |---|---|
 | [三項小決定](./small-decisions-2026-10-25.md) | 電子腦放大置中（假 Canvas、合成距離與 Chromium 截圖）、關冷氣說定時、預設模式自動（假中控）；Mac 與真冷氣待驗 |
+| [家人辨識 ID-01](./family-id-01-2026-10-25.md) | 登記、刪除、加密保存、畫面內試認的單元與整合測試（假 SecretBox＋真 AES-GCM、IPC 過濾）、產品 worker 對 OpenCV 交叉核對、headless Chromium UI 與 CSP；假鏡頭完整流程因雲端無 GPU 未完成；門檻未校準；Mac、safeStorage、Electron IPC 待測 |
+| [家人辨識 ID-00 spike](./family-id-00-spike-2026-10-24.md) | YuNet／MediaPipe／SFace 在雲端 headless Chromium 的 CPU／WASM 量測、OpenCV 交叉核對；公有領域肖像，cosine 只是 sanity check；Mac＋AR0144 待測 |
 | [本次實作盤點](./implementation-review-2026-10-24.md) | 主線程式檢視、790 項測試、型別、建置與隔離 mock HTTP；未做真模型／硬體驗收 |
 | [live 語音](./live-voice-2026-10-23.md) | fixture 為主；§4 有 Mac log、溫度查詢口頭結果；其他及計費待驗 |
 | [看著說話問候](./look-to-talk-greet-2026-10-23.md) | fake 計時器與兩路狀態；600 ms 為估計，真鏡頭與語音待驗 |
