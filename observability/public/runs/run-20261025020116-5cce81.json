@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T02:01:16.858Z",
-  "updated_at": "2026-10-25T02:08:49.234Z",
+  "updated_at": "2026-10-25T02:08:53.407Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-25T02:08:53.407Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -133,6 +133,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "兩案比較：採B（核心持有gallery＋薄IPC）並納入A的原生確認、管理點擊窗、抑制看著說話"
+    },
+    {
+      "at": "2026-10-25T02:08:53.407Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
