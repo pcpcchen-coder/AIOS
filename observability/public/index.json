@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-25T02:01:51.245Z",
+  "updated_at": "2026-10-25T02:01:54.785Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,12 +9,12 @@
       "title": "家人辨識 ID-01：登記、刪除、加密特徵與本機辨識",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-25T02:01:49.427Z",
+      "updated_at": "2026-10-25T02:01:53.270Z",
       "started_at": "2026-10-25T02:01:16.858Z",
       "ended_at": null,
       "branch": "claude/family-id-01",
       "commit_sha": "",
-      "passed_steps": 0,
+      "passed_steps": 1,
       "total_steps": 8,
       "provenance": "Agent self-reported"
     },
