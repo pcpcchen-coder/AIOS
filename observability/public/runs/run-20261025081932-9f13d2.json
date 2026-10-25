@@ -8,16 +8,16 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T08:19:32.485Z",
-  "updated_at": "2026-10-25T08:19:40.934Z",
+  "updated_at": "2026-10-25T08:19:44.697Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-25T08:19:40.934Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-25T08:19:44.697Z",
+      "note": "讀14",
       "evidence": []
     },
     {
@@ -98,6 +98,13 @@
       "step_id": "how",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-25T08:19:44.697Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "passed",
+      "note": "讀14"
     }
   ],
   "provenance": "Agent self-reported"
