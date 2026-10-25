@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T02:01:16.858Z",
-  "updated_at": "2026-10-25T06:34:57.164Z",
+  "updated_at": "2026-10-25T06:35:00.592Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,8 +59,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-25T06:35:00.592Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -161,6 +161,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "typecheck、vitest 922、build、verify-aios、check-pstack 全過；假鏡頭完整流程雲端未完成"
+    },
+    {
+      "at": "2026-10-25T06:35:00.592Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
