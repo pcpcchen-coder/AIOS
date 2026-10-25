@@ -90,7 +90,25 @@ export const ORBIT_FIT_EXTENT = 1.7;
  * - 有真實進度環時（progress 不是 null）：進度環 1.45 R 加呼吸與餘裕，取 1.5，進度的起點（正上方）不會被切掉。
  * 若仍用 ORBIT_FIT_EXTENT，16:9 視窗最多只能放大約 1.38 倍，看不出差別。聆聽光環（1.32 R）在放大很多時上下緣可能超出視窗，左右仍看得到。
  */
-export const ZOOM_FIT_EXTENT = { body: { x: 1.25, y: 1.1 }, progress: { x: 1.5, y: 1.5 } } as const;
+export const ZOOM_FIT_EXTENT = { body: { x: 1.25, y: 1.1, down: 0.85 }, progress: { x: 1.5, y: 1.5, down: 1.5 } } as const;
+
+/**
+ * 放大到原位（0.47 高）放不下時，往畫面正中間移（George 2026-10-25）：腦形可以用整個視窗高度，
+ * 下緣可以延伸到「開始語音對話」按鈕、提示字、字幕與對話狀態的後面（它們是 DOM，疊在 Canvas 之上，仍點得到）。
+ * - 腦形的框是往上 y、往下 down（相對於 R；腦形往下只有 0.78 R，取 0.85，和 HIT_EXTENT.down 相同）；
+ *   框的中心（看起來的中心）在 cy + (down − y) ÷ 2 × R。
+ * - 上限 R = min(cx ÷ x, h ÷ (y + down))：16:9 是 h ÷ 1.95（1920×1080 約 2.56 倍）。這時框貼齊上下緣，看起來的中心在 h ÷ 2。
+ * - 3 倍在任何橫式視窗都放不完整：腦形高 1.95 × 0.6 h ≈ 1.17 h，比視窗還高。
+ * 原位時沿用上下都 y 的舊規則（2 倍以內不變）。有真實進度環時不移動（進度環下方是任務字幕）。
+ */
+export function zoomCenter(height: number, homeCy: number, home: number, max: number, r: number, fit: { y: number; down: number }): number {
+  const offset = (fit.down - fit.y) / 2;
+  const t = max > home ? Math.min(1, Math.max(0, (r - home) / (max - home))) : 1;
+  // 看起來的中心從原位走到 h ÷ 2，(1 − t)² 的曲線：一開始就離開頂端（比貼頂下滑快），最後平順停在正中間。
+  const from = homeCy + offset * home;
+  const visual = height / 2 - (height / 2 - from) * (1 - t) ** 2;
+  return Math.min(Math.max(visual - offset * r, fit.y * r), height - fit.down * r);
+}
 
 /**
  * 點擊範圍（相對於 R）：腦形量到的範圍加一點餘裕。原本是 1.35 R 的圓，2 倍時半徑 583 px（1920×1080），
@@ -112,6 +130,8 @@ export const LAYOUT = {
  * - 頂端縮略圖（top）仍用字級的 textScale：內容面板的位置（--surface-top × --distance-scale）跟著它，
  *   放大縮略圖會蓋住面板。
  * 半徑受視窗限制：不放大時整個軌道都在視窗內（ORBIT_FIT_EXTENT），放大時改以腦形或進度環為界（ZOOM_FIT_EXTENT）。
+ * 放大到原位放不下時，中心往畫面正中間移（zoomCenter）：半徑與中心都只是 zoom 的連續函數，
+ * 所以移動也只由真實距離事件驅動，Brain.step() 用同一個緩動移過去；倍率變小時照原路回到原位。
  */
 export function brainGeometry(
   width: number,
@@ -126,9 +146,16 @@ export function brainGeometry(
   const cx = width / 2;
   const cy = height * l.cy * (layout === "top" ? textScale : 1);
   const requested = Math.min(width, height) * l.r * scale;
-  const fit = layout === "center" && zoom > 1 ? ZOOM_FIT_EXTENT[progressRing ? "progress" : "body"] : { x: ORBIT_FIT_EXTENT, y: ORBIT_FIT_EXTENT };
-  const room = Math.min(cx / fit.x, Math.min(cy, height - cy) / fit.y);
-  return { cx, cy, r: Math.max(0, Math.min(requested, room)) };
+  const zoomed = layout === "center" && zoom > 1;
+  const fit = zoomed ? ZOOM_FIT_EXTENT[progressRing ? "progress" : "body"] : { x: ORBIT_FIT_EXTENT, y: ORBIT_FIT_EXTENT, down: ORBIT_FIT_EXTENT };
+  const home = Math.max(0, Math.min(cx / fit.x, Math.min(cy, height - cy) / fit.y));
+  if (!zoomed || requested <= home) return { cx, cy, r: Math.max(0, Math.min(requested, home)) };
+  // 原位放不下：用整個視窗高度，中心跟著半徑往正中間移（zoomCenter）。進度環、受寬度限制的視窗留在原位。
+  if (progressRing) return { cx, cy, r: home };
+  const max = Math.min(cx / fit.x, height / (fit.y + fit.down));
+  const r = Math.min(requested, max);
+  if (r <= home) return { cx, cy, r: home };
+  return { cx, cy: zoomCenter(height, cy, home, max, r, fit), r };
 }
 
 export class Brain {
@@ -161,6 +188,8 @@ export class Brain {
   private zoom = 1;
   /** 已發布到 CSS 的 --brain-r（跟著畫面上的半徑一起緩動，下方的字幕與輸入框才不會先跳）。 */
   private ambientRadius = 0;
+  /** 已發布到 CSS 的 --brain-cy（待機中心的高度；放大往中間移時跟著緩動）。 */
+  private ambientCy = 0;
   private shownProgress = 0;
 
   private width = 0;
@@ -263,10 +292,15 @@ export class Brain {
     return brainGeometry(this.width, this.height, layout, this.zoom, this.distanceScale, this.state.progress !== null);
   }
 
-  /** 待機半徑發布到 CSS（--brain-r）：下方字幕、輸入框依它排位置。 */
-  private publishAmbientRadius(r: number): void {
+  /**
+   * 待機半徑與中心高度發布到 CSS（--brain-r、--brain-cy）：下方字幕、輸入框、按鈕依它們排位置。
+   * 放大到要往畫面正中間移時（zoomCenter）中心才離開 47vh。
+   */
+  private publishAmbient(r: number, cy: number): void {
     this.ambientRadius = r;
+    this.ambientCy = cy;
     document.documentElement.style.setProperty("--brain-r", `${r}px`);
+    document.documentElement.style.setProperty("--brain-cy", `${cy}px`);
   }
 
   private resize(): void {
@@ -278,7 +312,8 @@ export class Brain {
     this.canvas.style.width = `${this.width}px`;
     this.canvas.style.height = `${this.height}px`;
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    this.publishAmbientRadius(this.target("center").r);
+    const ambient = this.target("center");
+    this.publishAmbient(ambient.r, ambient.cy);
   }
 
   private buildBrain(): void {
@@ -503,10 +538,13 @@ export class Brain {
     this.cy += (target.cy - this.cy) * k;
     this.radius += (target.r - this.radius) * k;
     // CSS 的待機半徑用同樣的緩動；差不到 0.5 px 時直接到位，避免每一幀都改樣式。
-    const ambient = this.target("center").r;
-    if (ambient !== this.ambientRadius) {
-      const next = this.ambientRadius + (ambient - this.ambientRadius) * k;
-      this.publishAmbientRadius(Math.abs(ambient - next) < 0.5 ? ambient : next);
+    const ambient = this.target("center");
+    if (ambient.r !== this.ambientRadius || ambient.cy !== this.ambientCy) {
+      const ease = (to: number, from: number) => {
+        const next = from + (to - from) * k;
+        return Math.abs(to - next) < 0.5 ? to : next;
+      };
+      this.publishAmbient(ease(ambient.r, this.ambientRadius), ease(ambient.cy, this.ambientCy));
     }
 
     if (this.state.progress !== null) {

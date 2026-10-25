@@ -498,7 +498,7 @@ describe("RealtimeVoice home_control", () => {
       room: "客廳",
       action: "設定 26 度",
       message: "已透過 AIFA 連線送出；控制器狀態不代表冷氣實際反應，請現場確認（fixture）",
-      sent_settings: "冷氣、26 度、風量低、擺風自動",
+      sent_settings: "模式冷氣、26 度、風量低、擺風自動",
     };
     const t = setup({}, { control: () => ONE_WAY });
     await t.voice.start();

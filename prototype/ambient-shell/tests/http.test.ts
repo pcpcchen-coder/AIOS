@@ -378,7 +378,7 @@ describe("HTTP API", () => {
     const { post } = await start(5, undefined, undefined, new HomeBridge({ url: "http://127.0.0.1:8788", token: "hub-secret", fetch: hub, newId: () => "k" }));
     const swing = await post("/api/home/control", { target: "冷氣", command: "ac_swing", value: "fixed_3" });
     const raw = await swing.text();
-    expect(JSON.parse(raw)).toMatchObject({ status: "unconfirmed", why: "one_way", sent_settings: "冷氣、25 度、風量低、擺風固定 3" });
+    expect(JSON.parse(raw)).toMatchObject({ status: "unconfirmed", why: "one_way", sent_settings: "模式冷氣、25 度、風量低、擺風固定 3" });
     expect(raw).not.toContain("hub-secret");
     const press = await (await post("/api/home/control", { target: "電視", command: "press", value: "volume_up" })).json();
     expect(press).toMatchObject({ status: "unconfirmed", why: "one_way", key: "Vol+" });

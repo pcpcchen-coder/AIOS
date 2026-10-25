@@ -147,8 +147,8 @@ AIOS 本機核心 HomeBridge（新）── REST v1 + SSE，Bearer 範圍權杖 
   - `infrared`：Tuya 紅外線家電（`config.infrared_virtual`）。中控對它們的 `configured` 永遠是 false，只看 `infrared.ready`。
   - `unsupported`：不是 AIFA 的冷氣（Tuya `kt`／`ktkzq`、Home Assistant `climate.*`）、中控設備裡的 AIFA 控制器本身、紅外線控制器本身（`wnykq`，「請說要控制的家電名稱」）、無線按鈕、AIFA 的非冷氣家電。
   - 判斷順序是紅外線先，所以紅外線的冷氣遙控不會拿到 AIFA 的溫度設定：對它說 `ac_temperature` 會被拒絕，只能 `press` 它的鍵。
-- **AIFA 開關**：`POST …/children/{c}/power {"power":bool}`。
-- **AIFA 設定**：中控的 `/climate` 要完整的模式、溫度、風量、擺風。HomeBridge 先 `POST …/status` 讀控制器記得的設定，缺的項目用預設值（冷氣、26 度、風量自動、擺風自動；特殊功能沒回報時用一般），結果的 `defaults_used` 列出用了哪些預設，模型要說出來。特殊功能（睡眠、強力）照回報保留，不會被清掉。
+- **AIFA 開關**：`POST …/children/{c}/power {"power":bool}`。關冷氣時中控會一併取消這台冷氣的定時；George 2026-10-25 決定要讓 AI 說出來：已送出（`one_way`）或可能送到（`no_reply`）時結果的 `note` 是要念給使用者的句子：「如果這台冷氣有設定定時，中控關機時會一併取消，需要的話請重新設定。」（沒有回覆時前面加「如果中控有執行這次關機」）。AIOS 讀不到定時，不能說確實有定時被取消，也不能說冷氣已關，這兩條寫在模型的工具規則（`realtimeToolRules`）；失敗或沒有送出時不說。
+- **AIFA 設定**：中控的 `/climate` 要完整的模式、溫度、風量、擺風。HomeBridge 先 `POST …/status` 讀控制器記得的設定，缺的項目用預設值（模式自動〔George 2026-10-25 決定，不分季節；原本是冷氣〕、26 度、風量自動、擺風自動；特殊功能沒回報時用一般），結果的 `defaults_used` 列出用了哪些預設，模型要說出來。特殊功能（睡眠、強力）照回報保留，不會被清掉。
   - 冷氣關著時中控回報的模式與溫度是 null，所以「改除濕」會用預設的 26 度；結果帶 `note`「這個設定不代表會開機」，不說成開了冷氣。
   - 「開冷氣 26 度」是兩次工具呼叫：先開關，再設定溫度，兩個結果都照說。
   - 風量調大／調小依控制器回報的目前風量調一格；回報是自動或沒有回報時不送，請使用者說低、中、高或自動；已經最低／最高也照實說。
