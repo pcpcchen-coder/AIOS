@@ -84,7 +84,7 @@ npm start        # 開發：組好內容後直接用 Electron 開
 npm run package  # 打包成 release/Nous-darwin-arm64/Nous.app 與 zip
 ```
 
-`scripts/build.mjs` 先用 vite 建前端、用 esbuild 把本機核心（`server/nous.ts`）打成單檔 `server.mjs`，再組成 `build/app`；`scripts/package.mjs` 用 `@electron/packager`（Electron 44.7.0）打包、簽章並壓 zip。
+`scripts/build.mjs` 先用 vite 建前端、用 esbuild 把本機核心（`server/nous.ts`）打成單檔 `server.mjs`，再組成 `build/app`；`scripts/package.mjs` 用 `@electron/packager`（Electron 44.9.3）打包、簽章並壓 zip。
 
 ### 固定簽章與本機權限
 

@@ -24,7 +24,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.131.0",
     "@mediapipe/tasks-vision": "1.1.1",
-    "dompurify": "3.4.16",
+    "dompurify": "3.4.17",
     "marked": "18.0.14",
     "onnxruntime-web": "1.30.0"
   },
