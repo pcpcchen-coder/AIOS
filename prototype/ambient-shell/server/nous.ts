@@ -11,7 +11,8 @@ import { loadConfig } from "./config.ts";
 import { MockExecutor } from "./mock-executor.ts";
 import { ProviderManager } from "./providers.ts";
 import { buildLiveInstructions, RealtimeBridge } from "./realtime.ts";
-import { ApiKeyRoute } from "./realtime-routes.ts";
+import { ApiKeyRoute, type RealtimeSessions } from "./realtime-routes.ts";
+import type { RouteId } from "../shared/realtime-route.ts";
 import { CodexAuth } from "./codex-auth.ts";
 import { CodexResponses, type CodexModelCache } from "./codex-responses.ts";
 import { LiveRoute } from "./live-route.ts";
@@ -138,6 +139,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     instructions: (ctx) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp }),
     caller: (ctx) =>
       new LiveToolCaller({ responses: codex, caps: liveCaps, host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log }),
+    // 看著說話的問候（ID-02）：頁面只帶互動 ID，短句由家人辨識的核心決策組成；瀏覽器版（沒有 identity）一律「我在」。
+    greeting: liveGreetingSource(() => identity),
     log,
   });
   const apiKeyRoute = new ApiKeyRoute(realtime, !!config.openaiApiKey, config.realtimeVoice);
@@ -157,8 +160,14 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
           const cam = camera.view();
           return cam.enabled && cam.active;
         },
+        ambient: () => {
+          const cam = camera.view();
+          return { look_to_talk: cam.look_to_talk, look_to_talk_greet: cam.look_to_talk_greet, look_to_talk_greet_name: cam.look_to_talk_greet_name };
+        },
         runtime,
         model: FACE_MODEL_VERSION,
+        // 問候決策只接受 /api/realtime/start 發出、真的連上的互動 ID（server 在下面建立，呼叫時已存在）。
+        claimGreeting: greetingClaims(() => server.realtimeSessions),
         log,
         onChange: () => notify(),
       })
@@ -223,6 +232,19 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         server.close(() => resolve());
       }),
   };
+}
+
+/**
+ * live 路徑的問候文字來源（ID-02）：頁面 POST greeting 的文字只當互動 ID，連同這個 live 工作階段的 ID 交給
+ * IdentityService.takeLiveGreeting；沒有家人辨識（瀏覽器版）或取不到時回 null（LiveRoute 送「我在」）。
+ */
+export function liveGreetingSource(identity: () => IdentityService | null): (interaction: string, sessionId: string) => string | null {
+  return (interaction, sessionId) => identity()?.takeLiveGreeting(interaction, sessionId) ?? null;
+}
+
+/** IdentityService 的 claimGreeting：把核心發出的互動 ID 換成真的連上的工作階段（RealtimeSessions.claimGreeting）。 */
+export function greetingClaims(sessions: () => RealtimeSessions | null): (interaction: string) => { route: RouteId; session_id: string } | null {
+  return (interaction) => sessions()?.claimGreeting(interaction) ?? null;
 }
 
 /** 先試指定的埠；被占用時讓系統分配一個空閒埠。 */

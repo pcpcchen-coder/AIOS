@@ -1,4 +1,5 @@
-// 家人辨識的取樣器（頁面端）：只在「家人辨識」畫面打開時運作，不做背景持續辨識（ID-01 範圍）。
+// 家人辨識的取樣器（頁面端）：在「家人辨識」畫面（ID-01），以及看著說話的面向等待期間（ID-02，src/sense/identity-ambient.ts）運作；
+// 不做背景持續辨識。
 // - 最多 4 Hz（兩次取樣至少相隔 SAMPLE_INTERVAL_MS）、同時最多一個推論；推論還沒回來就不取下一格（不排隊）。
 //   每 POLL_MS 檢查一次，推論一回來、間隔也到了就立刻取下一格，不必等下一個 250 ms 整點，
 //   讓相鄰畫格的間隔盡量貼近推論時間（證據與登記規則要求相鄰兩格不超過 500 ms）。
@@ -69,6 +70,10 @@ export class IdentityClient {
   private gen = 0;
   private ready = false;
   private inFlight = false;
+  /** 正在 worker 裡的那一格的世代：舊世代的結果回來時也要清掉 inFlight，才不會卡住（pause 後重新開始取樣）。 */
+  private inFlightGen: number | null = null;
+  /** 每次取樣加一：被暫停的那次取樣回來時，只有它仍是最新一次才清 inFlight。 */
+  private sampleToken = 0;
   private lastSampleAt: number | null = null;
   private readonly now: () => number;
 
@@ -88,7 +93,8 @@ export class IdentityClient {
   start(): void {
     if (this.timer !== null) return;
     this.gen = this.nextGeneration();
-    this.inFlight = false;
+    // pause() 之後 worker 裡可能還有上一個世代的一格：等它回來（receive 會清 inFlight）再取下一格，同時最多一個推論。
+    if (this.inFlightGen === null) this.inFlight = false;
     this.lastSampleAt = null;
     if (!this.worker) {
       this.ready = false;
@@ -103,12 +109,21 @@ export class IdentityClient {
     this.timer = every(() => void this.tick(), POLL_MS);
   }
 
-  /** 停止取樣並結束 worker；晚到的結果因世代不同被丟掉。 */
-  stop(): void {
+  /**
+   * 暫停取樣但保留 worker（模型留在記憶體，下次 start() 不必冷啟動；ID-02 看著說話的「模型在功能啟用後預載」）。
+   * 世代加一：還在 worker 裡的那一格回來時被丟掉。
+   */
+  pause(): void {
     this.gen = this.nextGeneration();
     if (this.timer !== null) (this.options.clearInterval ?? ((h) => clearInterval(h as ReturnType<typeof setInterval>)))(this.timer);
     this.timer = null;
+  }
+
+  /** 停止取樣並結束 worker；晚到的結果因世代不同被丟掉。 */
+  stop(): void {
+    this.pause();
     this.inFlight = false;
+    this.inFlightGen = null;
     this.ready = false;
     if (this.worker) {
       this.worker.onmessage = null;
@@ -130,6 +145,7 @@ export class IdentityClient {
     if (this.lastSampleAt !== null && now - this.lastSampleAt < (this.options.intervalMs ?? SAMPLE_INTERVAL_MS)) return;
     this.lastSampleAt = now;
     const gen = this.gen;
+    const token = ++this.sampleToken;
     this.inFlight = true;
     let bitmap: ImageBitmap | null = null;
     try {
@@ -139,6 +155,8 @@ export class IdentityClient {
     }
     if (gen !== this.gen || !this.worker) {
       bitmap?.close();
+      // 取畫格期間被暫停或換世代：這一格沒送進 worker，下一次 start() 可以直接取樣。
+      if (this.sampleToken === token && this.inFlightGen === null) this.inFlight = false;
       return;
     }
     if (!bitmap) {
@@ -147,6 +165,7 @@ export class IdentityClient {
       this.options.onFrame({ gen, t: this.now(), face_count: 0, quality: "no_frame" });
       return;
     }
+    this.inFlightGen = gen;
     this.worker.postMessage({ type: "frame", gen, bitmap }, [bitmap]);
   }
 
@@ -155,6 +174,10 @@ export class IdentityClient {
       this.ready = true;
       this.options.onState({ kind: "ready", model: msg.model });
       return;
+    }
+    if (msg.gen !== null && msg.gen === this.inFlightGen) {
+      this.inFlight = false;
+      this.inFlightGen = null;
     }
     if (msg.type === "error") {
       if (msg.gen !== null && msg.gen !== this.gen) return;
@@ -166,7 +189,6 @@ export class IdentityClient {
       msg.feature?.fill(0);
       return;
     }
-    this.inFlight = false;
     this.options.onFrame({ gen: msg.gen, t: this.now(), face_count: msg.face_count, quality: msg.quality, ...(msg.feature ? { feature: msg.feature } : {}) });
   }
 }

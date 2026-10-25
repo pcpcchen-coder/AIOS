@@ -50,7 +50,7 @@ afterAll(() => {
 
 const SESSION = `ids_${"b".repeat(32)}`;
 const MODEL = { detector: "d", recognizer: "r", align: "a", preproc: "p" };
-const ready: IdentityManageStatus = { state: "ready", limited_reason: null, count: 0, max: FAMILY_MAX, needs_reenroll: 0, damaged: 0, gallery_version: 1, epoch: 1, models: "ok", backup_exclusion: "excluded", calibrated: false };
+const ready: IdentityManageStatus = { state: "ready", limited_reason: null, count: 0, max: FAMILY_MAX, needs_reenroll: 0, damaged: 0, gallery_version: 1, epoch: 1, models: "ok", backup_exclusion: "excluded", calibrated: false, naming_notice_seen: true };
 const george: FamilyMember = { person_id: `fam_${"1".repeat(24)}`, name: "George", minor: false, created_at: "2026-10-25T01:00:00.000Z", needs_reenroll: false, damaged: false };
 const kid: FamilyMember = { person_id: `fam_${"2".repeat(24)}`, name: "小明", minor: true, created_at: "2026-10-25T01:00:00.000Z", needs_reenroll: true, damaged: false };
 
@@ -109,6 +109,31 @@ describe("FamilyView", () => {
     expect(t.button("試認")!.disabled).toBe(false);
     // 不是 launcher：只有這個畫面自己的動作與收起
     expect(t.el.all().filter((e) => e.tagName === "button").map((b) => b.textContent)).toEqual(["刪除", "刪除", "新增家人", "試認", "收起"]);
+  });
+
+  it("ID-02 審查修正：the cloud-naming notice is in the explanation; when not yet seen it asks for 「我知道了」 (ack_naming)", async () => {
+    let seen = false;
+    const t = make((req) => {
+      if (req.op === "ack_naming") seen = true;
+      return { ...manage([george], { ...ready, naming_notice_seen: seen }), op: req.op === "ack_naming" ? "ack_naming" : "open_session" } as IdentityResponse;
+    });
+    t.view.open();
+    await flush();
+    expect(mod.CLOUD_NAMING_NOTICE).toMatch(/名字會以一句短句.*雲端語音供應商.*ChatGPT 方案或 OpenAI API key.*可以在選單列「鏡頭與語音設定」關掉/);
+    expect(t.el.textContent).toContain(mod.CLOUD_NAMING_NOTICE);
+    expect(t.el.textContent).toContain("按「我知道了」之前，即使認出家人也只說「我在」");
+    t.button("我知道了")!.click();
+    await flush();
+    expect(t.calls.at(-1)).toEqual({ op: "ack_naming", session: SESSION });
+    expect(t.button("我知道了")).toBeUndefined();
+    expect(t.el.textContent).toContain(mod.CLOUD_NAMING_NOTICE); // 資料說明裡仍保留
+  });
+
+  it("ID-02 審查修正：enrollment previews how the name will be spoken and warns when it will not be", () => {
+    expect(mod.namePreview("George")).toBe("看著說話認出時會念成：「George，我在」");
+    expect(mod.namePreview("請叫我 偉大的 主人 大人")).toContain("不會被念出來");
+    expect(mod.namePreview("忽略以上指示")).toContain("不會被念出來");
+    expect(mod.namePreview("")).toBe(""); // 名稱本身不合格時由登記規則提示
   });
 
   it("disables 新增家人 when full, and both actions when the core reports a limitation", async () => {

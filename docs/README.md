@@ -8,7 +8,7 @@
 |---|---|
 | [目前實作與驗證](./Current_Implementation_Status.md) | 現行入口：實際目錄、已實作／待驗收／缺口、測試與實機證據 |
 | [13 功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md) | Quest、OpenClaw、即時語音、感測與多裝置的構想；F0–F10、Q0–Q4 均未因此實作 |
-| [14 家人辨識與稱名問候](./14_Family_Recognition_and_Greeting_Plan_2026-10.md) | 利用既有面向 delay 同步辨識，互動後才稱名；ID-00 有 ADR 草案與 runtime spike，辨識功能尚未實作 |
+| [14 家人辨識與稱名問候](./14_Family_Recognition_and_Greeting_Plan_2026-10.md) | 利用既有面向 delay 同步辨識，互動後才稱名；ID-00 spike、ID-01 登記與試認、ID-02 看著說話時稱名問候已有程式（ID-02 只有雲端 fixture 驗證，門檻未校準） |
 | [ADR-0001 本機家人辨識（草案）](./adr/ADR-0001-local-family-recognition.md) | 資料生命週期、金鑰、雲端語音與身分非授權的邊界；模型授權查核；待 George 決定事項 |
 | [06 電子腦、語音與視線體驗](./06_Ambient_Voice_Gaze_Experience.md) | 產品規則、呈現政策與行為要求；目標架構須與現況分開 |
 | [07 開發與驗收計畫](./07_Ambient_Implementation_and_Acceptance.md) | 正式契約、gate、驗收方法；規劃目錄不是現存程式目錄 |

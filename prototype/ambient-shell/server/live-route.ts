@@ -77,6 +77,11 @@ export interface LiveRouteOptions {
   /** 這條路徑提供的工具（給設定畫面的文字）。 */
   capabilities: () => { webSearch: boolean; home: boolean };
   clientVersion: string;
+  /**
+   * 看著說話的問候（ID-02）：頁面 POST greeting 帶來的文字只當成互動 ID，交給這個函式取核心已組好的短句
+   * （IdentityService.takeLiveGreeting）。沒有提供或取不到時送「我在」（LIVE_GREETING_TEXT）。頁面的文字永遠不會成為內容。
+   */
+  greeting?: (interaction: string, sessionId: string) => string | null;
   fetch?: typeof fetch;
   WebSocket?: SidebandSocketCtor;
   urls?: { call: string; sideband: (callId: string) => string };
@@ -199,7 +204,7 @@ export class LiveRoute implements RealtimeRoute {
       void this.hangup(urls.sideband(created.callId), ids);
       throw new RouteStartError("upstream", 502, unavailableText("upstream", { message: "接不上控制連線（sideband）" }), true);
     }
-    return new LiveCall(created.answer, this.options.model.display, socket, ctx, this.options.caller(ctx), this.options.log);
+    return new LiveCall(created.answer, this.options.model.display, socket, ctx, this.options.caller(ctx), this.options.log, this.options.greeting);
   }
 
   /** 盡力掛斷：再試一次 sideband（短時限），接上就送 session.close。 */
@@ -347,6 +352,7 @@ class LiveCall implements RouteCall {
     private readonly ctx: SessionContext,
     private readonly caller: DelegationRunner,
     private readonly log?: (line: string) => void,
+    private readonly greetingText?: (interaction: string, sessionId: string) => string | null,
   ) {
     this.control = { input: (kind, text) => this.input(kind, text) };
     socket.addEventListener("message", (event) => {
@@ -473,8 +479,9 @@ class LiveCall implements RouteCall {
    * user_text → 和交辦一樣交給 caller（打字就是請求），結果用 session.context.append 送回。
    * notice    → session.context.append speakable「（系統通知）…」（任務完成、確認卡的結果）。
    * context   → session.context.append commentary（例如手指指著哪一項；不念）。
-   * greeting  → session.context.append speakable 固定的 LIVE_GREETING_TEXT（「（開場）」開頭的招呼指示；同 OpenClaw quicksilver triggerGreeting）。
-   *              頁面送來的文字一律忽略（只用來通過長度檢查）；真的在開著的 sideband 送出才記成已送，每個工作階段最多一次。
+   * greeting  → session.context.append speakable 核心組好的招呼（「（開場）」開頭，只要模型照念「<名字>，我在」或「我在」；
+   *              同 OpenClaw quicksilver triggerGreeting）。頁面送來的文字只當成互動 ID 去取核心的決策（ID-02），取不到就送「我在」；
+   *              頁面文字永遠不會變成內容。真的在開著的 sideband 送出才記成已送，每個工作階段最多一次。
    */
   private input(kind: LiveInputKind, text: string): void {
     if (this.closed) return;
@@ -485,7 +492,8 @@ class LiveCall implements RouteCall {
     if (kind === "greeting") {
       // sideband 還沒開（或正在關）：不記成已送，之後重送仍有效；送出之後才記，所以不會送兩次。
       if (this.greeted || this.closed || this.socket.readyState !== 1) return;
-      for (const piece of chunkForAppend(LIVE_GREETING_TEXT)) this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: piece }] });
+      const greeting = this.greetingText?.(text, this.ctx.sessionId) ?? LIVE_GREETING_TEXT;
+      for (const piece of chunkForAppend(greeting)) this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: piece }] });
       this.greeted = true;
       return;
     }

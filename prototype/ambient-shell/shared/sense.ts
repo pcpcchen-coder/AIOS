@@ -47,6 +47,12 @@ export interface CameraPrefs {
    * 按鈕、語音指令或打字開始的不打招呼；使用者先開口就不打。
    */
   look_to_talk_greet: boolean;
+  /**
+   * 問候時稱呼認出的家人（George 2026-10-25，ID-02；預設開）：macOS App 在看著說話的面向等待期間同步辨識已登記的家人，
+   * 可靠認出時問候說「名字，我在」，名字會成為雲端語音供應商收到的短句。關掉：只說「我在」，看著說話時也不做辨識。
+   * 門檻未校準；瀏覽器版不支援辨識，這個開關沒有作用。
+   */
+  look_to_talk_greet_name: boolean;
   /** 手掌停止播報：舉起張開的手掌停止 Nous 說話（不取消任務）。 */
   stop_gesture: boolean;
   /**
@@ -56,13 +62,31 @@ export interface CameraPrefs {
   brain_zoom_max: number;
 }
 
+/** 問候的固定部分（docs/14 §1、§6）：沒有可靠姓名時只說這句。 */
+export const GREETING_PLAIN = "我在";
+
 /**
- * 看著說話開始的即時語音連上後，請模型說的那一句招呼（兩條路徑共用）。只知道使用者面向螢幕：
- * 不得說看到使用者、不得描述長相或環境（CLAUDE.md：沒有影像分析時不得宣稱正在觀看）。
+ * 問候短句只有兩種形狀：「<名字>，我在」或「我在」。名字必須是核心從受管理人物檔案取出、經 shared/identity.ts
+ * speakableName 驗證過的口語名稱；頁面與客戶端傳來的文字不能走到這裡（server/identity-service.ts 組句）。
  */
-export const LOOK_TO_TALK_GREETING =
-  "你是 Nous。使用者剛面向螢幕開始語音對話：請用一句簡短自然的繁體中文打招呼，問有什麼需要幫忙（例如「我在，有什麼需要幫忙的嗎？」）。" +
-  "你只知道使用者面向螢幕，看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境。";
+export function greetingSentence(name: string | null): string {
+  return name ? `${name}，${GREETING_PLAIN}` : GREETING_PLAIN;
+}
+
+/**
+ * 看著說話開始的即時語音連上後，請模型照念的那一句（兩條路徑共用）。只知道使用者面向螢幕：
+ * 不得說看到使用者、不得描述長相或環境（CLAUDE.md：沒有影像分析時不得宣稱正在觀看）；也不得自己猜名字。
+ * 模型仍可能改寫：驗收要看實際逐字稿，不能只看這段指示（docs/validation/family-id-02-2026-10-25.md）。
+ */
+export function greetingInstructions(sentence: string): string {
+  return (
+    `你是 Nous。使用者剛面向螢幕開始語音對話：請用繁體中文只說這一句，一字不改，不要加字、不要提問：「${sentence}」。` +
+    "你看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境；除了這一句裡已有的名字，不要說出或猜測任何名字。"
+  );
+}
+
+/** 沒有姓名時的問候指示（API key 路徑；瀏覽器版與決策失敗時也用它）。 */
+export const LOOK_TO_TALK_GREETING = greetingInstructions(GREETING_PLAIN);
 
 /**
  * ChatGPT 方案路徑的招呼要放進 session.context.append speakable：前面加這個固定標記，
@@ -70,8 +94,13 @@ export const LOOK_TO_TALK_GREETING =
  */
 export const GREETING_MARKER = "（開場）";
 
-/** ChatGPT 方案路徑真正送給模型的招呼（核心只送這個常數，忽略頁面送來的文字）。 */
-export const LIVE_GREETING_TEXT = `${GREETING_MARKER}${LOOK_TO_TALK_GREETING}`;
+/** ChatGPT 方案路徑真正送給模型的招呼（核心組成；頁面送來的文字只是互動 ID，不會變成內容）。 */
+export function liveGreetingText(sentence: string): string {
+  return `${GREETING_MARKER}${greetingInstructions(sentence)}`;
+}
+
+/** 沒有姓名時 ChatGPT 方案路徑送的招呼。 */
+export const LIVE_GREETING_TEXT = liveGreetingText(GREETING_PLAIN);
 
 /** SettingsView.camera 的形狀。 */
 export type CameraSettings = CameraInstall & CameraPrefs;
@@ -102,7 +131,11 @@ export const CAMERA_PREFS = {
   },
   look_to_talk_greet: {
     kind: "bool", default: true, label: "看著說話時先打招呼",
-    hint: "看著說話開始的對話，連上後 Nous 先問一句有什麼需要幫忙；你先開口就不打招呼",
+    hint: "看著說話開始的對話，連上後 Nous 先說「我在」；你先開口就不打招呼",
+  },
+  look_to_talk_greet_name: {
+    kind: "bool", default: true, label: "打招呼時稱呼認出的家人",
+    hint: "只在 macOS App：認出已登記的家人時說「名字，我在」，名字會送到雲端語音；關掉只說「我在」（門檻未校準）",
   },
   stop_gesture: { kind: "bool", default: true, label: "手掌停止播報", hint: "舉起張開的手掌停止 Nous 說話（不取消任務）" },
   brain_zoom_max: {

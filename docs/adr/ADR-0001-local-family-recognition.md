@@ -1,8 +1,8 @@
 # ADR-0001：本機家人辨識的資料生命週期與 runtime
 
-狀態：**草案（Proposed）**；George 已於 2026-10-25 決定 §9 大部分項目，偵測器與 SFace 訓練資料風險仍待決。日期：2026-10-24，2026-10-25 依 ID-01 實作修訂 §2.1、§2.2、§10。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00、ID-01。
+狀態：**草案（Proposed）**；George 已於 2026-10-25 決定 §9 大部分項目，偵測器已定案（YuNet 2023mar 640），SFace 訓練資料風險仍待決。日期：2026-10-24，2026-10-25 依 ID-01 實作修訂 §2.1、§2.2、§10，同日依 ID-02 修訂 §2.1.1、§2.4、§6、§9 並新增 §11。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00、ID-01、ID-02。
 
-ID-00 是不接進產品流程的 runtime spike（`prototype/ambient-shell/spike/face/`，量測見 [驗證紀錄](../validation/family-id-00-spike-2026-10-24.md)）。ID-01（2026-10-25，分支 `claude/family-id-01`）實作了登記、刪除、加密保存、本機辨識（只在選單列打開的「家人辨識」畫面內）與品質、失效狀態，只有雲端驗證，**沒有 Mac 實機結果、門檻未校準、沒有稱名問候**，見 [ID-01 驗證紀錄](../validation/family-id-01-2026-10-25.md)。
+ID-00 是不接進產品流程的 runtime spike（`prototype/ambient-shell/spike/face/`，量測見 [驗證紀錄](../validation/family-id-00-spike-2026-10-24.md)）。ID-01（2026-10-25，分支 `claude/family-id-01`）實作了登記、刪除、加密保存、本機辨識（只在選單列打開的「家人辨識」畫面內）與品質、失效狀態，只有雲端驗證，**沒有 Mac 實機結果、門檻未校準、沒有稱名問候**，見 [ID-01 驗證紀錄](../validation/family-id-01-2026-10-25.md)。George 於 2026-10-25 在 Mac 實測 ID-01：登記與試認順利、手掌停止正常（實測紀錄由 George 口頭回報，repo 內沒有數字）。ID-02（2026-10-25，分支 `claude/family-id-02`）接上看著說話：面向等待期間同步辨識、互動綁定、核心組成「<名字>，我在」或「我在」，兩條語音路徑都由核心決定內容；**只有雲端 fixture 驗證，門檻仍未校準，實際音訊（14 I12）待 Mac**，見 [ID-02 驗證紀錄](../validation/family-id-02-2026-10-25.md)與 §11。
 
 編號說明：這是本 repo `docs/adr/` 的第一份 ADR。[08](../08_Consolidation_and_Update_2026-10.md) 提到的 ADR-001–005 是當時的提案標籤，沒有在 repo 建檔；[11](../11_Stereo_Camera_Interaction_2026-10.md) 引用的 ADR-0002、ADR-0005 屬於另一個 repo（this-is-yourX）。三者不是同一個編號序列。
 
@@ -63,9 +63,12 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 - **薄 IPC**：preload 只多一個 `nousDesktop.identity(request)`（`ipcRenderer.invoke("nous:identity")`）。主程序的處理器先檢查 `event.sender === win.webContents`、`event.senderFrame === sender.mainFrame`、frame 網址以核心網址開頭，再以純函式 `desktop/identity-ipc.mjs` 過濾 op 白名單與欄位形狀（多的欄位丟掉），然後交給核心。語意驗證（特徵正規化、名稱、人數、一致性）由核心負責。
 - **管理 session**：只有使用者在選單列點「家人辨識…」後 10 秒內，主視窗本機核心的頁面才能開（主程序記錄點擊時間，`open_session` 時一次性消耗）；沒點選單時語音或頁面腳本自己開會被拒（`not_user_initiated`）。一次只有一個 session；畫面收起、閒置 10 分鐘、開滿 15 分鐘、主視窗 `did-navigate`（含重新載入）或 `render-process-gone`（主程序呼叫 `closeSessions`）、核心關閉（`shutdown`）都會失效。probe、登記、刪除都要有效 session，每個 session 每秒最多 6 次請求。
 - **核心重啟與並行**：核心關閉時先進入關閉狀態，等待中的原生確認回來後一律不寫；會改資料的操作（登記、刪除、清除）同時只能有一個，避免疊出多個對話框或用到過期的去重資料；寫入前核對磁碟上的 `gallery_version` 與記憶體相同，不同就拒絕（`stale_gallery`），不拿舊資料覆蓋。
-- **ID-01 沒有背景持續辨識**：辨識只在「家人辨識」畫面內的「試認」與登記取樣時運作。看著說話時同步辨識與稱名屬於 ID-02，原本「只在鏡頭運作且看著說話啟用時接受」的條件到 ID-02 再接。
+- **沒有背景常駐辨識**：ID-01 的辨識只在「家人辨識」畫面內的「試認」與登記取樣時運作。ID-02 另外加了看著說話時的同步辨識（§11）：只在既有 `look_to_talk` 的面向停留期間，以及互動開始後到問候決策之前取樣；離開在場、轉開、離開近距離或關鏡頭就停止。核心另以 `ambient_probe`、`ambient_status`、`greeting` 三個 op 接受（不需要管理 session），條件是「看著說話」「看著說話時先打招呼」「打招呼時稱呼認出的家人」三個設定都開、鏡頭開、模型雜湊相符、管理畫面沒開；`greeting` 另外要核心自己發出、綁定真的連上的語音工作階段的互動 ID（§2.4.1）。
 - **比對在核心**：回應不含相似度分數。每位家人的分數取該人各樣本 cosine 的最大值；最高分 ≥ `match` 且領先第二名 ≥ `margin` 才算這一格指向此人，分數接近是 ambiguous，低於門檻是 unknown。只比對模型與前處理版本（detector／recognizer／align／preproc）都相符的家人，不符的標 `needs_reenroll`。之後再經證據規則（`shared/identity.ts` 的 `decideIdentity`）：同一取樣世代內至少 3 格、跨至少 500 ms、全部指向同一人，最新一格不超過 1 秒；**「不認得」與「兩位分不清」也要同樣的證據才回，之前一律是中性的 collecting**，單一格不能拿來探測某張臉是否已登記（審查 2026-10-25）；相鄰兩格斷開超過 500 ms，或世代、`epoch`、`gallery_version` 改變就清空；多張臉一律 ambiguous，不挑最大的臉；品質不足是 unavailable。
-- 威脅面照實保留：renderer 內任何程式（含生成 UI 若越界）在 session 內都能呼叫 probe；拿一張臉連續送 3 格以上，仍可從穩定結果推測它是否已登記。對策是 session 只能由使用者點選單列開啟、時長上限、限速、回應不含分數、gallery 相關結果要累積證據才回、重複登記只回「可能已登記」不回是哪一位。生成 UI 本來就不得接觸 preload API（CLAUDE.md 紅線）。
+- 威脅面照實保留：
+  - 管理 session（ID-01）：renderer 內任何程式（含生成 UI 若越界）在 session 內都能呼叫 probe；拿一張臉連續送 3 格以上，仍可從穩定結果推測它是否已登記。對策是 session 只能由使用者點選單列開啟、時長上限、限速、回應不含分數、gallery 相關結果要累積證據才回、重複登記只回「可能已登記」不回是哪一位。
+  - 看著說話（ID-02，獨立審查 2026-10-25 修正後）：`ambient_probe` 不需要 session，但回應不含任何結果，被拒時也不說原因；`ambient_status` 只回可不可以取樣。能拿回名字的只有 `greeting`，而它只接受**核心在 `/api/realtime/start`（source 為 look_to_talk）發出、還沒用過、那個語音工作階段真的連上（API key：SDP 已交換；live：sideband 已接上）而且還在進行、連上後 20 秒內**的互動 ID，每秒最多 2 次、每分鐘最多 3 次；頁面自己編的 ID 只得到「我在」。修正前（審查發現）：`ambient_probe` 加 `greeting` 可以把任意特徵換成姓名，等於沒有 session 的查詢工具。
+  - **殘餘風險**：頁面程式仍可自己呼叫 `/api/realtime/start`（source look_to_talk）真的開一次即時語音（會開麥克風、顯示「即時語音」指示、依路徑計費），再送合成或從別處取得的特徵，在 API key 路徑從 IPC 回應讀到組好的短句（含名字）；每個工作階段最多一次、每分鐘最多 3 次。ChatGPT 方案路徑頁面拿不到短句，但模型念出後的逐字稿仍會回到頁面（字幕）。要消除 API key 路徑這一段，需要核心代送 `response.create`（§11 待辦）。生成 UI 本來就不得接觸 preload API 或核心 HTTP（CLAUDE.md 紅線）。
 - 刪除、清除與收起畫面時：核心清掉證據並遞增 `epoch`；頁面停止取樣、結束 worker（模型與暫存一併釋放）、丟掉記憶體中的樣本，取樣世代加一，晚到的結果因世代不符被丟掉。
 - 第一版上限 2–5 位登記家人（14 §5）；超過上限拒絕新登記，不自動覆蓋。
 - 每次取樣約 4 Hz、同時最多一個待處理推論；結果帶追蹤世代，世代不符一律丟棄（14 §3、§4）。
@@ -115,9 +118,28 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 
 ### 2.4 雲端語音
 
-- 雲端只會收到最後的短句文字，例如「George，我在」。不上傳影像、特徵、相似度或其他家人的名單。
-- 提供「辨識開啟，但不在雲端語音稱名」選項：仍可在本機辨識，但問候一律用「我在」。
-- 名稱由核心從受管理的人物檔案取出，限制長度並拒絕控制字元、標記與指令內容（14 §6、I11）。客戶端傳來的任意文字不能變成名稱。
+- **問候本身**只送一句短句，例如「George，我在」；不上傳影像、特徵、相似度或其他家人的名單。但名字一旦被念出來，就和對話的其他內容一樣會出現在雲端：模型自己的逐字稿、ChatGPT 方案路徑交辦給 Codex 的請求（附最近的逐字稿，§2.4.1），也可能被模型寫進任務標題（見下表）。所以不能說「雲端只收到短句」。
+- **揭露與同意（獨立審查 2026-10-25）**：「家人辨識」畫面的資料說明與登記同意都寫明「開啟稱名時，名字會以短句送到雲端語音供應商（ChatGPT 方案或 OpenAI API key），可以在設定關掉」。另有一次性說明：核心以 `identity/cloud-naming-notice.v1.json`（只有版本與時間，不含姓名，不加密，0600）記錄「已看過」；登記時勾選同意並保存、或在家人辨識畫面按「我知道了」（`ack_naming`，需要管理 session）才寫入。**沒看過就不稱名**（原因 `notice_unseen`），只說「我在」。ID-01 時已登記、還沒看過說明的家人，打開家人辨識畫面會看到這段與「我知道了」。
+- 「打招呼時稱呼認出的家人」（camera.json 的 `look_to_talk_greet_name`，預設開，George 2026-10-25）：關掉時問候一律用「我在」，而且看著說話時不做辨識（辨識在 ID-02 唯一的用途就是稱名，關了就不取樣）。這個設定是 ID-02 新增的；ID-01 沒有存過稱名設定。決策之後、live 路徑取用之前才關掉時，核心改送「我在」，不補回姓名。
+- 名稱由核心從受管理的人物檔案取出，先過登記用的 `parseFamilyName`，再過 `speakableName`：只允許文字、組合符號、數字與名字裡常見的空白、間隔號、句點、撇號、連字號，並以黑名單拒絕像指令的字（忽略、指示、指令、系統、ignore、prompt…；盡力而為，不是完整防護）。不合格就只說「我在」（14 §6、I11）。客戶端傳來的任意文字不能變成名稱或內容。
+- 短句只有兩種形狀：`greetingSentence(name)` 組成「<名字>，我在」或「我在」，再放進固定的指示（請模型一字不改照念、不加字、不提問、不猜名字、不說看到使用者）。模型仍可能改寫：只看指示不能算通過，驗收看實際逐字稿與播音（14 §6、I12）。
+
+#### 2.4.1 姓名出現在哪些行程（ID-02，2026-10-25）
+
+| 位置 | API key 路徑 | ChatGPT 方案（live）路徑 |
+|---|---|---|
+| 核心（Electron 主程序裡的 `startNous`） | 從 gallery 取名稱、驗證、組句 | 同左，另把組好的整段文字暫存在記憶體（同一互動、3 秒內取用一次） |
+| IPC 回應 → renderer（頁面程式） | **會**：`greeting` op 回傳這一輪的 `instructions`，裡面有「George，我在」；頁面立刻放進 `response.create` 經 WebRTC 資料通道送出，不保存、不記 log | **不會**：IPC 只回 `text: null`；頁面接著 `POST /api/realtime/input` `kind: "greeting"`，內容只有互動 ID |
+| loopback HTTP | 不經過 | 只有互動 ID；核心依 ID 取暫存的短句（綁定那個 live 工作階段），自己經 sideband 送出（頁面文字永遠不是內容） |
+| 語音供應商 | `response.create` 的 instructions | `session.context.append` speakable |
+| renderer 的字幕 | 模型說出的逐字稿（`onAssistantTranscript`）會顯示「Nous：George，我在」——這是使用者本來就會聽到的內容，兩條路徑相同 | 同左 |
+| 交辦的 Codex 請求 | — | **會**：模型念出「George，我在」後，sideband 的逐字稿進入 `LiveCall` 的最近 12 則緩衝；之後的交辦（`server/live-tool-caller.ts` 的 `requestText`）把最近 8 則逐字稿附在送給 Codex 的請求裡，所以名字可能跟著送到 Codex（OpenAI） |
+| 任務標題與保存 | 模型可能把名字寫進交辦的任務標題（`delegate_task` 的 title），任務以 JSON 存在本機資料夾，也會送到執行任務的引擎 | 同左（交辦由 Codex 決定標題） |
+| log／trace | 核心只記決策原因、世代與證據格數；頁面時序（`[看著說話時序]`）只有毫秒。ChatGPT 方案路徑既有的交辦 log 會記交辦內容的前 40 字（`preview`），若使用者或模型在請求裡說了名字就可能出現 | 同左 |
+
+**取捨（API key 路徑）**：要讓姓名完全不經過 renderer，核心必須自己連上那條 WebRTC 通話的控制面（OpenAI Realtime 對 WebRTC 通話另開 server 端 WebSocket 的作法），由核心送 `response.create`。目前 API key 路徑的資料通道只在頁面，核心只代換 SDP，沒有通話 ID，也無法在雲端驗證那條連線；同時兩邊都能送 `response.create`，頁面的「回應中」狀態與插話取消要重新設計。ID-02 選擇**由核心組好整句、只回傳組好的 instructions**：頁面拿不到 person_id、分數或其他家人的名單，但組好的短句會短暫出現在 renderer 記憶體。頁面腳本要拿到名字，必須先真的開一次看著說話的語音工作階段（`greeting` 只接受核心發出、真的連上的互動 ID，見 §2.1.1 威脅面）；它也能從字幕看到同一句話，且生成 UI 不得接觸 preload API（CLAUDE.md 紅線）。要消除這一段，改成核心代送（§11 待辦，需 Mac 實測）。
+
+- `ambient_probe` 的回應不含任何結果（不回 matched／unknown），被拒時不說原因；`ambient_status` 只回可不可以取樣。頁面無法拿它們探測某張臉是否已登記或有沒有登記家人。`greeting` 每個互動 ID 只能決策一次、每秒最多 2 次、每分鐘最多 3 次，只有在核心自己的證據成立、互動 ID 綁定真的連上的工作階段、看過雲端稱名說明時才帶名字。
 
 ### 2.5 身分不作授權依據
 
@@ -157,13 +179,13 @@ spike 的 TypeScript 模組逐項對照 OpenCV 官方實作（opencv/opencv comm
 
 依 spike 數據決定，雲端結果見 [驗證紀錄 §3](../validation/family-id-00-spike-2026-10-24.md#3-雲端量測結果)。雲端只能提供方向，**最終選擇需要 Mac＋AR0144 實測**。
 
-目前的傾向（待 Mac 數據確認）：**YuNet 2023mar（640×640）作為偵測前端**。理由：
+**2026-10-25 定案：YuNet 2023mar（640×640）作為偵測前端**（George 在 Mac 實測 ID-01 後決定：登記與試認順利、手掌停止正常）。理由：
 
 1. SFace 的對齊需要雙眼與兩個嘴角共 5 點。YuNet 直接輸出這 5 點；BlazeFace 只有嘴巴中心，接 SFace 需要另外推估嘴角，多一個未驗證的誤差來源。
 2. 雲端 1280×720 畫格中，臉寬約 60 與 100 px 時 BlazeFace short range 大多偵測不到或框偏大（輸入只有 128×128）；YuNet 兩版與 BlazeFace full range 都能偵測。
 3. BlazeFace 模型卡把身分辨識列為範圍外。
 
-反方理由：BlazeFace 在雲端的單次耗時較低，且已有 tasks-vision 依賴。若 Mac 上 YuNet 拖慢既有感測迴圈或停止手勢，再重新評估（例如 full range 加嘴角推估，或只在 ROI 上跑 YuNet）。
+反方理由：BlazeFace 在雲端的單次耗時較低，且已有 tasks-vision 依賴。ID-02 讓辨識在看著說話時也會跑；若 Mac 上同時運作時拖慢既有感測迴圈或停止手勢（ID-02 驗證紀錄 §5 的量測），再重新評估（例如 full range 加嘴角推估，或只在 ROI 上跑 YuNet）。
 
 ## 7. 與 CLAUDE.md 紅線逐條對照
 
@@ -195,10 +217,15 @@ spike 的 TypeScript 模組逐項對照 OpenCV 官方實作（opencv/opencv comm
 - 登記入口與瀏覽器版（原第 5、6 項）：入口放在 macOS App 選單列「鏡頭與語音設定」裡的「家人辨識…」，多角度樣本起點 5–10 張（ID-01 實測後再調）。瀏覽器版不支援辨識，明示「辨識不可用」，原有對話與看著說話照常。
 - 未成年家人（原第 7 項）：可以登記，由家長（George）在登記時確認同意；規則與成人相同：只用於稱呼、不作授權、可隨時刪除。
 
+2026-10-25（ID-01 在 Mac 實測之後）George 再決定：
+
+- **偵測器定案（原待決第 1 項）：YuNet 2023mar 640**（§6）。MediaPipe Face Detector 不再列為候選，spike 保留量測紀錄。
+- **未校準門檻先稱名**：稱名問候（ID-02）不等門檻校準，先用 ID-01 的起點門檻（`match` 0.5、`margin` 0.08），校準工具與保留樣本留給 ID-03。原本「校準完成前不稱名」的做法改為：稱名不需要 `calibrated`，但所有觀測、`GreetingDecision`、log 與文件都照實標 `calibrated: false`／「門檻未校準」。風險照實保留：可能叫錯名字或認不出來；身分只用於稱呼，叫錯不會放行任何動作（§2.5）。
+- 雲端稱名預設開、設定可關（重申 §9 原第 4 項，ID-02 實作為「打招呼時稱呼認出的家人」）；瀏覽器版不支援辨識，看著說話的問候只說「我在」。
+
 仍待決：
 
-1. 偵測器：在 Mac 實測後選 YuNet（目前傾向）或 MediaPipe full range。實測步驟見驗證紀錄 §8。
-2. SFace 訓練資料風險是否可接受，或要求先換成訓練資料條款清楚的模型。
+1. SFace 訓練資料風險是否可接受，或要求先換成訓練資料條款清楚的模型。
 
 ## 10. ID-01 待辦（已知、不需 George 決定）
 
@@ -212,3 +239,26 @@ spike 的 TypeScript 模組逐項對照 OpenCV 官方實作（opencv/opencv comm
 - [ ] 門檻校準（`CALIBRATED = false`）：需要家人自願的保留樣本與陌生人（ID-03）。
 - [ ] Mac＋AR0144 實測：safeStorage／Keychain 提示、`tmutil isexcluded`、IPC、登記與試認、停止手勢與 CPU、Electron 中的 worker CSP、刪除後重啟（驗證紀錄 §6）。
 - [ ] 每位家人的「停用」（保留但不比對）延到之後；ID-01 只有刪除。
+
+## 11. ID-02：看著說話時同步辨識與稱名問候（2026-10-25）
+
+分支 `claude/family-id-02`（基於含 ID-00、ID-01 的 main）。雲端 fixture 驗證見 [ID-02 驗證紀錄](../validation/family-id-02-2026-10-25.md)。
+
+- **只接既有 `look_to_talk` 路徑**：`SenseController` 每次事件與 tick 後回報 `SenseSnapshot`（在場、面向、距離、鏡頭裝置事件是否 ok、看著說話是否正在累計停留）。`src/sense/identity-ambient.ts` 只在停留期間、在場＋近距離（0.6–1.5 m，距離未知不算）＋面向＋鏡頭 ok 時取樣，沿用 `IdentityClient`（≤4 Hz、同時最多一個推論、推論在 worker）。看著說話的計時完全不讀它：`startTalk` 在原時間點呼叫，辨識冷啟動或慢就照原時間開始，問候只說「我在」。按鈕、語音指令與同意說明後的 `user` 路徑不建立問候物件，沿用 2026-10-23 的規則。
+- **追蹤世代**：頁面端在離開在場、轉開、離開近距離、鏡頭不是 ok、設定關閉與辨識出錯時加一。`startRealtime` 建立互動 ID 並綁定當下的世代；核心的證據也依世代分開，同一世代出現過多張臉或兩位不同的家人就整段不稱名。`PresenceTracker` 的 60 秒離開判定不拿來維持身分。
+- **問候生命週期與辨識分開**：`GreetingOnce` 改為 `pending → deciding → sent／skipped`。語音就緒＋600 ms 後才 `take(route)`，此時才經 IPC 問核心；決策期間使用者開口、打字或收起就是 skipped，回來的內容不送。標成 sent 之後不重送（送出狀態未知也一樣）；live→API key 改路徑共用同一個物件，核心另以「每個互動 ID 一次決策」把關。
+- **核心的 GreetingDecision**（`shared/identity.ts`）：互動 ID、person_id 或 null、追蹤世代、gallery 版本、證據時間、決策時間、原因、`calibrated:false`。檢查 14 §3 的條件：頁面端給 `eligible`（同互動與世代、仍在近距離面向、沒有多張臉、辨識沒出錯、仍啟用）；核心檢查同一世代、沒有混到別人、證據 ≥3 格且跨 ≥500 ms、最新 ≤1 秒、person 仍存在且可比對、gallery 版本未變（刪除或清除都會清掉證據與待取用的短句）、稱名設定仍開、名稱通過 `speakableName`。任一項不符就不帶名字。決策後證據即丟，晚到的推論不能讓之後的互動沿用。
+- **兩條路徑**：見 §2.4.1。API key 路徑由 IPC 回傳組好的 instructions；live 路徑只送互動 ID，核心（`server/live-route.ts` 的 `greeting` 選項 → `server/nous.ts` 的 `liveGreetingSource` → `IdentityService.takeLiveGreeting`，綁定 live 工作階段 ID）取短句送進 sideband，取不到就送「我在」。
+- **互動 ID 由核心發出（獨立審查 2026-10-25 修正）**：頁面開始看著說話時 `POST /api/realtime/start` 帶 `source: "look_to_talk"`，`RealtimeSessions` 發出一次性的 `interaction`（改路徑時沿用）；`call()` 成功時記下它綁定哪個工作階段、何時連上。`IdentityService` 經 `greetingClaims` → `RealtimeSessions.claimGreeting` 換成工作階段，只接受「核心發出、尚未使用、工作階段真的連上而且還在進行、連上後 20 秒內、路徑相符」的 ID（原因 `no_session`）。頁面自己的鍵只用來綁定追蹤世代。
+- **一次性說明**：見 §2.4。沒看過就不稱名（原因 `notice_unseen`）。
+- **開場句改變**：所有看著說話的問候（兩條路徑、瀏覽器版、決策失敗時）都從 2026-10-23 的「我在，有什麼需要幫忙的嗎？」之類的招呼，改成只說「我在」或「George，我在」。
+- **gallery 載入**：`ambient_status` 不載入 gallery、不碰 Keychain（只看檔案在不在）；第一次 `ambient_probe` 才載入。所以有登記家人時，第一次在看著說話中被辨識可能出現 Keychain 提示（之前若已在管理畫面允許過就不會）。
+- **log**：核心只記一行「問候決策（路徑，原因，世代，連續證據 N 格／M ms，最新 K ms 前，門檻未校準）」；取樣不逐筆記。頁面印 `[看著說話時序]` 一行毫秒數到 DevTools console，供 Mac 對照面向→在場→互動啟動→語音就緒→問候決策→首音。
+
+待辦：
+
+- [ ] Mac 實測（ID-02 驗證紀錄 §5）：兩條路徑實際聽到「George，我在」、模型是否加話或猜名、先開口取消、換人、多人、時序與同時運作的 CPU／停止手勢。**若模型會加話、猜名或重複，該路徑不得標為通過**，需改用確定文字的 TTS（14 §6）。
+- [ ] API key 路徑改由核心代送 `response.create`（核心連上那條 WebRTC 通話的 server 端控制連線），讓組好的短句也不經過 renderer（§2.4.1 取捨；獨立審查 #1(c)，不在 ID-02 做）。
+- [x] 登記時預覽「會念成：『X，我在』」，不能念的名稱（像句子、指令、超過 3 段）在登記當下就提示（獨立審查 2026-10-25）。
+- [ ] 交辦請求附帶的逐字稿與任務標題可能含名字（§2.4.1）：是否在交辦前遮掉問候那一則，留待 George 決定。
+- [ ] 門檻校準與保留樣本（ID-03）。

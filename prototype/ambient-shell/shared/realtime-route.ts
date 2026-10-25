@@ -137,6 +137,11 @@ export type StartDecision =
       billing_line: string;
       /** auto 改用 API key 時要說出並顯示的計費通知。 */
       notice: string | null;
+      /**
+       * 看著說話開始的互動 ID（ID-02）：只有 source 為 look_to_talk 時由核心發出，同一次互動改路徑時沿用。
+       * 問候決策只接受核心發出、尚未使用、工作階段真的連上 20 秒內的 ID（RealtimeSessions.claimGreeting）。
+       */
+      interaction?: string | null;
     }
   | { ok: false; message: string; reasons: Partial<Record<RouteId, UnavailableReason>> };
 

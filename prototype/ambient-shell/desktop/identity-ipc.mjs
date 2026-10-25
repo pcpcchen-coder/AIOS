@@ -5,13 +5,14 @@
 //   3. 選單列點擊時間窗：只有使用者在選單列點「家人辨識…」後 10 秒內，open_session 才算使用者發起（一次有效）。
 
 /** 與 shared/identity.ts 的 IDENTITY_OPS 相同（測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all"];
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming"];
 
 export const MENU_CLICK_WINDOW_MS = 10_000;
 const FEATURE_DIM = 128;
 const MAX_SAMPLES = 10;
 const SESSION = /^ids_[0-9a-f]{32}$/;
 const PERSON = /^fam_[0-9a-f]{24}$/;
+const INTERACTION = /^int_[0-9a-f]{16}$/;
 
 /**
  * 發送者檢查。event 為 ipcMain.handle 的 IpcMainInvokeEvent；win 為主視窗；coreUrl 為本機核心網址（http://localhost:埠）。
@@ -57,13 +58,35 @@ export function validateIdentityRequest(req) {
   if (!req || typeof req !== "object" || Array.isArray(req)) return bad("request must be an object");
   const op = req.op;
   if (!IDENTITY_OPS.includes(op)) return bad("unknown op");
-  if (op === "open_session") return { ok: true, request: { op } };
+  if (op === "open_session" || op === "ambient_status") return { ok: true, request: { op } };
+  // ID-02：看著說話時的同步辨識與問候決策不需要管理 session；核心另外依設定、鏡頭與模型決定接不接受。
+  if (op === "ambient_probe") {
+    const m = model(req.model);
+    if (!m) return bad("model is required");
+    if (!isInt(req.track, 0, Number.MAX_SAFE_INTEGER) || !isInt(req.face_count, 0, 64)) return bad("track and face_count must be integers");
+    if (!isShortString(req.quality, 32)) return bad("quality is required");
+    const request = { op, track: req.track, face_count: req.face_count, quality: req.quality, model: m };
+    if (req.feature !== undefined) {
+      const f = feature(req.feature);
+      if (!f) return bad(`feature must be ${FEATURE_DIM} finite numbers`);
+      request.feature = f;
+    }
+    return { ok: true, request };
+  }
+  if (op === "greeting") {
+    if (!(typeof req.interaction === "string" && INTERACTION.test(req.interaction))) return bad("interaction is required");
+    if (!isInt(req.track, 0, Number.MAX_SAFE_INTEGER)) return bad("track must be an integer");
+    if (typeof req.eligible !== "boolean") return bad("eligible must be a boolean");
+    if (req.route !== "api_key" && req.route !== "live") return bad("route must be api_key or live");
+    return { ok: true, request: { op, interaction: req.interaction, track: req.track, eligible: req.eligible, route: req.route } };
+  }
   if (!(typeof req.session === "string" && SESSION.test(req.session))) return bad("session is required");
   const session = req.session;
   switch (op) {
     case "close_session":
     case "list":
     case "clear_all":
+    case "ack_naming":
       return { ok: true, request: { op, session } };
     case "delete":
       if (!(typeof req.person_id === "string" && PERSON.test(req.person_id))) return bad("person_id is required");

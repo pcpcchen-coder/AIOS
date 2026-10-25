@@ -221,10 +221,30 @@ export interface RealtimeSessionsOptions {
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 
+/** 誰開始了這次即時語音（頁面報的；只決定要不要發互動 ID，不是授權）。 */
+export type RealtimeStartSource = "look_to_talk" | "user";
+
+/** 互動 ID 在工作階段真的連上之後多久內可以拿來做問候決策（ID-02）。 */
+export const GREETING_CLAIM_MS = 20_000;
+
+/**
+ * 核心發出的互動 ID（ID-02，ADR-0001 §2.4.1）：問候決策只接受這裡登記過、還沒用過、工作階段真的連上（api_key：SDP 已交換；
+ * live：sideband 已接上）而且還在進行、連上後 GREETING_CLAIM_MS 內的 ID。頁面自己產生的 ID 一律不給名字。
+ */
+interface Interaction {
+  id: string;
+  issuedAt: number;
+  /** 真的連上的工作階段；null＝還沒連上。 */
+  session: { id: string; route: RouteId; at: number } | null;
+  used: boolean;
+}
+
 interface Decision {
   id: string;
   owner: string;
   clientId: string | null;
+  /** 看著說話開始的互動 ID（核心發出）；改路徑時交給新的決定。 */
+  interaction: string | null;
   plan: Extract<StartPlan, { kind: "start" }>;
   route: RouteId;
   at: number;
@@ -256,6 +276,7 @@ export function effectiveApproval(state: ApprovalSnapshot & { openUntil: number 
 
 export class RealtimeSessions {
   private readonly decisions = new Map<string, Decision>();
+  private readonly interactions = new Map<string, Interaction>();
   /** 一個核心只有一個 live 工作階段。 */
   private live: LiveSession | null = null;
   /** API key 路徑的工作階段只記下來給畫面顯示（控制面在頁面的資料通道）。 */
@@ -317,7 +338,7 @@ export class RealtimeSessions {
    * POST /api/realtime/start。偏好只在這裡讀一次；之後改偏好只影響下一次開始。
    * clientId：開始的頁面的 SSE 串流；live 路徑一定要有（工具呼叫只送到這條串流）。
    */
-  start(clientId: string | null): StartDecision {
+  start(clientId: string | null, source: RealtimeStartSource = "user"): StartDecision {
     this.sweep();
     if (this.live) {
       return { ok: false, message: `即時語音無法開始：${unavailableText("session_busy")}`, reasons: { live: "session_busy" } };
@@ -327,16 +348,46 @@ export class RealtimeSessions {
     if (plan.route === "live" && !clientId) {
       return { ok: false, message: "即時語音無法開始：頁面沒有連上本機核心的事件串流，請重新整理後再試。", reasons: {} };
     }
-    const decision = this.decide(plan, plan.route, clientId);
+    const interaction = source === "look_to_talk" ? this.issueInteraction() : null;
+    const decision = this.decide(plan, plan.route, clientId, interaction);
     const model = this.options.routes[plan.route]!.describe().model;
-    return { ok: true, session_id: decision.id, owner: decision.owner, route: plan.route, model, billing_line: billingLine(plan.route, model), notice: plan.notice };
+    return { ok: true, session_id: decision.id, owner: decision.owner, route: plan.route, model, billing_line: billingLine(plan.route, model), notice: plan.notice, interaction };
   }
 
-  private decide(plan: Extract<StartPlan, { kind: "start" }>, route: RouteId, clientId: string | null): Decision {
+  private issueInteraction(): string {
+    const id = `int_${randomBytes(8).toString("hex")}`;
+    this.interactions.set(id, { id, issuedAt: this.now(), session: null, used: false });
+    return id;
+  }
+
+  /** 工作階段真的連上：記下互動 ID 屬於哪個工作階段、何時連上。 */
+  private connected(decision: Decision): void {
+    const it = decision.interaction ? this.interactions.get(decision.interaction) : undefined;
+    if (it && !it.used) it.session = { id: decision.id, route: decision.route, at: this.now() };
+  }
+
+  /**
+   * IdentityService 的問候決策呼叫（ID-02）：這個互動 ID 是核心發出、還沒用過、工作階段真的連上而且還在進行、
+   * 連上後 GREETING_CLAIM_MS 內，才回傳它屬於哪個工作階段並標記已用；否則 null（不給名字）。一個 ID 只能成功一次。
+   */
+  claimGreeting(id: string): { route: RouteId; session_id: string } | null {
+    this.sweep();
+    const it = this.interactions.get(id);
+    if (!it || it.used || !it.session) return null;
+    const s = it.session;
+    if (this.now() - s.at > GREETING_CLAIM_MS) return null;
+    const active = s.route === "api_key" ? this.ga?.id === s.id : this.live?.id === s.id && !!this.live.call && !this.live.closed;
+    if (!active) return null;
+    it.used = true;
+    return { route: s.route, session_id: s.id };
+  }
+
+  private decide(plan: Extract<StartPlan, { kind: "start" }>, route: RouteId, clientId: string | null, interaction: string | null = null): Decision {
     const decision: Decision = {
       id: `rt_${randomUUID().replaceAll("-", "")}`,
       owner: `own_${randomBytes(24).toString("base64url")}`,
       clientId,
+      interaction,
       plan,
       route,
       at: this.now(),
@@ -348,6 +399,7 @@ export class RealtimeSessions {
   private sweep(): void {
     const ttl = this.options.pendingTtlMs ?? 60_000;
     for (const [id, d] of this.decisions) if (this.now() - d.at > ttl) this.decisions.delete(id);
+    for (const [id, it] of this.interactions) if (this.now() - it.issuedAt > ttl + GREETING_CLAIM_MS) this.interactions.delete(id);
   }
 
   /**
@@ -364,6 +416,7 @@ export class RealtimeSessions {
     if (decision.route === "api_key") {
       const call = await route.connect(offerSdp, this.contextFor(null, decision.id));
       this.ga = { id: decision.id, owner: decision.owner, clientId: decision.clientId };
+      this.connected(decision);
       return { sdp: call.answerSdp, model: call.model, route: "api_key", session_id: decision.id };
     }
     if (this.live) throw new SessionError(409, unavailableText("session_busy"));
@@ -385,13 +438,14 @@ export class RealtimeSessions {
         throw new SessionError(409, "即時語音在連線期間就結束了（頁面離開或控制連線中斷），這次沒有開始。");
       }
       session.call = call;
+      this.connected(decision);
       return { sdp: call.answerSdp, model: call.model, route: "live", session_id: decision.id };
     } catch (err) {
       this.finish(session);
       if (!(err instanceof RouteStartError)) throw err;
       const fallback = planFallback(decision.plan, err);
       if (!fallback || !this.options.routes.api_key) throw err;
-      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId);
+      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId, decision.interaction);
       const model = this.options.routes.api_key.describe().model;
       this.options.log?.(`即時語音：ChatGPT 方案路徑開始失敗（${err.reason}），改用 API key（這次依用量計費）`);
       throw new FallbackRequired({

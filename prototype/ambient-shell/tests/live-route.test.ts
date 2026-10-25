@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LiveCoreEvent } from "../shared/realtime-route.ts";
-import { GREETING_MARKER, LIVE_GREETING_TEXT } from "../shared/sense.ts";
+import { GREETING_MARKER, greetingSentence, LIVE_GREETING_TEXT, liveGreetingText } from "../shared/sense.ts";
 import { CodexAuth } from "../server/codex-auth.ts";
 import { ANSWER_BOUND_MS, callIdFrom, LIVE_CALL_URL, LIVE_SIDEBAND_URL, LIVE_TIMEOUTS_MS, LiveRoute, SIDEBAND_ATTEMPTS, type DelegationRunner } from "../server/live-route.ts";
 import { RouteStartError, type ApprovalSnapshot, type SessionContext } from "../server/realtime-routes.ts";
@@ -27,7 +27,7 @@ function answer(headers: Record<string, string> = { Location: "/v1/realtime/call
   return new Response("v=0 live-answer", { status: 201, headers });
 }
 
-async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot } = {}) {
+async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string) => string | null } = {}) {
   sideband = await startFakeSideband();
   const dir = mkdtempSync(join(tmpdir(), "nous-live-"));
   const creds = writeCredentials(dir);
@@ -61,6 +61,7 @@ async function setup(options: { model?: string | null; handler?: (req: Recorded)
     fetch,
     urls: { call: "https://chatgpt.fixture/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas", sideband: (id) => sideband!.url(id) },
     sleep: async () => {},
+    ...(options.greeting ? { greeting: options.greeting } : {}),
   });
   return { route, ctx, events, requests, delegations, creds, setOutstanding: (n: number) => (outstanding = n) };
 }
@@ -332,6 +333,31 @@ describe("LiveRoute sideband", () => {
     expect(append).toMatchObject({ channel: "speakable", content: [{ type: "input_text", text: LIVE_GREETING_TEXT }] });
     expect(LIVE_GREETING_TEXT.startsWith(GREETING_MARKER)).toBe(true);
     expect(JSON.stringify(conn.received)).not.toContain("密碼");
+  });
+
+  it("ID-02：the page's greeting text is only an interaction ID handed to the core's decision; the core's composed sentence is sent", async () => {
+    const asked: string[] = [];
+    const named = liveGreetingText(greetingSentence("George"));
+    const t = await setup({ greeting: (id) => (asked.push(id), id === "int_0123456789abcdef" ? named : null) });
+    const call = await t.route.connect("v=0", t.ctx);
+    const conn = await sideband!.next();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    const append = await conn.waitFor((e) => e.type === "session.context.append");
+    expect(append).toMatchObject({ channel: "speakable", content: [{ type: "input_text", text: named }] });
+    expect(named).toContain("「George，我在」");
+    expect(asked).toEqual(["int_0123456789abcdef"]);
+    await call.close("ended");
+  });
+
+  it("ID-02：no decision from the core (browser version, expired, unknown ID) → 「我在」; page text never becomes content", async () => {
+    const other = await setup({ greeting: () => null });
+    const call2 = await other.route.connect("v=0", other.ctx);
+    const conn2 = await sideband!.next();
+    call2.control!.input("greeting", "George，我在（頁面亂送的文字，fixture）");
+    const append2 = await conn2.waitFor((e) => e.type === "session.context.append");
+    expect(append2).toMatchObject({ content: [{ type: "input_text", text: LIVE_GREETING_TEXT }] });
+    expect(JSON.stringify(conn2.received)).not.toContain("George");
+    await call2.close("ended");
   });
 
   it("審查修正：greeted is only set after a send on an open sideband, so a greeting sent while it is not open is not lost, and never sent twice", async () => {

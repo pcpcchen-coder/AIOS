@@ -7,6 +7,7 @@
 import {
   FAMILY_MAX,
   parseFamilyName,
+  speakableName,
   type FaceModelVersion,
   type FamilyMember,
   type IdentityObservation,
@@ -14,6 +15,7 @@ import {
   type IdentityManageStatus,
   type IdentityResponse,
 } from "../shared/identity.ts";
+import { greetingSentence } from "../shared/sense.ts";
 import { EnrollmentCollector, ENROLL_TARGET } from "./family-enroll.ts";
 import { QUALITY_LABEL } from "./sense/face/quality.ts";
 import { IdentityClient, type ClientFrame, type ClientState, type FrameSource, type WorkerLike } from "./sense/identity-client.ts";
@@ -35,6 +37,13 @@ export interface FamilyViewDeps {
 export const FAMILY_EXPLANATION =
   "家人辨識只在這台 Mac 上運作：只保存加密的臉部特徵（不存照片、不上傳），只用來稱呼你，不作為解鎖、付款或任何授權的依據。" +
   "每位家人都要本人在場並同意；未成年家人由家長確認。隨時可以刪除。";
+/**
+ * 雲端稱名的揭露（ID-02）：登記同意與一次性說明都用這段。看過（登記同意或按「我知道了」）之前，核心不稱名。
+ */
+export const CLOUD_NAMING_NOTICE =
+  "開啟「打招呼時稱呼認出的家人」時，看著說話認出家人後，名字會以一句短句（例如「George，我在」）送到雲端語音供應商" +
+  "（ChatGPT 方案或 OpenAI API key，看你用哪一條即時語音路徑）；對話中說出的話也會照常送到那裡。臉部影像與特徵不會送出。" +
+  "可以在選單列「鏡頭與語音設定」關掉，關掉後只說「我在」。";
 export const FAMILY_BACKUP_NOTE =
   "刪除後新的資料無法還原；但在此之前已存在的 Time Machine 備份或 APFS 本機快照，可能仍保有舊的加密檔（這台 Mac 的應用程式金鑰不會輪換，舊檔理論上仍可解開）。";
 export const UNCALIBRATED_LABEL = "門檻未校準：結果只供參考，可能認錯或認不出來";
@@ -62,6 +71,15 @@ function button(label: string, onClick: () => void, variant = "", disabled = fal
   b.disabled = disabled;
   b.addEventListener("click", onClick);
   return b;
+}
+
+/**
+ * 登記時預覽問候會怎麼念（只在這個畫面顯示使用者自己打的名稱，不送出）。核心組句時用同一組規則再驗一次（權威在核心）。
+ */
+export function namePreview(draft: string): string {
+  if (!parseFamilyName(draft).ok) return "";
+  const name = speakableName(draft);
+  return name ? `看著說話認出時會念成：「${greetingSentence(name)}」` : "這個名稱不會被念出來：認出時只說「我在」（像句子、指令或含不能念的符號）。";
 }
 
 /** 核心給的觀測 → 畫面上的一句話（不含分數）。 */
@@ -378,7 +396,7 @@ export class FamilyView {
     if (phase.kind === "consent") return [...messages, this.consentStep(phase)];
     if (phase.kind === "capture") return [...messages, this.captureStep(phase)];
     if (phase.kind === "submitting") return [h("p", { class: "muted" }, `正在保存「${phase.name}」…（請在系統對話框確認）`)];
-    return [...messages, this.statusLines(), this.list(), this.actions(), this.trying ? this.tryPanel() : null, this.explanation()];
+    return [...messages, this.statusLines(), this.namingNotice(), this.list(), this.actions(), this.trying ? this.tryPanel() : null, this.explanation()];
   }
 
   private statusLines(): HTMLElement | null {
@@ -390,6 +408,26 @@ export class FamilyView {
     if (st.needs_reenroll > 0) lines.push(h("p", { class: "notice" }, `${st.needs_reenroll} 位家人登記時的模型版本與目前不同，不會被辨識；請刪除後重新登記。`));
     if (st.damaged > 0) lines.push(h("p", { class: "notice" }, `${st.damaged} 位家人的特徵資料不完整（壞資料），不會被辨識；請刪除後重新登記。`));
     return lines.length > 0 ? h("div", { class: "family-status" }, ...lines) : null;
+  }
+
+  /** 雲端稱名的一次性說明：沒看過時顯示「我知道了」；看過之後只在資料說明裡保留同一段文字。 */
+  private namingNotice(): HTMLElement | null {
+    const st = this.status;
+    if (!st || st.naming_notice_seen) return null;
+    return h(
+      "div",
+      { class: "family-status" },
+      h("p", { class: "notice" }, CLOUD_NAMING_NOTICE),
+      h("p", { class: "muted small" }, "按「我知道了」之前，即使認出家人也只說「我在」。"),
+      h("div", { class: "actions" }, button("我知道了", () => void this.ackNaming(), "btn--primary", this.busy)),
+    );
+  }
+
+  private async ackNaming(): Promise<void> {
+    if (!this.session || this.busy) return;
+    const res = await this.call({ op: "ack_naming", session: this.session });
+    if (res && !res.ok && this.phase.kind !== "unavailable") this.error = res.message;
+    this.render();
   }
 
   private list(): HTMLElement {
@@ -452,12 +490,15 @@ export class FamilyView {
     input.value = phase.draft;
     const minor = h("input", { type: "checkbox" });
     minor.checked = phase.minor;
+    const preview = h("p", { class: "muted small", "aria-live": "polite" }, namePreview(phase.draft));
+    input.addEventListener("input", () => (preview.textContent = namePreview(input.value)));
     return h(
       "div",
       { class: "family-step" },
       h("h3", {}, "新增家人：名稱"),
       h("p", { class: "muted small" }, "Nous 會用這個名稱稱呼他（1–16 個字，不能有換行或 < > { } [ ] ` \" \\）。"),
       input,
+      preview,
       h("label", { class: "family-check" }, minor, " 這位家人未成年（需要家長確認同意）"),
       phase.error ? h("p", { class: "error-text" }, phase.error) : null,
       h("div", { class: "actions" }, button("下一步", () => this.submitName(input.value, minor.checked), "btn--primary"), button("取消", () => this.backToList(), "btn--ghost")),
@@ -482,6 +523,8 @@ export class FamilyView {
       { class: "family-step" },
       h("h3", {}, `新增家人：${phase.name}`),
       h("p", {}, FAMILY_EXPLANATION),
+      h("p", {}, CLOUD_NAMING_NOTICE),
+      h("p", { class: "muted small" }, namePreview(phase.name)),
       h("p", { class: "muted small" }, FAMILY_BACKUP_NOTE),
       h("label", { class: "family-check" }, consent, ` ${phase.name} 本人在場，已聽過說明並同意`),
       phase.minor ? h("label", { class: "family-check" }, guardian, " 我是家長，確認同意登記這位未成年家人") : null,
@@ -503,6 +546,12 @@ export class FamilyView {
   }
 
   private explanation(): HTMLElement {
-    return h("div", { class: "family-explain" }, h("p", { class: "muted small" }, FAMILY_EXPLANATION), h("p", { class: "muted small" }, FAMILY_BACKUP_NOTE));
+    return h(
+      "div",
+      { class: "family-explain" },
+      h("p", { class: "muted small" }, FAMILY_EXPLANATION),
+      h("p", { class: "muted small" }, CLOUD_NAMING_NOTICE),
+      h("p", { class: "muted small" }, FAMILY_BACKUP_NOTE),
+    );
   }
 }

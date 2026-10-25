@@ -1,5 +1,4 @@
 import { parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
-import { LIVE_GREETING_TEXT } from "../shared/sense.ts";
 import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimeCallbacks, RealtimeDeps, RealtimePhase } from "./realtime.ts";
 import type { GreetingOnce, RealtimeSession } from "./realtime-session.ts";
@@ -78,7 +77,7 @@ export class LiveVoice implements RealtimeSession {
   /** 確認卡狀態的回報要先於工具結果到達核心。 */
   private approvalSync: Promise<void> = Promise.resolve();
   private idleMs: number;
-  /** 看著說話開始的工作階段：進入聆聽後請模型先說一句招呼（核心用 session.context.append speakable，同 OpenClaw triggerGreeting）。 */
+  /** 看著說話開始的工作階段：進入聆聽後請核心送一句招呼（核心組句，用 session.context.append speakable，同 OpenClaw triggerGreeting）。 */
   private readonly greeting: GreetingOnce | null;
   /** 進入聆聽之後等 GREETING_SETTLE_MS 才送招呼；使用者逐字稿（含未完成的）、打字、收起都會取消。 */
   private greetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -303,9 +302,17 @@ export class LiveVoice implements RealtimeSession {
     }, GREETING_SETTLE_MS);
   }
 
-  /** 等待結束：使用者還沒開口、設定還開著，就請核心送一句可念的招呼（核心只送固定的 LIVE_GREETING_TEXT）。 */
+  /**
+   * 等待結束：使用者還沒開口、設定還開著，就請核心送一句可念的招呼。頁面只送互動 ID：短句（「<名字>，我在」或「我在」）
+   * 由核心依問候決策組成並直接送進 sideband，名字不經過頁面。決策期間開口、打字或收起都會取消。
+   */
   private greetIfPending(): void {
-    if (this.greeting?.take()) void this.deps.input("greeting", LIVE_GREETING_TEXT).catch(() => undefined);
+    if (!this.greeting) return;
+    const generation = this.generation;
+    void this.greeting.take("live").then((interaction) => {
+      if (interaction === null || generation !== this.generation || !this.capturing) return;
+      void this.deps.input("greeting", interaction).catch(() => undefined);
+    });
   }
 
   /** 逐字稿：資料通道或核心，哪個先到用哪個，依 item_id（沒有時依來源配對）去重。 */

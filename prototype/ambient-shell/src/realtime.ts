@@ -306,11 +306,17 @@ export class RealtimeVoice {
     }, GREETING_SETTLE_MS);
   }
 
-  /** 等待結束：看著說話開始、使用者還沒開口、設定還開著，就請模型說一句招呼。 */
+  /**
+   * 等待結束：看著說話開始、使用者還沒開口、設定還開著，就向核心要這一輪的指示（只含「<名字>，我在」或「我在」），
+   * 請模型照念。決策期間開口、打字或收起都會取消；回來時工作階段已換掉或正在回應就不送（也不重送）。
+   */
   private greetIfPending(): void {
     if (!this.greeting || this.responding) return;
-    const instructions = this.greeting.take();
-    if (instructions) this.requestResponse({ instructions });
+    const generation = this.generation;
+    void this.greeting.take("api_key").then((instructions) => {
+      if (!instructions || generation !== this.generation || this.responding) return;
+      this.requestResponse({ instructions });
+    });
   }
 
   private handle(event: ServerEvent): void {

@@ -48,7 +48,8 @@ export const api = {
   chatgptLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/chatgpt/logout", {}),
   chatgptWelcomeAck: () => call<SettingsView>("POST", "/api/auth/chatgpt/welcome-ack", {}),
   /** 即時語音：開麥克風前先決定路徑（client_id：這個頁面的 SSE 串流）。 */
-  realtimeStart: (clientId: string | null) => call<StartDecision>("POST", "/api/realtime/start", clientId ? { client_id: clientId } : {}),
+  realtimeStart: (clientId: string | null, source: "look_to_talk" | "user" = "user") =>
+    call<StartDecision>("POST", "/api/realtime/start", { ...(clientId ? { client_id: clientId } : {}), ...(source === "look_to_talk" ? { source } : {}) }),
   /**
    * 即時語音：把 WebRTC SDP offer 交給本機核心，由它代為建立連線（API key 或 ChatGPT 方案）。
    * 沒有 ticket 是原本的 API key 呼叫。核心提議改路徑（409 ＋ fallback）時丟 FallbackOfferError。

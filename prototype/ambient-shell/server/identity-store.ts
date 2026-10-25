@@ -27,6 +27,11 @@ import { isValidFeature, type FaceModelVersion } from "../shared/identity.ts";
 //   會留在 V8 heap 直到被回收，無法主動清零；能清零的 Buffer 都已清零。
 
 export const GALLERY_FILE = "gallery.v1.json";
+/**
+ * 雲端稱名說明的已讀紀錄（ID-02）：只有時間與版本，不含姓名或特徵，所以不加密；放在同一個 0700 資料夾。
+ * 不讀 Keychain，問候決策每次都能檢查。
+ */
+export const NAMING_NOTICE_FILE = "cloud-naming-notice.v1.json";
 const FORMAT = "nous.identity.gallery";
 const CIPHER = "aes-256-gcm";
 const TMP_PREFIX = `${GALLERY_FILE}.tmp-`;
@@ -169,6 +174,24 @@ export class GalleryStore {
 
   exists(): boolean {
     return existsSync(this.path);
+  }
+
+  /** 已看過雲端稱名的說明（檔案存在且格式正確）。 */
+  namingNoticeSeen(): boolean {
+    try {
+      const data = JSON.parse(readFileSync(join(this.options.dir, NAMING_NOTICE_FILE), "utf8")) as { schema_version?: unknown; seen_at?: unknown };
+      return data.schema_version === 1 && typeof data.seen_at === "string";
+    } catch {
+      return false;
+    }
+  }
+
+  /** 記錄已看過（管理畫面「我知道了」或登記時的同意）。 */
+  markNamingNoticeSeen(at: string): void {
+    this.prepare();
+    const file = join(this.options.dir, NAMING_NOTICE_FILE);
+    writeFileSync(file, `${JSON.stringify({ schema_version: 1, seen_at: at })}\n`, { mode: 0o600 });
+    chmodSync(file, 0o600);
   }
 
   /** 磁碟上檔頭的 gallery_version（不解密）；沒有檔案是 null，讀不懂是 -1。寫入前用來確認沒有被別的程序改過。 */

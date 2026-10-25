@@ -5,7 +5,7 @@ import { ApiError, api, newRequestId, streamChat, subscribeEvents, type HomeCont
 import { ConversationSession } from "./conversation.ts";
 import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf } from "./sense/controller.ts";
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
-import { DEFAULT_CAMERA_PREFS, LOOK_TO_TALK_GREETING, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
+import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
 import { formatSeconds } from "../shared/prefs.ts";
 import { DEFAULT_VOICE_PREFS, idleTimeoutsMs, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import {
@@ -19,7 +19,7 @@ import {
   type RealtimePhase,
 } from "./realtime.ts";
 import { browserWatchLevel, LiveVoice } from "./live-voice.ts";
-import { greetingFor, idleSession, openRealtime, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
+import { greetingFor, idleSession, newInteractionId, openRealtime, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
 import type { RealtimeServerEvent } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
@@ -29,7 +29,9 @@ import { homeControlLine, homeStatusLine } from "../shared/home.ts";
 import { classify, settingsReply } from "./intent.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { FamilyView } from "./family-view.ts";
-import type { WorkerLike } from "./sense/identity-client.ts";
+import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
+import { AmbientIdentity } from "./sense/identity-ambient.ts";
+import { LookTimeline } from "./look-timeline.ts";
 import type { IdentityRequest, IdentityResponse } from "../shared/identity.ts";
 import faceRuntime from "../shared/face-runtime.json" with { type: "json" };
 import { evaluateSurface } from "./presentation-policy.ts";
@@ -192,6 +194,7 @@ const realtimeCallbacks: RealtimeCallbacks = {
   onApprovalResolved: closeApproval,
   onToolActivity: (text) => showSubtitle(text),
   onClosed: (reason) => {
+    ambient.endInteraction();
     endRealtimeTicket();
     sense.conversationEnded();
     showSubtitle(reason);
@@ -224,6 +227,7 @@ function endRealtimeTicket(): void {
 }
 
 function stopRealtime(): void {
+  ambient.endInteraction();
   realtimeStart?.abort();
   realtimeStart = null;
   realtimeStarting = false;
@@ -326,6 +330,8 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
   if (value.camera && !value.camera.active) cameraOffPending = false; // 伺服器已保存「關掉」
   if (value.camera && wasActive !== undefined && value.camera.active !== wasActive) cameraFailed = false;
   syncCamera();
+  // 設定或家人辨識狀態改變：看著說話時的同步辨識重新向核心確認（不中斷正在進行的取樣）。
+  ambient.refresh();
 }
 
 function chatGPTAvailable(): boolean {
@@ -578,6 +584,34 @@ function closePreview(): void {
 
 sensorIndicator.addEventListener("click", () => (previewRequestId ? closePreview() : openPreview(userRequest())));
 
+/** 家人辨識的推論 worker（ID-01 畫面與 ID-02 看著說話共用同一個檔案；各自建立、各自結束）。 */
+function createIdentityWorker(): WorkerLike {
+  return new Worker(new URL("./sense/identity-worker.ts", import.meta.url), { type: "module" }) as unknown as WorkerLike;
+}
+
+/**
+ * 看著說話時同步辨識（docs/14 ID-02）：只有 macOS App、三個設定（看著說話、打招呼、稱名）都開、settings.identity 可用而且
+ * 沒有限制、家人辨識畫面沒開時才啟用。只在面向停留期間與問候決策前取樣；不延長看著說話的秒數。
+ */
+function ambientEnabled(): boolean {
+  const cam = settings?.camera;
+  const id = settings?.identity;
+  return !!window.nousDesktop?.identity && !!cam?.enabled && cam.active && cam.look_to_talk && cam.look_to_talk_greet && cam.look_to_talk_greet_name
+    && !!id?.available && !id.limited_reason && !blocksAutoTalk(shell.surface);
+}
+
+/** 看著說話問候的時序（只有相對毫秒，印到 DevTools console；Mac 實測用）。 */
+const lookTimeline = new LookTimeline(() => performance.now(), (line) => console.info(line));
+
+const ambient = new AmbientIdentity({
+  bridge: window.nousDesktop?.identity ? { identity: (request) => window.nousDesktop!.identity!(request) } : null,
+  enabled: ambientEnabled,
+  createSampler: (onFrame, onState) =>
+    new IdentityClient({ source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) }, createWorker: createIdentityWorker, onFrame, onState }),
+  model: faceRuntime.model_version,
+  now: () => performance.now(),
+});
+
 const sense = new SenseController({
   now: () => performance.now(),
   isTalking: () => realtime.on || conversation.current !== "off",
@@ -586,6 +620,8 @@ const sense = new SenseController({
   prefs: () => settings?.camera ?? DEFAULT_CAMERA_PREFS,
   // 看著說話開始的對話：連上後依「看著說話時先打招呼」請模型先打一次招呼。
   startTalk: () => startRealtime("look_to_talk"),
+  // 同步辨識只讀感知狀態，決定取樣與追蹤世代；看著說話的計時不看它。
+  onSense: (snapshot) => ambient.update(snapshot),
   interruptSpeech: () => {
     if (realtime.current === "speaking") realtime.interrupt();
     else if (conversation.current === "speaking") conversation.interrupt();
@@ -607,8 +643,14 @@ const sense = new SenseController({
     document.body.dataset.brainZoom = String(factor);
     brain.setProximityZoom(factor);
   },
-  setPresence: (present) => (document.body.dataset.present = present ? "yes" : "no"),
-  setFacing: (facing) => (document.body.dataset.facing = facing ? "yes" : "no"),
+  setPresence: (present) => {
+    document.body.dataset.present = present ? "yes" : "no";
+    if (present) lookTimeline.mark("present");
+  },
+  setFacing: (facing) => {
+    document.body.dataset.facing = facing ? "yes" : "no";
+    if (facing) lookTimeline.mark("facing");
+  },
   pointTo: (zone) => {
     pointedZone = zone;
     applyPointing();
@@ -633,7 +675,7 @@ setInterval(() => sense.tick(), 200);
 const familyView = new FamilyView({
   bridge: window.nousDesktop?.identity ? { identity: (request) => window.nousDesktop!.identity!(request) } : null,
   source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) },
-  createWorker: () => new Worker(new URL("./sense/identity-worker.ts", import.meta.url), { type: "module" }) as unknown as WorkerLike,
+  createWorker: createIdentityWorker,
   model: faceRuntime.model_version,
   dismiss: () => dispatch({ type: "dismiss" }),
 });
@@ -738,13 +780,35 @@ function startRealtime(source: RealtimeStartSource): void {
   const start = new AbortController();
   realtimeStart = start;
   // 一次開始一個招呼：改路徑時兩個工作階段共用，所以計費通知之後照樣打招呼、但整次最多一次。
-  const greeting = greetingFor(source, () => (settings?.camera ?? DEFAULT_CAMERA_PREFS).look_to_talk_greet, LOOK_TO_TALK_GREETING);
+  // ID-02：看著說話開始的互動綁定當下的追蹤世代（頁面的鍵 interaction）；核心在 /api/realtime/start 另外發出互動 ID
+  // （coreInteraction），問候決策只認核心發出、工作階段真的連上的那一個。送出前由核心決定稱名或只說「我在」（只有 API key
+  // 路徑的 instructions 會帶著組好的短句經過這裡）。同意說明延後的不會走到這裡（上面已 return）。
+  const interaction = newInteractionId();
+  let coreInteraction: string | null = null;
+  const greeting = greetingFor(source, () => (settings?.camera ?? DEFAULT_CAMERA_PREFS).look_to_talk_greet, {
+    interaction,
+    decide: async (route) => {
+      const content = await ambient.decide(interaction, route, coreInteraction);
+      lookTimeline.mark("decided");
+      return content;
+    },
+    settled: () => ambient.endInteraction(interaction),
+  });
+  if (greeting) {
+    ambient.beginInteraction(interaction);
+    lookTimeline.mark("start");
+  }
   // 路徑在開麥克風前決定；auto 改用 API key 時先說出計費通知。
   void openRealtime({
-    start: () => api.realtimeStart(sseClientId),
+    start: async () => {
+      const decision = await api.realtimeStart(sseClientId, source);
+      coreInteraction = decision.ok ? (decision.interaction ?? null) : null;
+      return decision;
+    },
     makeSession: (decision) => makeRealtimeSession(decision, greeting),
     announce: announceRealtime,
     refused: (message) => {
+      ambient.endInteraction(interaction);
       showSubtitle(message);
       dispatch({ type: "input.open" });
       showCommandError(message);
@@ -756,6 +820,7 @@ function startRealtime(source: RealtimeStartSource): void {
     },
   }, start.signal)
     .catch((err: unknown) => {
+      ambient.endInteraction(interaction);
       if (start.signal.aborted) return;
       const message = `無法開始即時語音：${err instanceof Error ? err.message : String(err)}`;
       showSubtitle(message);
@@ -767,6 +832,8 @@ function startRealtime(source: RealtimeStartSource): void {
         realtimeStart = null;
         realtimeStarting = false;
       }
+      // 開始失敗或被中止：時序照實印出已有的部分（改路徑成功時要等 API key 的就緒、決策與首音，見 renderRealtimeState）。
+      if (!realtime.on) lookTimeline.end();
       render();
     });
 }
@@ -780,6 +847,10 @@ const REALTIME_STATE_LABEL: Record<Exclude<RealtimePhase, "off">, string> = {
 };
 
 function renderRealtimeState(phase: RealtimePhase): void {
+  if (phase === "listening") lookTimeline.mark("ready");
+  else if (phase === "speaking") lookTimeline.mark("first_audio");
+  // live 建立失敗、正在改用 API key 時（realtimeStarting）不結束：要記到 API key 路徑的就緒、問候決策與首音。
+  else if (phase === "off" && !realtimeStarting) lookTimeline.end();
   voicePill.hidden = phase === "off";
   if (phase !== "off") voicePill.textContent = `${REALTIME_STATE_LABEL[phase]}（點此結束）`;
   voicePill.dataset.state = phase === "off" ? "off" : phase === "speaking" ? "speaking" : "listening";
@@ -967,6 +1038,8 @@ function dispatch(event: ShellEvent): void {
   // 收起只關畫面：停止取樣並丟掉記憶體中的樣本與 session，不刪已存的家人資料。
   if (leftFamily) familyView.close();
   if (enteredFamily) familyView.open();
+  // 家人辨識畫面開著時不做看著說話的同步辨識（核心也拒絕）；收起後重新確認（gallery 可能剛改過）。
+  if (leftFamily || enteredFamily) ambient.refresh();
   // 確認卡被收起或被其他畫面取代：視為不同意，外部動作不執行。
   if (leftConfirm && pendingConfirms.has(leftConfirm) && realtime.pendingApproval?.id === leftConfirm) {
     realtime.resolveApproval(false, "dismissed");
