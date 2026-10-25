@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T01:31:26.861Z",
-  "updated_at": "2026-10-25T01:31:53.552Z",
+  "updated_at": "2026-10-25T01:31:57.040Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,8 +23,8 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-25T01:31:57.040Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -96,6 +96,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "定位電子腦縮放、home-bridge"
+    },
+    {
+      "at": "2026-10-25T01:31:57.040Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
