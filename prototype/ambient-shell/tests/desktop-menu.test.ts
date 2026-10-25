@@ -7,6 +7,7 @@ import { DESKTOP_COMMANDS, runDesktopCommand } from "../src/desktop-command.ts";
 import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, VOICE_UNSAVED_REASON } from "../shared/seconds-menu.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
 import type { SettingsView } from "../shared/types.ts";
+import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity.ts";
 import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
 
 const enabledCamera: CameraSettings = {
@@ -84,7 +85,7 @@ describe("settingsMenu（鏡頭與語音設定）", () => {
     expect(m.command).toHaveBeenCalledWith("camera-preview");
     const cameraPreview = vi.fn();
     const noop = () => {};
-    expect(runDesktopCommand("camera-preview", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview })).toBe(true);
+    expect(runDesktopCommand("camera-preview", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview, family: noop })).toBe(true);
     expect(cameraPreview).toHaveBeenCalledOnce();
   });
 
@@ -121,6 +122,41 @@ describe("settingsMenu（鏡頭與語音設定）", () => {
     expect(m.items[at + 1]).toEqual({ label: VOICE_UNSAVED_REASON, enabled: false });
   });
 
+  it("家人辨識… is the last camera item; the click goes through openFamily (which records the click time), never a bare command", () => {
+    const ready: IdentityStatus = { available: true, disabled_reason: null, limited_reason: null };
+    const settings = { ...view(enabledCamera), identity: ready };
+    const command = vi.fn();
+    const openFamily = vi.fn();
+    const items = settingsMenu(settings, { command, setMenuPref: vi.fn(), openFamily });
+    const labels = items.map((i) => (i.type === "separator" ? "----" : i.label));
+    expect(labels.slice(labels.indexOf("顯示鏡頭畫面"), labels.indexOf("顯示鏡頭畫面") + 3)).toEqual(["顯示鏡頭畫面", "家人辨識…", "----"]);
+    const family = items.find((i) => i.label === "家人辨識…")!;
+    expect(family).toMatchObject({ enabled: true, sublabel: undefined });
+    family.click!();
+    expect(openFamily).toHaveBeenCalledOnce();
+    expect(command).not.toHaveBeenCalled();
+    // 姓名不會出現在選單：settings.identity 只有 available、disabled_reason、limited_reason。
+    expect(JSON.stringify(items)).not.toMatch(/person_id|name/);
+    expect(Object.keys(ready).sort()).toEqual(["available", "disabled_reason", "limited_reason"]);
+  });
+
+  it("家人辨識… shows the core's reasons: disabled with a gray explanation line (browser, no encryption); limited stays enabled with a sublabel", () => {
+    const browser = settingsMenu({ ...view(enabledCamera), identity: BROWSER_IDENTITY_STATUS }, { command: vi.fn(), setMenuPref: vi.fn(), openFamily: vi.fn() });
+    expect(browser.find((i) => i.label === "家人辨識…")).toMatchObject({ enabled: false, sublabel: "瀏覽器版不可用（只在 macOS App 提供）" });
+    expect(browser.find((i) => i.label === "家人辨識：瀏覽器版不可用（只在 macOS App 提供）")).toEqual({ label: "家人辨識：瀏覽器版不可用（只在 macOS App 提供）", enabled: false });
+    const noKey: IdentityStatus = { ...BROWSER_IDENTITY_STATUS, disabled_reason: "此 Mac 無法加密保存（safeStorage 不可用），家人辨識停用" };
+    expect(settingsMenu({ ...view(enabledCamera), identity: noKey }, { command: vi.fn(), setMenuPref: vi.fn() }).find((i) => i.label === "家人辨識…")).toMatchObject({ enabled: false, sublabel: noKey.disabled_reason });
+    for (const limited_reason of ["辨識模型未安裝（npm run face:setup -- --product）；只能查看與刪除", "鏡頭未啟用或已關閉；只能查看與刪除", "辨識模型雜湊不符，已停用新增與試認；只能查看與刪除"]) {
+      const st: IdentityStatus = { available: true, disabled_reason: null, limited_reason };
+      const item = settingsMenu({ ...view(enabledCamera), identity: st }, { command: vi.fn(), setMenuPref: vi.fn() }).find((i) => i.label === "家人辨識…");
+      expect(item).toMatchObject({ enabled: true, sublabel: limited_reason });
+    }
+  });
+
+  it("without settings.identity from the core 家人辨識… is not drawn", () => {
+    expect(build(view(enabledCamera)).labels).not.toContain("家人辨識…");
+  });
+
   it("without camera_preview_disabled_reason from the core the item is not drawn", () => {
     const settings = view(enabledCamera);
     delete settings.camera_preview_disabled_reason;
@@ -137,10 +173,11 @@ describe("runDesktopCommand", () => {
       settings: () => calls.push("settings"),
       type: () => calls.push("type"),
       cameraPreview: () => calls.push("cameraPreview"),
+      family: () => calls.push("family"),
     };
     for (const c of DESKTOP_COMMANDS) expect(runDesktopCommand(c, handlers)).toBe(true);
     expect(runDesktopCommand("more-settings", handlers)).toBe(false);
-    expect(calls).toEqual(["voice", "progress", "settings", "type", "cameraPreview"]);
+    expect(calls).toEqual(["voice", "progress", "settings", "type", "cameraPreview", "family"]);
   });
 
   it("every command(...) the Electron main program and the menu template send is one the page knows", () => {

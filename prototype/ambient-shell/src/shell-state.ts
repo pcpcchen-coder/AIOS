@@ -13,7 +13,8 @@ export type VisibilityReason =
   | "sensor_status"
   | "user_pinned";
 
-export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation" | "confirm";
+/** family：家人辨識（docs/14 ID-01），只由選單列「家人辨識…」打開，visibility_reason 為 user_request。 */
+export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation" | "confirm" | "family";
 
 export interface Surface {
   surface_id: string;
@@ -43,6 +44,8 @@ export type ShellEvent =
   | { type: "show.artifact"; request_id: string; task_id: string; artifact_id: string }
   | { type: "show.notice"; request_id: string; message: string }
   | { type: "show.settings"; request_id: string; message?: string | null }
+  /** 家人辨識畫面；request_id 是選單列點擊產生的使用者請求。 */
+  | { type: "show.family"; request_id: string }
   /** 外部動作的確認卡；request_id 為確認請求 id，由 Presentation Policy 對照待確認清單。 */
   | { type: "show.confirm"; request_id: string; message: string }
   | { type: "dismiss" };
@@ -68,6 +71,14 @@ function surface(
     artifact_id: extra.artifact_id ?? null,
     message: extra.message ?? null,
   };
+}
+
+/**
+ * 這個畫面開著時不能自動開始對話（看著說話）：startRealtime 會收起畫面。家人辨識畫面（登記、試認）不能被打斷。
+ * 使用者自己按「開始語音對話」不受影響（那是明確的動作）。
+ */
+export function blocksAutoTalk(surface: Surface | null): boolean {
+  return surface?.kind === "family";
 }
 
 /** 純函式 reducer；不產生任何副作用（例如取消任務），副作用由呼叫端明確發出。 */
@@ -136,6 +147,13 @@ export function reduceShell(state: ShellState, event: ShellEvent): ShellState {
         listening: false,
         foreground_task_id: null,
         surface: surface("settings", event.request_id, { message: event.message ?? null }),
+      };
+    case "show.family":
+      return {
+        mode: "presenting",
+        listening: false,
+        foreground_task_id: null,
+        surface: surface("family", event.request_id),
       };
     case "show.confirm":
       return {

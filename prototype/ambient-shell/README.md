@@ -285,9 +285,27 @@ Claude 與 ChatGPT 背景任務使用同一套提示詞（`server/prompts.ts`）
 - 影像只在這台電腦的頁面內處理，離開感知管線的只有上面四種事件；`connect-src 'self'` 不變，模型與 wasm 由本機核心提供。鏡頭只在 `NOUS_CAMERA=on` 時被頁面政策允許。
 - 雙目參數目前用廠商規格推算（焦距約 1005 px、基線 52 mm），**尚未做 ChArUco 校正與實機驗證**；左右眼順序以 `NOUS_CAMERA_LEFT_FIRST` 指定。準確度與門檻依 docs/11 §7 實測後調整。
 
+### 家人辨識（docs/14 ID-01，只在 macOS App）
+
+macOS App 選單列「鏡頭與語音設定 → 家人辨識…」打開「家人辨識」畫面（`visibility_reason` 為 `user_request`）：家人列表（名稱、登記日、未成年）、新增家人（最多 5 位）、刪除與試認。**辨識只在這個畫面裡運作**：沒有背景辨識，也還沒有「George，我在」的稱名問候（ID-02）。
+
+```bash
+npm run face:setup -- --product   # YuNet 2023mar、SFace 與 onnxruntime wasm（約 53 MB）；核對 SHA-256 後裝到 face-runtime/（不進 git），
+                                  # macOS 另外複製到 ~/Library/Application Support/Nous/face-runtime/（App 從那裡讀）
+```
+
+- **資料**：只存加密的臉部特徵與名稱，不存照片。資料金鑰以 Electron safeStorage 包裝，gallery 用 AES-256-GCM；每次登記或刪除都換新金鑰。刪除與登記前跳系統確認視窗。刪除後新的資料無法還原，但在此之前的 Time Machine 備份或 APFS 本機快照可能仍保有舊的加密檔（應用程式金鑰不輪換），畫面與確認視窗都照實說明。
+- **邊界**：身分資料（姓名、識別碼、特徵）只走 Electron IPC 到核心，不走本機 HTTP；`GET /api/settings` 的 `identity` 只有可用狀態與人數。推論在 module worker（`src/sense/identity-worker.ts`，產品中唯一能讀像素的檔案），像素不離開 worker；模型與 wasm 不進 `dist`，由核心核對雜湊後從 `/face-runtime/` 提供，JS 回應帶 `connect-src 'self'` 的 CSP。
+- **登記**：名稱 1–16 字（拒換行、控制字元，以及角括號、大括號、方括號、反引號、雙引號與反斜線）→ 本人在場同意（未成年另需家長確認）→ 依提示（正面、稍左、稍右、抬頭、低頭）自動取 7 張品質合格的樣本，中途出現多張臉或中斷超過 0.5 秒整批重來 → 核心檢查一致性與重複（「看起來已登記為 X」不覆蓋）→ 系統確認後才寫檔。
+- **試認**：顯示「認得：X／不認得／多張臉／品質不足」，標「門檻未校準」。認得、不認得與「分不清是哪一位」都要至少 3 格、跨 0.5 秒一致才回，之前一律顯示「辨識中…」（單一格不能拿來探測某張臉是否已登記）；門檻是未校準的起點值，不是 OpenCV 範例的 0.363。
+- **工作階段**：只有點選單後 10 秒內、主視窗頁面才能開；收起、閒置 10 分鐘、開滿 15 分鐘、主視窗重新載入或導覽、核心重新啟動都會結束。家人資料第一次打開時才載入（啟動時不碰鑰匙圈）；解不開金鑰（可能沒允許鑰匙圈）可重試，檔案損壞才提供「清除全部」。
+- **開發模式**：`npm run dev:web` 的 Vite 會把 `/api` 與 `/face-runtime/` 轉給 8787 的核心；但瀏覽器版本來就不能開家人辨識，實際使用要在 macOS App。
+- **瀏覽器版不可用**（沒有 safeStorage 等級的加密保存）；完整設定畫面照實寫「家人辨識：瀏覽器版不可用」。
+- **未在 Mac 實測**，見 [ID-01 驗證](../../docs/validation/family-id-01-2026-10-25.md)；設計與資料規則見 [ADR-0001](../../docs/adr/ADR-0001-local-family-recognition.md)。
+
 ### 人臉 spike（docs/14 ID-00，開發工具）
 
-`spike/face/` 是量測 YuNet、MediaPipe Face Detector 與 SFace 能否在瀏覽器內跑、要花多久的獨立頁面。它**不是**家人辨識功能：沒有接進主畫面或感知管線，不登記家人、不保存特徵，也不影響問候。主程式的 `npm run build` 不包含它。
+`spike/face/` 是量測 YuNet、MediaPipe Face Detector 與 SFace 能否在瀏覽器內跑、要花多久的獨立頁面。它**不是**家人辨識功能：沒有接進主畫面或感知管線，不登記家人、不保存特徵，也不影響問候。主程式的 `npm run build` 不包含它。YuNet 與 SFace 的前後處理已在 ID-01 搬到 `src/sense/face/`，spike 改為引用那一份（產品不得引用 spike）。
 
 ```bash
 npm run face:setup   # 下載並核對 5 個模型（約 40 MB）與 wasm 到 spike/face/public/（不進 git）
@@ -351,6 +369,10 @@ prototype/ambient-shell/
 │   ├── conversation.ts     # 語音與文字共用的回合、歷史、取消及可見性
 │   ├── speech-text.ts      # 語音模式要念的短句（由任務狀態計算）
 │   ├── echo.ts             # 插話／回音判斷、逐句切分
+│   ├── family-view.ts      # 「家人辨識」畫面（ID-01；只經 IPC 與核心往來）
+│   ├── family-enroll.ts    # 登記取樣規則（純邏輯）
+│   ├── sense/identity-*.ts # 家人辨識的 module worker（唯一能讀像素）、取樣器與訊息格式
+│   ├── sense/face/         # YuNet／SFace 前後處理與畫格品質（純函式）
 │   └── main.ts
 ├── server/                 # 本機核心（Node http + SSE）
 │   ├── runner.ts           # 任務排程、取消、重試、步驟回報
@@ -371,11 +393,15 @@ prototype/ambient-shell/
 │   ├── camera-settings.ts  # 鏡頭使用者設定（camera.json）
 │   ├── voice-settings.ts   # 語音閒置秒數（voice.json）
 │   ├── prefs-file.ts       # 設定檔共用：逐鍵驗證、讀不懂時 fail closed、原子寫入
+│   ├── identity-service.ts # 家人辨識核心：管理 session、登記、刪除、比對與證據（只經 IPC，不走 HTTP）
+│   ├── identity-store.ts   # 家人資料加密保存（safeStorage 包裝的金鑰＋AES-256-GCM、原子替換）
+│   ├── face-runtime.ts     # 模型與 onnxruntime wasm 的雜湊核對與 /face-runtime/
 │   ├── commands-page.ts    # 唯讀指令表頁 GET /help/commands（無 script、嚴格 CSP）
 │   ├── mock-executor.ts
 │   ├── store.ts            # JSON 持久化
 │   └── app.ts / http-guard.ts / config.ts / index.ts
 ├── spike/face/             # ID-00 人臉 spike（開發工具，不接進產品；見 docs/adr/ADR-0001）
+├── face-runtime/           # 家人辨識的模型與 wasm（npm run face:setup -- --product；不進 git、不進 dist）
 ├── shared/                 # 前後端共用型別與進度計算；prefs.ts、voice-prefs.ts（設定規格）、
 │                           # seconds-menu.ts（選單列鏡頭開關、秒數與倍率）、voice-commands.ts（指令表唯一來源）
 └── tests/                  # vitest
@@ -390,7 +416,7 @@ npm run typecheck
 
 從儲存庫根目錄執行 `node scripts/verify-aios.mjs` 可另外驗證隔離的模擬任務及直接對話 HTTP 流程。模擬測試不代表真實帳號或音訊硬體驗證。
 
-涵蓋：進度計算、指令判斷、Shell 狀態轉移（收起不取消、背景完成不搶前景）、呈現政策、任務成功／失敗／取消／排隊／重試、重啟後的中斷標記、HTTP 驗證與 SSE、Claude 請求形狀（以假 fetch 驗證，不代表真實模型能力）、鏡頭與語音秒數、電子腦放大倍率設定的驗證與保存、選單列鏡頭開關、秒數與倍率的推導、設定畫面在 App 內只剩帳號（假 DOM）、電子腦靠近放大的倍率與繪圖（假 Canvas）、指令表逐句對照真正的比對規則與 README 區塊不走樣、閒置秒數改變時的重新倒數（假計時器）、鏡頭管線啟動／關閉（假鏡頭與假模型，不代表實機）。
+涵蓋：進度計算、指令判斷、Shell 狀態轉移（收起不取消、背景完成不搶前景）、呈現政策、任務成功／失敗／取消／排隊／重試、重啟後的中斷標記、HTTP 驗證與 SSE、Claude 請求形狀（以假 fetch 驗證，不代表真實模型能力）、鏡頭與語音秒數、電子腦放大倍率設定的驗證與保存、選單列鏡頭開關、秒數與倍率的推導、設定畫面在 App 內只剩帳號（假 DOM）、電子腦靠近放大的倍率與繪圖（假 Canvas）、指令表逐句對照真正的比對規則與 README 區塊不走樣、閒置秒數改變時的重新倒數（假計時器）、鏡頭管線啟動／關閉（假鏡頭與假模型，不代表實機）、家人辨識 ID-01 的證據規則、名稱驗證、加密保存、核心的 session／登記／刪除／比對、IPC 過濾、隱私邊界與 YuNet 640 前處理對 OpenCV 的核對（合成特徵與替身，不代表實機或辨識準確率）。
 
 ## 已知限制
 

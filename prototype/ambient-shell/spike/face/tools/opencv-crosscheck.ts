@@ -7,8 +7,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import * as ort from "onnxruntime-web";
 import { iou } from "../metrics.ts";
-import { cosineSimilarity, l2Normalize, rgbaToChw, similarityTransform, SFACE_SIZE, warpAffineToChw } from "../sface.ts";
-import { padToDivisor, postProcessYuNet, YUNET_STRIDES } from "../yunet.ts";
+import { cosineSimilarity, l2Normalize, rgbaToChw, similarityTransform, SFACE_SIZE, warpAffineToChw } from "../../../src/sense/face/sface.ts";
+import { padToDivisor, postProcessYuNet, YUNET_STRIDES } from "../../../src/sense/face/yunet.ts";
 
 interface Reference {
   opencv: string;

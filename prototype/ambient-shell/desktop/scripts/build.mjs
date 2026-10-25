@@ -1,5 +1,6 @@
 // 組出 App 內容（build/app）：Electron 主程式、打包成單檔的本機核心、前端、圖示與設定範本。
-// 不會放入 .env、data/ 或任何登入憑證。
+// 不會放入 .env、data/ 或任何登入憑證；也不放家人辨識的模型與 onnxruntime wasm（只由 npm run face:setup -- --product
+// 安裝到 ~/Library/Application Support/Nous/face-runtime/，不進 release zip）。
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -32,6 +33,7 @@ await build({
 
 cpSync(join(desktop, "main.mjs"), join(out, "main.mjs"));
 cpSync(join(desktop, "settings-menu.mjs"), join(out, "settings-menu.mjs"));
+cpSync(join(desktop, "identity-ipc.mjs"), join(out, "identity-ipc.mjs"));
 cpSync(join(desktop, "preload.cjs"), join(out, "preload.cjs"));
 cpSync(join(desktop, "assets"), join(out, "assets"), { recursive: true, filter: (p) => !p.includes(".iconset") });
 cpSync(join(shell, ".env.example"), join(out, "env.example"));

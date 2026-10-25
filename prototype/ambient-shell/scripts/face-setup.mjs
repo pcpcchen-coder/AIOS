@@ -1,11 +1,18 @@
-// ID-00 人臉 spike（docs/14、docs/adr/ADR-0001）的模型與 runtime 檔案。只給 spike 頁使用，不接進產品流程。
-// 放在 spike/face/public/（不進 git），不放 public/vision/：後者會被 vite build 複製進產品 dist 與 Electron 包。
-// 用法：npm run face:setup（約 40 MB，需要網路）；已有本機副本時：npm run face:setup -- --from <資料夾>。
+// 人臉模型與 runtime 檔案（docs/14、docs/adr/ADR-0001）。兩種用法：
+//
+// 1. ID-00 spike（預設）：5 個模型與 wasm 放到 spike/face/public/（不進 git），只給 spike 頁使用。
+//    npm run face:setup（約 40 MB，需要網路）；已有本機副本時：npm run face:setup -- --from <資料夾>。
+// 2. ID-01 產品（--product）：只裝 shared/face-runtime.json 列的 YuNet 2023mar、SFace 與 onnxruntime 的 wasm／mjs，
+//    放到 face-runtime/（不進 git）；在 macOS 上另外複製到 ~/Library/Application Support/Nous/face-runtime/，
+//    App 的核心從那裡核對雜湊並提供（/face-runtime/）。不放 public/：那會進瀏覽器版 dist 與 release zip。
+//    npm run face:setup -- --product [--from <資料夾>] [--dest <資料夾>]
+//
 // 每個檔案都核對 SHA-256；不符就刪掉並以非 0 結束，不留下未驗證的模型。
 
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -53,6 +60,10 @@ const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
 const fromIndex = process.argv.indexOf("--from");
 const fromDir = fromIndex < 0 ? null : process.argv[fromIndex + 1];
 const force = process.argv.includes("--force");
+
+if (process.argv.includes("--product")) {
+  process.exit(await setupProduct());
+}
 
 const ortSrc = join(root, "node_modules", "onnxruntime-web", "dist");
 const mpSrc = join(root, "node_modules", "@mediapipe", "tasks-vision", "wasm");
@@ -104,3 +115,68 @@ for (const model of MODELS) {
 }
 if (failed) process.exit(1);
 console.log("完成。啟動 spike 頁：npm run face:spike（只在 127.0.0.1，不接進主畫面）。");
+
+/** --product：產品用的模型與 runtime（shared/face-runtime.json）。回傳結束碼。 */
+async function setupProduct() {
+  const manifest = JSON.parse(readFileSync(join(root, "shared", "face-runtime.json"), "utf8"));
+  const destIndex = process.argv.indexOf("--dest");
+  const dests = destIndex >= 0 ? [resolve(process.argv[destIndex + 1])] : [join(root, "face-runtime")];
+  // macOS App 的核心從 userData（~/Library/Application Support/Nous）讀；開發用 electron build/app 也是同一個資料夾。
+  if (destIndex < 0 && process.platform === "darwin") dests.push(join(homedir(), "Library", "Application Support", "Nous", "face-runtime"));
+  const ortDir = join(root, "node_modules", "onnxruntime-web", "dist");
+  let failed = false;
+  const verified = new Map();
+  for (const file of manifest.files) {
+    const existing = join(dests[0], file.name);
+    if (!force && existsSync(existing) && sha256(readFileSync(existing)) === file.sha256) {
+      verified.set(file.name, readFileSync(existing));
+      console.log(`已存在且雜湊相符：${file.name}`);
+      continue;
+    }
+    let buf;
+    if (file.package) {
+      const local = join(ortDir, file.name);
+      if (!existsSync(local)) {
+        console.error(`找不到 ${local}，請先執行 npm ci。`);
+        failed = true;
+        continue;
+      }
+      buf = readFileSync(local);
+    } else if (fromDir) {
+      const local = join(fromDir, file.name);
+      if (!existsSync(local)) {
+        console.error(`--from 資料夾沒有 ${file.name}`);
+        failed = true;
+        continue;
+      }
+      buf = readFileSync(local);
+    } else {
+      const res = await fetch(file.url);
+      if (!res.ok) {
+        console.error(`下載失敗（HTTP ${res.status}）：${file.url}`);
+        failed = true;
+        continue;
+      }
+      buf = Buffer.from(await res.arrayBuffer());
+    }
+    const got = sha256(buf);
+    if (got !== file.sha256) {
+      console.error(`SHA-256 不符：${file.name}\n  預期 ${file.sha256}\n  實際 ${got}`);
+      failed = true;
+      continue;
+    }
+    verified.set(file.name, buf);
+    console.log(`已核對 ${file.name}（${buf.length} bytes，${file.license}）`);
+  }
+  if (failed) {
+    console.error("有檔案沒有通過核對，沒有安裝任何檔案。");
+    return 1;
+  }
+  for (const dest of dests) {
+    mkdirSync(dest, { recursive: true });
+    for (const [name, buf] of verified) writeFileSync(join(dest, name), buf);
+    console.log(`已安裝到 ${dest}`);
+  }
+  console.log("完成。家人辨識只在 macOS App 提供；App 啟動時核心會再核對一次雜湊（選單列「家人辨識…」會顯示結果）。");
+  return 0;
+}

@@ -28,8 +28,12 @@ import { formatCount } from "./format.ts";
 import { homeControlLine, homeStatusLine } from "../shared/home.ts";
 import { classify, settingsReply } from "./intent.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
+import { FamilyView } from "./family-view.ts";
+import type { WorkerLike } from "./sense/identity-client.ts";
+import type { IdentityRequest, IdentityResponse } from "../shared/identity.ts";
+import faceRuntime from "../shared/face-runtime.json" with { type: "json" };
 import { evaluateSurface } from "./presentation-policy.ts";
-import { initialShell, reduceShell, type ShellEvent, type ShellState } from "./shell-state.ts";
+import { blocksAutoTalk, initialShell, reduceShell, type ShellEvent, type ShellState } from "./shell-state.ts";
 import {
   progressStructureKey,
   refreshTimers,
@@ -63,6 +67,8 @@ interface DesktopBridge {
   openExternal(url: string): void;
   /** settings：設定的版本字串；變了 App 就重新讀取設定，選單列不會留著舊的「（目前）」。 */
   reportState(state: { voice: string; activeTasks: number; settings: string }): void;
+  /** 家人辨識（只經 IPC 到 App 的核心；不走 HTTP）。舊版 App 沒有這一項。 */
+  identity?(request: IdentityRequest): Promise<IdentityResponse>;
 }
 declare global {
   interface Window {
@@ -575,7 +581,8 @@ sensorIndicator.addEventListener("click", () => (previewRequestId ? closePreview
 const sense = new SenseController({
   now: () => performance.now(),
   isTalking: () => realtime.on || conversation.current !== "off",
-  canAutoTalk: () => !!settings?.realtime?.available && realtimeSupported() && hasVoiceConsent("realtime"),
+  // 家人辨識畫面開著時不自動開始對話：startRealtime 會收起畫面，打斷登記或試認。
+  canAutoTalk: () => !blocksAutoTalk(shell.surface) && !!settings?.realtime?.available && realtimeSupported() && hasVoiceConsent("realtime"),
   prefs: () => settings?.camera ?? DEFAULT_CAMERA_PREFS,
   // 看著說話開始的對話：連上後依「看著說話時先打招呼」請模型先打一次招呼。
   startTalk: () => startRealtime("look_to_talk"),
@@ -621,6 +628,15 @@ const sense = new SenseController({
   },
 });
 setInterval(() => sense.tick(), 200);
+
+// 家人辨識（docs/14 ID-01）：只由選單列打開；畫面收起時停止取樣、丟掉記憶體中的樣本與 session。
+const familyView = new FamilyView({
+  bridge: window.nousDesktop?.identity ? { identity: (request) => window.nousDesktop!.identity!(request) } : null,
+  source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) },
+  createWorker: () => new Worker(new URL("./sense/identity-worker.ts", import.meta.url), { type: "module" }) as unknown as WorkerLike,
+  model: faceRuntime.model_version,
+  dismiss: () => dispatch({ type: "dismiss" }),
+});
 
 /** 把指向的區塊對到畫面上可選的項目；只是選定（亮框），不展開、不送出（06 §4.4）。 */
 function applyPointing(): void {
@@ -945,7 +961,12 @@ function dispatch(event: ShellEvent): void {
   if (next === shell) return;
   const wasListening = shell.listening;
   const leftConfirm = shell.surface?.kind === "confirm" && next.surface?.surface_id !== shell.surface.surface_id ? shell.surface.request_id : null;
+  const leftFamily = shell.surface?.kind === "family" && next.surface?.surface_id !== shell.surface.surface_id;
+  const enteredFamily = next.surface?.kind === "family" && next.surface.surface_id !== shell.surface?.surface_id;
   shell = next;
+  // 收起只關畫面：停止取樣並丟掉記憶體中的樣本與 session，不刪已存的家人資料。
+  if (leftFamily) familyView.close();
+  if (enteredFamily) familyView.open();
   // 確認卡被收起或被其他畫面取代：視為不同意，外部動作不執行。
   if (leftConfirm && pendingConfirms.has(leftConfirm) && realtime.pendingApproval?.id === leftConfirm) {
     realtime.resolveApproval(false, "dismissed");
@@ -1409,6 +1430,7 @@ window.addEventListener("nous:command", (event) => {
     settings: actions.openSettings,
     type: () => dispatch({ type: "input.open" }),
     cameraPreview: actions.openCameraPreview,
+    family: () => dispatch({ type: "show.family", request_id: userRequest() }),
   });
 });
 
@@ -1534,7 +1556,9 @@ function renderSurface(): void {
 
   const task = s.task_id ? tasks.get(s.task_id) : undefined;
   const key =
-    s.kind === "settings"
+    s.kind === "family"
+      ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
+      : s.kind === "settings"
       ? `${s.surface_id}:${JSON.stringify(settings)}:${s.message ?? ""}`
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey(tasks.values())}:${s.message ?? ""}`
@@ -1553,6 +1577,7 @@ function renderSurface(): void {
   let el: HTMLElement;
   const confirm = s.kind === "confirm" ? pendingConfirms.get(s.request_id) : undefined;
   if (confirm) el = renderConfirm(confirm);
+  else if (s.kind === "family") el = familyView.element;
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
   else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop });
   else if (s.kind === "progress") el = renderProgress([...tasks.values()], s.message, actions);

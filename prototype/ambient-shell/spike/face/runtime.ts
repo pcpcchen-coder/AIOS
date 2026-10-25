@@ -13,8 +13,8 @@ import {
   type FaceBox,
   type YuNetFace,
   type YuNetStrideOutput,
-} from "./yunet.ts";
-import { l2Normalize, rgbaToChw, similarityTransform, warpAffineToChw } from "./sface.ts";
+} from "../../src/sense/face/yunet.ts";
+import { l2Normalize, rgbaToChw, similarityTransform, warpAffineToChw } from "../../src/sense/face/sface.ts";
 
 export const SPIKE_ASSETS = {
   ort: "/ort/",

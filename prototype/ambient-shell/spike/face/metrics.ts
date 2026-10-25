@@ -1,6 +1,6 @@
 // ID-00 spike：耗時統計與兩個偵測器的框比較（純函式）。計算方式同 docs/validation/family-id-00-spike-2026-10-24.md。
 
-import { rectOverlap, type FaceBox } from "./yunet.ts";
+import { rectOverlap, type FaceBox } from "../../src/sense/face/yunet.ts";
 
 export interface TimingSummary {
   n: number;
