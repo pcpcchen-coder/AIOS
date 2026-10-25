@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T02:01:16.858Z",
-  "updated_at": "2026-10-25T02:01:56.920Z",
+  "updated_at": "2026-10-25T02:02:01.035Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,10 +23,10 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-25T02:01:56.919Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-25T02:02:01.034Z",
+      "note": "George：先做人臉辨識；ADR",
       "evidence": []
     },
     {
@@ -112,6 +112,13 @@
       "step_id": "checkpoint",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-25T02:02:01.035Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "passed",
+      "note": "George：先做人臉辨識；ADR"
     }
   ],
   "provenance": "Agent self-reported"
