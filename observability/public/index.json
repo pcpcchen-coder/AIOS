@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-25T11:34:43.675Z",
+  "updated_at": "2026-10-25T11:34:46.949Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,7 +9,7 @@
       "title": "家人辨識 ID-02：看著說話時同步辨識與稱名問候",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-25T11:34:41.349Z",
+      "updated_at": "2026-10-25T11:34:45.612Z",
       "started_at": "2026-10-25T08:19:32.485Z",
       "ended_at": null,
       "branch": "claude/family-id-02",
