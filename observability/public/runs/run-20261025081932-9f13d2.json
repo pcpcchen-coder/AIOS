@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T08:19:32.485Z",
-  "updated_at": "2026-10-25T08:20:30.134Z",
+  "updated_at": "2026-10-25T08:20:33.894Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-25T08:20:33.894Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -133,6 +133,13 @@
       "step_id": "architect",
       "status": "skipped",
       "note": "docs/14 §6–§7 已是整合設計，ID-01 已定核心＋IPC 架構；不另跑 arena"
+    },
+    {
+      "at": "2026-10-25T08:20:33.894Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
