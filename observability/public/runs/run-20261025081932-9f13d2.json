@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T08:19:32.485Z",
-  "updated_at": "2026-10-25T08:19:51.404Z",
+  "updated_at": "2026-10-25T08:19:54.617Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,8 +32,8 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-25T08:19:54.616Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -119,6 +119,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "George：做ID-02；先用未校準門檻稱名；定案YuNet；Mac實測正常"
+    },
+    {
+      "at": "2026-10-25T08:19:54.616Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
