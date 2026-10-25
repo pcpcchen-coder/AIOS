@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T01:31:26.861Z",
-  "updated_at": "2026-10-25T01:32:03.935Z",
+  "updated_at": "2026-10-25T01:45:31.842Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-25T01:32:03.935Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-25T01:45:31.841Z",
+      "note": "三項完成",
       "evidence": []
     },
     {
@@ -117,6 +117,13 @@
       "step_id": "implement",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-25T01:45:31.842Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "三項完成"
     }
   ],
   "provenance": "Agent self-reported"
