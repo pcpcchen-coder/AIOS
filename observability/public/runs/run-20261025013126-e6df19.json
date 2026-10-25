@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T01:31:26.861Z",
-  "updated_at": "2026-10-25T01:32:00.451Z",
+  "updated_at": "2026-10-25T01:32:03.935Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,8 +32,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-25T01:32:03.935Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -110,6 +110,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "George：放大時置中；關冷氣說明定時；預設自動"
+    },
+    {
+      "at": "2026-10-25T01:32:03.935Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
