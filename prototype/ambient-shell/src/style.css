@@ -13,7 +13,7 @@
   --brain-r: min(20vw, 20vh);
   --brain-top-r: min(7vw, 7vh);
   --surface-top: calc(12vh + var(--brain-top-r) * 1.45 + 18px);
-  --brain-cta-top: min(calc(47vh + var(--brain-r) * 1.35 + 20px), calc(100dvh - 140px));
+  --brain-cta-top: min(calc(var(--brain-cy, 47vh) + var(--brain-r) * 1.35 + 20px), calc(100dvh - 140px));
   font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
   color: var(--text);
   background: var(--bg);
@@ -79,7 +79,7 @@ body {
 .caption {
   position: fixed;
   left: 50%;
-  top: min(calc(47vh + var(--brain-r) * 1.45 + 28px), calc(100dvh - 160px));
+  top: min(calc(var(--brain-cy, 47vh) + var(--brain-r) * 1.45 + 28px), calc(100dvh - 160px));
   transform: translateX(-50%);
   width: min(640px, 92vw);
   text-align: center;
@@ -124,7 +124,7 @@ body {
 .command {
   position: fixed;
   left: 50%;
-  top: min(calc(47vh + var(--brain-r) * 1.45 + 24px), calc(100dvh - 120px));
+  top: min(calc(var(--brain-cy, 47vh) + var(--brain-r) * 1.45 + 24px), calc(100dvh - 120px));
   transform: translateX(-50%);
   width: min(620px, 92vw);
   z-index: 5;
@@ -866,7 +866,7 @@ body.listening .subtitle {
 
 .conversation-status {
   position: fixed;
-  top: min(calc(47vh + var(--brain-r) * 1.15), calc(100dvh - 170px));
+  top: min(calc(var(--brain-cy, 47vh) + var(--brain-r) * 1.15), calc(100dvh - 170px));
   left: 50%;
   transform: translateX(-50%);
   color: var(--cyan);
