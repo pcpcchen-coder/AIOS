@@ -73,8 +73,11 @@ export const MIN_SEND_WINDOW_MS = 5_000;
 /** AIFA 清單在 24 小時後失效；提早 10 分鐘重新讀取，避免送出途中跨過期限。 */
 const AIFA_LIST_TTL_S = 86_400;
 const AIFA_STALE_MARGIN_S = 600;
-/** 冷氣設定缺值時用的預設（要說出來）。特殊功能沒有回報時用 normal。 */
-export const CLIMATE_DEFAULTS = { mode: "cool", temperature: 26, fan: "auto", swing: "auto" } as const satisfies {
+/**
+ * 冷氣設定缺值時用的預設（要說出來）。特殊功能沒有回報時用 normal。
+ * 模式預設自動（George 2026-10-25 決定，不分季節）：冷氣關著時控制器不記得模式，猜冷氣在冬天不合適。
+ */
+export const CLIMATE_DEFAULTS = { mode: "auto", temperature: 26, fan: "auto", swing: "auto" } as const satisfies {
   mode: AcMode;
   temperature: number;
   fan: AcFan;
@@ -682,8 +685,24 @@ export function buildClimate(change: ClimateChange, report: ControllerReport | n
   const feature = pick<AcFeature>(r?.feature, (v) => caps.features.includes(v), "normal", "特殊功能", (v) => AC_FEATURE_TEXT[v]);
 
   const packet: ClimatePacket = { mode, temperature, fan, swing, feature };
-  const text = [AC_MODE_TEXT[mode], `${temperature} 度`, `風量${AC_FAN_TEXT[fan]}`, `擺風${AC_SWING_TEXT[swing]}`, ...(feature === "normal" ? [] : [AC_FEATURE_TEXT[feature]])].join("、");
+  const text = [`模式${AC_MODE_TEXT[mode]}`, `${temperature} 度`, `風量${AC_FAN_TEXT[fan]}`, `擺風${AC_SWING_TEXT[swing]}`, ...(feature === "normal" ? [] : [AC_FEATURE_TEXT[feature]])].join("、");
   return { packet, text, defaultsUsed };
+}
+
+/**
+ * 關冷氣時中控會一併取消這台冷氣的定時（中控的固定做法；George 2026-10-25 決定要讓 AI 說出來）。
+ * note 只放要念給使用者聽的句子；不能說的話（確實取消了、冷氣已經關了）在 realtimeToolRules。
+ * AIOS 讀不到定時，不知道原本有沒有設定，所以句子是「如果有設定定時」。只在關機可能已送到中控時說：
+ * - 已送出（one_way）：中控執行了關機，定時照中控做法取消。
+ * - 中控沒有回覆或可能收到（no_reply、retry 且可能收到）：加上「如果中控有執行這次關機」。
+ * - 失敗、沒有送出：不說（中控沒有執行關機；200 failed 時定時會不會被取消，要等 George 實測）。
+ */
+export const AC_OFF_TIMER_NOTE = "如果這台冷氣有設定定時，中控關機時會一併取消，需要的話請重新設定。";
+export const AC_OFF_TIMER_NOTE_UNSURE = "如果中控有執行這次關機，而且這台冷氣有設定定時，定時也會一併取消，需要的話請重新設定。";
+function acOffTimerNote(reply: HubReply): string | null {
+  if (reply.kind === "result" && reply.status === "unconfirmed") return reply.why === "one_way" ? AC_OFF_TIMER_NOTE : AC_OFF_TIMER_NOTE_UNSURE;
+  if (reply.kind === "retry" && reply.maybeReceived) return AC_OFF_TIMER_NOTE_UNSURE;
+  return null;
 }
 
 /** 「控制器回報：開、冷氣、26 度、風量低」：只能這樣說，不是冷氣的實際狀態。 */
@@ -1143,6 +1162,10 @@ export class HomeBridge {
     }
     const reported = reply.kind === "result" ? reportedText(reply.controller) : undefined;
     if (reported) facts.controller_reported = reported;
+    if (plan.route === "aifa_power" && !plan.power) {
+      const timer = acOffTimerNote(reply);
+      if (timer) facts.note = timer;
+    }
     return this.oneWayResult(reply, p, facts);
   }
 

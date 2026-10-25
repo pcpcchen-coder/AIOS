@@ -3,7 +3,8 @@ import { execFile } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, session, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, safeStorage, session, shell, Tray } from "electron";
+import { checkIdentitySender, MenuClickWindow, validateIdentityRequest } from "./identity-ipc.mjs";
 import { radio, settingsMenu } from "./settings-menu.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -18,6 +19,10 @@ const envFile = join(userData, ".env");
 const dataDir = join(userData, "data");
 const prefsFile = join(userData, "desktop.json");
 const logFile = join(userData, "nous.log");
+/** 家人辨識的加密 gallery（0700；Time Machine 排除）。 */
+const identityDir = join(userData, "identity");
+/** 家人辨識的模型與 onnxruntime wasm：只由 npm run face:setup -- --product 安裝到這裡，不在 App 包裡。 */
+const faceRuntimeDir = join(userData, "face-runtime");
 
 const REALTIME_MODELS = [
   { id: "gpt-realtime", label: "gpt-realtime（品質最好）" },
@@ -86,7 +91,91 @@ async function startCore() {
       NOUS_MAX_CONCURRENT: String(prefs.maxConcurrent),
     },
     log,
+    identity: {
+      dir: identityDir,
+      secretBox: identitySecretBox,
+      excludeFromBackup: excludeFromTimeMachine,
+      confirm: confirmIdentity,
+      modelDir: faceRuntimeDir,
+    },
   });
+}
+
+// ───────────── 家人辨識（ADR-0001；資料與比對在核心，這裡只提供 safeStorage、原生確認與 IPC 傳輸） ─────────────
+
+/**
+ * 資料金鑰的包裝：safeStorage（macOS 以 Keychain 中的應用程式金鑰加密）。只在 macOS 且可加密時可用；
+ * Linux 的 basic_text 後端等於明文，一律當不可用（核心就不建立 gallery，不退回明文）。
+ */
+const identitySecretBox = {
+  available: () => {
+    if (process.platform !== "darwin" || !safeStorage.isEncryptionAvailable()) return false;
+    return !(typeof safeStorage.getSelectedStorageBackend === "function" && safeStorage.getSelectedStorageBackend() === "basic_text");
+  },
+  seal: (plain) => safeStorage.encryptString(plain),
+  open: (sealed) => safeStorage.decryptString(sealed),
+};
+
+/** 把 gallery 資料夾排除在 Time Machine 之外（黏著式排除，跟著資料夾走）。失敗只記狀態並在畫面說明。 */
+function excludeFromTimeMachine(dir) {
+  return new Promise((resolve, reject) => {
+    if (process.platform !== "darwin") return reject(new Error("只有 macOS 有 Time Machine"));
+    execFile("tmutil", ["addexclusion", dir], (err) => (err ? reject(err) : resolve()));
+  });
+}
+
+const BACKUP_NOTE = "限制：在此之前已存在的 Time Machine 備份或 APFS 本機快照，可能仍保有舊的加密檔；本機的應用程式金鑰不會輪換，舊檔理論上仍可解開。Nous 無法刪除那些快照。";
+
+/** 登記、刪除與清除的原生確認：頁面無法偽造，這是「永久刪除須當次明確確認」的實作。回 true 才寫檔。 */
+async function confirmIdentity(request) {
+  const parent = win && !win.isDestroyed() ? win : undefined;
+  const ask = (options) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  if (request?.kind === "enroll") {
+    const minor = request.minor === true;
+    const { response, checkboxChecked } = await ask({
+      type: "question",
+      buttons: ["登記", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `要登記「${request.name}」為家人嗎？`,
+      detail:
+        "本人必須在場、聽過說明並同意。Nous 只在這台 Mac 上保存加密的臉部特徵（不存照片、不上傳），只用來稱呼，" +
+        "不作為解鎖或授權的依據；隨時可以在「家人辨識」刪除。目前辨識門檻尚未校準。",
+      ...(minor ? { checkboxLabel: "我是家長，本人在場，我確認同意登記這位未成年家人", checkboxChecked: false } : {}),
+    });
+    return response === 0 && (!minor || checkboxChecked === true);
+  }
+  if (request?.kind === "delete") {
+    const { response } = await ask({
+      type: "warning",
+      buttons: ["永久刪除", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `要永久刪除「${request.name}」的家人資料嗎？`,
+      detail: `會從加密檔移除這位家人的所有特徵與名稱，並換用新的加密金鑰；刪除後無法還原。\n\n${BACKUP_NOTE}`,
+    });
+    return response === 0;
+  }
+  if (request?.kind === "clear_all") {
+    const { response } = await ask({
+      type: "warning",
+      buttons: ["清除全部", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "要清除全部家人資料嗎？",
+      detail: `會刪除這台 Mac 上 Nous 的家人辨識加密檔（所有家人的特徵與名稱）；清除後無法還原，需要重新登記。\n\n${BACKUP_NOTE}`,
+    });
+    return response === 0;
+  }
+  return false;
+}
+
+/** 選單列「家人辨識…」的點擊時間：10 秒內頁面才能開管理 session（語音或頁面腳本不能自己開）。 */
+const familyClick = new MenuClickWindow();
+
+function openFamily() {
+  familyClick.mark(Date.now());
+  command("family");
 }
 
 async function api(path, body) {
@@ -175,6 +264,9 @@ function createWindow() {
     e.preventDefault();
     if (/^https?:/.test(url)) void shell.openExternal(url);
   });
+  // 家人辨識的管理 session 只屬於當下這一頁：主視窗導覽、重新載入（也會觸發 did-navigate）或 renderer 結束就關掉。
+  win.webContents.on("did-navigate", () => core?.identity?.closeSessions());
+  win.webContents.on("render-process-gone", () => core?.identity?.closeSessions());
 }
 
 function showWindow() {
@@ -292,7 +384,7 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref });
+  return settingsMenu(settings, { command, setMenuPref, openFamily });
 }
 
 /** 即時語音用的 Codex 登入：核心開好回呼（1455，被占用時 1457，再不行改裝置代碼），系統瀏覽器開登入頁。 */
@@ -590,6 +682,14 @@ ipcMain.on("nous:state", (_e, state) => {
 });
 ipcMain.on("nous:open-external", (_e, url) => {
   if (typeof url === "string" && /^https:\/\//.test(url)) void shell.openExternal(url);
+});
+// 家人辨識：只接受主視窗主框架、來自本機核心頁面的請求；形狀過濾後原樣交給核心（核心再完整驗證）。
+ipcMain.handle("nous:identity", async (event, request) => {
+  if (!core?.identity || !checkIdentitySender(event, win, core.url)) return { ok: false, code: "unavailable", message: "家人辨識不可用" };
+  const checked = validateIdentityRequest(request);
+  if (!checked.ok) return { ok: false, code: "bad_request", message: checked.error };
+  const userInitiated = checked.request.op === "open_session" ? familyClick.consume(Date.now()) : false;
+  return core.identity.handle(checked.request, { userInitiated });
 });
 
 app.whenReady().then(async () => {

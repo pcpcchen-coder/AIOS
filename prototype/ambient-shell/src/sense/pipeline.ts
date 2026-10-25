@@ -2,6 +2,8 @@
 // 2560×720 併排影像 → 切左右 1280×720 → MediaPipe Pose（左右各一）＋手勢辨識（左）→ SenseProcessor → 事件。
 // 不保存、不上傳任何影像；離開這個模組的只有 SenseEvent。使用者要求看鏡頭畫面時，管線自己把縮小的左眼畫面
 // 與左右眼差異畫到呼叫端給的兩個畫布上；不交出 MediaStream、video 或原尺寸畫布，也不讀回像素。
+// 唯一的例外是家人辨識的取樣出口 sampleFrame()：只在「家人辨識」畫面要求時，把目前左眼畫格做成 ImageBitmap，
+// 由呼叫端轉移給推論 worker（src/sense/identity-worker.ts，唯一能讀像素的產品檔）；這裡仍不讀回像素。
 
 import type { CameraInstall, SenseEvent } from "../../shared/sense.ts";
 import { SenseProcessor } from "./processor.ts";
@@ -129,6 +131,15 @@ export class SensePipeline {
     this.emit({ type: "presence", present: false, distance_m: null });
     this.emit({ type: "attention", facing: false });
     this.emit({ type: "pointing", zone: null });
+  }
+
+  /**
+   * 家人辨識取樣（ADR-0001 §2.1）：鏡頭運作中且畫面正常時，回傳目前左眼畫格的 ImageBitmap，否則 null。
+   * 呼叫端必須把它轉移給 worker 或 close()；這裡不保留參考。
+   */
+  async sampleFrame(): Promise<ImageBitmap | null> {
+    if (this.phase !== "on" || this.degraded) return null;
+    return createImageBitmap(this.canvasL);
   }
 
   /** 開或關鏡頭畫面（null）。只影響畫，不影響偵測；換掉或關掉時清空舊畫布，不留下凍結的最後一格。 */
