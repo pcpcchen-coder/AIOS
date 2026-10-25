@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T02:01:16.858Z",
-  "updated_at": "2026-10-25T06:52:48.510Z",
+  "updated_at": "2026-10-25T06:52:51.990Z",
   "ended_at": null,
   "steps": [
     {
@@ -77,11 +77,16 @@
     {
       "id": "pr",
       "title": "pr",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
-      "evidence": []
+      "status": "passed",
+      "started_at": "2026-10-25T06:52:51.989Z",
+      "ended_at": "2026-10-25T06:52:51.990Z",
+      "note": "PR #40",
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/pull/40"
+        }
+      ]
     }
   ],
   "events": [
@@ -189,6 +194,13 @@
       "step_id": "fix",
       "status": "passed",
       "note": "16 點全修；939 項通過"
+    },
+    {
+      "at": "2026-10-25T06:52:51.990Z",
+      "type": "step_updated",
+      "step_id": "pr",
+      "status": "passed",
+      "note": "PR #40"
     }
   ],
   "provenance": "Agent self-reported"
