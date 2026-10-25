@@ -25,15 +25,19 @@ import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
 import type { FaceModelVersion, IdentityResponse } from "../shared/identity.ts";
 import { billingLine, type StartDecision } from "../shared/realtime-route.ts";
-import { greetingInstructions, greetingSentence, LIVE_GREETING_TEXT, liveGreetingText, LOOK_TO_TALK_GREETING } from "../shared/sense.ts";
+import { GREETING_TEMPLATES } from "../shared/sense.ts";
+import { GreetingPicker } from "../server/greeting-picker.ts";
 import { scriptedFetch, writeCredentials } from "./fixtures/fake-chatgpt.ts";
 import { startFakeSideband, type FakeConnection, type FakeSideband } from "./fixtures/fake-sideband.ts";
 import { fakeSecretBox, near, unitFeature } from "./fixtures/identity.ts";
 
 const MODEL: FaceModelVersion = { detector: "yunet-2023mar@8f2383e4", recognizer: "sface-2021dec@0ba9fbfa", align: "opencv-aligncrop-5pt@048f050d", preproc: "yunet640-cvlinear-bgr-v1" };
 const GEORGE = unitFeature(1);
-const NAMED_LIVE = liveGreetingText(greetingSentence("George"));
-const NAMED_API = greetingInstructions(greetingSentence("George"));
+/** 固定清單裡所有可能的句子（挑句是隨機的），放在「」裡比對。 */
+const esc = (t: string) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const said = (name: string | null) => new RegExp(`「(${GREETING_TEMPLATES.filter((t) => t.named === (name !== null)).map((t) => esc(t.render(name))).join("|")})」`);
+const NAMED = said("George");
+const PLAIN = said(null);
 
 let server: Server | null = null;
 let sideband: FakeSideband | null = null;
@@ -87,8 +91,9 @@ async function start() {
   const providers = new ProviderManager({ claude: null, chatgpt: new ChatGPTExecutor(siwc, { model: null }), mock: new MockExecutor(5), auth: siwc, dir, preferred: "mock", onChange: () => {} });
   const codexAuth = new CodexAuth({ dir, onChange: () => {}, fetch: scriptedFetch(() => new Response("{}", { status: 500 })).fetch });
   const prefs = new RealtimeSettingsStore({ dir, defaults: { route: "live", live_voice: "cove" }, onChange: () => {}, log: () => {} });
-  // 和 server/nous.ts 同樣的接線：identity 在 app 之後才建立，閉包在呼叫時才讀。
+  // 和 server/nous.ts 同樣的接線：identity 在 app 之後才建立，閉包在呼叫時才讀；開場句挑選共用一個。
   let identity: IdentityService | null = null;
+  const picker = new GreetingPicker();
   const live = new LiveRoute({
     auth: codexAuth,
     voice: () => "cove",
@@ -100,7 +105,7 @@ async function start() {
     fetch: scriptedFetch(() => new Response("v=0 live-answer", { status: 201, headers: { Location: "/v1/realtime/calls/rtc_chain" } })).fetch,
     urls: { call: "https://chatgpt.fixture/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas", sideband: (id) => sideband!.url(id) },
     sleep: async () => {},
-    greeting: liveGreetingSource(() => identity),
+    greeting: liveGreetingSource(() => identity, picker),
   });
   const bridge = new RealtimeBridge({
     apiKey: "sk-fixture",
@@ -130,6 +135,7 @@ async function start() {
     camera: () => true,
     ambient: () => ({ look_to_talk: true, look_to_talk_greet: true, look_to_talk_greet_name: true }),
     claimGreeting: greetingClaims(() => app.realtimeSessions),
+    picker,
     runtime: { state: "ok", problems: [] },
     model: MODEL,
     now: () => clock.now,
@@ -184,7 +190,7 @@ describe("ID-02 整條鏈：ChatGPT 方案（live）", () => {
     expect(d.interaction).toMatch(/^int_[0-9a-f]{16}$/);
     await t.look(1);
     expect(await t.greet(d.interaction!, 1, "live")).toEqual({ ok: true, op: "greeting", text: null });
-    expect(await spokenGreeting(t, d, conn, d.interaction!)).toBe(NAMED_LIVE);
+    expect(await spokenGreeting(t, d, conn, d.interaction!)).toMatch(NAMED);
     // 同一個 ID 不能再決策一次
     expect(await t.greet(d.interaction!, 1, "live")).toMatchObject({ ok: false, code: "already" });
   });
@@ -197,7 +203,7 @@ describe("ID-02 整條鏈：ChatGPT 方案（live）", () => {
     const forged = "int_0123456789abcdef";
     await t.look(1);
     expect(await t.greet(forged, 1, "live")).toMatchObject({ ok: true, text: null });
-    expect(await spokenGreeting(t, d, conn, forged)).toBe(LIVE_GREETING_TEXT);
+    expect(await spokenGreeting(t, d, conn, forged)).toMatch(PLAIN);
   });
 });
 
@@ -210,20 +216,20 @@ describe("ID-02 整條鏈：API key", () => {
     expect(d).toMatchObject({ ok: true, route: "api_key", interaction: expect.stringMatching(/^int_/) });
     await t.look(1);
     // 還沒交換 SDP（沒有真的連上）：不給名字，而且這個 ID 之後也不能再用。
-    expect(await t.greet(d.interaction!, 1, "api_key")).toMatchObject({ ok: true, text: LOOK_TO_TALK_GREETING });
+    expect(await t.greet(d.interaction!, 1, "api_key")).toMatchObject({ ok: true, text: expect.stringMatching(PLAIN) });
 
     const d2 = (await t.post("/api/realtime/start", { client_id: clientId, source: "look_to_talk" })).json as Extract<StartDecision, { ok: true }>;
     expect((await t.post("/api/realtime/call", { sdp: "v=0 offer", session_id: d2.session_id, owner: d2.owner })).json).toMatchObject({ route: "api_key" });
     await t.look(2);
-    expect(await t.greet("int_00000000deadbeef", 2, "api_key")).toMatchObject({ ok: true, text: LOOK_TO_TALK_GREETING });
+    expect(await t.greet("int_00000000deadbeef", 2, "api_key")).toMatchObject({ ok: true, text: expect.stringMatching(PLAIN) });
     await t.look(3);
-    expect(await t.greet(d2.interaction!, 3, "api_key")).toMatchObject({ ok: true, text: NAMED_API });
+    expect(await t.greet(d2.interaction!, 3, "api_key")).toMatchObject({ ok: true, text: expect.stringMatching(NAMED) });
 
     const d3 = (await t.post("/api/realtime/start", { client_id: clientId, source: "look_to_talk" })).json as Extract<StartDecision, { ok: true }>;
     await t.post("/api/realtime/call", { sdp: "v=0 offer", session_id: d3.session_id, owner: d3.owner });
     await t.post("/api/realtime/end", { session_id: d3.session_id, owner: d3.owner });
     await t.look(4);
-    expect(await t.greet(d3.interaction!, 4, "api_key")).toMatchObject({ ok: true, text: LOOK_TO_TALK_GREETING });
+    expect(await t.greet(d3.interaction!, 4, "api_key")).toMatchObject({ ok: true, text: expect.stringMatching(PLAIN) });
   });
 });
 

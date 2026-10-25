@@ -2,7 +2,7 @@
 
 狀態：**草案（Proposed）**；George 已於 2026-10-25 決定 §9 大部分項目，偵測器已定案（YuNet 2023mar 640），SFace 訓練資料風險仍待決。日期：2026-10-24，2026-10-25 依 ID-01 實作修訂 §2.1、§2.2、§10，同日依 ID-02 修訂 §2.1.1、§2.4、§6、§9 並新增 §11。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00、ID-01、ID-02。
 
-ID-00 是不接進產品流程的 runtime spike（`prototype/ambient-shell/spike/face/`，量測見 [驗證紀錄](../validation/family-id-00-spike-2026-10-24.md)）。ID-01（2026-10-25，分支 `claude/family-id-01`）實作了登記、刪除、加密保存、本機辨識（只在選單列打開的「家人辨識」畫面內）與品質、失效狀態，只有雲端驗證，**沒有 Mac 實機結果、門檻未校準、沒有稱名問候**，見 [ID-01 驗證紀錄](../validation/family-id-01-2026-10-25.md)。George 於 2026-10-25 在 Mac 實測 ID-01：登記與試認順利、手掌停止正常（實測紀錄由 George 口頭回報，repo 內沒有數字）。ID-02（2026-10-25，分支 `claude/family-id-02`）接上看著說話：面向等待期間同步辨識、互動綁定、核心組成「<名字>，我在」或「我在」，兩條語音路徑都由核心決定內容；**只有雲端 fixture 驗證，門檻仍未校準，實際音訊（14 I12）待 Mac**，見 [ID-02 驗證紀錄](../validation/family-id-02-2026-10-25.md)與 §11。
+ID-00 是不接進產品流程的 runtime spike（`prototype/ambient-shell/spike/face/`，量測見 [驗證紀錄](../validation/family-id-00-spike-2026-10-24.md)）。ID-01（2026-10-25，分支 `claude/family-id-01`）實作了登記、刪除、加密保存、本機辨識（只在選單列打開的「家人辨識」畫面內）與品質、失效狀態，只有雲端驗證，**沒有 Mac 實機結果、門檻未校準、沒有稱名問候**，見 [ID-01 驗證紀錄](../validation/family-id-01-2026-10-25.md)。George 於 2026-10-25 在 Mac 實測 ID-01：登記與試認順利、手掌停止正常（實測紀錄由 George 口頭回報，repo 內沒有數字）。ID-02（2026-10-25，分支 `claude/family-id-02`）接上看著說話：面向等待期間同步辨識、互動綁定、核心從固定清單挑一句開場（例如「George，我在」「早安，George」「我在」），兩條語音路徑都由核心決定內容；**只有雲端 fixture 驗證，門檻仍未校準，實際音訊（14 I12）待 Mac**，見 [ID-02 驗證紀錄](../validation/family-id-02-2026-10-25.md)與 §11。
 
 編號說明：這是本 repo `docs/adr/` 的第一份 ADR。[08](../08_Consolidation_and_Update_2026-10.md) 提到的 ADR-001–005 是當時的提案標籤，沒有在 repo 建檔；[11](../11_Stereo_Camera_Interaction_2026-10.md) 引用的 ADR-0002、ADR-0005 屬於另一個 repo（this-is-yourX）。三者不是同一個編號序列。
 
@@ -122,7 +122,7 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 - **揭露與同意（獨立審查 2026-10-25）**：「家人辨識」畫面的資料說明與登記同意都寫明「開啟稱名時，名字會以短句送到雲端語音供應商（ChatGPT 方案或 OpenAI API key），可以在設定關掉」。另有一次性說明：核心以 `identity/cloud-naming-notice.v1.json`（只有版本與時間，不含姓名，不加密，0600）記錄「已看過」；登記時勾選同意並保存、或在家人辨識畫面按「我知道了」（`ack_naming`，需要管理 session）才寫入。**沒看過就不稱名**（原因 `notice_unseen`），只說「我在」。ID-01 時已登記、還沒看過說明的家人，打開家人辨識畫面會看到這段與「我知道了」。
 - 「打招呼時稱呼認出的家人」（camera.json 的 `look_to_talk_greet_name`，預設開，George 2026-10-25）：關掉時問候一律用「我在」，而且看著說話時不做辨識（辨識在 ID-02 唯一的用途就是稱名，關了就不取樣）。這個設定是 ID-02 新增的；ID-01 沒有存過稱名設定。決策之後、live 路徑取用之前才關掉時，核心改送「我在」，不補回姓名。
 - 名稱由核心從受管理的人物檔案取出，先過登記用的 `parseFamilyName`，再過 `speakableName`：只允許文字、組合符號、數字與名字裡常見的空白、間隔號、句點、撇號、連字號，並以黑名單拒絕像指令的字（忽略、指示、指令、系統、ignore、prompt…；盡力而為，不是完整防護）。不合格就只說「我在」（14 §6、I11）。客戶端傳來的任意文字不能變成名稱或內容。
-- 短句只有兩種形狀：`greetingSentence(name)` 組成「<名字>，我在」或「我在」，再放進固定的指示（請模型一字不改照念、不加字、不提問、不猜名字、不說看到使用者）。模型仍可能改寫：只看指示不能算通過，驗收看實際逐字稿與播音（14 §6、I12）。
+- **開場句從固定清單挑**（George 2026-10-25：要多一點變化）：`shared/sense.ts` 的 `GREETING_TEMPLATES`。有名字：「George，我在」「嗨，George」「George，你好」「我在這，George」，依本機時段另有「早安／午安／晚上好，George」；沒有名字：「我在」「嗨，我在」「你好」，時段版「早安／午安／晚上好」。時段以這台電腦的時區為準（同 `server/home-bridge.ts`）：5–11 點早安、11–18 點午安、18 點以後晚上好（不用「晚安」，中文多指道晚安），0–4 點不加。核心（`server/greeting-picker.ts`）隨機挑、避開上一次用過的模板（只記在記憶體），log 只記模板編號。全部是短句、不是問句，不讓模型自由生成；名字照樣先經 `speakableName`。挑好的一句放進固定的指示（請模型一字不改照念、不加字、不提問、不猜名字、不說看到使用者）。模型仍可能改寫：只看指示不能算通過，驗收看實際逐字稿與播音（14 §6、I12）。
 
 #### 2.4.1 姓名出現在哪些行程（ID-02，2026-10-25）
 
@@ -133,8 +133,8 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 | loopback HTTP | 不經過 | 只有互動 ID；核心依 ID 取暫存的短句（綁定那個 live 工作階段），自己經 sideband 送出（頁面文字永遠不是內容） |
 | 語音供應商 | `response.create` 的 instructions | `session.context.append` speakable |
 | renderer 的字幕 | 模型說出的逐字稿（`onAssistantTranscript`）會顯示「Nous：George，我在」——這是使用者本來就會聽到的內容，兩條路徑相同 | 同左 |
-| 交辦的 Codex 請求 | — | **會**：模型念出「George，我在」後，sideband 的逐字稿進入 `LiveCall` 的最近 12 則緩衝；之後的交辦（`server/live-tool-caller.ts` 的 `requestText`）把最近 8 則逐字稿附在送給 Codex 的請求裡，所以名字可能跟著送到 Codex（OpenAI） |
-| 任務標題與保存 | 模型可能把名字寫進交辦的任務標題（`delegate_task` 的 title），任務以 JSON 存在本機資料夾，也會送到執行任務的引擎 | 同左（交辦由 Codex 決定標題） |
+| 交辦的 Codex 請求 | 沒有對應的上下文：API key 路徑由模型自己呼叫工具，`delegate_task` 只帶標題，不附逐字稿 | **問候那一則會遮掉**（George 2026-10-25）：`LiveCall` 記下核心送出的那一句，送出後第一則助理逐字稿若是它（含標點差異或被打斷的開頭，`isGreetingTurn`）就在緩衝裡標成 `greeting`；`requestText` 附最近 8 則逐字稿時跳過它。**只遮問候那一則**：使用者自己說的名字（例如「幫 George 寫信」）與之後模型回答裡提到的名字照樣附上，會送到 Codex（OpenAI）。模型若沒照念、第一則回覆不是那一句，就不會被標記 |
+| 任務標題與保存 | **不另外處理**：模型仍可能把對話裡出現的名字（問候以外的，例如使用者自己說的）寫進任務標題（`delegate_task` 的 title），任務以 JSON 存在本機資料夾，也會送到執行任務的引擎 | 同左（交辦由 Codex 決定標題） |
 | log／trace | 核心只記決策原因、世代與證據格數；頁面時序（`[看著說話時序]`）只有毫秒。ChatGPT 方案路徑既有的交辦 log 會記交辦內容的前 40 字（`preview`），若使用者或模型在請求裡說了名字就可能出現 | 同左 |
 
 **取捨（API key 路徑）**：要讓姓名完全不經過 renderer，核心必須自己連上那條 WebRTC 通話的控制面（OpenAI Realtime 對 WebRTC 通話另開 server 端 WebSocket 的作法），由核心送 `response.create`。目前 API key 路徑的資料通道只在頁面，核心只代換 SDP，沒有通話 ID，也無法在雲端驗證那條連線；同時兩邊都能送 `response.create`，頁面的「回應中」狀態與插話取消要重新設計。ID-02 選擇**由核心組好整句、只回傳組好的 instructions**：頁面拿不到 person_id、分數或其他家人的名單，但組好的短句會短暫出現在 renderer 記憶體。頁面腳本要拿到名字，必須先真的開一次看著說話的語音工作階段（`greeting` 只接受核心發出、真的連上的互動 ID，見 §2.1.1 威脅面）；它也能從字幕看到同一句話，且生成 UI 不得接觸 preload API（CLAUDE.md 紅線）。要消除這一段，改成核心代送（§11 待辦，需 Mac 實測）。
@@ -251,14 +251,15 @@ spike 的 TypeScript 模組逐項對照 OpenCV 官方實作（opencv/opencv comm
 - **兩條路徑**：見 §2.4.1。API key 路徑由 IPC 回傳組好的 instructions；live 路徑只送互動 ID，核心（`server/live-route.ts` 的 `greeting` 選項 → `server/nous.ts` 的 `liveGreetingSource` → `IdentityService.takeLiveGreeting`，綁定 live 工作階段 ID）取短句送進 sideband，取不到就送「我在」。
 - **互動 ID 由核心發出（獨立審查 2026-10-25 修正）**：頁面開始看著說話時 `POST /api/realtime/start` 帶 `source: "look_to_talk"`，`RealtimeSessions` 發出一次性的 `interaction`（改路徑時沿用）；`call()` 成功時記下它綁定哪個工作階段、何時連上。`IdentityService` 經 `greetingClaims` → `RealtimeSessions.claimGreeting` 換成工作階段，只接受「核心發出、尚未使用、工作階段真的連上而且還在進行、連上後 20 秒內、路徑相符」的 ID（原因 `no_session`）。頁面自己的鍵只用來綁定追蹤世代。
 - **一次性說明**：見 §2.4。沒看過就不稱名（原因 `notice_unseen`）。
-- **開場句改變**：所有看著說話的問候（兩條路徑、瀏覽器版、決策失敗時）都從 2026-10-23 的「我在，有什麼需要幫忙的嗎？」之類的招呼，改成只說「我在」或「George，我在」。
+- **開場句改變**：所有看著說話的問候都從 2026-10-23 的「我在，有什麼需要幫忙的嗎？」之類的招呼，改成核心從固定清單挑的一句短句（§2.4）。兩條路徑在 macOS App 都用核心挑的句子；live 路徑沒有家人辨識（瀏覽器版）時核心也從不含名字的清單挑；只有 API key 路徑在瀏覽器版或決策失敗時，頁面用固定的「我在」（頁面不挑句）。
+- **遮掉問候**：交辦給 Codex 的最近逐字稿不附開場問候那一則（§2.4.1）。
 - **gallery 載入**：`ambient_status` 不載入 gallery、不碰 Keychain（只看檔案在不在）；第一次 `ambient_probe` 才載入。所以有登記家人時，第一次在看著說話中被辨識可能出現 Keychain 提示（之前若已在管理畫面允許過就不會）。
-- **log**：核心只記一行「問候決策（路徑，原因，世代，連續證據 N 格／M ms，最新 K ms 前，門檻未校準）」；取樣不逐筆記。頁面印 `[看著說話時序]` 一行毫秒數到 DevTools console，供 Mac 對照面向→在場→互動啟動→語音就緒→問候決策→首音。
+- **log**：核心只記一行「問候決策（路徑，原因，世代，連續證據 N 格／M ms，最新 K ms 前，模板編號，門檻未校準）」，不記句子內容；取樣不逐筆記。頁面印 `[看著說話時序]` 一行毫秒數到 DevTools console，供 Mac 對照面向→在場→互動啟動→語音就緒→問候決策→首音。
 
 待辦：
 
-- [ ] Mac 實測（ID-02 驗證紀錄 §5）：兩條路徑實際聽到「George，我在」、模型是否加話或猜名、先開口取消、換人、多人、時序與同時運作的 CPU／停止手勢。**若模型會加話、猜名或重複，該路徑不得標為通過**，需改用確定文字的 TTS（14 §6）。
+- [ ] Mac 實測（ID-02 驗證紀錄 §5）：兩條路徑實際聽到清單裡的一句（例如「嗨，George」）、模型是否加話或猜名、先開口取消、換人、多人、時序與同時運作的 CPU／停止手勢。**若模型會加話、猜名或重複，該路徑不得標為通過**，需改用確定文字的 TTS（14 §6）。
 - [ ] API key 路徑改由核心代送 `response.create`（核心連上那條 WebRTC 通話的 server 端控制連線），讓組好的短句也不經過 renderer（§2.4.1 取捨；獨立審查 #1(c)，不在 ID-02 做）。
-- [x] 登記時預覽「會念成：『X，我在』」，不能念的名稱（像句子、指令、超過 3 段）在登記當下就提示（獨立審查 2026-10-25）。
-- [ ] 交辦請求附帶的逐字稿與任務標題可能含名字（§2.4.1）：是否在交辦前遮掉問候那一則，留待 George 決定。
+- [x] 登記時預覽會怎麼念（例如「George，我在」「嗨，George」），不能念的名稱（像句子、指令、超過 3 段）在登記當下就提示（獨立審查 2026-10-25）。
+- [x] 交辦請求的逐字稿遮掉問候那一則（George 2026-10-25）；任務標題不另外處理，照實寫在 §2.4.1。
 - [ ] 門檻校準與保留樣本（ID-03）。

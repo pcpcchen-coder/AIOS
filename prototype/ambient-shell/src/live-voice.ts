@@ -303,7 +303,7 @@ export class LiveVoice implements RealtimeSession {
   }
 
   /**
-   * 等待結束：使用者還沒開口、設定還開著，就請核心送一句可念的招呼。頁面只送互動 ID：短句（「<名字>，我在」或「我在」）
+   * 等待結束：使用者還沒開口、設定還開著，就請核心送一句可念的招呼。頁面只送互動 ID：短句（核心從固定清單挑，例如「George，我在」「早安」）
    * 由核心依問候決策組成並直接送進 sideband，名字不經過頁面。決策期間開口、打字或收起都會取消。
    */
   private greetIfPending(): void {

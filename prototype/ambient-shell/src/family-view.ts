@@ -74,12 +74,15 @@ function button(label: string, onClick: () => void, variant = "", disabled = fal
 }
 
 /**
- * 登記時預覽問候會怎麼念（只在這個畫面顯示使用者自己打的名稱，不送出）。核心組句時用同一組規則再驗一次（權威在核心）。
+ * 登記時預覽問候會怎麼念（只在這個畫面顯示使用者自己打的名稱，不送出）。實際句子由核心從固定清單挑（依時段、避開上一次），
+ * 組句時用同一組規則再驗一次（權威在核心）。
  */
 export function namePreview(draft: string): string {
   if (!parseFamilyName(draft).ok) return "";
   const name = speakableName(draft);
-  return name ? `看著說話認出時會念成：「${greetingSentence(name)}」` : "這個名稱不會被念出來：認出時只說「我在」（像句子、指令或含不能念的符號）。";
+  return name
+    ? `看著說話認出時會說像「${greetingSentence(name)}」「嗨，${name}」這樣的短句（依時段也可能是「早安，${name}」）。`
+    : "這個名稱不會被念出來：認出時只說「我在」之類不含名字的短句（像句子、指令或含不能念的符號）。";
 }
 
 /** 核心給的觀測 → 畫面上的一句話（不含分數）。 */

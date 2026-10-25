@@ -5,9 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LiveCoreEvent } from "../shared/realtime-route.ts";
 import { GREETING_MARKER, greetingSentence, LIVE_GREETING_TEXT, liveGreetingText } from "../shared/sense.ts";
 import { CodexAuth } from "../server/codex-auth.ts";
-import { ANSWER_BOUND_MS, callIdFrom, LIVE_CALL_URL, LIVE_SIDEBAND_URL, LIVE_TIMEOUTS_MS, LiveRoute, SIDEBAND_ATTEMPTS, type DelegationRunner } from "../server/live-route.ts";
+import { ANSWER_BOUND_MS, callIdFrom, isGreetingTurn, type LiveGreeting, LIVE_CALL_URL, LIVE_SIDEBAND_URL, LIVE_TIMEOUTS_MS, LiveRoute, SIDEBAND_ATTEMPTS, type DelegationRunner } from "../server/live-route.ts";
 import { RouteStartError, type ApprovalSnapshot, type SessionContext } from "../server/realtime-routes.ts";
-import type { DelegationRequest, DelegationResult } from "../server/live-tool-caller.ts";
+import { requestText, type DelegationRequest, type DelegationResult } from "../server/live-tool-caller.ts";
 import { scriptedFetch, SECRET_TOKEN_MARK, writeCredentials, type Recorded } from "./fixtures/fake-chatgpt.ts";
 import { startFakeSideband, type FakeSideband } from "./fixtures/fake-sideband.ts";
 
@@ -27,7 +27,7 @@ function answer(headers: Record<string, string> = { Location: "/v1/realtime/call
   return new Response("v=0 live-answer", { status: 201, headers });
 }
 
-async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string) => string | null } = {}) {
+async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string, sessionId: string) => LiveGreeting | null } = {}) {
   sideband = await startFakeSideband();
   const dir = mkdtempSync(join(tmpdir(), "nous-live-"));
   const creds = writeCredentials(dir);
@@ -338,15 +338,61 @@ describe("LiveRoute sideband", () => {
   it("ID-02：the page's greeting text is only an interaction ID handed to the core's decision; the core's composed sentence is sent", async () => {
     const asked: string[] = [];
     const named = liveGreetingText(greetingSentence("George"));
-    const t = await setup({ greeting: (id) => (asked.push(id), id === "int_0123456789abcdef" ? named : null) });
+    const t = await setup({ greeting: (id, session) => (asked.push(`${id}@${session}`), id === "int_0123456789abcdef" ? { text: named, sentence: "George，我在" } : null) });
     const call = await t.route.connect("v=0", t.ctx);
     const conn = await sideband!.next();
     call.control!.input("greeting", "int_0123456789abcdef");
     const append = await conn.waitFor((e) => e.type === "session.context.append");
     expect(append).toMatchObject({ channel: "speakable", content: [{ type: "input_text", text: named }] });
     expect(named).toContain("「George，我在」");
-    expect(asked).toEqual(["int_0123456789abcdef"]);
+    expect(asked).toEqual(["int_0123456789abcdef@rt_test"]); // 連同這個 live 工作階段的 ID 交給核心
     await call.close("ended");
+  });
+
+  it("George 2026-10-25：the opening the model read out is marked in the transcript ring and left out of the Codex request; the user's own mention of the name stays", async () => {
+    const t = await setup({ greeting: () => ({ text: liveGreetingText("晚上好，George"), sentence: "晚上好，George" }) });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    await conn.waitFor((e) => e.type === "session.context.append");
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: "晚上好，George！", id: "a1" } });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "幫 George 寫一封信給客戶", id: "u1" } });
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: "好，我來幫 George 準備。", id: "a2" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_mail", content: [{ type: "input_text", text: "幫 George 寫一封信給客戶" }] } });
+    await conn.waitFor((e) => e.type === "delegation.context.append");
+    const req = t.delegations.at(-1)!;
+    expect(req.transcript.map((x) => [x.role, x.text, x.greeting ?? false])).toEqual([
+      ["assistant", "晚上好，George！", true],
+      ["user", "幫 George 寫一封信給客戶", false],
+      ["assistant", "好，我來幫 George 準備。", false],
+    ]);
+    const sent = requestText(req);
+    expect(sent).not.toContain("晚上好，George");
+    expect(sent).toContain("使用者：幫 George 寫一封信給客戶");
+    expect(sent).toContain("Nous：好，我來幫 George 準備。");
+  });
+
+  it("isGreetingTurn: the sent sentence (with punctuation or a cut-off start) matches; other replies do not", () => {
+    expect(isGreetingTurn("晚上好，George！", "晚上好，George")).toBe(true);
+    expect(isGreetingTurn("晚上好 George", "晚上好，George")).toBe(true);
+    expect(isGreetingTurn("晚上好，", "晚上好，George")).toBe(true); // 被打斷
+    expect(isGreetingTurn("新竹今天不會下雨。", "晚上好，George")).toBe(false);
+    expect(isGreetingTurn("", "我在")).toBe(false);
+  });
+
+  it("only the first assistant turn after the opening can be the greeting: a later reply that repeats the words is kept", async () => {
+    const t = await setup({ greeting: () => ({ text: liveGreetingText("我在"), sentence: "我在" }) });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    await conn.waitFor((e) => e.type === "session.context.append");
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: "新竹今天不會下雨。", id: "a1" } }); // 使用者先開口，模型直接回答
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: "我在。", id: "a2" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_x", content: [{ type: "input_text", text: "x" }] } });
+    await conn.waitFor((e) => e.type === "delegation.context.append");
+    expect(t.delegations.at(-1)!.transcript.every((x) => !x.greeting)).toBe(true);
   });
 
   it("ID-02：no decision from the core (browser version, expired, unknown ID) → 「我在」; page text never becomes content", async () => {

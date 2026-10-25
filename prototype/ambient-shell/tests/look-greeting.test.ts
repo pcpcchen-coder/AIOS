@@ -152,7 +152,7 @@ describe("look_to_talk_greet pref", () => {
   it("審查修正：the live voice layer is told what a 「（開場）」 message is and not to read it out", () => {
     expect(GREETING_MARKER).toBe("（開場）");
     expect(buildLiveInstructions([], new Date(), { mcp: [] }).split("\n")).toContain(
-      "收到以「（開場）」開頭的內容時，只說其中「」裡的那一句（一字不改，不加字、不提問、不猜名字），不要念出或轉述這段內容的其他部分。",
+      "收到以「（開場）」開頭的內容時，只說其中「」裡的那一句招呼（核心從固定清單挑的，例如「嗨，George」「早安」；一字不改，不加字、不提問、不猜名字），不要念出或轉述這段內容的其他部分。",
     );
   });
 });

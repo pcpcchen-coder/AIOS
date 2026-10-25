@@ -34,7 +34,8 @@ import {
   type IdentityStatus,
   type QualityReason,
 } from "../shared/identity.ts";
-import { greetingInstructions, greetingSentence, liveGreetingText, LIVE_GREETING_TEXT } from "../shared/sense.ts";
+import { greetingInstructions, liveGreetingText } from "../shared/sense.ts";
+import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
 import type { GalleryStore, GalleryVersions, StoredPerson } from "./identity-store.ts";
 
@@ -57,7 +58,7 @@ import type { GalleryStore, GalleryVersions, StoredPerson } from "./identity-sto
 //   頁面因此無法拿它探測某張臉是否已登記。這個追蹤世代出現過多張臉或兩位不同的家人就整段作廢（不稱名）。
 // - greeting：送出問候前呼叫一次（每個互動 ID 最多一次；每秒 2 次、每分鐘 3 次）。互動 ID 必須是 RealtimeSessions 在
 //   看著說話開始時發出、還沒用過、工作階段真的連上 20 秒內（claimGreeting），否則不帶名字。核心建立 GreetingDecision
-//   （docs/14 §3 的條件），從受管理人物檔案取名稱、以 speakableName 再驗一次，組成「<名字>，我在」或「我在」。
+//   （docs/14 §3 的條件），從受管理人物檔案取名稱、以 speakableName 再驗一次，從 shared/sense.ts 的固定清單挑一句（依本機時段、避開上一次；例如「George，我在」「早安，George」「我在」）。
 //   稱名設定關閉、或還沒看過雲端稱名說明時一律不帶名字。API key 路徑回傳組好的 instructions；live 路徑把短句留在核心，
 //   綁定那個 live 工作階段，由 server/live-route.ts 取用（takeLiveGreeting）。
 // - ambient_status／ambient_probe 被拒時不說原因（原因可能透露有沒有登記家人）。
@@ -96,6 +97,8 @@ export interface IdentityServiceOptions {
    * 成功一次之後同一個 ID 就不能再用。
    */
   claimGreeting?: (interaction: string) => { route: GreetingRoute; session_id: string } | null;
+  /** 開場句挑選（固定清單、依時段、避開上一次）；未提供時建一個（Math.random、這台電腦的時區）。 */
+  picker?: GreetingPicker;
   /** 模型與 runtime 的雜湊核對結果（啟動時算一次）。 */
   runtime: FaceRuntimeCheck;
   model: FaceModelVersion;
@@ -222,11 +225,13 @@ export class IdentityService {
   /** 已做過問候決策的互動 ID。 */
   private readonly decided: string[] = [];
   /** live 路徑：已組好、等 server/live-route.ts 取用的短句（一次只有一個互動）。 */
-  private pendingLive: { interaction: string; session_id: string; named: boolean; text: string; at: number } | null = null;
+  private pendingLive: { interaction: string; session_id: string; named: boolean; text: string; sentence: string; at: number } | null = null;
+  private readonly picker: GreetingPicker;
 
   constructor(private readonly options: IdentityServiceOptions) {
     this.now = options.now ?? Date.now;
     this.log = options.log ?? (() => {});
+    this.picker = options.picker ?? new GreetingPicker({ now: this.now });
   }
 
   private encryptionAvailable(): boolean {
@@ -569,16 +574,18 @@ export class IdentityService {
     const decision = this.decide(interaction, track, req.eligible, session !== null);
     const person = decision.person_id ? this.people.find((p) => p.person_id === decision.person_id) : undefined;
     const name = person ? speakableName(person.name) : null;
-    const sentence = greetingSentence(name);
+    // 從固定清單挑一句（依時段、避開上一次）；log 只記模板編號，不記句子。
+    const picked = this.picker.pick(name);
+    const sentence = picked.sentence;
     // 只有原因與數字（給 Mac 實測對照時序）：證據格數、跨度與最新一格多久以前；不記姓名、person_id 或分數。
     const ev = this.ambient?.track === track ? this.ambient.evidence.frames : [];
     const span = ev.length ? Math.round(ev.at(-1)!.t - ev[0]!.t) : 0;
     const age = decision.evidence_at === null ? "—" : `${Math.round(decision.decided_at - decision.evidence_at)} ms`;
-    this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前，門檻未校準）`);
+    this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前，模板 ${picked.id}，門檻未校準）`);
     // 證據只為這一次問候存在：決策後丟掉，晚到的推論不能讓下一次互動沿用。
     this.ambient = null;
     if (route === "api_key") return { ok: true, op: "greeting", text: greetingInstructions(sentence) };
-    this.pendingLive = session ? { interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence), at: this.now() } : null;
+    this.pendingLive = session ? { interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence), sentence, at: this.now() } : null;
     return { ok: true, op: "greeting", text: null };
   }
 
@@ -609,15 +616,16 @@ export class IdentityService {
   }
 
   /**
-   * server/live-route.ts 取用 live 路徑的短句（頁面 POST greeting 帶來的只有互動 ID）。只有同一個互動、
-   * LIVE_GREETING_PICKUP_MS 內才給，取一次就清掉；稱名在這之間被關掉時改回「我在」。找不到時回 null（呼叫端送「我在」）。
+   * server/live-route.ts 取用 live 路徑的短句（頁面 POST greeting 帶來的只有互動 ID）。只有同一個互動、同一個 live 工作階段、
+   * LIVE_GREETING_PICKUP_MS 內才給，取一次就清掉；稱名在這之間被關掉時改挑一句不含名字的。找不到時回 null
+   * （server/nous.ts 的 liveGreetingSource 改挑一句不含名字的）。回傳整段文字與那一句（逐字稿緩衝用來認出問候）。
    */
-  takeLiveGreeting(interaction: string, sessionId: string): string | null {
+  takeLiveGreeting(interaction: string, sessionId: string): { text: string; sentence: string } | null {
     const pending = this.pendingLive;
     this.pendingLive = null;
     if (!pending || pending.interaction !== interaction || pending.session_id !== sessionId || this.now() - pending.at > LIVE_GREETING_PICKUP_MS) return null;
-    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) return LIVE_GREETING_TEXT;
-    return pending.text;
+    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) return this.picker.plainLive();
+    return { text: pending.text, sentence: pending.sentence };
   }
 
   /** 等待原生確認之後：核心關閉、session 換掉或 gallery 已被改過就不寫。 */

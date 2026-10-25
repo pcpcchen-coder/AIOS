@@ -13,6 +13,8 @@ import { HOST_TIMEOUT_MS, HostGone, type ApprovalSnapshot, type ToolHost } from 
 export interface TranscriptTurn {
   role: "user" | "assistant";
   text: string;
+  /** 看著說話的開場問候（核心送出、模型念出的那一則）：交辦時不附給 Codex（可能含家人的名字，ADR-0001 §2.4.1）。 */
+  greeting?: true;
 }
 
 export interface DelegationRequest {
@@ -262,8 +264,9 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   });
 }
 
-function requestText(request: DelegationRequest): string {
-  const recent = request.transcript.slice(-8).map((t) => `${t.role === "user" ? "使用者" : "Nous"}：${t.text}`);
+/** 交辦給 Codex 的請求文字：最近 8 則逐字稿（不含開場問候那一則；使用者自己說的話照樣保留）＋這次的請求。 */
+export function requestText(request: DelegationRequest): string {
+  const recent = request.transcript.filter((t) => !t.greeting).slice(-8).map((t) => `${t.role === "user" ? "使用者" : "Nous"}：${t.text}`);
   return [
     ...(recent.length ? ["最近的對話（裝置回報的逐字稿）：", ...recent, ""] : []),
     request.source === "typed" ? `使用者打字：${request.text}` : `語音模型交辦的請求：${request.text}`,

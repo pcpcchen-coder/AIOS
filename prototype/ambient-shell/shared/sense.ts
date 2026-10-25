@@ -62,15 +62,76 @@ export interface CameraPrefs {
   brain_zoom_max: number;
 }
 
-/** 問候的固定部分（docs/14 §1、§6）：沒有可靠姓名時只說這句。 */
+/** 問候的固定部分（docs/14 §1、§6）：沒有可靠姓名時的基本句，也是瀏覽器版與決策失敗時用的句子。 */
 export const GREETING_PLAIN = "我在";
 
+/** 本機時段（George 2026-10-25）：5–11 點早安、11–18 點午安、18 點以後晚上好（「晚安」在中文多指道晚安，不用）；0–4 點不加問候語。 */
+export type DaySlot = "morning" | "afternoon" | "evening" | null;
+
+export function daySlot(hour: number): DaySlot {
+  if (hour >= 5 && hour < 11) return "morning";
+  if (hour >= 11 && hour < 18) return "afternoon";
+  if (hour >= 18) return "evening";
+  return null;
+}
+
 /**
- * 問候短句只有兩種形狀：「<名字>，我在」或「我在」。名字必須是核心從受管理人物檔案取出、經 shared/identity.ts
- * speakableName 驗證過的口語名稱；頁面與客戶端傳來的文字不能走到這裡（server/identity-service.ts 組句）。
+ * 這台電腦（或指定時區）現在是幾點（0–23）。時區的取法同 server/home-bridge.ts：未指定就用這台電腦的時區。
  */
+export function localHour(now: number, timeZone?: string): number {
+  const hour = Number(new Date(now).toLocaleString("en-US", { hour: "numeric", hourCycle: "h23", timeZone }));
+  return Number.isInteger(hour) && hour >= 0 && hour < 24 ? hour : new Date(now).getHours();
+}
+
+/**
+ * 問候短句的固定清單（George 2026-10-25：要多一點變化，但不讓模型自由生成，也不改成提問）。
+ * - id 只是編號，核心 log 只記它，不記句子；
+ * - named：要有名字（名字必須是核心從受管理人物檔案取出、經 shared/identity.ts speakableName 驗證過的口語名稱）；
+ * - slot：只在那個時段可以用（null＝任何時段）。
+ * 全部都是短句、不是問句。頁面與客戶端傳來的文字不能走到這裡（server/greeting-picker.ts 挑句）。
+ */
+export interface GreetingTemplate {
+  id: string;
+  named: boolean;
+  slot: DaySlot;
+  render(name: string | null): string;
+}
+
+export const GREETING_TEMPLATES: readonly GreetingTemplate[] = [
+  { id: "n0", named: true, slot: null, render: (n) => `${n}，我在` },
+  { id: "n1", named: true, slot: null, render: (n) => `嗨，${n}` },
+  { id: "n2", named: true, slot: null, render: (n) => `${n}，你好` },
+  { id: "n3", named: true, slot: null, render: (n) => `我在這，${n}` },
+  { id: "n4", named: true, slot: "morning", render: (n) => `早安，${n}` },
+  { id: "n5", named: true, slot: "afternoon", render: (n) => `午安，${n}` },
+  { id: "n6", named: true, slot: "evening", render: (n) => `晚上好，${n}` },
+  { id: "p0", named: false, slot: null, render: () => GREETING_PLAIN },
+  { id: "p1", named: false, slot: null, render: () => "嗨，我在" },
+  { id: "p2", named: false, slot: null, render: () => "你好" },
+  { id: "p3", named: false, slot: "morning", render: () => "早安" },
+  { id: "p4", named: false, slot: "afternoon", render: () => "午安" },
+  { id: "p5", named: false, slot: "evening", render: () => "晚上好" },
+];
+
+/** 這個時段可以用的模板（有名字或沒名字）。 */
+export function greetingCandidates(named: boolean, slot: DaySlot): GreetingTemplate[] {
+  return GREETING_TEMPLATES.filter((t) => t.named === named && (t.slot === null || t.slot === slot));
+}
+
+/**
+ * 從固定清單隨機挑一句（亂數由呼叫端注入，測試可固定）。可選的不只一句時，避開上一次用過的模板。
+ * name 為 null 時只挑不含名字的句子。
+ */
+export function pickGreeting(name: string | null, slot: DaySlot, last: string | null, random: () => number): { id: string; sentence: string } {
+  const all = greetingCandidates(name !== null, slot);
+  const pool = all.length > 1 ? all.filter((t) => t.id !== last) : all;
+  const t = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))]!;
+  return { id: t.id, sentence: t.render(name) };
+}
+
+/** 基本句（不分時段）：登記畫面預覽用（「George，我在」或「我在」）。 */
 export function greetingSentence(name: string | null): string {
-  return name ? `${name}，${GREETING_PLAIN}` : GREETING_PLAIN;
+  return GREETING_TEMPLATES.find((t) => t.id === (name ? "n0" : "p0"))!.render(name);
 }
 
 /**
@@ -85,7 +146,7 @@ export function greetingInstructions(sentence: string): string {
   );
 }
 
-/** 沒有姓名時的問候指示（API key 路徑；瀏覽器版與決策失敗時也用它）。 */
+/** 沒有姓名、也沒有核心挑句時的問候指示（API key 路徑：瀏覽器版與決策失敗時用它）。 */
 export const LOOK_TO_TALK_GREETING = greetingInstructions(GREETING_PLAIN);
 
 /**
@@ -99,7 +160,7 @@ export function liveGreetingText(sentence: string): string {
   return `${GREETING_MARKER}${greetingInstructions(sentence)}`;
 }
 
-/** 沒有姓名時 ChatGPT 方案路徑送的招呼。 */
+/** 核心沒有挑句時 ChatGPT 方案路徑送的招呼（LiveRoute 沒有接上 greeting 來源時的保底）。 */
 export const LIVE_GREETING_TEXT = liveGreetingText(GREETING_PLAIN);
 
 /** SettingsView.camera 的形狀。 */
