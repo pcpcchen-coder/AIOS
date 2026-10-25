@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-25T01:31:26.861Z",
-  "updated_at": "2026-10-25T01:45:42.329Z",
+  "updated_at": "2026-10-25T01:50:43.373Z",
   "ended_at": null,
   "steps": [
     {
@@ -50,10 +50,10 @@
     {
       "id": "review",
       "title": "review",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-25T01:45:42.328Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-25T01:50:43.372Z",
+      "note": "0 blocker、1 major（置中不足，George 選真置中）、多項 minor",
       "evidence": []
     },
     {
@@ -145,6 +145,13 @@
       "step_id": "review",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-25T01:50:43.372Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "passed",
+      "note": "0 blocker、1 major（置中不足，George 選真置中）、多項 minor"
     }
   ],
   "provenance": "Agent self-reported"
