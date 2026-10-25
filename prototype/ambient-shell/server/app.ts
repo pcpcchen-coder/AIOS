@@ -29,6 +29,7 @@ import {
 import { COMMANDS_PATH, commandsPageHeaders, renderCommandsPage } from "./commands-page.ts";
 import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity.ts";
 import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
+import { pageHeaders } from "./page-headers.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
 
@@ -56,19 +57,6 @@ const CONTENT_TYPES: Record<string, string> = {
   ".mjs": "text/javascript; charset=utf-8",
   ".onnx": "application/octet-stream",
 };
-
-/**
- * 頁面安全標頭。鏡頭啟用時（NOUS_CAMERA=on）才允許本頁使用鏡頭，並允許編譯本機的 MediaPipe wasm；
- * 影像處理仍只在本機（connect-src 'self'）。
- */
-export function pageHeaders(camera: boolean): Record<string, string> {
-  return {
-    "Content-Security-Policy": `default-src 'self'; script-src 'self'${camera ? " 'wasm-unsafe-eval'" : ""}; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`,
-    "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
-    "Permissions-Policy": `camera=(${camera ? "self" : ""}), microphone=(self), geolocation=()`,
-  };
-}
 
 /**
  * JavaScript 回應的 CSP。頁面的 CSP 只管頁面；dedicated worker 套用的是它自己腳本回應的 CSP，沒有這個標頭時
