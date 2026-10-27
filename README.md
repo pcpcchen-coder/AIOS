@@ -1,4 +1,18 @@
+<!-- bilingual: source=zh-TW -->
+
 # Nous — Cognitive Operating System with Claude as Kernel
+
+<!-- language-switch:start -->
+<div align="center">
+
+**語言 / Language**
+
+**[繁體中文](README.md)** &nbsp; | &nbsp; **[English](README.en.md)**
+
+目前閱讀：繁體中文
+
+</div>
+<!-- language-switch:end -->
 
 > **平時是高科技感的電子腦動態桌布；說出需求，AI Agents 完成工作，成果才浮現。以語音操作、webcam 視線指向，不需要挑選或開啟 App。**
 
@@ -153,3 +167,15 @@ node scripts/verify-aios.mjs
 ---
 
 _「作業系統的歷史是『降低人與電腦互動成本』的歷史。從指令列到 GUI 到觸控，每一代都把更多認知負擔從人類轉移到系統。Nous 是這個方向的下一步——連『學習 App』這個認知負擔都由 AI 承擔。」_
+
+<!-- language-switch:start -->
+<div align="center">
+
+**語言 / Language**
+
+**[繁體中文](README.md)** &nbsp; | &nbsp; **[English](README.en.md)**
+
+目前閱讀：繁體中文
+
+</div>
+<!-- language-switch:end -->
