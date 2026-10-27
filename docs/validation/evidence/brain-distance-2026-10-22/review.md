@@ -1,3 +1,7 @@
+<!-- bilingual: source=en -->
+
+> [繁體中文](review.zh-TW.md) | [English](review.md)
+
 # Independent distance scaling review
 
 Result: no proven correctness defects found in the reviewed change against `16dc63c`. This is a read-only review; repository files were not edited.

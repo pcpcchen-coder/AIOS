@@ -1,8 +1,12 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](15_Companion_Mode_Spec_2026-10-24.md) | [English](15_Companion_Mode_Spec_2026-10-24.en.md)
+
 # Companion Mode（自然陪聊模式）功能規格
 
 > 狀態：**設計提案／待實作** · 版本：0.1 · 日期：2026-10-24 · 適用：`prototype/ambient-shell`（Node HTTP/SSE + TypeScript/Vite + Electron）。本文件**不代表程式已實作或實機驗收通過**。
 >
-> 關聯：[現況](./Current_Implementation_Status.md) · [06 互動規格](./06_Ambient_Voice_Gaze_Experience.md) · [07 驗收規則](./07_Ambient_Implementation_and_Acceptance.md) · [開發批次](./development/companion-mode-implementation-plan.md)
+> 關聯：[現況](Current_Implementation_Status.md) · [06 互動規格](06_Ambient_Voice_Gaze_Experience.md) · [07 驗收規則](07_Ambient_Implementation_and_Acceptance.md) · [開發批次](development/companion-mode-implementation-plan.md)
 
 ## 1. 產品目標與邊界
 
@@ -196,4 +200,4 @@ Content-Type: application/json
 - 電視畫面、節目字幕與真正具場景脈絡的主動評論。
 - 家庭成員個人化、聲紋、長期觀影記憶與跨裝置連續陪聊。
 
-開發實作步驟、測試範圍與交付標準見 [Companion Mode 開發批次](./development/companion-mode-implementation-plan.md)。
+開發實作步驟、測試範圍與交付標準見 [Companion Mode 開發批次](development/companion-mode-implementation-plan.md)。

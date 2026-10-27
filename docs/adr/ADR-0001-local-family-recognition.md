@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](ADR-0001-local-family-recognition.md) | [English](ADR-0001-local-family-recognition.en.md)
+
 # ADR-0001：本機家人辨識的資料生命週期與 runtime
 
 狀態：**草案（Proposed）**；George 已於 2026-10-25 決定 §9 大部分項目，偵測器已定案（YuNet 2023mar 640），SFace 訓練資料風險仍待決。日期：2026-10-24，2026-10-25 依 ID-01 實作修訂 §2.1、§2.2、§10，同日依 ID-02 修訂 §2.1.1、§2.4、§6、§9 並新增 §11。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00、ID-01、ID-02。

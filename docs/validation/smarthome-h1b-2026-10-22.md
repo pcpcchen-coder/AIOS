@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](smarthome-h1b-2026-10-22.md) | [English](smarthome-h1b-2026-10-22.en.md)
+
 # 武陵居家電控制 H1b 驗證（AIFA 冷氣、紅外線家電）
 
 日期為 2026-10-22，平台為 Linux 雲端環境，Node.js 22.22.0。對應 [docs/12](../12_SmartHome_Integration_Plan_2026-10.md) 的批次 H1b（`home_control` 延伸到 AIFA 冷氣與 Tuya 紅外線家電）。這是原型的驗證，沒有變更 G0 至 G3 驗收狀態。
@@ -140,7 +144,7 @@ docs/12 的 H1b 段落與 `prototype/ambient-shell/README.md` 的紅外線段落
 George 對兩件事做了決定，程式已改，本檔上下文保留 2026-10-22 的原文：
 
 - 冷氣關著時讀不到控制器記得的模式，預設改成**自動**（不分季節），原本是冷氣。上面「冷氣關著說『26 度』」的 `defaults_used: ["模式：冷氣"]` 與真實中控那一列的 `"mode":"cool"`，現在分別是 `["模式：自動"]` 與 `"mode":"auto"`；`sent_settings` 的模式前面加了「模式」（例如「模式自動、26 度、風量高、擺風固定 2」）。
-- 關 AIFA 冷氣時，Nous 會說「如果這台冷氣有設定定時，中控關機時會一併取消，需要的話請重新設定」。下面步驟 3（關冷氣）與步驟 4（預設模式）的預期跟著改，步驟見 [三項小決定](./small-decisions-2026-10-25.md#george-在-mac家裡的測試步驟)。
+- 關 AIFA 冷氣時，Nous 會說「如果這台冷氣有設定定時，中控關機時會一併取消，需要的話請重新設定」。下面步驟 3（關冷氣）與步驟 4（預設模式）的預期跟著改，步驟見 [三項小決定](small-decisions-2026-10-25.md#george-在-mac家裡的測試步驟)。
 
 ## George 家裡的實機驗證步驟
 

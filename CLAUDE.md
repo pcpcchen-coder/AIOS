@@ -1,8 +1,18 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](CLAUDE.md) | [English](CLAUDE.en.md)
+
 # CLAUDE.md — Nous 開發規則 v0.1（2026-10-07）
 
-給在本 repo 工作的開發 agent（Claude Code 等）。規格以 `docs/06`、`docs/07` 及明確日期的專題決定為準；目前實作與證據見 [`docs/Current_Implementation_Status.md`](./docs/Current_Implementation_Status.md)。`docs/08` 是 2026-10-07 的歷史規劃快照，不能當作今日現況。
+給在本 repo 工作的開發 agent（Claude Code 等）。規格以 `docs/06`、`docs/07` 及明確日期的專題決定為準；目前實作與證據見 [`docs/Current_Implementation_Status.md`](docs/Current_Implementation_Status.md)。`docs/08` 是 2026-10-07 的歷史規劃快照，不能當作今日現況。
 
-本專案採用 pstack 開發流程。開始非簡單修改前，讀取 [`AGENTS.md`](./AGENTS.md) 的專案適配規則及 [`使用指南`](./docs/development/pstack.md)，再依對應 playbook 工作。
+本專案採用 pstack 開發流程。開始非簡單修改前，讀取 [`AGENTS.md`](AGENTS.zh-TW.md) 的專案適配規則及 [`使用指南`](docs/development/pstack.md)，再依對應 playbook 工作。
+
+## 中英文文件與介面（2026-10-26 使用者要求）
+
+所有新增或修改的專案說明文件，必須在同一批變更提供完整繁體中文與英文版本，並同步更新語言切換連結。App 與網頁新增或修改的介面文字（含選單、提示、錯誤、無障礙標籤）也必須支援兩種語言，沿用共用翻譯表。所有後續 Agent 均須遵守 [雙語規範](./docs/BILINGUAL.md)；交付前執行 `node scripts/check-bilingual-docs.mjs`，翻譯審閱完成後才可用 `--record` 更新對應紀錄。摘要不能替代完整翻譯。
+
+**English requirement:** Every agent must deliver complete Traditional Chinese and English documentation in the same change, and support both languages in new or changed App/web interface copy. Follow [the bilingual policy](./docs/BILINGUAL.md), review both versions, and run `node scripts/check-bilingual-docs.mjs` before delivery.
 
 ## 開工前
 

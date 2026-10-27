@@ -1,3 +1,5 @@
+import { translate, type Locale } from "./i18n.mjs";
+
 // 家電狀態查詢（docs/12 H0）與控制（H1）交還給模型與畫面的結果；前後端共用。
 
 export interface Reading {
@@ -36,7 +38,8 @@ function readingText(r: Reading): string {
 }
 
 /** 字幕用的一行錨點：房間或設備、讀值與資料時間；快照與過期資料照實標示。 */
-export function homeStatusLine(result: HomeStatusResult): string {
+export function homeStatusLine(result: HomeStatusResult, locale: Locale = "zh-TW"): string {
+  if (locale === "en") return englishStatusLine(result);
   switch (result.status) {
     case "ambiguous":
       return `要查哪一個：${result.candidates.join("、")}`;
@@ -235,7 +238,8 @@ function where(t: HomeTarget): string {
 }
 
 /** 字幕用的一行錨點（✓ 已確認／⏳ 已送出、未確認／✕ 失敗）；未確認不寫成成功。 */
-export function homeControlLine(r: HomeControlResult): string {
+export function homeControlLine(r: HomeControlResult, locale: Locale = "zh-TW"): string {
+  if (locale === "en") return englishControlLine(r);
   switch (r.status) {
     case "confirmed":
       return `✓ ${where(r)} ${r.action}：已確認`;
@@ -286,5 +290,42 @@ export function homeControlNotice(r: HomeControlResult): string {
       return `家電指令沒有執行：${r.message}`;
     default:
       return homeControlLine(r);
+  }
+}
+
+function englishStatusLine(result: HomeStatusResult): string {
+  switch (result.status) {
+    case "ambiguous": return `Which device should I check: ${result.candidates.join(", ")}`;
+    case "not_found": return `No home device found for “${result.target}”`;
+    case "no_such_reading": return `No device in ${result.scope} can measure ${result.metric}`;
+    case "ok": {
+      const parts = result.devices.slice(0, 3).map(device => {
+        const location = device.room && result.scope !== device.device ? `${device.room} ${device.device}` : device.device;
+        if (!device.data) return `${location}: ${translate(device.online, "en")}`;
+        const readings = device.readings.map(reading => reading.value === null ? `${reading.name}: no reading`
+          : `${reading.name}: ${typeof reading.value === "boolean" ? reading.value ? "yes" : "no" : reading.value}${reading.unit ? ` ${reading.unit}` : ""}`);
+        const values = readings.length ? readings.join(", ") : "no reading";
+        const stamp = device.time ? ` (${device.data === "即時" ? "" : translate(device.data, "en") + " "}${device.time})`
+          : device.data === "沒有讀值" ? "" : ` (${translate(device.data, "en")})`;
+        return `${location}: ${values}${stamp}`;
+      });
+      return parts.length ? parts.join("; ") + (result.devices.length > 3 || result.truncated ? "; …" : "") : `No devices in ${result.scope}`;
+    }
+  }
+}
+
+function englishControlLine(result: HomeControlResult): string {
+  const action = "action" in result ? translate(result.action, "en") : "";
+  switch (result.status) {
+    case "confirmed": return `✓ ${where(result)} ${action}: confirmed`;
+    case "unconfirmed":
+      if (result.why === "one_way") return `⏳ ${where(result)} ${action}: sent, please verify${result.toggle ? " (toggle button)" : ""}`;
+      if (result.why === "cloud_no_reply") return `? ${where(result)} ${action}: no cloud reply; delivery unknown (the controller will not retry automatically)`;
+      return result.why === "no_reply" ? `? ${where(result)} ${action}: no controller reply; execution unknown` : `⏳ ${where(result)} ${action}: sent, unconfirmed`;
+    case "failed": return `✕ ${where(result)} ${action}: failed (${translate(result.message, "en")})`;
+    case "refused": return `Not sent: ${translate(result.message, "en")}`;
+    case "ambiguous": return `Which device should I control: ${result.candidates.join(", ")}`;
+    case "not_found": return `No home device found for “${result.target}”${result.note ? ` (${translate(result.note, "en")})` : ""}`;
+    case "needs_confirmation": return `Please confirm: ${where(result)} ${action}`;
   }
 }

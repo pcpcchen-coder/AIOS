@@ -1,3 +1,5 @@
+import { localize } from "./localization.ts";
+import { type Locale } from "../shared/i18n.mjs";
 import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, systemPrompt, WEB_SEARCH_UNAVAILABLE_GAP } from "./prompts.ts";
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 import { RESOURCE, type ChatGPTAuth } from "./chatgpt-auth.ts";
@@ -50,7 +52,7 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
     return model;
   }
 
-  async run(input: { title: string }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+  async run(input: { title: string; locale?: Locale }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
     const model = await this.resolveModel(await this.auth.getAccessToken());
     const served = new Set<string>();
     let webSearch = !!this.options.webSearch;
@@ -59,7 +61,7 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
     const planned = await this.stream(
       {
         model,
-        instructions: systemPrompt({ webSearch }),
+        instructions: systemPrompt({ webSearch }, input.locale),
         input: [{ role: "user", content: planPrompt(input.title) }],
         format: { type: "json_schema", name: "nous_plan", schema: PLAN_SCHEMA, strict: true },
       },
@@ -67,9 +69,10 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
     );
     if (planned.model) served.add(planned.model);
     const plan = parsePlan(planned.text);
-    const titles = [...plan.steps.map((s) => s.title), SYNTHESIS_TITLE];
+    const synthesisTitle = localize(SYNTHESIS_TITLE, input.locale);
+    const titles = [...plan.steps.map((s) => s.title), synthesisTitle];
     reporter.planReady(
-      [...plan.steps.map((s) => ({ title: s.title, domain: s.domain })), { title: SYNTHESIS_TITLE, domain: "language" as const }],
+      [...plan.steps.map((s) => ({ title: s.title, domain: s.domain })), { title: synthesisTitle, domain: "language" as const }],
       model,
     );
 
@@ -89,7 +92,7 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
       };
       const request = (search: boolean) => ({
         model,
-        instructions: systemPrompt({ webSearch: search }),
+        instructions: systemPrompt({ webSearch: search }, input.locale),
         input: [{ role: "user" as const, content: stepPrompt(input.title, plan, outputs, i) }],
         ...(search ? { tools: [{ type: "web_search" }] } : {}),
       });
@@ -110,7 +113,7 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
       reporter.stepDone(i);
     }
 
-    const gaps = [...plan.capability_gaps, ...extraGaps];
+    const gaps = [...plan.capability_gaps, ...extraGaps.map(gap => localize(gap, input.locale))];
     if (truncated) gaps.push("部分步驟的輸出未完整結束（response.incomplete）。");
     return {
       content: outputs[outputs.length - 1],

@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](brain-regions-2026-10-20.md) | [English](brain-regions-2026-10-20.en.md)
+
 # 六腦區合併驗證
 
 驗證時間為 2026-10-20 15:33–15:34，Asia/Taipei。本批次將 `claude/blissful-rubin-rbtgtk` 的 `17147efa` 合併到既有 ChatGPT 對話版本 `e3b1e5f`，並擴充為六個功能區。電子腦仍使用同一個 renderer。

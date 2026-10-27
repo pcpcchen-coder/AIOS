@@ -1,3 +1,7 @@
+<!-- bilingual: source=en -->
+
+> [繁體中文](design-b.zh-TW.md) | [English](design-b.md)
+
 # Candidate B: distance in the complete visual snapshot
 
 Same inherited model as the other candidate. No model diversity claimed.

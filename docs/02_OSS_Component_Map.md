@@ -1,12 +1,16 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](02_OSS_Component_Map.md) | [English](02_OSS_Component_Map.en.md)
+
 # Nous 認知 OS — 開源元件對應表（Component Map）
 
-> **2026-10-24 閱讀導覽**：目前程式與缺口以 [實作現況](./Current_Implementation_Status.md) 為準；新功能的價值、依賴、MVP 與 roadmap 見 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。本文保留早期設計，不代表已實作或已通過驗收。產品紅線與 G0–G3 仍依 [06](./06_Ambient_Voice_Gaze_Experience.md)、[07](./07_Ambient_Implementation_and_Acceptance.md) 及後續明確修訂執行；新評估中的 F0–F10、Q0–Q4 不取代這些 gate。
+> **2026-10-24 閱讀導覽**：目前程式與缺口以 [實作現況](Current_Implementation_Status.md) 為準；新功能的價值、依賴、MVP 與 roadmap 見 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md)。本文保留早期設計，不代表已實作或已通過驗收。產品紅線與 G0–G3 仍依 [06](06_Ambient_Voice_Gaze_Experience.md)、[07](07_Ambient_Implementation_and_Acceptance.md) 及後續明確修訂執行；新評估中的 F0–F10、Q0–Q4 不取代這些 gate。
 >
 > 程式基準為 `1f44c6b`（2026-10-23）。可執行原型位於 `prototype/ambient-shell`，採 Node HTTP、SSE、TypeScript、Vite 與 Electron。本文的 Tauri、React、Python kernel、Agent SDK、長期記憶及生成工具等屬目標設計；模型、價格、市場、stars 與外部生態數據是原始撰寫時的資料，本次未重新查證，採用前須另查。
 
-> **2026-10-07 歷史更新**：當時對 Letta、Langfuse、語音與視線候選的判讀及修正提案見 [08 §4.5、§5](./08_Consolidation_and_Update_2026-10.md)。這些外部狀態未在本次重新查證；08 的提案不等於 ADR 已通過，本文元件表也不是已安裝依賴清單。
+> **2026-10-07 歷史更新**：當時對 Letta、Langfuse、語音與視線候選的判讀及修正提案見 [08 §4.5、§5](08_Consolidation_and_Update_2026-10.md)。這些外部狀態未在本次重新查證；08 的提案不等於 ADR 已通過，本文元件表也不是已安裝依賴清單。
 
-> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](./06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](./07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
+> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
 
 > **目的**：把 12 個月藍圖中的每個自建模組，對應到社群已成熟的 OSS 專案，從「從零打造」轉為「整合 + 薄膠水層」，把時程壓縮到 3 個月。
 >
@@ -122,7 +126,7 @@ Claude Agent SDK（Python 後端 + TS 前端）作為唯一 agent 框架，其�
 
 ### AI Chat UI 元件
 
-2026-09-16 更新：下列元件用於按需展開的對話與成果；不將現成聊天範本直接當作首頁。電子腦、Voice Session、GazeProvider、FocusResolver 與 Presentation Policy 為新的 Shell 整合範圍。視線候選、校正限制與官方來源見 [06 §4](./06_Ambient_Voice_Gaze_Experience.md#4-webcam-視線互動)，正式依賴待 PoC 後決定。
+2026-09-16 更新：下列元件用於按需展開的對話與成果；不將現成聊天範本直接當作首頁。電子腦、Voice Session、GazeProvider、FocusResolver 與 Presentation Policy 為新的 Shell 整合範圍。視線候選、校正限制與官方來源見 [06 §4](06_Ambient_Voice_Gaze_Experience.md#4-webcam-視線互動)，正式依賴待 PoC 後決定。
 
 | 元件職責 | OSS 專案 | GitHub | Stars | License | 策略 |
 |---|---|---|---|---|---|

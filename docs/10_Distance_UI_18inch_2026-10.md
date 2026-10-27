@@ -1,8 +1,12 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](10_Distance_UI_18inch_2026-10.md) | [English](10_Distance_UI_18inch_2026-10.en.md)
+
 # Nous 10 — 18 吋遠距 UI 設計（畫面 × 語音）
 
 版本：v0.2 · 日期：2026-10-21 · 狀態：設計提案（待實機 2 m 驗證）
 
-> 2026-10-24 對照：原型已有距離縮放與靠近放大程式及 fixture 證據，真實 2 m 可讀性、雙目距離精度仍待驗。全案現況見 [目前實作與驗證](./Current_Implementation_Status.md)，Quest 空間成果另見 [13 功能評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。本文件的螢幕像素尺寸不可直接套成 Quest 空間字級。
+> 2026-10-24 對照：原型已有距離縮放與靠近放大程式及 fixture 證據，真實 2 m 可讀性、雙目距離精度仍待驗。全案現況見 [目前實作與驗證](Current_Implementation_Status.md)，Quest 空間成果另見 [13 功能評估](13_Feature_Expansion_Assessment_2026-10-24.md)。本文件的螢幕像素尺寸不可直接套成 Quest 空間字級。
 
 關聯：06（電子腦／語音／視線）、09（Spoken Brief 交辦單，見 Project 文件）
 設計稿：claude.ai Design 畫布「Nous 遠距 UI · 18 吋」；原始檔在 [`docs/design/distance-ui-18in/`](./design/distance-ui-18in/)（`.dc.html`，1920 × 1080 實尺寸）
@@ -32,7 +36,7 @@
 
 設計觀看距離取 **2.0 m**。實際距離不同時，所有尺寸 × (D ÷ 2.0 m)。
 
-> **2026-10-23 例外（George 決定）**：待機的電子腦不套用這條，改成靠近時放大（2.5 m 以外 1 倍、0.6 m 以內放大到使用者設定的倍率，預設 2 倍）。字級、內容面板與頂端縮略圖仍 × D ÷ 2.0 m。見 11 §3 的「電子腦圖形」與 [`docs/validation/brain-proximity-zoom-2026-10-23.md`](./validation/brain-proximity-zoom-2026-10-23.md)。
+> **2026-10-23 例外（George 決定）**：待機的電子腦不套用這條，改成靠近時放大（2.5 m 以外 1 倍、0.6 m 以內放大到使用者設定的倍率，預設 2 倍）。字級、內容面板與頂端縮略圖仍 × D ÷ 2.0 m。見 11 §3 的「電子腦圖形」與 [`docs/validation/brain-proximity-zoom-2026-10-23.md`](validation/brain-proximity-zoom-2026-10-23.md)。
 
 ## 2. 字級 token（中文字高取 0.9 em）
 

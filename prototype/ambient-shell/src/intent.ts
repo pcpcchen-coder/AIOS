@@ -33,9 +33,26 @@ export function normalizeCommand(text: string): string {
   return text.replace(TRAILING, "").replace(LEADING, "").replace(POLITE_PREFIX, "").trim();
 }
 
+const ENGLISH_COMMANDS: readonly [RegExp, Intent][] = [
+  [/^(?:open )?(?:settings|camera settings|engine settings)$/i, { kind: "settings" }],
+  [/^(?:show |view )?(?:progress|status|task progress)$/i, { kind: "progress" }],
+  [/^(?:show |view )?(?:results?|latest results?)$/i, { kind: "result" }],
+  [/^(?:stop|cancel)(?: (?:the )?task)?$/i, { kind: "stop" }],
+  [/^(?:dismiss|hide|close)(?: (?:the )?(?:view|window))?$/i, { kind: "dismiss" }],
+  [/^(?:voice on|(?:turn on|enable|start) voice(?: mode| conversation)?)$/i, { kind: "voice_on" }],
+  [/^(?:voice off|(?:turn off|disable|end|stop) voice(?: mode| conversation)?)$/i, { kind: "voice_off" }],
+];
+
 export function classify(input: string): Intent {
   const text = input.trim();
   if (!text) return { kind: "empty" };
+  const english = text.replace(/[.!?]+$/, "").trim().replace(/^please\s+/i, "").replace(/\s+/g, " ");
+  if (/^[\x00-\x7F]+$/.test(english)) {
+    const provider = /^(?:use|switch to) (claude|chatgpt|gpt|mock(?: mode)?)$/i.exec(english);
+    if (provider) return { kind: "use_provider", provider: provider[1]!.toLowerCase() === "claude" ? "claude" : provider[1]!.toLowerCase().startsWith("mock") ? "mock" : "chatgpt" };
+    const matched = ENGLISH_COMMANDS.find(([pattern]) => pattern.test(english));
+    return matched ? { ...matched[1] } : { kind: "task", text };
+  }
   const command = normalizeCommand(text);
   if (command.length <= MAX_COMMAND_CHARS && !TASK_VERB.test(command)) {
     if (VOICE_OFF.test(command)) return { kind: "voice_off" };
@@ -60,8 +77,8 @@ export type SettingsTopic = "camera" | "engine" | "general";
 
 export function settingsTopic(input: string): SettingsTopic {
   const command = normalizeCommand(input.trim());
-  if (/鏡頭/.test(command)) return "camera";
-  if (/引擎|模型|AI/i.test(command)) return "engine";
+  if (/鏡頭|camera/i.test(command)) return "camera";
+  if (/引擎|模型|AI|engine|model/i.test(command)) return "engine";
   return "general";
 }
 

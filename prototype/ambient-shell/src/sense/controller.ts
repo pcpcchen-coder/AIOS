@@ -230,6 +230,17 @@ export const CAMERA_RULES: readonly { pattern: RegExp; command: CameraCommand }[
  * 後者交給 classify 的設定意圖。
  */
 export function matchCameraCommand(text: string): CameraCommand | null {
+  const english = text.trim().replace(/[.!?]+$/, "").replace(/^please\s+/i, "").replace(/\s+/g, " ");
+  if (/^[\x00-\x7F]+$/.test(english)) {
+    if (/^(?:show|open) (?:the )?camera preview$/i.test(english)) return { preview: true };
+    if (/^(?:hide|close|dismiss) (?:the )?camera preview$/i.test(english)) return { preview: false };
+    const match = /^(turn on|turn off|enable|disable) (?:the )?(camera|look to talk|look-to-talk|greet first|palm stop)$/i.exec(english);
+    if (!match) return null;
+    const enabled = /^(turn on|enable)$/i.test(match[1]!);
+    const englishKeys = { camera: "active", "look to talk": "look_to_talk", "look-to-talk": "look_to_talk", "greet first": "look_to_talk_greet", "palm stop": "stop_gesture" } as const;
+    const key = englishKeys[match[2]!.toLowerCase() as keyof typeof englishKeys];
+    return CAMERA_RULES.find(rule => "set" in rule.command && rule.command.set[key] === enabled)?.command ?? null;
+  }
   const t = text.replace(/[\s，。！？!?,.、~～…]/g, "");
   if (NEGATION_OR_QUESTION.test(t)) return null;
   const command = t.replace(POLITE_PREFIX, "").replace(POLITE_SUFFIX, "");

@@ -31,6 +31,16 @@ await build({
   logLevel: "warning",
 });
 
+await build({
+  entryPoints: [join(desktop, "localization.mjs")],
+  outfile: join(out, "localization.mjs"),
+  bundle: true,
+  platform: "node",
+  format: "esm",
+  target: "node24",
+  logLevel: "warning",
+});
+
 cpSync(join(desktop, "main.mjs"), join(out, "main.mjs"));
 cpSync(join(desktop, "settings-menu.mjs"), join(out, "settings-menu.mjs"));
 cpSync(join(desktop, "identity-ipc.mjs"), join(out, "identity-ipc.mjs"));

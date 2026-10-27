@@ -1,0 +1,431 @@
+{
+  "version": 1,
+  "policy": "docs/BILINGUAL.md",
+  "documents": [
+    {
+      "source": ".agents/skills/verify-aios/SKILL.md",
+      "sourceLanguage": "en",
+      "translation": ".agents/skills/verify-aios/SKILL.zh-TW.md",
+      "sourceSha256": "97f763a415a814ff0814125f446c58a514fb228ae18850a524e6b200eebc1ad3",
+      "translationSha256": "1c44d93947da1d01e39095462854c5dc77ea4fc95b075868d8bf92b9fd072930"
+    },
+    {
+      "source": "AGENTS.md",
+      "sourceLanguage": "en",
+      "translation": "AGENTS.zh-TW.md",
+      "sourceSha256": "5d6d4497ff4369a51fd87fd5e3d50619bdeb447462e0a1cf3c1fcae16d20592f",
+      "translationSha256": "1efb0e72e90e7de113abae4a88cd5f174b986c24393e9c0de7d091e997cda770"
+    },
+    {
+      "source": "CLAUDE.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "CLAUDE.en.md",
+      "sourceSha256": "c453d807b72be526eecc979ba1b71f9b9ca6b453829506f5f172578dc434abfe",
+      "translationSha256": "b76bf35915175ea269ace69f3d00153f7cb78a74ac3701f9610ae79ad8b27c67"
+    },
+    {
+      "source": "README.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "README.en.md",
+      "sourceSha256": "78f5236031d7c2c8499405b533d802575ed65f5a8ab47e56364da1b16fb765f7",
+      "translationSha256": "f0b22fe3ea7e8385df38b17d0808173b55ef5bf6800429466d294e1f495a41c4"
+    },
+    {
+      "source": "SETUP.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "SETUP.en.md",
+      "sourceSha256": "cc50c1f3b666fa9236b48f885ad2a11bbf0d2565c6a5b3dccb1139d2162fe243",
+      "translationSha256": "036d2fecd7d161973ae3650be581f56a5cded5bf6be1139613a0a71787820cda"
+    },
+    {
+      "source": "docs/01_Complete_Technical_Blueprint.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/01_Complete_Technical_Blueprint.en.md",
+      "sourceSha256": "06fd18aa75ee45bfc194e4b4566999f692c68867addbec71171c1456e73bbd16",
+      "translationSha256": "7afa773cd6f305f4d8b0551ebb3442d00c86960b0423240be32df17fb4a5768c"
+    },
+    {
+      "source": "docs/02_OSS_Component_Map.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/02_OSS_Component_Map.en.md",
+      "sourceSha256": "6646a0bf159a519c245390f3e1bba94da1d33bb7d1c04afd75f9cc606ae9c0c6",
+      "translationSha256": "8d05360ea1d59e0fa045a0337e22c7087f343dfe2edb4ad8450f5df6c1d0b4dc"
+    },
+    {
+      "source": "docs/03_3Month_Accelerated_Roadmap.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/03_3Month_Accelerated_Roadmap.en.md",
+      "sourceSha256": "17f4b712102b96ab9c1902da47773c29ff3203597e0899342d4f62c55e15c376",
+      "translationSha256": "6971437d21139a1d18111ac35c69ff3f2ebfad6cdb77138dbab60f0c2a6f7963"
+    },
+    {
+      "source": "docs/04_Generative_Interaction_System.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/04_Generative_Interaction_System.en.md",
+      "sourceSha256": "46d42e29fba774b3d9d8ffdb292fd7b70a79ca4900db8b6f923a62df287bc210",
+      "translationSha256": "ec1a0cea839cc57628ba14a056e789a89ab82a5ca333c4cd7ae561b501e981d0"
+    },
+    {
+      "source": "docs/05_Progress_and_Next_Steps.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/05_Progress_and_Next_Steps.en.md",
+      "sourceSha256": "fe17c2e2a959faa31a05dade5af04e2e263117aa5e49a26267309993afbf06cd",
+      "translationSha256": "70e16eab7c82fa06ceee438b662f71bdfffa0e50721b5f6d27cc3eb4cfa26a94"
+    },
+    {
+      "source": "docs/06_Ambient_Voice_Gaze_Experience.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/06_Ambient_Voice_Gaze_Experience.en.md",
+      "sourceSha256": "72533e4b13513b5353e6df1786340f5cbfcd3efb2f8598df6cb0360777dd35fd",
+      "translationSha256": "f0a6c5485deefeb28cc1650f222c12e3e722c506524615f339104c1b53dc8d08"
+    },
+    {
+      "source": "docs/07_Ambient_Implementation_and_Acceptance.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/07_Ambient_Implementation_and_Acceptance.en.md",
+      "sourceSha256": "16d9d559cef8394b6a672933c3b2525c2567025dd8f3b9ba4a5ebef16ff14461",
+      "translationSha256": "9c7c4b60f9c03a1f993d22b5ea8afeb8967357294aaea90844a81fc2fca40db6"
+    },
+    {
+      "source": "docs/08_Consolidation_and_Update_2026-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/08_Consolidation_and_Update_2026-10.en.md",
+      "sourceSha256": "af77a4b731203c1de879a7942ac3f6f54413825b7c9cb207dbea7fbbe99dedee",
+      "translationSha256": "ab10d9703792b4e21f71f810d032d554e99e133a6032293d6b809a50e7f3fae4"
+    },
+    {
+      "source": "docs/10_Distance_UI_18inch_2026-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/10_Distance_UI_18inch_2026-10.en.md",
+      "sourceSha256": "84a0a57ad45bd77f90c79de833e6fa23a22c0acd2bd3c8ac857dfd3728e01d49",
+      "translationSha256": "138232a4b79b1e31451414835ee5b9f958e5fa973510019a16f704da48fc9afa"
+    },
+    {
+      "source": "docs/11_Stereo_Camera_Interaction_2026-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/11_Stereo_Camera_Interaction_2026-10.en.md",
+      "sourceSha256": "2e3ffe17a97f153932526d295d4c8c1f24131d704006673f2966468464f6669b",
+      "translationSha256": "47152e23c63ca0b897f918bfb8934144a89fc6847a2226a37b4bbfc052ef0d17"
+    },
+    {
+      "source": "docs/12_SmartHome_Integration_Plan_2026-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/12_SmartHome_Integration_Plan_2026-10.en.md",
+      "sourceSha256": "bec9e87a354499e5c81dbb1656d4052517f1cef7c0151e63d9de611bfc9f33b9",
+      "translationSha256": "04f3e649a6cd3c27d544d956c31dcfd134f678ecdb6c7cde4ed2598c056915d2"
+    },
+    {
+      "source": "docs/13_Feature_Expansion_Assessment_2026-10-24.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/13_Feature_Expansion_Assessment_2026-10-24.en.md",
+      "sourceSha256": "7044f2317134b2e6b7995959fed5cf29906f3c151aa7aca97ab3320c7f60d280",
+      "translationSha256": "370fc205005d19e71926842a3e63cb5ff672328b12808d1cbd6bb1cbd8344e7f"
+    },
+    {
+      "source": "docs/14_Family_Recognition_and_Greeting_Plan_2026-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/14_Family_Recognition_and_Greeting_Plan_2026-10.en.md",
+      "sourceSha256": "400408af8b8bf93816fb50cb7274abb9f98a85568ced4254f003122ce6be1e14",
+      "translationSha256": "7c8c2b1ea0871e0af72c3412730f31854fa2a9a4812ec84b9aea16cb72dcd4ed"
+    },
+    {
+      "source": "docs/15_Companion_Mode_Spec_2026-10-24.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/15_Companion_Mode_Spec_2026-10-24.en.md",
+      "sourceSha256": "240a8fe33dc1127ea2e160cf7be59d6011c5e6d9ba18aa2ab327e9698c0ca4ca",
+      "translationSha256": "d3d7b1f83adaedc279acf46003e47bf0064d545afe278877cc786d940ece3029"
+    },
+    {
+      "source": "docs/16_Nous_Memory_Layer_Design_2026-10-26.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/16_Nous_Memory_Layer_Design_2026-10-26.en.md",
+      "sourceSha256": "18eb1d1ddca744ea9448061c7aaa96e43343d49ef59dd55bb5704e7f47f6890f",
+      "translationSha256": "5783bae6b7049fe3f211995cb8cb97088097fd697fa45ac249eedc3ab27cfe62"
+    },
+    {
+      "source": "docs/BILINGUAL.md",
+      "mode": "inline",
+      "sha256": "d2ba4d1c494863262594e6d315bcc32759e377756ad7b7de0680e757955cc0cc"
+    },
+    {
+      "source": "docs/Current_Implementation_Status.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/Current_Implementation_Status.en.md",
+      "sourceSha256": "78afa4b5bd533b37b64b14eb9d61385e6ce4464c5d1c502134e6a253acfed6f7",
+      "translationSha256": "be9306f2043bbdca491c934db4186c0bdab95d7c0591f7ad871d694e7c1cfa91"
+    },
+    {
+      "source": "docs/README.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/README.en.md",
+      "sourceSha256": "099f325706bf6043e825d029828ebbf2bc27dc3dd7125c76ed3eedb4945f1a79",
+      "translationSha256": "3b96756273f9ba9019a92ed969f885938cbe333f75d5eb865f4b5e14fcd0c72d"
+    },
+    {
+      "source": "docs/adr/ADR-0001-local-family-recognition.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/adr/ADR-0001-local-family-recognition.en.md",
+      "sourceSha256": "151d0f5418eb61f00863f97b9396bca3147ade64782a868089db6970519d7b57",
+      "translationSha256": "0057c2f4dad2c9ed457c8985279aea3848463bd0c0a4408e0fc9a73f65f7c386"
+    },
+    {
+      "source": "docs/adr/ADR-0002-nous-family-memory.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/adr/ADR-0002-nous-family-memory.en.md",
+      "sourceSha256": "af4ff41466ab2927e701656bd4752db52b4a95175354283f4ef713c90a935bd5",
+      "translationSha256": "d09712c9da1354aa61bb356d24a35b9ac9a19d98ed7dd290caff434a176fcfff"
+    },
+    {
+      "source": "docs/development/brain-regions.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/development/brain-regions.en.md",
+      "sourceSha256": "eb1fc74f36d60397153036e7a23a55f25032bf6582663816126351533f2ead4b",
+      "translationSha256": "e93828293b91fec3de1ddea787b1442803892aaea1ab07a7d30058e873b6ddc6"
+    },
+    {
+      "source": "docs/development/chatgpt-conversation-design.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/development/chatgpt-conversation-design.en.md",
+      "sourceSha256": "95dbe97e52aba553ad252a3a4646e3b156ec0449b3ea051c2cde490c2a7e7859",
+      "translationSha256": "598a0ba10ef83a3d3a96c9c175439366e27ff1f943bacdd5aaafe00ca535c538"
+    },
+    {
+      "source": "docs/development/companion-mode-implementation-plan.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/development/companion-mode-implementation-plan.en.md",
+      "sourceSha256": "7a53b46a7e60531ab6b9faa8cafe6bb6c927edf1e8d8f6a1e46abeea99190a6c",
+      "translationSha256": "6491232d0880f1a6368b2bef26b421423314d1569c4c5b532e93b3f5c73a3426"
+    },
+    {
+      "source": "docs/development/localization.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/development/localization.en.md",
+      "sourceSha256": "c7691db9e22cf4cfee97df8d53bead2bd327bfa18803f7d3ca07b81f85b4d756",
+      "translationSha256": "9bad14f27aeeff955910d937938e99f24da64dbf3791a2bb15b23b2670f1cd6d"
+    },
+    {
+      "source": "docs/development/pstack.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/development/pstack.en.md",
+      "sourceSha256": "9188aead095ece6faffaa1d0fed089534fab240ead975ba75ffeeb221b155fba",
+      "translationSha256": "fe5870de22710ce0c894e1a11315d51141185a70be14290ee695258e550996be"
+    },
+    {
+      "source": "docs/validation/README.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/README.en.md",
+      "sourceSha256": "486ce14a38d8cace2db09aee3daa015ad7fda8574105a9c7ae0a4bd63f070d01",
+      "translationSha256": "244bbd4ad406d10897c5a4f967cd7b4347a7d8e6e94fcef3b05a5a1d95fea9b7"
+    },
+    {
+      "source": "docs/validation/bilingual-2026-10-26.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/bilingual-2026-10-26.en.md",
+      "sourceSha256": "ebffc2b0d9a5fd5b8367e2a267f6865c2c3d588f09fddc9cb6f45c7acec29d71",
+      "translationSha256": "ee8645acdc0d2ff7d9094b31878ba8c600c35d421caf1433f98d27dc1d1dc984"
+    },
+    {
+      "source": "docs/validation/brain-distance-2026-10-22.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/brain-distance-2026-10-22.en.md",
+      "sourceSha256": "040481979a82deac237078c73cb0aaa752155a047808f3a74c3bcb227d6256da",
+      "translationSha256": "88aef388aa3ce4488242638c254a634f2ace961f06746b5870fd4e3da3d43782"
+    },
+    {
+      "source": "docs/validation/brain-proximity-zoom-2026-10-23.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/brain-proximity-zoom-2026-10-23.en.md",
+      "sourceSha256": "43db769d23401230c16093fdc6cfd8c6a4ccb2b40421394d8ec263b6349f7da3",
+      "translationSha256": "afed00a4bd9b1cd81105eba2c7d21d03f1eabbcf73ea7347411766ec8d3d2816"
+    },
+    {
+      "source": "docs/validation/brain-regions-2026-10-20.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/brain-regions-2026-10-20.en.md",
+      "sourceSha256": "95eef9f81c59320b87f49ff48752de96c9b373dc8368166cb0c49631840e69f2",
+      "translationSha256": "cb0c81a39f7a2f05961f02b4b5194766e0e8bceb35cef9f668ce926ec3855bba"
+    },
+    {
+      "source": "docs/validation/camera-preview-2026-10-21.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/camera-preview-2026-10-21.en.md",
+      "sourceSha256": "60d8f4808b38892d6df46829a14e4649a85fdc8482aa5a518fc0043a26ece07b",
+      "translationSha256": "fbef56294f1b8e2a361074a5042c692a75005ebea65d7aa82f8dac7384968823"
+    },
+    {
+      "source": "docs/validation/chatgpt-conversation-2026-10-20.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/chatgpt-conversation-2026-10-20.en.md",
+      "sourceSha256": "c2560ed8bf74828c0ef83f3a3fe0b8a6826c60546544af799ad6cf866730b835",
+      "translationSha256": "2c37b6227be4774fc576a010ad11a55f928460b9cab4624c4cbea2610506374b"
+    },
+    {
+      "source": "docs/validation/evidence/brain-distance-2026-10-22/brief.md",
+      "sourceLanguage": "en",
+      "translation": "docs/validation/evidence/brain-distance-2026-10-22/brief.zh-TW.md",
+      "sourceSha256": "52bdbae3d6db3aaeed9253fe6b00bcab6fb18b32995ceb5e05ad9caaf51f1ffb",
+      "translationSha256": "c0f7b915ce2241c3f7103a3f3df096e191eba5d9b7bfbf810aa9b2bed61c2fa5"
+    },
+    {
+      "source": "docs/validation/evidence/brain-distance-2026-10-22/design-a.md",
+      "sourceLanguage": "en",
+      "translation": "docs/validation/evidence/brain-distance-2026-10-22/design-a.zh-TW.md",
+      "sourceSha256": "3b9b56b0f5a145ea6c6ad3989d3ea1e6fdbc1bf83901e794ebf8e2b87317fbfc",
+      "translationSha256": "a724a1e784780827d9a803d4f4e86394377bb33158f63d338ad149b78c58fbe1"
+    },
+    {
+      "source": "docs/validation/evidence/brain-distance-2026-10-22/design-b.md",
+      "sourceLanguage": "en",
+      "translation": "docs/validation/evidence/brain-distance-2026-10-22/design-b.zh-TW.md",
+      "sourceSha256": "17f753156d93540ceec71f3c5119390e7012af87e651cdd90b0b98b87b4fae46",
+      "translationSha256": "7d2251cf1609758c559f39c7ad1613de99fbd133f2546ff4b37701f5a99ce366"
+    },
+    {
+      "source": "docs/validation/evidence/brain-distance-2026-10-22/ground.md",
+      "sourceLanguage": "en",
+      "translation": "docs/validation/evidence/brain-distance-2026-10-22/ground.zh-TW.md",
+      "sourceSha256": "c0092e585f48ec16d861b259a42d91d51f480cc9e7ba887bff0acd0fac668a51",
+      "translationSha256": "bbf7b65b779bcfe59128a8d45c9ba4743a07f2578ff7d520ff429687e0917e73"
+    },
+    {
+      "source": "docs/validation/evidence/brain-distance-2026-10-22/judgment.md",
+      "sourceLanguage": "en",
+      "translation": "docs/validation/evidence/brain-distance-2026-10-22/judgment.zh-TW.md",
+      "sourceSha256": "03cdb605fe1b299b4bff94105ed94077953bdc139d02e96e908912f3629a5f6c",
+      "translationSha256": "0bca36fcf172fd61fb8706c5d3d25f4b1811c84aef5be107ab6dd8992bbfed14"
+    },
+    {
+      "source": "docs/validation/evidence/brain-distance-2026-10-22/plan.md",
+      "sourceLanguage": "en",
+      "translation": "docs/validation/evidence/brain-distance-2026-10-22/plan.zh-TW.md",
+      "sourceSha256": "772dd6e08eb6b3b033f36b8b4a399b178590e0803114692b75f695562b642148",
+      "translationSha256": "050fa74812f88166097d448673c318b5f77cc2991d0e1991afcb1e8bfbfb255b"
+    },
+    {
+      "source": "docs/validation/evidence/brain-distance-2026-10-22/review.md",
+      "sourceLanguage": "en",
+      "translation": "docs/validation/evidence/brain-distance-2026-10-22/review.zh-TW.md",
+      "sourceSha256": "f054284c0d3a995e07d7c232c59d489ad95370553dfa8788d308c37b69215f41",
+      "translationSha256": "89af56068ced18a7e4f594df0b99e7d276f5b6db9750c7037f31724c2dceac80"
+    },
+    {
+      "source": "docs/validation/family-id-00-spike-2026-10-24.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/family-id-00-spike-2026-10-24.en.md",
+      "sourceSha256": "fe3b76385025376c59be2b8564fdfb5040c879ce31110398e7cc4101cf30f729",
+      "translationSha256": "ca8870ac0bb91ef8e96627c33eea70224f36b83ed1efec1fb39626606e315a8f"
+    },
+    {
+      "source": "docs/validation/family-id-00-spike-2026-10-24/cloud-summary.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/family-id-00-spike-2026-10-24/cloud-summary.en.md",
+      "sourceSha256": "774285e1b49bbee04cf904ea3d77b13c60189e6968cfdf5e32858bee32628539",
+      "translationSha256": "f2bebf040765fcc41c1bf35ffaf0574f8093c21724c972f441a0d0fc0b222ab9"
+    },
+    {
+      "source": "docs/validation/family-id-01-2026-10-25.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/family-id-01-2026-10-25.en.md",
+      "sourceSha256": "3830c4163b8cf8ea5f66f815694c1e33622e54255f2efd74d3b1c1b8a80bc047",
+      "translationSha256": "da3add978c5977531b65ae837a9ac54eee642e8130d8e89caef62ddae9aede92"
+    },
+    {
+      "source": "docs/validation/family-id-02-2026-10-25.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/family-id-02-2026-10-25.en.md",
+      "sourceSha256": "aaeb444849557dca2d85dc5609a321b0492b7a789327980e92ef8132281ccbe3",
+      "translationSha256": "a1c5efe60b3f5f0ce284bd299ae9faa0c5f8b837c955caae0e8dbcd80de884fd"
+    },
+    {
+      "source": "docs/validation/implementation-review-2026-10-24.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/implementation-review-2026-10-24.en.md",
+      "sourceSha256": "58da4c3c4db15b03cf4b51cead71238052edd0a4ea8c902c4ef46348b179185d",
+      "translationSha256": "b332c8718ad567559c65638a030805fbe3a1aa52b4467c497a6481a37db22e70"
+    },
+    {
+      "source": "docs/validation/live-voice-2026-10-23.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/live-voice-2026-10-23.en.md",
+      "sourceSha256": "426c0e701d6c98201df658a813e0473849e81545f8b155ae067c6424797d9513",
+      "translationSha256": "9385b8a115a4e6db9f6d3a00bd414ff90972e86534d3941f2570e0c2a597c49e"
+    },
+    {
+      "source": "docs/validation/look-to-talk-greet-2026-10-23.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/look-to-talk-greet-2026-10-23.en.md",
+      "sourceSha256": "110a555ea58d58b83d94aeec36fb260e478d5c8c9c03346765c607e550eae28a",
+      "translationSha256": "43820fd269fa393bc3ba9db00c2722f7854b2007a1671b86e2e9cf1bc7a16f4c"
+    },
+    {
+      "source": "docs/validation/memory-mem0-2026-10-26.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/memory-mem0-2026-10-26.en.md",
+      "sourceSha256": "302a7227bc6cd5aa54636aee6d5d958dc4e37a5e2ad4573657a3fdd903aa7391",
+      "translationSha256": "3cf2e49dc29b448e8e2f8e803ac0086cffa3e6639e2b52f28fb87d54825f8dab"
+    },
+    {
+      "source": "docs/validation/menu-seconds-commands-2026-10-22.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/menu-seconds-commands-2026-10-22.en.md",
+      "sourceSha256": "9ace0804671cc39e60c5171faa887f53155ae29e69e525ed375959b8be6838ad",
+      "translationSha256": "4d46887f11ba2ed320d0050cc4c8dfc1ad1b0a4c6f4cd21557c5ea6f71e85f15"
+    },
+    {
+      "source": "docs/validation/menu-settings-consolidate-2026-10-23.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/menu-settings-consolidate-2026-10-23.en.md",
+      "sourceSha256": "6dd40b1b8dde63c86e263e76a0e8c02f0d5594d4d9d1daea0e8d1ac2a99536a7",
+      "translationSha256": "37ccb89949f1abd40abbdd96045109398d64b2835012b1f380694033f9767d82"
+    },
+    {
+      "source": "docs/validation/small-decisions-2026-10-25.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/small-decisions-2026-10-25.en.md",
+      "sourceSha256": "00ab9a677c7d0ac9c328515ffd9316055ff315673293576b18874e51f99c07fa",
+      "translationSha256": "dbfc9f2fad71cecb5acf6351aeb20b22a4438b3a38790f3d97521b02e17a73cc"
+    },
+    {
+      "source": "docs/validation/smarthome-h0-2026-10-21.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/smarthome-h0-2026-10-21.en.md",
+      "sourceSha256": "66905bffbbcacc3841e75a112b6c45c256ce2d8afdd4eee9e261db1a4fad1687",
+      "translationSha256": "473a41b2fa6bb61f936a8e56191749a6c04d3d25b56e7460b354e610470c904a"
+    },
+    {
+      "source": "docs/validation/smarthome-h1-2026-10-22.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/smarthome-h1-2026-10-22.en.md",
+      "sourceSha256": "295b93b5ce887c8868a9c60ad22e4ed4f25dc3513577338d08c210378b973557",
+      "translationSha256": "1d01b2c60fee26c1aac4583b9a481bd1a0d61c741aa8a0f4bd1fdf72ccae8c0b"
+    },
+    {
+      "source": "docs/validation/smarthome-h1b-2026-10-22.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/smarthome-h1b-2026-10-22.en.md",
+      "sourceSha256": "13156bda096c1b77cda722ce5f2570caaba95b29cf10fb1cda68c69f6ac65d1f",
+      "translationSha256": "cc173a59d6616db315aff18f448ec9d4a990d1199a42d8f3177fc1a89609b6a2"
+    },
+    {
+      "source": "prototype/ambient-shell/INSTALL.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "prototype/ambient-shell/INSTALL.en.md",
+      "sourceSha256": "44c4f142bacfa545d8f043bdffff4c1a1f2a4273111a50ddbe726371dfd91226",
+      "translationSha256": "ff2bdf0b3560ee7e05b071b16e6430056a30f7a121dd4eb9bbe6be5cc14016a2"
+    },
+    {
+      "source": "prototype/ambient-shell/README.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "prototype/ambient-shell/README.en.md",
+      "sourceSha256": "85fdf16729be83c633b3a1713eae8eec6e5996b3cba043303b50a990f6333e39",
+      "translationSha256": "c3b909080e9dd43e5127ba2da6611f6bf4adb22388edcf02ab17bce28ec9d903"
+    },
+    {
+      "source": "prototype/ambient-shell/desktop/README.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "prototype/ambient-shell/desktop/README.en.md",
+      "sourceSha256": "529e9977ea18621201ce739d860c4b09384f640666e9c3831e4dfd61dd654787",
+      "translationSha256": "7028e379bf50fb80bedeb1b6abdb2ca4480f76aa0c32a5b50f2ccef6045e5da0"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import { type Locale } from "../shared/i18n.mjs";
 import { computeProgress, sortForProgress } from "../shared/progress.ts";
 import { HOME_COMMANDS } from "../shared/home.ts";
 import type { RealtimeBaseInfo, Task } from "../shared/types.ts";
@@ -130,8 +131,10 @@ export const REALTIME_TOOLS = [
 ] as const;
 
 /** 依實際可用的能力組出工作階段的工具清單：函式工具＋遠端 MCP 伺服器。 */
-export function buildRealtimeTools(caps: RealtimeCapabilities): Record<string, unknown>[] {
-  const functions = REALTIME_TOOLS.filter((t) => caps.webSearch || t.name !== "web_search");
+export function buildRealtimeTools(caps: RealtimeCapabilities, locale: Locale = "zh-TW"): Record<string, unknown>[] {
+  const functions = REALTIME_TOOLS.filter((t) => caps.webSearch || t.name !== "web_search").map(tool => tool.name === "delegate_task" && locale === "en"
+    ? { ...tool, parameters: { ...tool.parameters, properties: { title: { ...tool.parameters.properties.title, description: "Describe the requested output in one sentence in English, preserving user names and identifiers." } } } }
+    : tool);
   const mcp = caps.mcp.map((server) => ({ type: "mcp", ...server }));
   return [...functions, ...(caps.home ? [HOME_STATUS_TOOL, HOME_CONTROL_TOOL] : []), ...mcp];
 }
@@ -187,12 +190,13 @@ export function buildRealtimeInstructions(
   tasks: Iterable<Task>,
   now = new Date(),
   caps: RealtimeCapabilities = { webSearch: false, mcp: [] },
+  locale: Locale = "zh-TW",
 ): string {
   const list = taskLines(tasks);
   const abilities = realtimeToolRules(caps);
   return [
     "你是 Nous，使用者桌面上的語音助理，正在和使用者即時語音對話。",
-    "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
+    locale === "en" ? "Speak English unless the user explicitly asks for another language. Be natural and brief, usually one to three sentences. Preserve all tool and confirmation rules." : "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
     "使用者隨時會插話；被打斷後以使用者的新內容為準，不要重複剛才的話。",
     ...abilities,
     "工具回傳的結果才是事實；工具失敗或查不到時照實說，不確定的事要說是推測。",
@@ -209,11 +213,11 @@ export function buildRealtimeInstructions(
  * ChatGPT 方案路徑（gpt-live-1-codex）的語音層說明。這個模型沒有工具：需要做事時交辦（delegation），
  * 由 LiveToolCaller 用同一份工具表執行。改寫自 OpenClaw realtime-quicksilver-instructions.ts:4-10，加上 Nous 的誠實規則。
  */
-export function buildLiveInstructions(tasks: Iterable<Task>, now: Date, caps: { mcp: readonly unknown[] }): string {
+export function buildLiveInstructions(tasks: Iterable<Task>, now: Date, caps: { mcp: readonly unknown[] }, locale: Locale = "zh-TW"): string {
   const list = taskLines(tasks);
   return [
     "你是 Nous 的語音層，使用者桌面上的語音助理，正在和使用者即時語音對話。你自己沒有任何工具。",
-    "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
+    locale === "en" ? "Speak English unless the user explicitly asks for another language. Be natural and brief, usually one to three sentences. Preserve all tool and confirmation rules." : "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
     "使用者隨時會插話；被打斷後以使用者的新內容為準，不要重複剛才的話。",
     "需要做事時（上網查詢、查家裡狀態、控制家電、交辦背景工作、查任務進度、結束對話），一律交辦（delegate），每個請求只交辦一次，等結果回來。",
     "只轉述交辦結果；結果回來之前不能說已經做好、查到或開了（例如不能說「燈開了」）。結果說失敗或不確定時照實說。",
@@ -270,23 +274,23 @@ export class RealtimeBridge {
   }
 
   /** 用 API key 建立短效 client secret，代為送出瀏覽器的 SDP offer，回傳 SDP answer。 */
-  async connect(offerSdp: string, tasks: Iterable<Task>): Promise<{ sdp: string; model: string }> {
+  async connect(offerSdp: string, tasks: Iterable<Task>, locale: Locale = "zh-TW"): Promise<{ sdp: string; model: string }> {
     const { apiKey, model, voice } = this.options;
     if (!apiKey) throw new RealtimeError("尚未設定 OPENAI_API_KEY，無法使用即時語音。", 409);
     const session = {
       type: "realtime",
       model,
-      instructions: buildRealtimeInstructions(tasks, new Date(), this.caps),
+      instructions: buildRealtimeInstructions(tasks, new Date(), this.caps, locale),
       output_modalities: ["audio"],
       audio: {
         input: {
-          transcription: { model: "gpt-4o-mini-transcribe", language: "zh" },
+          transcription: { model: "gpt-4o-mini-transcribe", language: locale === "en" ? "en" : "zh" },
           turn_detection: { type: "semantic_vad", eagerness: "auto" },
           noise_reduction: { type: "near_field" },
         },
         output: { voice },
       },
-      tools: buildRealtimeTools(this.caps),
+      tools: buildRealtimeTools(this.caps, locale),
       tool_choice: "auto",
     };
     const minted = await this.request(`${API}/realtime/client_secrets`, {

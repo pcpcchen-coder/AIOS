@@ -1,12 +1,16 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](03_3Month_Accelerated_Roadmap.md) | [English](03_3Month_Accelerated_Roadmap.en.md)
+
 # Nous 認知 OS — 3 個月加速開發時程
 
-> **2026-10-24 閱讀導覽**：目前程式與缺口以 [實作現況](./Current_Implementation_Status.md) 為準；新功能的價值、依賴、MVP 與 roadmap 見 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。本文保留早期設計，不代表已實作或已通過驗收。產品紅線與 G0–G3 仍依 [06](./06_Ambient_Voice_Gaze_Experience.md)、[07](./07_Ambient_Implementation_and_Acceptance.md) 及後續明確修訂執行；新評估中的 F0–F10、Q0–Q4 不取代這些 gate。
+> **2026-10-24 閱讀導覽**：目前程式與缺口以 [實作現況](Current_Implementation_Status.md) 為準；新功能的價值、依賴、MVP 與 roadmap 見 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md)。本文保留早期設計，不代表已實作或已通過驗收。產品紅線與 G0–G3 仍依 [06](06_Ambient_Voice_Gaze_Experience.md)、[07](07_Ambient_Implementation_and_Acceptance.md) 及後續明確修訂執行；新評估中的 F0–F10、Q0–Q4 不取代這些 gate。
 >
 > 程式基準為 `1f44c6b`（2026-10-23）。可執行原型位於 `prototype/ambient-shell`，採 Node HTTP、SSE、TypeScript、Vite 與 Electron。本文的 Tauri、React、Python kernel、Agent SDK、長期記憶及生成工具等屬目標設計；模型、價格、市場、stars 與外部生態數據是原始撰寫時的資料，本次未重新查證，採用前須另查。
 
-> **2026-10-07 歷史更新**：當時的估計時程（PR-00 + G0–G3）見 [08 §6](./08_Consolidation_and_Update_2026-10.md#6-重新排程)。08 §3.3 P1 記錄當時對「Letta REST API」路線的修正判斷；本次未重新查證外部狀態。以下未勾選項是舊計畫，不能用來推算今日進度。
+> **2026-10-07 歷史更新**：當時的估計時程（PR-00 + G0–G3）見 [08 §6](08_Consolidation_and_Update_2026-10.md#6-重新排程)。08 §3.3 P1 記錄當時對「Letta REST API」路線的修正判斷；本次未重新查證外部狀態。以下未勾選項是舊計畫，不能用來推算今日進度。
 
-> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](./06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](./07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
+> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
 
 > **核心哲學**：不重造輪子、不自建底層、專注整合與 UX。**12 個月 → 3 個月**的關鍵在於把每個模組都外包給社群已成熟的 OSS，我們只寫「薄膠水層」與差異化的使用者體驗。
 >
@@ -18,7 +22,7 @@
 
 ## 2026-09-16 排程修訂
 
-語音、按需呈現與 webcam 大區塊選取已成核心需求。實作依 [07](./07_Ambient_Implementation_and_Acceptance.md) 的 G0–G3 推進：殼與政策 → 真實語音任務 → 視線融合 → Alpha 驗收。優先削減知識圖譜 UI、白板及公開發布等非必要工作，以騰出硬體驗證時間。
+語音、按需呈現與 webcam 大區塊選取已成核心需求。實作依 [07](07_Ambient_Implementation_and_Acceptance.md) 的 G0–G3 推進：殼與政策 → 真實語音任務 → 視線融合 → Alpha 驗收。優先削減知識圖譜 UI、白板及公開發布等非必要工作，以騰出硬體驗證時間。
 
 以下週級拆解保留供底層工作參考，不再作固定 12 週交付承諾；其中聊天、知識、成本與工作流畫面一律按需顯示。
 

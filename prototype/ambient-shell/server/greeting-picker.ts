@@ -1,3 +1,4 @@
+import { type Locale } from "../shared/i18n.mjs";
 import { daySlot, liveGreetingText, localHour, pickGreeting } from "../shared/sense.ts";
 
 // 看著說話的開場句挑選（George 2026-10-25）：核心從 shared/sense.ts 的固定清單隨機挑一句，依本機時段可以是「早安，George」，
@@ -29,15 +30,15 @@ export class GreetingPicker {
     this.now = options.now ?? Date.now;
   }
 
-  pick(name: string | null): PickedGreeting {
-    const picked = pickGreeting(name, daySlot(localHour(this.now(), this.options.timeZone)), this.last, this.random);
+  pick(name: string | null, locale: Locale = "zh-TW"): PickedGreeting {
+    const picked = pickGreeting(name, daySlot(localHour(this.now(), this.options.timeZone)), this.last, this.random, locale);
     this.last = picked.id;
     return picked;
   }
 
   /** live 路徑保底（沒有家人辨識或沒有決策）：挑一句不含名字的，組成送進 sideband 的整段文字。 */
-  plainLive(): { text: string; sentence: string; id: string } {
-    const picked = this.pick(null);
-    return { ...picked, text: liveGreetingText(picked.sentence) };
+  plainLive(locale: Locale = "zh-TW"): { text: string; sentence: string; id: string } {
+    const picked = this.pick(null, locale);
+    return { ...picked, text: liveGreetingText(picked.sentence, locale) };
   }
 }

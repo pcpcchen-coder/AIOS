@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](cloud-summary.md) | [English](cloud-summary.en.md)
+
 CLOUD CONTAINER CPU/WASM (headless Chromium) — not a Mac / AR0144 measurement; cosine is a sanity check, not accuracy
 
 ## onnxruntime threads=1, crossOriginIsolated=true

@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "Nous uses the microphone for voice conversations after you enable voice interaction. Audio is sent to your selected voice service. End the conversation to stop capture.";
+"NSCameraUsageDescription" = "Nous uses the camera for presence, head direction, gestures, nominal distance, and optional family recognition. Images are processed only on this Mac, without saving or upload.";

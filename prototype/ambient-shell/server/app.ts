@@ -1,3 +1,5 @@
+import { localize, localizeSettings } from "./localization.ts";
+import { normalizeLocale } from "../shared/i18n.mjs";
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -195,7 +197,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         const method = req.method ?? "GET";
         if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");
         res.writeHead(200, commandsPageHeaders());
-        res.end(method === "HEAD" ? undefined : renderCommandsPage(settings.view(), new Date()));
+        res.end(method === "HEAD" ? undefined : renderCommandsPage(settings.view(), new Date(), normalizeLocale(url.searchParams.get("lang"))));
       } else if (url.pathname.startsWith("/api/")) {
         await handleApi(req, res, url.pathname);
       } else if (url.pathname.startsWith("/face-runtime/")) {
@@ -206,7 +208,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     } catch (err) {
       const code = err instanceof HttpError ? err.status : 500;
       if (code === 500) console.error(err);
-      if (!res.headersSent) sendJson(res, code, { error: (err as Error).message });
+      if (!res.headersSent) sendJson(res, code, { error: localize((err as Error).message, normalizeLocale(req.headers["x-nous-locale"])) });
       else res.end();
     }
   });
@@ -214,7 +216,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
 
   async function handleApi(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
     const method = req.method ?? "GET";
-    if (method === "GET" && path === "/api/settings") return sendJson(res, 200, settings.view());
+    if (method === "GET" && path === "/api/settings") return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     if (method === "POST" && path === "/api/settings/provider") {
       const body = await readJson(req);
       const provider = body.provider;
@@ -224,7 +226,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         throw new HttpError(409, (err as Error).message);
       }
-      return sendJson(res, 200, settings.view());
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/settings/camera") {
       if (!options.camera) throw new HttpError(409, "鏡頭未設定");
@@ -242,7 +244,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         // 寫檔失敗：伺服器記憶體沒有改，回報真實原因，不顯示假成功。
         throw new HttpError(500, `鏡頭設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, settings.view());
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/settings/voice") {
       if (!options.voice) throw new HttpError(409, "語音設定未設定");
@@ -258,7 +260,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         throw new HttpError(500, `語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, settings.view());
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/settings/realtime") {
       if (!options.realtimePrefs) throw new HttpError(409, "即時語音路徑設定未設定");
@@ -275,7 +277,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         throw new HttpError(500, `即時語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, settings.view());
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/chat") return streamChat(req, res);
     if (method === "POST" && path === "/api/realtime/start") {
@@ -283,7 +285,11 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (!sessions) throw new HttpError(409, "即時語音模式未啟用");
       const clientId = typeof body.client_id === "string" && CLIENT_ID.test(body.client_id) && clients.has(body.client_id) ? body.client_id : null;
       // source 只決定要不要發看著說話的互動 ID（ID-02），不是授權；其他值都當成 user。
-      return sendJson(res, 200, sessions.start(clientId, body.source === "look_to_talk" ? "look_to_talk" : "user"));
+      const locale = normalizeLocale(req.headers["x-nous-locale"]);
+      const decision = sessions.start(clientId, body.source === "look_to_talk" ? "look_to_talk" : "user", locale);
+      return sendJson(res, 200, decision.ok
+        ? { ...decision, billing_line: localize(decision.billing_line, locale), notice: decision.notice === null ? null : localize(decision.notice, locale) }
+        : { ...decision, message: localize(decision.message, locale) });
     }
     if (method === "POST" && path === "/api/realtime/call") {
       const body = await readJson(req);
@@ -306,7 +312,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       // 沒有 session_id：原本的 API key 路徑，行為不變。
       if (!realtime) throw new HttpError(409, "即時語音模式未啟用");
       try {
-        return sendJson(res, 200, await realtime.connect(sdp, store.list()));
+        return sendJson(res, 200, await realtime.connect(sdp, store.list(), normalizeLocale(req.headers["x-nous-locale"])));
       } catch (err) {
         if (err instanceof RealtimeError) throw new HttpError(err.status, err.message);
         throw err;
@@ -387,7 +393,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (!codexAuth) throw new HttpError(409, "ChatGPT 方案即時語音未設定");
       const how = body.method === "device" ? "device" : "browser";
       try {
-        return sendJson(res, 200, await codexAuth.startLogin(how));
+        return sendJson(res, 200, await codexAuth.startLogin(how, normalizeLocale(req.headers["x-nous-locale"])));
       } catch (err) {
         throw new HttpError(502, (err as Error).message);
       }
@@ -395,7 +401,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (method === "POST" && path === "/api/auth/codex/cancel") {
       await readJson(req);
       codexAuth?.cancel();
-      return sendJson(res, 200, settings.view());
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/auth/codex/logout") {
       await readJson(req);
@@ -435,12 +441,12 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (method === "POST" && path === "/api/auth/chatgpt/login") {
       const body = await readJson(req);
       const mode = body.mode === "new" ? "new" : "auto";
-      return sendJson(res, 200, await auth.startLogin(mode));
+      return sendJson(res, 200, await auth.startLogin(mode, normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/auth/chatgpt/cancel") {
       await readJson(req);
       auth.cancelPending();
-      return sendJson(res, 200, settings.view());
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/auth/chatgpt/logout") {
       await readJson(req);
@@ -450,7 +456,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (method === "POST" && path === "/api/auth/chatgpt/welcome-ack") {
       await readJson(req);
       auth.ackWelcome();
-      return sendJson(res, 200, settings.view());
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "GET" && path === "/api/tasks") return sendJson(res, 200, store.list());
     if (method === "GET" && path === "/api/events") return openEvents(req, res);
@@ -460,7 +466,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const text = typeof body.text === "string" ? body.text.trim() : "";
       if (!text) throw new HttpError(400, "text is required");
       if (text.length > MAX_TEXT_CHARS) throw new HttpError(400, `text exceeds ${MAX_TEXT_CHARS} chars`);
-      return sendJson(res, 201, runner.submit({ title: text, request_id: requestId(body) }));
+      return sendJson(res, 201, runner.submit({ title: text, request_id: requestId(body), ...(normalizeLocale(req.headers["x-nous-locale"]) === "en" ? { locale: "en" as const } : {}) }));
     }
 
     const artifact = path.match(/^\/api\/artifacts\/([\w-]+)$/);
@@ -536,7 +542,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     const filter = new DelegationFilter();
     try {
       const { model } = await chat.chat(
-        { system: buildChatSystem(store.list()), messages },
+        { system: buildChatSystem(store.list(), new Date(), normalizeLocale(req.headers["x-nous-locale"])), messages },
         (delta) => {
           const { text, delegates } = filter.push(delta);
           if (text) send({ type: "delta", text });
@@ -551,7 +557,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (!controller.signal.aborted) {
         send({
           type: "error",
-          message: err instanceof ExecutionError ? err.userMessage : `對話失敗：${(err as Error).message}`,
+          message: localize(err instanceof ExecutionError ? err.userMessage : `對話失敗：${(err as Error).message}`, normalizeLocale(req.headers["x-nous-locale"])),
           action: err instanceof ExecutionError ? err.action : null,
         });
       }

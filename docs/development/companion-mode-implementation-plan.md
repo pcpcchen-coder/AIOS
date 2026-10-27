@@ -1,8 +1,12 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](companion-mode-implementation-plan.md) | [English](companion-mode-implementation-plan.en.md)
+
 # 實作 Companion Mode（AIOS 原型開發交辦與驗收）
 
 > 文件性質：**How-to／開發批次規劃，尚未執行** · 2026-10-24 · 依據：[Companion Mode 功能規格](../15_Companion_Mode_Spec_2026-10-24.md)。
 >
-> 工作前先讀 [現況](../Current_Implementation_Status.md)、[AGENTS.md](../../AGENTS.md)、[CLAUDE.md](../../CLAUDE.md)、[pstack 使用指南](./pstack.md)。目前現存原型為 `prototype/ambient-shell`；不要以舊 Python kernel、Tauri 或已存在的本地 ASR 為前提。
+> 工作前先讀 [現況](../Current_Implementation_Status.md)、[AGENTS.md](../../AGENTS.zh-TW.md)、[CLAUDE.md](../../CLAUDE.md)、[pstack 使用指南](pstack.md)。目前現存原型為 `prototype/ambient-shell`；不要以舊 Python kernel、Tauri 或已存在的本地 ASR 為前提。
 
 ## 交付原則
 

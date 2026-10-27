@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](family-id-00-spike-2026-10-24.md) | [English](family-id-00-spike-2026-10-24.en.md)
+
 # 家人辨識 ID-00：runtime spike 與 ADR 草案驗證
 
 2026-10-24；分支 `claude/family-id-00`，基底 `5af2c24`（14 規劃）。對應 [14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) §9 的 ID-00 與 [ADR-0001 草案](../adr/ADR-0001-local-family-recognition.md)。
@@ -57,7 +61,7 @@ YuNet 門檻用 OpenCV Zoo 範例預設（分數 0.6、NMS 0.3、topK 5000），
 
 ## 3. 雲端量測結果
 
-環境：Linux x64 容器、4 vCPU、Node v22.22.0、Playwright 1.56.1 的 headless Chromium 141.0.7390.37。原始輸出見 [`cloud-report.json`](./family-id-00-spike-2026-10-24/cloud-report.json) 與 [`cloud-summary.md`](./family-id-00-spike-2026-10-24/cloud-summary.md)。
+環境：Linux x64 容器、4 vCPU、Node v22.22.0、Playwright 1.56.1 的 headless Chromium 141.0.7390.37。原始輸出見 [`cloud-report.json`](./family-id-00-spike-2026-10-24/cloud-report.json) 與 [`cloud-summary.md`](family-id-00-spike-2026-10-24/cloud-summary.md)。
 
 ### 3.1 偵測（兩種執行緒設定結果相同）
 
@@ -74,7 +78,7 @@ YuNet 門檻用 OpenCV Zoo 範例預設（分數 0.6、NMS 0.3、topK 5000），
 
 ### 3.2 耗時（ms，20 個畫格彙總）
 
-下表所有數字直接取自腳本產出的 [`cloud-summary.md`](./family-id-00-spike-2026-10-24/cloud-summary.md)（含 `.pre`、`.infer`、`.post` 分段），計算方式見 §2。
+下表所有數字直接取自腳本產出的 [`cloud-summary.md`](family-id-00-spike-2026-10-24/cloud-summary.md)（含 `.pre`、`.infer`、`.post` 分段），計算方式見 §2。
 
 | 項目 | 1 執行緒：中位數 | 1 執行緒：最差 p95 | 4 執行緒：中位數 | 4 執行緒：最差 p95 |
 |---|---:|---:|---:|---:|

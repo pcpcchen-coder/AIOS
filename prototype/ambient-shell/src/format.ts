@@ -1,3 +1,4 @@
+import { msg, getLocale } from "./i18n.ts";
 import type { StepStatus, TaskStatus } from "../shared/types.ts";
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
@@ -22,9 +23,9 @@ export function formatDuration(ms: number): string {
   const h = Math.floor(total / 3600);
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
-  if (h > 0) return `${h} 小時 ${m} 分`;
-  if (m > 0) return `${m} 分 ${String(s).padStart(2, "0")} 秒`;
-  return `${s} 秒`;
+  if (h > 0) return msg`${h} 小時 ${m} 分`;
+  if (m > 0) return msg`${m} 分 ${String(s).padStart(2, "0")} 秒`;
+  return msg`${s} 秒`;
 }
 
 export function formatClock(iso: string): string {
@@ -33,5 +34,5 @@ export function formatClock(iso: string): string {
 }
 
 export function formatCount(n: number): string {
-  return n.toLocaleString("zh-TW");
+  return n.toLocaleString(getLocale());
 }

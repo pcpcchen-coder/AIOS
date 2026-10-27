@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](brain-regions.md) | [English](brain-regions.en.md)
+
 # 擴充電子腦功能區
 
 這份文件保留六腦區合併批次的設計與驗證範圍。當時的語音說明主要是瀏覽器 STT、文字串流與 TTS；後續即時語音與鏡頭互動的實作不由這份歷史紀錄驗收。最新範圍見 [目前實作狀態](../Current_Implementation_Status.md)、[即時語音驗證](../validation/live-voice-2026-10-23.md) 與 [功能擴充評估](../13_Feature_Expansion_Assessment_2026-10-24.md)。

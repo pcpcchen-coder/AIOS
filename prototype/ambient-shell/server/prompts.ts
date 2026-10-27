@@ -1,10 +1,11 @@
+import { type Locale } from "../shared/i18n.mjs";
 import { classifyDomain, isDomain, DOMAINS, REGIONS, type Domain } from "../shared/domain.ts";
 import { ExecutionError } from "./runner.ts";
 
 // Claude 與 ChatGPT 執行器共用的提示詞與計畫格式：同樣走「規劃 → 逐步執行 → 彙整」。
 
 /** 任務執行的系統指示；依這次執行實際擁有的工具說明能力。 */
-export function systemPrompt(caps: { webSearch: boolean }): string {
+export function systemPrompt(caps: { webSearch: boolean }, locale: Locale = "zh-TW"): string {
   return [
     "你是 Nous 的任務執行 Agent。使用者在桌面上交辦一件事，你負責完成它。",
     caps.webSearch
@@ -12,7 +13,7 @@ export function systemPrompt(caps: { webSearch: boolean }): string {
       : "這次執行沒有上網工具：涉及即時或最新資料的部分，列出需要查證的項目。",
     "寄信、對外發布、付款、刪除等會改變外部狀態的動作，由系統的確認流程處理，不在任務中直接執行；需要時產出可直接使用的草稿或內容。",
     "產出要能直接使用；做不到的部分寫進缺口並提供替代產出，不得假裝已經完成。",
-    "不確定的事實要標明是推測。使用繁體中文（台灣用語）。",
+    locale === "en" ? "Label uncertain facts as inferences. Produce the plan, step titles, assumptions, gaps, and final artifact in English unless the user explicitly requests another output language." : "不確定的事實要標明是推測。使用繁體中文（台灣用語）。",
   ].join("\n");
 }
 

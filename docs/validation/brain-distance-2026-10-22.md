@@ -1,8 +1,12 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](brain-distance-2026-10-22.md) | [English](brain-distance-2026-10-22.en.md)
+
 # 電子腦雙目距離縮放驗證
 
 2026-10-22；基底 `16dc63cafd949a0e195d94e693afd3ba0d823d1d`。本紀錄隨電子腦距離縮放功能交付。
 
-> **2026-10-23 部分取代**：George 決定待機的電子腦改成靠近時放大（使用者設定最大倍率），不再跟下面的 D ÷ 2 m 比例；頂端縮略圖與字級不變。新的規則、量測與截圖見 [電子腦靠近放大驗證](./brain-proximity-zoom-2026-10-23.md)。下面的待機半徑數字是當時的紀錄。
+> **2026-10-23 部分取代**：George 決定待機的電子腦改成靠近時放大（使用者設定最大倍率），不再跟下面的 D ÷ 2 m 比例；頂端縮略圖與字級不變。新的規則、量測與截圖見 [電子腦靠近放大驗證](brain-proximity-zoom-2026-10-23.md)。下面的待機半徑數字是當時的紀錄。
 
 電子腦現在接收既有 `SenseController.setScale` 的距離比例。待機與頂端圖形、光環、投影和點擊範圍共用實際半徑；任務與對話更新保留比例。距離事件為空、判定離開，以及鏡頭 off/error/degraded 時沿用控制器的重設。`starting` 保留最近比例；原有 60 秒離開判定不變。
 
@@ -38,7 +42,7 @@
 
 採用 Model the Domain 保留輸入生命週期、Laziness Protocol 延伸既有幾何與重設、Test Behavior Not Implementation 檢查可見繪圖與點擊結果、Prove It Works 實測建置頁面。新增註解審查無需刪除或抑制規則。未要求 commit 或 PR，因此跳過對應步驟；原生 Cursor UI 工具不可用，以 Chromium/Playwright 驗證實際頁面。
 
-[設計 A](./evidence/brain-distance-2026-10-22/design-a.md)、[設計 B](./evidence/brain-distance-2026-10-22/design-b.md)、[評選](./evidence/brain-distance-2026-10-22/judgment.md)、[獨立審查](./evidence/brain-distance-2026-10-22/review.md)、[計畫](./evidence/brain-distance-2026-10-22/plan.md)。
+[設計 A](evidence/brain-distance-2026-10-22/design-a.zh-TW.md)、[設計 B](evidence/brain-distance-2026-10-22/design-b.zh-TW.md)、[評選](evidence/brain-distance-2026-10-22/judgment.zh-TW.md)、[獨立審查](evidence/brain-distance-2026-10-22/review.zh-TW.md)、[計畫](evidence/brain-distance-2026-10-22/plan.zh-TW.md)。
 
 [pstack run](https://github.com/pcpcchen-coder/AIOS/blob/telemetry/pstack/observability/public/runs/run-20261022010402-0fb7c0.json) 已透過專案核准的 sidecar 發布去識別化階段資料。初次預設傳輸失敗後，改用 Git 傳輸成功；未發布原始碼或私人對話。
 

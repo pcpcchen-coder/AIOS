@@ -1,3 +1,7 @@
+<!-- bilingual: source=en -->
+
+> [繁體中文](plan.zh-TW.md) | [English](plan.md)
+
 # Feature plan
 
 Run: run-20261022010402-0fb7c0

@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](chatgpt-conversation-2026-10-20.md) | [English](chatgpt-conversation-2026-10-20.en.md)
+
 # 電子腦 ChatGPT 對話驗證
 
 日期為 2026-10-20，平台為 Linux 雲端環境，Node.js 24.19.0，npm 11.9.0，Chromium 無頭瀏覽器。這是原型對話流程的驗證，沒有變更 G0 至 G3 驗收狀態。

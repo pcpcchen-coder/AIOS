@@ -1,3 +1,4 @@
+import { getLocale, t, type Locale } from "./i18n.ts";
 import {
   isLikelyEcho,
   isStopWord,
@@ -109,7 +110,7 @@ export class PushToTalk {
     const Ctor = recognitionCtor();
     if (!Ctor || this.recognition) return;
     const r = new Ctor();
-    r.lang = "zh-TW";
+    r.lang = getLocale() === "en" ? "en-US" : "zh-TW";
     r.interimResults = true;
     r.continuous = false;
     r.maxAlternatives = 1;
@@ -132,7 +133,7 @@ export class PushToTalk {
       if (this.recognition !== r) return;
       this.captureExpected = false;
       this.setCapture(false);
-      if (e.error !== "aborted") this.callbacks.onError(ERROR_TEXT[e.error] ?? `語音辨識失敗（${e.error}）`);
+      if (e.error !== "aborted") this.callbacks.onError(t(ERROR_TEXT[e.error] ?? `語音辨識失敗（${e.error}）`));
     };
     r.onend = () => {
       if (this.recognition !== r) return;
@@ -213,6 +214,8 @@ const FATAL_ERRORS = new Set(["not-allowed", "service-not-allowed", "audio-captu
  * 立刻停止念並改聽使用者說話。戴耳機時沒有回音，插話最靈敏。
  */
 export class VoiceConversation {
+  private speechLocale: Locale = getLocale();
+  get locale(): Locale { return this.speechLocale; }
   private recognition: RecognitionLike | null = null;
   private state: ConversationState = "off";
   private capture = false;
@@ -270,6 +273,7 @@ export class VoiceConversation {
 
   start(): void {
     if (this.on || !recognitionCtor()) return;
+    this.speechLocale = getLocale();
     this.networkErrors = 0;
     this.setState("listening");
     this.resetIdle();
@@ -319,7 +323,7 @@ export class VoiceConversation {
           this.resetIdle();
         }
       },
-    });
+    }, this.speechLocale);
     this.spoken = "";
     this.reply = reply;
     return reply;
@@ -359,7 +363,7 @@ export class VoiceConversation {
     const Ctor = recognitionCtor();
     if (!Ctor || !this.on) return;
     const r = new Ctor();
-    r.lang = "zh-TW";
+    r.lang = this.speechLocale === "en" ? "en-US" : "zh-TW";
     r.interimResults = true;
     r.continuous = true;
     r.maxAlternatives = 1;
@@ -471,7 +475,7 @@ class Reply implements ReplyHandle {
   readonly done = new Promise<void>((r) => (this.resolve = r));
   private events: ReplyEvents | null;
 
-  constructor(events: ReplyEvents | null) {
+  constructor(events: ReplyEvents | null, private readonly locale: Locale = getLocale()) {
     this.events = events;
   }
 
@@ -521,7 +525,7 @@ class Reply implements ReplyHandle {
     this.speaking = true;
     const controller = new AbortController();
     this.playbackAbort = controller;
-    void speakText(sentence, { cancelOthers: false, signal: controller.signal, onStart: () => {
+    void speakText(sentence, { locale: this.locale, cancelOthers: false, signal: controller.signal, onStart: () => {
       if (this._cancelled) return;
       this.events?.onStart();
       this.events?.onSentence(sentence);
@@ -543,13 +547,14 @@ class Reply implements ReplyHandle {
 }
 
 /** 以瀏覽器 TTS 念出短句；部分瀏覽器不觸發 onend，所以加上依長度估算的逾時保護。 */
-export function speakText(text: string, options: { cancelOthers?: boolean; onStart?: () => void; signal?: AbortSignal } = {}): Promise<void> {
+export function speakText(text: string, options: { cancelOthers?: boolean; onStart?: () => void; signal?: AbortSignal; locale?: Locale } = {}): Promise<void> {
   const synth = typeof speechSynthesis === "undefined" ? null : speechSynthesis;
   if (!synth || options.signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => {
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = "zh-TW";
-    const voice = synth.getVoices().find((v) => v.lang === "zh-TW") ?? synth.getVoices().find((v) => v.lang.startsWith("zh"));
+    const locale = options.locale ?? getLocale();
+    u.lang = locale === "en" ? "en-US" : "zh-TW";
+    const voice = synth.getVoices().find((v) => v.lang === u.lang) ?? synth.getVoices().find((v) => v.lang.toLowerCase().startsWith(locale === "en" ? "en" : "zh"));
     if (voice) u.voice = voice;
     let done = false;
     const finish = () => {

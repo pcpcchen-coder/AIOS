@@ -1,10 +1,14 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](06_Ambient_Voice_Gaze_Experience.md) | [English](06_Ambient_Voice_Gaze_Experience.en.md)
+
 # Nous — 電子腦桌面、語音與視線互動規格
 
 版本：v0.1 · 規格日期：2026-09-16 · 效力說明更新：2026-10-24。產品規則持續有效；部分能力已有原型，整體 gate 與硬體驗收仍須逐項提供證據。
 
-> **2026-10-24 閱讀導覽**：目前程式與缺口見 [實作現況](./Current_Implementation_Status.md)，新功能建議見 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。程式基準為 `1f44c6b`（2026-10-23）。原型使用 Node HTTP、SSE、TypeScript、Vite 與 Electron，已有瀏覽器 STT／TTS 與 WebRTC 即時語音雙路；本地喚醒、Tauri、完整 Agent SDK 與本文件的校正視線流程仍屬目標設計。
+> **2026-10-24 閱讀導覽**：目前程式與缺口見 [實作現況](Current_Implementation_Status.md)，新功能建議見 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md)。程式基準為 `1f44c6b`（2026-10-23）。原型使用 Node HTTP、SSE、TypeScript、Vite 與 Electron，已有瀏覽器 STT／TTS 與 WebRTC 即時語音雙路；本地喚醒、Tauri、完整 Agent SDK 與本文件的校正視線流程仍屬目標設計。
 >
-> [11 雙目鏡頭互動設計](./11_Stereo_Camera_Interaction_2026-10.md) 明確修訂遠距互動路徑。現有感測是 `presence`、是否面向螢幕、停止手勢及三區手臂指向；頭向不等於眼動，程式存在不代表準確率或硬體 gate 已通過。遠距目標選取以語音編號為主、手臂指向為輔。以下視線規格保留為後續研發與驗收要求，不可套用到頭向後宣稱已完成 gaze。新評估中的 F0–F10、Q0–Q4 不取代 G0–G3。
+> [11 雙目鏡頭互動設計](11_Stereo_Camera_Interaction_2026-10.md) 明確修訂遠距互動路徑。現有感測是 `presence`、是否面向螢幕、停止手勢及三區手臂指向；頭向不等於眼動，程式存在不代表準確率或硬體 gate 已通過。遠距目標選取以語音編號為主、手臂指向為輔。以下視線規格保留為後續研發與驗收要求，不可套用到頭向後宣稱已完成 gaze。新評估中的 F0–F10、Q0–Q4 不取代 G0–G3。
 
 ## 1. 產品定義與範圍
 
@@ -25,7 +29,7 @@
 
 ### 文件優先順序
 
-本文件及 [07 開發與驗收計畫](./07_Ambient_Implementation_and_Acceptance.md) 規範新的 Shell、輸入及揭露策略；與 01–05 的常駐 Dashboard、技能側欄、語音延後等舊敘述衝突時，以 06–07 為準。其餘核心架構仍沿用既有目標設計，不能據此推定已有實作。遠距鏡頭的具體限制與互動修訂見 11，實作現況由現況文件記錄。原本「3 個月」是排程假設，加入視線與語音後需按驗收 gate 重新估工。
+本文件及 [07 開發與驗收計畫](07_Ambient_Implementation_and_Acceptance.md) 規範新的 Shell、輸入及揭露策略；與 01–05 的常駐 Dashboard、技能側欄、語音延後等舊敘述衝突時，以 06–07 為準。其餘核心架構仍沿用既有目標設計，不能據此推定已有實作。遠距鏡頭的具體限制與互動修訂見 11，實作現況由現況文件記錄。原本「3 個月」是排程假設，加入視線與語音後需按驗收 gate 重新估工。
 
 ## 2. 畫面與資訊揭露規則
 
@@ -267,4 +271,4 @@ flowchart TD
 
 只有待機動畫或預錄腳本不算完成產品閉環。驗收必須包含：真實語音需求、真實 Agent 工具工作、可保存成果、真實 webcam 校正與區塊選取、語音調整、收起與喚回。Mock／replay 可用於開發，但需明示，不能用來證明真實能力。
 
-功能 gate、資料契約、檔案結構、任務 prompt 與逐項驗收見 [07 開發與驗收計畫](./07_Ambient_Implementation_and_Acceptance.md)。
+功能 gate、資料契約、檔案結構、任務 prompt 與逐項驗收見 [07 開發與驗收計畫](07_Ambient_Implementation_and_Acceptance.md)。

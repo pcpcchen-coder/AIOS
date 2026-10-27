@@ -172,7 +172,10 @@ async function expectRegions(expected) {
   assert.equal(await page.locator('#brain').getAttribute('data-active-regions'), await page.locator('body').getAttribute('data-active-regions'));
 }
 async function type(text) {
-  if (!await page.locator('#command-input').isVisible()) await page.keyboard.press('Enter');
+  if (!await page.locator('#command-input').isVisible()) {
+    await page.locator('#brain').click({ position: { x: 5, y: 5 } });
+    await page.keyboard.press('Enter');
+  }
   await page.locator('#command-input').fill(text);
   await page.locator('#command-input').press('Enter');
 }

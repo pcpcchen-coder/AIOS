@@ -119,20 +119,22 @@ describe("Electron wiring (static)", () => {
   const preload = readFileSync(new URL("../desktop/preload.cjs", import.meta.url), "utf8");
   const main = readFileSync(new URL("../desktop/main.mjs", import.meta.url), "utf8");
 
-  it("preload exposes exactly openExternal, reportState and identity on nousDesktop, and identity only invokes nous:identity", async () => {
+  it("preload exposes only the named app and locale capabilities, and identity only invokes nous:identity", async () => {
     const exposed: Record<string, Record<string, unknown>> = {};
     const invoke = vi.fn();
     const send = vi.fn();
+    const sendSync = vi.fn(() => "zh-TW");
     const require = (name: string) => {
       expect(name).toBe("electron");
-      return { contextBridge: { exposeInMainWorld: (key: string, api: Record<string, unknown>) => (exposed[key] = api) }, ipcRenderer: { invoke, send } };
+      return { contextBridge: { exposeInMainWorld: (key: string, api: Record<string, unknown>) => (exposed[key] = api) }, ipcRenderer: { invoke, send, sendSync, on: vi.fn(), removeListener: vi.fn() } };
     };
     new Function("require", preload)(require);
     expect(Object.keys(exposed)).toEqual(["nousDesktop"]);
-    expect(Object.keys(exposed.nousDesktop!).sort()).toEqual(["identity", "openExternal", "reportState"]);
+    expect(Object.keys(exposed.nousDesktop!).sort()).toEqual(["identity", "initialLocale", "onLocaleChange", "openExternal", "reportState"]);
     (exposed.nousDesktop!.identity as (r: unknown) => unknown)({ op: "open_session" });
     expect(invoke).toHaveBeenCalledWith("nous:identity", { op: "open_session" });
     expect(send).not.toHaveBeenCalled();
+    expect(sendSync).toHaveBeenCalledExactlyOnceWith("nous:get-locale");
   });
 
   it("main.mjs checks the sender and the request shape before handing it to the core, and only open_session consumes the click", () => {

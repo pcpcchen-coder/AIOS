@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, safeStorage, session, shell, Tray } from "electron";
 import { checkIdentitySender, MenuClickWindow, validateIdentityRequest } from "./identity-ipc.mjs";
 import { radio, settingsMenu } from "./settings-menu.mjs";
+import { isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "./localization.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const asset = (name) => join(here, "assets", name);
@@ -39,6 +40,7 @@ const REALTIME_ROUTES = [
 ];
 
 const DEFAULT_PREFS = {
+  locale: "zh-TW",
   realtimeModel: "gpt-realtime",
   realtimeVoice: "marin",
   maxConcurrent: 4,
@@ -51,15 +53,52 @@ const DEFAULT_PREFS = {
 
 function loadPrefs() {
   try {
-    return { ...DEFAULT_PREFS, ...JSON.parse(readFileSync(prefsFile, "utf8")) };
+    const saved = JSON.parse(readFileSync(prefsFile, "utf8"));
+    return { ...DEFAULT_PREFS, ...saved, locale: isLocale(saved.locale) ? saved.locale : "zh-TW" };
   } catch {
     return { ...DEFAULT_PREFS };
   }
 }
 let prefs = loadPrefs();
+setNativeLocale(prefs.locale);
 function savePrefs(patch) {
   prefs = { ...prefs, ...patch };
   writeFileSync(prefsFile, JSON.stringify(prefs, null, 2));
+}
+
+function showMessage(options, parent) {
+  const localized = localizeDialog(options);
+  return parent ? dialog.showMessageBox(parent, localized) : dialog.showMessageBox(localized);
+}
+
+function showError(title, detail) {
+  dialog.showErrorBox(t(title), t(detail));
+}
+
+function setLocale(locale, { notify = true } = {}) {
+  if (!isLocale(locale) || locale === prefs.locale) return false;
+  const previous = prefs.locale;
+  try {
+    savePrefs({ locale });
+  } catch (error) {
+    prefs.locale = previous;
+    showError("語言選擇沒有保存", t("無法寫入 App 偏好設定；語言仍維持原本的選擇。{0}", String(error.message ?? error)));
+    if (win && !win.isDestroyed()) win.webContents.send("nous:locale-changed", previous);
+    return false;
+  }
+  setNativeLocale(locale);
+  settings = null;
+  settingsReadGeneration++;
+  rebuildMenu();
+  rebuildAppMenu();
+  void refreshSettings();
+  app.setAboutPanelOptions({ credits: t("漂浮電子腦 × 即時語音 × 背景任務") });
+  if (commandsWin && !commandsWin.isDestroyed()) {
+    commandsWin.setTitle(t("Nous 語音指令表"));
+    loadCommands();
+  }
+  if (notify && win && !win.isDestroyed()) win.webContents.send("nous:locale-changed", locale);
+  return true;
 }
 
 const logLines = [];
@@ -129,7 +168,8 @@ const BACKUP_NOTE = "限制：在此之前已存在的 Time Machine 備份或 AP
 /** 登記、刪除與清除的原生確認：頁面無法偽造，這是「永久刪除須當次明確確認」的實作。回 true 才寫檔。 */
 async function confirmIdentity(request) {
   const parent = win && !win.isDestroyed() ? win : undefined;
-  const ask = (options) => (parent ? dialog.showMessageBox(parent, options) : dialog.showMessageBox(options));
+  const ask = (options) => showMessage(options, parent);
+  const backupNote = t(BACKUP_NOTE);
   if (request?.kind === "enroll") {
     const minor = request.minor === true;
     const { response, checkboxChecked } = await ask({
@@ -152,7 +192,7 @@ async function confirmIdentity(request) {
       defaultId: 1,
       cancelId: 1,
       message: `要永久刪除「${request.name}」的家人資料嗎？`,
-      detail: `會從加密檔移除這位家人的所有特徵與名稱，並換用新的加密金鑰；刪除後無法還原。\n\n${BACKUP_NOTE}`,
+      detail: `會從加密檔移除這位家人的所有特徵與名稱，並換用新的加密金鑰；刪除後無法還原。\n\n${backupNote}`,
     });
     return response === 0;
   }
@@ -163,7 +203,7 @@ async function confirmIdentity(request) {
       defaultId: 1,
       cancelId: 1,
       message: "要清除全部家人資料嗎？",
-      detail: `會刪除這台 Mac 上 Nous 的家人辨識加密檔（所有家人的特徵與名稱）；清除後無法還原，需要重新登記。\n\n${BACKUP_NOTE}`,
+      detail: `會刪除這台 Mac 上 Nous 的家人辨識加密檔（所有家人的特徵與名稱）；清除後無法還原，需要重新登記。\n\n${backupNote}`,
     });
     return response === 0;
   }
@@ -179,9 +219,10 @@ function openFamily() {
 }
 
 async function api(path, body) {
+  const headers = { "X-Nous-Locale": prefs.locale, ...(body === undefined ? {} : { "Content-Type": "application/json" }) };
   const res = await fetch(`${core.url}${path}`, body === undefined
-    ? undefined
-    : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    ? { headers }
+    : { method: "POST", headers, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
   return data;
@@ -200,12 +241,12 @@ async function activeTaskCount() {
 async function restartCore(reason, { ask = true } = {}) {
   const active = await activeTaskCount();
   if (active > 0 && ask) {
-    const { response } = await dialog.showMessageBox({
+    const { response } = await showMessage({
       type: "question",
       buttons: ["重新啟動", "取消"],
       defaultId: 1,
       cancelId: 1,
-      message: `要重新啟動 Nous 核心來套用「${reason}」嗎？`,
+      message: `要重新啟動 Nous 核心來套用「${t(reason)}」嗎？`,
       detail: `目前有 ${active} 個任務進行中，重新啟動會中斷它們（之後可以按「重試」）。`,
     });
     if (response !== 0) return false;
@@ -233,7 +274,7 @@ function createWindow() {
     titleBarStyle: "hiddenInset",
     alwaysOnTop: prefs.alwaysOnTop,
     show: false,
-    webPreferences: { preload: join(here, "preload.cjs"), contextIsolation: true, sandbox: true },
+    webPreferences: { preload: join(here, "preload.cjs"), contextIsolation: true, sandbox: true, additionalArguments: [`--nous-locale=${prefs.locale}`] },
   });
   win.loadURL(core.url);
   win.once("ready-to-show", () => {
@@ -304,7 +345,7 @@ function openCommandsWindow() {
     height: 720,
     minWidth: 480,
     minHeight: 360,
-    title: "Nous 語音指令表",
+    title: t("Nous 語音指令表"),
     show: false,
     webPreferences: {
       partition: HELP_PARTITION,
@@ -330,12 +371,12 @@ function openCommandsWindow() {
 
 function loadCommands() {
   const target = commandsWin;
-  target.loadURL(`${core.url}/help/commands`).catch((err) => {
+  target.loadURL(`${core.url}/help/commands?lang=${prefs.locale}`).catch((err) => {
     // ⌘R 或核心重啟後的 loadCommands 取代了還在載入的那一次：舊的載入以 ERR_ABORTED 結束，新的照常進行。
     if (err?.code === "ERR_ABORTED") return;
     log(`語音指令表載入失敗：${err.message ?? err}`);
     if (target.isDestroyed()) return;
-    dialog.showErrorBox("無法打開語音指令表", `本機核心沒有回應（${err.message ?? err}）。稍後再試，或在「設定與資料」重新啟動核心。`);
+    showError("無法打開語音指令表", `本機核心沒有回應（${err.message ?? err}）。稍後再試，或在「設定與資料」重新啟動核心。`);
     target.destroy();
   });
 }
@@ -353,6 +394,7 @@ function command(name) {
 let tray = null;
 let pageState = { voice: "off", activeTasks: 0 };
 let settings = null;
+let settingsReadGeneration = 0;
 
 const VOICE_LABEL = {
   off: "未開啟",
@@ -374,8 +416,12 @@ function trayImage(active) {
 }
 
 async function refreshSettings() {
+  const generation = ++settingsReadGeneration;
+  const locale = prefs.locale;
   try {
-    settings = await api("/api/settings");
+    const next = await api("/api/settings");
+    if (generation !== settingsReadGeneration || locale !== prefs.locale) return;
+    settings = next;
   } catch {
     // 核心重啟中，下次再更新
   }
@@ -384,7 +430,7 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, translate: t });
 }
 
 /** 即時語音用的 Codex 登入：核心開好回呼（1455，被占用時 1457，再不行改裝置代碼），系統瀏覽器開登入頁。 */
@@ -394,10 +440,10 @@ async function codexLogin() {
     if (result.method === "browser") void shell.openExternal(result.authorize_url);
     else {
       void shell.openExternal(result.verification_url);
-      dialog.showMessageBox({ message: "ChatGPT 方案（Codex）裝置代碼登入", detail: `${result.note ? `${result.note}。\n` : ""}在開啟的頁面輸入代碼：${result.user_code}` });
+      showMessage({ message: "ChatGPT 方案（Codex）裝置代碼登入", detail: `${result.note ? `${t(result.note)}。\n` : ""}在開啟的頁面輸入代碼：${result.user_code}` });
     }
   } catch (err) {
-    dialog.showErrorBox("無法開始 ChatGPT 方案登入", String(err.message ?? err));
+    showError("無法開始 ChatGPT 方案登入", String(err.message ?? err));
   }
   await refreshSettings();
 }
@@ -407,8 +453,8 @@ async function setMenuPref(row, value) {
   try {
     settings = await api(row.write_path, { [row.key]: value });
   } catch (err) {
-    const title = row.kind === "bool" ? `「${row.label}」沒有保存` : row.kind === "factor" ? "倍率沒有保存" : "秒數沒有保存";
-    dialog.showErrorBox(title, String(err.message ?? err));
+    const title = row.kind === "bool" ? `「${t(row.label)}」沒有保存` : row.kind === "factor" ? "倍率沒有保存" : "秒數沒有保存";
+    showError(title, String(err.message ?? err));
     await refreshSettings();
     return;
   }
@@ -420,7 +466,7 @@ function rebuildMenu() {
   const voiceOn = pageState.voice !== "off";
   tray.setImage(trayImage(voiceOn));
   tray.setTitle(pageState.activeTasks > 0 ? ` ${pageState.activeTasks}` : "", { fontType: "monospacedDigit" });
-  tray.setToolTip(voiceOn ? `Nous · 語音${VOICE_LABEL[pageState.voice] ?? ""}` : "Nous 電子腦");
+  tray.setToolTip(t(voiceOn ? `Nous · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}` : "Nous 電子腦"));
 
   const realtime = settings?.realtime;
   const provider = settings?.provider;
@@ -433,13 +479,13 @@ function rebuildMenu() {
   const realtimeLine = !realtime
     ? "讀取中…"
     : realtime.active
-      ? `${realtime.active.billing_line}（進行中）${realtime.billing_line && realtime.billing_line !== realtime.active.billing_line ? `；下次：${realtime.billing_line}` : ""}`
-      : realtime.billing_line ?? `不可用（${realtime.detail}）`;
+      ? `${t(realtime.active.billing_line)}（進行中）${realtime.billing_line && realtime.billing_line !== realtime.active.billing_line ? `；下次：${t(realtime.billing_line)}` : ""}`
+      : t(realtime.billing_line ?? `不可用（${t(realtime.detail)}）`);
 
   const template = [
-    { label: `Nous · 引擎：${PROVIDER_LABEL[provider] ?? "讀取中…"}`, enabled: false },
+    { label: `Nous · 引擎：${t(PROVIDER_LABEL[provider] ?? "讀取中…")}`, enabled: false },
     {
-      label: `即時語音：${realtimeLine} · 語音${VOICE_LABEL[pageState.voice] ?? ""}`,
+      label: `即時語音：${t(realtimeLine)} · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}`,
       enabled: false,
     },
     { label: pageState.activeTasks > 0 ? `進行中的任務：${pageState.activeTasks} 個` : "目前沒有進行中的任務", enabled: false },
@@ -453,11 +499,11 @@ function rebuildMenu() {
       label: "AI 引擎（執行交辦的工作）",
       submenu: [
         ...providers.map((p) =>
-          radio(`${PROVIDER_LABEL[p.id] ?? p.label}${p.available ? "" : "（不可用）"}`, p.id === provider, async () => {
+          radio(`${t(PROVIDER_LABEL[p.id] ?? p.label)}${p.available ? "" : t("（不可用）")}`, p.id === provider, async () => {
             try {
               await api("/api/settings/provider", { provider: p.id });
             } catch (err) {
-              dialog.showErrorBox("無法切換引擎", String(err.message ?? err));
+              showError("無法切換引擎", String(err.message ?? err));
             }
             await refreshSettings();
           }, p.available),
@@ -475,7 +521,7 @@ function rebuildMenu() {
             try {
               settings = await api("/api/settings/realtime", { route: r.id });
             } catch (err) {
-              dialog.showErrorBox("即時語音路徑沒有保存", String(err.message ?? err));
+              showError("即時語音路徑沒有保存", String(err.message ?? err));
               await refreshSettings();
               return;
             }
@@ -484,8 +530,8 @@ function rebuildMenu() {
         ),
         { type: "separator" },
         {
-          label: liveAccount?.signed_in ? `ChatGPT 方案（Codex）：${liveAccount.email ?? "已登入"}` : "ChatGPT 方案（Codex）登入…",
-          sublabel: liveRoute && !liveRoute.available ? liveRoute.detail : undefined,
+          label: liveAccount?.signed_in ? `ChatGPT 方案（Codex）：${liveAccount.email ?? t("已登入")}` : "ChatGPT 方案（Codex）登入…",
+          sublabel: liveRoute && !liveRoute.available ? t(liveRoute.detail) : undefined,
           click: () => void codexLogin(),
           enabled: !!liveAccount && !liveAccount.signed_in,
         },
@@ -497,7 +543,7 @@ function rebuildMenu() {
               try {
                 settings = await api("/api/settings/realtime", { live_voice: v });
               } catch (err) {
-                dialog.showErrorBox("聲音沒有保存", String(err.message ?? err));
+                showError("聲音沒有保存", String(err.message ?? err));
                 await refreshSettings();
                 return;
               }
@@ -547,6 +593,7 @@ function rebuildMenu() {
     },
     { label: "鏡頭與語音設定", submenu: secondsMenu() },
     { label: "語音指令表", click: openCommandsWindow },
+    languageMenu(prefs.locale, setLocale),
     { type: "separator" },
     {
       label: "設定與資料",
@@ -601,7 +648,7 @@ function rebuildMenu() {
     { label: "關於 Nous", click: () => app.showAboutPanel() },
     { label: "結束 Nous", accelerator: "Command+Q", click: () => app.quit() },
   ];
-  tray.setContextMenu(Menu.buildFromTemplate(template));
+  tray.setContextMenu(Menu.buildFromTemplate(localizeMenu(template)));
 }
 
 function applyDock() {
@@ -639,7 +686,7 @@ function watchEnvFile() {
       last = text;
       const restarted = await restartCore("新的 .env 設定");
       if (restarted && Notification.isSupported()) {
-        new Notification({ title: "Nous", body: "已套用新的設定（.env）。" }).show();
+        new Notification({ title: "Nous", body: t("已套用新的設定（.env）。") }).show();
       }
     }, 1200);
   });
@@ -650,7 +697,7 @@ function watchEnvFile() {
 app.setAboutPanelOptions({
   applicationName: "Nous",
   applicationVersion: app.getVersion(),
-  credits: "漂浮電子腦 × 即時語音 × 背景任務",
+  credits: t("漂浮電子腦 × 即時語音 × 背景任務"),
 });
 
 app.on("second-instance", showWindow);
@@ -669,8 +716,12 @@ app.on("window-all-closed", () => {
 // 設定在頁面（帳號頁、語音或打字指令）改了：頁面收到核心的 settings.updated 後回報新的版本字串，這裡馬上重新讀取。
 // 不在點選單列圖示時才讀：macOS 上 setContextMenu 的選單在 mouse-down 當下就打開，非同步的讀取趕不上這一次。
 let reportedSettings = null;
-ipcMain.on("nous:state", (_e, state) => {
-  if (!state || typeof state !== "object") return;
+ipcMain.on("nous:get-locale", (event) => {
+  event.returnValue = trustedLocaleSender(event, win, core?.url) ? prefs.locale : "zh-TW";
+});
+ipcMain.on("nous:state", (event, state) => {
+  if (!trustedLocaleSender(event, win, core?.url) || !state || typeof state !== "object") return;
+  if (isLocale(state.locale)) setLocale(state.locale, { notify: false });
   pageState = { voice: String(state.voice ?? "off"), activeTasks: Number(state.activeTasks) || 0 };
   const revision = String(state.settings ?? "");
   if (revision && revision !== reportedSettings) {
@@ -685,37 +736,21 @@ ipcMain.on("nous:open-external", (_e, url) => {
 });
 // 家人辨識：只接受主視窗主框架、來自本機核心頁面的請求；形狀過濾後原樣交給核心（核心再完整驗證）。
 ipcMain.handle("nous:identity", async (event, request) => {
-  if (!core?.identity || !checkIdentitySender(event, win, core.url)) return { ok: false, code: "unavailable", message: "家人辨識不可用" };
+  if (!core?.identity || !checkIdentitySender(event, win, core.url)) return { ok: false, code: "unavailable", message: t("家人辨識不可用") };
   const checked = validateIdentityRequest(request);
   if (!checked.ok) return { ok: false, code: "bad_request", message: checked.error };
   const userInitiated = checked.request.op === "open_session" ? familyClick.consume(Date.now()) : false;
   return core.identity.handle(checked.request, { userInitiated });
 });
 
-app.whenReady().then(async () => {
-  ensureEnvFile();
-  mkdirSync(dataDir, { recursive: true });
-  try {
-    await startCore();
-  } catch (err) {
-    dialog.showErrorBox("Nous 無法啟動", String(err?.stack ?? err));
-    app.exit(1);
-    return;
-  }
-
-  // 麥克風與鏡頭（media）只開放給本機核心的頁面；鏡頭需 NOUS_CAMERA=on，影像只在本機處理。
-  const allowMedia = (url) => Boolean(core && url?.startsWith(core.url));
-  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-    callback(permission === "media" && allowMedia(details.requestingUrl));
-  });
-  session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => permission === "media" && allowMedia(`${origin}/`));
-
+function rebuildAppMenu() {
   Menu.setApplicationMenu(
-    Menu.buildFromTemplate([
+    Menu.buildFromTemplate(localizeMenu([
       {
         label: "Nous",
         submenu: [
           { label: "關於 Nous", click: () => app.showAboutPanel() },
+          languageMenu(prefs.locale, setLocale),
           { type: "separator" },
           { label: "隱藏 Nous", role: "hide" },
           { label: "隱藏其他", role: "hideOthers" },
@@ -763,8 +798,29 @@ app.whenReady().then(async () => {
         role: "help",
         submenu: [{ label: "語音指令表", click: openCommandsWindow }],
       },
-    ]),
+    ])),
   );
+}
+
+app.whenReady().then(async () => {
+  ensureEnvFile();
+  mkdirSync(dataDir, { recursive: true });
+  try {
+    await startCore();
+  } catch (err) {
+    showError("Nous 無法啟動", String(err?.stack ?? err));
+    app.exit(1);
+    return;
+  }
+
+  // 麥克風與鏡頭（media）只開放給本機核心的頁面；鏡頭需 NOUS_CAMERA=on，影像只在本機處理。
+  const allowMedia = (url) => Boolean(core && url?.startsWith(core.url));
+  session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
+    callback(permission === "media" && allowMedia(details.requestingUrl));
+  });
+  session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => permission === "media" && allowMedia(`${origin}/`));
+
+  rebuildAppMenu();
 
   tray = new Tray(trayImage(false));
   setTimeout(() => log(`選單列圖示位置：${JSON.stringify(tray.getBounds())}`), 3000);

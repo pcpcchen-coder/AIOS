@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](chatgpt-conversation-design.md) | [English](chatgpt-conversation-design.en.md)
+
 # 電子腦 ChatGPT 對話設計
 
 這份文件記錄 2026-10-20 的瀏覽器 STT、文字串流與 TTS 對話批次。後續已加入 API key Realtime 與 Codex live 兩條即時語音路徑，不能以本文件推斷最新語音功能或其驗收狀態。最新現況見 [目前實作狀態](../Current_Implementation_Status.md)，後續方向見 [功能擴充評估](../13_Feature_Expansion_Assessment_2026-10-24.md)，語音證據見 [2026-10-23 即時語音驗證](../validation/live-voice-2026-10-23.md)。

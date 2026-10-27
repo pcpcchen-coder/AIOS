@@ -1,3 +1,4 @@
+import type { Locale } from "./i18n.mjs";
 import type { CameraSettings } from "./sense.ts";
 import type { MenuPrefSetting } from "./seconds-menu.ts";
 import type { VoicePrefs } from "./voice-prefs.ts";
@@ -40,6 +41,7 @@ export interface TaskStep {
 }
 
 export interface Task {
+  locale?: Locale;
   schema_version: string;
   task_id: string;
   /** 觸發這個任務的使用者輸入 id，Presentation Policy 用它驗證 user_request。 */

@@ -1,3 +1,5 @@
+import { localize } from "./localization.ts";
+import { type Locale } from "../shared/i18n.mjs";
 import { isDomain, type Domain } from "../shared/domain.ts";
 import type { ErrorAction, ExecutorMode, Task, TaskStep } from "../shared/types.ts";
 import type { TaskStore } from "./store.ts";
@@ -25,7 +27,7 @@ export interface Executor {
   /** 新任務會記錄並使用的引擎。 */
   readonly mode: ExecutorMode;
   /** mode 為任務建立時記錄的引擎；可切換引擎的執行器依此分派。 */
-  run(input: { title: string; mode: ExecutorMode }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult>;
+  run(input: { title: string; mode: ExecutorMode; locale?: Locale }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult>;
 }
 
 /** 帶有可直接顯示給使用者之說明的錯誤；action 為畫面可提供的下一步。 */
@@ -65,7 +67,7 @@ export class TaskRunner {
     return this.executor.mode;
   }
 
-  submit(input: { title: string; request_id: string; retry_of?: string }): Task {
+  submit(input: { title: string; request_id: string; retry_of?: string; locale?: Locale }): Task {
     const task = this.store.create({ ...input, mode: this.executor.mode });
     this.queue.push(task.task_id);
     this.pump();
@@ -75,7 +77,7 @@ export class TaskRunner {
   retry(taskId: string, requestId: string): Task | null {
     const original = this.store.get(taskId);
     if (!original || (original.status !== "failed" && original.status !== "cancelled")) return null;
-    return this.submit({ title: original.title, request_id: requestId, retry_of: taskId });
+    return this.submit({ title: original.title, request_id: requestId, retry_of: taskId, ...(original.locale === "en" ? { locale: "en" as const } : {}) });
   }
 
   /** 「停止任務」：排隊中直接取消；執行中先標為 cancelling 再中止請求。 */
@@ -122,7 +124,7 @@ export class TaskRunner {
     this.controllers.set(taskId, controller);
     const now = () => new Date().toISOString();
     const planning: TaskStep = {
-      title: PLANNING_STEP_TITLE,
+      title: localize(PLANNING_STEP_TITLE, this.store.get(taskId)?.locale),
       status: "running",
       started_at: now(),
       finished_at: null,
@@ -184,7 +186,7 @@ export class TaskRunner {
     };
 
     try {
-      const result = await this.executor.run({ title: task.title, mode: task.mode }, reporter, controller.signal);
+      const result = await this.executor.run({ title: task.title, mode: task.mode, ...(task.locale === "en" ? { locale: "en" as const } : {}) }, reporter, controller.signal);
       if (controller.signal.aborted) {
         this.finishCancelled(taskId);
         return;
@@ -215,7 +217,7 @@ export class TaskRunner {
         err instanceof ExecutionError ? err.userMessage : `執行失敗：${(err as Error).message}`;
       this.store.update(taskId, (t) => {
         t.status = "failed";
-        t.error = message;
+        t.error = localize(message, task.locale);
         t.error_action = err instanceof ExecutionError ? err.action : null;
         t.finished_at = now();
         for (const s of t.steps) if (s.status === "running") s.status = "failed";

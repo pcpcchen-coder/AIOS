@@ -1,0 +1,210 @@
+{
+  "date": "2026-10-26",
+  "timezone": "Asia/Taipei",
+  "baseRevision": "ca7a8fe0b427c9c128e9b57d1bbe6ecb70477b1c",
+  "batch": "MEM-0",
+  "status": "isolated_foundation_passed_product_gates_pending",
+  "environment": {
+    "node": "v22.23.3",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "fullRegression": {
+    "command": "node scripts/verify-aios.mjs",
+    "passed": true,
+    "checks": [
+      "typecheck",
+      "test",
+      "build",
+      "built HTML and mock provider",
+      "HTTP task submission, completion, labeled mock artifact and JSON persistence",
+      "direct mock chat SSE with terminal event and no unsolicited background task"
+    ],
+    "tests": {
+      "passed": 1041,
+      "skipped": 1,
+      "total": 1042
+    },
+    "skipReason": "Installed face-runtime files unavailable; existing conditional identity-http test",
+    "sourceNote": "Full suite covers final core modules and tests; native-store probe extension verified separately in packaged Electron."
+  },
+  "dedicatedTests": {
+    "store": 18,
+    "boundary": 13,
+    "safeStorageFixture": 5,
+    "total": 36
+  },
+  "pstack": {
+    "passed": true,
+    "upstreamHashes": 172,
+    "skills": 56,
+    "publication": false
+  },
+  "runtimeProbe": {
+    "mode": "capabilities_only",
+    "passed": true,
+    "phases": [
+      {
+        "mode": "capabilities",
+        "electron": "44.9.3",
+        "packaged": true,
+        "platform": "darwin",
+        "methods": {
+          "isEncryptionAvailable": "function",
+          "encryptString": "function",
+          "decryptString": "function",
+          "isAsyncEncryptionAvailable": "function",
+          "encryptStringAsync": "function",
+          "decryptStringAsync": "function"
+        },
+        "status": "capabilities_only",
+        "keychainAccessAttempted": false
+      },
+      {
+        "mode": "store_fixture",
+        "electron": "44.9.3",
+        "packaged": true,
+        "platform": "darwin",
+        "methods": {
+          "isEncryptionAvailable": "function",
+          "encryptString": "function",
+          "decryptString": "function",
+          "isAsyncEncryptionAvailable": "function",
+          "encryptStringAsync": "function",
+          "decryptStringAsync": "function"
+        },
+        "keychainAccessAttempted": false,
+        "wrapper": "synthetic AES-GCM fixture, not safeStorage",
+        "status": "packaged_fixture_store_passed"
+      }
+    ]
+  },
+  "pending": [
+    "real Keychain deny path and actual Nous signing identity",
+    "physical voice playback stop acknowledgement and upstream session rebuild",
+    "retrieval and durable-write latency targets including safeStorage",
+    "MEM-1 product service and consent/UI/chat loop",
+    "MEM-2 Codex live integration"
+  ],
+  "testedSources": [
+    {
+      "path": "prototype/ambient-shell/server/memory/store.ts",
+      "sha256": "ec151d8f2e3a39b64e854f4c6b4442be0625cf1dc2d3e148dda29140b0fa04aa"
+    },
+    {
+      "path": "prototype/ambient-shell/server/memory/boundary.ts",
+      "sha256": "96c90f1028f295179b5d852cc2a4d56b86bfdc688d20d602525b72e4955a6829"
+    },
+    {
+      "path": "prototype/ambient-shell/desktop/memory-safe-storage.mjs",
+      "sha256": "bde9cc92635a1f96cad2bb086a6323ed4b05a3be892b48b06fa2444cbdd3f570"
+    },
+    {
+      "path": "prototype/ambient-shell/desktop/memory-safe-storage.d.mts",
+      "sha256": "3490fe0277ff2d4d94db6110d1896a4757340c9dca965acca811f5b943d33df6"
+    },
+    {
+      "path": "prototype/ambient-shell/desktop/scripts/probe-memory-runtime.mjs",
+      "sha256": "7edc1f003444f092e495b6d213a4ee5b365bc89e3ba501c9241527276ad3588a"
+    },
+    {
+      "path": "prototype/ambient-shell/tests/memory-store.test.ts",
+      "sha256": "3363fbc31d078e4c91b44b09cd0c2b765d9fb01a5156fe5233955f2c2bc62a8d"
+    },
+    {
+      "path": "prototype/ambient-shell/tests/memory-boundary.test.ts",
+      "sha256": "76c1fad6ee4a875ab9a177b00a12df8fa4a4a33e12d8e152b391a044f12bbf0d"
+    },
+    {
+      "path": "prototype/ambient-shell/tests/memory-safe-storage.test.ts",
+      "sha256": "ae03109dcf40be315446ebe1812bb41cc8883e8e67254a31c5d6a52cba13fb8f"
+    },
+    {
+      "path": "prototype/ambient-shell/tests/fixtures/memory-store-crash.ts",
+      "sha256": "d5000e0920be21f34258458b991d7b07caca6447051ea4fd9e76056a3785eefd"
+    }
+  ],
+  "nativeKeychainProbe": {
+    "mode": "explicit_keychain_roundtrip",
+    "passed": true,
+    "phases": [
+      {
+        "mode": "capabilities",
+        "electron": "44.9.3",
+        "packaged": true,
+        "platform": "darwin",
+        "methods": {
+          "isEncryptionAvailable": "function",
+          "encryptString": "function",
+          "decryptString": "function",
+          "isAsyncEncryptionAvailable": "function",
+          "encryptStringAsync": "function",
+          "decryptStringAsync": "function"
+        },
+        "status": "capabilities_only",
+        "keychainAccessAttempted": false
+      },
+      {
+        "mode": "store_fixture",
+        "electron": "44.9.3",
+        "packaged": true,
+        "platform": "darwin",
+        "methods": {
+          "isEncryptionAvailable": "function",
+          "encryptString": "function",
+          "decryptString": "function",
+          "isAsyncEncryptionAvailable": "function",
+          "encryptStringAsync": "function",
+          "decryptStringAsync": "function"
+        },
+        "keychainAccessAttempted": false,
+        "wrapper": "synthetic AES-GCM fixture, not safeStorage",
+        "status": "packaged_fixture_store_passed"
+      },
+      {
+        "mode": "write",
+        "electron": "44.9.3",
+        "packaged": true,
+        "platform": "darwin",
+        "methods": {
+          "isEncryptionAvailable": "function",
+          "encryptString": "function",
+          "decryptString": "function",
+          "isAsyncEncryptionAvailable": "function",
+          "encryptStringAsync": "function",
+          "decryptStringAsync": "function"
+        },
+        "keychainAccessAttempted": true,
+        "status": "roundtrip_passed",
+        "nativeStore": {
+          "facts": 1000,
+          "revision": 1,
+          "receiptStatus": "saved",
+          "canaryAbsentFromCiphertext": true
+        }
+      },
+      {
+        "mode": "read",
+        "electron": "44.9.3",
+        "packaged": true,
+        "platform": "darwin",
+        "methods": {
+          "isEncryptionAvailable": "function",
+          "encryptString": "function",
+          "decryptString": "function",
+          "isAsyncEncryptionAvailable": "function",
+          "encryptStringAsync": "function",
+          "decryptStringAsync": "function"
+        },
+        "keychainAccessAttempted": true,
+        "status": "restart_decrypt_passed",
+        "nativeStore": {
+          "facts": 1000,
+          "revision": 1,
+          "receiptStatus": "saved",
+          "canaryAbsentFromCiphertext": true
+        }
+      }
+    ]
+  }
+}

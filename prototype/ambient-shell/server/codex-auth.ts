@@ -1,3 +1,5 @@
+import { localize } from "./localization.ts";
+import type { Locale } from "../shared/i18n.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -172,11 +174,11 @@ export class CodexAuth {
    * 開始登入。browser：綁 127.0.0.1:1455，被占用就 :1457（SIWC、OpenClaw 或 Codex 可能正占著 1455），絕不綁 0；
    * 兩個都被占用時自動改用裝置代碼登入並說明原因。再按一次會取消前一次。
    */
-  async startLogin(method: "browser" | "device"): Promise<LoginStart> {
+  async startLogin(method: "browser" | "device", locale: Locale = "zh-TW"): Promise<LoginStart> {
     this.cancel();
     if (method === "browser") {
       const bound = await this.bindCallback();
-      if (bound) return this.startBrowser(bound.server, bound.port);
+      if (bound) return this.startBrowser(bound.server, bound.port, locale);
       const note = `${this.ports.join("、")} 都被占用（可能是 OpenClaw 或 Codex 正在登入）；改用裝置代碼登入`;
       return this.startDevice(note);
     }
@@ -336,7 +338,7 @@ export class CodexAuth {
     return null;
   }
 
-  private startBrowser(server: Server, port: number): LoginStart {
+  private startBrowser(server: Server, port: number, locale: Locale = "zh-TW"): LoginStart {
     const redirectUri = `http://127.0.0.1:${port}${CALLBACK_PATH}`;
     const verifier = randomBytes(32).toString("base64url");
     const pending: PendingBrowser = {
@@ -363,7 +365,7 @@ export class CodexAuth {
       }
       void this.handleCallback(url).then((result) => {
         res.writeHead(result.ok ? 200 : 400, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(callbackPage(result));
+        res.end(callbackPage(result, locale));
       });
     });
     this.pending = pending;
@@ -635,9 +637,9 @@ export function accountFromTokens(accessToken: string, idToken: string | null): 
   return { account_id: pick("chatgpt_account_id"), plan: pick("chatgpt_plan_type"), email };
 }
 
-function callbackPage(result: CallbackResult): string {
-  const text = result.message.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-  return `<!doctype html><html lang="zh-Hant-TW"><meta charset="utf-8"><title>Nous</title>
+function callbackPage(result: CallbackResult, locale: Locale = "zh-TW"): string {
+  const text = localize(result.message, locale).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+  return `<!doctype html><html lang="${locale === "en" ? "en" : "zh-Hant-TW"}"><meta charset="utf-8"><title>Nous</title>
 <body style="background:#03050b;color:#e6f4ff;font-family:system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0">
 <p style="font-size:18px">${text}</p></body></html>`;
 }

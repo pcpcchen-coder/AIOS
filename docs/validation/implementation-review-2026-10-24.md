@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](implementation-review-2026-10-24.md) | [English](implementation-review-2026-10-24.en.md)
+
 # 實作盤點與既有程式驗證（2026-10-24）
 
 程式基準：`1f44c6b384d8819e99c5d5a7689069119adf6d53`。本次功能盤點產出 [現況入口](../Current_Implementation_Status.md) 與 [功能擴充報告](../13_Feature_Expansion_Assessment_2026-10-24.md)，後續依使用者要求同步更新 repo 說明文件。

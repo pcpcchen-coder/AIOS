@@ -14,6 +14,8 @@ const APPROVE = new RegExp(`(確認|確定)(${APPROVE_VERBS.join("|")})`);
 
 /** 判斷一句話是否為確認或取消；都不是時回傳 null（確認卡繼續等待）。 */
 export function matchApproval(text: string): ApprovalDecision | null {
+  const english = englishApproval(text, false);
+  if (english) return english;
   const t = text.replace(/[\s，。、！？!?,.「」『』"'：:；;]/g, "");
   if (!t) return null;
   if (REJECT.test(t)) return "reject";
@@ -32,9 +34,19 @@ const EXACT_REJECT = new RegExp(`^${LEAD}(?:${REJECT_WORDS.join("|")})(?:${["執
  * 核心用它判斷一個交辦是不是在回答確認卡：「停止播放音樂」「不用開燈，查一下客廳溫度」是請求，不是答案。
  */
 export function exactApproval(text: string): ApprovalDecision | null {
+  const english = englishApproval(text, true);
+  if (english) return english;
   const t = text.replace(/[\s，。、！？!?,.「」『』"'：:；;～~]/g, "");
   if (!t) return null;
   if (EXACT_REJECT.test(t)) return "reject";
   if (EXACT_APPROVE.test(t)) return "approve";
+  return null;
+}
+
+function englishApproval(text: string, exact: boolean): ApprovalDecision | null {
+  const value = text.trim().toLowerCase().replace(/[.!?,]+$/u, "").replace(/\s+/gu, " ");
+  if (!exact && /\b(?:cancel|reject|stop)\b|\bdo not\b|\bdon['’]t\b/u.test(value)) return "reject";
+  if (/^(?:please )?(?:cancel(?: action)?|reject(?: action)?|do not execute|don['’]t execute)$/u.test(value)) return "reject";
+  if (/^(?:please )?confirm (?:execute|execution|send|publish|delete|payment|purchase|order|create|update)(?: please)?$/u.test(value)) return "approve";
   return null;
 }

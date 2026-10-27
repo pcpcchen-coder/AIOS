@@ -1,3 +1,4 @@
+import { t } from "./i18n.ts";
 import { classifyDomain, DOMAIN_LABEL, isDomain, type Domain } from "../shared/domain.ts";
 import type { Task } from "../shared/types.ts";
 import type { ConversationReply } from "./conversation.ts";
@@ -41,9 +42,9 @@ export function collectRegionActivity(input: ActivitySnapshot): RegionActivity[]
 }
 
 export function activityDescription(activity: RegionActivity): string {
-  const source = activity.source === "topic" ? "主題分類"
-    : activity.source === "microphone" ? "麥克風收音"
-    : activity.source === "tts" ? "語音播放"
-    : activity.mock ? "模擬任務" : activity.source === "task-planning" ? "任務規劃" : "任務步驟";
-  return `${DOMAIN_LABEL[activity.domain]} · ${source}`;
+  const source = activity.source === "topic" ? t("主題分類")
+    : activity.source === "microphone" ? t("麥克風收音")
+    : activity.source === "tts" ? t("語音播放")
+    : activity.mock ? t("模擬任務") : activity.source === "task-planning" ? t("任務規劃") : t("任務步驟");
+  return `${t(DOMAIN_LABEL[activity.domain])} · ${source}`;
 }

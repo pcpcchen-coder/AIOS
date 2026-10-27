@@ -1,8 +1,12 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](12_SmartHome_Integration_Plan_2026-10.md) | [English](12_SmartHome_Integration_Plan_2026-10.en.md)
+
 # Nous 12 — 武陵居智慧家電整合規劃（AIOS 端）
 
 版本：v0.5 · 日期：2026-10-22 · 狀態：H0、H1、H1b 已在原型實作，H1 的開關燈 George 已在家裡口頭確認，H1b 待實機驗證；H2–H4 尚未開始（v0.2 納入 George 的四項決定，見 §8；v0.4 記錄 H1 對 §1 第 5 點的修正；v0.5 加入 H1b：AIFA 冷氣與 Tuya 紅外線家電）
 
-> 2026-10-24 對照：[全案現況](./Current_Implementation_Status.md) 與 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md) 已加入。H1 的預設直接執行與 H2 尚未接設備政策是既有實作界線，不把確認卡存在寫成所有家電都需確認。家中口頭開關燈紀錄與 live 語音查溫度紀錄不能外推 H1b 或整套計費／實機驗收通過。Quest 空間家電綁定是後續 F8 提案。
+> 2026-10-24 對照：[全案現況](Current_Implementation_Status.md) 與 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md) 已加入。H1 的預設直接執行與 H2 尚未接設備政策是既有實作界線，不把確認卡存在寫成所有家電都需確認。家中口頭開關燈紀錄與 live 語音查溫度紀錄不能外推 H1b 或整套計費／實機驗收通過。Quest 空間家電綁定是後續 F8 提案。
 對應：SmartHomeAI repo [`docs/AIOS接入規劃.md`](https://github.com/pcpcchen-coder/SmartHomeAI/blob/main/docs/AIOS接入規劃.md)（中控端要補的介面）
 關聯：10（遠距 UI）、11（雙目鏡頭）、即時語音的工具與語音確認（`prototype/ambient-shell/src/realtime.ts`、`src/approval.ts`）
 
@@ -162,7 +166,7 @@ AIOS 本機核心 HomeBridge（新）── REST v1 + SSE，Bearer 範圍權杖 
 - **時間**：每句話最多 60 秒（`UTTERANCE_MS`），每一步的逾時都被它截短；剩不到 5 秒就不再開始 POST（第一次之前：沒有送出；之後：不確定有沒有執行）。逾時：讀清單 8 秒、`/status` 22 秒、AIFA 重新讀取 25 秒、AIFA 送出 16 秒＋重送 12 秒、紅外線送出 16 秒＋重送 10 秒。最壞時間的算法見驗證文件；H1 的 `/commands` 最壞 55 秒，不會被截到。
 - **共用**：每分鐘 6 個指令的上限三條路徑共用，每個意圖在第一次控制 POST 之前才算一次：沒有 POST 就拒絕的（清單重新讀取失敗、冷氣設定組不出來、已經最低、時間不夠）不算，`/discover`、`/status` 與各種重送也不算。確認卡流程（測試專用的 `policyFor`）在每條路徑都能用。問是哪一台時，AIFA 冷氣與紅外線家電的候選一律加上路徑（「冷氣（AIFA）」「客廳的冷氣（紅外線遙控）」），結果帶 `note` 請模型照抄候選名稱；AIFA 冷氣常常沒有房間，所以只看名稱分不出來。使用者照著回答就能選到那一台；名稱只對到另一條路徑的設備時，以括號裡的路徑為準。
 
-驗證見 [`docs/validation/smarthome-h1b-2026-10-22.md`](./validation/smarthome-h1b-2026-10-22.md)：假中控測試、時間預算，以及真實中控程式（示例配置，沒有 AIFA 帳號與 Tuya 認證，冷氣與紅外線的清單、按鍵是寫進中控的 fixture）。尚缺：George 家裡的實機語音控制、記下他家紅外線家電真正的按鍵名稱。
+驗證見 [`docs/validation/smarthome-h1b-2026-10-22.md`](validation/smarthome-h1b-2026-10-22.md)：假中控測試、時間預算，以及真實中控程式（示例配置，沒有 AIFA 帳號與 Tuya 認證，冷氣與紅外線的清單、按鍵是寫進中控的 fixture）。尚缺：George 家裡的實機語音控制、記下他家紅外線家電真正的按鍵名稱。
 
 **H1 實作對照（2026-10-22）**：`HomeBridge.control`／`confirm`（`server/home-bridge.ts`）、`POST /api/home/control`、`POST /api/home/confirm`、即時語音的 `home_control` 工具、家電確認卡與字幕錨點。做法與限制：
 
@@ -173,9 +177,9 @@ AIOS 本機核心 HomeBridge（新）── REST v1 + SSE，Bearer 範圍權杖 
 - 時間：先讀 `/home` 等 8 秒；每次送出等 16 秒；重新讀取等 15 秒。整個指令只有一次同 key 重送，逾時等錯誤與 `state_stale`（重新讀取後）共用，所以最多兩次 POST。最壞 8 + 16 + 15 + 16 = 55 秒；確認卡同意後不再讀 `/home`，最壞 47 秒（算法見驗證文件）。模型先說一句「好，我請中控處理」，字幕顯示「控制中：設備」。
 - 確認卡流程已接好，但 H1 沒有任何設備會觸發：只能用測試專用的 `policyFor` 選項，`.env` 與設定檔都不能開。H2 改讀中控的 `voice` 設定。確認卡的答案交給本機核心（不送 OpenAI），確認後的結果以系統通知轉告；伺服器端的確認 ID 只能用一次、綁定設備與指令、90 秒失效；`needs_confirmation` 帶 `expires_in_s`，確認卡倒數取 60 秒與它的較小值。已經有確認卡（MCP 或家電）開著或排隊時，家電卡不排隊：本機核心丟掉這張，模型拿到 `busy`，請使用者先回答那張卡再說一次。
 
-驗證見 [`docs/validation/smarthome-h1-2026-10-22.md`](./validation/smarthome-h1-2026-10-22.md)：假中控測試與真實中控程式（示例配置，沒有真實設備）。本文件狀態列另記家中開關燈口頭確認；仍缺完整逐項設備結果、量測與 §3 的大圖示結果畫面，不改寫原批次測試範圍。
+驗證見 [`docs/validation/smarthome-h1-2026-10-22.md`](validation/smarthome-h1-2026-10-22.md)：假中控測試與真實中控程式（示例配置，沒有真實設備）。本文件狀態列另記家中開關燈口頭確認；仍缺完整逐項設備結果、量測與 §3 的大圖示結果畫面，不改寫原批次測試範圍。
 
-**H0 實作對照（2026-10-21）**：`prototype/ambient-shell/server/home-bridge.ts`（設定、讀 `GET /api/v1/home`、本機名稱比對、讀值整理）、`POST /api/home/status`、即時語音的 `home_status` 工具與字幕錨點。每次查詢都向中控取最新資料，不快取讀值。驗證見 [`docs/validation/smarthome-h0-2026-10-21.md`](./validation/smarthome-h0-2026-10-21.md)。後續家中查溫度的 log 與口頭結果見 [live 語音 §4](./validation/live-voice-2026-10-23.md#4-真實結果george-家中測試)；仍缺完整量測與 §3 的大數字錨點畫面。
+**H0 實作對照（2026-10-21）**：`prototype/ambient-shell/server/home-bridge.ts`（設定、讀 `GET /api/v1/home`、本機名稱比對、讀值整理）、`POST /api/home/status`、即時語音的 `home_status` 工具與字幕錨點。每次查詢都向中控取最新資料，不快取讀值。驗證見 [`docs/validation/smarthome-h0-2026-10-21.md`](validation/smarthome-h0-2026-10-21.md)。後續家中查溫度的 log 與口頭結果見 [live 語音 §4](validation/live-voice-2026-10-23.md#4-真實結果george-家中測試)；仍缺完整量測與 §3 的大數字錨點畫面。
 
 ## 7. 測試
 

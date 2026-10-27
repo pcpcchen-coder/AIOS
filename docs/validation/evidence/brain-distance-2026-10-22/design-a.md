@@ -1,3 +1,7 @@
+<!-- bilingual: source=en -->
+
+> [繁體中文](design-a.zh-TW.md) | [English](design-a.md)
+
 # Candidate A: renderer distance input
 
 This candidate uses the inherited parent model. No model diversity is claimed.

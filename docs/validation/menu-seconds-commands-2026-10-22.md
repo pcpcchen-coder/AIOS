@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](menu-seconds-commands-2026-10-22.md) | [English](menu-seconds-commands-2026-10-22.en.md)
+
 # 選單列秒數設定與語音指令表驗證
 
 2026-10-22；基底 `5572b91a26d156dee80db8a6aa2cae455c24b5a2`。本紀錄隨「選單列秒數設定、語音閒置秒數、語音指令表」交付。

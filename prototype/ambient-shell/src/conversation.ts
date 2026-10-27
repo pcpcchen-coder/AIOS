@@ -1,3 +1,4 @@
+import type { Locale } from "../shared/i18n.mjs";
 import type { ChatEvent, ChatTurn } from "./api.ts";
 
 interface Exchange {
@@ -18,14 +19,15 @@ export interface ConversationOutput {
 }
 
 interface ConversationOptions {
-  stream(messages: ChatTurn[], requestId: string, event: (value: ChatEvent) => void, signal: AbortSignal): Promise<void>;
+  stream(messages: ChatTurn[], requestId: string, event: (value: ChatEvent) => void, signal: AbortSignal, locale?: Locale): Promise<void>;
   output(): ConversationOutput;
   changed(): void;
   activity?(kind: "submit" | "stream", requestId: string, text: string): void;
-  delegated(title: string, requestId: string): void;
+  delegated(title: string, requestId: string, locale?: Locale): void;
 }
 
 interface ActiveTurn {
+  locale?: Locale;
   controller: AbortController;
   output: ConversationOutput;
   exchange: Exchange;
@@ -47,7 +49,7 @@ export class ConversationSession {
     return { reply: this.reply, visible: this.visible };
   }
 
-  async send(text: string, requestId: string): Promise<void> {
+  async send(text: string, requestId: string, locale?: Locale): Promise<void> {
     this.interrupt();
     const exchange = { requestId, user: text.trim(), answer: "" };
     this.visible = true;
@@ -64,7 +66,7 @@ export class ConversationSession {
       this.options.changed();
       return;
     }
-    const turn: ActiveTurn = { controller: new AbortController(), output: this.options.output(), exchange, settled: false };
+    const turn: ActiveTurn = { controller: new AbortController(), output: this.options.output(), exchange, locale, settled: false };
     this.active = turn;
     this.reply = { ...exchange, kind: "pending" };
     this.options.activity?.("submit", requestId, exchange.user);
@@ -80,7 +82,7 @@ export class ConversationSession {
             this.reply = { ...turn.exchange, kind: "pending" };
             break;
           case "delegate":
-            this.options.delegated(event.title, requestId);
+            this.options.delegated(event.title, requestId, turn.locale);
             break;
           case "done":
             turn.settled = true;
@@ -94,7 +96,7 @@ export class ConversationSession {
             break;
         }
         this.options.changed();
-      }, turn.controller.signal);
+      }, turn.controller.signal, turn.locale);
       if (this.active === turn && !turn.settled) throw new Error("回覆連線已中斷，未收到完成確認。請再試一次。");
     } catch (error) {
       if (this.active !== turn) return;

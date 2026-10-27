@@ -1,0 +1,8 @@
+---
+description: Required Traditional Chinese and English documentation and UI
+alwaysApply: true
+---
+
+Every agent must follow AGENTS.md and docs/BILINGUAL.md. New or updated project documentation must include complete, synchronized Traditional Chinese and English versions in the same change. New or changed App/web interface copy must support both languages through the shared localization catalog. Run node scripts/check-bilingual-docs.mjs before delivery. Review both languages before refreshing its catalog with --record. Never replace a full translation with a summary.
+
+所有 Agent 必須遵守 AGENTS.md 與 docs/BILINGUAL.md。新增或修改說明文件必須在同一批變更提供完整、同步的繁體中文與英文版本；App／網頁介面文字也須透過共用翻譯表支援雙語。交付前執行 node scripts/check-bilingual-docs.mjs，確認兩版同步後才可用 --record 更新紀錄，不得用摘要取代翻譯。

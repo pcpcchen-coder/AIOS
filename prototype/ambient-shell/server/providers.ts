@@ -1,3 +1,4 @@
+import { type Locale } from "../shared/i18n.mjs";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SCHEMA_VERSION, type ExecutorMode, type ProviderInfo, type SettingsView } from "../shared/types.ts";
@@ -72,7 +73,7 @@ export class ProviderManager implements Executor, ChatCapable {
     return { schema_version: SCHEMA_VERSION, provider: this.current, providers, chatgpt };
   }
 
-  run(input: { title: string; mode: ExecutorMode }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+  run(input: { title: string; mode: ExecutorMode; locale?: Locale }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
     const executor =
       input.mode === "claude" ? this.options.claude : input.mode === "chatgpt" ? this.options.chatgpt : this.options.mock;
     if (!executor) {

@@ -1,12 +1,16 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](08_Consolidation_and_Update_2026-10.md) | [English](08_Consolidation_and_Update_2026-10.en.md)
+
 # Nous — 2026-10 匯總與更新（規劃基線 v0.2）
 
 版本：v0.2 · 快照日期：2026-10-07 · 歷史效力說明更新：2026-10-24。本文件保留 10-07 的盤點與提案，不代表今日程式狀態。架構修正仍須經 spike／ADR 確認；本次文件整理沒有把任何提案改標為已決。
 
-> **2026-10-24 閱讀導覽**：repo 現已有 `prototype/ambient-shell` 可執行原型，以 `1f44c6b`（2026-10-23）為程式基準。今日程式與缺口以 [實作現況](./Current_Implementation_Status.md) 為準，後續功能優先序與 Quest 分期見 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。原型採 Node HTTP、SSE、TypeScript、Vite 與 Electron，有多引擎、雙路語音、任務／成果及感測；這些不代表已通過 G0–G3。
+> **2026-10-24 閱讀導覽**：repo 現已有 `prototype/ambient-shell` 可執行原型，以 `1f44c6b`（2026-10-23）為程式基準。今日程式與缺口以 [實作現況](Current_Implementation_Status.md) 為準，後續功能優先序與 Quest 分期見 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md)。原型採 Node HTTP、SSE、TypeScript、Vite 與 Electron，有多引擎、雙路語音、任務／成果及感測；這些不代表已通過 G0–G3。
 >
 > 下文 §0–9 均保留為 **2026-10-07 歷史快照**。其中「實作為 0」、未開始、未決、字數、兩個 commit、模型價格、外部專案狀態及 14 天排程均只指當時，本次未重新查證外部資料。今日不應照舊表重建 PR-00／PR-01；先延伸現有原型，補驗收與整合缺口。F0–F10、Q0–Q4 不取代既有 gate。
 
-> 2026-10-07 的歷史閱讀順序：本文件（當時現況與修正）→ [06](./06_Ambient_Voice_Gaze_Experience.md)／[07](./07_Ambient_Implementation_and_Acceptance.md)（最新產品規格與驗收）→ 01–05（基礎設計與歷史快照）。當時的設計衝突優先順序：**08 的已決項 > 06–07 > 01–05**；08 標為「提案」者不覆蓋既有文件，直到對應 ADR 通過。
+> 2026-10-07 的歷史閱讀順序：本文件（當時現況與修正）→ [06](06_Ambient_Voice_Gaze_Experience.md)／[07](07_Ambient_Implementation_and_Acceptance.md)（最新產品規格與驗收）→ 01–05（基礎設計與歷史快照）。當時的設計衝突優先順序：**08 的已決項 > 06–07 > 01–05**；08 標為「提案」者不覆蓋既有文件，直到對應 ADR 通過。
 
 ---
 

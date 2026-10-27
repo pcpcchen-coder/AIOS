@@ -1,3 +1,5 @@
+import { localize } from "./localization.ts";
+import { type Locale } from "../shared/i18n.mjs";
 import Anthropic from "@anthropic-ai/sdk";
 import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, systemPrompt, WEB_SEARCH_UNAVAILABLE_GAP } from "./prompts.ts";
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
@@ -98,15 +100,15 @@ export class ClaudeExecutor implements Executor, ChatCapable {
     }
   }
 
-  async run(input: { title: string }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+  async run(input: { title: string; locale?: Locale }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
     try {
-      return await this.execute(input.title, reporter, signal);
+      return await this.execute(input.title, reporter, signal, input.locale);
     } catch (err) {
       throw toExecutionError(err);
     }
   }
 
-  private async execute(title: string, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+  private async execute(title: string, reporter: Reporter, signal: AbortSignal, locale: Locale = "zh-TW"): Promise<ExecutionResult> {
     const model = await this.resolveModel();
     const served = new Set<string>();
     let webSearch = !!this.options.webSearchTool;
@@ -116,7 +118,7 @@ export class ClaudeExecutor implements Executor, ChatCapable {
       {
         model,
         max_tokens: 4000,
-        system: systemPrompt({ webSearch }),
+        system: systemPrompt({ webSearch }, locale),
         output_config: { effort: "low", format: { type: "json_schema", schema: PLAN_SCHEMA } },
         messages: [{ role: "user", content: planPrompt(title) }],
         ...this.extra(),
@@ -127,9 +129,10 @@ export class ClaudeExecutor implements Executor, ChatCapable {
     assertUsable(planMessage, "規劃");
     const plan = parsePlan(textOf(planMessage));
 
-    const titles = [...plan.steps.map((s) => s.title), SYNTHESIS_TITLE];
+    const synthesisTitle = localize(SYNTHESIS_TITLE, locale);
+    const titles = [...plan.steps.map((s) => s.title), synthesisTitle];
     reporter.planReady(
-      [...plan.steps.map((s) => ({ title: s.title, domain: s.domain })), { title: SYNTHESIS_TITLE, domain: "language" as const }],
+      [...plan.steps.map((s) => ({ title: s.title, domain: s.domain })), { title: synthesisTitle, domain: "language" as const }],
       model,
     );
 
@@ -158,7 +161,7 @@ export class ClaudeExecutor implements Executor, ChatCapable {
             {
               model,
               max_tokens: isSynthesis ? 32000 : 16000,
-              system: systemPrompt({ webSearch: search }),
+              system: systemPrompt({ webSearch: search }, locale),
               output_config: { effort: "medium" },
               messages,
               ...(search ? { tools: [this.webSearchTool()] } : {}),
@@ -193,8 +196,8 @@ export class ClaudeExecutor implements Executor, ChatCapable {
       reporter.stepDone(i);
     }
 
-    const gaps = [...plan.capability_gaps, ...extraGaps];
-    if (truncated) gaps.push("部分步驟的輸出達到長度上限而被截斷。");
+    const gaps = [...plan.capability_gaps, ...extraGaps.map(gap => localize(gap, locale))];
+    if (truncated) gaps.push(localize("部分步驟的輸出達到長度上限而被截斷。", locale));
     return {
       content: outputs[outputs.length - 1],
       assumptions: plan.assumptions,

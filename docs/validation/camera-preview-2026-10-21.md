@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](camera-preview-2026-10-21.md) | [English](camera-preview-2026-10-21.en.md)
+
 # 鏡頭預覽小視窗與鏡頭設定驗證
 
 日期為 2026-10-21，平台為 Linux 雲端環境，Node.js 22.22.0，Chromium 無頭瀏覽器。這是原型的驗證，沒有變更 G0 至 G3 驗收狀態。

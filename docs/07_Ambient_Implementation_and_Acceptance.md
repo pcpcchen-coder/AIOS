@@ -1,12 +1,16 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](07_Ambient_Implementation_and_Acceptance.md) | [English](07_Ambient_Implementation_and_Acceptance.en.md)
+
 # Nous — Ambient Shell 開發與驗收計畫
 
 版本：v0.1 · 計畫日期：2026-09-16 · 效力說明更新：2026-10-24。部分能力已有原型；本文件定義驗收要求，不是已通過的測試報告。
 
-> **2026-10-24 閱讀導覽**：先讀 [實作現況](./Current_Implementation_Status.md) 與既有 `prototype/ambient-shell`，再依本文件找出 gate 缺口。新優先序見 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。程式基準為 `1f44c6b`（2026-10-23）。原型已有電子腦、任務／成果、雙路語音及感測，不應從 PR-01 重新建立。
+> **2026-10-24 閱讀導覽**：先讀 [實作現況](Current_Implementation_Status.md) 與既有 `prototype/ambient-shell`，再依本文件找出 gate 缺口。新優先序見 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md)。程式基準為 `1f44c6b`（2026-10-23）。原型已有電子腦、任務／成果、雙路語音及感測，不應從 PR-01 重新建立。
 >
-> 本地喚醒、正式 monorepo、Tauri、Python kernel、Agent SDK、校正眼動與完整 G0–G3 驗收仍不能據原型推定完成。[11 雙目鏡頭互動設計](./11_Stereo_Camera_Interaction_2026-10.md) 的頭向、停止手勢及三區手臂指向不等於本文件的 gaze 校正；遠距先用語音編號選取。新評估中的 F0–F10、Q0–Q4 是候選功能與 Quest 分期，不取代 G0–G3。
+> 本地喚醒、正式 monorepo、Tauri、Python kernel、Agent SDK、校正眼動與完整 G0–G3 驗收仍不能據原型推定完成。[11 雙目鏡頭互動設計](11_Stereo_Camera_Interaction_2026-10.md) 的頭向、停止手勢及三區手臂指向不等於本文件的 gaze 校正；遠距先用語音編號選取。新評估中的 F0–F10、Q0–Q4 是候選功能與 Quest 分期，不取代 G0–G3。
 
-需求來源：[06 電子腦、語音與視線互動規格](./06_Ambient_Voice_Gaze_Experience.md)。本文件把產品方向拆成可交付工作；所有數值是待校準的工程目標，不是性能承諾。
+需求來源：[06 電子腦、語音與視線互動規格](06_Ambient_Voice_Gaze_Experience.md)。本文件把產品方向拆成可交付工作；所有數值是待校準的工程目標，不是性能承諾。
 
 ## 1. 第一個可驗收版本
 

@@ -1,8 +1,12 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](13_Feature_Expansion_Assessment_2026-10-24.md) | [English](13_Feature_Expansion_Assessment_2026-10-24.en.md)
+
 # AIOS／Nous 功能擴充評估
 
 查核日期：2026-10-24，Asia/Taipei。對象：[pcpcchen-coder/AIOS](https://github.com/pcpcchen-coder/AIOS)。
 
-> 發布說明：本報告以 `1f44c6b` 的程式為基準，GitHub 數量是建立本次文件 PR 前的查核快照。依使用者後續要求，報告與 [目前實作及驗證](./Current_Implementation_Status.md) 一併納入 repo，並同步更新說明文件。文件盤點已交付，F0 所提產品 CI 與其他功能仍待實作；本次不修改 runtime，也不提升 G0–G3 完成度。
+> 發布說明：本報告以 `1f44c6b` 的程式為基準，GitHub 數量是建立本次文件 PR 前的查核快照。依使用者後續要求，報告與 [目前實作及驗證](Current_Implementation_Status.md) 一併納入 repo，並同步更新說明文件。文件盤點已交付，F0 所提產品 CI 與其他功能仍待實作；本次不修改 runtime，也不提升 G0–G3 完成度。
 
 **建議優先完成「同一個工作在 Mac 與 Quest 接續，成果與操作都有來源和版本」的閉環。** Claude 維持 AIOS 核心的主要開發工作，ChatGPT 負責 Quest 客戶端工程。OpenClaw 作為可替換、受限的工作執行者接入。這裡的 Claude／ChatGPT 分工是開發責任，不代表 Quest 執行時必須只用 OpenAI 模型。
 
@@ -133,6 +137,8 @@ MVP 分清「停止播報」「停止生成」「取消任務」三種命令；M
 驗收為兩端零雙重收音／播報，語音交接不重交工作；張掌本機靜音 p95 提議小於 200 ms；一般無工具問答的首音延遲先收集 30 輪 p50／p95，再以 p95 2.5 秒作初步調校目標。工具請求另列，不拿長任務延遲混進一般對話。
 
 ### F7：能修正、能忘記的工作記憶
+
+2026-10-26 補充：[16 家庭記憶層設計](16_Nous_Memory_Layer_Design_2026-10-26.md) 將個人與家人偏好細化為獨立批次，首版採加密快照；[ADR-0002](adr/ADR-0002-nous-family-memory.md) 說明與下方歷史 Markdown＋FTS5 提案的差異。[MEM-0 已交付隔離基礎](validation/memory-mem0-2026-10-26.md)，真機 gate 與產品記憶仍未完成。下方為歷史提案，不能據此向明文任務成果注入記憶。
 
 MVP 先做工作摘要、使用者明示偏好與成果來源，支援「上次決定什麼」「這項不要記」。以 Markdown 保存可讀內容，SQLite FTS5 作索引，先不接知識圖譜或向量服務。
 

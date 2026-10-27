@@ -1,3 +1,5 @@
+import { localize } from "./localization.ts";
+import type { Locale } from "../shared/i18n.mjs";
 import { createHash } from "node:crypto";
 import type { SettingsView } from "../shared/types.ts";
 import { commandContext, commandSections, COMMANDS_INTRO, type TableSection } from "../shared/voice-commands.ts";
@@ -41,30 +43,46 @@ export function commandsPageHeaders(): Record<string, string> {
   };
 }
 
-export function renderCommandsPage(view: SettingsView, now: Date): string {
-  const sections = commandSections(commandContext(view)).map(renderSection).join("\n");
+export function renderCommandsPage(view: SettingsView, now: Date, locale: Locale = "zh-TW"): string {
+  const t = (text: string) => localize(text, locale);
+  const sections = commandSections(commandContext(view)).map(section => locale === "en" ? {
+    ...section, title: t(section.title), intro: section.intro ? t(section.intro) : null,
+    columns: section.columns.map(t), rows: section.rows.map(row => ({
+      ...row, cells: row.cells.map(cell => localizeHelpCell(cell)), unmet: row.unmet ? t(row.unmet) : null,
+    })),
+  } : section).map(renderSection).join("\n");
   const camera = view.camera?.enabled ? "鏡頭：啟用" : "鏡頭：未啟用（.env NOUS_CAMERA=on）";
   const realtime = view.realtime?.available ? "即時語音：可用" : `即時語音：不可用（${view.realtime?.detail ?? "未設定"}）`;
   const time = [now.getHours(), now.getMinutes(), now.getSeconds()].map((n) => String(n).padStart(2, "0")).join(":");
   return `<!doctype html>
-<html lang="zh-Hant">
+<html lang="${locale === "en" ? "en" : "zh-Hant"}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Nous 語音指令表</title>
+<title>${escapeHtml(t("Nous 語音指令表"))}</title>
 <style>${STYLE}</style>
 </head>
 <body>
 <main>
-<h1>Nous 語音指令表</h1>
-<p class="intro">${escapeHtml(COMMANDS_INTRO)}</p>
-<p class="status">${escapeHtml(`目前：${camera} · ${realtime}`)}</p>
+<h1>${escapeHtml(t("Nous 語音指令表"))}</h1>
+${locale === "en" ? '<p class="muted">English interface commands include “open settings”, “show progress”, “show results”, and “stop task”. For an action confirmation, use “confirm execution”; “yes” alone does not authorize it. The table below preserves exact Chinese input examples with English explanations.</p>' : ""}
+<p class="intro">${escapeHtml(t(COMMANDS_INTRO))}</p>
+<p class="status">${escapeHtml(locale === "en" ? `Current: ${t(camera)} · ${t(realtime)}` : `目前：${camera} · ${realtime}`)}</p>
 ${sections}
-<footer>${escapeHtml(`依 ${time} 打開時的設定產生；之後改了設定，請按 ⌘R 重新整理。`)}</footer>
+<footer>${escapeHtml(t(`依 ${time} 打開時的設定產生；之後改了設定，請按 ⌘R 重新整理。`))}</footer>
 </main>
 </body>
 </html>
 `;
+}
+
+function localizeHelpCell(cell: string): string {
+  const dynamic = cell.match(/^(.*)；目前 (.*?)（預設 (.*?)），macOS App：選單列「鏡頭與語音設定」；瀏覽器：設定畫面可調$/);
+  if (dynamic) {
+    const prefix = localize(`${dynamic[1]}；預設 ${dynamic[3]}，macOS App：選單列「鏡頭與語音設定」；瀏覽器：設定畫面可調`, "en");
+    return `${prefix}. Current: ${localize(dynamic[2], "en")} (default ${localize(dynamic[3], "en")}).`;
+  }
+  return localize(cell, "en");
 }
 
 function renderSection(section: TableSection): string {

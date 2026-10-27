@@ -1,3 +1,4 @@
+import { normalizeLocale, type Locale } from "../shared/i18n.mjs";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { RealtimeBaseInfo, RealtimeInfo, Task } from "../shared/types.ts";
 import {
@@ -44,6 +45,7 @@ export interface ApprovalSnapshot {
 /** 一個工作階段給路徑的東西。由 RealtimeSessions 建立；路徑看不到其他工作階段。 */
 export interface SessionContext {
   readonly sessionId: string;
+  readonly locale?: Locale;
   readonly tasks: () => Task[];
   /** 真實事件 → 擁有工作階段的頁面（SSE realtime.live）。closed 事件同時結束工作階段。 */
   emit(event: LiveCoreEvent): void;
@@ -235,11 +237,12 @@ interface Interaction {
   id: string;
   issuedAt: number;
   /** 真的連上的工作階段；null＝還沒連上。 */
-  session: { id: string; route: RouteId; at: number } | null;
+  session: { id: string; route: RouteId; at: number; locale: Locale } | null;
   used: boolean;
 }
 
 interface Decision {
+  locale: Locale;
   id: string;
   owner: string;
   clientId: string | null;
@@ -338,7 +341,7 @@ export class RealtimeSessions {
    * POST /api/realtime/start。偏好只在這裡讀一次；之後改偏好只影響下一次開始。
    * clientId：開始的頁面的 SSE 串流；live 路徑一定要有（工具呼叫只送到這條串流）。
    */
-  start(clientId: string | null, source: RealtimeStartSource = "user"): StartDecision {
+  start(clientId: string | null, source: RealtimeStartSource = "user", locale: Locale = "zh-TW"): StartDecision {
     this.sweep();
     if (this.live) {
       return { ok: false, message: `即時語音無法開始：${unavailableText("session_busy")}`, reasons: { live: "session_busy" } };
@@ -349,7 +352,7 @@ export class RealtimeSessions {
       return { ok: false, message: "即時語音無法開始：頁面沒有連上本機核心的事件串流，請重新整理後再試。", reasons: {} };
     }
     const interaction = source === "look_to_talk" ? this.issueInteraction() : null;
-    const decision = this.decide(plan, plan.route, clientId, interaction);
+    const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale));
     const model = this.options.routes[plan.route]!.describe().model;
     return { ok: true, session_id: decision.id, owner: decision.owner, route: plan.route, model, billing_line: billingLine(plan.route, model), notice: plan.notice, interaction };
   }
@@ -363,14 +366,14 @@ export class RealtimeSessions {
   /** 工作階段真的連上：記下互動 ID 屬於哪個工作階段、何時連上。 */
   private connected(decision: Decision): void {
     const it = decision.interaction ? this.interactions.get(decision.interaction) : undefined;
-    if (it && !it.used) it.session = { id: decision.id, route: decision.route, at: this.now() };
+    if (it && !it.used) it.session = { id: decision.id, route: decision.route, at: this.now(), locale: decision.locale };
   }
 
   /**
    * IdentityService 的問候決策呼叫（ID-02）：這個互動 ID 是核心發出、還沒用過、工作階段真的連上而且還在進行、
    * 連上後 GREETING_CLAIM_MS 內，才回傳它屬於哪個工作階段並標記已用；否則 null（不給名字）。一個 ID 只能成功一次。
    */
-  claimGreeting(id: string): { route: RouteId; session_id: string } | null {
+  claimGreeting(id: string): { route: RouteId; session_id: string; locale?: Locale } | null {
     this.sweep();
     const it = this.interactions.get(id);
     if (!it || it.used || !it.session) return null;
@@ -379,11 +382,12 @@ export class RealtimeSessions {
     const active = s.route === "api_key" ? this.ga?.id === s.id : this.live?.id === s.id && !!this.live.call && !this.live.closed;
     if (!active) return null;
     it.used = true;
-    return { route: s.route, session_id: s.id };
+    return { route: s.route, session_id: s.id, ...(s.locale === "en" ? { locale: "en" as const } : {}) };
   }
 
-  private decide(plan: Extract<StartPlan, { kind: "start" }>, route: RouteId, clientId: string | null, interaction: string | null = null): Decision {
+  private decide(plan: Extract<StartPlan, { kind: "start" }>, route: RouteId, clientId: string | null, interaction: string | null = null, locale: Locale = "zh-TW"): Decision {
     const decision: Decision = {
+      locale,
       id: `rt_${randomUUID().replaceAll("-", "")}`,
       owner: `own_${randomBytes(24).toString("base64url")}`,
       clientId,
@@ -414,7 +418,7 @@ export class RealtimeSessions {
     this.decisions.delete(sessionId);
     const route = this.options.routes[decision.route]!;
     if (decision.route === "api_key") {
-      const call = await route.connect(offerSdp, this.contextFor(null, decision.id));
+      const call = await route.connect(offerSdp, this.contextFor(null, decision.id, decision.locale));
       this.ga = { id: decision.id, owner: decision.owner, clientId: decision.clientId };
       this.connected(decision);
       return { sdp: call.answerSdp, model: call.model, route: "api_key", session_id: decision.id };
@@ -431,7 +435,7 @@ export class RealtimeSessions {
     };
     this.live = session;
     try {
-      const call = await route.connect(offerSdp, this.contextFor(session, decision.id));
+      const call = await route.connect(offerSdp, this.contextFor(session, decision.id, decision.locale));
       if (session.closed) {
         // 連線期間工作階段已結束（頁面離開或控制連線中斷）：掛斷剛建立的通話，照實說沒有開始。
         await call.close("page_gone").catch(() => undefined);
@@ -445,7 +449,7 @@ export class RealtimeSessions {
       if (!(err instanceof RouteStartError)) throw err;
       const fallback = planFallback(decision.plan, err);
       if (!fallback || !this.options.routes.api_key) throw err;
-      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId, decision.interaction);
+      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId, decision.interaction, decision.locale);
       const model = this.options.routes.api_key.describe().model;
       this.options.log?.(`即時語音：ChatGPT 方案路徑開始失敗（${err.reason}），改用 API key（這次依用量計費）`);
       throw new FallbackRequired({
@@ -549,10 +553,11 @@ export class RealtimeSessions {
     live.pendingHost.clear();
   }
 
-  private contextFor(live: LiveSession | null, sessionId: string): SessionContext {
+  private contextFor(live: LiveSession | null, sessionId: string, locale: Locale): SessionContext {
     const sessions = this;
     return {
       sessionId,
+      locale,
       tasks: this.options.tasks,
       now: this.now,
       approval: () => (live ? effectiveApproval(live.approval, this.now()) : { open: false, resolvedAt: null }),
@@ -666,7 +671,7 @@ export class ApiKeyRoute implements RealtimeRoute {
   async connect(offerSdp: string, ctx: SessionContext): Promise<RouteCall> {
     let answer: { sdp: string; model: string };
     try {
-      answer = await this.bridge.connect(offerSdp, ctx.tasks());
+      answer = await this.bridge.connect(offerSdp, ctx.tasks(), ctx.locale);
     } catch (err) {
       if (err instanceof RealtimeError) throw new RouteStartError(err.status === 409 ? "no_api_key" : "api_key_rejected", err.status, err.message, false);
       throw err;

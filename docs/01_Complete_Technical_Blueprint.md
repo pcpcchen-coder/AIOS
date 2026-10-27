@@ -1,10 +1,14 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](01_Complete_Technical_Blueprint.md) | [English](01_Complete_Technical_Blueprint.en.md)
+
 # 以 Claude 為核心的認知作業系統：完整技術藍圖與開發時程
 
-> **2026-10-24 閱讀導覽**：目前程式與缺口以 [實作現況](./Current_Implementation_Status.md) 為準；新功能的價值、依賴、MVP 與 roadmap 見 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。本文保留早期設計，不代表已實作或已通過驗收。產品紅線與 G0–G3 仍依 [06](./06_Ambient_Voice_Gaze_Experience.md)、[07](./07_Ambient_Implementation_and_Acceptance.md) 及後續明確修訂執行；新評估中的 F0–F10、Q0–Q4 不取代這些 gate。
+> **2026-10-24 閱讀導覽**：目前程式與缺口以 [實作現況](Current_Implementation_Status.md) 為準；新功能的價值、依賴、MVP 與 roadmap 見 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md)。本文保留早期設計，不代表已實作或已通過驗收。產品紅線與 G0–G3 仍依 [06](06_Ambient_Voice_Gaze_Experience.md)、[07](07_Ambient_Implementation_and_Acceptance.md) 及後續明確修訂執行；新評估中的 F0–F10、Q0–Q4 不取代這些 gate。
 >
 > 程式基準為 `1f44c6b`（2026-10-23）。可執行原型位於 `prototype/ambient-shell`，採 Node HTTP、SSE、TypeScript、Vite 與 Electron。本文的 Tauri、React、Python kernel、Agent SDK、長期記憶及生成工具等屬目標設計；模型、價格、市場、stars 與外部生態數據是原始撰寫時的資料，本次未重新查證，採用前須另查。
 
-> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](./06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](./07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
+> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
 
 **認知作業系統（Cognitive OS）是一個以 Claude 作為「認知核心」的個人知識與工作管理平台，它不操控硬體，而是讓 AI 操作知識、記憶、工作流與多 Agent 編排。** 這份藍圖基於對 30+ 個開源專案、學術論文與業界框架的深入研究，為兩人團隊設計了一條可在 12 個月內交付可展示產品的技術路徑。核心洞見是：當前市場上沒有任何產品提供完整的「OS 層抽象」——Claude Desktop 是 Shell、Notion 是檔案系統、Dify 是 Process Builder，但沒有人把它們整合成一個作業系統。這是一個 **$14.89B 市場**（2025 年）中尚未被佔據的架構層級。
 
@@ -220,7 +224,7 @@ Claude Code 本身就是用 TypeScript + React（Ink 框架）構建的，**~90%
 
 ### 介面設計
 
-最新 Shell 形態為 **Ambient 電子腦桌面 + 暫態成果 Surface**，詳見 [06](./06_Ambient_Voice_Gaze_Experience.md)。
+最新 Shell 形態為 **Ambient 電子腦桌面 + 暫態成果 Surface**，詳見 [06](06_Ambient_Voice_Gaze_Experience.md)。
 
 - 待機只有電子腦動態視覺；使用者以語音表達需求，以 webcam 視線選定成果區塊，再說出動作。
 - Command Bar、Knowledge Panel、Agent Monitor、Conversation Stream 是可按需叫出的能力，不作常駐首頁。

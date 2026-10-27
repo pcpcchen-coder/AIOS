@@ -12,7 +12,8 @@
 // 取樣器沿用 IdentityClient：≤4 Hz、同時最多一個推論；推論在 worker，不阻塞 80 ms 的感測迴圈。
 
 import { AMBIENT_NEAR_M, type FaceModelVersion, type GreetingRoute, type IdentityRequest, type IdentityResponse } from "../../shared/identity.ts";
-import { LOOK_TO_TALK_GREETING } from "../../shared/sense.ts";
+import { plainGreetingInstructions } from "../../shared/sense.ts";
+import { getLocale, type Locale } from "../i18n.ts";
 import type { SenseSnapshot } from "./controller.ts";
 import type { ClientFrame, ClientState } from "./identity-client.ts";
 
@@ -49,6 +50,7 @@ export interface AmbientDeps {
 type Readiness = "unknown" | "ready" | "blocked";
 
 interface Interaction {
+  locale: Locale;
   id: string;
   /** startRealtime 當下的追蹤世代。 */
   track: number;
@@ -114,8 +116,8 @@ export class AmbientIdentity {
    * startRealtime("look_to_talk")：綁定這次互動與當下的追蹤世代。回傳互動 ID（GreetingOnce 用它向核心要決策）。
    * 互動開始時不在近距離面向也照常建立，決策時頁面端條件不成立，就只說「我在」。
    */
-  beginInteraction(id: string): void {
-    this.interaction = { id, track: this.trackGen, startedAt: this.deps.now() };
+  beginInteraction(id: string, locale: Locale = getLocale()): void {
+    this.interaction = { id, locale, track: this.trackGen, startedAt: this.deps.now() };
     this.sync();
   }
 
@@ -133,8 +135,9 @@ export class AmbientIdentity {
    */
   async decide(id: string, route: GreetingRoute, coreInteraction: string | null): Promise<string> {
     // live 的 plain：核心沒有這個 ID 的決策，就送「我在」。
-    const plain = route === "api_key" ? LOOK_TO_TALK_GREETING : (coreInteraction ?? id);
     const it = this.interaction;
+    const locale = it?.locale ?? getLocale();
+    const plain = route === "api_key" ? plainGreetingInstructions(locale) : (coreInteraction ?? id);
     const eligible =
       !!it && it.id === id && it.track === this.trackGen && this.ok && !this.multi && !this.errored && this.readiness === "ready" && this.deps.enabled();
     if (!this.deps.bridge || !coreInteraction) {

@@ -1,0 +1,35 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](README.md) | [English](README.en.md)
+
+<a id="驗證紀錄索引"></a>
+# Validation record index
+
+Added 2026-10-26: [bilingual documentation and App/web verification](bilingual-2026-10-26.en.md), covering document synchronization, interface switching and persistence, conversation language, and isolated mock UI checks.
+
+Updated 2026-10-26. This directory retains the original date, method, and limitations of each validation. Updating other documents does not upgrade an old record to a hardware pass. Later results appear in new records or explicit dated additions.
+
+| Record | Evidence scope and limitations |
+|---|---|
+| [Family memory MEM-0](memory-mem0-2026-10-26.en.md) | Isolated tests of core-private snapshots, sources, and revocation; real process crashes and native macOS locking; cross-process retrieval of 1,000 fictional memories with packaged Electron 44.9.3 and real Keychain; production signing, denial, audio, and product wiring remain unverified |
+| [Three small decisions](small-decisions-2026-10-25.en.md) | Centered brain zoom with fake Canvas, synthetic distance, and Chromium screenshots; air-conditioner off commands specify a timer and default to automatic mode with a fake controller; Mac and real air conditioner remain unverified |
+| [Family recognition ID-02](family-id-02-2026-10-25.en.md) | Fixtures for recognition during look-to-talk, interaction binding, core-generated wording, and named greetings on both paths (synthetic features, fake sampler, fake WebRTC, and sideband): six pre-greeting conditions, cancellation on speech or typing, person changes, multiple people, expiry, deletion, one fallback, name injection, and no names in logs; thresholds are uncalibrated; actual audio, timing, and concurrent workload await Mac testing |
+| [Family recognition ID-01](family-id-01-2026-10-25.en.md) | Unit and integration tests for enrollment, deletion, encrypted persistence, and recognition inside the management screen (fake SecretBox plus real AES-GCM and IPC filtering), product worker cross-check against OpenCV, headless Chromium UI and CSP; full fake-camera journey incomplete because the cloud has no GPU; uncalibrated thresholds; Mac, safeStorage, and Electron IPC await testing |
+| [Family recognition ID-00 spike](family-id-00-spike-2026-10-24.en.md) | CPU/WASM measurements of YuNet, MediaPipe, and SFace in cloud headless Chromium; OpenCV cross-check; public-domain portraits and cosine sanity checks only; Mac plus AR0144 await testing |
+| [Implementation inventory](implementation-review-2026-10-24.en.md) | Mainline code review, 790 tests, types, build, and isolated mock HTTP; no real-model or hardware acceptance |
+| [Live voice](live-voice-2026-10-23.en.md) | Primarily fixtures; §4 contains Mac logs and a verbal temperature-query result; other checks and billing remain unverified |
+| [Look-to-talk greeting](look-to-talk-greet-2026-10-23.en.md) | Fake timers and states on both paths; 600 ms is an estimate; real camera and voice remain unverified |
+| [Consolidated menu settings](menu-settings-consolidate-2026-10-23.en.md) | Types, tests, and syntax; actual Electron menu interaction remains unverified |
+| [Menu durations and command table](menu-seconds-commands-2026-10-22.en.md) | Data, commands, and fake-page checks; native windows and menus remain unverified |
+| [Brain proximity zoom](brain-proximity-zoom-2026-10-23.en.md) | Fake Canvas, synthetic distances, and screenshots; no AR0144 hardware measurements |
+| [Distance UI](brain-distance-2026-10-22.en.md) | Fixtures and built-page validation; real distance and readability remain unverified |
+| [Camera preview](camera-preview-2026-10-21.en.md) | Synthetic stereo video with real MediaPipe and Chromium; no physical stereo calibration |
+| [Six-region animation](brain-regions-2026-10-20.en.md) | Application events and fixture visual checks; not model-internal activity |
+| [General conversation](chatgpt-conversation-2026-10-20.en.md) | Fake accounts, speech, and browser journey; cannot substitute for real-account and audio acceptance |
+| [Smart home H0](smarthome-h0-2026-10-21.en.md) | Queries and a fake controller; later verbal temperature-query result appears in live voice §4 |
+| [Smart home H1](smarthome-h1-2026-10-22.en.md) | Control, idempotency, and an example controller; verbal home light-switching results appear in docs/12 status |
+| [Smart home H1b](smarthome-h1b-2026-10-22.en.md) | AIFA/IR fixtures and an unauthenticated real-controller failure path; real devices remain unverified |
+
+“Real controller code” does not necessarily mean real devices and accounts. A “real browser” can also use fixtures at account, camera, or audio boundaries. Read each record's full limitations when assessing its evidence.
+
+See [implementation status](../Current_Implementation_Status.en.md) for the current overview and [feature assessment](../13_Feature_Expansion_Assessment_2026-10-24.en.md) for expansion proposals.

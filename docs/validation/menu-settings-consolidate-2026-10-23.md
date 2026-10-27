@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](menu-settings-consolidate-2026-10-23.md) | [English](menu-settings-consolidate-2026-10-23.en.md)
+
 # macOS App 設定集中到選單列驗證
 
 2026-10-23；基底 `3df6c4bbd37569898b7343ea085b954fb1834764`（分支 `claude/menu-settings-consolidate`）。內容含獨立審查後的修正。

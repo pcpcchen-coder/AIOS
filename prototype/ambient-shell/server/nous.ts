@@ -1,3 +1,4 @@
+import { type Locale } from "../shared/i18n.mjs";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { parseEnv } from "node:util";
@@ -139,9 +140,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     model: config.liveModel,
     clientVersion: config.nousVersion,
     capabilities: () => ({ webSearch: true, home: home.available }),
-    instructions: (ctx) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp }),
+    instructions: (ctx) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp }, ctx.locale),
     caller: (ctx) =>
-      new LiveToolCaller({ responses: codex, caps: liveCaps, host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log }),
+      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: liveCaps, host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log }),
     // 看著說話的問候（ID-02）：頁面只帶互動 ID，短句由家人辨識的核心決策組成；瀏覽器版（沒有 identity）一律「我在」。
     greeting: liveGreetingSource(() => identity, greetings),
     log,
@@ -242,12 +243,12 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
  * live 路徑的問候文字來源（ID-02）：頁面 POST greeting 的文字只當互動 ID，連同這個 live 工作階段的 ID 交給
  * IdentityService.takeLiveGreeting；沒有家人辨識（瀏覽器版）或取不到時，由核心從固定清單挑一句不含名字的（例如「我在」「早安」）。
  */
-export function liveGreetingSource(identity: () => IdentityService | null, picker: GreetingPicker): (interaction: string, sessionId: string) => LiveGreeting {
-  return (interaction, sessionId) => identity()?.takeLiveGreeting(interaction, sessionId) ?? picker.plainLive();
+export function liveGreetingSource(identity: () => IdentityService | null, picker: GreetingPicker): (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting {
+  return (interaction, sessionId, locale) => identity()?.takeLiveGreeting(interaction, sessionId) ?? picker.plainLive(locale);
 }
 
 /** IdentityService 的 claimGreeting：把核心發出的互動 ID 換成真的連上的工作階段（RealtimeSessions.claimGreeting）。 */
-export function greetingClaims(sessions: () => RealtimeSessions | null): (interaction: string) => { route: RouteId; session_id: string } | null {
+export function greetingClaims(sessions: () => RealtimeSessions | null): (interaction: string) => { route: RouteId; session_id: string; locale?: Locale } | null {
   return (interaction) => sessions()?.claimGreeting(interaction) ?? null;
 }
 

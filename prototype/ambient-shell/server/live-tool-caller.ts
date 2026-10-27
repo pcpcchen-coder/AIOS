@@ -1,3 +1,4 @@
+import type { Locale } from "../shared/i18n.mjs";
 import { exactApproval } from "../shared/approval.ts";
 import { RESULT_UNKNOWN_TEXT, SIDE_EFFECT_TOOLS, type HostToolName } from "../shared/realtime-route.ts";
 import type { Task } from "../shared/types.ts";
@@ -76,8 +77,8 @@ const HOST_TOOLS: readonly HostToolName[] = ["web_search", "delegate_task", "get
  * 工具表：buildRealtimeTools(caps) 去掉 MCP（MCP 在 ChatGPT 方案路徑不可用）。名稱、說明、參數都和 API key 路徑相同：
  * 同一份 server/realtime.ts。
  */
-export function liveCallerTools(caps: RealtimeCapabilities): CodexToolSpec[] {
-  return buildRealtimeTools({ ...caps, mcp: [] })
+export function liveCallerTools(caps: RealtimeCapabilities, locale: Locale = "zh-TW"): CodexToolSpec[] {
+  return buildRealtimeTools({ ...caps, mcp: [] }, locale)
     .filter((tool) => tool.type === "function")
     .map((tool) => {
       const t = tool as unknown as FunctionToolSpec;
@@ -86,13 +87,13 @@ export function liveCallerTools(caps: RealtimeCapabilities): CodexToolSpec[] {
 }
 
 /** 說明：工具執行層的開頭 ＋ realtimeToolRules(caps)（API key 路徑語音模型拿到的同一段文字）＋ 回覆約定 ＋ 任務 ＋ 日期。 */
-export function buildCallerInstructions(caps: RealtimeCapabilities, tasks: Iterable<Task>, now: Date): string {
+export function buildCallerInstructions(caps: RealtimeCapabilities, tasks: Iterable<Task>, now: Date, locale: Locale = "zh-TW"): string {
   const list = taskLines(tasks);
   return [
     "你是 Nous 的工具執行層。即時語音模型沒有工具，會把使用者的請求交給你；你用工具完成，你最後一則訊息會交給語音模型用口語轉述給使用者。",
     ...realtimeToolRules({ ...caps, mcp: [] }),
     "外部服務（MCP）在這條路徑不能用；使用者要求時照實說，需要時請他到設定（macOS App：選單列「即時語音」）把路徑切換到 API key。",
-    "最後一則訊息：一到三句繁體中文（台灣用語），只講工具回傳的事實；不要提工具名稱或 JSON。",
+    locale === "en" ? "Final response: one to three sentences in English, reporting only facts returned by tools. Do not mention tool names or JSON." : "最後一則訊息：一到三句繁體中文（台灣用語），只講工具回傳的事實；不要提工具名稱或 JSON。",
     "沒有呼叫工具就不能說做好了；工具失敗照實說；工具回傳 status 是 unknown 時只能說「結果不明，請確認」。",
     "needs_confirmation：說要對哪台設備做什麼，請使用者按畫面上的確認卡或說「確認執行」；你不能確認。",
     "一般聊天或不需要工具的問題，直接簡短回答，不要呼叫工具。",
@@ -122,6 +123,7 @@ export function approvalGuard(text: string, approval: ApprovalSnapshot, now: num
 }
 
 export interface LiveToolCallerOptions {
+  locale?: Locale;
   responses: Pick<CodexResponses, "turn">;
   caps: () => RealtimeCapabilities;
   host: ToolHost;
@@ -161,8 +163,8 @@ export class LiveToolCaller {
     const failed = (text: string) => (executed.length ? `已經執行：${done()}。不過${text}` : text);
     try {
       const caps = this.options.caps();
-      const instructions = buildCallerInstructions(caps, this.options.tasks(), new Date(this.now()));
-      const specs = liveCallerTools(caps);
+      const instructions = buildCallerInstructions(caps, this.options.tasks(), new Date(this.now()), this.options.locale);
+      const specs = liveCallerTools(caps, this.options.locale);
       const allowed = new Set(specs.map((s) => (s.type === "function" ? s.name : "")));
       const input: CodexInputItem[] = [{ role: "user", content: requestText(request) }];
       let hostCalls = 0;

@@ -1,3 +1,7 @@
+<!-- bilingual: source=en -->
+
+> [繁體中文](brief.zh-TW.md) | [English](brief.md)
+
 # Stereo-distance brain rendering
 
 User authorized connecting actual electronic-brain graph size to existing stereo camera distance scaling and explicitly asked pstack. Worktree starts clean on16dc63c. Previous manual zoom feature was explicitly abandoned. No slider, manual preferences, user controls or persisted zoom. Existing distanceScale maps D/2 meters to0.75–1.5, default1 and resets on no distance, camera unavailable or absence. Preserve its behavior and all sensor privacy gates.

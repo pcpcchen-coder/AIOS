@@ -1,10 +1,14 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](05_Progress_and_Next_Steps.md) | [English](05_Progress_and_Next_Steps.en.md)
+
 # Nous 認知 OS — 完整進度彙總與下一階段規劃
 
-> **2026-10-24 閱讀導覽**：本文是 2026 年 9 月設計階段的歷史快照。今天的程式、完成範圍與缺口請讀 [實作現況](./Current_Implementation_Status.md)，後續優先序請讀 [功能擴充評估](./13_Feature_Expansion_Assessment_2026-10-24.md)。下文的「當前」、「下一步」、比例與月份均指原始快照，不是今日排程或實作進度。外部模型、價格、市場與專案數據本次未重新查證。
+> **2026-10-24 閱讀導覽**：本文是 2026 年 9 月設計階段的歷史快照。今天的程式、完成範圍與缺口請讀 [實作現況](Current_Implementation_Status.md)，後續優先序請讀 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md)。下文的「當前」、「下一步」、比例與月份均指原始快照，不是今日排程或實作進度。外部模型、價格、市場與專案數據本次未重新查證。
 >
 > 以 `1f44c6b`（2026-10-23）為程式基準，repo 已有 `prototype/ambient-shell` 可執行原型、語音路徑、任務與成果保存、感測及 Electron 殼。這些程式存在不代表 G0–G3 已通過；長期記憶、校正眼動與完整 Agent 編排仍不能由原型推定完成。
 
-> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](./06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](./07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
+> **2026-09-16 互動規格更新**：電子腦待機、無 App、語音優先、webcam 視線選取及按需呈現，依 [06 體驗規格](06_Ambient_Voice_Gaze_Experience.md) 與 [07 開發驗收](07_Ambient_Implementation_and_Acceptance.md)。本文其餘底層設計保留；舊時程與舊介面描述僅供歷史參考，衝突時以 06–07 為準。
 
 > **文件目的**:將專案從啟動到目前的所有思考、決策、產出完整盤點,並基於已完成的基礎,發想下一階段該深化與拓展的方向。
 >
@@ -14,8 +18,8 @@
 
 ## 2026-09-16 歷史增補
 
-- **新產品基準**：電子腦動態桌布、無 App、語音優先、webcam 視線指向、按需成果；規格見 [06](./06_Ambient_Voice_Gaze_Experience.md)。
-- **已完成文件**：資料契約、prompt、8 個工作批次、可手算案例與硬體驗收，見 [07](./07_Ambient_Implementation_and_Acceptance.md)。
+- **新產品基準**：電子腦動態桌布、無 App、語音優先、webcam 視線指向、按需成果；規格見 [06](06_Ambient_Voice_Gaze_Experience.md)。
+- **已完成文件**：資料契約、prompt、8 個工作批次、可手算案例與硬體驗收，見 [07](07_Ambient_Implementation_and_Acceptance.md)。
 - **當時尚未完成實作**：2026-09-16 尚無可執行桌面、語音、視線或 Agent 端到端測試。此狀態已不適用今日原型。
 - **當時下一步**：先實作 PR-01–02，再推進 G1 與 G2。今日開工先盤點既有原型與驗收缺口，不重建已存在的電子腦或任務流程。
 - **決策修正**：語音不再延後；常駐 Dashboard／技能側欄改為按需 Surface；原 12 週時程需重新估工。

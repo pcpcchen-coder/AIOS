@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](live-voice-2026-10-23.md) | [English](live-voice-2026-10-23.en.md)
+
 # 即時語音：ChatGPT 方案路徑（gpt-live-1-codex）＋可切換的 API key 路徑（2026-10-23）
 
 批次：`prototype/ambient-shell` 的即時語音加上第二條路徑。Nous 自己做 Codex 登入，經 `chatgpt.com/backend-api/codex/realtime/calls` 與 `wss://api.openai.com/v1/live/{callId}` 用 `gpt-live-1-codex`，做法和 OpenClaw 相同。原本的 `OPENAI_API_KEY`（`gpt-realtime`）路徑保留，使用者可以切換。

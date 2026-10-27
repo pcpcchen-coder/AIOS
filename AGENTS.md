@@ -1,4 +1,22 @@
+<!-- bilingual: source=en -->
+
+> [繁體中文](AGENTS.zh-TW.md) | [English](AGENTS.md)
+
 # AIOS agent workflow
+
+## Required bilingual documentation and interface policy / 中英文必要規則
+
+**Owner requirement, 2026-10-26. Every new or updated project document must provide complete Traditional Chinese and English versions in the same change. Every new or changed user-facing App or web string must support both languages. This applies to every agent, including Claude Code, Codex, and Cursor.**
+
+**使用者要求（2026-10-26）：所有 Agent（包含 Claude Code、Codex、Cursor）新增或修改專案說明文件時，必須在同一批變更提供完整繁體中文與英文版本；新增或修改 App／網頁介面文字也必須同時支援中英文。**
+
+- Read [the bilingual policy](docs/BILINGUAL.md) before writing. Existing Chinese paths stay valid; English companions use `name.en.md`. English originals use `name.zh-TW.md` for Chinese. A short policy may contain both complete languages in one file.
+- Translate the full content, including tables, warnings, limitations, and acceptance evidence. Preserve executable examples, identifiers, paths, numbers, and historical dates. A summary or language-switch link is not a translation.
+- Synchronize both versions whenever either changes. Add reciprocal language links and link to the matching language where available. Preserve original section anchors when translating headings.
+- Keep user content and model responses distinct from interface copy. Reuse the shared localization catalog for App and web, including accessible labels and native menu/dialog copy. Do not infer hardware validation from translation or automated UI tests.
+- Before delivery run `node scripts/check-bilingual-docs.mjs`. After reviewing synchronized translations, refresh the catalog with `node scripts/check-bilingual-docs.mjs --record`, then rerun the check. Never record stale or incomplete translations just to pass.
+- Third-party pinned sources in `vendor/`, their registered symlinks, raw evidence logs, dependency manifests, and application mockup HTML are excluded from document translation. Explain them in paired project docs instead. Do not edit upstream hashes to satisfy this policy.
+
 
 Read `CLAUDE.md` and follow its product rules, documentation order, batch boundaries, and evidence requirements. Start with `docs/Current_Implementation_Status.md` for current capabilities and evidence, then the applicable product specifications. The implemented application is `prototype/ambient-shell`: Node HTTP/SSE, plain TypeScript/Vite, Electron and JSON task/artifact persistence. The monorepo, Python kernel, Tauri shell, calibrated eye gaze and local wake/ASR/TTS pipeline in the design documents are planned work. Head-facing, stereo-pose and gesture code already exists; it does not establish hardware accuracy. Extend the current prototype rather than recreating it from a historical roadmap.
 

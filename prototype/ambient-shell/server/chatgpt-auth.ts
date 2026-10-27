@@ -1,3 +1,5 @@
+import { localize } from "./localization.ts";
+import type { Locale } from "../shared/i18n.mjs";
 import { createHash, createPublicKey, randomBytes, randomUUID, verify } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -130,7 +132,7 @@ export class ChatGPTAuth {
    * 開始登入，回傳要在瀏覽器開啟的授權網址。
    * mode=auto：已有註冊就重新授權同一帳號；mode=new：註冊新帳號／工作區。
    */
-  async startLogin(mode: "auto" | "new"): Promise<{ authorize_url: string }> {
+  async startLogin(mode: "auto" | "new", locale: Locale = "zh-TW"): Promise<{ authorize_url: string }> {
     this.cancelPending();
     const reg = mode === "auto" ? this.active() : undefined;
     const { server, port } = await listenLoopback(this.options.callbackPort);
@@ -154,7 +156,7 @@ export class ChatGPTAuth {
       }
       void this.handleCallback(url).then((result) => {
         res.writeHead(result.ok ? 200 : 400, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(callbackPage(result));
+        res.end(callbackPage(result, locale));
       });
     });
     this.pending = pending;
@@ -534,9 +536,9 @@ async function listenLoopback(port: number): Promise<{ server: Server; port: num
   return { server, port: (server.address() as AddressInfo).port };
 }
 
-function callbackPage(result: CallbackResult): string {
-  const text = result.message.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
-  return `<!doctype html><html lang="zh-Hant-TW"><meta charset="utf-8"><title>Nous</title>
+function callbackPage(result: CallbackResult, locale: Locale = "zh-TW"): string {
+  const text = localize(result.message, locale).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+  return `<!doctype html><html lang="${locale === "en" ? "en" : "zh-Hant-TW"}"><meta charset="utf-8"><title>Nous</title>
 <body style="background:#03050b;color:#e6f4ff;font-family:system-ui,sans-serif;display:grid;place-items:center;height:100vh;margin:0">
 <p style="font-size:18px">${text}</p></body></html>`;
 }

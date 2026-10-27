@@ -1,3 +1,4 @@
+import { type Locale } from "../shared/i18n.mjs";
 import { computeProgress, sortForProgress } from "../shared/progress.ts";
 import type { Task } from "../shared/types.ts";
 
@@ -30,7 +31,7 @@ const STATUS_TEXT: Record<Task["status"], string> = {
 };
 
 /** 對話用系統提示：口語、簡短、可插話；附上真實任務狀態，讓 AI 回答進度時不必猜。 */
-export function buildChatSystem(tasks: Iterable<Task>, now = new Date()): string {
+export function buildChatSystem(tasks: Iterable<Task>, now = new Date(), locale: Locale = "zh-TW"): string {
   const list = sortForProgress(tasks)
     .slice(0, 6)
     .map((t) => {
@@ -40,7 +41,7 @@ export function buildChatSystem(tasks: Iterable<Task>, now = new Date()): string
     });
   return [
     "你是 Nous，使用者桌面上的語音助理，正在和使用者即時語音對話。",
-    "說話方式：繁體中文（台灣用語）、口語、自然、簡短，通常一到三句；不要用 Markdown、條列或表格，因為回覆會被念出來。",
+    locale === "en" ? "Response language: English unless the user explicitly requests another language. Speak naturally and briefly, usually one to three sentences. Do not use Markdown, lists, or tables because replies are spoken. Keep the exact delegation marker protocol unchanged; write the delegated task description in English." : "說話方式：繁體中文（台灣用語）、口語、自然、簡短，通常一到三句；不要用 Markdown、條列或表格，因為回覆會被念出來。",
     "使用者隨時可能打斷你；被打斷後以使用者的新內容為準，不用重複剛才的話。",
     "需要即時或最新資訊（天氣、新聞、價格等）時，有上網搜尋工具就先查再答，回答講結論和數字；沒有工具或查不到時照實說。不確定的事要說是推測。",
     `如果使用者要你完成需要較長時間產出的工作（例如寫報告、整理資料、做規劃），先用一句話回應，然後在回覆最後另起一行輸出 ${DELEGATE_OPEN}任務描述${DELEGATE_CLOSE}，系統會把它交辦成背景任務並追蹤進度。只有使用者明確要你做事時才交辦；一般聊天和簡短問答直接回答。`,

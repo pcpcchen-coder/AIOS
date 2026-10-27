@@ -1,3 +1,4 @@
+import { getLocale, type Locale } from "./i18n.ts";
 import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
@@ -17,12 +18,12 @@ export class ApiError extends Error {
   }
 }
 
-async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<T> {
+async function call<T>(method: "GET" | "POST", path: string, body?: unknown, locale: Locale = getLocale()): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
       method,
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      headers: { "X-Nous-Locale": locale, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -34,7 +35,8 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
 }
 
 export const api = {
-  createTask: (text: string, request_id: string) => call<Task>("POST", "/api/tasks", { text, request_id }),
+  getSettings: (locale?: Locale) => call<SettingsView>("GET", "/api/settings", undefined, locale),
+  createTask: (text: string, request_id: string, locale?: Locale) => call<Task>("POST", "/api/tasks", { text, request_id }, locale),
   cancelTask: (taskId: string) => call<Task>("POST", `/api/tasks/${taskId}/cancel`, {}),
   retryTask: (taskId: string, request_id: string) =>
     call<Task>("POST", `/api/tasks/${taskId}/retry`, { request_id }),
@@ -48,8 +50,8 @@ export const api = {
   chatgptLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/chatgpt/logout", {}),
   chatgptWelcomeAck: () => call<SettingsView>("POST", "/api/auth/chatgpt/welcome-ack", {}),
   /** 即時語音：開麥克風前先決定路徑（client_id：這個頁面的 SSE 串流）。 */
-  realtimeStart: (clientId: string | null, source: "look_to_talk" | "user" = "user") =>
-    call<StartDecision>("POST", "/api/realtime/start", { ...(clientId ? { client_id: clientId } : {}), ...(source === "look_to_talk" ? { source } : {}) }),
+  realtimeStart: (clientId: string | null, source: "look_to_talk" | "user" = "user", locale?: Locale) =>
+    call<StartDecision>("POST", "/api/realtime/start", { ...(clientId ? { client_id: clientId } : {}), ...(source === "look_to_talk" ? { source } : {}) }, locale),
   /**
    * 即時語音：把 WebRTC SDP offer 交給本機核心，由它代為建立連線（API key 或 ChatGPT 方案）。
    * 沒有 ticket 是原本的 API key 呼叫。核心提議改路徑（409 ＋ fallback）時丟 FallbackOfferError。
@@ -111,12 +113,13 @@ export async function streamChat(
   request_id: string,
   onEvent: (event: ChatEvent) => void,
   signal: AbortSignal,
+  locale: Locale = getLocale(),
 ): Promise<void> {
   let res: Response;
   try {
     res = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-Nous-Locale": locale },
       body: JSON.stringify({ messages, request_id }),
       signal,
     });

@@ -1,3 +1,4 @@
+import { t, msg, getLocale, setLocale, onLocaleChange, transcriptText, applyStaticTranslations, type Locale } from "./i18n.ts";
 import "./style.css";
 import { computeProgress, isActive, queueText, sortForProgress } from "../shared/progress.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
@@ -66,9 +67,11 @@ const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as 
 
 /** macOS App（Electron）的 preload 提供；在一般瀏覽器裡不存在。 */
 interface DesktopBridge {
+  readonly initialLocale?: Locale;
+  onLocaleChange?(listener: (locale: Locale) => void): () => void;
   openExternal(url: string): void;
   /** settings：設定的版本字串；變了 App 就重新讀取設定，選單列不會留著舊的「（目前）」。 */
-  reportState(state: { voice: string; activeTasks: number; settings: string }): void;
+  reportState(state: { voice: string; activeTasks: number; settings: string; locale: Locale }): void;
   /** 家人辨識（只經 IPC 到 App 的核心；不走 HTTP）。舊版 App 沒有這一項。 */
   identity?(request: IdentityRequest): Promise<IdentityResponse>;
 }
@@ -133,7 +136,7 @@ const voice = new PushToTalk({
   onListeningChange: (listening) => {
     micIndicator.hidden = !listening;
     micButton.classList.toggle("recording", listening);
-    micButton.setAttribute("aria-label", listening ? "停止收音" : "按下開始說話");
+    micButton.setAttribute("aria-label", t(listening ? "停止收音" : "按下開始說話"));
     render();
   },
   onError: showCommandError,
@@ -151,10 +154,10 @@ const conversation = new VoiceConversation(
     onPlaybackChange: () => render(),
     onUtterance: (text) => {
       session.interrupt();
-      showSubtitle(`你：${text}`);
+      showTranscript("user", text);
       void handleCommand(text);
     },
-    onInterim: (text) => showSubtitle(`你：${text}…`, true),
+    onInterim: (text) => showTranscript("user", text, true, true),
     onStateChange: renderVoiceState,
     onBargeIn: () => {
       session.interrupt();
@@ -180,10 +183,10 @@ const realtimeTaskIds = new Set<string>();
 const realtimeCallbacks: RealtimeCallbacks = {
   onPhase: renderRealtimeState,
   onUserTranscript: (text) => {
-    showSubtitle(`你：${text}`);
+    showTranscript("user", text);
     handleCameraCommand(text);
   },
-  onAssistantTranscript: (text) => showSubtitle(`Nous：${text}`),
+  onAssistantTranscript: (text) => showTranscript("assistant", text),
   onDelegate: delegateFromRealtime,
   onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
   onWebSearch: webSearchFromRealtime,
@@ -207,6 +210,7 @@ let realtime: RealtimeSession = idleSession();
 /** 這次工作階段的路徑、計費與擁有者憑證（只在這個頁面）。 */
 let realtimeTicket: SessionDecision | null = null;
 let realtimeStarting = false;
+let realtimeLocale: Locale = getLocale();
 /** 進行中的開始流程；stopRealtime 中止它，之後的 await 回來時不會再開麥克風。 */
 let realtimeStart: AbortController | null = null;
 /** 這個頁面的 SSE 串流 ID（hello 帶來）；開始 ChatGPT 方案路徑時交給核心。 */
@@ -283,7 +287,7 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
       setMuted: (muted) => {
         if (liveAudio) liveAudio.muted = muted;
       },
-      speak: (text) => void speakText(text).catch(() => undefined),
+      speak: (text) => void speakText(text, { locale: realtimeLocale }).catch(() => undefined),
     },
     { idleMs: idleTimeoutsMs(undefined).realtime, greeting },
   );
@@ -292,7 +296,7 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
 /** 說出並顯示計費通知；語音合成卡住時最多等 8 秒，再開麥克風。 */
 async function announceRealtime(notice: string): Promise<void> {
   showSubtitle(notice, true);
-  await Promise.race([speakText(notice).catch(() => undefined), new Promise((r) => setTimeout(r, 8_000))]);
+  await Promise.race([speakText(notice, { locale: realtimeLocale }).catch(() => undefined), new Promise((r) => setTimeout(r, 8_000))]);
 }
 
 const session = new ConversationSession({
@@ -303,7 +307,7 @@ const session = new ConversationSession({
   },
   activity: (kind, _requestId, text) => brain.pulse(kind, classifyDomain(text)),
   changed: () => render(),
-  delegated: (title, requestId) => void delegateTask(title, requestId),
+  delegated: (title, requestId, locale) => void delegateTask(title, requestId, locale),
 });
 
 function accountKey(value: SettingsView): string {
@@ -369,13 +373,14 @@ async function prepareConversation(requestId: string, epoch: number): Promise<bo
 }
 
 async function converse(text: string, requestId: string): Promise<void> {
+  const requestLocale = conversation.on ? conversation.locale : getLocale();
   const epoch = ++conversationEpoch;
   try {
     if (!await prepareConversation(requestId, epoch) || epoch !== conversationEpoch) return;
     input.value = "";
     dispatch({ type: "dismiss" });
     hideSubtitle();
-    await session.send(text, requestId);
+    await session.send(text, requestId, requestLocale);
   } catch (error) {
     if (epoch !== conversationEpoch) return;
     dispatch({ type: "input.open" });
@@ -419,7 +424,7 @@ function openConversation(): void {
 }
 
 /** AI 在對話中決定交辦的工作：建立背景任務並在電子腦下方顯示進度。 */
-async function delegateTask(title: string, requestId: string): Promise<void> {
+async function delegateTask(title: string, requestId: string, locale: Locale = getLocale()): Promise<void> {
   const epoch = conversationEpoch;
   const stillCurrent = () => {
     const { reply, visible } = session.view;
@@ -427,7 +432,7 @@ async function delegateTask(title: string, requestId: string): Promise<void> {
       && (reply.kind === "pending" || reply.kind === "complete") && reply.requestId === requestId;
   };
   try {
-    const task = await api.createTask(title, requestId);
+    const task = await api.createTask(title, requestId, locale);
     if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
     if (!stillCurrent()) {
       render();
@@ -443,10 +448,13 @@ async function delegateTask(title: string, requestId: string): Promise<void> {
 /** 語音模式開啟時念出回覆並顯示字幕；文字模式下不出聲。 */
 function say(text: string): void {
   if (!conversation.on) return;
-  showSubtitle(`Nous：${text}`);
-  void conversation.speak(text);
+  showAuthoredSpeech(text);
+  void conversation.speak(t(text));
 }
 
+type SubtitleSource = { kind: "message" | "authoredSpeech"; text: string } | { kind: "transcript"; speaker: "user" | "assistant"; text: string; interim: boolean };
+let subtitleSource: SubtitleSource = { kind: "message", text: "" };
+let commandErrorSource = "";
 let subtitleTimer: ReturnType<typeof setTimeout> | null = null;
 function hideSubtitle(): void {
   if (subtitleTimer) clearTimeout(subtitleTimer);
@@ -454,8 +462,29 @@ function hideSubtitle(): void {
   subtitle.hidden = true;
 }
 
+function renderSubtitle(): void {
+  const source = subtitleSource;
+  subtitle.textContent = source.kind === "transcript" ? transcriptText(source.speaker, source.text, source.interim)
+    : source.kind === "authoredSpeech" ? transcriptText("assistant", t(source.text)) : t(source.text);
+}
+
+function showTranscript(speaker: "user" | "assistant", text: string, sticky = false, interim = false): void {
+  subtitleSource = { kind: "transcript", speaker, text, interim };
+  presentSubtitle(sticky);
+}
+
+function showAuthoredSpeech(text: string): void {
+  subtitleSource = { kind: "authoredSpeech", text };
+  presentSubtitle(false);
+}
+
 function showSubtitle(text: string, sticky = false): void {
-  subtitle.textContent = text;
+  subtitleSource = { kind: "message", text };
+  presentSubtitle(sticky);
+}
+
+function presentSubtitle(sticky: boolean): void {
+  renderSubtitle();
   subtitle.hidden = false;
   if (subtitleTimer) clearTimeout(subtitleTimer);
   if (!sticky) subtitleTimer = setTimeout(() => (subtitle.hidden = true), 6000);
@@ -469,10 +498,10 @@ const VOICE_STATE_LABEL: Record<ConversationState, string> = {
 
 function renderVoiceState(state: ConversationState): void {
   voicePill.hidden = state === "off";
-  voicePill.textContent = `${VOICE_STATE_LABEL[state]}（點此關閉）`;
+  voicePill.textContent = msg`${t(VOICE_STATE_LABEL[state])}（點此關閉）`;
   voicePill.dataset.state = state;
   voiceModeButton.classList.toggle("recording", state !== "off");
-  voiceModeButton.setAttribute("aria-label", state === "off" ? "開啟語音對話模式" : "關閉語音對話模式");
+  voiceModeButton.setAttribute("aria-label", state === "off" ? t("開啟語音對話模式") : t("關閉語音對話模式"));
   render();
 }
 
@@ -509,6 +538,7 @@ document.body.append(sensorIndicator);
 let pipeline: SensePipeline | null = null;
 let pointedZone: PointZone | null = null;
 /** 最後一次的鏡頭裝置狀態（來自管線事件，不是設定）。 */
+let sensorDetail = "";
 let sensorState: SensorState = "off";
 /**
  * 這個視窗剛說了「鏡頭關掉」但伺服器還沒回報 active=false：防止尚未保存時收到舊的 hello 把鏡頭又打開。
@@ -529,7 +559,7 @@ const previewClose = document.createElement("button");
 previewClose.type = "button";
 previewClose.className = "sensor-preview-close";
 previewClose.textContent = "×";
-previewClose.setAttribute("aria-label", "收起鏡頭畫面");
+previewClose.setAttribute("aria-label", t("收起鏡頭畫面"));
 previewClose.addEventListener("click", () => closePreview());
 sensorPreview.append(
   previewClose,
@@ -551,9 +581,11 @@ function previewTile(target: HTMLCanvasElement, label: string): HTMLElement {
   const figure = document.createElement("figure");
   const stale = document.createElement("span");
   stale.className = "sensor-preview-stale";
-  stale.textContent = "影像中斷";
+  stale.dataset.i18n = "影像中斷";
+  stale.textContent = t("影像中斷");
   const text = document.createElement("figcaption");
-  text.textContent = label;
+  text.dataset.i18n = label;
+  text.textContent = t(label);
   figure.append(target, stale, text);
   return figure;
 }
@@ -657,10 +689,11 @@ const sense = new SenseController({
   },
   setSensor: (state: SensorState, detail: string) => {
     sensorState = state;
+    sensorDetail = detail;
     sensorIndicator.hidden = state === "off";
     sensorIndicator.dataset.state = state;
-    sensorIndicator.title = `${detail}（按一下顯示／收起鏡頭畫面）`;
-    sensorIndicator.textContent = state === "ok" ? "鏡頭" : state === "starting" ? "鏡頭啟動中" : `鏡頭：${detail}`;
+    sensorIndicator.title = t("{0}（按一下顯示／收起鏡頭畫面）", t(detail));
+    sensorIndicator.textContent = state === "ok" ? t("鏡頭") : state === "starting" ? t("鏡頭啟動中") : t("鏡頭：{0}", t(detail));
     sensorPreview.dataset.state = state;
     if (state === "off" || state === "error" || state === "starting") closePreview();
     if (state === "error") {
@@ -777,6 +810,7 @@ function startRealtime(source: RealtimeStartSource): void {
   hideSubtitle();
   dispatch({ type: "dismiss" });
   realtimeStarting = true;
+  realtimeLocale = getLocale();
   const start = new AbortController();
   realtimeStart = start;
   // 一次開始一個招呼：改路徑時兩個工作階段共用，所以計費通知之後照樣打招呼、但整次最多一次。
@@ -787,6 +821,7 @@ function startRealtime(source: RealtimeStartSource): void {
   let coreInteraction: string | null = null;
   const greeting = greetingFor(source, () => (settings?.camera ?? DEFAULT_CAMERA_PREFS).look_to_talk_greet, {
     interaction,
+    locale: realtimeLocale,
     decide: async (route) => {
       const content = await ambient.decide(interaction, route, coreInteraction);
       lookTimeline.mark("decided");
@@ -795,13 +830,13 @@ function startRealtime(source: RealtimeStartSource): void {
     settled: () => ambient.endInteraction(interaction),
   });
   if (greeting) {
-    ambient.beginInteraction(interaction);
+    ambient.beginInteraction(interaction, realtimeLocale);
     lookTimeline.mark("start");
   }
   // 路徑在開麥克風前決定；auto 改用 API key 時先說出計費通知。
   void openRealtime({
     start: async () => {
-      const decision = await api.realtimeStart(sseClientId, source);
+      const decision = await api.realtimeStart(sseClientId, source, realtimeLocale);
       coreInteraction = decision.ok ? (decision.interaction ?? null) : null;
       return decision;
     },
@@ -852,17 +887,17 @@ function renderRealtimeState(phase: RealtimePhase): void {
   // live 建立失敗、正在改用 API key 時（realtimeStarting）不結束：要記到 API key 路徑的就緒、問候決策與首音。
   else if (phase === "off" && !realtimeStarting) lookTimeline.end();
   voicePill.hidden = phase === "off";
-  if (phase !== "off") voicePill.textContent = `${REALTIME_STATE_LABEL[phase]}（點此結束）`;
+  if (phase !== "off") voicePill.textContent = msg`${t(REALTIME_STATE_LABEL[phase])}（點此結束）`;
   voicePill.dataset.state = phase === "off" ? "off" : phase === "speaking" ? "speaking" : "listening";
   voiceModeButton.classList.toggle("recording", phase !== "off");
-  voiceModeButton.setAttribute("aria-label", phase === "off" ? "開始語音對話" : "結束即時語音");
+  voiceModeButton.setAttribute("aria-label", phase === "off" ? t("開始語音對話") : t("結束即時語音"));
   render();
 }
 
 /** 模型在即時語音中決定交辦的工作：建立任務、顯示進度，並把真實狀態交還給模型。 */
 async function delegateFromRealtime(title: string): Promise<Record<string, unknown>> {
   const requestId = userRequest();
-  const created = await api.createTask(title, requestId);
+  const created = await api.createTask(title, requestId, realtimeLocale);
   if (!tasks.has(created.task_id)) tasks.set(created.task_id, created);
   realtimeTaskIds.add(created.task_id);
   dispatch({ type: "task.submitted", task_id: created.task_id, request_id: requestId });
@@ -897,7 +932,7 @@ async function homeStatusFromRealtime(target: string, metric: string | null): Pr
   brain.pulse("step", classifyDomain(target));
   try {
     const result = await api.homeStatus(target, metric);
-    showSubtitle(homeStatusLine(result));
+    showSubtitle(homeStatusLine(result, getLocale()));
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -915,7 +950,7 @@ async function homeControlFromRealtime(args: HomeControlArgs): Promise<HomeResul
   showSubtitle(`控制中：${args.target}`, true);
   try {
     const result = await api.homeControl(args);
-    showSubtitle(homeControlLine(result));
+    showSubtitle(homeControlLine(result, getLocale()));
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -930,7 +965,7 @@ async function homeConfirmFromRealtime(confirmId: string, approve: boolean): Pro
   if (approve && detail?.kind === "home") showSubtitle(`控制中：${detail.device}`, true);
   try {
     const result = await api.homeConfirm(confirmId, approve);
-    if (approve) showSubtitle(homeControlLine(result));
+    if (approve) showSubtitle(homeControlLine(result, getLocale()));
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -990,10 +1025,10 @@ function disableVoiceMode(): void {
 function realtimeBillingSentence(): string {
   const rt = settings?.realtime;
   if (rt?.route === "live") {
-    const fallback = rt.preference === "auto" && rt.routes.some((r) => r.id === "api_key" && r.available) ? "；ChatGPT 方案不能用時會改用 OPENAI_API_KEY 依用量計費，並先告訴你" : "";
-    return `這次計費：${rt.billing_line}，用你在 Nous 登入的 ChatGPT 方案${fallback}`;
+    const fallback = rt.preference === "auto" && rt.routes.some((r) => r.id === "api_key" && r.available) ? t("；ChatGPT 方案不能用時會改用 OPENAI_API_KEY 依用量計費，並先告訴你") : "";
+    return msg`這次計費：${t(rt.billing_line ?? "")}，用你在 Nous 登入的 ChatGPT 方案${fallback}`;
   }
-  return `這次計費：${rt?.billing_line ?? "OpenAI API key 計費"}，使用你在 .env 設定的 OPENAI_API_KEY，依用量計費`;
+  return msg`這次計費：${t(rt?.billing_line ?? "OpenAI API key 計費")}，使用你在 .env 設定的 OPENAI_API_KEY，依用量計費`;
 }
 
 /** 同意說明；閒置秒數用目前的設定（選單列可改），不寫死。 */
@@ -1001,17 +1036,17 @@ function consentMessage(kind: ConsentKind): string {
   const idle = voicePrefs();
   switch (kind) {
     case "realtime":
-      return `即時語音模式像 ChatGPT 語音模式：開啟期間麥克風音訊會即時串流到 OpenAI（${realtimeBillingSentence()}），AI 直接用語音回答，你隨時可以插話。要它做較長的工作時會交辦成背景任務，仍用目前選擇的引擎執行。說「再見」（由 AI 判斷）、點右上角指示、按 Esc 或 ${formatSeconds(idle.realtime_idle_s)}沒說話就會結束。本系統不保存音訊。要開啟嗎？`;
+      return msg`即時語音模式像 ChatGPT 語音模式：開啟期間麥克風音訊會即時串流到 OpenAI（${realtimeBillingSentence()}），AI 直接用語音回答，你隨時可以插話。要它做較長的工作時會交辦成背景任務，仍用目前選擇的引擎執行。說「再見」（由 AI 判斷）、點右上角指示、按 Esc 或 ${t(formatSeconds(idle.realtime_idle_s))}沒說話就會結束。本系統不保存音訊。要開啟嗎？`;
     case "push":
-      return "語音辨識使用瀏覽器內建服務；在 Chrome／Edge 中，音訊會傳到瀏覽器供應商（例如 Google）的雲端辨識。只有在你按下麥克風時才收音，本系統不保存音訊。要啟用嗎？";
+      return t("語音辨識使用瀏覽器內建服務；在 Chrome／Edge 中，音訊會傳到瀏覽器供應商（例如 Google）的雲端辨識。只有在你按下麥克風時才收音，本系統不保存音訊。要啟用嗎？");
     case "continuous":
-      return `語音模式是對話：開啟期間會持續收音（包含 Nous 說話時，才能讓你插話），你說的話會傳到瀏覽器供應商（例如 Google）的雲端辨識，並送到目前的 AI 引擎回答，回覆用電腦語音念出。建議戴耳機，插話會更準。說「關閉語音模式」、點右上角指示或 ${formatSeconds(idle.voice_idle_s)}沒說話就會關閉。本系統不保存音訊。要開啟嗎？`;
+      return msg`語音模式是對話：開啟期間會持續收音（包含 Nous 說話時，才能讓你插話），你說的話會傳到瀏覽器供應商（例如 Google）的雲端辨識，並送到目前的 AI 引擎回答，回覆用電腦語音念出。建議戴耳機，插話會更準。說「關閉語音模式」、點右上角指示或 ${t(formatSeconds(idle.voice_idle_s))}沒說話就會關閉。本系統不保存音訊。要開啟嗎？`;
   }
 }
 
 function askConsent(kind: ConsentKind): void {
   pendingConsent = kind;
-  consentText.textContent = consentMessage(kind);
+  consentText.textContent = t(consentMessage(kind));
   dispatch({ type: "input.open" });
   consentBox.hidden = false;
 }
@@ -1181,7 +1216,7 @@ async function handleCommand(text: string): Promise<void> {
         // 所以語音模式沒開時直接顯示字幕。
         const desktop = !!window.nousDesktop;
         const reply = settingsReply(text, { desktop, cameraEnabled: !!settings?.camera?.enabled });
-        if (desktop && !conversation.on) showSubtitle(`Nous：${reply}`);
+        if (desktop && !conversation.on) showAuthoredSpeech(reply);
         else say(reply);
       }
       return;
@@ -1231,7 +1266,7 @@ async function handleCommand(text: string): Promise<void> {
     case "task":
       if (realtime.on) {
         input.value = "";
-        showSubtitle(`你：${intent.text}`);
+        showTranscript("user", intent.text);
         realtime.sendText(intent.text);
         return;
       }
@@ -1424,7 +1459,8 @@ async function chatgptLogin(mode: "auto" | "new", requestId: string): Promise<vo
 }
 
 function showCommandError(message: string): void {
-  commandError.textContent = message;
+  commandErrorSource = message;
+  commandError.textContent = t(message);
   commandError.hidden = false;
 }
 
@@ -1442,7 +1478,7 @@ function render(): void {
     : session.view.visible && session.view.reply.kind === "error" ? "error" : "idle";
   document.body.dataset.conversationState = phase;
   canvas.dataset.conversationState = phase;
-  conversationStatus.textContent = { idle: "", listening: "正在聆聽，你可以直接說話", thinking: "正在等待回覆，你可以插話", speaking: "正在回覆，你可以直接插話", error: "對話暫時中斷，可重試或開啟設定" }[phase];
+  conversationStatus.textContent = t({ idle: "", listening: "正在聆聽，你可以直接說話", thinking: "正在等待回覆，你可以插話", speaking: "正在回覆，你可以直接插話", error: "對話暫時中斷，可重試或開啟設定" }[phase]);
   conversationStatus.hidden = phase === "idle";
   const activity = collectRegionActivity({
     tasks: [...tasks.values()], reply: session.view.reply,
@@ -1469,6 +1505,9 @@ function render(): void {
 
   renderStatusLine();
   renderEngineLine();
+  voiceModeButton.setAttribute("aria-label", realtime.current !== "off" ? t("結束即時語音") : conversation.current !== "off" ? t("關閉語音對話模式") : t("開啟語音對話模式"));
+  if (realtime.current !== "off") voicePill.textContent = t("{0}（點此結束）", t(REALTIME_STATE_LABEL[realtime.current]));
+  else if (conversation.current !== "off") voicePill.textContent = t("{0}（點此關閉）", t(VOICE_STATE_LABEL[conversation.current]));
   reportDesktopState();
   renderCaption(fg);
   renderSurface();
@@ -1486,6 +1525,7 @@ function reportDesktopState(): void {
     voice: realtime.on ? realtime.current : conversation.on ? conversation.current : "off",
     activeTasks: [...tasks.values()].filter(isActive).length,
     settings: `${pageLoadId}.${settingsRevision}`,
+    locale: getLocale(),
   };
   const key = JSON.stringify(state);
   if (key === reportedDesktopState) return;
@@ -1534,20 +1574,20 @@ function renderConversation(): void {
   conversationReply.dataset.requestId = reply.requestId;
   conversationReply.dataset.visibilityReason = "user_request";
   conversationReply.dataset.status = reply.kind;
-  conversationUser.textContent = `你：${reply.user}`;
+  conversationUser.textContent = msg`你：${reply.user}`;
   const provider = settings?.provider ?? "chatgpt";
-  const answer = reply.answer || (reply.kind === "pending" ? "…" : "沒有收到文字回覆。");
-  conversationAnswer.textContent = `${PROVIDER_LABEL[provider]}：${answer}${reply.kind === "error" ? `\n${reply.message}` : reply.kind === "interrupted" ? "\n已打斷回覆。" : ""}`;
+  const answer = reply.answer || (reply.kind === "pending" ? "…" : t("沒有收到文字回覆。"));
+  conversationAnswer.textContent = `${t(PROVIDER_LABEL[provider])}：${answer}${reply.kind === "error" ? `\n${t(reply.message)}` : reply.kind === "interrupted" ? t("\n已打斷回覆。") : ""}`;
 }
 
 function renderStatusLine(): void {
   if (!connected) {
-    statusLine.textContent = "與本機核心的連線中斷，正在重新連線…";
+    statusLine.textContent = t("與本機核心的連線中斷，正在重新連線…");
     statusLine.className = "status-line status-line--warn";
     statusLine.hidden = false;
   } else if (settings?.provider === "mock") {
-    statusLine.textContent = "模擬模式 · 未呼叫 AI 模型";
-    statusLine.title = "說「設定」可以切換到 Claude 或 ChatGPT";
+    statusLine.textContent = t("模擬模式 · 未呼叫 AI 模型");
+    statusLine.title = t("說「設定」可以切換到 Claude 或 ChatGPT");
     statusLine.className = "status-line status-line--mock";
     statusLine.hidden = false;
   } else {
@@ -1566,20 +1606,20 @@ function renderEngineLine(): void {
   const rt = settings.realtime;
   const activeLine = realtimeTicket?.billing_line ?? rt?.active?.billing_line ?? null;
   if (realtime.on) {
-    const next = rt?.billing_line && rt.billing_line !== activeLine ? `（下次開始時改用：${rt.billing_line}）` : "";
-    engineLine.append(`即時語音：${activeLine ?? rt?.billing_line ?? "—"}${next}｜交辦工作：`);
+    const next = rt?.billing_line && rt.billing_line !== activeLine ? msg`（下次開始時改用：${t(rt.billing_line)}）` : "";
+    engineLine.append(msg`即時語音：${t(activeLine ?? rt?.billing_line ?? "—")}${next}｜交辦工作：`);
   }
   if (settings.provider === "chatgpt") {
     const link = document.createElement("a");
     link.href = CHATGPT_USAGE_URL;
     link.target = "_blank";
     link.rel = "noopener noreferrer";
-    link.textContent = "管理用量";
-    engineLine.append("使用 ChatGPT 方案 · ", link);
+    link.textContent = t("管理用量");
+    engineLine.append(t("使用 ChatGPT 方案 · "), link);
   } else {
-    engineLine.append(`引擎：${PROVIDER_LABEL[settings.provider]} · 說「設定」可切換`);
+    engineLine.append(msg`引擎：${t(PROVIDER_LABEL[settings.provider])} · 說「設定」可切換`);
   }
-  if (!realtime.on && rt) engineLine.append(`｜即時語音：${rt.billing_line ?? "不可用"}`);
+  if (!realtime.on && rt) engineLine.append(msg`｜即時語音：${t(rt.billing_line ?? "不可用")}`);
   engineLine.hidden = false;
 }
 
@@ -1590,20 +1630,20 @@ function renderCaption(fg: Task | undefined): void {
   }
   const p = computeProgress(fg);
   let detail: string;
-  if (fg.status === "queued") detail = queueText(fg, tasks.values());
-  else if (fg.status === "cancelling") detail = "停止中…";
-  else if (p.total === null) detail = "規劃步驟中…";
+  if (fg.status === "queued") detail = t(queueText(fg, tasks.values()));
+  else if (fg.status === "cancelling") detail = t("停止中…");
+  else if (p.total === null) detail = t("規劃步驟中…");
   else if (p.current) {
     const chars = p.current.step.output_chars;
-    detail = `步驟 ${p.current.index} / ${p.total}：${p.current.step.title}${chars ? ` · 已產生 ${formatCount(chars)} 字` : ""}`;
-  } else detail = `${p.done} / ${p.total} 步完成`;
+    detail = msg`步驟 ${p.current.index} / ${p.total}：${p.current.step.title}${chars ? msg` · 已產生 ${formatCount(chars)} 字` : ""}`;
+  } else detail = msg`${p.done} / ${p.total} 步完成`;
 
   caption.replaceChildren(
-    line("caption-title", `正在處理：${fg.title}`),
+    line("caption-title", msg`正在處理：${fg.title}`),
     line("caption-detail", detail),
-    line("caption-hint", "按 Esc 或說「收起」回到桌布，任務會在背景繼續"),
+    line("caption-hint", t("按 Esc 或說「收起」回到桌布，任務會在背景繼續")),
   );
-  if (fg.mode === "mock") caption.prepend(line("caption-mock", "模擬"));
+  if (fg.mode === "mock") caption.prepend(line("caption-mock", t("模擬")));
   caption.hidden = false;
 }
 
@@ -1619,7 +1659,7 @@ function renderSurface(): void {
   const decision = evaluateSurface(s, { userRequestIds, tasks, pendingConfirmIds: new Set(pendingConfirms.keys()) });
   if (!s || !decision.allowed) {
     if (s && !decision.allowed) {
-      console.warn("[presentation-policy] 拒絕呈現：", decision.reason, s);
+      console.warn(t("[presentation-policy] 拒絕呈現："), decision.reason, s);
       queueMicrotask(() => dispatch({ type: "dismiss" }));
     }
     if (renderedKey !== null) surfaceRoot.replaceChildren();
@@ -1628,7 +1668,7 @@ function renderSurface(): void {
   }
 
   const task = s.task_id ? tasks.get(s.task_id) : undefined;
-  const key =
+  const key = getLocale() + ":" + (
     s.kind === "family"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
@@ -1637,14 +1677,14 @@ function renderSurface(): void {
       ? `${s.surface_id}:${progressStructureKey(tasks.values())}:${s.message ?? ""}`
       : s.kind === "artifact"
         ? `${s.surface_id}:${artifacts.has(s.artifact_id!)}:${artifactErrors.has(s.artifact_id!)}`
-        : `${s.surface_id}:${task?.updated_at ?? ""}`;
+        : `${s.surface_id}:${task?.updated_at ?? ""}`);
   if (key === renderedKey) {
     updateLiveCounts(surfaceRoot, tasks);
     return;
   }
 
   const previous = surfaceRoot.firstElementChild as HTMLElement | null;
-  const sameSurface = renderedKey?.startsWith(`${s.surface_id}:`) ?? false;
+  const sameSurface = renderedKey?.startsWith(`${getLocale()}:${s.surface_id}:`) ?? false;
   const scrollTop = sameSurface && previous ? previous.scrollTop : 0;
 
   let el: HTMLElement;
@@ -1772,3 +1812,24 @@ $<HTMLButtonElement>("consent-no").addEventListener("click", () => {
 });
 
 render();
+
+applyStaticTranslations();
+window.nousDesktop?.onLocaleChange?.(setLocale);
+onLocaleChange(() => {
+  const selected = getLocale();
+  const revision = settingsRevision;
+  void api.getSettings(selected).then(value => {
+    if (getLocale() !== selected || settingsRevision !== revision) return;
+    applySettings(value, true);
+    render();
+  }).catch(() => {});
+  applyStaticTranslations();
+  if (!subtitle.hidden) renderSubtitle();
+  if (!commandError.hidden) commandError.textContent = t(commandErrorSource);
+  if (!consentBox.hidden) consentText.textContent = t(consentMessage(pendingConsent));
+  previewClose.setAttribute("aria-label", t("收起鏡頭畫面"));
+  micButton.setAttribute("aria-label", t(voice.active ? "停止收音" : "按下開始說話"));
+  sensorIndicator.title = t("{0}（按一下顯示／收起鏡頭畫面）", t(sensorDetail));
+  sensorIndicator.textContent = sensorState === "ok" ? t("鏡頭") : sensorState === "starting" ? t("鏡頭啟動中") : t("鏡頭：{0}", t(sensorDetail));
+  render();
+});

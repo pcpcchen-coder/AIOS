@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](README.md) | [English](README.en.md)
+
 # Nous 原型：漂浮電子腦 × ChatGPT 對話 × 按需任務
 
 > 以電子腦呈現語音對話。登入自己的 ChatGPT 帳號後啟動收音，可插話，也可打字接著聊。需要較長工作時，AI 可沿用原型的背景任務流程。
@@ -17,7 +21,7 @@
 
 ## 啟動
 
-需要 Node.js 22.12 以上。第一次安裝、Windows 指令與常見問題見 **[INSTALL.md](./INSTALL.md)**。
+需要 Node.js 22.12 以上。第一次安裝、Windows 指令與常見問題見 **[INSTALL.md](INSTALL.md)**。
 
 ```bash
 cd prototype/ambient-shell

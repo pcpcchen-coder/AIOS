@@ -1,3 +1,7 @@
+<!-- bilingual: source=en -->
+
+> [繁體中文](ground.zh-TW.md) | [English](ground.md)
+
 # Stereo distance and brain sizing
 
 ## Overview

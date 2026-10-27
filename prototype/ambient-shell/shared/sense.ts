@@ -1,5 +1,6 @@
 // 雙目鏡頭的感知事件與設定（docs/11）。影像只在本機處理；離開感知管線的只有這些事件，不含任何影像或關鍵點座標。
 // 使用者要求看鏡頭畫面時，管線把縮小的畫面直接畫到本頁畫布（不寫檔、不進 trace、不外傳）。
+import { type Locale } from "./i18n.mjs";
 import { parsePrefsPatch, prefDefaults, stepPref, type PrefSpecs } from "./prefs.ts";
 
 export type PointZone = "left" | "center" | "right";
@@ -113,6 +114,15 @@ export const GREETING_TEMPLATES: readonly GreetingTemplate[] = [
   { id: "p5", named: false, slot: "evening", render: () => "晚上好" },
 ];
 
+const ENGLISH_GREETING: Record<string, string> = {
+  n0: "{0}, I'm here", n1: "Hi, {0}", n2: "Hello, {0}", n3: "I'm here, {0}",
+  n4: "Good morning, {0}", n5: "Good afternoon, {0}", n6: "Good evening, {0}",
+  p0: "I'm here", p1: "Hi, I'm here", p2: "Hello", p3: "Good morning", p4: "Good afternoon", p5: "Good evening",
+};
+function englishGreeting(id: string, name: string | null): string {
+  return ENGLISH_GREETING[id].replace("{0}", () => name ?? "");
+}
+
 /** 這個時段可以用的模板（有名字或沒名字）。 */
 export function greetingCandidates(named: boolean, slot: DaySlot): GreetingTemplate[] {
   return GREETING_TEMPLATES.filter((t) => t.named === named && (t.slot === null || t.slot === slot));
@@ -122,15 +132,16 @@ export function greetingCandidates(named: boolean, slot: DaySlot): GreetingTempl
  * 從固定清單隨機挑一句（亂數由呼叫端注入，測試可固定）。可選的不只一句時，避開上一次用過的模板。
  * name 為 null 時只挑不含名字的句子。
  */
-export function pickGreeting(name: string | null, slot: DaySlot, last: string | null, random: () => number): { id: string; sentence: string } {
+export function pickGreeting(name: string | null, slot: DaySlot, last: string | null, random: () => number, locale: Locale = "zh-TW"): { id: string; sentence: string } {
   const all = greetingCandidates(name !== null, slot);
   const pool = all.length > 1 ? all.filter((t) => t.id !== last) : all;
   const t = pool[Math.min(pool.length - 1, Math.floor(random() * pool.length))]!;
-  return { id: t.id, sentence: t.render(name) };
+  return { id: t.id, sentence: locale === "en" ? englishGreeting(t.id, name) : t.render(name) };
 }
 
 /** 基本句（不分時段）：登記畫面預覽用（「George，我在」或「我在」）。 */
-export function greetingSentence(name: string | null): string {
+export function greetingSentence(name: string | null, locale: Locale = "zh-TW"): string {
+  if (locale === "en") return englishGreeting(name ? "n0" : "p0", name);
   return GREETING_TEMPLATES.find((t) => t.id === (name ? "n0" : "p0"))!.render(name);
 }
 
@@ -139,7 +150,11 @@ export function greetingSentence(name: string | null): string {
  * 不得說看到使用者、不得描述長相或環境（CLAUDE.md：沒有影像分析時不得宣稱正在觀看）；也不得自己猜名字。
  * 模型仍可能改寫：驗收要看實際逐字稿，不能只看這段指示（docs/validation/family-id-02-2026-10-25.md）。
  */
-export function greetingInstructions(sentence: string): string {
+export function greetingInstructions(sentence: string, locale: Locale = "zh-TW"): string {
+  if (locale === "en") return (
+    `You are Nous. The user has just faced the screen to start a voice conversation. Say exactly this one English sentence, with no additions or questions: 「${sentence}」. ` +
+    "You cannot see the scene. Do not claim to see the user or describe their appearance, expression, clothes, or surroundings. Do not say or guess any name beyond the one already in that sentence."
+  );
   return (
     `你是 Nous。使用者剛面向螢幕開始語音對話：請用繁體中文只說這一句，一字不改，不要加字、不要提問：「${sentence}」。` +
     "你看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境；除了這一句裡已有的名字，不要說出或猜測任何名字。"
@@ -147,7 +162,10 @@ export function greetingInstructions(sentence: string): string {
 }
 
 /** 沒有姓名、也沒有核心挑句時的問候指示（API key 路徑：瀏覽器版與決策失敗時用它）。 */
-export const LOOK_TO_TALK_GREETING = greetingInstructions(GREETING_PLAIN);
+export function plainGreetingInstructions(locale: Locale = "zh-TW"): string {
+  return greetingInstructions(locale === "en" ? "I'm here" : GREETING_PLAIN, locale);
+}
+export const LOOK_TO_TALK_GREETING = plainGreetingInstructions();
 
 /**
  * ChatGPT 方案路徑的招呼要放進 session.context.append speakable：前面加這個固定標記，
@@ -156,8 +174,8 @@ export const LOOK_TO_TALK_GREETING = greetingInstructions(GREETING_PLAIN);
 export const GREETING_MARKER = "（開場）";
 
 /** ChatGPT 方案路徑真正送給模型的招呼（核心組成；頁面送來的文字只是互動 ID，不會變成內容）。 */
-export function liveGreetingText(sentence: string): string {
-  return `${GREETING_MARKER}${greetingInstructions(sentence)}`;
+export function liveGreetingText(sentence: string, locale: Locale = "zh-TW"): string {
+  return `${GREETING_MARKER}${greetingInstructions(sentence, locale)}`;
 }
 
 /** 核心沒有挑句時 ChatGPT 方案路徑送的招呼（LiveRoute 沒有接上 greeting 來源時的保底）。 */

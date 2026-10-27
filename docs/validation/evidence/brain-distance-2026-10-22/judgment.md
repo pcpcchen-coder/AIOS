@@ -1,3 +1,7 @@
+<!-- bilingual: source=en -->
+
+> [繁體中文](judgment.zh-TW.md) | [English](judgment.md)
+
 # Distance brain design cross-judgment
 
 Choose A, the dedicated renderer distance input. Both candidates use the inherited parent model; this is independent review, not model diversity.

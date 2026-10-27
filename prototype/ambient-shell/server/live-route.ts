@@ -1,7 +1,8 @@
+import { translate, type Locale } from "../shared/i18n.mjs";
 import { randomUUID } from "node:crypto";
 import type { RealtimeBaseInfo } from "../shared/types.ts";
 import { chunkForAppend, parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
-import { GREETING_PLAIN, LIVE_GREETING_TEXT } from "../shared/sense.ts";
+import { GREETING_PLAIN, liveGreetingText } from "../shared/sense.ts";
 import { billingLine, LIVE_VOICES, unavailableText, type LiveInputKind, type LiveVoiceId, type RouteOption, type UnavailableReason } from "../shared/realtime-route.ts";
 import { CodexAuthError, CodexUnauthorized, NOUS_ORIGINATOR, type CodexAuth, type CodexRequestAuth } from "./codex-auth.ts";
 import { redact } from "./codex-responses.ts";
@@ -81,7 +82,7 @@ export interface LiveRouteOptions {
    * 看著說話的問候（ID-02）：頁面 POST greeting 帶來的文字只當成互動 ID，交給這個函式取核心已組好的短句
    * （IdentityService.takeLiveGreeting）。沒有提供或取不到時送「我在」（LIVE_GREETING_TEXT）。頁面的文字永遠不會成為內容。
    */
-  greeting?: (interaction: string, sessionId: string) => LiveGreeting | null;
+  greeting?: (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting | null;
   fetch?: typeof fetch;
   WebSocket?: SidebandSocketCtor;
   urls?: { call: string; sideband: (callId: string) => string };
@@ -97,7 +98,7 @@ export interface LiveGreeting {
 
 /** 比對用：去掉空白與標點（模型可能多一個驚嘆號或句號）。 */
 function normalizeSpoken(text: string): string {
-  return text.replace(/[\s\p{P}\p{S}]/gu, "");
+  return text.replace(/[\s\p{P}\p{S}]/gu, "").toLowerCase();
 }
 
 /**
@@ -375,7 +376,7 @@ class LiveCall implements RouteCall {
     private readonly ctx: SessionContext,
     private readonly caller: DelegationRunner,
     private readonly log?: (line: string) => void,
-    private readonly greetingText?: (interaction: string, sessionId: string) => LiveGreeting | null,
+    private readonly greetingText?: (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting | null,
   ) {
     this.control = { input: (kind, text) => this.input(kind, text) };
     socket.addEventListener("message", (event) => {
@@ -522,7 +523,7 @@ class LiveCall implements RouteCall {
     if (kind === "greeting") {
       // sideband 還沒開（或正在關）：不記成已送，之後重送仍有效；送出之後才記，所以不會送兩次。
       if (this.greeted || this.closed || this.socket.readyState !== 1) return;
-      const greeting = this.greetingText?.(text, this.ctx.sessionId) ?? { text: LIVE_GREETING_TEXT, sentence: GREETING_PLAIN };
+      const greeting = this.greetingText?.(text, this.ctx.sessionId, this.ctx.locale) ?? { text: liveGreetingText(translate(GREETING_PLAIN, this.ctx.locale), this.ctx.locale), sentence: translate(GREETING_PLAIN, this.ctx.locale) };
       this.greetingSentence = greeting.sentence;
       for (const piece of chunkForAppend(greeting.text)) this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: piece }] });
       this.greeted = true;

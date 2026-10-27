@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](look-to-talk-greet-2026-10-23.md) | [English](look-to-talk-greet-2026-10-23.en.md)
+
 # 看著說話打招呼驗證
 
 2026-10-23；基底 `0cf32115ed073131ba50fff16bde113e55f6538d`。本紀錄隨「看著說話時先打招呼」交付；審查修正（基底 `d1239a4`）見文末「審查修正」，下面「決定」已改成修正後的行為。

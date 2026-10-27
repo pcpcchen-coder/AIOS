@@ -1,8 +1,12 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](INSTALL.md) | [English](INSTALL.en.md)
+
 # 安裝與執行指南（本機）
 
 這份指南用於啟動目前的 Node.js 原型。下載、套件安裝與帳號授權所需時間依網路和裝置而定。功能與實測範圍見 [目前實作狀態](../../docs/Current_Implementation_Status.md)，後續規劃見 [功能擴充評估](../../docs/13_Feature_Expansion_Assessment_2026-10-24.md)。
 
-> macOS 可使用 [v0.1.0 預覽版](https://github.com/pcpcchen-coder/AIOS/releases/tag/nous-desktop-v0.1.0) 的 `Nous-0.1.0-mac-arm64.zip`。這是既有預先建置產物，尚未核對是否包含 2026-10-23 最新 main 的功能。要用目前原碼版本，依下列流程啟動，或按 [macOS 打包指南](./desktop/README.md#自己打包) 自行打包。
+> macOS 可使用 [v0.1.0 預覽版](https://github.com/pcpcchen-coder/AIOS/releases/tag/nous-desktop-v0.1.0) 的 `Nous-0.1.0-mac-arm64.zip`。這是既有預先建置產物，尚未核對是否包含 2026-10-23 最新 main 的功能。要用目前原碼版本，依下列流程啟動，或按 [macOS 打包指南](desktop/README.md#自己打包) 自行打包。
 
 ## 0. 需要的東西
 
@@ -202,7 +206,7 @@ Nous 原型已啟動：http://localhost:8787
 | 說或打「開啟語音模式」／按聲波按鈕 | 語音對話模式：像 ChatGPT 語音模式一樣直接聊天，它說話時可以插話（說「停」或直接講）；要它做較長的工作時會自動交辦成任務。建議戴耳機。說「關閉語音模式」結束，閒置預設 1 分 30 秒自動關閉（可調） |
 | 即時語音有可用路徑（ChatGPT 方案登入或 `OPENAI_API_KEY`）時按「開始語音對話」 | 即時語音模式：語音直接對語音、隨時插話；工作交辦給目前的引擎。右上角顯示「即時語音 · 聆聽中／回覆中」，點它結束；說「再見」時由 AI 判斷是否結束 |
 
-完整的語音與打字指令（哪些在本機處理、哪些交給 AI、容易誤會的說法）見 [README 的指令表](./README.md#語音與打字指令表)；核心啟動後也可以打開 <http://localhost:8787/help/commands>，macOS App 在選單列「語音指令表」（⌘/）。
+完整的語音與打字指令（哪些在本機處理、哪些交給 AI、容易誤會的說法）見 [README 的指令表](README.md#語音與打字指令表)；核心啟動後也可以打開 <http://localhost:8787/help/commands>，macOS App 在選單列「語音指令表」（⌘/）。
 
 ## 7. 常見問題
 

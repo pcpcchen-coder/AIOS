@@ -3,6 +3,10 @@ name: verify-aios
 description: Verify the AIOS ambient-shell prototype with its existing tests, typecheck, build, and an isolated mock HTTP task journey. Use after changing the prototype or checking development readiness.
 ---
 
+<!-- bilingual: source=en -->
+
+> [繁體中文](SKILL.zh-TW.md) | [English](SKILL.md)
+
 # Verify AIOS
 
 Run from the repository root with Node.js 22.12 or later. Install dependencies with `npm ci` in `prototype/ambient-shell` only if they are missing.

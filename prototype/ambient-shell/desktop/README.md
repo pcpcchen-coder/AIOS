@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](README.md) | [English](README.en.md)
+
 # Nous macOS App
 
 現行桌面包裝使用 Electron 與 Node.js 本機核心。Tauri、Quest 客戶端及跨裝置同步尚未實作；現況與驗證範圍見 [目前實作狀態](../../../docs/Current_Implementation_Status.md)，規劃見 [功能擴充評估](../../../docs/13_Feature_Expansion_Assessment_2026-10-24.md)。

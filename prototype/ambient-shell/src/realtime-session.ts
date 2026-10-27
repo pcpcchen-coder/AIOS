@@ -1,6 +1,7 @@
 import type { GreetingRoute } from "../shared/identity.ts";
 import type { FallbackOffer, RouteId, StartDecision } from "../shared/realtime-route.ts";
-import { LOOK_TO_TALK_GREETING } from "../shared/sense.ts";
+import { plainGreetingInstructions } from "../shared/sense.ts";
+import { getLocale, type Locale } from "./i18n.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimePhase, RealtimeVoice } from "./realtime.ts";
 
 // 頁面唯一的接縫：main.ts 只跟 RealtimeSession 說話，不直接碰哪條路徑的類別。
@@ -58,8 +59,8 @@ export const GREETING_SETTLE_MS = 600;
 export type GreetingDecide = (route: GreetingRoute) => Promise<string>;
 
 /** 不稱名的內容：瀏覽器版、沒有辨識或決策失敗時用。API key 是固定的「我在」指示；live 只送互動 ID（核心取不到決策就送「我在」）。 */
-export function plainGreeting(interaction: string): GreetingDecide {
-  return async (route) => (route === "api_key" ? LOOK_TO_TALK_GREETING : interaction);
+export function plainGreeting(interaction: string, locale: Locale = getLocale()): GreetingDecide {
+  return async (route) => (route === "api_key" ? plainGreetingInstructions(locale) : interaction);
 }
 
 /** 一次看著說話開始的互動 ID（頁面亂數產生；不含身分，核心只拿來配對問候決策）。 */
@@ -69,6 +70,7 @@ export function newInteractionId(): string {
 }
 
 export interface GreetingOptions {
+  locale?: Locale;
   /** 這次互動的 ID（看著說話開始時建立；同一次的 live 與 API key 工作階段共用）。 */
   interaction?: string;
   /** 送出前的決策（macOS App：經 IPC 問核心）；未提供時不稱名。 */
@@ -86,6 +88,7 @@ export interface GreetingOptions {
  * - 一旦標記 sent 就不再送（送出狀態未知時也不重送，docs/14 I6）。
  */
 export class GreetingOnce {
+  private readonly locale: Locale;
   private value: GreetingState = "pending";
   readonly interaction: string;
   private readonly decide: GreetingDecide;
@@ -96,7 +99,8 @@ export class GreetingOnce {
     options: GreetingOptions = {},
   ) {
     this.interaction = options.interaction ?? newInteractionId();
-    this.decide = options.decide ?? plainGreeting(this.interaction);
+    this.locale = options.locale ?? getLocale();
+    this.decide = options.decide ?? plainGreeting(this.interaction, this.locale);
     this.settled = options.settled ?? (() => {});
   }
 
@@ -117,7 +121,7 @@ export class GreetingOnce {
       payload = await this.decide(route);
     } catch {
       // 決策失敗（IPC 錯誤、核心重新啟動）：照常問候，但不帶名字。
-      payload = await plainGreeting(this.interaction)(route);
+      payload = await plainGreeting(this.interaction, this.locale)(route);
     }
     if (this.value !== "deciding") return null;
     if (!this.enabled()) {

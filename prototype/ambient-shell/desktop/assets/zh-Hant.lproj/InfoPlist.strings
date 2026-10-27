@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "Nous 在你啟用語音互動後使用麥克風進行對話；音訊會傳送至你選用的語音服務。結束對話即可停止收音。";
+"NSCameraUsageDescription" = "Nous 使用鏡頭判斷在場、頭向、手勢、名目距離及選用的家人辨識；影像只在這台 Mac 處理，不保存也不上傳。";

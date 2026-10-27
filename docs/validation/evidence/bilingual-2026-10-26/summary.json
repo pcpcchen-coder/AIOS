@@ -1,0 +1,116 @@
+{
+  "date": "2026-10-26",
+  "timezone": "Asia/Taipei",
+  "baseCommit": "ca7a8fe0b427c9c128e9b57d1bbe6ecb70477b1c",
+  "fixture": "Actual built browser and Electron UI, isolated mock core/config/data. No real account, model, microphone, speaker, camera, or home device verification.",
+  "fullVerification": {
+    "testFilesPassed": 69,
+    "testsPassed": 1086,
+    "testsSkipped": 1,
+    "typecheck": "passed",
+    "build": "passed",
+    "isolatedMockHttp": "passed"
+  },
+  "documentation": {
+    "existingDocumentPairs": 58,
+    "newDocumentPairs": 2,
+    "inlineBilingualPolicies": 1,
+    "checkerFailureCasesPassed": 5,
+    "pstackUpstreamHashes": 172,
+    "pstackSkillsPerClient": 56
+  },
+  "browserCases": [
+    {
+      "name": "web-settings-zh-en-and-accessibility",
+      "status": "passed"
+    },
+    {
+      "name": "web-language-persists-across-reload",
+      "status": "passed"
+    },
+    {
+      "name": "language-switch-preserves-task-and-user-content",
+      "status": "passed"
+    },
+    {
+      "name": "roundtrip-and-English-settings-command",
+      "status": "passed"
+    },
+    {
+      "name": "English-command-help-retains-readonly-security",
+      "status": "passed"
+    }
+  ],
+  "electronCases": [
+    {
+      "name": "native-menu-switches-renderer-without-reload",
+      "status": "passed"
+    },
+    {
+      "name": "renderer-switch-updates-native-persistent-preference",
+      "status": "passed"
+    },
+    {
+      "name": "native-language-persists-on-reload",
+      "status": "passed"
+    }
+  ],
+  "regionRegressionCases": [
+    {
+      "name": "signed-out-consent-gates",
+      "status": "passed"
+    },
+    {
+      "name": "six-task-domains-and-terminal-cleanup",
+      "status": "passed"
+    },
+    {
+      "name": "six-topic-classifications",
+      "status": "passed"
+    },
+    {
+      "name": "topic-provenance-and-late-completion",
+      "status": "passed"
+    },
+    {
+      "name": "actual-capture-tts-and-restart-boundaries",
+      "status": "passed"
+    },
+    {
+      "name": "push-to-talk-actual-audio-and-errors",
+      "status": "passed"
+    },
+    {
+      "name": "simultaneous-sources-and-close-preserves-task",
+      "status": "passed"
+    },
+    {
+      "name": "provider-account-reset-preserves-background-task",
+      "status": "passed"
+    },
+    {
+      "name": "shared-voice-typed-history-and-stream-errors",
+      "status": "passed"
+    }
+  ],
+  "limitations": [
+    "Production App not installed or replaced; no release published.",
+    "Real English ASR/TTS, model language adherence and hardware need separate acceptance.",
+    "No G0–G3 gate status is advanced."
+  ],
+  "screenshots": {
+    "app-en.png": "fbb53a1cf2449f4f56493abc9d154c02d43dae12990d325290ced9bf3eb3b070",
+    "app-zh-TW.png": "cad76826f821d498fc5230c45bff71703d931f6a3fa8185cdbd35c0bc418b8eb",
+    "web-en-progress.png": "28b07967ee4a8ba8e933d6a88d87aabd2fa3d381d2186f0f605ee6f4e3248647",
+    "web-en.png": "f2bbb6d3721598db000aebb6c18ec843af5cc2ffcd8cc3b83f49f68aa1a2575c",
+    "web-zh-TW.png": "17785acf086867fb0f4977f21fbb68e5e455ee5dfbbf957daff0608679b39afa"
+  },
+  "builtAssets": {
+    "assets/identity-worker-D3Vwl1bw.js": "2ce6486d9ffe7e14337fa45b533666b7476edb5eb171e1aadae96bcd7005addc",
+    "assets/index-DJBqKH98.css": "921caa221d2db2f10a0c36cca39099f6095c0cd560367c5d5358c3bd6561e369",
+    "assets/index-hPZTBbyr.js": "cd66b24867b445c35d090d455b5b15fd05362e5081b9ffa555a390a9853c0bb7",
+    "assets/pipeline-BFw879RB.js": "80badf2cceedfff99d4f2a8bea2bd59a12540d2535b8db93cf40a9f8aba7876b",
+    "assets/vision_bundle-vGmGsg1F.js": "19478d14468bc204ea2371aae7cf35560bd6e9f22ffa48f7e3d09a3d3043e294",
+    "index.html": "f773ff6b24a0e37e23da67d29288feb9cba254abfd5db3d2cf65984cb46087a1"
+  }
+}

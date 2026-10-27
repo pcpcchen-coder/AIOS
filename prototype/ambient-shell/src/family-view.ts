@@ -1,3 +1,4 @@
+import { t, msg, getLocale, onLocaleChange } from "./i18n.ts";
 // 「家人辨識」Surface（docs/14 ID-01、ADR-0001）：只由選單列「鏡頭與語音設定 → 家人辨識…」打開（visibility_reason
 // user_request）。內容：家人列表、新增家人（名稱 → 本人同意 → 自動取樣）、刪除、試認、資料說明。
 // - 辨識只在這個畫面內運作（登記與試認）；收起只丟記憶體中的樣本與管理 session，不刪已存的資料。
@@ -57,17 +58,23 @@ type Phase =
   | { kind: "capture"; name: string; minor: boolean; guardian: boolean; hint: string }
   | { kind: "submitting"; name: string };
 
-type Child = Node | string | null | undefined | false;
+type RawText = { readonly raw: string };
+type Child = Node | string | RawText | null | undefined | false;
+const raw = (text: string): RawText => ({ raw: text });
 
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Record<string, string> = {}, ...children: Child[]): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-  for (const c of children) if (c) el.append(c);
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, ["aria-label", "title", "placeholder"].includes(k) ? t(v) : v);
+  for (const c of children) {
+    if (typeof c === "string") el.append(c);
+    else if (c && "raw" in c) el.append(c.raw);
+    else if (c) el.append(c);
+  }
   return el;
 }
 
 function button(label: string, onClick: () => void, variant = "", disabled = false): HTMLButtonElement {
-  const b = h("button", { type: "button", class: `btn ${variant}`.trim() }, label);
+  const b = h("button", { type: "button", class: `btn ${variant}`.trim() }, t(label));
   b.disabled = disabled;
   b.addEventListener("click", onClick);
   return b;
@@ -81,32 +88,32 @@ export function namePreview(draft: string): string {
   if (!parseFamilyName(draft).ok) return "";
   const name = speakableName(draft);
   return name
-    ? `看著說話認出時會說像「${greetingSentence(name)}」「嗨，${name}」這樣的短句（依時段也可能是「早安，${name}」）。`
-    : "這個名稱不會被念出來：認出時只說「我在」之類不含名字的短句（像句子、指令或含不能念的符號）。";
+    ? msg`看著說話認出時會說像「${greetingSentence(name, getLocale())}」「嗨，${name}」這樣的短句（依時段也可能是「早安，${name}」）。`
+    : t("這個名稱不會被念出來：認出時只說「我在」之類不含名字的短句（像句子、指令或含不能念的符號）。");
 }
 
 /** 核心給的觀測 → 畫面上的一句話（不含分數）。 */
 export function observationText(obs: IdentityObservation | null, people: readonly FamilyMember[]): string {
-  if (!obs) return "辨識中…";
+  if (!obs) return t("辨識中…");
   switch (obs.state) {
     case "matched": {
       const who = people.find((p) => p.person_id === obs.person_id);
-      return who ? `認得：${who.name}` : "辨識中…";
+      return who ? msg`認得：${who.name}` : t("辨識中…");
     }
     case "unknown":
-      return "不認得";
+      return t("不認得");
     case "ambiguous":
-      return obs.reason === "multi_face" ? "畫面裡有多張臉（不會任選一位）" : "分不清是哪一位";
+      return obs.reason === "multi_face" ? t("畫面裡有多張臉（不會任選一位）") : t("分不清是哪一位");
     case "unavailable":
       switch (obs.reason) {
         case "quality":
-          return "品質不足";
+          return t("品質不足");
         case "no_face":
-          return "沒有看到臉";
+          return t("沒有看到臉");
         case "no_gallery":
-          return "還沒有可以比對的家人";
+          return t("還沒有可以比對的家人");
         default:
-          return "辨識中…";
+          return t("辨識中…");
       }
   }
 }
@@ -136,6 +143,7 @@ export class FamilyView {
   constructor(private readonly deps: FamilyViewDeps) {
     this.element = h("section", { class: "surface surface--family", role: "region", "data-visibility-reason": "user_request" });
     this.render();
+    onLocaleChange(() => { this.renderedKey = null; this.render(); });
   }
 
   /** 打開畫面：向核心開管理 session（主程序只在使用者 10 秒內點過選單列時允許）。 */
@@ -366,7 +374,7 @@ export class FamilyView {
    */
   private render(): void {
     const key = JSON.stringify([
-      this.phase,
+      getLocale(), this.phase,
       this.people,
       this.status,
       this.notice,
@@ -379,26 +387,26 @@ export class FamilyView {
     ]);
     if (key === this.renderedKey) return;
     this.renderedKey = key;
-    const header = h("header", { class: "surface-header" }, h("p", { class: "eyebrow" }, "鏡頭與語音設定"), h("h2", {}, "家人辨識"));
+    const header = h("header", { class: "surface-header" }, h("p", { class: "eyebrow" }, t("鏡頭與語音設定")), h("h2", {}, t("家人辨識")));
     const body = this.body();
     const footer = h(
       "footer",
       { class: "surface-footer" },
-      button("收起", () => this.deps.dismiss(), "btn--ghost"),
-      h("span", { class: "hint" }, "收起只關畫面，已登記的家人不會被刪除"),
+      button(t("收起"), () => this.deps.dismiss(), "btn--ghost"),
+      h("span", { class: "hint" }, t("收起只關畫面，已登記的家人不會被刪除")),
     );
     this.element.replaceChildren(header, ...body.filter((c): c is Node => !!c && typeof c !== "string"), footer);
   }
 
   private body(): Child[] {
     const phase = this.phase;
-    const messages: Child[] = [this.notice ? h("p", { class: "notice" }, this.notice) : null, this.error ? h("p", { class: "error-text" }, this.error) : null];
-    if (phase.kind === "opening") return [h("p", { class: "muted" }, "正在開啟…")];
-    if (phase.kind === "unavailable") return [h("p", { class: "error-text" }, phase.message), this.explanation()];
+    const messages: Child[] = [this.notice ? h("p", { class: "notice" }, t(this.notice)) : null, this.error ? h("p", { class: "error-text" }, t(this.error)) : null];
+    if (phase.kind === "opening") return [h("p", { class: "muted" }, t("正在開啟…"))];
+    if (phase.kind === "unavailable") return [h("p", { class: "error-text" }, t(phase.message)), this.explanation()];
     if (phase.kind === "name") return [...messages, this.nameStep(phase)];
     if (phase.kind === "consent") return [...messages, this.consentStep(phase)];
     if (phase.kind === "capture") return [...messages, this.captureStep(phase)];
-    if (phase.kind === "submitting") return [h("p", { class: "muted" }, `正在保存「${phase.name}」…（請在系統對話框確認）`)];
+    if (phase.kind === "submitting") return [h("p", { class: "muted" }, msg`正在保存「${phase.name}」…（請在系統對話框確認）`)];
     return [...messages, this.statusLines(), this.namingNotice(), this.list(), this.actions(), this.trying ? this.tryPanel() : null, this.explanation()];
   }
 
@@ -406,10 +414,10 @@ export class FamilyView {
     const st = this.status;
     if (!st) return null;
     const lines: Child[] = [];
-    if (st.limited_reason) lines.push(h("p", { class: "notice" }, st.limited_reason));
-    if (st.backup_exclusion === "failed") lines.push(h("p", { class: "notice" }, "無法把家人資料夾排除在 Time Machine 之外：備份可能含有加密檔。"));
-    if (st.needs_reenroll > 0) lines.push(h("p", { class: "notice" }, `${st.needs_reenroll} 位家人登記時的模型版本與目前不同，不會被辨識；請刪除後重新登記。`));
-    if (st.damaged > 0) lines.push(h("p", { class: "notice" }, `${st.damaged} 位家人的特徵資料不完整（壞資料），不會被辨識；請刪除後重新登記。`));
+    if (st.limited_reason) lines.push(h("p", { class: "notice" }, t(st.limited_reason)));
+    if (st.backup_exclusion === "failed") lines.push(h("p", { class: "notice" }, t("無法把家人資料夾排除在 Time Machine 之外：備份可能含有加密檔。")));
+    if (st.needs_reenroll > 0) lines.push(h("p", { class: "notice" }, msg`${st.needs_reenroll} 位家人登記時的模型版本與目前不同，不會被辨識；請刪除後重新登記。`));
+    if (st.damaged > 0) lines.push(h("p", { class: "notice" }, msg`${st.damaged} 位家人的特徵資料不完整（壞資料），不會被辨識；請刪除後重新登記。`));
     return lines.length > 0 ? h("div", { class: "family-status" }, ...lines) : null;
   }
 
@@ -420,8 +428,8 @@ export class FamilyView {
     return h(
       "div",
       { class: "family-status" },
-      h("p", { class: "notice" }, CLOUD_NAMING_NOTICE),
-      h("p", { class: "muted small" }, "按「我知道了」之前，即使認出家人也只說「我在」。"),
+      h("p", { class: "notice" }, t(CLOUD_NAMING_NOTICE)),
+      h("p", { class: "muted small" }, t("按「我知道了」之前，即使認出家人也只說「我在」。")),
       h("div", { class: "actions" }, button("我知道了", () => void this.ackNaming(), "btn--primary", this.busy)),
     );
   }
@@ -434,20 +442,20 @@ export class FamilyView {
   }
 
   private list(): HTMLElement {
-    if (this.people.length === 0) return h("p", { class: "muted" }, "還沒有登記家人。");
+    if (this.people.length === 0) return h("p", { class: "muted" }, t("還沒有登記家人。"));
     const ul = h("ul", { class: "family-list" });
     for (const p of this.people) {
       const date = new Date(p.created_at);
-      const when = Number.isNaN(date.getTime()) ? "" : `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} 登記`;
+      const when = Number.isNaN(date.getTime()) ? "" : msg`${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} 登記`;
       ul.append(
         h(
           "li",
           { class: "family-person" },
-          h("div", { class: "family-person-text" }, h("strong", {}, p.name), h("span", { class: "muted small" }, when)),
-          p.minor ? h("span", { class: "chip" }, "未成年") : null,
-          p.needs_reenroll ? h("span", { class: "chip chip--failed" }, "需重新登記") : null,
-          p.damaged ? h("span", { class: "chip chip--failed" }, "壞資料") : null,
-          button("刪除", () => void this.remove(p), "btn--ghost", this.busy),
+          h("div", { class: "family-person-text" }, h("strong", {}, raw(p.name)), h("span", { class: "muted small" }, when)),
+          p.minor ? h("span", { class: "chip" }, t("未成年")) : null,
+          p.needs_reenroll ? h("span", { class: "chip chip--failed" }, t("需重新登記")) : null,
+          p.damaged ? h("span", { class: "chip chip--failed" }, t("壞資料")) : null,
+          button(t("刪除"), () => void this.remove(p), "btn--ghost", this.busy),
         ),
       );
     }
@@ -471,9 +479,9 @@ export class FamilyView {
 
   private clientLine(): string | null {
     const s = this.clientState;
-    if (!s || s.kind === "loading") return "載入辨識模型…";
-    if (s.kind === "no_camera") return "鏡頭沒有在運作（選單列「鏡頭與語音設定」的「鏡頭」要打開）";
-    if (s.kind === "error") return s.message;
+    if (!s || s.kind === "loading") return t("載入辨識模型…");
+    if (s.kind === "no_camera") return t("鏡頭沒有在運作（選單列「鏡頭與語音設定」的「鏡頭」要打開）");
+    if (s.kind === "error") return t(s.message);
     return null;
   }
 
@@ -483,8 +491,8 @@ export class FamilyView {
       "div",
       { class: "family-try", "aria-live": "polite" },
       h("p", { class: "family-result" }, line && this.clientState?.kind !== "ready" ? line : observationText(this.observation, this.people)),
-      this.quality && this.observation?.reason === "quality" ? h("p", { class: "muted small" }, this.quality) : null,
-      h("p", { class: "muted small" }, UNCALIBRATED_LABEL),
+      this.quality && this.observation?.reason === "quality" ? h("p", { class: "muted small" }, t(this.quality)) : null,
+      h("p", { class: "muted small" }, t(UNCALIBRATED_LABEL)),
     );
   }
 
@@ -494,17 +502,18 @@ export class FamilyView {
     const minor = h("input", { type: "checkbox" });
     minor.checked = phase.minor;
     const preview = h("p", { class: "muted small", "aria-live": "polite" }, namePreview(phase.draft));
-    input.addEventListener("input", () => (preview.textContent = namePreview(input.value)));
+    input.addEventListener("input", () => { phase.draft = input.value; preview.textContent = namePreview(input.value); });
+    minor.addEventListener("change", () => { phase.minor = minor.checked; });
     return h(
       "div",
       { class: "family-step" },
-      h("h3", {}, "新增家人：名稱"),
-      h("p", { class: "muted small" }, "Nous 會用這個名稱稱呼他（1–16 個字，不能有換行或 < > { } [ ] ` \" \\）。"),
+      h("h3", {}, t("新增家人：名稱")),
+      h("p", { class: "muted small" }, t("Nous 會用這個名稱稱呼他（1–16 個字，不能有換行或 < > { } [ ] ` \" \\）。")),
       input,
       preview,
-      h("label", { class: "family-check" }, minor, " 這位家人未成年（需要家長確認同意）"),
-      phase.error ? h("p", { class: "error-text" }, phase.error) : null,
-      h("div", { class: "actions" }, button("下一步", () => this.submitName(input.value, minor.checked), "btn--primary"), button("取消", () => this.backToList(), "btn--ghost")),
+      h("label", { class: "family-check" }, minor, t(" 這位家人未成年（需要家長確認同意）")),
+      phase.error ? h("p", { class: "error-text" }, t(phase.error)) : null,
+      h("div", { class: "actions" }, button(t("下一步"), () => this.submitName(input.value, minor.checked), "btn--primary"), button(t("取消"), () => this.backToList(), "btn--ghost")),
     );
   }
 
@@ -513,7 +522,7 @@ export class FamilyView {
     consent.checked = phase.consent;
     const guardian = h("input", { type: "checkbox" });
     guardian.checked = phase.guardian;
-    const next = button("開始取樣", () => this.startCapture(phase.name, phase.minor, guardian.checked), "btn--primary", !phase.consent || (phase.minor && !phase.guardian));
+    const next = button(t("開始取樣"), () => this.startCapture(phase.name, phase.minor, guardian.checked), "btn--primary", !phase.consent || (phase.minor && !phase.guardian));
     const sync = () => {
       phase.consent = consent.checked;
       phase.guardian = guardian.checked;
@@ -524,15 +533,15 @@ export class FamilyView {
     return h(
       "div",
       { class: "family-step" },
-      h("h3", {}, `新增家人：${phase.name}`),
-      h("p", {}, FAMILY_EXPLANATION),
-      h("p", {}, CLOUD_NAMING_NOTICE),
+      h("h3", {}, msg`新增家人：${phase.name}`),
+      h("p", {}, t(FAMILY_EXPLANATION)),
+      h("p", {}, t(CLOUD_NAMING_NOTICE)),
       h("p", { class: "muted small" }, namePreview(phase.name)),
-      h("p", { class: "muted small" }, FAMILY_BACKUP_NOTE),
-      h("label", { class: "family-check" }, consent, ` ${phase.name} 本人在場，已聽過說明並同意`),
-      phase.minor ? h("label", { class: "family-check" }, guardian, " 我是家長，確認同意登記這位未成年家人") : null,
-      h("p", { class: "muted small" }, `接著請 ${phase.name} 一個人面對鏡頭，依提示轉動頭部；品質合格時會自動取 ${ENROLL_TARGET} 張。保存前還會跳出系統確認。`),
-      h("div", { class: "actions" }, next, button("取消", () => this.backToList(), "btn--ghost")),
+      h("p", { class: "muted small" }, t(FAMILY_BACKUP_NOTE)),
+      h("label", { class: "family-check" }, consent, msg` ${phase.name} 本人在場，已聽過說明並同意`),
+      phase.minor ? h("label", { class: "family-check" }, guardian, t(" 我是家長，確認同意登記這位未成年家人")) : null,
+      h("p", { class: "muted small" }, msg`接著請 ${phase.name} 一個人面對鏡頭，依提示轉動頭部；品質合格時會自動取 ${ENROLL_TARGET} 張。保存前還會跳出系統確認。`),
+      h("div", { class: "actions" }, next, button(t("取消"), () => this.backToList(), "btn--ghost")),
     );
   }
 
@@ -541,10 +550,10 @@ export class FamilyView {
     return h(
       "div",
       { class: "family-step", "aria-live": "polite" },
-      h("h3", {}, `取樣中：${phase.name}`),
-      h("p", { class: "family-result" }, line ?? phase.hint),
-      h("p", { class: "muted small" }, `已取 ${this.collector.count}／${ENROLL_TARGET} 張（只在記憶體，不存照片）。中途出現多張臉或追蹤中斷會整批重來。`),
-      h("div", { class: "actions" }, button("取消", () => this.backToList(), "btn--ghost")),
+      h("h3", {}, msg`取樣中：${phase.name}`),
+      h("p", { class: "family-result" }, line ?? t(phase.hint)),
+      h("p", { class: "muted small" }, msg`已取 ${this.collector.count}／${ENROLL_TARGET} 張（只在記憶體，不存照片）。中途出現多張臉或追蹤中斷會整批重來。`),
+      h("div", { class: "actions" }, button(t("取消"), () => this.backToList(), "btn--ghost")),
     );
   }
 
@@ -552,9 +561,9 @@ export class FamilyView {
     return h(
       "div",
       { class: "family-explain" },
-      h("p", { class: "muted small" }, FAMILY_EXPLANATION),
-      h("p", { class: "muted small" }, CLOUD_NAMING_NOTICE),
-      h("p", { class: "muted small" }, FAMILY_BACKUP_NOTE),
+      h("p", { class: "muted small" }, t(FAMILY_EXPLANATION)),
+      h("p", { class: "muted small" }, t(CLOUD_NAMING_NOTICE)),
+      h("p", { class: "muted small" }, t(FAMILY_BACKUP_NOTE)),
     );
   }
 }

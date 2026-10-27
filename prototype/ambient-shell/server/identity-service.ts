@@ -1,3 +1,4 @@
+import { normalizeLocale, type Locale } from "../shared/i18n.mjs";
 import { randomBytes } from "node:crypto";
 import {
   CALIBRATED,
@@ -96,7 +97,7 @@ export interface IdentityServiceOptions {
    * 核心發出的互動 ID 換成真的工作階段（RealtimeSessions.claimGreeting）：沒提供或回 null 時不稱名。
    * 成功一次之後同一個 ID 就不能再用。
    */
-  claimGreeting?: (interaction: string) => { route: GreetingRoute; session_id: string } | null;
+  claimGreeting?: (interaction: string) => { route: GreetingRoute; session_id: string; locale?: Locale } | null;
   /** 開場句挑選（固定清單、依時段、避開上一次）；未提供時建一個（Math.random、這台電腦的時區）。 */
   picker?: GreetingPicker;
   /** 模型與 runtime 的雜湊核對結果（啟動時算一次）。 */
@@ -225,7 +226,7 @@ export class IdentityService {
   /** 已做過問候決策的互動 ID。 */
   private readonly decided: string[] = [];
   /** live 路徑：已組好、等 server/live-route.ts 取用的短句（一次只有一個互動）。 */
-  private pendingLive: { interaction: string; session_id: string; named: boolean; text: string; sentence: string; at: number } | null = null;
+  private pendingLive: { locale: Locale; interaction: string; session_id: string; named: boolean; text: string; sentence: string; at: number } | null = null;
   private readonly picker: GreetingPicker;
 
   constructor(private readonly options: IdentityServiceOptions) {
@@ -575,7 +576,8 @@ export class IdentityService {
     const person = decision.person_id ? this.people.find((p) => p.person_id === decision.person_id) : undefined;
     const name = person ? speakableName(person.name) : null;
     // 從固定清單挑一句（依時段、避開上一次）；log 只記模板編號，不記句子。
-    const picked = this.picker.pick(name);
+    const locale = normalizeLocale(session?.locale);
+    const picked = this.picker.pick(name, locale);
     const sentence = picked.sentence;
     // 只有原因與數字（給 Mac 實測對照時序）：證據格數、跨度與最新一格多久以前；不記姓名、person_id 或分數。
     const ev = this.ambient?.track === track ? this.ambient.evidence.frames : [];
@@ -584,8 +586,8 @@ export class IdentityService {
     this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前，模板 ${picked.id}，門檻未校準）`);
     // 證據只為這一次問候存在：決策後丟掉，晚到的推論不能讓下一次互動沿用。
     this.ambient = null;
-    if (route === "api_key") return { ok: true, op: "greeting", text: greetingInstructions(sentence) };
-    this.pendingLive = session ? { interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence), sentence, at: this.now() } : null;
+    if (route === "api_key") return { ok: true, op: "greeting", text: greetingInstructions(sentence, locale) };
+    this.pendingLive = session ? { locale, interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence, locale), sentence, at: this.now() } : null;
     return { ok: true, op: "greeting", text: null };
   }
 
@@ -624,7 +626,7 @@ export class IdentityService {
     const pending = this.pendingLive;
     this.pendingLive = null;
     if (!pending || pending.interaction !== interaction || pending.session_id !== sessionId || this.now() - pending.at > LIVE_GREETING_PICKUP_MS) return null;
-    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) return this.picker.plainLive();
+    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) return this.picker.plainLive(pending.locale);
     return { text: pending.text, sentence: pending.sentence };
   }
 

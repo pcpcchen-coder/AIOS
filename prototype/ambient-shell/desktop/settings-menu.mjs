@@ -16,9 +16,10 @@ const PREVIEW_GROUP = "camera";
  * @param handlers command(name)：把選單動作交給頁面；setMenuPref(row, value)：POST { [row.key]: value } 到 row.write_path；
  *   openFamily()：「家人辨識…」（主程序先記下點擊時間，10 秒內頁面才能開管理 session，再交給頁面打開畫面）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, translate = (source) => source }) {
+  const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
-  if (!rows) return [{ label: "讀取中…", enabled: false }];
+  if (!rows) return [{ label: text("讀取中…"), enabled: false }];
   const previewReason = settings.camera_preview_disabled_reason;
   const identity = settings.identity;
   const items = [];
@@ -28,8 +29,8 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily }) {
     // undefined：核心沒有提供這一項（不畫）；null：可以用。
     if (previewReason !== undefined) {
       items.push({
-        label: "顯示鏡頭畫面",
-        sublabel: previewReason ?? undefined,
+        label: text("顯示鏡頭畫面"),
+        sublabel: text(previewReason) ?? undefined,
         enabled: previewReason === null,
         click: () => command("camera-preview"),
       });
@@ -38,45 +39,45 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily }) {
     // 停用時另外放一行灰色說明（sublabel 只有 macOS 14.4 以上才顯示）。
     if (identity !== undefined) {
       items.push({
-        label: "家人辨識…",
-        sublabel: identity.disabled_reason ?? identity.limited_reason ?? undefined,
+        label: text("家人辨識…"),
+        sublabel: text(identity.disabled_reason ?? identity.limited_reason) ?? undefined,
         enabled: identity.available,
         click: () => openFamily?.(),
       });
-      if (identity.disabled_reason) items.push({ label: `家人辨識：${identity.disabled_reason}`, enabled: false });
+      if (identity.disabled_reason) items.push({ label: text(`家人辨識：${text(identity.disabled_reason)}`), enabled: false });
     }
   };
   for (const row of rows) {
     if (row.group !== group) {
       closeGroup();
       if (group !== null) items.push({ type: "separator" });
-      items.push({ label: row.group_label, enabled: false });
+      items.push({ label: text(row.group_label), enabled: false });
       group = row.group;
       // 停用原因放在分段標題下方的說明項：sublabel 只有 macOS 14.4 以上才顯示，舊版只看得到灰色。
       const reasons = [...new Set(rows.filter((r) => r.group === group && r.disabled_reason !== null).map((r) => r.disabled_reason))];
-      for (const reason of reasons) items.push({ label: reason, enabled: false });
+      for (const reason of reasons) items.push({ label: text(reason), enabled: false });
     }
     const enabled = row.disabled_reason === null;
     if (row.kind === "bool") {
       items.push({
-        label: row.label,
+        label: text(row.label),
         type: "checkbox",
         checked: row.value,
         enabled,
-        sublabel: row.disabled_reason ?? row.note,
+        sublabel: text(row.disabled_reason ?? row.note),
         // 寫入與核心回應為準：送出相反的值，成功後依回應重畫，失敗時重新讀取，勾選不會停在沒保存的狀態。
         click: () => void setMenuPref(row, !row.value),
       });
       continue;
     }
     items.push({
-      label: `${row.label}：${row.value_label}`,
-      sublabel: row.disabled_reason ?? row.note,
+      label: `${text(row.label)}${text("：")}${text(row.value_label)}`,
+      sublabel: text(row.disabled_reason ?? row.note),
       submenu: [
-        ...(enabled ? [] : [{ label: row.disabled_reason, enabled: false }, { type: "separator" }]),
-        ...row.options.map((o) => radio(o.label, o.checked, () => void setMenuPref(row, o.value), enabled)),
+        ...(enabled ? [] : [{ label: text(row.disabled_reason), enabled: false }, { type: "separator" }]),
+        ...row.options.map((o) => radio(text(o.label), o.checked, () => void setMenuPref(row, o.value), enabled)),
         { type: "separator" },
-        { label: row.note, enabled: false },
+        { label: text(row.note), enabled: false },
       ],
     });
   }

@@ -1,3 +1,7 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](smarthome-h0-2026-10-21.md) | [English](smarthome-h0-2026-10-21.en.md)
+
 # 武陵居家電狀態查詢 H0 驗證
 
 日期為 2026-10-21，平台為 Linux 雲端環境，Node.js 22.22.0。對應 [docs/12](../12_SmartHome_Integration_Plan_2026-10.md) 的批次 H0。這是原型的驗證，沒有變更 G0 至 G3 驗收狀態。

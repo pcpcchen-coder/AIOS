@@ -54,7 +54,7 @@ The following describes the product direction. The status table and current impl
 
 The first release is a desktop Shell on an existing OS. Native wallpaper embedding requires separate validation. Agents act according to available capabilities, data, and permissions. When a capability is missing, explain it clearly rather than promising success for arbitrary tasks.
 
-See [06 Experience and architecture specification](docs/06_Ambient_Voice_Gaze_Experience.md) and [07 Development tasks, prompts, and acceptance](docs/07_Ambient_Implementation_and_Acceptance.md).
+See [06 Experience and architecture specification](docs/06_Ambient_Voice_Gaze_Experience.en.md) and [07 Development tasks, prompts, and acceptance](docs/07_Ambient_Implementation_and_Acceptance.en.md).
 
 ---
 
@@ -72,11 +72,16 @@ See [06 Experience and architecture specification](docs/06_Ambient_Voice_Gaze_Ex
 | Persistence and safety | JSON tasks / results, presentation policy, partial tool confirmation | Unfinished tasks fail after restart. Checkpoints, full artifact versions, general Action Gate, and long-term memory are missing |
 | Quest / OpenClaw | This feature assessment is complete | No Quest client or OpenClaw agent adapter. Using OpenClaw voice references is not agent integration |
 
-At baseline `1f44c6b`, 48 test files and 790 tests, type checks, a build, and an isolated mock HTTP journey passed. These results do not replace acceptance of real models, microphones, Quest, cameras, or home devices. See [current state and evidence](docs/Current_Implementation_Status.md).
+At baseline `1f44c6b`, 48 test files and 790 tests, type checks, a build, and an isolated mock HTTP journey passed. These results do not replace acceptance of real models, microphones, Quest, cameras, or home devices. See [current state and evidence](docs/Current_Implementation_Status.en.md).
 
-The recommended sequence is current state and product CI → shared capabilities / Action Gate → resumable tasks and artifact versions → device pairing → Quest spatial results → restricted OpenClaw worker and voice handoff. This is an expansion route still to implement. It does not change existing gate results. See the [feature expansion assessment](docs/13_Feature_Expansion_Assessment_2026-10-24.md) for MVP scope, risks, effort, and acceptance.
+The recommended sequence is current state and product CI → shared capabilities / Action Gate → resumable tasks and artifact versions → device pairing → Quest spatial results → restricted OpenClaw worker and voice handoff. This is an expansion route still to implement. It does not change existing gate results. See the [feature expansion assessment](docs/13_Feature_Expansion_Assessment_2026-10-24.en.md) for MVP scope, risks, effort, and acceptance.
 
 <a id="執行原型"></a>
+<a id="中英文文件與介面"></a>
+## Bilingual documentation and interface
+
+Project documentation is available in Traditional Chinese and English. See the [Traditional Chinese README](README.md) and [bilingual policy](docs/BILINGUAL.md). Select 繁體中文 or English under Language in App/web settings or the desktop menu; the choice is saved. See [language support](docs/development/localization.en.md) for use and maintenance. Build current source for this feature; existing downloads do not update automatically.
+
 <a id="執行原型"></a>
 ## Run the prototype
 
@@ -89,7 +94,7 @@ npm ci
 npm start
 ```
 
-Open `http://localhost:8787`. The kernel accepts local connections only; Quest cannot directly use this localhost. Without model or account configuration, use the explicitly labeled mock mode. See the [installation guide](prototype/ambient-shell/INSTALL.md) for models and voice settings. macOS has [preview downloads and packaging instructions](prototype/ambient-shell/desktop/README.md). An existing Release is not guaranteed to include the latest main features.
+Open `http://localhost:8787`. The kernel accepts local connections only; Quest cannot directly use this localhost. Without model or account configuration, use the explicitly labeled mock mode. See the [installation guide](prototype/ambient-shell/INSTALL.en.md) for models and voice settings. macOS has [preview downloads and packaging instructions](prototype/ambient-shell/desktop/README.en.md). An existing Release is not guaranteed to include the latest main features.
 
 Run development verification from the repository root:
 
@@ -103,25 +108,26 @@ node scripts/verify-aios.mjs
 <a id="文件導覽"></a>
 ## Documentation
 
-Development follows the [project pstack guide](docs/development/pstack.md). See [AGENTS.md](AGENTS.md) for agent rules.
+Development follows the [project pstack guide](docs/development/pstack.en.md). See [AGENTS.md](AGENTS.md) for agent rules.
 
-Documentation lives in [`docs/`](./docs). **Read current state and evidence first, then product rules 06–07 and topic updates 10–12.** 08 is a historical snapshot from 2026-10-07. Old schedules and technology choices in 01–05 are not the current implementation. See the [documentation index](docs/README.md) for the full reading order.
+Documentation lives in [`docs/`](./docs). **Read current state and evidence first, then product rules 06–07 and topic updates 10–12.** 08 is a historical snapshot from 2026-10-07. Old schedules and technology choices in 01–05 are not the current implementation. See the [documentation index](docs/README.en.md) for the full reading order.
 
 | # | Document | Contents | Audience |
 |---|---|---|---|
-| **Current** | [Current implementation and verification](docs/Current_Implementation_Status.md) | Code directories, capabilities, evidence levels, gaps, and verification | Everyone, read first |
-| **13** | [Feature expansion assessment](docs/13_Feature_Expansion_Assessment_2026-10-24.md) | Priorities and roadmap for Quest, OpenClaw, voice, sensing, and multiple devices | Planning and collaborative development |
-| **14** | [Family recognition and named greeting plan](docs/14_Family_Recognition_and_Greeting_Plan_2026-10.md) | Recognize during the facing delay and say “George, I'm here” only after interaction starts. [Draft ADR-0001](docs/adr/ADR-0001-local-family-recognition.md); ID-00 [spike](docs/validation/family-id-00-spike-2026-10-24.md), ID-01 [enrollment and trial recognition](docs/validation/family-id-01-2026-10-25.md), ID-02 [named greeting during look-to-talk](docs/validation/family-id-02-2026-10-25.md) (cloud fixtures only, uncalibrated thresholds, actual audio pending Mac checks) | Core and sensing developers |
-| **15** | [Companion Mode specification](docs/15_Companion_Mode_Spec_2026-10-24.md) | **Design proposal, unimplemented**; master switch, response behavior, answer length, cooldown, privacy, and acceptance; [implementation batches](docs/development/companion-mode-implementation-plan.md) | UI / voice developers |
-| **01** | [Complete technical blueprint](docs/01_Complete_Technical_Blueprint.md) | Seven-module architecture, technology choices, and a 12-month schedule | Readers seeking the overall design |
-| **02** | [OSS component map](docs/02_OSS_Component_Map.md) | Community open-source projects for each module | Implementers |
-| **03** | [Three-month accelerated roadmap](docs/03_3Month_Accelerated_Roadmap.md) | Weekly action plan | Developers |
-| **04** | [Generative interaction system](docs/04_Generative_Interaction_System.md) | Dynamic design without fixed UI | Readers exploring the long-term interaction model |
-| **05** | [Progress and next steps](docs/05_Progress_and_Next_Steps.md) | Project snapshot and subsequent requirement additions | New contributors |
-| **06** | [Electronic brain, voice, and gaze experience](docs/06_Ambient_Voice_Gaze_Experience.md) | Latest product specification, state machine, presentation policy, and architecture | Product and development |
-| **07** | [Development and acceptance plan](docs/07_Ambient_Implementation_and_Acceptance.md) | Directories, contracts, prompts, batches, and acceptance cases | Implementers and reviewers |
-| **08** | [October 2026 consolidation and update](docs/08_Consolidation_and_Update_2026-10.md) | Early October decisions, ecosystem research, and an old schedule snapshot | Historical decision reference |
-| **10–12** | [Topic documents](docs/README.md) | Design and implementation comparisons for distance UI, stereo interaction, and smart home | Relevant feature developers |
+| **Current** | [Current implementation and verification](docs/Current_Implementation_Status.en.md) | Code directories, capabilities, evidence levels, gaps, and verification | Everyone, read first |
+| **13** | [Feature expansion assessment](docs/13_Feature_Expansion_Assessment_2026-10-24.en.md) | Priorities and roadmap for Quest, OpenClaw, voice, sensing, and multiple devices | Planning and collaborative development |
+| **14** | [Family recognition and named greeting plan](docs/14_Family_Recognition_and_Greeting_Plan_2026-10.en.md) | Recognize during the facing delay and say “George, I'm here” only after interaction starts. [Draft ADR-0001](docs/adr/ADR-0001-local-family-recognition.en.md); ID-00 [spike](docs/validation/family-id-00-spike-2026-10-24.en.md), ID-01 [enrollment and trial recognition](docs/validation/family-id-01-2026-10-25.en.md), ID-02 [named greeting during look-to-talk](docs/validation/family-id-02-2026-10-25.en.md) (cloud fixtures only, uncalibrated thresholds, actual audio pending Mac checks) | Core and sensing developers |
+| **15** | [Companion Mode specification](docs/15_Companion_Mode_Spec_2026-10-24.en.md) | **Design proposal, unimplemented**; master switch, response behavior, answer length, cooldown, privacy, and acceptance; [implementation batches](docs/development/companion-mode-implementation-plan.en.md) | UI / voice developers |
+| **16** | [Nous family memory layer](docs/16_Nous_Memory_Layer_Design_2026-10-26.en.md) | MEM-0 delivered [isolated foundation verification](docs/validation/memory-mem0-2026-10-26.en.md), but the product has not enabled it. Per-person preferences, cross-model access, and voice revocation await later batches; [ADR-0002](docs/adr/ADR-0002-nous-family-memory.en.md) | Core / voice developers |
+| **01** | [Complete technical blueprint](docs/01_Complete_Technical_Blueprint.en.md) | Seven-module architecture, technology choices, and a 12-month schedule | Readers seeking the overall design |
+| **02** | [OSS component map](docs/02_OSS_Component_Map.en.md) | Community open-source projects for each module | Implementers |
+| **03** | [Three-month accelerated roadmap](docs/03_3Month_Accelerated_Roadmap.en.md) | Weekly action plan | Developers |
+| **04** | [Generative interaction system](docs/04_Generative_Interaction_System.en.md) | Dynamic design without fixed UI | Readers exploring the long-term interaction model |
+| **05** | [Progress and next steps](docs/05_Progress_and_Next_Steps.en.md) | Project snapshot and subsequent requirement additions | New contributors |
+| **06** | [Electronic brain, voice, and gaze experience](docs/06_Ambient_Voice_Gaze_Experience.en.md) | Latest product specification, state machine, presentation policy, and architecture | Product and development |
+| **07** | [Development and acceptance plan](docs/07_Ambient_Implementation_and_Acceptance.en.md) | Directories, contracts, prompts, batches, and acceptance cases | Implementers and reviewers |
+| **08** | [October 2026 consolidation and update](docs/08_Consolidation_and_Update_2026-10.en.md) | Early October decisions, ecosystem research, and an old schedule snapshot | Historical decision reference |
+| **10–12** | [Topic documents](docs/README.en.md) | Design and implementation comparisons for distance UI, stereo interaction, and smart home | Relevant feature developers |
 
 ---
 
@@ -144,7 +150,7 @@ Documentation lives in [`docs/`](./docs). **Read current state and evidence firs
 The current runtime uses Node.js HTTP + SSE, framework-free TypeScript, Vite, Electron, the Anthropic Messages SDK, MediaPipe, and local JSON. Types are tagged `proto-0.1`. The following are target choices from design documents, subject to separate decisions and verification. This documentation update does not migrate the stack.
 
 - **Kernel**: Claude Opus 5.5 (planning) + Sonnet family (workers), model IDs obtained through the Models API rather than hard-coded.
-- **Memory Layer**: Proposed local Markdown memory files + SQLite FTS5 / sqlite-vec indexes; [Mem0](https://github.com/mem0ai/mem0) as fallback (the previously selected Letta V1 server has retired; see 08).
+- **Memory Layer**: The [2026-10-26 family memory design](docs/16_Nous_Memory_Layer_Design_2026-10-26.en.md) adopts local encrypted snapshots, per-person retrieval, and revocable context. MEM-0 has a core-private isolated module; a separately packaged probe passed real Keychain readback across processes. It is not integrated into the product. Production signing and voice gates remain pending. Markdown + SQLite indexing remains a historical proposal; see [ADR-0002](docs/adr/ADR-0002-nous-family-memory.en.md) for current tradeoffs.
 - **Knowledge Layer**: [LightRAG](https://github.com/HKUDS/LightRAG) (dual-layer retrieval + knowledge graph; integration after G1).
 - **Agent Framework**: [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python).
 - **Desktop Shell**: [Tauri 2.x](https://github.com/tauri-apps/tauri) + React.
@@ -154,7 +160,7 @@ The current runtime uses Node.js HTTP + SSE, framework-free TypeScript, Vite, El
 - **Observability**: Local OpenTelemetry; [Langfuse](https://github.com/langfuse/langfuse) as optional export.
 - **Tool Protocol**: [Model Context Protocol (MCP)](https://github.com/modelcontextprotocol), 2026-07-28 specification (including Apps and Tasks extensions).
 
-See [02 OSS component map](docs/02_OSS_Component_Map.md) and [08 §5](docs/08_Consolidation_and_Update_2026-10.md#5-更新後的元件對應只列差異) for the evolution of these choices.
+See [02 OSS component map](docs/02_OSS_Component_Map.en.md) and [08 §5](docs/08_Consolidation_and_Update_2026-10.en.md#5-更新後的元件對應只列差異) for the evolution of these choices.
 
 ---
 

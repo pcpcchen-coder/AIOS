@@ -1,3 +1,5 @@
+import { localize } from "./localization.ts";
+import { normalizeLocale, type Locale } from "../shared/i18n.mjs";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -28,11 +30,12 @@ export class TaskStore {
     for (const a of artifacts) this.artifacts.set(a.artifact_id, a);
     const now = new Date().toISOString();
     for (const t of tasks) {
+      if (normalizeLocale(t.locale) !== "en") delete t.locale;
       for (const step of t.steps) if (!isDomain(step.domain)) delete step.domain;
       // 上次未完成的任務不可能還在跑：誠實標為失敗，而不是假裝仍在進行。
       if (t.status === "queued" || t.status === "running" || t.status === "cancelling") {
         t.status = "failed";
-        t.error = INTERRUPTED;
+        t.error = localize(INTERRUPTED, t.locale);
         t.finished_at = now;
         t.updated_at = now;
         for (const s of t.steps) if (s.status === "running") s.status = "failed";
@@ -69,13 +72,14 @@ export class TaskStore {
     return a ? clone(a) : undefined;
   }
 
-  create(input: { title: string; request_id: string; mode: ExecutorMode; retry_of?: string }): Task {
+  create(input: { title: string; request_id: string; mode: ExecutorMode; retry_of?: string; locale?: Locale }): Task {
     const now = new Date().toISOString();
     const task: Task = {
       schema_version: SCHEMA_VERSION,
       task_id: `task_${randomUUID()}`,
       request_id: input.request_id,
       title: input.title,
+      ...(normalizeLocale(input.locale) === "en" ? { locale: "en" as const } : {}),
       status: "queued",
       mode: input.mode,
       model: null,

@@ -1,9 +1,10 @@
+import { type Locale } from "../shared/i18n.mjs";
 import { classifyDomain } from "../shared/domain.ts";
 import { DELEGATE_CLOSE, DELEGATE_OPEN, type ChatCapable, type ChatMessage } from "./chat.ts";
 import type { ExecutionResult, Executor, Reporter } from "./runner.ts";
 
 /** 模擬模式下視為「要它做事」的動詞；真實引擎由模型自行判斷。 */
-const MOCK_WORK = /(寫|撰寫|整理|規劃|分析|翻譯|摘要|總結|製作|準備|做一份)/;
+const MOCK_WORK = /(寫|撰寫|整理|規劃|分析|翻譯|摘要|總結|製作|準備|做一份)|\b(write|draft|organize|plan|analyze|translate|summarize|create|prepare)\b/i;
 
 /**
  * 模擬執行器：沒有呼叫任何模型，只用計時器走過固定步驟，讓介面流程可被看見。
@@ -24,7 +25,10 @@ export class MockExecutor implements Executor, ChatCapable {
     signal: AbortSignal,
   ): Promise<{ model: string | null }> {
     const heard = input.messages[input.messages.length - 1].content.slice(0, 30);
-    const reply = MOCK_WORK.test(heard)
+    const english = input.system.includes("Response language: English");
+    const reply = english ? (MOCK_WORK.test(heard)
+      ? `(Mock) I have queued “${heard}” as a background task. Progress appears below the brain.\n${DELEGATE_OPEN}${heard}${DELEGATE_CLOSE}`
+      : `(Mock) I heard “${heard}”. No AI model is connected, so I cannot actually answer. Open settings to select Claude or ChatGPT.`) : MOCK_WORK.test(heard)
       ? `（模擬）好，我把「${heard}」交辦成背景任務，進度會顯示在電子腦下方。\n${DELEGATE_OPEN}${heard}${DELEGATE_CLOSE}`
       : `（模擬）我聽到你說「${heard}」。現在是模擬模式，沒有連接任何 AI 模型，所以沒辦法真的回答。你可以說「設定」切換到 Claude 或 ChatGPT。`;
     for (const chunk of reply.match(/.{1,6}/gu) ?? []) {
@@ -34,8 +38,9 @@ export class MockExecutor implements Executor, ChatCapable {
     return { model: null };
   }
 
-  async run(input: { title: string }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
-    const steps = ["理解需求（模擬）", "拆解工作（模擬）", "整理產出（模擬）"];
+  async run(input: { title: string; locale?: Locale }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+    const english = input.locale === "en";
+    const steps = english ? ["Understand request (mock)", "Break down work (mock)", "Prepare result (mock)"] : ["理解需求（模擬）", "拆解工作（模擬）", "整理產出（模擬）"];
     await sleep(this.stepDelayMs * 0.6, signal);
     const domain = classifyDomain(input.title) ?? "language";
     reporter.planReady(
@@ -48,7 +53,7 @@ export class MockExecutor implements Executor, ChatCapable {
       reporter.stepDone(i);
     }
     return {
-      content: [
+      content: english ? ["## Mock result", "", `Your request: “${input.title}”.`, "", "This is **mock mode**. No AI model was called, and **the request was not actually completed**.", "The steps use timers to demonstrate task, progress, and result views.", "", "To run Claude, configure `ANTHROPIC_API_KEY` in `.env` and restart."].join("\n") : [
         "## 模擬結果",
         "",
         `你交辦的是：「${input.title}」。`,
@@ -59,7 +64,7 @@ export class MockExecutor implements Executor, ChatCapable {
         "要讓 Claude 真的執行，請在 `.env` 設定 `ANTHROPIC_API_KEY` 後重新啟動。",
       ].join("\n"),
       assumptions: [],
-      capability_gaps: ["模擬模式：未連接任何 Agent 或工具"],
+      capability_gaps: [english ? "Mock mode: no Agent or tools are connected" : "模擬模式：未連接任何 Agent 或工具"],
       status: "partial",
       model: null,
     };
