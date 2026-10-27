@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-25T11:53:35.701Z",
+  "updated_at": "2026-10-27T00:57:18.673Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "aios-ci-investigation-40429591229-1",
+      "title": "AIOS pstack observability E2E (scripted CI, not native Agent)",
+      "playbook": "investigation-ci",
+      "status": "failed",
+      "updated_at": "2026-10-27T00:57:17.036Z",
+      "started_at": "2026-10-27T00:57:15.938Z",
+      "ended_at": "2026-10-27T00:57:17.035Z",
+      "branch": "main",
+      "commit_sha": "876eeaaf7697cf4a3847e0687430c536f4a1d9a7",
+      "passed_steps": 1,
+      "total_steps": 3,
+      "provenance": "Scripted CI investigation, not native pstack Agent"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261025081932-9f13d2",
