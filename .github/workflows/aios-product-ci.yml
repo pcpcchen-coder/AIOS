@@ -16,7 +16,6 @@ jobs:
     timeout-minutes: 30
     env:
       CI: "true"
-      TMPDIR: ${{ runner.temp }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -33,6 +32,8 @@ jobs:
         run: node scripts/check-pstack.mjs
 
       - name: Verify AIOS prototype with isolated mock HTTP
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: node scripts/verify-aios.mjs
 
       - name: Retain mock verification evidence
