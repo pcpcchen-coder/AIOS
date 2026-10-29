@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-29T07:09:55.061Z",
-  "updated_at": "2026-10-29T16:09:32.571Z",
+  "updated_at": "2026-10-29T16:09:39.406Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "verify",
       "title": "verify",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-29T16:09:39.405Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -124,6 +124,13 @@
       "step_id": "implement",
       "status": "passed",
       "note": "spike、量測、ADR-0003 草案"
+    },
+    {
+      "at": "2026-10-29T16:09:39.406Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
