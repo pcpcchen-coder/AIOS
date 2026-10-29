@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-29T06:08:32.091Z",
-  "updated_at": "2026-10-29T06:09:22.619Z",
+  "updated_at": "2026-10-29T06:09:26.041Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,8 +32,8 @@
     {
       "id": "research",
       "title": "research",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-29T06:09:26.041Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -110,6 +110,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "George：喚醒詞列候選再定；音色辨認用途全要、重點連結記憶；可開關常駐本機聆聽"
+    },
+    {
+      "at": "2026-10-29T06:09:26.041Z",
+      "type": "step_updated",
+      "step_id": "research",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
