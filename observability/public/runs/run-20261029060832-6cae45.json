@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-29T06:08:32.091Z",
-  "updated_at": "2026-10-29T06:29:50.292Z",
+  "updated_at": "2026-10-29T06:29:53.970Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "draft",
       "title": "draft",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-29T06:29:50.291Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-29T06:29:53.969Z",
+      "note": "doc 17 中英文、索引與狀態更新；雙語檢查通過",
       "evidence": []
     },
     {
@@ -131,6 +131,13 @@
       "step_id": "draft",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-29T06:29:53.970Z",
+      "type": "step_updated",
+      "step_id": "draft",
+      "status": "passed",
+      "note": "doc 17 中英文、索引與狀態更新；雙語檢查通過"
     }
   ],
   "provenance": "Agent self-reported"
