@@ -1,0 +1,41 @@
+{
+  "note": "MEM-1 中文檢索測試集（虛構人物與內容）。sentences 經 server/memory/parse.ts 解析後保存；third_party 句子必須被拒絕、不留下任何記憶。queries 的 expect 為應取回的記憶原文，forbid 為不得出現在取回結果中的片段。此集合與詞庫在同一批次撰寫，不是獨立保留的評估集。",
+  "people": {
+    "george": ["記住，我不吃香菜", "記住我不喝咖啡", "我喜歡冷氣 26 度，記住", "記住，回答要簡短", "記住我對花生過敏", "記住我喜歡聽爵士音樂"],
+    "amy": ["記住我喜歡香菜", "記住，我每天早上喝拿鐵", "記住我喜歡吃辣"]
+  },
+  "household": ["記住家裡晚餐不吃牛肉"],
+  "third_party": { "george": ["媽媽不喝咖啡，幫她記住", "他說記住他不吃海鮮"] },
+  "queries": [
+    { "id": "p1", "category": "positive", "subject": "george", "query": "晚餐吃什麼好？", "expect": ["不吃香菜"], "forbid": ["喜歡香菜"] },
+    { "id": "p2", "category": "positive", "subject": "george", "query": "幫我推薦一家餐廳", "expect": ["不吃香菜", "對花生過敏"], "forbid": ["喜歡吃辣"] },
+    { "id": "p3", "category": "positive", "subject": "george", "query": "冷氣要開幾度？", "expect": ["喜歡冷氣 26 度"], "forbid": [] },
+    { "id": "p4", "category": "positive", "subject": "george", "query": "可以幫我泡杯咖啡嗎", "expect": ["不喝咖啡"], "forbid": ["每天早上喝拿鐵"] },
+    { "id": "p5", "category": "positive", "subject": "george", "query": "你回答的方式要怎樣比較好", "expect": ["回答要簡短"], "forbid": [] },
+    { "id": "p6", "category": "positive", "subject": "amy", "query": "早餐喝什麼", "expect": ["每天早上喝拿鐵"], "forbid": ["不喝咖啡"] },
+    { "id": "p7", "category": "positive", "subject": "amy", "query": "晚上想吃火鍋，要什麼口味", "expect": ["喜歡吃辣"], "forbid": ["不吃香菜"] },
+    { "id": "p8", "category": "positive", "subject": "george", "query": "放點音樂吧", "expect": ["喜歡聽爵士音樂"], "forbid": [] },
+    { "id": "s1", "category": "synonym", "subject": "george", "query": "這道菜可以加芫荽嗎", "expect": ["不吃香菜"], "forbid": ["喜歡香菜"] },
+    { "id": "s2", "category": "synonym", "subject": "george", "query": "要不要來杯拿鐵", "expect": ["不喝咖啡"], "forbid": [] },
+    { "id": "s3", "category": "synonym", "subject": "george", "query": "空調調幾度", "expect": ["喜歡冷氣 26 度"], "forbid": [] },
+    { "id": "s4", "category": "synonym", "subject": "amy", "query": "Should I put cilantro on the tacos?", "expect": ["喜歡香菜"], "forbid": ["不吃香菜"] },
+    { "id": "s5", "category": "synonym", "subject": "george", "query": "可以吃堅果嗎", "expect": ["對花生過敏"], "forbid": [] },
+    { "id": "s6", "category": "synonym", "subject": "george", "query": "回覆精簡一點好嗎", "expect": ["回答要簡短"], "forbid": [] },
+    { "id": "t1", "category": "simplified", "subject": "george", "query": "晚饭加点香菜好吗", "expect": ["不吃香菜"], "forbid": ["喜歡香菜"] },
+    { "id": "t2", "category": "simplified", "subject": "george", "query": "冷气开几度", "expect": ["喜歡冷氣 26 度"], "forbid": [] },
+    { "id": "t3", "category": "simplified", "subject": "amy", "query": "早上喝咖啡还是茶", "expect": ["每天早上喝拿鐵"], "forbid": ["不喝咖啡"] },
+    { "id": "n1", "category": "negation", "subject": "george", "query": "我可以吃香菜嗎", "expect": ["不吃香菜"], "forbid": ["喜歡香菜"] },
+    { "id": "n2", "category": "negation", "subject": "george", "query": "幫我買咖啡", "expect": ["不喝咖啡"], "forbid": [] },
+    { "id": "n3", "category": "negation", "subject": "george", "query": "花生醬三明治好嗎", "expect": ["對花生過敏"], "forbid": [] },
+    { "id": "n4", "category": "negation", "subject": "household", "query": "晚餐煮牛肉好嗎", "expect": ["家裡晚餐不吃牛肉"], "forbid": ["不吃香菜", "喜歡香菜"] },
+    { "id": "u1", "category": "unrelated", "subject": "george", "query": "今天天氣如何", "expect": [], "forbid": ["*"] },
+    { "id": "u2", "category": "unrelated", "subject": "george", "query": "幫我算 3 加 5", "expect": [], "forbid": ["*"] },
+    { "id": "u3", "category": "unrelated", "subject": "amy", "query": "台北到高雄多遠", "expect": [], "forbid": ["*"] },
+    { "id": "u4", "category": "unrelated", "subject": "george", "query": "現在幾點", "expect": [], "forbid": ["*"] },
+    { "id": "u5", "category": "unrelated", "subject": "amy", "query": "幫我寫一封感謝信", "expect": [], "forbid": ["*"] },
+    { "id": "c1", "category": "cross_person", "subject": "amy", "query": "這道菜要不要加香菜", "expect": ["喜歡香菜"], "forbid": ["不吃香菜"] },
+    { "id": "c2", "category": "cross_person", "subject": "george", "query": "這道菜要不要加香菜", "expect": ["不吃香菜"], "forbid": ["喜歡香菜"] },
+    { "id": "x1", "category": "third_party", "subject": "george", "query": "晚餐要不要煮海鮮", "expect": [], "forbid": ["海鮮"] },
+    { "id": "x2", "category": "third_party", "subject": "amy", "query": "媽媽喝咖啡嗎", "expect": [], "forbid": ["媽媽", "不喝咖啡"] }
+  ]
+}

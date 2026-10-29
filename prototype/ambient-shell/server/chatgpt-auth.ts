@@ -122,6 +122,12 @@ export class ChatGPTAuth {
     };
   }
 
+  /** 目前帳號的穩定識別（ID token 的 subject）；只給核心算記憶同意的帳號指紋，不外傳、不寫 log。 */
+  accountSubject(): string | null {
+    const reg = this.active();
+    return reg && (reg.refresh_token || reg.access_token) ? reg.subject : null;
+  }
+
   /** 可以用 ChatGPT 方案推論：已登入且取得方案用量權限。 */
   get usable(): boolean {
     const i = this.info();

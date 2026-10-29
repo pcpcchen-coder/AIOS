@@ -104,7 +104,13 @@ export interface ChatTurn {
 export type ChatEvent =
   | { type: "delta"; text: string }
   | { type: "delegate"; title: string }
-  | { type: "done"; model: string | null }
+  /** 這一輪用了記憶：不自動交辦，改問使用者（title 是使用者原句）。 */
+  | { type: "delegate_blocked"; title: string }
+  /** 核心的固定句型：這次沒有保存或沒有用到記憶。 */
+  | { type: "memory_notice"; message: string }
+  /** 記憶被撤銷（換人、更正、忘記、關閉記憶）：回覆停止，這是結束事件。 */
+  | { type: "memory_revoked"; message: string }
+  | { type: "done"; model: string | null; memory_used?: number }
   | { type: "error"; message: string; action: string | null };
 
 /** 語音對話：POST /api/chat，逐筆回傳串流事件；abort 時中斷（插話）。 */
@@ -114,13 +120,14 @@ export async function streamChat(
   onEvent: (event: ChatEvent) => void,
   signal: AbortSignal,
   locale: Locale = getLocale(),
+  memoryTurn: string | null = null,
 ): Promise<void> {
   let res: Response;
   try {
     res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Nous-Locale": locale },
-      body: JSON.stringify({ messages, request_id }),
+      body: JSON.stringify({ messages, request_id, ...(memoryTurn ? { memory_turn: memoryTurn } : {}) }),
       signal,
     });
   } catch (err) {
@@ -148,7 +155,7 @@ export async function streamChat(
         if (!data) continue;
         const event = JSON.parse(data) as ChatEvent;
         onEvent(event);
-        if (event.type === "done" || event.type === "error") {
+        if (event.type === "done" || event.type === "error" || event.type === "memory_revoked") {
           terminal = true;
           return;
         }

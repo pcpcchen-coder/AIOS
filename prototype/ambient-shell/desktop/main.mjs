@@ -3,8 +3,11 @@ import { execFile } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, safeStorage, session, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, safeStorage, session, shell, Tray } from "electron";
 import { checkIdentitySender, MenuClickWindow, validateIdentityRequest } from "./identity-ipc.mjs";
+import { validateMemoryRequest } from "./memory-ipc.mjs";
+import { createMemorySecretBox } from "./memory-safe-storage.mjs";
+import { checkTrustedSender } from "./trusted-sender.mjs";
 import { radio, settingsMenu } from "./settings-menu.mjs";
 import { isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "./localization.mjs";
 
@@ -24,6 +27,12 @@ const logFile = join(userData, "nous.log");
 const identityDir = join(userData, "identity");
 /** 家人辨識的模型與 onnxruntime wasm：只由 npm run face:setup -- --product 安裝到這裡，不在 App 包裡。 */
 const faceRuntimeDir = join(userData, "face-runtime");
+/**
+ * 家庭記憶的加密快照（docs/16；0700；Time Machine 排除）。資料夾與 Keychain 只在使用者說「記住…」、打開「記憶…」，
+ * 或上次執行時記憶是開著的（核心在 configDir 留一個不含內容的開關提示）而第一次打字時才碰；查狀態不碰。
+ * 注意：settings 回報 available 時會呼叫 safeStorage.isEncryptionAvailable()；它會不會觸發 Keychain 詢問列在 Mac gate。
+ */
+const memoryDir = join(userData, "memory");
 
 const REALTIME_MODELS = [
   { id: "gpt-realtime", label: "gpt-realtime（品質最好）" },
@@ -137,6 +146,15 @@ async function startCore() {
       confirm: confirmIdentity,
       modelDir: faceRuntimeDir,
     },
+    memory: {
+      dir: memoryDir,
+      // safeStorage 包裝資料金鑰（只在 darwin、App ready 且可加密時可用；失敗一律不可用，不退回明文）。
+      secretBox: createMemorySecretBox({ safeStorage, ready: () => app.isReady() }),
+      excludeFromBackup: excludeFromTimeMachine,
+      confirm: confirmMemory,
+      // 本次人物世代改變（換人、暫停、撤銷）：推一個不含內容的通知，頁面再用 status（不開記憶檔）讀新狀態。
+      onPresence: () => { if (win && !win.isDestroyed()) win.webContents.send("nous:memory-changed"); },
+    },
   });
 }
 
@@ -186,28 +204,88 @@ async function confirmIdentity(request) {
     return response === 0 && (!minor || checkboxChecked === true);
   }
   if (request?.kind === "delete") {
-    const { response } = await ask({
+    // 連結的記憶（docs/17 §9.4、George 決定 ⑨）：顯示筆數；成人預設不勾，未成年預設勾選。不勾只解除連結。
+    // count 為 null：記憶檔這次還沒開過，不為了計數去開（不碰 Keychain），改寫「刪除時一併處理」。
+    const memory = request.memory && (Number.isInteger(request.memory.count) || request.memory.count === null) ? request.memory : null;
+    const { response, checkboxChecked } = await ask({
       type: "warning",
       buttons: ["永久刪除", "取消"],
       defaultId: 1,
       cancelId: 1,
       message: `要永久刪除「${request.name}」的家人資料嗎？`,
       detail: `會從加密檔移除這位家人的所有特徵與名稱，並換用新的加密金鑰；刪除後無法還原。\n\n${backupNote}`,
+      ...(memory ? {
+        checkboxLabel: memory.count === null
+          ? t("同時刪除此人的記憶（如有；筆數在刪除時一併處理）；不勾選只解除連結，記憶保留在「記憶…」")
+          : t("同時刪除此人的記憶（{0} 筆）；不勾選只解除連結，記憶保留在「記憶…」", String(memory.count)),
+        checkboxChecked: memory.defaultDelete === true,
+      } : {}),
     });
-    return response === 0;
+    if (!memory) return response === 0;
+    return { confirmed: response === 0, deleteMemory: response === 0 && checkboxChecked === true };
   }
   if (request?.kind === "clear_all") {
-    const { response } = await ask({
+    // 每位家人連結的記憶：未成年一併刪除；成人預設只解除連結，勾選才刪（原生對話框只有一個勾選框）。
+    const people = Array.isArray(request.memory?.people) ? request.memory.people : [];
+    const lines = people.map((p) => p.count === null
+      ? t(p.minor ? "{0}：記憶筆數刪除時一併處理（未成年，一併刪除）" : "{0}：記憶筆數刪除時一併處理（成人，預設保留）", String(p.name))
+      : t(p.minor ? "{0}：{1} 筆記憶（未成年，一併刪除）" : "{0}：{1} 筆記憶（成人，預設保留）", String(p.name), String(p.count)));
+    const adults = people.some((p) => !p.minor);
+    const { response, checkboxChecked } = await ask({
       type: "warning",
       buttons: ["清除全部", "取消"],
       defaultId: 1,
       cancelId: 1,
       message: "要清除全部家人資料嗎？",
-      detail: `會刪除這台 Mac 上 Nous 的家人辨識加密檔（所有家人的特徵與名稱）；清除後無法還原，需要重新登記。\n\n${backupNote}`,
+      detail: `會刪除這台 Mac 上 Nous 的家人辨識加密檔（所有家人的特徵與名稱）；清除後無法還原，需要重新登記。${lines.length ? `\n\n${t("連結的記憶：")}\n${lines.join("\n")}` : ""}\n\n${backupNote}`,
+      ...(adults ? { checkboxLabel: t("同時刪除成人家人的記憶（不勾選只解除連結）"), checkboxChecked: false } : {}),
+    });
+    if (!people.length) return response === 0;
+    return { confirmed: response === 0, deleteMemory: response === 0 && checkboxChecked === true };
+  }
+  return false;
+}
+
+const MEMORY_NOTE = "限制：在此之前已存在的 Time Machine 備份或 APFS 本機快照，可能仍保有舊的加密記憶檔；已送給模型服務的內容也不會因此刪除。";
+
+/** 記憶的原生確認（docs/16 §8、§9）：刪除整個人物記憶、全部忘記、連結家人辨識。頁面無法偽造；回 true 才寫檔。 */
+async function confirmMemory(request) {
+  const parent = win && !win.isDestroyed() ? win : undefined;
+  const ask = (options) => showMessage(options, parent);
+  const note = t(MEMORY_NOTE);
+  if (request?.kind === "profile_delete") {
+    const { response } = await ask({
+      type: "warning", buttons: ["永久刪除", "取消"], defaultId: 1, cancelId: 1,
+      message: t("要永久刪除「{0}」的記憶檔嗎？", String(request.name)),
+      detail: `${t("會刪除這位人物的 {0} 筆記憶、來源與同意設定；家人辨識資料不受影響。刪除後無法還原。", String(request.count))}\n\n${note}`,
+    });
+    return response === 0;
+  }
+  if (request?.kind === "forget_all") {
+    const { response } = await ask({
+      type: "warning", buttons: ["全部忘記", "取消"], defaultId: 1, cancelId: 1,
+      message: request.scope ? t("要忘記「{0}」的全部記憶嗎？", String(request.scope)) : t("要忘記全家共用的全部記憶嗎？"),
+      detail: `${t("會刪除 {0} 筆記憶；其他人物的記憶不受影響。刪除後無法還原。", String(request.count))}\n\n${note}`,
+    });
+    return response === 0;
+  }
+  if (request?.kind === "link_face") {
+    const { response } = await ask({
+      type: "question", buttons: ["連結", "取消"], defaultId: 1, cancelId: 1,
+      message: request.person ? t("要把「{0}」的記憶檔連結到家人辨識的「{1}」嗎？", String(request.profile), String(request.person)) : t("要解除「{0}」的家人辨識連結嗎？", String(request.profile)),
+      detail: t("連結後，看著說話認出這位家人時，Nous 只會問「這次用 {0} 的偏好？」，確認後才選定；認臉不是授權。同名的新登記不會自動接回舊記憶。", String(request.profile)),
     });
     return response === 0;
   }
   return false;
+}
+
+/** 選單列「記憶…」的點擊時間：10 秒內頁面才能打開記憶管理。 */
+const memoryClick = new MenuClickWindow();
+
+function openMemory() {
+  memoryClick.mark(Date.now());
+  command("memory");
 }
 
 /** 選單列「家人辨識…」的點擊時間：10 秒內頁面才能開管理 session（語音或頁面腳本不能自己開）。 */
@@ -306,8 +384,8 @@ function createWindow() {
     if (/^https?:/.test(url)) void shell.openExternal(url);
   });
   // 家人辨識的管理 session 只屬於當下這一頁：主視窗導覽、重新載入（也會觸發 did-navigate）或 renderer 結束就關掉。
-  win.webContents.on("did-navigate", () => core?.identity?.closeSessions());
-  win.webContents.on("render-process-gone", () => core?.identity?.closeSessions());
+  win.webContents.on("did-navigate", () => { core?.identity?.closeSessions(); core?.memory?.closeSessions(); });
+  win.webContents.on("render-process-gone", () => { core?.identity?.closeSessions(); core?.memory?.closeSessions(); });
 }
 
 function showWindow() {
@@ -593,6 +671,11 @@ function rebuildMenu() {
     },
     { label: "鏡頭與語音設定", submenu: secondsMenu() },
     { label: "語音指令表", click: openCommandsWindow },
+    {
+      label: "記憶…",
+      sublabel: settings?.memory && !settings.memory.available ? t("此 Mac 無法安全保存，記憶停用") : settings?.memory?.enabled ? undefined : t("尚未開啟"),
+      click: openMemory,
+    },
     languageMenu(prefs.locale, setLocale),
     { type: "separator" },
     {
@@ -743,6 +826,15 @@ ipcMain.handle("nous:identity", async (event, request) => {
   return core.identity.handle(checked.request, { userInitiated });
 });
 
+// 記憶：只接受主視窗主框架、來自本機核心頁面的請求；形狀過濾後交給核心（核心再完整驗證）。
+ipcMain.handle("nous:memory", async (event, request) => {
+  if (!core?.memory || !checkTrustedSender(event, win, core.url)) return { ok: false, code: "unavailable", message: t("記憶不可用") };
+  const checked = validateMemoryRequest(request);
+  if (!checked.ok) return { ok: false, code: "bad_request", message: checked.error };
+  const userInitiated = checked.request.op === "list" && checked.request.manage === true ? memoryClick.consume(Date.now()) : false;
+  return core.memory.handle(checked.request, { userInitiated });
+});
+
 function rebuildAppMenu() {
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(localizeMenu([
@@ -821,6 +913,8 @@ app.whenReady().then(async () => {
   session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => permission === "media" && allowMedia(`${origin}/`));
 
   rebuildAppMenu();
+  // 作業系統鎖定：暫停本次人物（記憶撤銷舊世代；解鎖後要重新選擇）。
+  powerMonitor.on("lock-screen", () => core?.memory?.suspendAll());
 
   tray = new Tray(trayImage(false));
   setTimeout(() => log(`選單列圖示位置：${JSON.stringify(tray.getBounds())}`), 3000);

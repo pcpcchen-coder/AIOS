@@ -1,5 +1,6 @@
-// 只開放三個動作給網頁：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示，以及家人辨識的請求。
-// identity 只是傳輸：發送者、op 白名單與形狀在主程序檢查（desktop/identity-ipc.mjs），資料與比對在核心（ADR-0001 §2.1）。
+// 只開放四個動作給網頁：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示、家人辨識與記憶的請求。
+// identity 與 memory 只是傳輸：發送者、op 白名單與形狀在主程序檢查（desktop/identity-ipc.mjs、desktop/memory-ipc.mjs），
+// 資料、比對與記憶規則在核心（ADR-0001 §2.1、docs/16 §9）。
 const { contextBridge, ipcRenderer } = require("electron");
 
 const validLocale = (value) => value === "zh-TW" || value === "en";
@@ -23,4 +24,12 @@ contextBridge.exposeInMainWorld("nousDesktop", {
       ...(validLocale(state?.locale) ? { locale: state.locale } : {}),
     }),
   identity: (request) => ipcRenderer.invoke("nous:identity", request),
+  memory: (request) => ipcRenderer.invoke("nous:memory", request),
+  // 本次人物世代改變的通知（不含內容）；頁面收到後用 status 讀新狀態（不開記憶檔）。
+  onMemoryChange: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = () => callback();
+    ipcRenderer.on("nous:memory-changed", listener);
+    return () => ipcRenderer.removeListener("nous:memory-changed", listener);
+  },
 });

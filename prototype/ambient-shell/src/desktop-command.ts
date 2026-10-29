@@ -10,9 +10,11 @@ export interface DesktopCommandHandlers {
   cameraPreview(): void;
   /** 選單列「鏡頭與語音設定 → 家人辨識…」（主程序已記下點擊時間；管理 session 由核心決定能不能開）。 */
   family(): void;
+  /** 選單列「記憶…」（主程序已記下點擊時間；記憶管理能不能打開由核心決定）。 */
+  memory(): void;
 }
 
-export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family"] as const;
+export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family", "memory"] as const;
 
 /** 認得的指令執行對應動作並回 true；不認得的不做任何事，回 false。 */
 export function runDesktopCommand(command: string, handlers: DesktopCommandHandlers): boolean {
@@ -34,6 +36,9 @@ export function runDesktopCommand(command: string, handlers: DesktopCommandHandl
       return true;
     case "family":
       handlers.family();
+      return true;
+    case "memory":
+      handlers.memory();
       return true;
     default:
       return false;

@@ -30,6 +30,8 @@ import { homeControlLine, homeStatusLine } from "../shared/home.ts";
 import { classify, settingsReply } from "./intent.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { FamilyView } from "./family-view.ts";
+import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, presenceLabel, receiptsText } from "./memory-view.ts";
+import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
 import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
 import { AmbientIdentity } from "./sense/identity-ambient.ts";
 import { LookTimeline } from "./look-timeline.ts";
@@ -74,6 +76,10 @@ interface DesktopBridge {
   reportState(state: { voice: string; activeTasks: number; settings: string; locale: Locale }): void;
   /** 家人辨識（只經 IPC 到 App 的核心；不走 HTTP）。舊版 App 沒有這一項。 */
   identity?(request: IdentityRequest): Promise<IdentityResponse>;
+  /** 家庭記憶（docs/16 MEM-1；只經 IPC 到 App 的核心）。舊版 App 與瀏覽器版沒有這一項。 */
+  memory?(request: MemoryRequest): Promise<MemoryResponse>;
+  /** 本次人物世代改變的通知（不含內容）。 */
+  onMemoryChange?(listener: () => void): () => void;
 }
 declare global {
   interface Window {
@@ -103,6 +109,18 @@ const conversationReply = $<HTMLDivElement>("conversation-reply");
 const conversationUser = $<HTMLParagraphElement>("conversation-user");
 const conversationAnswer = $<HTMLParagraphElement>("conversation-answer");
 const conversationStatus = $<HTMLParagraphElement>("conversation-status");
+const conversationPerson = $<HTMLParagraphElement>("conversation-person");
+const conversationNotice = $<HTMLParagraphElement>("conversation-notice");
+const memoryLine = $<HTMLParagraphElement>("memory-line");
+const memoryPersonLabel = $<HTMLLabelElement>("memory-person-label");
+const memoryPerson = $<HTMLSelectElement>("memory-person");
+/** 記憶的本次人物（核心回的；只在輸入列與對話 Surface 顯示，不建常駐側欄）。 */
+let memoryPresence: MemoryPresenceView | null = null;
+let memoryProfiles: { id: string; name: string }[] = [];
+/** 帶記憶的一輪想交辦：在對話 Surface 裡問「要交辦這件事嗎？」（標題是使用者原句）。 */
+let pendingDelegate: { title: string; requestId: string } | null = null;
+/** turn 的原句（卡片處理完後，純記憶指令的回條要配這一句顯示）。 */
+const memoryTurnText = new Map<string, string>();
 let developmentProvider: ExecutorMode | null = null;
 let conversationEpoch = 0;
 let pendingProviderSelection: { epoch: number; account: string } | null = null;
@@ -131,7 +149,8 @@ const voice = new PushToTalk({
   },
   onFinal: (text) => {
     input.value = text;
-    void handleCommand(text);
+    // 語音來源：MEM-1 不經記憶 IPC、不送 memory_turn（語音記憶要等 MEM-2／MEM-3）。
+    void handleCommand(text, "speech");
   },
   onListeningChange: (listening) => {
     micIndicator.hidden = !listening;
@@ -155,7 +174,7 @@ const conversation = new VoiceConversation(
     onUtterance: (text) => {
       session.interrupt();
       showTranscript("user", text);
-      void handleCommand(text);
+      void handleCommand(text, "speech");
     },
     onInterim: (text) => showTranscript("user", text, true, true),
     onStateChange: renderVoiceState,
@@ -308,6 +327,11 @@ const session = new ConversationSession({
   activity: (kind, _requestId, text) => brain.pulse(kind, classifyDomain(text)),
   changed: () => render(),
   delegated: (title, requestId, locale) => void delegateTask(title, requestId, locale),
+  // 帶記憶的一輪不自動交辦（docs/16 §9、M15）：出卡片問使用者，標題用使用者原句。
+  delegateBlocked: (title, requestId) => {
+    pendingDelegate = { title, requestId };
+    render();
+  },
 });
 
 function accountKey(value: SettingsView): string {
@@ -372,10 +396,29 @@ async function prepareConversation(requestId: string, epoch: number): Promise<bo
   return false;
 }
 
-async function converse(text: string, requestId: string): Promise<void> {
+/**
+ * 一般聊天。桌面版的打字來源先經記憶 IPC（turn）：核心解析「記住／更正／忘記／我是 X」，回回條、卡片與要送的聊天文字，
+ * 以及一次性的 memory_turn；/api/chat 帶它，核心才取用記憶。語音來源與瀏覽器版不經記憶（不送 memory_turn）。
+ */
+async function converse(text: string, requestId: string, source: "typed" | "speech" = "typed"): Promise<void> {
   const requestLocale = conversation.on ? conversation.locale : getLocale();
   const epoch = ++conversationEpoch;
   try {
+    const bridge = window.nousDesktop?.memory;
+    if (bridge && source === "typed") {
+      // 先經記憶：純記憶指令（「記住…」「我是 X」）不需要先登入任何模型服務；要送聊天時才 prepareConversation。
+      input.value = "";
+      const res = await bridge({ op: "turn", text, request_id: requestId });
+      if (epoch !== conversationEpoch) return;
+      if (res.ok && res.op === "turn") {
+        applyMemoryTurn(res, text, requestId, requestLocale);
+        return;
+      }
+      // 記憶 IPC 失敗：一般聊天照常，照實說這次沒有用到記憶。
+      if (!await sendChat(text, requestId, requestLocale, null, epoch)) return;
+      showSubtitle(t("記憶目前不可用；這次沒有用到記憶"));
+      return;
+    }
     if (!await prepareConversation(requestId, epoch) || epoch !== conversationEpoch) return;
     input.value = "";
     dispatch({ type: "dismiss" });
@@ -387,6 +430,63 @@ async function converse(text: string, requestId: string): Promise<void> {
     showCommandError(error instanceof Error ? error.message : "無法開始對話。");
   }
 }
+
+/** 核心的 turn 結果：本次人物、回條、卡片或要送的聊天（帶 memory_turn）。卡片在時先處理卡片，問題稍後再送。 */
+function applyMemoryTurn(view: MemoryTurnView & { status?: MemoryStatusView }, userText: string, requestId: string, locale: Locale): void {
+  memoryTurnText.set(requestId, userText);
+  if (memoryTurnText.size > 32) memoryTurnText.delete(memoryTurnText.keys().next().value!);
+  setMemoryPresence(view.presence, view.status?.profiles.map(p => ({ id: p.id, name: p.name })));
+  if (view.history_reset) session.forgetMemoryHistory();
+  if (view.card) {
+    memoryView.showCard(view.card, requestId, view.chat, view.status ?? null);
+    dispatch({ type: "show.memory", request_id: requestId });
+    return;
+  }
+  const receipts = receiptsText(view.receipts);
+  const notice = memoryText(view.notice);
+  if (view.chat) {
+    const extra = [receipts, notice].filter(Boolean).join("\n");
+    void sendChat(view.chat.text, requestId, locale, view.chat.memory_turn, conversationEpoch).then((sent) => { if (sent && extra) showSubtitle(extra, true); });
+    return;
+  }
+  dispatch({ type: "dismiss" });
+  hideSubtitle();
+  // 只有記憶指令：核心的固定回條就是這一輪的回覆（不呼叫模型）。
+  session.local(userText, requestId, receipts || notice || t("沒有需要保存的內容。"));
+}
+
+/** 送一般聊天（需要時先準備模型服務）；epoch 已換（使用者又做了別的事）就不送。回傳是否送出。 */
+async function sendChat(text: string, requestId: string, locale: Locale, memoryTurn: string | null, epoch: number): Promise<boolean> {
+  if (!await prepareConversation(requestId, epoch) || epoch !== conversationEpoch) return false;
+  dispatch({ type: "dismiss" });
+  hideSubtitle();
+  await session.send(text, requestId, locale, memoryTurn);
+  return true;
+}
+
+/**
+ * 本次人物世代改變（換人、暫停、OS 鎖定、閒置、刪除家人、更正、忘記）：用過記憶的對話歷史清空，標示更新。
+ * 核心的 turn 回應與主程序推來的通知都會帶新的世代。
+ */
+function setMemoryPresence(presence: MemoryPresenceView | null, profiles?: { id: string; name: string }[]): void {
+  if (presence && memoryPresence && presence.epoch !== memoryPresence.epoch) {
+    session.forgetMemoryHistory(true);
+    pendingDelegate = null;
+  }
+  memoryPresence = presence;
+  if (profiles) memoryProfiles = profiles;
+  render();
+}
+
+/** 讀本次人物（status 不開記憶檔、不碰 Keychain）；記憶沒開時不顯示標示，但仍追蹤世代。 */
+async function refreshMemoryStatus(): Promise<void> {
+  const bridge = window.nousDesktop?.memory;
+  if (!bridge) return;
+  const res = await bridge({ op: "status" });
+  if (!res.ok || res.op !== "status") return;
+  setMemoryPresence(res.presence, res.state === "ready" ? res.profiles.map(p => ({ id: p.id, name: p.name })) : undefined);
+}
+window.nousDesktop?.onMemoryChange?.(() => void refreshMemoryStatus());
 
 function closeConversation(): void {
   conversationEpoch++;
@@ -642,6 +742,8 @@ const ambient = new AmbientIdentity({
     new IdentityClient({ source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) }, createWorker: createIdentityWorker, onFrame, onState }),
   model: faceRuntime.model_version,
   now: () => performance.now(),
+  // 記憶的互動結束：人離開鏡頭或多人入鏡時暫停本次人物（只能降權）。
+  onPresenceBreak: (reason) => void window.nousDesktop?.memory?.({ op: "suspend", reason }).then((res) => { if (res.ok && res.op === "suspend") setMemoryPresence(res.presence); }),
 });
 
 const sense = new SenseController({
@@ -711,6 +813,42 @@ const familyView = new FamilyView({
   createWorker: createIdentityWorker,
   model: faceRuntime.model_version,
   dismiss: () => dispatch({ type: "dismiss" }),
+});
+
+const memoryView = new MemoryView({
+  bridge: window.nousDesktop?.memory ? { memory: (request) => window.nousDesktop!.memory!(request) } : null,
+  dismiss: () => dispatch({ type: "dismiss" }),
+  resolved: (view, requestId) => applyMemoryTurn(view, memoryTurnText.get(requestId) ?? "", requestId, getLocale()),
+  changed: (_receipt, historyReset, presence) => {
+    if (historyReset) session.forgetMemoryHistory();
+    if (presence) setMemoryPresence(presence);
+  },
+});
+
+/** 「要交辦這件事嗎？」按「交辦」：用使用者原句建立任務（新的 user_request，不帶記憶、不帶模型改寫）。 */
+async function delegateDirect(title: string): Promise<void> {
+  const requestId = userRequest();
+  try {
+    const task = await api.createTask(title, requestId, getLocale());
+    if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
+    dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
+    dispatch({ type: "task.updated", task: tasks.get(task.task_id)! });
+  } catch (err) {
+    showSubtitle(msg`交辦失敗：${(err as Error).message}`);
+  }
+}
+
+memoryPerson.addEventListener("change", () => {
+  const bridge = window.nousDesktop?.memory;
+  if (!bridge) return;
+  const profile = memoryPerson.value === "" ? null : memoryPerson.value;
+  // 主視窗的「本次人物」選單：使用者直接選定（換人會撤銷舊世代，用過記憶的對話歷史清空）。
+  void bridge({ op: "select", profile, card: memoryPresence?.select_card }).then((res) => {
+    if (res.ok && res.op === "select") {
+      session.forgetMemoryHistory();
+      setMemoryPresence(res.presence, res.status.profiles.map(p => ({ id: p.id, name: p.name })));
+    } else if (!res.ok) showCommandError(res.message);
+  });
 });
 
 /** 把指向的區塊對到畫面上可選的項目；只是選定（亮框），不展開、不送出（06 §4.4）。 */
@@ -1068,10 +1206,12 @@ function dispatch(event: ShellEvent): void {
   const wasListening = shell.listening;
   const leftConfirm = shell.surface?.kind === "confirm" && next.surface?.surface_id !== shell.surface.surface_id ? shell.surface.request_id : null;
   const leftFamily = shell.surface?.kind === "family" && next.surface?.surface_id !== shell.surface.surface_id;
+  const leftMemory = shell.surface?.kind === "memory" && next.surface?.surface_id !== shell.surface.surface_id;
   const enteredFamily = next.surface?.kind === "family" && next.surface.surface_id !== shell.surface?.surface_id;
   shell = next;
   // 收起只關畫面：停止取樣並丟掉記憶體中的樣本與 session，不刪已存的家人資料。
   if (leftFamily) familyView.close();
+  if (leftMemory && next.surface?.kind !== "memory") memoryView.close();
   if (enteredFamily) familyView.open();
   // 家人辨識畫面開著時不做看著說話的同步辨識（核心也拒絕）；收起後重新確認（gallery 可能剛改過）。
   if (leftFamily || enteredFamily) ambient.refresh();
@@ -1082,6 +1222,8 @@ function dispatch(event: ShellEvent): void {
   if (!wasListening && shell.listening) {
     form.hidden = false;
     input.focus();
+    // 第一次打開輸入列時讀本次人物：status 不開記憶檔、不碰 Keychain。
+    if (!memoryPresence) void refreshMemoryStatus();
   }
   if (wasListening && !shell.listening) {
     voice.abort();
@@ -1188,7 +1330,7 @@ function latestArtifactTask(): Task | undefined {
     .sort((a, b) => (b.finished_at ?? "").localeCompare(a.finished_at ?? ""))[0];
 }
 
-async function handleCommand(text: string): Promise<void> {
+async function handleCommand(text: string, source: "typed" | "speech" = "typed"): Promise<void> {
   if (handleCameraCommand(text)) {
     dispatch({ type: "input.close" });
     return;
@@ -1270,7 +1412,7 @@ async function handleCommand(text: string): Promise<void> {
         realtime.sendText(intent.text);
         return;
       }
-      await converse(intent.text, requestId);
+      await converse(intent.text, requestId, source);
       return;
   }
 }
@@ -1502,6 +1644,7 @@ function render(): void {
   form.hidden = !shell.listening;
   startConversation.hidden = conversation.on || realtime.on || shell.listening || shell.surface !== null;
   renderConversation();
+  renderMemoryLine();
 
   renderStatusLine();
   renderEngineLine();
@@ -1544,6 +1687,10 @@ window.addEventListener("nous:command", (event) => {
     type: () => dispatch({ type: "input.open" }),
     cameraPreview: actions.openCameraPreview,
     family: () => dispatch({ type: "show.family", request_id: userRequest() }),
+    memory: () => {
+      memoryView.openManager();
+      dispatch({ type: "show.memory", request_id: userRequest() });
+    },
   });
 });
 
@@ -1575,9 +1722,69 @@ function renderConversation(): void {
   conversationReply.dataset.visibilityReason = "user_request";
   conversationReply.dataset.status = reply.kind;
   conversationUser.textContent = msg`你：${reply.user}`;
+  // 「本次人物」只在輸入列與這個對話 Surface 顯示（不建常駐側欄）。
+  const person = window.nousDesktop?.memory && settings?.memory?.enabled ? presenceLabel(memoryPresence) : "";
+  conversationPerson.hidden = !person;
+  conversationPerson.textContent = person;
+  conversationNotice.hidden = !("notice" in reply && reply.notice);
+  conversationNotice.textContent = "notice" in reply && reply.notice ? t(reply.notice) : "";
   const provider = settings?.provider ?? "chatgpt";
   const answer = reply.answer || (reply.kind === "pending" ? "…" : t("沒有收到文字回覆。"));
   conversationAnswer.textContent = `${t(PROVIDER_LABEL[provider])}：${answer}${reply.kind === "error" ? `\n${t(reply.message)}` : reply.kind === "interrupted" ? t("\n已打斷回覆。") : ""}`;
+  renderDelegatePrompt(reply.requestId);
+}
+
+/** 「要交辦這件事嗎？」：這一輪用到記憶，所以不自動交辦；按「交辦」才用使用者原句建立任務（docs/16 §9、M15）。 */
+function renderDelegatePrompt(requestId: string): void {
+  const existing = document.getElementById("delegate-prompt");
+  const pending = pendingDelegate && pendingDelegate.requestId === requestId ? pendingDelegate : null;
+  const key = pending ? `${getLocale()}:${pending.requestId}` : "";
+  if (existing?.dataset.key === key && pending) return;
+  existing?.remove();
+  if (!pending) return;
+  const box = document.createElement("div");
+  box.id = "delegate-prompt";
+  box.className = "delegate-prompt";
+  box.dataset.key = key;
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", t("要交辦這件事嗎？"));
+  const question = document.createElement("p");
+  question.textContent = msg`要交辦這件事嗎？「${pending.title}」（這一輪用到了記憶，所以沒有自動交辦）`;
+  const yes = document.createElement("button");
+  yes.type = "button";
+  yes.className = "btn btn--primary";
+  yes.textContent = t("交辦");
+  yes.addEventListener("click", () => { pendingDelegate = null; void delegateDirect(pending.title); render(); });
+  const no = document.createElement("button");
+  no.type = "button";
+  no.className = "btn btn--ghost";
+  no.textContent = t("不用");
+  no.addEventListener("click", () => { pendingDelegate = null; render(); });
+  box.append(question, yes, no);
+  conversationReply.append(box);
+}
+
+/** 輸入列的記憶狀態：桌面版且記憶開啟時顯示「本次人物」選單；瀏覽器版明示不可用。 */
+function renderMemoryLine(): void {
+  const desktop = !!window.nousDesktop?.memory;
+  if (!desktop) {
+    memoryLine.hidden = false;
+    memoryPersonLabel.textContent = t(MEMORY_BROWSER_UNAVAILABLE);
+    memoryPerson.hidden = true;
+    return;
+  }
+  const enabled = !!settings?.memory?.enabled && !!memoryPresence;
+  memoryLine.hidden = !enabled;
+  if (!enabled) return;
+  memoryPersonLabel.textContent = presenceLabel(memoryPresence);
+  memoryPerson.hidden = false;
+  const options: [string, string][] = [["", t("全家共用（不選人物）")], ...memoryProfiles.map(p => [p.id, p.name] as [string, string])];
+  const key = JSON.stringify([getLocale(), options]);
+  if (memoryPerson.dataset.key !== key) {
+    memoryPerson.replaceChildren(...options.map(([value, label]) => { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; }));
+    memoryPerson.dataset.key = key;
+  }
+  memoryPerson.value = memoryPresence?.state === "selected" ? memoryPresence.profile ?? "" : "";
 }
 
 function renderStatusLine(): void {
@@ -1669,7 +1876,7 @@ function renderSurface(): void {
 
   const task = s.task_id ? tasks.get(s.task_id) : undefined;
   const key = getLocale() + ":" + (
-    s.kind === "family"
+    s.kind === "family" || s.kind === "memory"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
       ? `${s.surface_id}:${JSON.stringify(settings)}:${s.message ?? ""}`
@@ -1691,6 +1898,8 @@ function renderSurface(): void {
   const confirm = s.kind === "confirm" ? pendingConfirms.get(s.request_id) : undefined;
   if (confirm) el = renderConfirm(confirm);
   else if (s.kind === "family") el = familyView.element;
+  // 記憶卡與記憶管理自己更新內容（等 IPC 回應、原生確認時不重建）。
+  else if (s.kind === "memory") el = memoryView.element;
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
   else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop });
   else if (s.kind === "progress") el = renderProgress([...tasks.values()], s.message, actions);

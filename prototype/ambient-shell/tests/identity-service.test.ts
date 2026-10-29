@@ -588,3 +588,87 @@ describe("IdentityService: review fixes (2026-10-25)", () => {
     expect(loaded.ok && loaded.data.people.map((p) => p.name)).toEqual(["George", "Mary"]);
   });
 });
+
+// MEM-1：刪除家人時的記憶（docs/17 §9.4、George 決定 ⑨）。記憶層以替身代表；原生對話框以 confirm 替身代表。
+let memoryDirs = 0;
+describe("delete with linked memory", () => {
+  function withMemory(answer: boolean | { confirmed: boolean; deleteMemory: boolean }, linked: { count: number | null; minor: boolean } | null, unlinkResult: "none" | "unlinked" | "deleted" | "failed" = "unlinked") {
+    const box = fakeSecretBox();
+    const calls: unknown[] = [];
+    const confirm = vi.fn(async (_r: ConfirmRequest) => answer);
+    const memory = { countForFace: vi.fn(async () => linked), unlinkFace: vi.fn(async (personId: string, deleteMemory: boolean) => { calls.push([personId, deleteMemory]); return unlinkResult; }), suspend: vi.fn() };
+    const svc = new IdentityService({ store: new GalleryStore({ dir: join(root, `identity-${++memoryDirs}`), secretBox: box }), confirm, camera: () => true, runtime: { state: "ok", problems: [] }, model: MODEL, now: () => 1_000_000, memory: () => memory });
+    return { svc, confirm, memory, calls };
+  }
+  async function enrolled(s: ReturnType<typeof withMemory>, minor = false) {
+    const opened = await s.svc.handle({ op: "open_session" }, { userInitiated: true });
+    if (!opened.ok || !("session" in opened)) throw new Error("open failed");
+    const res = await s.svc.handle({ op: "enroll", session: opened.session, name: "小寶", minor, guardian_confirmed: minor, consent: true, model: MODEL, samples: samplesOf(unitFeature(5)) });
+    if (!res.ok || !("people" in res)) throw new Error(JSON.stringify(res));
+    return { session: opened.session, person: res.people[0]!.person_id };
+  }
+
+  it("shows the memory count; adults default to keeping memory (only unlink)", async () => {
+    const s = withMemory({ confirmed: true, deleteMemory: false }, { count: 3, minor: false });
+    const { session, person } = await enrolled(s);
+    expect(await s.svc.handle({ op: "delete", session, person_id: person })).toMatchObject({ ok: true, memory: "unlinked" });
+    expect(s.confirm).toHaveBeenLastCalledWith({ kind: "delete", name: "小寶", memory: { count: 3, defaultDelete: false } });
+    expect(s.calls).toEqual([[person, false]]);
+  });
+
+  it("minors default to deleting memory; the checkbox answer decides", async () => {
+    const s = withMemory({ confirmed: true, deleteMemory: true }, { count: 2, minor: true });
+    const { session, person } = await enrolled(s, true);
+    await s.svc.handle({ op: "delete", session, person_id: person });
+    expect(s.confirm).toHaveBeenLastCalledWith({ kind: "delete", name: "小寶", memory: { count: 2, defaultDelete: true } });
+    expect(s.calls).toEqual([[person, true]]);
+  });
+
+  it("declined: nothing deleted and memory untouched; no link: no memory option", async () => {
+    const s = withMemory({ confirmed: false, deleteMemory: true }, { count: 2, minor: false });
+    const { session, person } = await enrolled(s);
+    expect(await s.svc.handle({ op: "delete", session, person_id: person })).toMatchObject({ ok: false, code: "declined" });
+    expect(s.memory.unlinkFace).not.toHaveBeenCalled();
+    const t = withMemory(true, null);
+    const e = await enrolled(t);
+    await t.svc.handle({ op: "delete", session: e.session, person_id: e.person });
+    expect(t.confirm).toHaveBeenLastCalledWith({ kind: "delete", name: "小寶" });
+    expect(t.memory.unlinkFace).not.toHaveBeenCalled();
+  });
+});
+
+describe("delete and clear_all report memory results (M-9)", () => {
+  function core(linked: { count: number | null; minor: boolean } | null, unlinkResult: "none" | "unlinked" | "deleted" | "failed", answer: boolean | { confirmed: boolean; deleteMemory: boolean }) {
+    const calls: [string, boolean][] = [];
+    const confirm = vi.fn(async (_r: ConfirmRequest) => answer);
+    const memory = { countForFace: vi.fn(async () => linked), unlinkFace: vi.fn(async (id: string, del: boolean) => { calls.push([id, del]); return unlinkResult; }), suspend: vi.fn() };
+    const svc = new IdentityService({ store: new GalleryStore({ dir: join(root, `identity-m9-${++memoryDirs}`), secretBox: fakeSecretBox() }), confirm, camera: () => true, runtime: { state: "ok", problems: [] }, model: MODEL, now: () => 1_000_000, memory: () => memory });
+    return { svc, confirm, calls, memory };
+  }
+  async function family(c: ReturnType<typeof core>) {
+    const opened = await c.svc.handle({ op: "open_session" }, { userInitiated: true });
+    if (!opened.ok || !("session" in opened)) throw new Error("open failed");
+    const ids: string[] = [];
+    for (const [name, minor, seed] of [["大人", false, 11], ["小寶", true, 12]] as const) {
+      const res = await c.svc.handle({ op: "enroll", session: opened.session, name, minor, guardian_confirmed: minor, consent: true, model: MODEL, samples: samplesOf(unitFeature(seed)) });
+      if (!res.ok || !("people" in res)) throw new Error(JSON.stringify(res));
+      ids.push(res.people.find(p => p.name === name)!.person_id);
+    }
+    return { session: opened.session, ids };
+  }
+
+  it("a failed memory update is reported, not swallowed; an unopened store shows count null", async () => {
+    const c = core({ count: null, minor: false }, "failed", { confirmed: true, deleteMemory: false });
+    const { session, ids } = await family(c);
+    expect(await c.svc.handle({ op: "delete", session, person_id: ids[0] })).toMatchObject({ ok: true, memory: "failed" });
+    expect(c.confirm).toHaveBeenLastCalledWith({ kind: "delete", name: "大人", memory: { count: null, defaultDelete: false } });
+  });
+
+  it("clear_all lists every linked person; minors are deleted, adults only when checked", async () => {
+    const c = core({ count: 2, minor: false }, "unlinked", { confirmed: true, deleteMemory: false });
+    const { session, ids } = await family(c);
+    expect(await c.svc.handle({ op: "clear_all", session })).toMatchObject({ ok: true, memory: "unlinked" });
+    expect(c.confirm).toHaveBeenLastCalledWith({ kind: "clear_all", memory: { people: [{ name: "大人", count: 2, minor: false }, { name: "小寶", count: 2, minor: true }] } });
+    expect(c.calls).toEqual([[ids[0], false], [ids[1], true]]);
+  });
+});

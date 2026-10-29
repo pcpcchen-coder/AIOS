@@ -33,6 +33,7 @@ import {
   type IdentityManageView,
   type IdentityResponse,
   type IdentityStatus,
+  type MemoryUnlinkResult,
   type QualityReason,
 } from "../shared/identity.ts";
 import { greetingInstructions, liveGreetingText } from "../shared/sense.ts";
@@ -73,11 +74,30 @@ export const SESSION_RATE_PER_S = 6;
 
 export type ConfirmRequest =
   | { kind: "enroll"; name: string; minor: boolean }
-  | { kind: "delete"; name: string }
-  | { kind: "clear_all" };
+  /**
+   * memory：連結到這位家人的記憶筆數與預設是否一起刪（17 §9.4、George 決定 ⑨：成人預設不勾，未成年預設勾）。
+   * count 為 null：記憶檔這次還沒開過，不為了計數去開（不碰 Keychain），畫面寫「刪除時一併處理」。
+   */
+  | { kind: "delete"; name: string; memory?: { count: number | null; defaultDelete: boolean } }
+  /** memory：每位家人的連結記憶筆數；未成年的記憶一併刪除，成人只有勾選「同時刪除成人家人的記憶」才刪。 */
+  | { kind: "clear_all"; memory?: { people: { name: string; count: number | null; minor: boolean }[] } };
 
-/** 主程序的原生確認對話框（dialog.showMessageBox）；回 true 才寫檔。 */
-export type ConfirmFn = (request: ConfirmRequest) => Promise<boolean>;
+/**
+ * 主程序的原生確認對話框（dialog.showMessageBox）；回 true 才寫檔。
+ * 刪除家人且有連結記憶時可回 { confirmed, deleteMemory }（勾選「同時刪除此人的記憶」）。
+ */
+export type ConfirmFn = (request: ConfirmRequest) => Promise<boolean | { confirmed: boolean; deleteMemory: boolean }>;
+
+/** 記憶層的連接點（server/memory/service.ts）；只在核心內部呼叫。 */
+export interface IdentityMemoryLink {
+  countForFace(personId: string): Promise<{ count: number | null; minor: boolean } | null>;
+  unlinkFace(personId: string, deleteMemory: boolean): Promise<MemoryUnlinkResult>;
+  /** 看著說話取樣時看到多張臉：暫停記憶的本次人物（只能降權）。 */
+  suspend(reason: "multi_face"): void;
+}
+
+/** 給記憶層的臉部候選只保留這麼久（docs/16 §4：只是候選，確認後才選定）。 */
+export const MEMORY_CANDIDATE_MS = 60_000;
 
 /** 看著說話時同步辨識需要的使用者設定（camera.json；核心每次都重新讀，改了立即生效）。 */
 export interface AmbientPrefs {
@@ -106,6 +126,8 @@ export interface IdentityServiceOptions {
   now?: () => number;
   log?: (line: string) => void;
   onChange?: () => void;
+  /** 記憶層（只有注入 memory 時存在）：刪除家人時解除連結或一起刪除記憶。 */
+  memory?: () => IdentityMemoryLink | null;
 }
 
 /** 頁面送來的請求還沒驗證，一律當 unknown。 */
@@ -228,6 +250,8 @@ export class IdentityService {
   /** live 路徑：已組好、等 server/live-route.ts 取用的短句（一次只有一個互動）。 */
   private pendingLive: { locale: Locale; interaction: string; session_id: string; named: boolean; text: string; sentence: string; at: number } | null = null;
   private readonly picker: GreetingPicker;
+  /** 最近一次比對成功、沒有多臉的問候決策（給記憶層當人物候選；同一追蹤世代、60 秒內）。 */
+  private lastMatch: { person_id: string; track: number; at: number } | null = null;
 
   constructor(private readonly options: IdentityServiceOptions) {
     this.now = options.now ?? Date.now;
@@ -315,6 +339,25 @@ export class IdentityService {
   private dropAmbient(): void {
     this.ambient = null;
     this.pendingLive = null;
+    this.lastMatch = null;
+  }
+
+  /**
+   * 只給記憶層（核心內部）：最近一次比對成功、MEMORY_CANDIDATE_MS 內、同一追蹤世代、沒有多臉的決策。
+   * 這只是「這次用 X 的偏好？」的候選，不是授權；記憶層要使用者確認後才選定人物。
+   */
+  memoryCandidate(): { person_id: string; name: string; at: number } | null {
+    const m = this.lastMatch;
+    if (!m || this.now() - m.at > MEMORY_CANDIDATE_MS) return null;
+    if (this.ambient && this.ambient.track !== m.track) return null;
+    const person = this.comparable().find((p) => p.person_id === m.person_id);
+    return person ? { person_id: person.person_id, name: person.name, at: m.at } : null;
+  }
+
+  /** 只給記憶層：已登記的家人（連結到既有人物用）；家人資料還沒載入時回 null，不在這裡碰 Keychain。 */
+  memoryPeople(): { person_id: string; name: string; minor: boolean }[] | null {
+    if (this.gallery !== "ready") return null;
+    return this.people.map((p) => ({ person_id: p.person_id, name: p.name, minor: p.minor }));
   }
 
   /** IPC 進來的請求（已由 desktop/identity-ipc.mjs 過濾形狀；這裡仍完整驗證，核心為權威）。 */
@@ -540,8 +583,14 @@ export class IdentityService {
     const match = this.matchFrame(req);
     const now = this.now();
     if (!this.ambient || this.ambient.track !== track) this.ambient = { track, evidence: EMPTY_EVIDENCE, firstMatch: null, mixed: false };
+    if (this.lastMatch && this.lastMatch.track !== track) this.lastMatch = null;
     const a = this.ambient;
-    if (match.kind === "ambiguous" && match.reason === "multi_face") a.mixed = true;
+    if (match.kind === "ambiguous" && match.reason === "multi_face") {
+      a.mixed = true;
+      this.lastMatch = null;
+      // 多人入鏡：記憶的本次人物暫停（只降權）。
+      this.options.memory?.()?.suspend("multi_face");
+    }
     if (match.kind === "matched") {
       a.firstMatch ??= match.person_id;
       if (a.firstMatch !== match.person_id) a.mixed = true;
@@ -586,6 +635,7 @@ export class IdentityService {
     this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前，模板 ${picked.id}，門檻未校準）`);
     // 證據只為這一次問候存在：決策後丟掉，晚到的推論不能讓下一次互動沿用。
     this.ambient = null;
+    this.lastMatch = decision.person_id && decision.reason === null ? { person_id: decision.person_id, track, at: this.now() } : null;
     if (route === "api_key") return { ok: true, op: "greeting", text: greetingInstructions(sentence, locale) };
     this.pendingLive = session ? { locale, interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence, locale), sentence, at: this.now() } : null;
     return { ok: true, op: "greeting", text: null };
@@ -691,19 +741,42 @@ export class IdentityService {
     const id = req.person_id;
     const target = typeof id === "string" && PERSON_ID.test(id) ? this.people.find((p) => p.person_id === id) : undefined;
     if (!target) throw new RequestError("not_found", "找不到這位家人");
-    if (!(await this.options.confirm({ kind: "delete", name: target.name }))) throw new RequestError("declined", "沒有確認，未刪除");
+    // 連結的記憶筆數（記憶不可用或沒有連結時不問）：未成年預設一起刪，成人預設只解除連結（George 決定 ⑨）。
+    const memory = this.options.memory?.() ?? null;
+    const linked = memory ? await memory.countForFace(target.person_id).catch(() => null) : null;
+    const answer = await this.options.confirm({ kind: "delete", name: target.name, ...(linked ? { memory: { count: linked.count, defaultDelete: target.minor || linked.minor } } : {}) });
+    const confirmed = typeof answer === "boolean" ? answer : answer.confirmed === true;
+    if (!confirmed) throw new RequestError("declined", "沒有確認，未刪除");
     this.afterConfirm(session, "未刪除");
     if (!this.people.includes(target)) throw new RequestError("not_found", "找不到這位家人");
     this.commit(this.people.filter((p) => p !== target));
     // 寫檔成功後才清零被刪者的特徵；寫入失敗時資料與比對都保持原樣。
     for (const f of target.features) f.fill(0);
-    return { ok: true, op: "delete", ...this.manageView(session) };
+    // 記憶：不勾只解除連結並撤銷本次人物，不默默刪記憶（16 §8）；勾選才刪除整個人物記憶。結果照實回給畫面。
+    let result: MemoryUnlinkResult | undefined;
+    if (memory && linked) {
+      const deleteMemory = typeof answer === "object" && answer.deleteMemory === true;
+      result = await memory.unlinkFace(target.person_id, deleteMemory).catch((): MemoryUnlinkResult => "failed");
+      if (result === "failed") this.log("identity: 記憶連結解除失敗");
+    }
+    return { ok: true, op: "delete", ...(result ? { memory: result } : {}), ...this.manageView(session) };
   }
 
   private async clearAll(session: Session): Promise<IdentityResponse> {
     if (this.gallery !== "corrupt" && this.gallery !== "ready") throw new RequestError("unavailable", this.manageStatus().limited_reason ?? "目前不能清除");
-    if (!(await this.options.confirm({ kind: "clear_all" }))) throw new RequestError("declined", "沒有確認，未清除");
+    // 每位家人連結的記憶（不為了計數去開記憶檔）：未成年一併刪除，成人只有勾選才刪，否則只解除連結並暫停本次人物。
+    const memory = this.options.memory?.() ?? null;
+    const linked: { person: StoredPerson; count: number | null; minor: boolean }[] = [];
+    if (memory) for (const p of this.people) {
+      const c = await memory.countForFace(p.person_id).catch(() => null);
+      if (c) linked.push({ person: p, count: c.count, minor: p.minor || c.minor });
+    }
+    const answer = await this.options.confirm({ kind: "clear_all", ...(linked.length ? { memory: { people: linked.map(l => ({ name: l.person.name, count: l.count, minor: l.minor })) } } : {}) });
+    const confirmed = typeof answer === "boolean" ? answer : answer.confirmed === true;
+    if (!confirmed) throw new RequestError("declined", "沒有確認，未清除");
     this.afterConfirm(session, "未清除");
+    const deleteAdults = typeof answer === "object" && answer.deleteMemory === true;
+    const ids = linked.map(l => ({ id: l.person.person_id, del: l.minor || deleteAdults }));
     this.options.store.remove();
     for (const p of this.people) for (const f of p.features) f.fill(0);
     this.people = [];
@@ -714,7 +787,13 @@ export class IdentityService {
     session.evidence = EMPTY_EVIDENCE;
     this.dropAmbient();
     this.bump();
-    return { ok: true, op: "clear_all", ...this.manageView(session) };
+    let result: MemoryUnlinkResult | undefined;
+    if (memory && ids.length) {
+      const results = await Promise.all(ids.map(x => memory.unlinkFace(x.id, x.del).catch((): MemoryUnlinkResult => "failed")));
+      result = results.includes("failed") ? "failed" : results.includes("deleted") ? "deleted" : results.includes("unlinked") ? "unlinked" : "none";
+      if (result === "failed") this.log("identity: 記憶連結解除失敗");
+    }
+    return { ok: true, op: "clear_all", ...(result ? { memory: result } : {}), ...this.manageView(session) };
   }
 
   /**
