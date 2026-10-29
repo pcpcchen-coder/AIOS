@@ -419,8 +419,15 @@ export type IdentityErrorCode =
   /** 這個互動已經做過問候決策（每次互動最多一次，送出狀態未知時也不重來）。 */
   | "already";
 
+/**
+ * 刪除家人或清除全部後，連結記憶的處理結果（docs/16 MEM-1）：none 沒有連結、unlinked 只解除連結、deleted 一併刪除、
+ * failed 記憶沒有處理成功（家人資料已刪；畫面照實告知，請到「記憶…」處理）。
+ */
+export type MemoryUnlinkResult = "none" | "unlinked" | "deleted" | "failed";
+
 export type IdentityResponse =
-  | ({ ok: true; op: "open_session" | "list" | "delete" | "clear_all" | "enroll" | "ack_naming" } & IdentityManageView)
+  | ({ ok: true; op: "open_session" | "list" | "enroll" | "ack_naming" } & IdentityManageView)
+  | ({ ok: true; op: "delete" | "clear_all"; memory?: MemoryUnlinkResult } & IdentityManageView)
   | { ok: true; op: "close_session" }
   | { ok: true; op: "probe"; observation: IdentityObservation }
   /** 只回可不可以取樣；不回原因（原因可能透露有沒有登記家人）。 */

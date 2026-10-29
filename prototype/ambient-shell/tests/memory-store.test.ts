@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MEMORY_FILE, MemoryStore, newStoreOperation, type MemoryData, type MemoryFact, type MemorySecretBox, type MemoryStoreOptions } from "../server/memory/store.ts";
+import { realLockAvailable, testLockProvider } from "./fixtures/memory-lock.ts";
 
 function box(key: Buffer = randomBytes(32)): MemorySecretBox {
   return {
@@ -14,16 +15,17 @@ function box(key: Buffer = randomBytes(32)): MemorySecretBox {
   };
 }
 const CANARY = "隔離測試不吃香菜_M0_CANARY";
-const profile = { id: "fictional-a", name: "虛構甲", createdAt: "2026-10-26T00:00:00Z" };
-function fact(): MemoryFact { return { id: "fact-a", profileId: profile.id, revision: 1, topic: "food", key: "coriander", value: CANARY, source: { kind: "explicit", turnId: "turn-1", at: profile.createdAt, excerpt: CANARY }, expiresAt: null }; }
+const profile = { id: "fictional-a", name: "虛構甲", createdAt: "2026-10-26T00:00:00Z", facePersonId: null, minor: false };
+function fact(): MemoryFact { return { id: "fact-a", profileId: profile.id, revision: 1, kind: "preference", topic: "food", key: "coriander", value: CANARY, audience: "household", source: { kind: "explicit", turnId: "turn-1", at: profile.createdAt, excerpt: CANARY }, validFrom: profile.createdAt, expiresAt: null, reviewAfter: null, pinned: false }; }
 function add(data: MemoryData) { data.profiles.push(profile); data.facts.push(fact()); return "saved" as const; }
 let dir: string, secretBox: MemorySecretBox, key: Buffer;
 let stores: MemoryStore[] = [];
-async function open(extra: Partial<MemoryStoreOptions> = {}) { const store = await MemoryStore.open({ dir, secretBox, ...extra }); stores.push(store); return store; }
+async function open(extra: Partial<MemoryStoreOptions> = {}) { const store = await MemoryStore.open({ dir, secretBox, lockProvider: testLockProvider, ...extra }); stores.push(store); return store; }
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "nous-memory-fixture-")); key = randomBytes(32); secretBox = box(key); });
 afterEach(async () => { await Promise.all(stores.map(s => s.close())); stores = []; rmSync(dir, { recursive: true, force: true }); });
 
-describe.skipIf(process.platform !== "darwin")("MemoryStore isolated macOS writer; fake key wrapper, real AES-GCM and lockf", () => {
+// macOS 用正式 lockf；Linux 用測試鎖 flock(1)（testLockProvider），其餘（AES-GCM、rename、SIGKILL）都是真的。
+describe.skipIf(!realLockAvailable)("MemoryStore isolated writer; fake key wrapper, real AES-GCM and lockf (flock on Linux CI)", () => {
   it("atomically persists data and a body-free receipt, restarts, and rejects a changed replay", async () => {
     let s = await open(); const op = newStoreOperation(0, CANARY);
     expect(await s.commit(op, add)).toEqual({ status: "saved", revision: 1 });
@@ -65,7 +67,7 @@ describe.skipIf(process.platform !== "darwin")("MemoryStore isolated macOS write
     const before = readFileSync(join(dir, MEMORY_FILE));
     expect(await s.commit(newStoreOperation(1, "capacity-1001"), data => { data.facts.push({ ...fact(), id: "fact-extra" }); return "saved"; })).toEqual({ status: "conflict" });
     expect(readFileSync(join(dir, MEMORY_FILE))).toEqual(before);
-  });
+  }, 60_000);
   it("rejects symlink snapshots without reading or replacing their targets", async () => {
     const target = join(dir, "other"); writeFileSync(target, "private-target", { mode: 0o600 });
     symlinkSync(target, join(dir, MEMORY_FILE));
@@ -176,5 +178,48 @@ describe.skipIf(process.platform !== "darwin")("MemoryStore isolated macOS write
     expect(JSON.stringify(s.read())).not.toContain(CANARY);
     await s.commit(newStoreOperation(2, "forget"), data => { data.facts = []; return "forgotten"; });
     expect(s.read().facts).toEqual([]);
+  });
+});
+
+describe.skipIf(!realLockAvailable)("MemoryStore snapshot version 2 (MEM-1)", () => {
+  it("upgrades a version 1 snapshot in memory, keeps the filename and writes version 2 only on the next commit", async () => {
+    // 以與 store 相同的信封格式造一份 MEM-0（version 1）快照：沒有 settings，profile／fact 沒有 MEM-1 欄位。
+    const dek = randomBytes(32), nonce = randomBytes(12);
+    const v1 = { format: "nous.memory.snapshot", version: 1, revision: 1, dedupKey: randomBytes(32).toString("hex"), receiptFloor: 0,
+      profiles: [{ id: "profile_v1", name: "虛構甲", createdAt: profile.createdAt }],
+      facts: [{ id: "fact-v1", profileId: "profile_v1", revision: 1, topic: "food", key: "coriander", value: "不吃香菜", source: { kind: "explicit", turnId: "turn-1", at: profile.createdAt, excerpt: "不吃香菜" }, expiresAt: null }],
+      consents: [], receipts: [], tombstones: [] };
+    const header = { format: "nous.memory.snapshot", version: 1, revision: 1, wrappedKey: secretBox.seal(dek.toString("base64")).toString("base64") };
+    const c = createCipheriv("aes-256-gcm", dek, nonce); c.setAAD(Buffer.from(JSON.stringify([header.format, header.version, header.revision, header.wrappedKey])));
+    const ciphertext = Buffer.concat([c.update(JSON.stringify(v1)), c.final()]);
+    writeFileSync(join(dir, MEMORY_FILE), JSON.stringify({ ...header, nonce: nonce.toString("base64"), tag: c.getAuthTag().toString("base64"), ciphertext: ciphertext.toString("base64") }), { mode: 0o600 });
+    chmodSync(dir, 0o700);
+    const s = await open();
+    const state = s.read();
+    expect(state.version).toBe(2);
+    expect(state.settings).toEqual({ enabled: false, setupAt: null, suggestions: false });
+    expect(state.profiles[0]).toMatchObject({ facePersonId: null, minor: false });
+    expect(state.facts[0]).toMatchObject({ kind: "preference", audience: "household", pinned: false, reviewAfter: null, validFrom: profile.createdAt, value: "不吃香菜" });
+    expect(JSON.parse(readFileSync(join(dir, MEMORY_FILE), "utf8")).version).toBe(1);
+    expect(await s.commit(newStoreOperation(1, "enable"), data => { data.settings = { enabled: true, setupAt: profile.createdAt, suggestions: false }; return "updated"; })).toEqual({ status: "updated", revision: 2 });
+    expect(JSON.parse(readFileSync(join(dir, MEMORY_FILE), "utf8")).version).toBe(2);
+    expect(readdirSync(dir).sort()).toEqual([MEMORY_FILE, "writer.lock"]);
+  });
+
+  it("rejects facts that are not household audience or lack MEM-1 fields, without writing", async () => {
+    const s = await open();
+    expect(await s.commit(newStoreOperation(0, "private"), data => { data.profiles.push(profile); data.facts.push({ ...fact(), audience: "private" as "household" }); return "saved"; })).toEqual({ status: "conflict" });
+    expect(await s.commit(newStoreOperation(0, "no-pin"), data => { data.profiles.push(profile); const { pinned: _p, ...rest } = fact(); data.facts.push(rest as MemoryFact); return "saved"; })).toEqual({ status: "conflict" });
+    expect(existsSync(join(dir, MEMORY_FILE))).toBe(false);
+  });
+});
+
+describe("MemoryStore production platform rule", () => {
+  it.skipIf(process.platform === "darwin")("refuses to open on a non-macOS platform when no test lock is injected", async () => {
+    const d = mkdtempSync(join(tmpdir(), "nous-memory-platform-"));
+    try {
+      await expect(MemoryStore.open({ dir: d, secretBox: box() })).rejects.toMatchObject({ code: "unavailable" });
+      expect(readdirSync(d)).toEqual([]);
+    } finally { rmSync(d, { recursive: true, force: true }); }
   });
 });

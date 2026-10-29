@@ -92,6 +92,12 @@ export function namePreview(draft: string): string {
     : t("這個名稱不會被念出來：認出時只說「我在」之類不含名字的短句（像句子、指令或含不能念的符號）。");
 }
 
+/** 刪除家人後連結記憶的處理結果（核心照實回報；失敗時家人資料已刪，記憶要到「記憶…」處理）。 */
+export function memoryNote(res: IdentityResponse): string {
+  if (!res.ok || (res.op !== "delete" && res.op !== "clear_all") || !res.memory || res.memory === "none") return "";
+  return res.memory === "deleted" ? "連結的記憶也已刪除。" : res.memory === "unlinked" ? "連結的記憶已解除連結並保留（可在「記憶…」查看或刪除）。" : "連結的記憶沒有處理成功：請到選單列「記憶…」查看並刪除。";
+}
+
 /** 核心給的觀測 → 畫面上的一句話（不含分數）。 */
 export function observationText(obs: IdentityObservation | null, people: readonly FamilyMember[]): string {
   if (!obs) return t("辨識中…");
@@ -310,7 +316,7 @@ export class FamilyView {
     // 永久刪除：核心會先跳出原生確認（Action Gate），被拒就不寫檔。
     const res = await this.call({ op: "delete", session: this.session, person_id: person.person_id });
     this.busy = false;
-    if (res?.ok) this.notice = `已永久刪除「${person.name}」的家人資料。`;
+    if (res?.ok) this.notice = t(`已永久刪除「${person.name}」的家人資料。`) + t(memoryNote(res));
     else if (res && !res.ok && this.phase.kind !== "unavailable") this.error = res.message;
     this.render();
   }
@@ -321,7 +327,7 @@ export class FamilyView {
     this.render();
     const res = await this.call({ op: "clear_all", session: this.session });
     this.busy = false;
-    if (res?.ok) this.notice = "已清除全部家人資料。";
+    if (res?.ok) this.notice = t("已清除全部家人資料。") + t(memoryNote(res));
     else if (res && !res.ok && this.phase.kind !== "unavailable") this.error = res.message;
     this.render();
   }

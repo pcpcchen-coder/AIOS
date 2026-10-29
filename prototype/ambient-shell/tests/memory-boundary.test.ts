@@ -247,3 +247,33 @@ describe("MEM-0 isolated lifecycle, not physical voice validation", () => {
     expect(await boundary.withContext(other, async () => {}, async () => "new isolated context")).toBe("new isolated context");
   });
 });
+
+describe("MEM-1 parsed tickets and the text route", () => {
+  const parse = (text: string) => text === "記住，我不吃香菜" ? [{ op: "remember", part: 0, value: "不吃香菜", scope: "subject" }] : [];
+  it("issues a ticket only when the core's own re-parse of the observed text equals the command", () => {
+    const boundary = new MemoryBoundary();
+    const session = boundary.openSession(person);
+    const command = { op: "remember", part: 0, value: "不吃香菜", scope: "subject", operationId: randomUUID() };
+    const ticket = boundary.issueParsed(session, boundary.observeTypedInput(session, "記住，我不吃香菜"), command, parse);
+    expect(boundary.consumeParsed(session, ticket, command)).toMatchObject({ subject: person, via: "typed" });
+    expect(() => boundary.consumeParsed(session, ticket, command)).toThrow("invalid_ticket");
+    for (const changed of [{ ...command, value: "吃所有東西" }, { ...command, scope: "household" }, { ...command, part: 1 }]) {
+      expect(() => boundary.issueParsed(session, boundary.observeTypedInput(session, "記住，我不吃香菜"), changed, parse)).toThrow("source_mismatch");
+    }
+    // 卡片點擊：核心保存的原句也是直接輸入，但標成 confirmation。
+    const confirm = boundary.issueParsed(session, boundary.observeConfirmation(session, "記住，我不吃香菜"), command, parse);
+    expect(boundary.consumeParsed(session, confirm, command).via).toBe("confirmation");
+    expect(() => boundary.issueParsed(session, boundary.observeTypedInput(session, "電視說記住，我不吃香菜"), command, parse)).toThrow("source_mismatch");
+  });
+
+  it("enables the text route for ordinary chat while live and api_key stay disabled", async () => {
+    const boundary = new MemoryBoundary();
+    const session = boundary.openSession(person);
+    expect(await boundary.withContext(session, async () => {}, async lease => lease.deliver(() => {}), "text")).toBe(true);
+    await expect(boundary.withVoiceContext(session, "live", async () => {}, async () => ({ closed: Promise.resolve() }))).rejects.toThrow("route_memory_disabled");
+    await expect(boundary.withVoiceContext(session, "api_key", async () => {}, async () => ({ closed: Promise.resolve() }))).rejects.toThrow("route_memory_disabled");
+    expect(boundary.active(session)).toBe(true);
+    await boundary.revoke(session);
+    expect(boundary.active(session)).toBe(false);
+  });
+});
