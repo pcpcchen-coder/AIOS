@@ -27,8 +27,8 @@
       "source": "README.md",
       "sourceLanguage": "zh-TW",
       "translation": "README.en.md",
-      "sourceSha256": "88e155b73052e492b35f82444f3a6e7dddfb95cda2180a8fcb1477c51d56650d",
-      "translationSha256": "b355e97beed67c53143f3991af5d51bf5399dbcb3905b9e3378fec8f1f25808a"
+      "sourceSha256": "36815e2f2cbe4818e7a7e12849acdfdcc00361db21564d22ba390b72c9c1e467",
+      "translationSha256": "890788f303b4cceb99f5f78bddc1407e57242e8e36f32bcdaebc827294690ee0"
     },
     {
       "source": "SETUP.md",
@@ -132,8 +132,8 @@
       "source": "docs/15_Companion_Mode_Spec_2026-10-24.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/15_Companion_Mode_Spec_2026-10-24.en.md",
-      "sourceSha256": "95ba2d6b4af6df0b80b8a93dbc4086e4b73af0c681ecaa8fb864d0cac6cf370a",
-      "translationSha256": "2bf58bbb6126ea305ee8ca7e9141bd4caad91b6c93a36c4c18561aab4adce7ac"
+      "sourceSha256": "f58a5486d881aac02b2bc76fb84b3cbaf6b29c0826d6f1d7366aff7b6e9ec549",
+      "translationSha256": "deb5e6b6c50849f531a15cfe95ef04d11b5a766820c7e88eeca2e6767bdf4813"
     },
     {
       "source": "docs/16_Nous_Memory_Layer_Design_2026-10-26.md",
@@ -146,8 +146,8 @@
       "source": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.en.md",
-      "sourceSha256": "1db44f0c8f37f06cf3aaf11bb699d020fafcadc3474d78c7d261139bc482ec4c",
-      "translationSha256": "bd6389a9020bc1a74cea7e40a93baea1553acf5f288285c6869138e8a75cf27d"
+      "sourceSha256": "74277385fb26ae49669201d0412b77939ed74b37b26589da128e34561e1ac5ad",
+      "translationSha256": "e5a8b9ce262802bfc1b9f83d8c00e5b2dfde668508c40b2d79b91ab57ee39dc8"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -158,15 +158,15 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "942789ccde256848426bb74d3fed45a17b143d6cc670e041bfddff21d18a9d7a",
-      "translationSha256": "9ea4e1457c2a8ff1dc96a97efb07cc0472ac6226c8a39ec490fc54d9a70013aa"
+      "sourceSha256": "42d206fe1b33e151bfc6b89ca0eabc0ee21289d7dbbcac0ee18aacd4ce5e9253",
+      "translationSha256": "94f0f6de8ffe23e805f53a983f7e5b47c2e300d87b99932988242c91adab111e"
     },
     {
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "a145df3bd2dfb6dc0272fd7f842a4abb66c3ac2254ae8b8fd8f8a3111e87fc04",
-      "translationSha256": "c6b738e5cef35f1f34922c0e022b67370684964e610886144de36bdda5d63ecc"
+      "sourceSha256": "2632b805f66a7e00adbef9a3c6bb124684d2ceaca4a0dca912fea60842149339",
+      "translationSha256": "8b74aec7d4a3712f32fc4db166f44437bbada4d75bbfa7b270a85197092b8fab"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",

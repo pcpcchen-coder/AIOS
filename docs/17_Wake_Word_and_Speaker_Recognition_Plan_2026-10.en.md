@@ -5,7 +5,7 @@
 <a id="本機喚醒詞與家人音色辨認規劃"></a>
 # Local wake word and family voice recognition plan
 
-Date: 2026-10-29, Asia/Taipei. Status: **planned, unimplemented**; revised the same day after an independent review. This document adds no wake, always-on capture, or voice recognition code. It made no recordings, created no family voice data, and passed no hardware gate. Code review baseline: AIOS main `876eeaaf7697cf4a3847e0687430c536f4a1d9a7`. External versions, licenses, and model cards were checked on 2026-10-29; sources are in §15.
+Date: 2026-10-29, Asia/Taipei. Status: **planned, unimplemented**; revised the same day after an independent review and updated with George's nine decisions of the same day (§14). This document adds no wake, always-on capture, or voice recognition code. It made no recordings, created no family voice data, and passed no hardware gate. Code review baseline: AIOS main `876eeaaf7697cf4a3847e0687430c536f4a1d9a7`. External versions, licenses, and model cards were checked on 2026-10-29; sources are in §15.
 
 Entry points are the [document index](README.en.md) and [current implementation status](Current_Implementation_Status.en.md). This plan extends [14 Family recognition and named greetings](14_Family_Recognition_and_Greeting_Plan_2026-10.en.md), [ADR-0001](adr/ADR-0001-local-family-recognition.en.md), [15 Companion Mode](15_Companion_Mode_Spec_2026-10-24.en.md), and [16 Family memory layer](16_Nous_Memory_Layer_Design_2026-10-26.en.md). It does not replace them.
 
@@ -17,8 +17,8 @@ George stated four requirements on 2026-10-29. The table summarizes this documen
 | Requirement | Answer in this document |
 |---|---|
 | Wake word: list candidates before deciding | Do not use “Nous” alone. Recommend 「哈囉努斯」 (“Hello Nous”) first and 「嘿努斯」 (“Hey Nous” in Mandarin) second. Decide from WK-00 living-room measurements of false accepts and false rejects (§3) |
-| Always-on listening: switchable, local detection, red lines unchanged | Off by default. When on, microphone audio enters only a 2-second in-memory ring buffer and a local detector. Unwoken audio is never written to disk, never enters traces, and never leaves the device. The App shows its own capture indicator, and the state comes from device events (§5). After a wake, a local earcon plays before the call opens, and the call ends automatically without speech, because a false wake opens a paid call and sends living-room audio to the cloud (§5.7) |
-| Voice recognition: names, cross-check with face, convenience limits, link memory | Enroll in the “Family recognition…” screen. Voice and face bind to the same `person_id`. Only face-voice agreement counts as confident; on disagreement, use no name. Command limits are convenience only and **not security authorization**, and apply only when a minor is enrolled (§8). Memory is read and written only after the core selects a person; identity only proposes a candidate (§6–§9) |
+| Always-on listening: switchable, local detection, red lines unchanged | Off by default. When on, microphone audio enters only a 2-second in-memory ring buffer and a local detector. Unwoken audio is never written to disk, never enters traces, and never leaves the device. The App shows its own capture indicator, and the state comes from device events (§5). With the preference on, listening resumes automatically after the App reopens and after sleep or lock, with a resume notice (§5.8). After a wake, a local earcon plays before the call opens, and the call ends automatically without speech, because a false wake opens a paid call and sends living-room audio to the cloud (§5.7) |
+| Voice recognition: names, cross-check with face, convenience limits, link memory | Enroll in the “Family recognition…” screen. Voice and face bind to the same `person_id`. Only face-voice agreement counts as confident; on disagreement, use no name. Command limits are convenience only and **not security authorization**, and apply only when a minor is enrolled (§8). Memory is read and written only after the core selects a person; identity only proposes a candidate (§6–§9). Voice-only enrollment is allowed; after threshold calibration, a wake can produce a named greeting from voice alone, and before calibration the greeting carries no name (§4.4) |
 | Wake and voice share audio and integrate with existing routes | The wake-word audio also feeds voice recognition. Speech after the wake word adds local evidence. Wake becomes a third interaction start source and reuses both live voice routes and the greeting decision; `AudioFrontEnd` is the only microphone owner (§4, §10) |
 
 State the memory dependency chain first: MEM-1 in [16 §11](16_Nous_Memory_Layer_Design_2026-10-26.en.md#11-分批實作與放行) covers only ordinary text chat. Memory for ChatGPT plan (live) voice waits for MEM-2, and memory for API key voice waits for MEM-3. When this plan's SP-02 ships, it provides **only the person-candidate interface**; no voice route reads or writes memory early (§9, §13.4).
@@ -95,7 +95,7 @@ Recommend 「哈囉努斯」 first and 「嘿努斯」 second. Add the English a
 2. 「努斯」 is rare in Mandarin and avoids the near-homophone with English “news”; “Nous” alone cannot avoid it.
 3. sherpa-onnx open-vocabulary KWS needs no recordings or training, so WK-00 can test two or three candidates at once and decide from data.
 
-George makes the final choice (§14 ①). The basis is WK-00's false accepts per hour with the TV on and the success rate over 30 family wake attempts, not the unit counts in this table.
+On 2026-10-29 George chose 「哈囉努斯」 (§14 ①). WK-00 still measures false accepts per hour with the TV on and the success rate over 30 family wake attempts; if the data is clearly poor, report back to George instead of changing the word unilaterally.
 
 <a id="4-喚醒音色臉與語音路徑的時序"></a>
 ## 4. Timing of wake, voice, face, and voice routes
@@ -126,7 +126,7 @@ sequenceDiagram
     end
     V->>C: ready + 600 ms
     C->>C: fuse face + voice -> GreetingDecision
-    C-->>V: greeting text (name only if confirmed)
+    C-->>V: greeting text (name only per fusion rules and calibration)
     C->>V: end call if no near-field speech within N s
     Note over R,K: KWS paused while session is active
 ```
@@ -143,21 +143,37 @@ sequenceDiagram
 
 The wake word lasts about 0.6–1.2 seconds (estimated from syllable count and speech rate; WK-00 measures the actual length). Speaker verification error rises sharply on short speech. Table 3 of a July 2026 arXiv paper ([Kang et al., arXiv:2609.25007](https://arxiv.org/abs/2609.25007)) lists VoxCeleb1-O results: the WavLM + ECAPA-TDNN baseline (pre-trained and fine-tuned on 3-second segments, with large-margin fine-tuning on 6-second segments; training data is the VoxCeleb2 development set) has 2.393% EER on 3-second test segments, rising to 18.437% on 1-second segments. The same architecture trained on 1-second segments drops to 10.346%, and the authors' VAM-ECAPA reaches 8.334%.
 
-Limits of these numbers: the model is WavLM + ECAPA, not the CAM++ this plan recommends; the data is English celebrity interviews; it is not a home microphone. They cannot represent CAM++ in this home. They only show that “a 1-second wake segment alone should not produce a name”.
+Limits of these numbers: the model is WavLM + ECAPA, not the CAM++ this plan recommends; the data is English celebrity interviews; it is not a home microphone. They cannot represent CAM++ in this home. They only show that “a 1-second wake segment alone, without calibration in this home, should not produce a name”.
 
 The plan therefore uses two kinds of evidence:
 
-- **Wake segment (about 1 second)**: available before the greeting decision, but treated only as weak evidence. Alone, it never produces a name (§7.2).
+- **Wake segment (about 1 second)**: available before the greeting decision. It is compared text-dependently against the enrolled wake-word samples only; until `calibrated_keyword` is done, it is weak evidence and alone never produces a name (§4.4, §7.2).
 - **Post-wake speech (2–3 seconds or more accumulated)**: for example, 「幫我想晚餐」 (“help me plan dinner”) in 「哈囉努斯，幫我想晚餐」. This evidence usually becomes sufficient after the greeting decision. It feeds revocation checks and convenience limits, not a late name (as in 14 §3: “if the model recognizes only after the generic greeting, do not add the name this time”).
 
 <a id="43-喚醒後同一口氣說的話"></a>
 ### 4.3 Speech said in the same breath as the wake word
 
-Users often say 「哈囉努斯，開燈」 (“Hello Nous, turn on the light”). Both live voice routes use a live WebRTC audio track, so audio before the connection completes cannot naturally enter the call. First version (the recommended default for §14 ⑦):
+Users often say 「哈囉努斯，開燈」 (“Hello Nous, turn on the light”). Both live voice routes use a live WebRTC audio track, so audio before the connection completes cannot naturally enter the call. First version (decided in §14 ⑦):
 
 - Speech between the wake and connection completion stays only in local memory for VAD and voice recognition. It is **not sent to the cloud** and is dropped when the connection completes or times out (8-second limit).
 - After the greeting, the user repeats the request. On a slow connection, the existing subtitles show “connecting”.
-- Forwarding that speech to the cloud (for example by appending audio through Realtime events) widens what leaves the device. WK-00 must confirm the API is feasible, and George decides.
+- On 2026-10-29 George decided not to forward it to the cloud (§14 ⑦). Forwarding later (for example by appending audio through Realtime events) would widen what leaves the device and needs a separate decision.
+
+<a id="44-以聲音認人並稱名問候"></a>
+### 4.4 Identify by voice and greet by name
+
+On 2026-10-29 George asked that once a voice is recognized, Nous greets the person by name (face-based naming already has code in ID-02). The design reuses ID-02 instead of building a second mechanism:
+
+- **Same decision and sentences**: the same `GreetingDecision`, the same fixed sentence list (`GREETING_TEMPLATES` in `shared/sense.ts`), the same `speakableName` name check, the same one-time cloud naming notice (no name until it has been seen, reason `notice_unseen`), and the “Use recognized family names in greetings” setting (when off, never a name).
+- **Only core-issued interaction IDs**: `greeting` accepts only an interaction ID the core issued for `wake_word`, bound to a voice session that is actually connected, within 20 seconds of connecting (following ID-02's `claimGreeting`, §11.2).
+- **Decision time unchanged**: still voice readiness + 600 ms. The core uses only the voice evidence that “already exists” at that moment: the wake-word segment, plus any local-only speech the user happens to say during the earcon and connection. **It never delays the greeting to wait for more speech**; with insufficient evidence it says a sentence without a name, and a later recognition never adds the name (as in 14 §3 and ID-02).
+- **Why not wait for the first seconds of call speech**: by §4.2's reference numbers, text-independent EER on 1-second segments is 10.346%–18.437%, and reliable naming usually needs 2–3 seconds of speech or more. But under §14 ⑦ the user usually states the request only after hearing the greeting, so waiting for speech would delay the greeting and often never get enough. The first version therefore uses only existing evidence and drops the name when it is not enough.
+- **Making the wake segment more useful**: the wake word is fixed text. Enrollment records the wake word 5 times (§11.3) and stores them as text-dependent matching templates; the wake segment is compared only with these templates, not with the read sentences. Text-dependent matching is usually more accurate than text-independent matching of the same length, but the numbers for this home are unknown and §4.2's paper figures do not apply; only SP-03 can measure them with family holdout samples.
+- **Calibration per segment type**: `calibrated_keyword` (wake segment, text-dependent) and `calibrated_utterance` (speech of 2 seconds or more) are tracked separately. With voice only, a name is allowed only after the matching segment type is calibrated; before that, the greeting is a sentence without a name, such as 「我在」 (“I'm here”) or 「嗨，我在」 (“Hi, I'm here”). SP-03's release condition is S7's 0 wrong names in 100 (an MVP threshold, not a claim of zero general error), with the false-reject rate reported separately; if it is not met, naming stays off, and the threshold is never lowered to make the numbers work.
+- **With a face**: when both face and voice exist, follow §7.3 fusion; no name when they disagree.
+- **Switch relationship**: the wake segment and pre-connection speech belong to the wake itself and depend on “Always-on wake listening” and whether the person enrolled a voice. “Recognize speaker during calls” (off by default, §14 ⑧) governs only per-utterance checks after connection and does not affect the named greeting at wake.
+- **Disclosure**: where names go in the cloud is the same as ADR-0001 §2.4. The naming notice gains a line saying recognition “may also be by voice”, within ADR-0003's scope (§11.2).
+- **Expected experience**: before calibration, every wake hears a sentence without a name; after calibration, sufficient evidence yields for example 「嗨，George」 (“Hi, George”), and otherwise still 「我在」.
 
 <a id="5-常駐聆聽的隱私與耗電設計"></a>
 ## 5. Privacy and power design for always-on listening
@@ -170,13 +186,13 @@ Preferences and actual state are stored separately, as in [15 §2.2](15_Companio
 | State | Meaning | When entered |
 |---|---|---|
 | `off` | Preference off; microphone not opened | Fresh install, unreadable or invalid settings (fail-closed) |
-| `armed` | Preference on, microphone not yet acquired | After cold start, after returning from sleep or lock, permission pending |
+| `armed` | Preference on, acquiring the microphone, no track `live` yet | Entered automatically when the App starts or returns from sleep / lock; while permission is pending |
 | `listening_local` | Source track is `live` and KWS is running locally | After the track `live` event and the AudioWorklet starts processing |
 | `in_call` | The source track is leased to live voice; KWS paused | When live voice leases the microphone from `AudioFrontEnd` |
 | `released` | `AudioFrontEnd` stopped the source track for a mode that opens its own capture | When Web Speech push-to-talk or continuous voice mode starts |
 | `error` | Permission denied, device removed, model hash mismatch | The corresponding error event |
 
-The interface shows “listening for the wake word” only in `listening_local`. A checked box, a settings file, or a mode name never stands in for a device event. A cold start enters only `armed`, and the user presses “Start listening” once to open the microphone (the recommended default for §14 ③).
+The interface shows “listening for the wake word” only in `listening_local`. A checked box, a settings file, or a mode name never stands in for a device event. George decided on 2026-10-29 (§14 ③, different from the original recommended default): with the preference on, always-on listening resumes automatically after the App reopens, and consistently after sleep or screen lock as well. Resuming enters `armed` first and moves to `listening_local`, showing listening, only after a track `live` event; denied permission or a missing device enters `error` and is reported honestly. See §5.8 for the resume notice and privacy mitigations.
 
 <a id="52-音訊只在記憶體"></a>
 ### 5.2 Audio stays in memory
@@ -195,7 +211,7 @@ Why 2 seconds: the buffer must cover a wake word of up to about 1.2 seconds plus
 ### 5.3 Prevent self-triggering and microphone contention
 
 - KWS pauses during live voice (`in_call`). After the call ends, it returns to `listening_local` if the preference is still on, within the same run, and device events confirm the source track is still `live`.
-- **This rule deliberately differs from [15 §3.1](15_Companion_Mode_Spec_2026-10-24.en.md#31-事件與所有權)**: Companion does not resume capture automatically after another voice mode ends, because Companion sends gated content to a model. Always-on wake detects only locally, and the user turns it on precisely to stay wakeable between calls. 15 now carries a cross-reference. If the user turns the preference off during a call, it does not resume afterwards.
+- **This rule deliberately differs from [15 §3.1](15_Companion_Mode_Spec_2026-10-24.en.md#31-事件與所有權)**: Companion does not resume capture automatically after another voice mode ends, and a cold start enters only `armed` (15 §2.2), because Companion sends gated content to a model. Always-on wake detects only locally, the user turns it on precisely to stay wakeable between calls, and George decided on 2026-10-29 that it also resumes automatically after the App reopens and after sleep (§5.8). 15 now carries a cross-reference. If the user turns the preference off during a call, it does not resume afterwards.
 - After a Web Speech mode ends (`released`), reacquiring the microphone means restarting capture: within the same run it may reopen automatically, but it shows listening only after a track `live` event.
 - KWS pauses during Nous playback and for 1.5 seconds after it ends. 1.5 seconds is a starting point; WK-01 adjusts it from measured echo.
 - No second trigger fires within 3 seconds of a wake, so one wake cannot open two calls.
@@ -213,8 +229,8 @@ Why 2 seconds: the buffer must cover a wake word of up to about 1.2 seconds plus
 ### 5.5 How to turn it off
 
 - The menu bar checkbox “Always-on wake listening”: turning it off synchronously stops the `AudioFrontEnd` source track (during a call, it stops when the call ends and does not resume), clears the ring buffer, and ends the KWS and voice workers, then saves the preference. If saving fails, capture still stops first and the save failure is shown.
-- The “Pause listening” shortcut stops only the current run and leaves the preference unchanged.
-- System sleep, screen lock, logout, microphone removal, or permission revocation always stop capture. After sleep or lock, return only to `armed` and wait for the user to press “Start listening”; removal and revocation enter `error`. Nothing reopens silently.
+- The “Pause listening” shortcut stops only until the current run ends and leaves the preference unchanged. While paused, returning from sleep or lock does not resume; reopening the App does resume, and the subtitle says so. To stop for good, turn off the menu bar switch.
+- System sleep, screen lock, logout, microphone removal, or permission revocation always stop capture. After sleep or lock, listening resumes automatically per §14 ③ (first `armed`, listening shown only after a track `live` event, with a resume notice, §5.8); removal and revocation enter `error`, with no automatic switch to another microphone and no repeated background retries.
 - Saying “stop listening” is handled by the existing voice flow only during a call. The wake detector recognizes only the wake word, so speech cannot be the only way to turn it off.
 
 <a id="56-耗電與-cpu"></a>
@@ -236,6 +252,22 @@ A false wake (for example, the TV saying a similar phrase) is not harmless: it *
 2. **End automatically without speech**: after the call is ready, if local VAD detects no near-field speech within N seconds, end the call automatically and return to listening. N starts at 5 seconds; WK-01 adjusts it to the family's actual reaction time. TV dialogue is also speech, so this rule can only shorten, not eliminate, what a false wake sends out.
 3. **Cost record**: every `wake_word` call goes into the cost record of [13 F6](13_Feature_Expansion_Assessment_2026-10-24.en.md#f6單一收音者可分辨的停止與費用紀錄): route, connected seconds, whether it ended automatically for “no speech”, and usage received. Without unit prices or account usage evidence, mark the cost “unknown” and never extrapolate a definite bill.
 4. **Rate limit**: at most 3 `wake_word` calls per minute (the same as ADR-0001's `greeting` limit). Beyond that, pause listening and show the reason, preventing false-wake loops or page scripts repeatedly opening calls (§11.2).
+
+<a id="58-自動恢復與啟動提示"></a>
+### 5.8 Automatic resume and the resume notice
+
+George decided on 2026-10-29 that, with the preference on, always-on listening resumes automatically after the App reopens and after sleep or screen lock (§14 ③). The red lines and honesty rules do not change:
+
+1. **Trigger**: the preference is on and “Pause listening” was not used in this run; resume starts when the App launches or the system wakes / unlocks. This feature does not handle “open the App at macOS login”, which is a separate setting.
+2. **Device events decide**: `armed` → `getUserMedia` → track `live` and the AudioWorklet starts processing → `listening_local`. Only the last step shows “listening locally”.
+3. **Resume notice**: on each successful automatic resume, the main window shows a one-time subtitle 「已恢復常駐喚醒聆聽（只在本機偵測『哈囉努斯』）」 (“Always-on wake listening resumed (detecting 「哈囉努斯」 locally only)”) for about 5 seconds, and the menu bar state updates. The subtitle uses the existing subtitle component and the shared localization catalog. If the main window is not shown, the menu bar state is authoritative, and the subtitle appears once the next time the main window shows.
+4. **Report failures honestly**: denied microphone permission, a missing previously used microphone (different `deviceId`), or a model load or hash failure all enter `error`. The subtitle and menu bar state the reason, for example “Microphone permission denied; always-on listening is off” or “The previously used microphone was not found”, and offer the existing “Open system microphone settings” menu item. Never switch to another microphone, never show listening, never retry repeatedly in the background.
+5. **Privacy mitigations**: after a reopen, users may not remember that it is listening. Mitigations:
+   - The explanation shown when the switch is first turned on says “Listening resumes automatically after the App reopens and after sleep, until you turn this switch off.”
+   - Every resume shows the one-time subtitle and the menu bar state; the brain screen's minimal local-listening icon stays visible throughout `listening_local` (§5.4).
+   - “Pause listening” lasts only until the current run ends; stopping for good requires turning off the menu bar switch, and the screen says so honestly.
+   - Automatic resume does not change what leaves the device: unwoken audio still stays only in the 2-second ring buffer (§5.2), and false wakes still get §5.7's earcon, automatic end, cost record, and rate limit.
+   - macOS still manages microphone permission; revoking it in System Settings stops capture immediately.
 
 <a id="6-喚醒引擎比較與推薦"></a>
 ## 6. Wake engine comparison and recommendation
@@ -264,7 +296,7 @@ Record the license risk honestly. It is the same kind as the [pending SFace item
 - The `zh-en-3M-2025-12-20` documentation does not state its training data.
 - The English model was trained on GigaSpeech XL. The GigaSpeech repo is Apache-2.0, but the data terms sit behind an application form that could not be read for this review.
 
-Nous is currently a household prototype that is not sold. The recommended default is to **accept and record** this risk (§14 ②). If it is ever sold or distributed, re-evaluate or train KWS on clearly licensed data, at far higher cost than this plan's estimate.
+Nous is currently a household prototype that is not sold. On 2026-10-29 George decided to **accept and record** this risk (§14 ②). If it is ever sold or distributed, re-evaluate or train KWS on clearly licensed data, at far higher cost than this plan's estimate.
 
 Version pinning: 2.0.0 and 2.0.1 are new major versions released within a week before this review. WK-00 compares 1.13.8 with 2.0.x and pins an exact version, not a range.
 
@@ -295,13 +327,13 @@ Reuse the state names from [ADR-0001](adr/ADR-0001-local-family-recognition.en.m
 
 - `VoiceObservation.state`: `matched` (carries `person_id`), `unknown`, `ambiguous`, `unavailable`.
 - Reasons for `unavailable`: `no_enrollment`, `too_short` (not enough valid speech), `noisy`, `model_unavailable`, `paused`, `switch_off` (“Recognize speaker during calls” is off).
-- Each observation carries `wake_id` (this wake), `segment` (`keyword` or `utterance`), valid speech milliseconds, `model_id`, `gallery_version`, and `calibrated: false`.
-- Evidence rules (starting point, calibrated in SP-03): a voice `matched` needs a top score ≥ `match` and a lead over second place ≥ `margin`; `segment=keyword` alone is not enough for a name; if two segments point to different people, the whole wake is `ambiguous`. Responses contain no scores; logs contain no `person_id`, name, or score.
+- Each observation carries `wake_id` (this wake), `segment` (`keyword` or `utterance`), valid speech milliseconds, `model_id`, `gallery_version`, and per-segment calibration states `calibrated_keyword` and `calibrated_utterance` (both false until SP-03 completes).
+- Evidence rules (starting point, calibrated in SP-03): a voice `matched` needs a top score ≥ `match` and a lead over second place ≥ `margin`; `segment=keyword` is compared text-dependently only against the enrolled wake-word templates, and alone is not enough for a name while `calibrated_keyword` is false; if two segments point to different people, the whole wake is `ambiguous`. Responses contain no scores; logs contain no `person_id`, name, or score.
 
-Two separate switches (§14 ⑧):
+Two separate switches (decided in §14 ⑧; “Recognize speaker during calls” is off by default):
 
 - “Always-on wake listening”: controls whether the microphone stays open for local wake detection.
-- “Recognize speaker during calls”: controls whether, during an already-woken call, a branch of the same stream feeds per-utterance voice recognition. When off, voice is always `unavailable` (`switch_off`), and fusion falls back to face only (ID-02 behavior). Look-to-talk also follows this switch.
+- “Recognize speaker during calls”: controls whether, during an already-woken call, a branch of the same stream feeds per-utterance voice recognition. When off, post-connection voice is always `unavailable` (`switch_off`), and fusion falls back to face only (ID-02 behavior). Look-to-talk also follows this switch. The wake segment and pre-connection speech are not affected by this switch (§4.4).
 
 <a id="73-臉聲融合規則"></a>
 ### 7.3 Face-voice fusion rules
@@ -316,14 +348,15 @@ The core fuses at the greeting decision and at the end of each user utterance. F
 | matched P | unavailable (for example, no speech yet, switch off) | `face_only(P)` | Per current ID-02 rules | P, needs confirmation | Per P's `minor` |
 | Multiple faces | matched P | `voice_multi(P)` | No name | **None** (as in 14 §3 and 16 §4: no person selection with several people in view) | Per voice P's `minor` |
 | unknown (stranger's face seen) | matched P | `conflict` (speaker may be off camera) | No name | **None** | Unknown |
-| No face data (camera off, not facing) | matched P (including utterance segment) | `voice_only(P)` | No name before calibration (§14 ④) | P, needs confirmation | Per P's `minor` |
-| No face data | matched P (keyword segment only) | `voice_weak(P)` | No name | None | Unknown |
+| No face data (camera off, not facing) | matched P (including utterance segment) | `voice_only(P)` | Yes only when `calibrated_utterance` is true; no name before (§4.4, §14 ④) | P, needs confirmation | Per P's `minor` |
+| No face data | matched P (keyword segment only) | `voice_weak(P)` | Yes only when `calibrated_keyword` is true; no name before (§4.4, §14 ④) | After calibration P, needs confirmation; before calibration none | After calibration per P's `minor`; before calibration unknown |
 | Any | unknown / ambiguous / unavailable, and face is not matched either | `none` | No name | None | Unknown |
 
 Two notes:
 
 - “matched P + unavailable” keeps existing ID-02 behavior, so adding voice never makes look-to-talk worse. This row differs from “matched P + unknown”: the former has no voice evidence; the latter has voice that does not support P, so it gets no name.
 - A fusion result is valid only for the current interaction. A person change, multiple faces, a broken track, the end of the interaction, or deleting the person invalidates it (as in 14 §3).
+- Naming from voice alone is George's 2026-10-29 decision (§14 ④), conditional on the matching segment type being calibrated; with multiple faces, a stranger's face, or face-voice disagreement there is still no name.
 
 <a id="74-防重播與防模仿的現況"></a>
 ### 7.4 State of replay and imitation defense
@@ -343,7 +376,7 @@ George asks, for example, that “only adults can control the air conditioner”
 - The limit can only make Nous **do less** (decline or ask an adult to confirm). It can never make Nous **do more** than an action normally allows because it recognized an adult.
 - Sending, publishing, paying, permanent deletion, and H2 device policy for appliances still go through the existing Action Gate and explicit confirmation.
 
-When it applies and defaults (the recommended default for §14 ⑥):
+When it applies and defaults (decided by George on 2026-10-29, §14 ⑥):
 
 - **It applies only when the gallery has at least one family member with `minor = true`**. Without an enrolled minor, the whole rule is off, and H1b air conditioning keeps today's direct-send behavior.
 - Default is **relaxed mode**: decline only when “a minor is recognized and no modality points to an adult”; otherwise follow the existing policy. **Strict mode** must be turned on explicitly by George in settings.
@@ -379,7 +412,7 @@ Dependency chain: MEM-1 in 16 §11 covers only ordinary text chat; live voice me
 
 | Fusion result | Memory read | Memory write |
 |---|---|---|
-| `confirmed(P)` | Ask a short confirmation 「這次用 George 的偏好？」 (“Use George's preferences this time?”); after confirmation, read P + household. Keep the confirmation (the recommended default for §14 ⑤) | After P is selected, write to P only on an explicit “remember” |
+| `confirmed(P)` | Ask a short confirmation 「這次用 George 的偏好？」 (“Use George's preferences this time?”); after confirmation, read P + household. Keep the confirmation (decided in §14 ⑤) | After P is selected, write to P only on an explicit “remember” |
 | `face_only(P)`, `voice_only(P)` | Same as above; confirmation is always required | Write only after selection |
 | `conflict`, `voice_multi`, `voice_weak`, `none` | Read household data only | No personal writes. When the user says “remember…”, ask “Under whose name, or for the whole household?”, selected through the trusted main window or “I am George” (16 §4) |
 
@@ -411,9 +444,9 @@ Consistent with ADR-0001's deletion and key rotation:
 
 1. Deleting a person in the “Family recognition…” screen, after native confirmation, removes the person's face and voice features from the encrypted gallery, rotates the data key, and increments `gallery_version` and the key generation.
 2. Deleting only the voice while keeping the face uses the same removal + rotation.
-3. The same native confirmation offers an explicit option “Also delete this person's memory (N entries)”, showing the count. Recommended default: unchecked for adults; checked for minors or members marked as “moved out” (§14 ⑨). Unchecked, deletion only removes the link between `person_id` and `ProfileId` and revokes active person sessions, without silently deleting memory (16 §8); checked, it runs 16's “delete the whole person's memory”.
+3. The same native confirmation offers an explicit option “Also delete this person's memory (N entries)”, showing the count. Default (decided in §14 ⑨): unchecked for adults; checked for minors or members marked as “moved out”. Unchecked, deletion only removes the link between `person_id` and `ProfileId` and revokes active person sessions, without silently deleting memory (16 §8); checked, it runs 16's “delete the whole person's memory”.
 4. A memory profile that has lost its link stays visible in the memory management screen, labeled “no linked family recognition data”, and can be viewed, exported, or deleted.
-5. Re-enrolling the same name does not automatically reconnect the old memory profile (16 §8, M16). To reconnect, after enrollment choose “Link to existing person” in the memory management screen, which lists unlinked profiles; the link is created only after native confirmation. This relink flow is a proposed addition to 16 and awaits George's decision (§14 ⑨).
+5. Re-enrolling the same name does not automatically reconnect the old memory profile (16 §8, M16). To reconnect, after enrollment choose “Link to existing person” in the memory management screen, which lists unlinked profiles; the link is created only after native confirmation. This relink flow is a proposed addition to 16, to be confirmed together with 16 during MEM-1 design.
 6. After deletion, late voice features are dropped because `gallery_version` no longer matches.
 
 <a id="95-未成年家人"></a>
@@ -506,7 +539,7 @@ The ADR-0003 draft (delivered in WK-00) must include:
    - A page script can compute voice features from a recording and submit them to `voice_probe`, adding one more input to the same class of name leak; the rate limits and “greeting returns only the assembled sentence” stay unchanged.
    - A new class of risk: code in the renderer can open paid calls repeatedly with fake wakes. Rate limits, visible indicators, and the cost record control it but cannot eliminate it.
    - While the always-on microphone is open, any code in the renderer could in principle read `AudioFrontEnd` audio. This matches today's `media` permission for pages at the core URL, but the exposure grows from “during calls” to “all the time it is on”. Generated UI still must not touch the preload API, core HTTP, or audio modules (CLAUDE.md red line), checked statically by `tests/audio-privacy.test.ts`.
-4. Gallery v2 format, migration, deletion, and rotation rules; whether voice-only family members may enroll (§14 ④).
+4. Gallery v2 format, migration, deletion, and rotation rules; voice-only family members are allowed (decided in §14 ④); storage of the text-dependent wake-word templates and the two calibration states; adding “may also be by voice” to ADR-0001 §2.4's naming notice.
 5. The license review table and pending risks for the wake engine and the speaker model (§14 ②).
 
 <a id="113-註冊-ux"></a>
@@ -515,9 +548,9 @@ The ADR-0003 draft (delivered in WK-00) must include:
 Reuse the ID-01 entry point and protections; add no persistent screen:
 
 1. The menu bar “Camera and voice settings → Family recognition…” opens the screen (a management session opens only within 10 seconds of the click, as in ADR-0001 §2.1.1); `visibility_reason` is `user_request`.
-2. Each family member's row gains “Add voice”. The recommended default allows voice-only family members (§14 ④): a new person can be added without enrolling a face first.
+2. Each family member's row gains “Add voice”. George decided to allow voice-only family members (§14 ④): a new person can be added without enrolling a face first.
 3. A native confirmation dialog (`dialog.showMessageBox`) shows the consent text: voice features are stored encrypted on this Mac; voices can be recorded or imitated and are used only for names, personalization, and convenience limits, **not security verification**; they can be deleted at any time. Minors need the parent's checkbox. Recording starts only when it returns true.
-4. Recording prompts: the wake word 5 times + 3 short sentences read aloud, about 20–30 seconds of valid speech in total. This is a starting point: sherpa-onnx's Node example uses 3 enrollment files per person, and this plan adds wake words so enrollment resembles the short segments used in practice. SP-03 adjusts from calibration results.
+4. Recording prompts: the wake word 5 times + 3 short sentences read aloud, about 20–30 seconds of valid speech in total. This is a starting point: sherpa-onnx's Node example uses 3 enrollment files per person, and this plan adds wake words so enrollment resembles the short segments used in practice; these 5 wake-word recordings are also stored as text-dependent matching templates (§4.4). SP-03 adjusts from calibration results.
 5. The screen shows live quality (volume, noise, valid speech seconds). On insufficient quality, re-record; never save low-quality samples.
 6. After recording, show “Voice added” and the microphone name used. If the microphone later changes (for example Mac built-in to XVF3800), suggest that re-enrollment may be needed.
 
@@ -529,11 +562,11 @@ These are proposals that extend the existing prototype, without rewriting the co
 | File / module | Planned responsibility |
 |---|---|
 | `shared/wake.ts`, new | Wake preferences, both switches, states (§5.1), `WakeEvent` type |
-| `shared/identity.ts` | `VoiceObservation`, fusion result, source field on `GreetingDecision` |
+| `shared/identity.ts` | `VoiceObservation`, fusion result, source field on `GreetingDecision` (face, voice, or both), `calibrated_keyword` / `calibrated_utterance` |
 | `src/audio/front-end.ts`, new | The single `getUserMedia`, `lease()`, AudioWorklet, 2-second ring buffer, consumer registration, release and resume |
 | `src/realtime.ts` (`browserRealtimeDeps().getMicrophone`, line 548), `src/main.ts` (line 258) | Lease from `AudioFrontEnd` instead; callers at `src/realtime.ts:185` and `src/live-voice.ts:155` stay unchanged |
 | `src/audio/kws-worker.ts`, `speaker-worker.ts`, new | wasm inference; output only events and feature vectors; no network or local storage |
-| `src/main.ts`, `src/realtime-session.ts` | Local earcon, `startRealtime("wake_word")`, interaction binding, pause KWS during calls, end automatically without speech |
+| `src/main.ts`, `src/realtime-session.ts` | Automatic resume and the one-time resume subtitle, local earcon, `startRealtime("wake_word")`, interaction binding, pause KWS during calls, end automatically without speech |
 | `server/realtime-routes.ts` | Add `wake_word` to `RealtimeStartSource` and issue interaction IDs for it; rate-limit `wake_word` per minute; let `claimGreeting` accept `wake_word` |
 | `server/identity-service.ts`, `identity-store.ts` | Voice gallery, matching, fusion, `voice_probe` rate limits, v2 format migration, deletion rotation |
 | `desktop/identity-ipc.mjs`, `preload.cjs` | Add voice enrollment, deletion, and `voice_probe` to the op allowlist; shape filtering |
@@ -556,7 +589,9 @@ These are proposals that extend the existing prototype, without rewriting the co
 |---|---|
 | Microphone permission denied or revoked | `error` with the reason; never show listening; text and button entry points work |
 | Microphone removed or device changed | Track `ended` → `error`; do not switch to another microphone automatically; ask the user |
-| System sleep, lock | Stop; on return, enter only `armed` and wait for the user to press “Start listening” (consistent with §5.5 and W10) |
+| System sleep, lock | Stop; on return, resume automatically: first `armed`, listening shown only after a track `live` event, with a resume notice (consistent with §5.5, §5.8, and W10); no resume while paused |
+| Microphone permission denied or previous microphone missing when the App reopens | `error`; the subtitle and menu bar state the reason and offer the System Settings entry; no switch to another microphone, no listening indicator |
+| Voice only, not yet calibrated | The greeting says a sentence without a name; the greeting is never delayed to wait for more speech |
 | TV says a similar phrase (false wake) | **Opens a paid live call and sends living-room audio (TV, other people's conversation) to the cloud** until the call ends. Buffers: the local earcon first, which the user can cancel; after the call is ready, end automatically if there is no near-field speech within N seconds (starting at 5); record it in the cost record; at most 3 per minute (§5.7). TV dialogue can defeat the automatic end; this is a residual risk |
 | Nous itself says 「努斯」 | KWS is paused during playback and 1.5 seconds after; no trigger |
 | Wake while live voice is already on | No second call; KWS is already paused in `in_call` |
@@ -578,7 +613,7 @@ These are proposals that extend the existing prototype, without rewriting the co
 | ID | Required observation |
 |---|---|
 | W1 | With the preference off, the microphone never opens (system and App indicators, track count) |
-| W2 | After turning on, “listening locally” appears only after a track `live` event; never on permission denial |
+| W2 | After turning on or automatic resume, “listening locally” appears only after a track `live` event; never on denied permission or a missing device, and the reason is stated honestly |
 | W3 | File and packet checks: for unwoken audio, zero disk writes, zero trace entries, zero audio over IPC (IPC carries only events and feature vectors), and zero network requests (5 minutes unwoken with zero inference API requests, as in 07 §6.4) |
 | W4 | Wake feedback p95 ≤ 300 ms (07 §6.4: from detector event to Shell showing listening), at least 30 trials, reporting p50 / p95 / max; also record the time from earcon end to call ready |
 | W5 | 30 wake attempts per family member (quiet and TV-on sets), success rates reported separately; initial target ≥ 95%, referencing openWakeWord's < 5% false-reject target |
@@ -586,12 +621,12 @@ These are proposals that extend the existing prototype, without rewriting the co
 | W7 | Nous playback of a sentence containing the wake word causes zero self-triggers |
 | W8 | Only one source track during live voice (the lease is a clone); zero double capture while Web Speech or Companion is on; resume per §5.3 afterwards |
 | W9 | Turning the switch off stops the source track within 1 second and clears the ring buffer |
-| W10 | After sleep or lock, return only to `armed`; after microphone removal, enter `error`; nothing reopens silently |
+| W10 | With the preference on, listening resumes automatically after the App reopens and after sleep or lock, each time with a one-time resume subtitle and menu bar state; no resume while paused; after microphone removal, enter `error` with no switch to another microphone |
 | W11 | With camera and KWS running together, CPU and the 80 ms sensing loop meet §5.6's release condition, and palm stop still works |
 | W12 | Both voice routes start with `wake_word`, and each audibly delivers the earcon and greeting; on fallback, at most one greeting per interaction; without speech, the call ends automatically within N seconds |
 
-<a id="133-音色驗收-s1s12"></a>
-### 13.3 Voice acceptance S1–S12
+<a id="133-音色驗收-s1s13"></a>
+### 13.3 Voice acceptance S1–S13
 
 | ID | Required observation |
 |---|---|
@@ -600,15 +635,16 @@ These are proposals that extend the existing prototype, without rewriting the co
 | S3 | After deleting a voice or a whole person, restarting, or rebuilding workers, the person can no longer be matched; the key generation increments |
 | S4 | The memory option on deletion follows its default and shows the count; unchecked, only the link is removed and the unlinked profile is visible in memory management; re-enrolling the same name does not reconnect old memory automatically |
 | S5 | `confirmed` only when face and voice agree; zero names and zero memory candidates in every `conflict` and `voice_multi` case |
-| S6 | Zero names from the wake segment alone |
+| S6 | Zero names from the wake segment alone while `calibrated_keyword` is false; zero names from voice alone while `calibrated_utterance` is false |
 | S7 | Family holdout samples: false-reject, false-accept, and `conflict` rates reported separately; initial target is 0 wrong names in 100 attempts by strangers or other family members. This is only an MVP threshold and does not mean a general error rate of zero |
 | S8 | A speaker change during speech revokes the person session; nothing is written under the original person; `voice_probe` responses contain no result and are rejected beyond the rate limit; an interaction ID made up by the page gets no name |
 | S9 | Without an enrolled minor, air-conditioner behavior is the same as today; with an enrolled minor who is recognized, an air-conditioner command is declined and zero commands are sent; in relaxed mode an unknown identity proceeds as usual |
 | S10 | Replay test results are recorded honestly; regardless of the result, external side effects still show a confirmation |
 | S11 | Logs, traces, SSE, and validation evidence contain no `person_id`, name, or score |
-| S12 | Score distributions for 1-, 2-, and 3-second segments and for different microphones are reported as the basis for thresholds; `calibrated` stays false until the report is complete |
+| S12 | Score distributions for the wake segment (text-dependent) and 1-, 2-, and 3-second speech on different microphones are reported as the basis for both thresholds; both calibration states stay false until the report is complete |
+| S13 | Voice-only named greeting (§4.4): after calibration, both voice routes audibly deliver a listed sentence with the name; with insufficient evidence, a sentence without a name; time from voice readiness to first audio is not later than with voice recognition off; late evidence never adds the name; no name under `notice_unseen` or with the naming setting off; an interaction ID made up by the page gets no name |
 
-Verify races and rules first with fake clocks, synthetic features, and fake detection events, permanently labeled as fixtures. Passing fixtures cannot replace hardware results for W4–W7, W11–W12, and S7–S12.
+Verify races and rules first with fake clocks, synthetic features, and fake detection events, permanently labeled as fixtures. Passing fixtures cannot replace hardware results for W4–W7, W11–W12, and S7–S13.
 
 <a id="134-交付批次與估時"></a>
 ### 13.4 Delivery batches and estimates
@@ -618,15 +654,15 @@ Engineering estimates assume one engineer familiar with the repo working with AI
 | Batch | Deliverable and release condition | Estimate |
 |---|---|---:|
 | WK-00 | Spike disconnected from the product: Node and wasm KWS with sherpa-onnx 1.13.8 and 2.0.x, both models, 2–3 candidate words; CPU, memory, actual wake-word length; false accepts per hour on TV negatives. Negatives are **counted only, not recorded**; the cost is that false accepts cannot be replayed for later analysis, only logged with the time and the program playing; ADR-0003 draft | 1.5–2.5 person-days |
-| WK-01 | `AudioFrontEnd` and `getMicrophone` changed to leasing, preferences and actual state, both menu bar switches and indicators, 2-second ring buffer, KWS worker, release and resume, self-trigger protection, local earcon, automatic end without speech, static audio privacy tests | 2–3 person-days |
+| WK-01 | `AudioFrontEnd` and `getMicrophone` changed to leasing, preferences and actual state, automatic resume after App reopen and sleep with a one-time resume subtitle, both menu bar switches and indicators, 2-second ring buffer, KWS worker, release and resume, self-trigger protection, local earcon, automatic end without speech, static audio privacy tests | 2.5–3.5 person-days |
 | WK-02 | `wake_word` start source and rate limit, `claimGreeting` extension, greeting and fallback on both voice routes, F6 cost record fields, shared interface for Companion `activation=wake`, rewritten `NSMicrophoneUsageDescription` | 1–2 person-days |
 | WK-03 | Mac hardware: W1–W12, including at least 8 hours of TV negatives and family wake tests | 2–3 person-days |
 | SP-00 | Speaker model spike: feature parity and latency for CAM++ and one backup in Node and the browser; the browser has no ready speaker API, so this includes a risk buffer for the `onnxruntime-web` + hand-written fbank fallback; 1–3 second score distributions (with volunteers or public test data) | 1.5–2.5 person-days |
 | SP-01 | “Add voice” enrollment, gallery v2 migration, encrypted storage, deletion and rotation, memory option on deletion, IPC allowlist and `voice_probe` rate limits; includes a risk buffer for wasm integration | 2.5–3.5 person-days |
-| SP-02 | Recognition from wake segment + utterance, face-voice fusion, greeting rules, convenience limits, **only the person-candidate interface** (memory reads and writes follow the MEM batches) | 2–3 person-days |
-| SP-03 | Family holdout samples, threshold calibration, cross-microphone tests, replay test, S1–S12 hardware acceptance | 2–3 person-days |
+| SP-02 | Recognition from wake segment (text-dependent templates) + utterance, face-voice fusion, the voice-based named greeting decision (reusing `GreetingDecision` and `claimGreeting`; always without a name before calibration, verified by fixtures), convenience limits, **only the person-candidate interface** (memory reads and writes follow the MEM batches) | 2.5–3.5 person-days |
+| SP-03 | Family holdout samples, calibration of both wake-segment and speech thresholds, cross-microphone tests, replay test; once targets are met, enable voice-only naming and test it on both voice routes; S1–S13 hardware acceptance | 2.5–4 person-days |
 
-Total: WK series 6.5–10.5 person-days, SP series 8–12 person-days, together 14.5–22.5 person-days, or 116–180 hours.
+Total: WK series 7–11 person-days, SP series 9–13.5 person-days, together 16–24.5 person-days, or 128–196 hours. That is 1.5–2 person-days more than the 14.5–22.5 person-days (116–180 hours) before George's decisions: WK-01 adds 0.5 for automatic resume and the resume notice, SP-02 adds 0.5 for the voice-based naming decision, and SP-03 adds 0.5–1 for the two calibrations and named-greeting tests. The voice-based named greeting gets no separate batch: the decision code sits in SP-02 (it never names before calibration), and naming is enabled in SP-03 once calibration targets are met.
 
 Dependency chain:
 
@@ -636,22 +672,22 @@ Dependency chain:
 
 Suggested order: WK-00 and SP-00 can run in parallel; then WK-01 → WK-02 → WK-03 and SP-01 → SP-02 → SP-03. The Claude core side owns all batches; ChatGPT / Codex can independently review timing and privacy tests.
 
-<a id="14-需-george-決定的事項"></a>
-## 14. Decisions needed from George
+<a id="14-george-的決定2026-10-29"></a>
+## 14. George's decisions (2026-10-29)
 
-Each item has a recommended default and the batch it blocks. If George does not respond, work proceeds with the recommended default.
+George decided the following nine items on 2026-10-29. Items ③ and ④ differ from the original recommended defaults; they are marked, and the whole document was revised to match.
 
-| # | Item | Recommended default | Blocks |
-|---|---|---|---|
-| ① | Wake word | 「哈囉努斯」; confirm how the family pronounces “Nous”; add the English alias “Hey Nous” only if needed; switch to 「嘿努斯」 if WK-00 data is poor | WK-01 (keyword file) |
-| ② | Model license risk (wake model and speaker model) | Accept and record: the sherpa-onnx KWS models (WenetSpeech terms contradict themselves; the Chinese-English model does not state its training data) and CAM++ zh-cn common (about 200k speakers of undisclosed data); backups are the 3D-Speaker dataset version or the WeSpeaker CN-Celeb version (inferred CC BY-SA by rule) | WK-01, SP-01 (product adoption; spikes can run first) |
-| ③ | Always-on behavior | Cold start does not resume automatically and enters only `armed`; returning from sleep or lock also enters only `armed`. The 2-second ring buffer is an engineering decision | WK-01 |
-| ④ | Voice only | Allow family members with voice only and no face; before calibration (SP-03), no name from voice alone | SP-01, SP-02 |
-| ⑤ | Memory without confirmation | Keep 16 §4's confirmation: even face-voice agreement needs one short confirmation | SP-02 candidate interface, MEM-1 |
-| ⑥ | Convenience limits | Air conditioner only; relaxed mode; active only when a minor is enrolled in the gallery | SP-02 |
-| ⑦ | Post-wake experience | Do not forward same-breath speech to the cloud; play a local earcon before opening the call | WK-02 |
-| ⑧ | Whether “Recognize speaker during calls” is a separate switch from always-on listening | Separate; off by default, with a recommendation to turn it on after SP-03 calibration | SP-02 |
-| ⑨ | Whether deleting a family member deletes memory by default | An explicit option showing the count; unchecked for adults, checked for minors or members who moved out; plus a confirmation flow to relink an existing memory profile (a proposed addition to 16) | SP-01 |
+| # | Item | Decision | Versus original recommended default | Affected batches |
+|---|---|---|---|---|
+| ① | Wake word | 「哈囉努斯」 | Same | WK-01 (keyword file) |
+| ② | Model training-data license risk (wake model and speaker model) | Accept and record: the sherpa-onnx KWS models (WenetSpeech terms contradict themselves; the Chinese-English model does not state its training data) and CAM++ zh-cn common (about 200k speakers of undisclosed data) | Same | WK-01, SP-01 |
+| ③ | Always-on behavior | **With the preference on, always-on listening resumes automatically after the App reopens**, and consistently after sleep or lock. On resume, capture indicators follow device events, a one-time resume notice appears, and failures are reported honestly (§5.1, §5.8). The 2-second ring buffer is an engineering decision | **Different**: the original default was that a cold start enters only `armed` | WK-01 |
+| ④ | Voice only | Voice-only enrollment without a face is allowed; no name before threshold calibration. **George also asked for a named greeting once a voice is recognized**: reuse ID-02's greeting mechanism; after calibration, voice alone can produce a name, and before calibration the greeting has no name (§4.4, §7.3) | **Different**: the original default said only “no name before calibration”, with no voice-based named greeting design | SP-01, SP-02, SP-03 |
+| ⑤ | Memory without confirmation | Keep one confirmation before writing personal memory (16 §4) | Same | SP-02 candidate interface, MEM-1 |
+| ⑥ | Convenience limits | Air conditioner only; relaxed mode; active only when a minor is enrolled | Same | SP-02 |
+| ⑦ | Post-wake experience | Play a local earcon first; do not forward speech said right after the wake word to the cloud | Same | WK-02 |
+| ⑧ | “Recognize speaker during calls” | Separate switch from always-on listening, off by default | Same | SP-02 |
+| ⑨ | Memory when deleting a family member | Adults: memory not deleted by default; minors or members who moved out: deleted by default; show the count before deletion | Same | SP-01 |
 
 Notice only (no decision needed): opening ADR-0003 is an engineering-process matter and is adopted directly (§11.2).
 
