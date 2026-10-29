@@ -44,6 +44,9 @@ await build({
 cpSync(join(desktop, "main.mjs"), join(out, "main.mjs"));
 cpSync(join(desktop, "settings-menu.mjs"), join(out, "settings-menu.mjs"));
 cpSync(join(desktop, "identity-ipc.mjs"), join(out, "identity-ipc.mjs"));
+cpSync(join(desktop, "trusted-sender.mjs"), join(out, "trusted-sender.mjs"));
+cpSync(join(desktop, "memory-ipc.mjs"), join(out, "memory-ipc.mjs"));
+cpSync(join(desktop, "memory-safe-storage.mjs"), join(out, "memory-safe-storage.mjs"));
 cpSync(join(desktop, "preload.cjs"), join(out, "preload.cjs"));
 cpSync(join(desktop, "assets"), join(out, "assets"), { recursive: true, filter: (p) => !p.includes(".iconset") });
 cpSync(join(shell, ".env.example"), join(out, "env.example"));

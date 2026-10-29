@@ -1,5 +1,8 @@
 import { localize, localizeSettings } from "./localization.ts";
-import { normalizeLocale } from "../shared/i18n.mjs";
+import { normalizeLocale, translate } from "../shared/i18n.mjs";
+import { BROWSER_MEMORY_STATUS, MEMORY_CLAIM, type MemorySettingsStatus } from "../shared/memory.ts";
+import type { ChatTarget } from "./memory/retrieve.ts";
+import type { MemoryContext } from "./memory/service.ts";
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
@@ -80,8 +83,16 @@ export interface AppOptions {
     select(provider: ExecutorMode): void;
   };
   auth: ChatGPTAuth;
-  /** 語音對話用的引擎（通常就是 ProviderManager）。 */
-  chat: ChatCapable;
+  /** 語音對話用的引擎（通常就是 ProviderManager）；chatTarget 是記憶同意用的「服務＋帳號」。 */
+  chat: ChatCapable & { chatTarget?(): ChatTarget | null };
+  /**
+   * 記憶層（MemoryService；只有 macOS App 注入）。/api/chat 帶 IPC 發的 memory_turn 時才檢索；settings 只放 {available, enabled}。
+   * 未提供（瀏覽器版）時回報不可用，一般聊天照舊。
+   */
+  memory?: {
+    settingsStatus(): MemorySettingsStatus;
+    withChat<T>(request: { nonce: unknown; requestId: string; lastUser: string; target: ChatTarget | null; historyLength?: number }, run: (ctx: MemoryContext) => Promise<T>): Promise<T>;
+  };
   /** 即時語音的 API key 路徑（OpenAI Realtime GA）；未提供時這條路徑不可用。 */
   realtime?: RealtimeBridge;
   /**
@@ -170,6 +181,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         seconds: describeMenuPrefs({ camera, voice, voiceWritable: !!options.voice, realtime: live }),
         camera_preview_disabled_reason: cameraPreviewDisabledReason(camera),
         identity: options.identity?.status() ?? BROWSER_IDENTITY_STATUS,
+        memory: options.memory?.settingsStatus() ?? BROWSER_MEMORY_STATUS,
       };
     },
     select: (provider: ExecutorMode) => options.settings.select(provider),
@@ -523,12 +535,19 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     }
   }
 
-  /** 語音對話：以 SSE 串流回覆文字；客戶端中斷（插話）時一併中止上游請求。 */
+  /**
+   * 語音對話：以 SSE 串流回覆文字；客戶端中斷（插話）時一併中止上游請求。
+   * 記憶（16 §7、§8）：帶 memory_turn 時由 MemoryService.withChat 驗證並檢索，整個串流包在它的 lease 裡；每個片段經 ctx.deliver
+   * 交付（撤銷後不再送），撤銷時送 memory_revoked 並中止上游。done 只附 memory_used 筆數，不附內容。
+   * 帶記憶的那一輪，或對話歷史裡有用過記憶的回答（ctx.blockDelegation，含語音來源與沒有 memory_turn 的請求）都不交辦：
+   * 模型的交辦改送 delegate_blocked，標題用使用者原句（不讓受記憶影響的改寫進明文任務）。
+   */
   async function streamChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const body = await readJson(req);
-    requestId(body);
+    const id = requestId(body);
     const messages = validateMessages(body.messages);
     if (!messages) throw new HttpError(400, "messages must be 1–40 user/assistant turns ending with user");
+    const locale = normalizeLocale(req.headers["x-nous-locale"]);
     res.writeHead(200, {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
@@ -539,25 +558,56 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (!res.writableEnded) controller.abort();
     });
     const send = (event: Record<string, unknown>) => res.write(`data: ${JSON.stringify(event)}\n\n`);
-    const filter = new DelegationFilter();
-    try {
+    const lastUser = messages[messages.length - 1]!.content;
+    let revoked = false;
+    const run = async (ctx: MemoryContext | null) => {
+      const filter = new DelegationFilter();
+      const used = ctx?.facts.length ?? 0;
+      const block = used > 0 || ctx?.blockDelegation === true;
+      const signal = ctx?.signal ? AbortSignal.any([controller.signal, ctx.signal]) : controller.signal;
+      ctx?.signal?.addEventListener("abort", () => {
+        if (revoked || controller.signal.aborted) return;
+        revoked = true;
+        send({ type: "memory_revoked", message: localize("記憶已撤銷（換人、更正、忘記或關閉記憶）；這次回覆已停止", locale) });
+      }, { once: true });
+      const deliver = (output: () => void) => (ctx ? ctx.deliver(output) : (output(), true));
+      let answer = "";
+      let blocked = false;
+      const emit = (text: string, delegates: string[]) => deliver(() => {
+        if (text) { answer += text; send({ type: "delta", text }); }
+        for (const title of delegates) {
+          if (block) {
+            if (!blocked) send({ type: "delegate_blocked", title: lastUser });
+            blocked = true;
+          } else send({ type: "delegate", title });
+        }
+      });
       const { model } = await chat.chat(
-        { system: buildChatSystem(store.list(), new Date(), normalizeLocale(req.headers["x-nous-locale"])), messages },
+        { system: buildChatSystem(store.list(), new Date(), locale, ctx?.facts ?? []), messages },
         (delta) => {
           const { text, delegates } = filter.push(delta);
-          if (text) send({ type: "delta", text });
-          for (const title of delegates) send({ type: "delegate", title });
+          emit(text, delegates);
         },
-        controller.signal,
+        signal,
       );
       const rest = filter.flush();
-      if (rest) send({ type: "delta", text: rest });
-      send({ type: "done", model });
+      if (rest) emit(rest, []);
+      if (revoked) return;
+      if (options.memory) {
+        // 模型說「記住了」但核心這一輪沒有成功回條：照實補一句（模型不能代替核心回條）。
+        if (MEMORY_CLAIM.test(answer) && !ctx?.saved) send({ type: "memory_notice", message: localize("這次沒有保存到記憶", locale) });
+        else if (ctx?.notice) send({ type: "memory_notice", message: translate(ctx.notice.message, locale, ...ctx.notice.values) });
+      }
+      deliver(() => send({ type: "done", model, ...(options.memory ? { memory_used: used } : {}) }));
+    };
+    try {
+      if (options.memory) await options.memory.withChat({ nonce: body.memory_turn, requestId: id, lastUser, target: chat.chatTarget?.() ?? null, historyLength: messages.length }, run);
+      else await run(null);
     } catch (err) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && !revoked) {
         send({
           type: "error",
-          message: localize(err instanceof ExecutionError ? err.userMessage : `對話失敗：${(err as Error).message}`, normalizeLocale(req.headers["x-nous-locale"])),
+          message: localize(err instanceof ExecutionError ? err.userMessage : `對話失敗：${(err as Error).message}`, locale),
           action: err instanceof ExecutionError ? err.action : null,
         });
       }

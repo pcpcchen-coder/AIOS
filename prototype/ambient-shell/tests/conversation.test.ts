@@ -142,3 +142,91 @@ describe("ConversationSession", () => {
     expect(t.outputs[0].cancelled).toBe(true);
   });
 });
+
+describe("ConversationSession with memory", () => {
+  it("forwards memory_turn, records usedMemory and clears history when memory changes", async () => {
+    const turns: (string | null | undefined)[] = [];
+    const requests: { messages: ChatTurn[]; event(value: ChatEvent): void; resolve(): void }[] = [];
+    const blocked: string[] = [];
+    const session = new ConversationSession({
+      stream: (messages, _id, event, _signal, _locale, memoryTurn) => new Promise<void>((resolve) => { turns.push(memoryTurn); requests.push({ messages, event, resolve }); }),
+      output: () => ({ push: () => {}, end: () => {}, cancel: () => {} }),
+      changed: () => {},
+      delegated: () => {},
+      delegateBlocked: (title) => blocked.push(title),
+    });
+    const first = session.send("晚餐吃什麼", "req_mem00001", undefined, "mt_" + "1".repeat(32));
+    requests[0]!.event({ type: "delta", text: "不放香菜的料理。" });
+    requests[0]!.event({ type: "delegate_blocked", title: "晚餐吃什麼" });
+    requests[0]!.event({ type: "memory_notice", message: "這次沒有保存到記憶" });
+    requests[0]!.event({ type: "done", model: "fixture", memory_used: 1 });
+    requests[0]!.resolve();
+    await first;
+    expect(turns[0]).toBe("mt_" + "1".repeat(32));
+    expect(blocked).toEqual(["晚餐吃什麼"]);
+    expect(session.view.reply).toMatchObject({ kind: "complete", notice: "這次沒有保存到記憶" });
+    const second = session.send("那甜點呢", "req_mem00002");
+    expect(requests[1]!.messages).toHaveLength(3);
+    expect(turns[1]).toBeNull();
+    requests[1]!.event({ type: "done", model: "fixture", memory_used: 0 });
+    requests[1]!.resolve();
+    await second;
+    session.forgetMemoryHistory();
+    const third = session.send("還有嗎", "req_mem00003");
+    expect(requests[2]!.messages).toEqual([{ role: "user", content: "還有嗎" }]);
+    requests[2]!.event({ type: "done", model: "fixture" });
+    requests[2]!.resolve();
+    await third;
+  });
+
+  it("memory_revoked stops the reply and drops history; local receipts never enter model history", async () => {
+    const requests: { messages: ChatTurn[]; event(value: ChatEvent): void; resolve(): void }[] = [];
+    const out = { cancelled: false };
+    const session = new ConversationSession({
+      stream: (messages, _id, event) => new Promise<void>((resolve) => requests.push({ messages, event, resolve })),
+      output: () => ({ push: () => {}, end: () => {}, cancel: () => { out.cancelled = true; } }),
+      changed: () => {}, delegated: () => {},
+    });
+    session.local("記住我不吃香菜", "req_mem00004", "記在 George 名下了：不吃香菜");
+    expect(session.view.reply).toMatchObject({ kind: "complete", answer: "記在 George 名下了：不吃香菜" });
+    const turn = session.send("晚餐吃什麼", "req_mem00005", undefined, "mt_" + "2".repeat(32));
+    // M-4：純記憶指令與核心回條不放進模型歷史（換成沒同意的帳號時不會經由歷史收到記憶）。
+    expect(requests[0]!.messages).toEqual([{ role: "user", content: "晚餐吃什麼" }]);
+    requests[0]!.event({ type: "delta", text: "舊內容" });
+    requests[0]!.event({ type: "memory_revoked", message: "記憶已撤銷" });
+    requests[0]!.event({ type: "delta", text: "晚到的內容" });
+    requests[0]!.resolve();
+    await turn;
+    expect(out.cancelled).toBe(true);
+    expect(session.view.reply).toMatchObject({ kind: "error", answer: "", message: "記憶已撤銷" });
+    const next = session.send("重新問", "req_mem00006");
+    expect(requests[1]!.messages).toEqual([{ role: "user", content: "重新問" }]);
+    requests[1]!.event({ type: "done", model: null });
+    requests[1]!.resolve();
+    await next;
+  });
+});
+
+describe("delegation after memory (M-3)", () => {
+  it("once a turn used memory, later delegations in the same history (typed or speech) ask the user instead", async () => {
+    const requests: { event(value: ChatEvent): void; resolve(): void }[] = [];
+    const delegated: string[] = [], blocked: string[] = [];
+    const session = new ConversationSession({
+      stream: (_m, _id, event) => new Promise<void>((resolve) => requests.push({ event, resolve })),
+      output: () => ({ push: () => {}, end: () => {}, cancel: () => {} }),
+      changed: () => {}, delegated: (t) => delegated.push(t), delegateBlocked: (t) => blocked.push(t),
+    });
+    const first = session.send("晚餐吃什麼", "req_dlg00001", undefined, "mt_" + "3".repeat(32));
+    requests[0]!.event({ type: "delta", text: "不放香菜。" });
+    requests[0]!.event({ type: "done", model: null, memory_used: 1 });
+    requests[0]!.resolve();
+    await first;
+    const second = session.send("那幫我排一週菜單", "req_dlg00002");
+    requests[1]!.event({ type: "delegate", title: "排一週不含香菜的菜單" });
+    requests[1]!.event({ type: "done", model: null, memory_used: 0 });
+    requests[1]!.resolve();
+    await second;
+    expect(delegated).toEqual([]);
+    expect(blocked).toEqual(["那幫我排一週菜單"]);
+  });
+});

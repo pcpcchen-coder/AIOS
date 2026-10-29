@@ -52,6 +52,10 @@
           <button id="consent-no" class="btn btn--ghost" type="button" data-i18n="不要">不要</button>
         </div>
       </div>
+      <p id="memory-line" class="memory-line" hidden>
+        <label for="memory-person" id="memory-person-label"></label>
+        <select id="memory-person" class="memory-person" aria-label="本次人物" data-i18n-aria-label="本次人物"></select>
+      </p>
       <p id="command-error" class="command-error" role="alert" hidden></p>
       <p id="engine-line" class="engine-line" hidden></p>
       <p class="command-hint" data-i18n="Enter 送出 · Esc 關閉 · 可說「進度如何」「看結果」「停止任務」「收起」「開啟語音模式」「設定」">Enter 送出 · Esc 關閉 · 可說「進度如何」「看結果」「停止任務」「收起」「開啟語音模式」「設定」</p>
@@ -64,8 +68,10 @@
 
     <p id="conversation-status" class="conversation-status" role="status" hidden></p>
     <section id="conversation-reply" class="conversation-reply" aria-label="本次對話" data-i18n-aria-label="本次對話" hidden>
+      <p id="conversation-person" class="conversation-person" hidden></p>
       <p id="conversation-user" class="conversation-user"></p>
       <p id="conversation-answer" class="conversation-answer" aria-live="polite"></p>
+      <p id="conversation-notice" class="conversation-notice" role="status" hidden></p>
       <div class="conversation-actions">
         <button id="conversation-type" class="btn btn--ghost" type="button" data-i18n="打字接著聊">打字接著聊</button>
         <button id="conversation-settings" class="btn btn--ghost" type="button" data-i18n="設定">設定</button>

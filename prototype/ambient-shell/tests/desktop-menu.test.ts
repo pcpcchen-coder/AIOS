@@ -86,7 +86,7 @@ describe("settingsMenu（鏡頭與語音設定）", () => {
     expect(m.command).toHaveBeenCalledWith("camera-preview");
     const cameraPreview = vi.fn();
     const noop = () => {};
-    expect(runDesktopCommand("camera-preview", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview, family: noop })).toBe(true);
+    expect(runDesktopCommand("camera-preview", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview, family: noop, memory: noop })).toBe(true);
     expect(cameraPreview).toHaveBeenCalledOnce();
   });
 
@@ -175,10 +175,11 @@ describe("runDesktopCommand", () => {
       type: () => calls.push("type"),
       cameraPreview: () => calls.push("cameraPreview"),
       family: () => calls.push("family"),
+      memory: () => calls.push("memory"),
     };
     for (const c of DESKTOP_COMMANDS) expect(runDesktopCommand(c, handlers)).toBe(true);
     expect(runDesktopCommand("more-settings", handlers)).toBe(false);
-    expect(calls).toEqual(["voice", "progress", "settings", "type", "cameraPreview", "family"]);
+    expect(calls).toEqual(["voice", "progress", "settings", "type", "cameraPreview", "family", "memory"]);
   });
 
   it("every command(...) the Electron main program and the menu template send is one the page knows", () => {

@@ -1,9 +1,20 @@
 import { type Locale } from "../shared/i18n.mjs";
+import { createHash, createHmac } from "node:crypto";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { SCHEMA_VERSION, type ExecutorMode, type ProviderInfo, type SettingsView } from "../shared/types.ts";
 import type { ChatGPTAuth } from "./chatgpt-auth.ts";
 import type { ChatCapable, ChatMessage } from "./chat.ts";
+import type { ChatTarget } from "./memory/retrieve.ts";
+
+/** 記憶同意的帳號鍵：Claude 用 API key 的 HMAC 指紋前 16 碼（不保存 key 本身）。 */
+export function claudeAccountKey(apiKey: string): string {
+  return createHmac("sha256", "nous.memory.account.claude.v1").update(apiKey).digest("hex").slice(0, 16);
+}
+/** ChatGPT 用帳號 ID（subject）的雜湊前 16 碼。 */
+export function chatgptAccountKey(subject: string): string {
+  return createHash("sha256").update(`nous.memory.account.chatgpt.v1:${subject}`).digest("hex").slice(0, 16);
+}
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 
 export interface ProviderManagerOptions {
@@ -17,6 +28,8 @@ export interface ProviderManagerOptions {
   /** NOUS_PROVIDER 指定的預設引擎；使用者在畫面上切換後以保存的選擇為準。 */
   preferred: ExecutorMode | null;
   onChange(): void;
+  /** Claude 的帳號指紋（claudeAccountKey）；沒有 API key 時省略。 */
+  claudeAccount?: string | null;
 }
 
 /**
@@ -80,6 +93,29 @@ export class ProviderManager implements Executor, ChatCapable {
       return Promise.reject(new ExecutionError("這個任務指定的 Claude 引擎未設定（缺少 ANTHROPIC_API_KEY）。"));
     }
     return executor.run(input, reporter, signal);
+  }
+
+  /**
+   * 記憶同意用的「服務＋帳號」（16 §4）：一般聊天目前會送到哪個帳號。只換模型名稱不改變這個值，所以不用重問。
+   * 模擬模式不呼叫模型，也不送記憶。
+   */
+  chatTarget(): ChatTarget | null {
+    return this.targetOf(this.current);
+  }
+
+  /** 所有已設定、可用的服務帳號（首次設定逐一允許）。 */
+  chatTargets(): ChatTarget[] {
+    return (["claude", "chatgpt"] as const).map(mode => this.targetOf(mode)).filter((t): t is ChatTarget => t !== null && t.account !== null);
+  }
+
+  private targetOf(mode: ExecutorMode): ChatTarget | null {
+    if (mode === "claude") return this.options.claude ? { provider: "claude", account: this.options.claudeAccount ?? null, label: "Claude" } : null;
+    if (mode === "chatgpt") {
+      const subject = this.options.auth.usable ? this.options.auth.accountSubject?.() ?? null : null;
+      const email = this.options.auth.info().email;
+      return { provider: "chatgpt", account: subject ? chatgptAccountKey(subject) : null, label: email ? `ChatGPT（${email}）` : "ChatGPT" };
+    }
+    return null;
   }
 
   /** 語音對話用目前選擇的引擎。 */

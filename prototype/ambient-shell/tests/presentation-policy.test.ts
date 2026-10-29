@@ -52,3 +52,13 @@ describe("evaluateSurface", () => {
     expect(evaluateSurface(s, ctx([makeTask({ status: "succeeded" })])).allowed).toBe(false);
   });
 });
+
+describe("memory surface", () => {
+  const memory: Surface = { ...base, surface_id: "surface_memory_req_aaaaaaaa", kind: "memory" };
+  it("需要真實的使用者請求；不能冒用外部動作的確認理由", () => {
+    expect(evaluateSurface(memory, ctx()).allowed).toBe(true);
+    expect(evaluateSurface(memory, ctx([], ["req_other000"]))).toEqual({ allowed: false, reason: "找不到對應的使用者請求" });
+    expect(evaluateSurface({ ...memory, visibility_reason: "action_confirmation" }, { ...ctx(), pendingConfirmIds: new Set(["req_aaaaaaaa"]) })).toEqual({ allowed: false, reason: "確認卡與 action_confirmation 必須成對" });
+    expect(evaluateSurface({ ...memory, visibility_reason: "sensor_status" }, ctx()).allowed).toBe(false);
+  });
+});

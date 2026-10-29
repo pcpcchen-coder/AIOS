@@ -9,18 +9,27 @@ const MAX_RECEIPTS = 2048;
 const FORMAT = "nous.memory.snapshot";
 const OPERATION_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-7[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 export interface MemorySecretBox { available(): boolean; seal(plain: string): Buffer; open(sealed: Buffer): string }
-export interface MemoryProfile { id: string; name: string; createdAt: string }
+/** 快照格式版本：MEM-1 起為 2；讀到 1 時只在記憶體內升級（檔名照舊 store.v1.enc），下次寫入才以 2 保存。 */
+export const SNAPSHOT_VERSION = 2;
+export const FACT_KINDS = ["preference", "note"] as const;
+export type FactKind = (typeof FACT_KINDS)[number];
+/** 首次同意設定（16 §4）：記憶預設關閉；自動建議首版固定關閉（MEM-5 才提供）。 */
+export interface MemorySettings { enabled: boolean; setupAt: string | null; suggestions: false }
+/** facePersonId：可移除的家人辨識連結（ADR-0001 的 person_id）；minor 跟著連結的登記資料，MEM-1 聊天不寫未成年人物。 */
+export interface MemoryProfile { id: string; name: string; createdAt: string; facePersonId: string | null; minor: boolean }
 export interface MemoryFact {
-  id: string; profileId: string | null; revision: number; topic: string; key: string; value: string;
+  id: string; profileId: string | null; revision: number; kind: FactKind; topic: string; key: string; value: string;
+  /** 首版只接受 household：家中可使用，不是私密空間（16 §3）。 */
+  audience: "household";
   source: { kind: "explicit"; turnId: string; at: string; excerpt: string };
-  expiresAt: string | null;
+  validFrom: string; expiresAt: string | null; reviewAfter: string | null; pinned: boolean;
 }
 export interface MemoryConsent { profileId: string | null; provider: string; account: string; allowed: boolean }
-export interface MemoryData { profiles: MemoryProfile[]; facts: MemoryFact[]; consents: MemoryConsent[]; tombstones: { id: string; revision: number }[] }
+export interface MemoryData { settings: MemorySettings; profiles: MemoryProfile[]; facts: MemoryFact[]; consents: MemoryConsent[]; tombstones: { id: string; revision: number }[] }
 export type MemoryOutcome = "saved" | "updated" | "forgotten" | "unchanged";
 export interface MemoryReceipt { operationId: string; digest: string; status: MemoryOutcome; revision: number; issuedAt: number }
 export interface MemorySnapshot extends MemoryData {
-  format: typeof FORMAT; version: 1; revision: number; dedupKey: string; receiptFloor: number; receipts: MemoryReceipt[];
+  format: typeof FORMAT; version: typeof SNAPSHOT_VERSION; revision: number; dedupKey: string; receiptFloor: number; receipts: MemoryReceipt[];
 }
 export interface StoreOperation {
   operationId: string; issuedAt: number; expiresAt: number; expectedRevision: number; fingerprint: string;
@@ -28,11 +37,25 @@ export interface StoreOperation {
 export type StoreResult = { status: MemoryOutcome; revision: number } | { status: "conflict" | "receipt_expired" | "unavailable" };
 export type StoreFailure = "locked" | "key_unavailable" | "corrupt" | "permissions" | "unavailable";
 export class MemoryStoreError extends Error { constructor(readonly code: StoreFailure) { super(`memory_${code}`); } }
-interface Envelope { format: typeof FORMAT; version: 1; revision: number; wrappedKey: string; nonce: string; tag: string; ciphertext: string }
+interface Envelope { format: typeof FORMAT; version: 1 | 2; revision: number; wrappedKey: string; nonce: string; tag: string; ciphertext: string }
+/** 測試用的單寫入者鎖：對繼承的 fd 3 取 BSD 鎖，回傳結束碼（0 成功、75 被占用）。 */
+export type MemoryLockProvider = (fd: number) => number | null;
 export interface MemoryStoreOptions {
   dir: string; secretBox: MemorySecretBox; now?: () => number;
   /** Isolated crash fixtures only. No production caller supplies this. */
   checkpoint?: (stage: "before_write" | "after_file_sync" | "after_rename" | "after_dir_sync") => void;
+  /**
+   * Tests only (like checkpoint). Production always uses macOS /usr/bin/lockf and refuses other platforms; this hook lets
+   * Linux CI run the real AES-GCM, rename and crash-point tests with an equivalent flock(1) lock. No production caller supplies it.
+   */
+  lockProvider?: MemoryLockProvider;
+}
+/** MemoryService 依賴的最小介面（測試可換成假 store）。只在核心使用，不交給 renderer 或模型。 */
+export interface MemoryStoreLike {
+  read(): MemorySnapshot;
+  receipt(operationId: string): StoreResult;
+  commit(operation: StoreOperation, change: (data: MemoryData) => MemoryOutcome): Promise<StoreResult>;
+  close(): Promise<void>;
 }
 
 function record(x: unknown): x is Record<string, unknown> { return !!x && typeof x === "object" && !Array.isArray(x); }
@@ -45,19 +68,50 @@ function operationTime(id: unknown): number | null {
 }
 function date(x: unknown): x is string { return typeof x === "string" && Number.isFinite(Date.parse(x)); }
 function unique(xs: { id: string }[]) { return new Set(xs.map(x => x.id)).size === xs.length; }
-function validSnapshot(x: unknown): x is MemorySnapshot {
-  if (!record(x) || !keys(x, ["format", "version", "revision", "dedupKey", "receiptFloor", "profiles", "facts", "consents", "receipts", "tombstones"]) || x.format !== FORMAT || x.version !== 1 || !integer(x.revision) || !integer(x.receiptFloor) || typeof x.dedupKey !== "string" || !/^[a-f0-9]{64}$/.test(x.dedupKey)) return false;
-  if (!Array.isArray(x.profiles) || x.profiles.length > 1000 || !x.profiles.every(p => record(p) && keys(p, ["id", "name", "createdAt"]) && text(p.id, 100) && text(p.name, 80) && date(p.createdAt)) || !unique(x.profiles)) return false;
+const ITEM_LIMIT = 1000;
+function validSettings(x: unknown): x is MemorySettings {
+  return record(x) && keys(x, ["enabled", "setupAt", "suggestions"]) && typeof x.enabled === "boolean" && (x.setupAt === null || date(x.setupAt)) && x.suggestions === false;
+}
+function validBody(x: Record<string, unknown>, version: 1 | 2): boolean {
+  const profileKeys = version === 1 ? ["id", "name", "createdAt"] : ["id", "name", "createdAt", "facePersonId", "minor"];
+  if (!Array.isArray(x.profiles) || x.profiles.length > ITEM_LIMIT || !x.profiles.every(p => record(p) && keys(p, profileKeys) && text(p.id, 100) && text(p.name, 80) && date(p.createdAt)
+    && (version === 1 || ((p.facePersonId === null || text(p.facePersonId, 100)) && typeof p.minor === "boolean"))) || !unique(x.profiles)) return false;
   const ids = new Set(x.profiles.map(p => p.id));
   const subject = (p: unknown) => p === null || (typeof p === "string" && ids.has(p));
-  if (!Array.isArray(x.facts) || x.facts.length > 1000 || !x.facts.every(f => record(f) && keys(f, ["id", "profileId", "revision", "topic", "key", "value", "source", "expiresAt"]) && text(f.id, 100) && subject(f.profileId) && integer(f.revision) && f.revision > 0 && f.revision <= (x.revision as number) && text(f.topic, 80) && text(f.key, 100) && text(f.value, 512) && (f.expiresAt === null || date(f.expiresAt)) && record(f.source) && keys(f.source, ["kind", "turnId", "at", "excerpt"]) && f.source.kind === "explicit" && text(f.source.turnId, 100) && date(f.source.at) && text(f.source.excerpt, 240)) || !unique(x.facts)) return false;
-  if (!Array.isArray(x.consents) || x.consents.length > 1000 || !x.consents.every(c => record(c) && keys(c, ["profileId", "provider", "account", "allowed"]) && subject(c.profileId) && text(c.provider, 100) && text(c.account, 200) && typeof c.allowed === "boolean")) return false;
+  const factKeys = version === 1 ? ["id", "profileId", "revision", "topic", "key", "value", "source", "expiresAt"]
+    : ["id", "profileId", "revision", "kind", "topic", "key", "value", "audience", "source", "validFrom", "expiresAt", "reviewAfter", "pinned"];
+  if (!Array.isArray(x.facts) || x.facts.length > ITEM_LIMIT || !x.facts.every(f => record(f) && keys(f, factKeys) && text(f.id, 100) && subject(f.profileId) && integer(f.revision) && f.revision > 0 && f.revision <= (x.revision as number) && text(f.topic, 80) && text(f.key, 100) && text(f.value, 512) && (f.expiresAt === null || date(f.expiresAt)) && record(f.source) && keys(f.source, ["kind", "turnId", "at", "excerpt"]) && f.source.kind === "explicit" && text(f.source.turnId, 100) && date(f.source.at) && text(f.source.excerpt, 240)
+    && (version === 1 || ((FACT_KINDS as readonly unknown[]).includes(f.kind) && f.audience === "household" && date(f.validFrom) && (f.reviewAfter === null || date(f.reviewAfter)) && typeof f.pinned === "boolean"))) || !unique(x.facts)) return false;
+  if (!Array.isArray(x.consents) || x.consents.length > ITEM_LIMIT || !x.consents.every(c => record(c) && keys(c, ["profileId", "provider", "account", "allowed"]) && subject(c.profileId) && text(c.provider, 100) && text(c.account, 200) && typeof c.allowed === "boolean")) return false;
   if (!Array.isArray(x.receipts) || x.receipts.length > MAX_RECEIPTS || !x.receipts.every(r => record(r) && keys(r, ["operationId", "digest", "status", "revision", "issuedAt"]) && operationTime(r.operationId) === r.issuedAt && typeof r.digest === "string" && /^[a-f0-9]{64}$/.test(r.digest) && ["saved", "updated", "forgotten", "unchanged"].includes(r.status as string) && integer(r.revision) && r.revision <= (x.revision as number) && integer(r.issuedAt)) || new Set(x.receipts.map(r => r.operationId)).size !== x.receipts.length) return false;
   return Array.isArray(x.tombstones) && x.tombstones.length <= 10000 && x.tombstones.every(t => record(t) && keys(t, ["id", "revision"]) && text(t.id, 100) && integer(t.revision) && t.revision <= (x.revision as number)) && unique(x.tombstones);
 }
+const HEAD = ["format", "version", "revision", "dedupKey", "receiptFloor", "profiles", "facts", "consents", "receipts", "tombstones"];
+function validHead(x: Record<string, unknown>, version: 1 | 2): boolean {
+  return x.format === FORMAT && x.version === version && integer(x.revision) && integer(x.receiptFloor) && typeof x.dedupKey === "string" && /^[a-f0-9]{64}$/.test(x.dedupKey);
+}
+export function validSnapshot(x: unknown): x is MemorySnapshot {
+  return record(x) && keys(x, [...HEAD, "settings"]) && validHead(x, 2) && validSettings(x.settings) && validBody(x, 2);
+}
+/** MEM-0（version 1）快照：只在記憶體內升級。舊資料沒有同意設定，記憶維持關閉；舊記錄視為未釘選、家中可使用的偏好。 */
+function upgradeV1(x: unknown): MemorySnapshot | null {
+  if (!record(x) || !keys(x, HEAD) || !validHead(x, 1) || !validBody(x, 1)) return null;
+  const v1 = x as unknown as Omit<MemorySnapshot, "version" | "settings" | "profiles" | "facts"> & {
+    profiles: { id: string; name: string; createdAt: string }[];
+    facts: (Omit<MemoryFact, "kind" | "audience" | "validFrom" | "reviewAfter" | "pinned">)[];
+  };
+  const next: MemorySnapshot = {
+    ...v1,
+    version: SNAPSHOT_VERSION,
+    settings: { enabled: false, setupAt: null, suggestions: false },
+    profiles: v1.profiles.map(p => ({ ...p, facePersonId: null, minor: false })),
+    facts: v1.facts.map(f => ({ ...f, kind: "preference" as const, audience: "household" as const, validFrom: f.source.at, reviewAfter: null, pinned: false })),
+  };
+  return validSnapshot(next) ? next : null;
+}
 function aad(e: Pick<Envelope, "format" | "version" | "revision" | "wrappedKey">) { return Buffer.from(JSON.stringify([e.format, e.version, e.revision, e.wrappedKey])); }
 
-export class MemoryStore {
+export class MemoryStore implements MemoryStoreLike {
   private state!: MemorySnapshot;
   private lockFd: number | undefined;
   private diskToken: string | null = null;
@@ -82,7 +136,7 @@ export class MemoryStore {
   }
   private hash(raw: string | null) { return raw === null ? null : createHash("sha256").update(raw).digest("hex"); }
   private start() {
-    if (process.platform !== "darwin") throw new MemoryStoreError("unavailable");
+    if (!this.options.lockProvider && process.platform !== "darwin") throw new MemoryStoreError("unavailable");
     if (!this.options.secretBox.available()) throw new MemoryStoreError("key_unavailable");
     this.options.dir = resolve(this.options.dir);
     mkdirSync(this.options.dir, { recursive: true, mode: 0o700 });
@@ -92,11 +146,13 @@ export class MemoryStore {
       this.lockFd = openSync(lock, constants.O_CREAT | constants.O_RDONLY | constants.O_NOFOLLOW, 0o600);
       this.inspect(lock, false);
       // BSD flock belongs to the shared open file description. The parent keeps that fd after lockf exits.
-      const locked = spawnSync("/usr/bin/lockf", ["-t", "0", "3"], { stdio: ["ignore", "pipe", "pipe", this.lockFd] });
-      if (locked.status !== 0) throw new MemoryStoreError(locked.status === 75 ? "locked" : "unavailable");
+      const status = this.options.lockProvider
+        ? this.options.lockProvider(this.lockFd)
+        : spawnSync("/usr/bin/lockf", ["-t", "0", "3"], { stdio: ["ignore", "pipe", "pipe", this.lockFd] }).status;
+      if (status !== 0) throw new MemoryStoreError(status === 75 ? "locked" : "unavailable");
       const raw = this.disk();
       this.diskToken = this.hash(raw);
-      this.state = raw === null ? { format: FORMAT, version: 1, revision: 0, dedupKey: randomBytes(32).toString("hex"), receiptFloor: 0, profiles: [], facts: [], consents: [], tombstones: [], receipts: [] } : this.decrypt(raw);
+      this.state = raw === null ? { format: FORMAT, version: SNAPSHOT_VERSION, revision: 0, dedupKey: randomBytes(32).toString("hex"), receiptFloor: 0, settings: { enabled: false, setupAt: null, suggestions: false }, profiles: [], facts: [], consents: [], tombstones: [], receipts: [] } : this.decrypt(raw);
       for (const name of readdirSync(this.options.dir)) if (/^store\.v1\.enc\.tmp-[a-f0-9-]+$/.test(name)) unlinkSync(join(this.options.dir, name));
       this.active = true;
     } catch (error) {
@@ -109,7 +165,7 @@ export class MemoryStore {
     let e: Envelope;
     try {
       e = JSON.parse(raw) as Envelope;
-      if (!record(e) || !keys(e, ["format", "version", "revision", "wrappedKey", "nonce", "tag", "ciphertext"]) || e.format !== FORMAT || e.version !== 1 || !integer(e.revision) || typeof e.wrappedKey !== "string" || typeof e.nonce !== "string" || typeof e.tag !== "string" || typeof e.ciphertext !== "string" || Buffer.from(e.nonce, "base64").length !== 12 || Buffer.from(e.tag, "base64").length !== 16) throw Error();
+      if (!record(e) || !keys(e, ["format", "version", "revision", "wrappedKey", "nonce", "tag", "ciphertext"]) || e.format !== FORMAT || (e.version !== 1 && e.version !== 2) || !integer(e.revision) || typeof e.wrappedKey !== "string" || typeof e.nonce !== "string" || typeof e.tag !== "string" || typeof e.ciphertext !== "string" || Buffer.from(e.nonce, "base64").length !== 12 || Buffer.from(e.tag, "base64").length !== 16) throw Error();
     } catch { throw new MemoryStoreError("corrupt"); }
     let key: Buffer;
     try { key = Buffer.from(this.options.secretBox.open(Buffer.from(e.wrappedKey, "base64")), "base64"); if (key.length !== 32) throw Error(); }
@@ -119,8 +175,10 @@ export class MemoryStore {
       const d = createDecipheriv("aes-256-gcm", key, Buffer.from(e.nonce, "base64")); d.setAAD(aad(e)); d.setAuthTag(Buffer.from(e.tag, "base64"));
       plain = Buffer.concat([d.update(Buffer.from(e.ciphertext, "base64")), d.final()]);
       if (plain.length > MAX_BYTES) throw Error();
-      const state: unknown = JSON.parse(plain.toString("utf8"));
-      if (!validSnapshot(state) || state.revision !== e.revision) throw Error();
+      const parsed: unknown = JSON.parse(plain.toString("utf8"));
+      if (!record(parsed) || parsed.version !== e.version) throw Error();
+      const state = e.version === 1 ? upgradeV1(parsed) : validSnapshot(parsed) ? parsed : null;
+      if (!state || state.revision !== e.revision) throw Error();
       return state;
     } catch { throw new MemoryStoreError("corrupt"); } finally { key.fill(0); plain?.fill(0); }
   }
@@ -129,7 +187,7 @@ export class MemoryStore {
     const key = randomBytes(32), nonce = randomBytes(12), plain = Buffer.from(JSON.stringify(state));
     try {
       if (plain.length > MAX_BYTES) throw new MemoryStoreError("unavailable");
-      const header: Pick<Envelope, "format" | "version" | "revision" | "wrappedKey"> = { format: FORMAT, version: 1 as const, revision: state.revision, wrappedKey: this.options.secretBox.seal(key.toString("base64")).toString("base64") };
+      const header: Pick<Envelope, "format" | "version" | "revision" | "wrappedKey"> = { format: FORMAT, version: SNAPSHOT_VERSION, revision: state.revision, wrappedKey: this.options.secretBox.seal(key.toString("base64")).toString("base64") };
       const c = createCipheriv("aes-256-gcm", key, nonce); c.setAAD(aad(header));
       const ciphertext = Buffer.concat([c.update(plain), c.final()]);
       return JSON.stringify({ ...header, nonce: nonce.toString("base64"), tag: c.getAuthTag().toString("base64"), ciphertext: ciphertext.toString("base64") });
@@ -158,7 +216,7 @@ export class MemoryStore {
     if (op.expectedRevision !== this.state.revision) return { status: "conflict" };
     try {
       const next = structuredClone(this.state);
-      const data: MemoryData = { profiles: next.profiles, facts: next.facts, consents: next.consents, tombstones: next.tombstones };
+      const data: MemoryData = { settings: next.settings, profiles: next.profiles, facts: next.facts, consents: next.consents, tombstones: next.tombstones };
       const status = change(data);
       Object.assign(next, data);
       next.revision++;

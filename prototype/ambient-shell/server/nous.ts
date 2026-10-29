@@ -1,5 +1,6 @@
 import { type Locale } from "../shared/i18n.mjs";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { createServer } from "node:net";
 import { parseEnv } from "node:util";
 import { createApp } from "./app.ts";
@@ -26,8 +27,12 @@ import { TaskRunner } from "./runner.ts";
 import { TaskStore } from "./store.ts";
 import { checkFaceRuntime, FACE_MODEL_VERSION } from "./face-runtime.ts";
 import { GalleryStore, type SecretBox } from "./identity-store.ts";
-import { IdentityService, type ConfirmFn, type IdentityContext } from "./identity-service.ts";
+import { IdentityService, type ConfirmFn, type IdentityContext, type IdentityMemoryLink } from "./identity-service.ts";
 import type { IdentityResponse } from "../shared/identity.ts";
+import type { MemoryResponse } from "../shared/memory.ts";
+import { MemoryService, type MemoryConfirmFn, type MemoryIdentityHooks } from "./memory/service.ts";
+import { MemoryStore, type MemorySecretBox } from "./memory/store.ts";
+import { claudeAccountKey } from "./providers.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
 
@@ -46,6 +51,24 @@ export interface NousOptions {
    * 沒有注入（瀏覽器版）時 settings.identity 回報「瀏覽器版不可用」。
    */
   identity?: IdentityInjection;
+  /**
+   * 家庭記憶層（docs/16 MEM-1；只有 macOS App 注入）。store 第一次收到記憶 IPC 才開（啟動時不碰 Keychain）。
+   * 沒有注入（瀏覽器版）時 settings.memory 回報不可用，一般聊天照舊。
+   */
+  memory?: MemoryInjection;
+}
+
+export interface MemoryInjection {
+  /** 加密快照的資料夾（App：userData/memory；0700）。 */
+  dir: string;
+  /** 包裝資料金鑰（App：desktop/memory-safe-storage.mjs，只在 darwin 且 safeStorage 可用時 available）。 */
+  secretBox: MemorySecretBox;
+  /** 刪除人物記憶、全部忘記、連結家人辨識前的原生確認。 */
+  confirm: MemoryConfirmFn;
+  /** Time Machine 排除（App：tmutil addexclusion）。 */
+  excludeFromBackup?: (dir: string) => Promise<void>;
+  /** 本次人物世代改變時通知主視窗（App：webContents.send，不含內容）。 */
+  onPresence?: () => void;
 }
 
 export interface IdentityInjection {
@@ -70,6 +93,14 @@ export interface NousHandle {
     handle(request: unknown, ctx: IdentityContext): Promise<IdentityResponse>;
     /** 主視窗導覽、重新載入或 renderer 結束時，主程序呼叫它結束管理 session。 */
     closeSessions(): void;
+  };
+  /** 只有注入 memory 時存在；主程序的 IPC 處理器（desktop/memory-ipc.mjs 過濾後）把請求轉到這裡。 */
+  memory?: {
+    handle(request: unknown, ctx: { userInitiated?: boolean }): Promise<MemoryResponse>;
+    /** 主視窗導覽、重新載入或 renderer 結束：本次人物回到未選定。 */
+    closeSessions(): void;
+    /** OS 鎖定（powerMonitor lock-screen）：暫停本次人物。 */
+    suspendAll(): void;
   };
 }
 
@@ -101,6 +132,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     dir: config.configDir,
     preferred: config.preferred,
     onChange: () => notify(),
+    claudeAccount: config.apiKey ? claudeAccountKey(config.apiKey) : null,
   });
   // 即時語音的 ChatGPT 方案路徑：Nous 自己的 Codex 登入（不讀 ~/.codex），語音、交辦的推論與上網查詢都算 Codex 額度。
   const codexAuth = new CodexAuth({ dir: config.configDir, onChange: () => notify(), log });
@@ -175,6 +207,24 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         picker: greetings,
         log,
         onChange: () => notify(),
+        memory: (): IdentityMemoryLink | null => memory,
+      })
+    : null;
+  const memoryOpts = options.memory;
+  const memory: MemoryService | null = memoryOpts
+    ? new MemoryService({
+        openStore: () => MemoryStore.open({ dir: memoryOpts.dir, secretBox: memoryOpts.secretBox }),
+        available: () => memoryOpts.secretBox.available(),
+        targets: () => ({ current: providers.chatTarget(), all: providers.chatTargets() }),
+        confirm: memoryOpts.confirm,
+        identity: (): MemoryIdentityHooks | null => identity ? { candidate: () => identity.memoryCandidate(), people: () => identity.memoryPeople() } : null,
+        afterOpen: memoryOpts.excludeFromBackup ? () => memoryOpts.excludeFromBackup!(memoryOpts.dir) : undefined,
+        // 上次執行時記憶是否開著：加密檔外只留這一個布林值（不含內容），讓重啟後第一次打字就能取用記憶，
+        // 而記憶沒開時查狀態、一般聊天都不碰 Keychain。
+        enabledHint: memoryEnabledHint(join(config.configDir, "memory-enabled.json")),
+        onPresence: memoryOpts.onPresence,
+        log,
+        onChange: () => notify(),
       })
     : null;
   const server = createApp({
@@ -192,6 +242,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     camera,
     voice,
     identity: identity ?? undefined,
+    memory: memory ?? undefined,
     faceRuntimeDir,
     port,
     devPort: config.devPort,
@@ -223,16 +274,19 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   log(`憑證與設定目錄：${config.configDir}`);
   const idStatus = identity?.status();
   // gallery 要到第一次開 session 才載入：這裡只記模型與鏡頭的狀態，不碰 Keychain。
+  log(`家庭記憶：${memory ? (memory.settingsStatus().available ? "可用（第一次使用時才開啟加密檔）" : "此 Mac 無法加密保存，停用") : "瀏覽器版不可用"}`);
   log(`家人辨識：${idStatus ? (idStatus.disabled_reason ?? `可用（模型 ${runtime.state}${idStatus.limited_reason ? `；${idStatus.limited_reason}` : ""}；門檻未校準；家人資料在第一次打開時才載入）`) : "瀏覽器版不可用"}`);
 
   return {
     port,
     url: `http://localhost:${port}`,
     ...(identity ? { identity: { handle: (request: unknown, ctx: IdentityContext) => identity.handle(request, ctx), closeSessions: () => identity.closeSessions() } } : {}),
+    ...(memory ? { memory: { handle: (request: unknown, ctx: { userInitiated?: boolean }) => memory.handle(request, ctx), closeSessions: () => memory.closeSessions(), suspendAll: () => memory.suspendAll() } } : {}),
     close: () =>
       new Promise<void>((resolve) => {
         // 先讓家人辨識進入關閉狀態：結束 session，等待中的原生確認回來後也不寫檔。
         identity?.shutdown();
+        void memory?.shutdown();
         server.closeAllConnections();
         server.close(() => resolve());
       }),
@@ -250,6 +304,20 @@ export function liveGreetingSource(identity: () => IdentityService | null, picke
 /** IdentityService 的 claimGreeting：把核心發出的互動 ID 換成真的連上的工作階段（RealtimeSessions.claimGreeting）。 */
 export function greetingClaims(sessions: () => RealtimeSessions | null): (interaction: string) => { route: RouteId; session_id: string; locale?: Locale } | null {
   return (interaction) => sessions()?.claimGreeting(interaction) ?? null;
+}
+
+/** 記憶開關提示（memory-enabled.json，只有 { enabled: boolean }）。讀寫失敗都當成「沒開」。 */
+export function memoryEnabledHint(file: string): { get(): boolean; set(enabled: boolean): void } {
+  return {
+    get: () => {
+      try { return (JSON.parse(readFileSync(file, "utf8")) as { enabled?: unknown }).enabled === true; } catch { return false; }
+    },
+    set: (enabled) => {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(`${file}.tmp`, JSON.stringify({ enabled }), { mode: 0o600 });
+      renameSync(`${file}.tmp`, file);
+    },
+  };
 }
 
 /** 先試指定的埠；被占用時讓系統分配一個空閒埠。 */

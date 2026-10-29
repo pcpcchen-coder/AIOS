@@ -4,6 +4,8 @@
 //   2. op 白名單與每個 op 允許的欄位與型別（多的欄位丟掉）；語意驗證（特徵正規化、名稱、人數）由核心負責；
 //   3. 選單列點擊時間窗：只有使用者在選單列點「家人辨識…」後 10 秒內，open_session 才算使用者發起（一次有效）。
 
+import { checkTrustedSender } from "./trusted-sender.mjs";
+
 /** 與 shared/identity.ts 的 IDENTITY_OPS 相同（測試對照）。 */
 export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming"];
 
@@ -15,20 +17,9 @@ const PERSON = /^fam_[0-9a-f]{24}$/;
 const INTERACTION = /^int_[0-9a-f]{16}$/;
 
 /**
- * 發送者檢查。event 為 ipcMain.handle 的 IpcMainInvokeEvent；win 為主視窗；coreUrl 為本機核心網址（http://localhost:埠）。
- * 回傳 true 才轉給核心。
+ * 發送者檢查（與記憶 IPC 共用 desktop/trusted-sender.mjs）。回傳 true 才轉給核心。
  */
-export function checkIdentitySender(event, win, coreUrl) {
-  if (!event || !win || typeof coreUrl !== "string" || !coreUrl) return false;
-  if (typeof win.isDestroyed === "function" && win.isDestroyed()) return false;
-  const sender = event.sender;
-  if (!sender || sender !== win.webContents) return false;
-  const frame = event.senderFrame;
-  if (!frame || frame !== sender.mainFrame) return false;
-  const url = typeof frame.url === "string" ? frame.url : "";
-  // 以 core.url 加上 "/" 比對，避免 http://localhost:8787 被 http://localhost:87870 冒充。
-  return url === coreUrl || url.startsWith(`${coreUrl}/`);
-}
+export const checkIdentitySender = checkTrustedSender;
 
 const isInt = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
 const isShortString = (v, max) => typeof v === "string" && v.length > 0 && v.length <= max;

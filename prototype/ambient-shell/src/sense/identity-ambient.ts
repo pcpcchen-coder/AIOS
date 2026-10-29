@@ -44,6 +44,11 @@ export interface AmbientDeps {
   createSampler(onFrame: (frame: ClientFrame) => void, onState: (state: ClientState) => void): AmbientSampler;
   model: FaceModelVersion;
   now(): number;
+  /**
+   * 記憶的「互動結束」（docs/16 MEM-1）：鏡頭判斷人離開（在場判斷結束或鏡頭停止）或取樣看到多張臉時呼叫，
+   * 讓記憶暫停本次人物（只降權）。只是轉頭、看鍵盤不算。未提供時不通知。
+   */
+  onPresenceBreak?(reason: "tracking_lost" | "multi_face"): void;
 }
 
 /** 核心對同步辨識的回答（ambient_status）；unknown＝還沒問過。重新確認期間保留上一次的答案，不中斷取樣。 */
@@ -80,6 +85,8 @@ export class AmbientIdentity {
   /** 辨識出錯（模型載入或推論失敗）：到下一次 refresh 前不再取樣。 */
   private errored = false;
   private interaction: Interaction | null = null;
+  /** 上一次是否「在場＋鏡頭 ok」（記憶的追蹤中斷只看這個，不看面向或距離）。 */
+  private presentOk = false;
 
   constructor(private readonly deps: AmbientDeps) {}
 
@@ -95,6 +102,9 @@ export class AmbientIdentity {
   /** SenseController.onSense：每次事件與 tick 之後。 */
   update(snapshot: SenseSnapshot): void {
     const ok = snapshot.sensor_ok && snapshot.present && snapshot.facing && isNear(snapshot.distance_m);
+    const presentOk = snapshot.sensor_ok && snapshot.present;
+    if (this.presentOk && !presentOk) this.deps.onPresenceBreak?.("tracking_lost");
+    this.presentOk = presentOk;
     // 轉開、離開、遠離、鏡頭停止：舊世代作廢（換人重置），之後看到的人從新的世代開始。
     if (this.ok && !ok) this.bumpTrack();
     this.ok = ok;
@@ -233,7 +243,10 @@ export class AmbientIdentity {
       frame.feature?.fill(0);
       return;
     }
-    if (frame.face_count > 1 || frame.quality === "multi_face") this.multi = true;
+    if (frame.face_count > 1 || frame.quality === "multi_face") {
+      if (!this.multi) this.deps.onPresenceBreak?.("multi_face");
+      this.multi = true;
+    }
     const feature = frame.feature ? Array.from(frame.feature) : undefined;
     frame.feature?.fill(0);
     void this.deps.bridge

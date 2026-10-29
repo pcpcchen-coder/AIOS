@@ -87,8 +87,8 @@ app.whenReady().then(async () => {
       if (phase === "write") {
         const op = newStoreOperation(0, "synthetic native-store seed");
         const result = await store.commit(op, data => {
-          data.profiles.push({ id: "fictional-native", name: "Fictional Native", createdAt: "2026-10-26T00:00:00Z" });
-          data.facts = Array.from({ length: 1000 }, (_, i) => ({ id: "fact-" + i, profileId: "fictional-native", revision: 1, topic: "food", key: "fixture-" + i, value: canary, source: { kind: "explicit", turnId: "synthetic-turn", at: "2026-10-26T00:00:00Z", excerpt: canary }, expiresAt: null }));
+          data.profiles.push({ id: "fictional-native", name: "Fictional Native", createdAt: "2026-10-26T00:00:00Z", facePersonId: null, minor: false });
+          data.facts = Array.from({ length: 1000 }, (_, i) => ({ id: "fact-" + i, profileId: "fictional-native", revision: 1, topic: "food", key: "fixture-" + i, kind: "preference", value: canary, audience: "household", source: { kind: "explicit", turnId: "synthetic-turn", at: "2026-10-26T00:00:00Z", excerpt: canary }, validFrom: "2026-10-26T00:00:00Z", expiresAt: null, reviewAfter: null, pinned: false }));
           return "saved";
         });
         if (result.status !== "saved") throw new Error("native store not saved");

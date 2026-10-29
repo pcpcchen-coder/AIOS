@@ -78,3 +78,14 @@ describe("reduceShell", () => {
     expect(reduceShell(initialShell, { type: "task.updated", task: succeeded })).toBe(initialShell);
   });
 });
+
+describe("memory surface (docs/16 MEM-1)", () => {
+  it("記憶卡是按需的 user_request Surface；收起回電子腦，也擋住看著說話自動開始", async () => {
+    const { blocksAutoTalk } = await import("../src/shell-state.ts");
+    const shown = run([{ type: "show.memory", request_id: "req_memory01" }]);
+    expect(shown.mode).toBe("presenting");
+    expect(shown.surface).toMatchObject({ kind: "memory", visibility_reason: "user_request", request_id: "req_memory01" });
+    expect(blocksAutoTalk(shown.surface)).toBe(true);
+    expect(reduceShell(shown, { type: "dismiss" })).toEqual(initialShell);
+  });
+});
