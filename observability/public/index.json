@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-29T16:45:39.920Z",
+  "updated_at": "2026-10-29T23:07:53.962Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261029230752-38c58e",
+      "title": "MEM-2：Codex live 語音的記憶取用、語音記住／忘記、換人撤銷",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-10-29T23:07:52.528Z",
+      "started_at": "2026-10-29T23:07:52.528Z",
+      "ended_at": null,
+      "branch": "claude/mem-2",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 8,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261029070955-ac994e",
