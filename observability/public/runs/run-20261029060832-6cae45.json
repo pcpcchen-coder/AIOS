@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-29T06:08:32.091Z",
-  "updated_at": "2026-10-29T06:09:15.597Z",
+  "updated_at": "2026-10-29T06:09:19.108Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,8 +23,8 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-29T06:09:19.108Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -96,6 +96,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "main"
+    },
+    {
+      "at": "2026-10-29T06:09:19.108Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
