@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-29T06:08:32.091Z",
-  "updated_at": "2026-10-29T06:29:46.239Z",
+  "updated_at": "2026-10-29T06:29:50.292Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "draft",
       "title": "draft",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-29T06:29:50.291Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -124,6 +124,13 @@
       "step_id": "research",
       "status": "passed",
       "note": "上網查證喚醒引擎與講者模型授權（2026-10-29）"
+    },
+    {
+      "at": "2026-10-29T06:29:50.292Z",
+      "type": "step_updated",
+      "step_id": "draft",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
