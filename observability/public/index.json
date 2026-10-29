@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-29T16:18:00.417Z",
+  "updated_at": "2026-10-29T16:18:05.911Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,7 +9,7 @@
       "title": "WK-00：喚醒詞 spike（sherpa-onnx KWS、哈囉努斯）與 ADR-0003 草案",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-29T16:17:57.317Z",
+      "updated_at": "2026-10-29T16:18:03.528Z",
       "started_at": "2026-10-29T07:09:55.061Z",
       "ended_at": null,
       "branch": "claude/wk-00",
