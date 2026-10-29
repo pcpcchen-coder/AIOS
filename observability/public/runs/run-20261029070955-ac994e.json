@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-29T07:09:55.061Z",
-  "updated_at": "2026-10-29T07:10:38.680Z",
+  "updated_at": "2026-10-29T07:10:42.119Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,8 +32,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-29T07:10:42.119Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -110,6 +110,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "George：先"
+    },
+    {
+      "at": "2026-10-29T07:10:42.119Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
