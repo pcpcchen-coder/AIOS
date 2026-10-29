@@ -4,7 +4,7 @@
 
 # 目前實作、驗證與缺口
 
-更新日期：2026-10-24，Asia/Taipei。程式基準：[`1f44c6b`](https://github.com/pcpcchen-coder/AIOS/commit/1f44c6b384d8819e99c5d5a7689069119adf6d53)。本次更新只調整文件，不變更產品能力或宣稱 G0–G3 通過。2026-10-25 另依家人辨識 ID-01 分支（`claude/family-id-01`）更新「已登記家人辨識」一列，同日再依 ID-02 分支（`claude/family-id-02`，尚未合併）更新同一列；這不是 G0–G3 的實機驗收。
+更新日期：2026-10-29，Asia/Taipei（本次只加入喚醒詞與音色辨認的規劃列，核對程式基準 [`876eeaa`](https://github.com/pcpcchen-coder/AIOS/commit/876eeaaf7697cf4a3847e0687430c536f4a1d9a7)）。上次全面核對為 2026-10-24，程式基準：[`1f44c6b`](https://github.com/pcpcchen-coder/AIOS/commit/1f44c6b384d8819e99c5d5a7689069119adf6d53)。本次更新只調整文件，不變更產品能力或宣稱 G0–G3 通過。2026-10-25 另依家人辨識 ID-01 分支（`claude/family-id-01`）更新「已登記家人辨識」一列，同日再依 ID-02 分支（`claude/family-id-02`，尚未合併）更新同一列；這不是 G0–G3 的實機驗收。2026-10-29 加入喚醒詞與音色辨認一列，只標規劃、未實作。
 
 AIOS 已有可執行的 Nous 桌面原型。先使用或延伸 [`prototype/ambient-shell`](../prototype/ambient-shell)，再依具體需求採用目標架構。Claude 是核心開發主力，ChatGPT／Codex 負責 Quest 工程方向；執行時的模型由設定與能力決定，不按裝置綁定供應商。
 
@@ -38,6 +38,7 @@ AIOS 已有可執行的 Nous 桌面原型。先使用或延伸 [`prototype/ambie
 | Quest、多裝置、OpenClaw worker | 無 | 無 | 擴充評估，不是已實作能力 |
 | 已登記家人辨識與稱名問候 | ID-01：登記、刪除、加密保存、本機辨識（macOS App 選單列打開的「家人辨識」畫面內試認）。ID-02：看著說話的面向等待期間同步辨識（只在停留與連線期間取樣，不做背景常駐辨識），語音就緒＋600 ms 後由核心決定稱不稱名，從固定清單隨機挑一句短的開場（例如「George，我在」「嗨，George」「早安」，依本機時段、避開上一次），API key 與 ChatGPT 方案兩條路徑都用核心挑的句子；交辦給 Codex 的逐字稿遮掉開場那一則；設定「打招呼時稱呼認出的家人」預設開、可關；偵測器定案 YuNet 2023mar 640 | 證據規則、名稱驗證、加密保存（假 SecretBox＋真 AES-GCM）、核心 session／登記／刪除／比對、IPC 過濾、隱私靜態檢查；產品 worker 對 OpenCV 交叉核對；ID-02 的 fixture：問候決策的 6 個條件、兩路送出的文字、先開口／打字取消、換人／多人／過期／刪除、fallback 一次、名稱注入、log 無姓名（合成特徵、假取樣器、假 WebRTC 與 sideband） | [14 規劃](14_Family_Recognition_and_Greeting_Plan_2026-10.md)；[ADR-0001 草案](adr/ADR-0001-local-family-recognition.md)；[ID-00 spike](validation/family-id-00-spike-2026-10-24.md)、[ID-01 驗證](validation/family-id-01-2026-10-25.md)、[ID-02 驗證](validation/family-id-02-2026-10-25.md)。George 口頭回報 ID-01 在 Mac 上登記、試認與手掌停止正常（repo 內沒有數字）；**ID-02 未在 Mac 實測**（兩路實際聽到的句子、模型是否照念、時序與同時運作的負擔）；**門檻未校準**（George 決定先稱名，照實標示）；API key 路徑組好的短句會短暫經過 renderer；瀏覽器版不辨識、只說「我在」 |
 | 長期記憶、知識圖譜、技能晉升 | MEM-0 已有核心私有加密快照、回條、來源 capability 與隔離撤銷模組；產品個人／家人偏好記憶未啟用 | 真 AES-GCM、原生跨 process 鎖、SIGKILL 復原、來源及整通 lease fixture；打包 Electron 44.9.3 真 Keychain 的 1,000 筆虛構記憶跨程序讀回通過 | [16 家庭記憶設計](16_Nous_Memory_Layer_Design_2026-10-26.md)、[ADR-0002](adr/ADR-0002-nous-family-memory.md)、[MEM-0 證據](validation/memory-mem0-2026-10-26.md)。正式簽章／拒絕、實體停播、性能與 MEM-1／MEM-2 產品閉環待驗；沒有向兩路語音或背景任務注入記憶 |
+| 本機喚醒詞、常駐聆聽、家人音色辨認 | **無**（規劃、未實作）。目前收音只在按鈕、看著說話或連續語音模式明確啟動時發生，Web Speech 與兩條即時語音都把音訊交給雲端；`src/voice.ts` 註明不做背景喚醒 | 無 | [17 喚醒詞與音色辨認規劃](17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md)（2026-10-29）：喚醒詞候選、sherpa-onnx 引擎建議與訓練資料授權風險、講者模型比較、臉聲融合、便利性限制不是授權、記憶人物規則；WK-00～WK-03、SP-00～SP-03 均未開始 |
 
 一般對話歷史存在目前頁面記憶體，重新載入會清除。已保存任務與成果不因此消失。兩者的生命週期不能混用。
 
@@ -72,6 +73,8 @@ App 與網頁已加入繁體中文／English 切換與保存，包含原生選�
 本次 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md) 建議先做共用能力政策、可回復任務、裝置配對，再完成 Quest 空間成果與 OpenClaw 受限 worker。F0–F10 是功能建議，Q0–Q4 是建議驗收階段；本次只交付其中的文件盤點，F0 所提產品 CI 尚未新增。
 
 新增的 [家人辨識與稱名問候規劃](14_Family_Recognition_and_Greeting_Plan_2026-10.md) 將近距離辨識與既有看著說話的等待同步進行；認出熟人仍保持安靜，啟動互動且語音就緒後才稱名。辨識不延長等待，失敗用通用問候。ID-00 已交付 ADR 草案與不接進產品的 runtime spike（雲端 CPU／WASM 量測）；ID-01 已有登記、刪除、加密保存與畫面內試認的程式，George 在 Mac 上試過；ID-02 已有看著說話時同步辨識與兩路稱名問候的程式，只有雲端 fixture 驗證、門檻未校準；ID-03（真機與保留樣本驗收、門檻校準）仍是規劃。這些都不構成能力完成或身分授權。
+
+2026-10-29 新增的 [本機喚醒詞與家人音色辨認規劃](17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md) 只是規劃，未實作：沒有喚醒、常駐收音或聲紋程式，沒有錄音，也沒有家人聲音資料。它建議以 sherpa-onnx 本機偵測喚醒詞、未喚醒音訊只留在記憶體的 2 秒環形緩衝，聲音與臉綁同一個 `person_id`，臉聲一致才稱名，並把身分只當成記憶人物候選。喚醒後先播本機提示音、沒有人聲就自動結束，因為誤喚醒會開一次付費通話。George 已於 2026-10-29 決定 9 項（喚醒詞「哈囉努斯」等）；與原建議不同的是：偏好開著時 App 重開與睡眠回來後自動恢復常駐聆聽（收音指示仍以裝置事件為準並有恢復提示），以及門檻校準完成後可只憑聲音稱名問候（校準前只說不含名字的句子）。另開 ADR-0003 屬工程流程，直接採用。以上都仍是規劃、未實作。
 
 正式產品規則仍由 [CLAUDE.md](../CLAUDE.md)、[06](06_Ambient_Voice_Gaze_Experience.md)、[07](07_Ambient_Implementation_and_Acceptance.md) 及有明確日期的專題決定規範。不要因本文件或測試全綠將 G0–G3 改為通過。01–05 與 08 保留歷史設計、當時選型和排程；其舊版本、價格與外部生態資料未在本次全面重新查證。
 
