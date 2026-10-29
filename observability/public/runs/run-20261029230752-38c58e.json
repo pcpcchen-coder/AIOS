@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-29T23:07:52.528Z",
-  "updated_at": "2026-10-29T23:30:36.842Z",
+  "updated_at": "2026-10-29T23:30:40.915Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-29T23:30:40.914Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -133,6 +133,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "Plan＋George：語音記住用說的確認、撤銷後重建通話"
+    },
+    {
+      "at": "2026-10-29T23:30:40.915Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
