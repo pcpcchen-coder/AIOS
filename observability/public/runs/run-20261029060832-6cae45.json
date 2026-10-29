@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "repo": "pcpcchen-coder/AIOS",
+  "run_id": "run-20261029060832-6cae45",
+  "title": "規劃：喚醒詞與家人音色辨認（連結記憶）",
+  "playbook": "investigation",
+  "branch": "claude/wake-speaker-plan",
+  "commit_sha": "",
+  "status": "running",
+  "started_at": "2026-10-29T06:08:32.091Z",
+  "updated_at": "2026-10-29T06:08:32.091Z",
+  "ended_at": null,
+  "steps": [
+    {
+      "id": "how",
+      "title": "how",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "checkpoint",
+      "title": "checkpoint",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "research",
+      "title": "research",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "draft",
+      "title": "draft",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "review",
+      "title": "review",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "fix",
+      "title": "fix",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "pr",
+      "title": "pr",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-29T06:08:32.091Z",
+      "type": "run_started",
+      "step_id": null,
+      "status": "running",
+      "note": ""
+    }
+  ],
+  "provenance": "Agent self-reported"
+}

@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-27T00:57:18.673Z",
+  "updated_at": "2026-10-29T06:08:33.907Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261029060832-6cae45",
+      "title": "規劃：喚醒詞與家人音色辨認（連結記憶）",
+      "playbook": "investigation",
+      "status": "running",
+      "updated_at": "2026-10-29T06:08:32.091Z",
+      "started_at": "2026-10-29T06:08:32.091Z",
+      "ended_at": null,
+      "branch": "claude/wake-speaker-plan",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 7,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "aios-ci-investigation-40429591229-1",
