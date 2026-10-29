@@ -1,0 +1,2089 @@
+{
+  "kind": "wk00-bench",
+  "environment": "cloud container, synthetic TTS positives and public corpora; not a Mac and not a living room / 雲端容器、合成或公開語料，不是 Mac、不是客廳",
+  "node": "v22.22.0",
+  "platform": "linux-x64",
+  "positives": {
+    "clips": 300,
+    "contexts": [
+      "isolated",
+      "white_noise_10dB",
+      "music_10dB",
+      "sentence"
+    ],
+    "voices": [
+      "aishell3",
+      "melo-zh-en"
+    ],
+    "speakers_aishell3": 30,
+    "melo_speeds": [
+      0.8,
+      0.9,
+      1,
+      1.1,
+      1.2
+    ]
+  },
+  "tts_word_length_s": {
+    "哈囉努斯": {
+      "n": 35,
+      "mean": 0.8165714285714282,
+      "p50": 0.8300000000000001,
+      "p95": 1.07,
+      "min": 0.48999999999999994,
+      "max": 1.0799999999999998
+    },
+    "嘿努斯": {
+      "n": 35,
+      "mean": 0.44028571428571434,
+      "p50": 0.42999999999999994,
+      "p95": 0.6299999999999999,
+      "min": 0.3,
+      "max": 0.6699999999999999
+    },
+    "Hey Nous": {
+      "n": 5,
+      "mean": 0.4039999999999999,
+      "p50": 0.38,
+      "p95": 0.49,
+      "min": 0.33,
+      "max": 0.49
+    }
+  },
+  "results": [
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "wenetspeech-3.3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 1,
+        "threshold": 0.1
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :1 #0.1 @HALUO_NUSI",
+        "h ēi n ǔ s ī :1 #0.1 @HEI_NUSI"
+      ],
+      "load_ms": 1103.5,
+      "rss_mb": {
+        "before_load": 213.1,
+        "after_load": 230.2,
+        "engine_delta": 17.1,
+        "peak": 426.5
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0238,
+        "single_core_percent_at_realtime": 2.38,
+        "rtf": 0.0272,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.6509473113374558,
+          "p50": 0.16217999998480082,
+          "p95": 9.634057999996003,
+          "min": 0.001883000019006431,
+          "max": 173.57688499998767
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "wenetspeech-3.3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 1,
+        "threshold": 0.25
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :1 #0.25 @HALUO_NUSI",
+        "h ēi n ǔ s ī :1 #0.25 @HEI_NUSI"
+      ],
+      "load_ms": 1166.4,
+      "rss_mb": {
+        "before_load": 210,
+        "after_load": 226.6,
+        "engine_delta": 16.6,
+        "peak": 473.9
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.024,
+        "single_core_percent_at_realtime": 2.4,
+        "rtf": 0.0272,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.657324136405608,
+          "p50": 0.16273900005035102,
+          "p95": 9.583625000028405,
+          "min": 0.0019699999975273386,
+          "max": 471.96165899996413
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "wenetspeech-3.3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 1,
+        "threshold": 0.4
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :1 #0.4 @HALUO_NUSI",
+        "h ēi n ǔ s ī :1 #0.4 @HEI_NUSI"
+      ],
+      "load_ms": 858,
+      "rss_mb": {
+        "before_load": 211.9,
+        "after_load": 229.1,
+        "engine_delta": 17.2,
+        "peak": 521.2
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0227,
+        "single_core_percent_at_realtime": 2.27,
+        "rtf": 0.0254,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.4732569653020335,
+          "p50": 0.15485500000067987,
+          "p95": 9.148501000017859,
+          "min": 0.0015500000008614734,
+          "max": 978.4410460000217
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "wenetspeech-3.3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 2,
+        "threshold": 0.1
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :2 #0.1 @HALUO_NUSI",
+        "h ēi n ǔ s ī :2 #0.1 @HEI_NUSI"
+      ],
+      "load_ms": 900.8,
+      "rss_mb": {
+        "before_load": 213.1,
+        "after_load": 229.7,
+        "engine_delta": 16.6,
+        "peak": 521.2
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0231,
+        "single_core_percent_at_realtime": 2.31,
+        "rtf": 0.0257,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.5003747076375475,
+          "p50": 0.15788399998564273,
+          "p95": 9.237679999961983,
+          "min": 0.001675999999861233,
+          "max": 292.7612739999895
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "wenetspeech-3.3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 2,
+        "threshold": 0.25
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :2 #0.25 @HALUO_NUSI",
+        "h ēi n ǔ s ī :2 #0.25 @HEI_NUSI"
+      ],
+      "load_ms": 778.4,
+      "rss_mb": {
+        "before_load": 209.2,
+        "after_load": 225.8,
+        "engine_delta": 16.7,
+        "peak": 521.2
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0231,
+        "single_core_percent_at_realtime": 2.31,
+        "rtf": 0.0257,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.5061052950587266,
+          "p50": 0.1565239999908954,
+          "p95": 9.203494999994291,
+          "min": 0.0014030000020284206,
+          "max": 398.10138200002257
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "wenetspeech-3.3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 2,
+        "threshold": 0.4
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :2 #0.4 @HALUO_NUSI",
+        "h ēi n ǔ s ī :2 #0.4 @HEI_NUSI"
+      ],
+      "load_ms": 822.7,
+      "rss_mb": {
+        "before_load": 213.2,
+        "after_load": 230,
+        "engine_delta": 16.8,
+        "peak": 521.2
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0232,
+        "single_core_percent_at_realtime": 2.32,
+        "rtf": 0.0258,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.5140090839621627,
+          "p50": 0.15791599999647588,
+          "p95": 9.179137999999512,
+          "min": 0.001505000051110983,
+          "max": 233.313055000006
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "zh-en-3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 1,
+        "threshold": 0.1
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :1 #0.1 @HALUO_NUSI",
+        "h ēi n ǔ s ī :1 #0.1 @HEI_NUSI",
+        "HH EY1 N UW1 S :1 #0.1 @HEY_NOUS"
+      ],
+      "load_ms": 1715.1,
+      "rss_mb": {
+        "before_load": 211.2,
+        "after_load": 228,
+        "engine_delta": 16.8,
+        "peak": 542.7
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0229,
+        "single_core_percent_at_realtime": 2.29,
+        "rtf": 0.0266,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.4196446705907246,
+          "p50": 0.16222900000866503,
+          "p95": 8.92859700002009,
+          "min": 0.0013790000230073929,
+          "max": 323.6456950000138
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "zh-en-3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 1,
+        "threshold": 0.25
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :1 #0.25 @HALUO_NUSI",
+        "h ēi n ǔ s ī :1 #0.25 @HEI_NUSI",
+        "HH EY1 N UW1 S :1 #0.25 @HEY_NOUS"
+      ],
+      "load_ms": 1702.4,
+      "rss_mb": {
+        "before_load": 213.5,
+        "after_load": 230.4,
+        "engine_delta": 16.9,
+        "peak": 595.5
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0231,
+        "single_core_percent_at_realtime": 2.31,
+        "rtf": 0.0266,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.4330188298713034,
+          "p50": 0.1650530000042636,
+          "p95": 8.852872999967076,
+          "min": 0.0015819999971427023,
+          "max": 378.4012619999703
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "zh-en-3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 1,
+        "threshold": 0.4
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :1 #0.4 @HALUO_NUSI",
+        "h ēi n ǔ s ī :1 #0.4 @HEI_NUSI",
+        "HH EY1 N UW1 S :1 #0.4 @HEY_NOUS"
+      ],
+      "load_ms": 1899.5,
+      "rss_mb": {
+        "before_load": 213.7,
+        "after_load": 230.2,
+        "engine_delta": 16.5,
+        "peak": 642.9
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0228,
+        "single_core_percent_at_realtime": 2.28,
+        "rtf": 0.0266,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.4098492164591696,
+          "p50": 0.1625060000224039,
+          "p95": 8.83031500002835,
+          "min": 0.0016700000269338489,
+          "max": 190.97641100001056
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "zh-en-3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 2,
+        "threshold": 0.1
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :2 #0.1 @HALUO_NUSI",
+        "h ēi n ǔ s ī :2 #0.1 @HEI_NUSI",
+        "HH EY1 N UW1 S :2 #0.1 @HEY_NOUS"
+      ],
+      "load_ms": 1983.7,
+      "rss_mb": {
+        "before_load": 213.5,
+        "after_load": 230,
+        "engine_delta": 16.5,
+        "peak": 690.2
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0226,
+        "single_core_percent_at_realtime": 2.26,
+        "rtf": 0.0265,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.3853898756973133,
+          "p50": 0.1619139999966137,
+          "p95": 8.7061860000249,
+          "min": 0.0014379999920492992,
+          "max": 209.06878099997994
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "zh-en-3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 2,
+        "threshold": 0.25
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :2 #0.25 @HALUO_NUSI",
+        "h ēi n ǔ s ī :2 #0.25 @HEI_NUSI",
+        "HH EY1 N UW1 S :2 #0.25 @HEY_NOUS"
+      ],
+      "load_ms": 1144.1,
+      "rss_mb": {
+        "before_load": 212,
+        "after_load": 229.2,
+        "engine_delta": 17.2,
+        "peak": 426.5
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0234,
+        "single_core_percent_at_realtime": 2.34,
+        "rtf": 0.0267,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.60281094506386,
+          "p50": 0.16325900005176663,
+          "p95": 9.391806000028737,
+          "min": 0.0017079999670386314,
+          "max": 292.1974029999692
+        }
+      }
+    },
+    {
+      "job": {
+        "negatives": [
+          "wav",
+          "libri-wav"
+        ],
+        "negativeHours": 3,
+        "noiseMinutes": 15,
+        "musicMinutes": 15,
+        "model": "zh-en-3M",
+        "engine": "node@2.0.1",
+        "precision": "int8",
+        "boost": 2,
+        "threshold": 0.4
+      },
+      "package_version": "2.0.1",
+      "keywords_text": [
+        "h ā l uō n ǔ s ī :2 #0.4 @HALUO_NUSI",
+        "h ēi n ǔ s ī :2 #0.4 @HEI_NUSI",
+        "HH EY1 N UW1 S :2 #0.4 @HEY_NOUS"
+      ],
+      "load_ms": 1113.3,
+      "rss_mb": {
+        "before_load": 212.6,
+        "after_load": 229.1,
+        "engine_delta": 16.5,
+        "peak": 426.5
+      },
+      "positives": {
+        "isolated": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "white_noise_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "music_10dB": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        },
+        "sentence": {
+          "keywords": {
+            "哈囉努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "嘿努斯": {
+              "n": 35,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            },
+            "Hey Nous": {
+              "n": 5,
+              "hits": 0,
+              "recall": 0,
+              "latency_after_word_end_s": null
+            }
+          },
+          "false_alarms": 0
+        }
+      },
+      "estimated_length_s": {},
+      "token_span_s": {},
+      "hard_negatives": {
+        "utterances": 192,
+        "seconds": 590.5,
+        "false_alarms": {}
+      },
+      "negatives": {
+        "seconds": 23404.1,
+        "hours": 6.501,
+        "sources": [
+          {
+            "name": "wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "libri-wav",
+            "hours": 3.001,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "white_noise",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          },
+          {
+            "name": "synthetic_music",
+            "hours": 0.25,
+            "false_alarms": {},
+            "examples": []
+          }
+        ],
+        "per_hour": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        },
+        "false_alarms": {
+          "哈囉努斯": 0,
+          "嘿努斯": 0,
+          "Hey Nous": 0
+        }
+      },
+      "perf": {
+        "cpu_seconds_per_audio_second": 0.0233,
+        "single_core_percent_at_realtime": 2.33,
+        "rtf": 0.0266,
+        "chunk_ms": {
+          "n": 235892,
+          "mean": 2.5933065932249373,
+          "p50": 0.1615999999921769,
+          "p95": 9.349707999965176,
+          "min": 0.0015439999988302588,
+          "max": 511.3712349999696
+        }
+      }
+    }
+  ]
+}

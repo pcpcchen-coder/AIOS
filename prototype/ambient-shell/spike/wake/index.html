@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <!-- WK-00 開發工具頁（不是產品畫面）：只在本機 127.0.0.1；麥克風音訊只在記憶體，不錄音、不連外。
+         connect-src 'self' 只允許同源載入自建 wasm；ws://127.0.0.1:5182 只給 wake:page 開發伺服器的 HMR。 -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' ws://127.0.0.1:5182; img-src 'self' data:; style-src 'self' 'unsafe-inline'; media-src 'self' mediastream:"
+    />
+    <title>WK-00 喚醒詞 spike / Wake-word spike</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root { color-scheme: dark; --bg: #101318; --fg: #e8ebf0; --muted: #98a2b3; --line: #2a3140; --ok: #39d98a; --warn: #ffb020; }
+      body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      .note { color: var(--muted); margin: 0 0 12px; max-width: 70em; }
+      fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px; }
+      legend { color: var(--muted); }
+      label { margin-right: 12px; }
+      input[type="text"] { width: 28em; max-width: 100%; }
+      button { margin: 4px 8px 4px 0; }
+      pre { white-space: pre-wrap; background: #0b0d11; border: 1px solid var(--line); border-radius: 8px; padding: 8px; max-height: 30em; overflow: auto; }
+      #status[data-state="listening_local"] { color: var(--ok); }
+      #status[data-state="error"] { color: var(--warn); }
+    </style>
+    <script type="module" src="./page.ts"></script>
+  </head>
+  <body>
+    <h1>WK-00 喚醒詞 spike / Wake-word spike</h1>
+    <p class="note">
+      開發工具，不是產品功能。麥克風音訊只在本頁記憶體（2 秒環形緩衝），不錄音、不寫檔、不連外。KWS 需要自建的 sherpa-onnx wasm（放在 spike/wake/public/kws-wasm/），npm 套件沒有瀏覽器版。<br />
+      Developer tool, not a product feature. Microphone audio stays in this page's memory (2-second ring buffer); nothing is recorded, saved or sent. KWS needs a self-built sherpa-onnx wasm in spike/wake/public/kws-wasm/; the npm package has no browser build.
+    </p>
+    <fieldset>
+      <legend>設定 / Settings</legend>
+      <label>關鍵詞 / Keywords <input id="keywords" type="text" value="哈囉努斯,嘿努斯" /></label>
+      <label>模型 / Model
+        <select id="model">
+          <option value="wenetspeech-3.3M">wenetspeech-3.3M</option>
+          <option value="zh-en-3M">zh-en-3M</option>
+        </select>
+      </label>
+      <label>門檻 / Threshold <input id="threshold" type="number" step="0.05" min="0" max="1" value="0.25" /></label>
+    </fieldset>
+    <button id="start" type="button">開始本機聆聽 / Start listening locally</button>
+    <button id="stop" type="button" disabled>停止並清空 / Stop and clear</button>
+    <p>狀態 / Status: <span id="status" data-state="off" role="status" aria-live="polite">關閉 / off</span></p>
+    <pre id="out" aria-label="偵測紀錄 / Detection log"></pre>
+  </body>
+</html>

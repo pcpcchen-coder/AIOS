@@ -13,12 +13,16 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p spike/face/tsconfig.json",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p spike/face/tsconfig.json && tsc --noEmit -p spike/wake/tsconfig.json",
     "test": "vitest run",
     "vision:setup": "node scripts/vision-setup.mjs",
     "face:setup": "node scripts/face-setup.mjs",
     "face:spike": "vite --config spike/face/vite.config.ts",
     "face:bench": "node scripts/face-spike-bench.mjs",
+    "wake:setup": "node scripts/wake-setup.mjs",
+    "wake:spike": "tsx spike/wake/cli.ts",
+    "wake:bench": "tsx spike/wake/bench.ts",
+    "wake:page": "vite --config spike/wake/vite.config.ts",
     "docs:commands": "tsx scripts/write-commands-doc.ts"
   },
   "dependencies": {
@@ -30,6 +34,8 @@
   },
   "devDependencies": {
     "@types/node": "25.9.9",
+    "sherpa-onnx": "2.0.1",
+    "sherpa-onnx-node": "2.0.1",
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vite": "8.3.4",

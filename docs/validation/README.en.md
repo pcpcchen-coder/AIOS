@@ -7,10 +7,11 @@
 
 Added 2026-10-26: [bilingual documentation and App/web verification](bilingual-2026-10-26.en.md), covering document synchronization, interface switching and persistence, conversation language, and isolated mock UI checks.
 
-Updated 2026-10-26. This directory retains the original date, method, and limitations of each validation. Updating other documents does not upgrade an old record to a hardware pass. Later results appear in new records or explicit dated additions.
+Updated 2026-10-29 (added the WK-00 wake-word spike). This directory retains the original date, method, and limitations of each validation. Updating other documents does not upgrade an old record to a hardware pass. Later results appear in new records or explicit dated additions.
 
 | Record | Evidence scope and limitations |
 |---|---|
+| [Wake word WK-00 spike](wk-00-spike-2026-10-29.en.md) | CPU, memory, real-time factor, and per-hour false alarms on public corpora for sherpa-onnx 1.13.8/2.0.1 Node and Node-wasm KWS, two models, and three candidate phrases in a cloud container; TTS-synthesized positives scored 0/300 hits for an undetermined reason (synthetic speech or the pronunciation units for 「哈囉」), and 0 false alarms together with 0 hits must not be read as a low false-alarm rate; browser wasm not self-built; family positives and TV negatives in the Mac living room await testing |
 | [Family memory MEM-0](memory-mem0-2026-10-26.en.md) | Isolated tests of core-private snapshots, sources, and revocation; real process crashes and native macOS locking; cross-process retrieval of 1,000 fictional memories with packaged Electron 44.9.3 and real Keychain; production signing, denial, audio, and product wiring remain unverified |
 | [Three small decisions](small-decisions-2026-10-25.en.md) | Centered brain zoom with fake Canvas, synthetic distance, and Chromium screenshots; air-conditioner off commands specify a timer and default to automatic mode with a fake controller; Mac and real air conditioner remain unverified |
 | [Family recognition ID-02](family-id-02-2026-10-25.en.md) | Fixtures for recognition during look-to-talk, interaction binding, core-generated wording, and named greetings on both paths (synthetic features, fake sampler, fake WebRTC, and sideband): six pre-greeting conditions, cancellation on speech or typing, person changes, multiple people, expiry, deletion, one fallback, name injection, and no names in logs; thresholds are uncalibrated; actual audio, timing, and concurrent workload await Mac testing |
