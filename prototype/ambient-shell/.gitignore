@@ -6,3 +6,7 @@ public/vision/
 spike/face/public/
 spike/face/dist/
 face-runtime/
+spike/wake/models/
+spike/wake/public/
+spike/wake/results/
+spike/wake/dist/
