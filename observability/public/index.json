@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-29T07:10:43.584Z",
+  "updated_at": "2026-10-29T07:11:19.256Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261029071117-46583a",
+      "title": "MEM-1：本機 profile、明示記住／更正／忘記、可靠回條、文字聊天取用",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-10-29T07:11:17.342Z",
+      "started_at": "2026-10-29T07:11:17.340Z",
+      "ended_at": null,
+      "branch": "claude/mem-1",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 8,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261029070955-ac994e",
