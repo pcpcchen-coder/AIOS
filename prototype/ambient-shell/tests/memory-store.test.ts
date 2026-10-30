@@ -16,7 +16,7 @@ function box(key: Buffer = randomBytes(32)): MemorySecretBox {
 }
 const CANARY = "隔離測試不吃香菜_M0_CANARY";
 const profile = { id: "fictional-a", name: "虛構甲", createdAt: "2026-10-26T00:00:00Z", facePersonId: null, minor: false };
-function fact(): MemoryFact { return { id: "fact-a", profileId: profile.id, revision: 1, kind: "preference", topic: "food", key: "coriander", value: CANARY, audience: "household", source: { kind: "explicit", turnId: "turn-1", at: profile.createdAt, excerpt: CANARY }, validFrom: profile.createdAt, expiresAt: null, reviewAfter: null, pinned: false }; }
+function fact(): MemoryFact { return { id: "fact-a", profileId: profile.id, revision: 1, kind: "preference", topic: "food", key: "coriander", value: CANARY, audience: "household", source: { kind: "explicit", turnId: "turn-1", at: profile.createdAt, excerpt: CANARY, by: null }, validFrom: profile.createdAt, expiresAt: null, reviewAfter: null, pinned: false, derivedFrom: null }; }
 function add(data: MemoryData) { data.profiles.push(profile); data.facts.push(fact()); return "saved" as const; }
 let dir: string, secretBox: MemorySecretBox, key: Buffer;
 let stores: MemoryStore[] = [];
@@ -221,5 +221,113 @@ describe("MemoryStore production platform rule", () => {
       await expect(MemoryStore.open({ dir: d, secretBox: box() })).rejects.toMatchObject({ code: "unavailable" });
       expect(readdirSync(d)).toEqual([]);
     } finally { rmSync(d, { recursive: true, force: true }); }
+  });
+});
+
+// ───────────── MEM-5a：快照 version 4 ─────────────
+
+function plainOf(d: string): string {
+  const e = JSON.parse(readFileSync(join(d, MEMORY_FILE), "utf8")) as { format: string; version: number; revision: number; wrappedKey: string; nonce: string; tag: string; ciphertext: string };
+  const dek = Buffer.from(secretBox.open(Buffer.from(e.wrappedKey, "base64")), "base64");
+  const dc = createDecipheriv("aes-256-gcm", dek, Buffer.from(e.nonce, "base64"));
+  dc.setAAD(Buffer.from(JSON.stringify([e.format, e.version, e.revision, e.wrappedKey])));
+  dc.setAuthTag(Buffer.from(e.tag, "base64"));
+  return Buffer.concat([dc.update(Buffer.from(e.ciphertext, "base64")), dc.final()]).toString("utf8");
+}
+const fileVersion = (d: string) => (JSON.parse(readFileSync(join(d, MEMORY_FILE), "utf8")) as { version: number }).version;
+const household = (extra: Partial<MemoryFact> = {}): MemoryFact => ({ ...fact(), id: "fact-h", profileId: null, value: "晚餐不要太鹹", source: { ...fact().source, excerpt: "晚餐不要太鹹", by: profile.id }, ...extra });
+const result = { id: "res_0123456789abcdef", taskId: "task_01234567-89ab-cdef-0123-456789abcdef", subject: null, deps: [], target: { provider: "claude", account: "fp0000claude0001" }, createdAt: profile.createdAt, state: "active" as const };
+
+describe.skipIf(!realLockAvailable)("MemoryStore snapshot version 4 (MEM-5a)", () => {
+  it("round-trips settings.suggestions, a suggestion source, source.by and a work_summary with derivedFrom", async () => {
+    let s = await open();
+    expect(await s.commit(newStoreOperation(0, "v4"), data => {
+      data.settings = { enabled: true, setupAt: profile.createdAt, suggestions: true };
+      data.profiles.push(profile);
+      data.facts.push({ ...fact(), source: { ...fact().source, kind: "suggestion" } }, household(), { ...fact(), id: "fact-w", kind: "work_summary", value: "這次選了方案 B", derivedFrom: { taskId: result.taskId } });
+      return "saved";
+    })).toEqual({ status: "saved", revision: 1 });
+    expect(fileVersion(dir)).toBe(4);
+    const before = s.read();
+    await s.close(); stores = [];
+    s = await open();
+    expect(s.read()).toEqual(before);
+    expect(s.read().facts.map(f => [f.source.kind, f.source.by, f.kind, f.derivedFrom])).toEqual([["suggestion", null, "preference", null], ["explicit", profile.id, "preference", null], ["explicit", null, "work_summary", { taskId: result.taskId }]]);
+  });
+
+  it("validates version 4 content: derivedFrom only on work_summary, by only on household facts and only for an existing profile", async () => {
+    const s = await open();
+    const bad: [string, (d: MemoryData) => void][] = [
+      ["derived-on-preference", d => { d.profiles.push(profile); d.facts.push({ ...fact(), derivedFrom: { taskId: result.taskId } }); }],
+      ["derived-bad-task", d => { d.profiles.push(profile); d.facts.push({ ...fact(), kind: "work_summary", derivedFrom: { taskId: "task_x" } }); }],
+      ["by-unknown", d => { d.profiles.push(profile); d.facts.push(household({ source: { ...fact().source, by: "nobody" } })); }],
+      ["by-on-person", d => { d.profiles.push(profile); d.facts.push({ ...fact(), source: { ...fact().source, by: profile.id } }); }],
+      ["unknown-source", d => { d.profiles.push(profile); d.facts.push({ ...fact(), source: { ...fact().source, kind: "model" as "explicit" } }); }],
+    ];
+    for (const [name, change] of bad) expect(await s.commit(newStoreOperation(0, name), d => { change(d); return "saved"; })).toEqual({ status: "conflict" });
+    expect(existsSync(join(dir, MEMORY_FILE))).toBe(false);
+  });
+
+  it("tamper: a changed envelope version or ciphertext fails closed (corrupt) without rewriting", async () => {
+    const s = await open();
+    await s.commit(newStoreOperation(0, "v4"), d => { d.profiles.push(profile); d.facts.push(household()); return "saved"; });
+    await s.close(); stores = [];
+    const file = join(dir, MEMORY_FILE), original = readFileSync(file, "utf8");
+    for (const mutate of [(e: Record<string, unknown>) => { e.version = 3; }, (e: Record<string, unknown>) => { e.version = 5; }, (e: Record<string, unknown>) => { const c = Buffer.from(e.ciphertext as string, "base64"); c[5] ^= 1; e.ciphertext = c.toString("base64"); }]) {
+      const e = JSON.parse(original) as Record<string, unknown>; mutate(e);
+      const tampered = JSON.stringify(e);
+      writeFileSync(file, tampered, { mode: 0o600 });
+      await expect(open()).rejects.toMatchObject({ code: "corrupt" });
+      expect(readFileSync(file, "utf8")).toBe(tampered);
+    }
+  });
+
+  it("without version 4 content, versions 2 and 3 are byte-identical to the MEM-4c store (7fc7d09) for the same operation", async () => {
+    const { MemoryStore: OldStore } = await import("./fixtures/memory-store-7fc7d09.ts");
+    for (const withResults of [false, true]) {
+      const a = mkdtempSync(join(tmpdir(), "nous-memory-old-")), b = mkdtempSync(join(tmpdir(), "nous-memory-new-"));
+      try {
+        const seed = await OldStore.open({ dir: a, secretBox, lockProvider: testLockProvider });
+        // OldStore 的 fact 沒有 by／derivedFrom（MEM-4c 的形狀）。
+        const oldFact = () => { const { derivedFrom: _d, ...f } = fact(); const { by: _b, ...source } = f.source; return { ...f, source }; };
+        await seed.commit(newStoreOperation(0, "seed"), data => { data.profiles.push(profile); data.facts.push(oldFact() as never); if (withResults) data.results.push(result); return "saved"; });
+        await seed.close();
+        writeFileSync(join(b, MEMORY_FILE), readFileSync(join(a, MEMORY_FILE)), { mode: 0o600 });
+        chmodSync(b, 0o700);
+        const op = newStoreOperation(1, "same-change");
+        const oldStore = await OldStore.open({ dir: a, secretBox, lockProvider: testLockProvider });
+        const newStore = await MemoryStore.open({ dir: b, secretBox, lockProvider: testLockProvider });
+        const second = { ...oldFact(), id: "fact-b", value: "不喝咖啡", key: "咖啡" };
+        expect(await oldStore.commit(op, data => { data.facts.push(second as never); data.settings = { ...data.settings, enabled: true, setupAt: profile.createdAt }; return "saved"; })).toEqual({ status: "saved", revision: 2 });
+        expect(await newStore.commit(op, data => { data.facts.push(second as never); data.settings = { ...data.settings, enabled: true, setupAt: profile.createdAt }; return "saved"; })).toEqual({ status: "saved", revision: 2 });
+        await oldStore.close(); await newStore.close();
+        expect(fileVersion(b)).toBe(withResults ? 3 : 2);
+        expect(plainOf(b)).toBe(plainOf(a));
+        expect(plainOf(b)).not.toMatch(/"by"|"derivedFrom"/);
+      } finally { rmSync(a, { recursive: true, force: true }); rmSync(b, { recursive: true, force: true }); }
+    }
+  });
+
+  it("v3 → v4 when suggestions are turned on (results kept), back to v3 when the version 4 content is gone; the MEM-4c store refuses v4 without overwriting it", async () => {
+    const s = await open();
+    await s.commit(newStoreOperation(0, "v3"), d => { d.profiles.push(profile); d.facts.push(fact()); d.results.push(result); return "saved"; });
+    expect(fileVersion(dir)).toBe(3);
+    await s.commit(newStoreOperation(1, "on"), d => { d.settings = { ...d.settings, suggestions: true }; return "updated"; });
+    expect(fileVersion(dir)).toBe(4);
+    expect(s.read().results).toEqual([result]);
+    await s.close(); stores = [];
+    // 舊版 App（MEM-4c 的 store）讀到 version 4：當成損壞而停用記憶，不覆寫。
+    const { MemoryStore: OldStore } = await import("./fixtures/memory-store-7fc7d09.ts");
+    const bytes = readFileSync(join(dir, MEMORY_FILE));
+    await expect(OldStore.open({ dir, secretBox, lockProvider: testLockProvider })).rejects.toMatchObject({ code: "corrupt" });
+    expect(readFileSync(join(dir, MEMORY_FILE))).toEqual(bytes);
+    const again = await open();
+    await again.commit(newStoreOperation(2, "off"), d => { d.settings = { ...d.settings, suggestions: false }; return "updated"; });
+    expect(fileVersion(dir)).toBe(3);
+    await again.close(); stores = [];
+    // 回到 3 之後舊版又讀得到。
+    const old = await OldStore.open({ dir, secretBox, lockProvider: testLockProvider });
+    expect(old.read().results).toEqual([result]);
+    await old.close();
   });
 });

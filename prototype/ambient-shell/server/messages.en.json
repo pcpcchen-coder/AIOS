@@ -451,5 +451,11 @@
   "這個任務的內容這次無法解開，不能重做": "This task's content cannot be decrypted right now, so it cannot be redone",
   "這是其他家人的任務；請從選單列「成果紀錄…」打開後再重做": "This task belongs to another family member; open it from the menu bar item “Results history…” to redo it",
   "這次無法解開加密的任務內容（金鑰不可用）；內容仍安全保存在這台 Mac，請稍後再試": "The encrypted task content could not be decrypted this time (key unavailable); it is still stored safely on this Mac. Please try again later.",
-  "正在更新記憶，請稍後再試": "Memory is updating; try again shortly"
+  "正在更新記憶，請稍後再試": "Memory is updating; try again shortly",
+  "好，不記這一句": "OK, I won't remember that",
+  "記憶建議已關閉，這次沒有保存": "Memory suggestions are off; nothing was saved this time",
+  "已經有相關的記憶，這次沒有保存：{0}": "A related memory already exists, so nothing was saved: {0}",
+  "已開啟記憶建議：打字聊天說到自己穩定的偏好時，會在回覆下方問一次；只有按「記住」才保存": "Memory suggestions are on: when you mention a stable preference of your own while typing, Nous asks once below the reply; it is saved only if you press “Remember”",
+  "已關閉記憶建議": "Memory suggestions are off",
+  "記憶建議目前沒有開放（需要 NOUS_MEMORY_ROUTES 列出 suggest）": "Memory suggestions are not available (NOUS_MEMORY_ROUTES must list suggest)"
 }

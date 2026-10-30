@@ -3,7 +3,7 @@
 // 文字欄位 message 是核心的固定句型（中文原文，{0}… 由 values 帶入），畫面用共用翻譯表 t(message, ...values) 顯示；
 // values 是使用者自己的話或人物名稱，不翻譯。
 
-export const MEMORY_OPS = ["status", "setup", "turn", "card_answer", "card_view", "select", "suspend", "list", "receipt", "edit", "forget", "pin", "profile_delete", "link_face", "profile_minor"] as const;
+export const MEMORY_OPS = ["status", "setup", "turn", "card_answer", "card_view", "select", "suspend", "list", "receipt", "edit", "forget", "pin", "profile_delete", "link_face", "profile_minor", "suggestions"] as const;
 export type MemoryOp = (typeof MEMORY_OPS)[number];
 
 /** 本次人物狀態（16 §4）：unselected 只用家庭共用；suspended 是撤銷後暫停，要重新選擇。 */
@@ -72,6 +72,11 @@ export interface MemoryStatusView {
   targets: MemoryTargetView[];
   active_facts: number;
   limits: { facts: number; profiles: number; value_chars: number };
+  /**
+   * MEM-5a 記憶建議：available＝NOUS_MEMORY_ROUTES 列出 suggest（預設關閉）；enabled＝記憶管理裡開了建議。兩者都是 true 才會提。
+   * 核心沒有載入記憶檔時沒有這個欄位。
+   */
+  suggestions?: { available: boolean; enabled: boolean };
 }
 
 export interface MemoryFactView {
@@ -81,12 +86,14 @@ export interface MemoryFactView {
   subject_name: string | null;
   text: string;
   topic: string;
-  /** explicit：打字或畫面點擊；voice_confirmed：MEM-2 即時語音的確認詞（George 2026-10-30）。 */
-  source: "explicit" | "voice_confirmed";
+  /** explicit：打字或畫面點擊；voice_confirmed：MEM-2 即時語音的確認詞（George 2026-10-30）；suggestion：MEM-5a 記憶建議上按「記住」。 */
+  source: "explicit" | "voice_confirmed" | "suggestion";
   excerpt: string;
   at: string;
   expires: string | null;
   pinned: boolean;
+  /** MEM-5a：全家共用的記憶由哪位本次人物記下（名字；只是當時選定的人物，不是身分驗證）。其他為 null。 */
+  by_name: string | null;
 }
 
 export type MemoryReceiptStatus =
@@ -115,7 +122,12 @@ export type MemoryCardView =
    * target 是要更正或忘記的那一筆；replaces：記住時會取代原本的說法。也可以說出確認詞（確認記住／確認更正／確認忘記）。
    */
   | { kind: "voice_confirm"; card: string; action: "remember" | "correct" | "forget"; heard: string; value: string; subject_name: string | null; target: string | null; options: VoiceConfirmChoice[]; replaces: boolean }
-  | { kind: "inspect"; subject_name: string | null; facts: MemoryFactView[] };
+  | { kind: "inspect"; subject_name: string | null; facts: MemoryFactView[] }
+  /**
+   * MEM-5a 記憶建議（只經 card_view；turn 只帶卡片 ID）：text 是使用者打的那一句，value 是按「記住」後要保存的內容。
+   * 卡片答案：confirm＝記住，decline＝不用。
+   */
+  | { kind: "suggestion"; card: string; text: string; value: string; subject_name: string | null };
 
 export interface MemoryTurnView {
   receipts: MemoryReceiptView[];
@@ -127,6 +139,10 @@ export interface MemoryTurnView {
   history_reset: boolean;
   /** 這次沒有用到記憶的原因（固定句型）；null＝已依設定處理。 */
   notice: MemoryText | null;
+  /**
+   * MEM-5a 記憶建議：只有卡片 ID（內容經 card_view 取）。不擋聊天：頁面在這一輪的回覆串流結束後，才在回覆下方顯示一行。
+   */
+  suggestion: { card: string } | null;
 }
 
 export type MemoryErrorCode = "bad_request" | "unavailable" | "not_user_initiated" | "no_manage" | "not_found" | "expired" | "conflict" | "declined" | "full" | "busy" | "closed";
@@ -139,7 +155,7 @@ export type MemoryResponse =
   | { ok: true; op: "receipt"; status: MemoryReceiptStatus }
   /** MEM-2：SSE 只送卡片 ID，可信主視窗用 card_view 取內容；origin live＝即時語音的卡（回答後不續送聊天）。 */
   | { ok: true; op: "card_view"; card: MemoryCardView; origin: "typed" | "live" }
-  | ({ ok: true; op: "edit" | "forget" | "pin" | "profile_delete" | "link_face" | "profile_minor" } & { receipt: MemoryReceiptView; history_reset: boolean; status: MemoryStatusView })
+  | ({ ok: true; op: "edit" | "forget" | "pin" | "profile_delete" | "link_face" | "profile_minor" | "suggestions" } & { receipt: MemoryReceiptView; history_reset: boolean; status: MemoryStatusView })
   | { ok: false; code: MemoryErrorCode; message: string };
 
 export type MemorySetupSubject = { kind: "household" } | { kind: "profile"; profile: string } | { kind: "name"; name: string };
@@ -164,7 +180,9 @@ export type MemoryRequest =
   | { op: "profile_minor"; profile: string; minor: boolean; token: string }
   | { op: "pin"; id: string; revision: number; pinned: boolean; token?: string }
   | { op: "profile_delete"; profile: string; token: string }
-  | { op: "link_face"; profile: string; person: string | null; token: string };
+  | { op: "link_face"; profile: string; person: string | null; token: string }
+  /** MEM-5a：記憶管理（token）開關記憶建議；開啟還要 NOUS_MEMORY_ROUTES 列出 suggest。 */
+  | { op: "suggestions"; enabled: boolean; token: string };
 
 /** 模型說「記住了」但核心沒有成功回條時，串流結束後追加的固定句型（app.ts 與畫面共用）。 */
 export const MEMORY_CLAIM = /(記住了|記下了|已記住|已經記住|我會記得|我記得了|幫你記著|記在.*名下|I(?:'ll| will) remember|I(?:'ve| have) (?:saved|remembered|noted)|got it,? i'?ll remember)/i;

@@ -1,0 +1,613 @@
+{
+ "note": "MEM-5a adversarial set from the independent review (2026-10-30), copied from the reviewer's probe.ts labels: 76 synthetic sentences, fictional people. Before the fixes: precision 10/51 = 19.6%, false-memory rate 41/51 = 80.4%, 41 of 65 negatives (63.1%) proposed (review numbers, per-segment flow). The rules were then tuned against this set, so it is no longer independent. attribution third = another person, proxy, translation or role play; special categories are the negatives whose label mentions sensitive, health or religion.",
+ "items": [
+  {
+   "text": "我不吃香菜才怪",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sarcasm"
+  },
+  {
+   "text": "我超愛吃榴槤的啦（才怪）",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sarcasm"
+  },
+  {
+   "text": "我最喜歡吃苦瓜呵呵",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sarcasm"
+  },
+  {
+   "text": "我最喜歡吃苦瓜XD",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sarcasm"
+  },
+  {
+   "text": "我不吃辣。才怪。",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sarcasm"
+  },
+  {
+   "text": "我不吃香菜。開玩笑的。",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "joke-cross-sentence"
+  },
+  {
+   "text": "我不是不吃牛肉",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "negation"
+  },
+  {
+   "text": "我沒有不喜歡咖啡",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "negation"
+  },
+  {
+   "text": "我不是討厭香菜，只是今天不想吃",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "negation"
+  },
+  {
+   "text": "我不吃香菜。我媽說的。",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other-cross-sentence"
+  },
+  {
+   "text": "我爸要我跟你說，我不吃豬肉",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other"
+  },
+  {
+   "text": "幫我爸打的，我不吃豬肉",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other"
+  },
+  {
+   "text": "爸爸在打字，我不吃豬肉",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other"
+  },
+  {
+   "text": "代替我媽回答，我不吃牛肉",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other"
+  },
+  {
+   "text": "我女朋友不吃辣",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other"
+  },
+  {
+   "text": "我兒子不吃青椒",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other"
+  },
+  {
+   "text": "幫我翻成英文，我不吃香菜",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "quote/translate"
+  },
+  {
+   "text": "假裝你是我，我不吃香菜",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "roleplay"
+  },
+  {
+   "text": "我們來玩角色扮演，我不吃香菜",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "roleplay"
+  },
+  {
+   "text": "老師要我們造句，我不喜歡吃蔬菜",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "minor/quote"
+  },
+  {
+   "text": "我五歲，我不喜歡吃青菜",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "minor"
+  },
+  {
+   "text": "我不愛吃青菜啦，媽媽",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "minor"
+  },
+  {
+   "text": "我不吃辣的話就點別的",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "conditional"
+  },
+  {
+   "text": "我不吃澱粉直到婚禮結束",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporary"
+  },
+  {
+   "text": "我不吃澱粉到月底",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporary"
+  },
+  {
+   "text": "我不吃肉，這個月在齋戒",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporary"
+  },
+  {
+   "text": "我不喝酒，這週在吃抗生素",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporary/health"
+  },
+  {
+   "text": "我不喝咖啡。這週而已。",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporary-cross-sentence"
+  },
+  {
+   "text": "我不吃香菜（應該吧）",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "uncertain"
+  },
+  {
+   "text": "我不吃什麼來著",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "我不吃香菜﹖",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question/fullwidth"
+  },
+  {
+   "text": "我不吃蝦，吃了會起疹子",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "我不喝酒，正在戒酒",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "我不吃牛肉因為我拜觀音",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sensitive-religion"
+  },
+  {
+   "text": "我討厭看民進黨的新聞",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sensitive-politics"
+  },
+  {
+   "text": "我不吃生魚片，因為我在備孕",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "我不吃香菜，晚餐有什麼推薦",
+   "propose": true,
+   "value": "不吃香菜",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我都不喝含糖飲料",
+   "propose": true,
+   "value": "都不喝含糖飲料",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不吃ＰＯＲＫ",
+   "propose": true,
+   "value": "不吃ＰＯＲＫ",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不吃 beef",
+   "propose": true,
+   "value": "不吃 beef",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我很討厭香菜！",
+   "propose": true,
+   "value": "很討厭香菜",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我一向不喝咖啡",
+   "propose": true,
+   "value": "一向不喝咖啡",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "以後我都不吃牛肉了",
+   "propose": true,
+   "value": "以後我都不吃牛肉",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "Oh great, I love soggy fries",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sarcasm"
+  },
+  {
+   "text": "I absolutely love cold coffee 🙄",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sarcasm"
+  },
+  {
+   "text": "I love burnt toast, said no one ever",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sarcasm"
+  },
+  {
+   "text": "I don't eat pork. Just kidding.",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "joke-cross-sentence"
+  },
+  {
+   "text": "I don't hate coffee",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "negation"
+  },
+  {
+   "text": "I never said I like coffee",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "negation"
+  },
+  {
+   "text": "For my dad, I don't eat pork",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other"
+  },
+  {
+   "text": "Dad here, I don't eat pork",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other"
+  },
+  {
+   "text": "This is Amy, I don't eat pork",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other"
+  },
+  {
+   "text": "Translate this, I don't eat pork",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "quote/translate"
+  },
+  {
+   "text": "My sister texted me. I hate onions.",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "other-cross-sentence"
+  },
+  {
+   "text": "Pretend you're me, I hate onions",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "roleplay"
+  },
+  {
+   "text": "I'm in 2nd grade, I hate vegetables",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "minor"
+  },
+  {
+   "text": "I don't eat after 8pm until my wedding",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporary"
+  },
+  {
+   "text": "I don't eat sugar until Christmas",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporary"
+  },
+  {
+   "text": "I don't drink coffee. Not this week anyway.",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporary-cross-sentence"
+  },
+  {
+   "text": "I don't eat meat during Lent",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporary/religion"
+  },
+  {
+   "text": "I never drink alcohol on my meds",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "I don't drink alcohol since I'm in recovery",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "I avoid sugar for my blood sugar",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "I don't eat peanuts, they make my throat swell",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "I always take my vitamins at 9",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "I don't eat pork because I'm Muslim",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sensitive-religion"
+  },
+  {
+   "text": "I never watch Fox News",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sensitive-politics"
+  },
+  {
+   "text": "I don't eat pork right",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "I like coffee, don't I",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "I don't eat pork lol",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "joke"
+  },
+  {
+   "text": "I don't eat spicy food unless my wife cooks",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "conditional/other"
+  },
+  {
+   "text": "Ｉ don't eat pork",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "fullwidth"
+  },
+  {
+   "text": "I don't eat cilantro, any dinner ideas?",
+   "propose": true,
+   "value": "I don't eat cilantro",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I never drink soda",
+   "propose": true,
+   "value": "I never drink soda",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I prefer short answers",
+   "propose": true,
+   "value": "I prefer short answers",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I don’t eat pork",
+   "propose": true,
+   "value": "I don’t eat pork",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  }
+ ]
+}

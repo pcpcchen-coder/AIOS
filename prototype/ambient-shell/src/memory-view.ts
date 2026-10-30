@@ -7,9 +7,12 @@ import { t, msg, getLocale, onLocaleChange } from "./i18n.ts";
 // - 記憶只經 macOS App 的 IPC（window.nousDesktop.memory）與核心往來；瀏覽器版明示不可用。
 // - 規則、人物、同意、票證與寫檔都在核心；這裡只顯示核心回的固定句型（t(message, ...values)），使用者的話與人物名照原樣。
 // - 不建立常駐側欄：收起就回電子腦；「本次人物」標籤只在輸入列與對話 Surface（src/main.ts）。
+// - MEM-5a：記憶建議（SuggestionPrompt）是對話回覆下方的一行，跟著那一輪的 request_id（user_request），不是新的 Surface；
+//   內容經 card_view 取，只有按「記住」才寫入。全家共用的記憶在查看時顯示「由 X 記下」，並說明這不是身分驗證。
 
 import type {
   ClarifyChoice,
+  MemoryResponse as MemoryResult,
   MemoryCardView,
   MemoryFactView,
   MemoryPresenceView,
@@ -46,6 +49,10 @@ export const MEMORY_BROWSER_UNAVAILABLE = "記憶：瀏覽器版不可用（只�
 /** MEM-2：codex 同意的範圍（16 §4：新增服務要另外確認，不沿用 ChatGPT 的同意）。 */
 export const CODEX_CONSENT_NOTE = "「ChatGPT 方案即時語音」的同意同時涵蓋即時語音模型與它交辦用的 Codex（同一個 ChatGPT 帳號）；和上面的 ChatGPT 是分開的同意。";
 /** MEM-3：openai_realtime 同意的範圍（OPENAI_API_KEY 的指紋；換 key 要重新允許）。只有 API key 路徑的記憶已放行時才會列出。 */
+/** MEM-5a：記憶建議的說明（記憶管理）。 */
+export const SUGGESTIONS_NOTE = "開啟後，打字聊天時說到自己穩定的偏好（例如「我不吃香菜」），會在那一則回覆下方問一次要不要記住；只有按「記住」才保存。不會從語音、成果或模型的回覆提出，也不會替全家共用、未成年家人或沒有選定的人物提出。";
+/** MEM-5a：全家共用的「由誰記下」不是身分驗證。 */
+export const ATTRIBUTION_NOTE = "「由誰記下」只是記下當時選定的本次人物，不是身分驗證。";
 export const OPENAI_REALTIME_CONSENT_NOTE = "「OpenAI API key 即時語音」的同意只涵蓋用 .env 的 OPENAI_API_KEY 進行的即時語音；換一把 key 要重新允許，和上面的 ChatGPT 方案即時語音是分開的同意。";
 
 type Mode =
@@ -309,6 +316,7 @@ export class MemoryView {
       case "pick": return "要改哪一筆？";
       case "inspect": return "你的記憶";
       case "voice_confirm": return mode.card.action === "remember" ? "要記住這一句嗎？" : mode.card.action === "correct" ? "要更正這筆記憶嗎？" : "要忘記這筆記憶嗎？";
+      case "suggestion": return "要記住這一句嗎？";
     }
   }
 
@@ -369,6 +377,11 @@ export class MemoryView {
             : o === "household" ? button("改記全家共用", () => void this.answer("household"), "", this.busy) : button("取消", () => void this.answer("cancel"), "btn--ghost", this.busy))));
         break;
       }
+      case "suggestion":
+        // 正常只出現在回覆下方的一行（SuggestionPrompt）；這裡只是備用的顯示方式。
+        nodes.push(h("p", {}, msg`要記住『${card.text}』嗎？`),
+          h("div", { class: "actions" }, button("記住", () => void this.answer("confirm"), "btn--primary", this.busy), button("不用", () => void this.answer("decline"), "btn--ghost", this.busy)));
+        break;
     }
     nodes.push(held);
     return nodes.filter((n): n is Node => !!n && typeof n !== "string");
@@ -401,7 +414,7 @@ export class MemoryView {
       allows.some(a => a.target.provider === "codex") ? h("p", { class: "muted small" }, t(CODEX_CONSENT_NOTE)) : null,
       allows.some(a => a.target.provider === "openai_realtime") ? h("p", { class: "muted small" }, t(OPENAI_REALTIME_CONSENT_NOTE)) : null,
       allows.length ? h("p", { class: "muted small" }, t("第一次設定時，勾選的服務帳號也會一併允許取得全家共用的記憶；之後可在「記憶…」分開調整。")) : null,
-      h("label", { class: "family-check" }, checkbox(false, true), t(" 自動提出記憶建議（首版未提供）")),
+      h("label", { class: "family-check" }, checkbox(false, true), t(" 自動提出記憶建議（預設關閉；要用時請在選單列「記憶…」開啟）")),
       h("p", { class: "muted small" }, t("沒有啟用或按取消時，你的問題照樣送出，但不會記住任何內容。")),
       // 取消也回核心：核心把被暫緩的問題交回來照樣送出（不寫入記憶）。
       h("div", { class: "actions" }, button("儲存設定", save, "btn--primary", this.busy), button("取消", () => void this.answer("cancel"), "btn--ghost", this.busy)),
@@ -412,7 +425,10 @@ export class MemoryView {
     if (facts.length === 0) return h("p", { class: "muted" }, t("沒有記憶。Nous 不知道的事會照實說不知道。"));
     const ul = h("ul", { class: "memory-list" });
     for (const f of facts) {
-      const meta = [f.source === "voice_confirmed" ? msg`來源：語音確認 · ${when(f.at)}` : msg`來源：本人明示 · ${when(f.at)}`, f.expires ? msg`到 ${when(f.expires)} 為止` : "", f.subject === null && !managed ? t("全家共用") : ""].filter(Boolean).join(" · ");
+      const source = f.source === "voice_confirmed" ? msg`來源：語音確認 · ${when(f.at)}` : f.source === "suggestion" ? msg`來源：記憶建議（按了記住） · ${when(f.at)}` : msg`來源：本人明示 · ${when(f.at)}`;
+      // MEM-5a：全家共用的記憶只在查看時顯示是誰記下的（當時選定的本次人物）。
+      const household = f.subject === null && f.by_name ? msg`全家共用・由 ${f.by_name} 記下・${when(f.at)}` : f.subject === null && !managed ? t("全家共用") : "";
+      const meta = [source, f.expires ? msg`到 ${when(f.expires)} 為止` : "", household].filter(Boolean).join(" · ");
       const row = h("li", { class: "memory-fact" }, h("div", { class: "memory-fact-text" }, h("strong", {}, f.text), h("span", { class: "muted small" }, meta)));
       if (f.pinned) row.append(h("span", { class: "chip" }, t("釘選")));
       if (this.editing === f.id) {
@@ -428,7 +444,21 @@ export class MemoryView {
       }
       ul.append(row);
     }
+    if (facts.some(f => f.subject === null && f.by_name)) return h("div", {}, ul, h("p", { class: "muted small" }, t(ATTRIBUTION_NOTE)));
     return ul;
+  }
+
+  /** MEM-5a：記憶管理裡的記憶建議開關（需要管理權杖；NOUS_MEMORY_ROUTES 沒有列出 suggest 時照實說沒有開放）。 */
+  private suggestionsControl(token: string | null): HTMLElement {
+    const s = this.status?.suggestions;
+    if (!s) return h("span", {});
+    // 審查 m2：旗標拿掉之後，之前開著的建議仍可以在這裡關掉（降回舊版前要先關，見驗證文件 §2.6）。
+    if (!s.available) return h("div", { class: "memory-allow" }, h("p", { class: "muted small" }, t("記憶建議：沒有開放（NOUS_MEMORY_ROUTES 沒有列出 suggest）。")),
+      s.enabled ? button("關閉記憶建議", () => void this.mutate({ op: "suggestions", enabled: false, token: token ?? "" }), "btn--ghost", this.busy || !token) : null);
+    return h("div", { class: "memory-allow" },
+      h("p", {}, s.enabled ? t("記憶建議：已開啟。") : t("記憶建議：已關閉（預設）。"),
+        button(s.enabled ? "關閉記憶建議" : "開啟記憶建議", () => void this.mutate({ op: "suggestions", enabled: !s.enabled, token: token ?? "" }), "btn--ghost", this.busy || !token)),
+      h("p", { class: "muted small" }, t(SUGGESTIONS_NOTE)));
   }
 
   private manage(mode: Extract<Mode, { kind: "manage" }>): Node[] {
@@ -456,6 +486,7 @@ export class MemoryView {
       profile?.minor ? h("p", { class: "notice" }, t("未成年家人的記憶由家長在這裡整理；聊天時不會直接寫入、更正或忘記。")) : h("span", {}),
       this.factList(mode.facts, true),
       h("div", { class: "actions" }, add, button("新增", () => void this.mutate({ op: "edit", id: null, subject: mode.subject, value: add.value }), "", this.busy)),
+      this.suggestionsControl(mode.token),
       h("div", { class: "memory-allow" }, h("p", {}, mode.subject ? msg`允許哪些服務帳號取得 ${profile?.name ?? ""} 的記憶片段：` : t("允許哪些服務帳號取得全家共用的記憶片段：")),
         ...consentRows.map(r => h("label", { class: "family-check" }, r.box, ` ${t(r.target.label)}`)),
         consentRows.some(r => r.target.provider === "codex") ? h("p", { class: "muted small" }, t(CODEX_CONSENT_NOTE)) : h("span", {}),
@@ -470,5 +501,110 @@ export class MemoryView {
       h("div", { class: "actions" }, button(mode.subject ? "忘記這位人物的全部記憶…" : "忘記全家共用的全部記憶…", () => void this.mutate({ op: "forget", all: true, subject: mode.subject, token: mode.token ?? "" }), "btn--ghost", this.busy || mode.facts.length === 0)),
       h("p", { class: "muted small" }, t(MEMORY_EXPLANATION)),
     ];
+  }
+}
+
+/**
+ * MEM-5a：對話回覆下方的一行記憶建議「要記住『我不吃香菜』嗎？［記住］［不用］」。
+ * - 核心的 turn 只給卡片 ID；回覆串流結束（complete）後才經 card_view 取內容並顯示，不擋聊天。
+ * - 跟著同一個 request_id（data-request-id、data-visibility-reason user_request）；不是新的常駐 Surface，收起或換一輪就消失。
+ * - 只有按「記住」才寫入（card_answer confirm，核心用卡片上保存的原句重新解析）；「不用」（decline）24 小時內不再提同一件事。
+ */
+export interface SuggestionPromptDeps {
+  bridge: MemoryBridge | null;
+  /** 核心回的結果（本次人物、歷史清除）交回主程式；回條由這一行自己顯示。 */
+  applied(view: MemoryTurnView): void;
+  /** 內容載入或狀態改變：請主程式重畫。 */
+  changed(): void;
+}
+
+type PromptState =
+  | { phase: "pending"; requestId: string; card: string }
+  | { phase: "loading"; requestId: string; card: string }
+  | { phase: "shown"; requestId: string; card: string; text: string; busy: boolean; error: string | null }
+  /** 審查 n4：保存核心的固定句型（不是翻好的字），換語言時重新翻譯。 */
+  | { phase: "done"; requestId: string; receipts: MemoryReceiptView[] };
+
+export class SuggestionPrompt {
+  private state: PromptState | null = null;
+  private gen = 0;
+  private element: HTMLElement | null = null;
+  private key = "";
+
+  constructor(private readonly deps: SuggestionPromptDeps) {}
+
+  /** 新的一輪帶了建議（卡片 ID）。 */
+  set(requestId: string, card: string): void {
+    this.gen++;
+    this.state = { phase: "pending", requestId, card };
+    this.element = null;
+  }
+
+  /** 換一輪、換人或世代改變：丟掉（核心那邊也已作廢）。 */
+  clear(): void {
+    this.gen++;
+    this.state = null;
+    this.element = null;
+  }
+
+  /** 正在等哪一輪（只給測試與主程式判斷）。 */
+  get requestId(): string | null { return this.state?.requestId ?? null; }
+
+  /**
+   * 這一輪的回覆畫完時呼叫：requestId 相同、回覆已完成才顯示；第一次會經 card_view 取內容（取得後呼叫 changed 再畫一次）。
+   * 回傳要接在回覆下方的元素；不顯示時 null。
+   */
+  render(requestId: string, complete: boolean): HTMLElement | null {
+    const st = this.state;
+    if (!st || st.requestId !== requestId || !complete || !this.deps.bridge) return null;
+    if (st.phase === "pending") { void this.load(st.card, requestId); return null; }
+    if (st.phase === "loading") return null;
+    const key = `${getLocale()}:${JSON.stringify(st)}`;
+    if (this.element && this.key === key) return this.element;
+    const box = h("div", { class: "suggestion-prompt", role: "group", "aria-label": "記憶建議", "data-visibility-reason": "user_request", "data-request-id": requestId });
+    if (st.phase === "done") box.append(h("p", { class: "muted small", role: "status" }, receiptsText(st.receipts)));
+    else {
+      box.append(h("span", {}, msg`要記住『${st.text}』嗎？`), " ",
+        button("記住", () => void this.answer("confirm"), "btn--primary", st.busy),
+        button("不用", () => void this.answer("decline"), "btn--ghost", st.busy));
+      box.setAttribute("title", t("只有按「記住」才會保存；不會自動記住。"));
+      if (st.error) box.append(h("p", { class: "error-text", role: "alert" }, t(st.error)));
+    }
+    this.element = box;
+    this.key = key;
+    return box;
+  }
+
+  private async call(request: MemoryRequest): Promise<MemoryResult> {
+    try { return await this.deps.bridge!.memory(request); }
+    catch (err) { return { ok: false, code: "unavailable", message: `記憶沒有回應：${err instanceof Error ? err.message : String(err)}` }; }
+  }
+
+  private async load(card: string, requestId: string): Promise<void> {
+    const gen = this.gen;
+    this.state = { phase: "loading", requestId, card };
+    const res = await this.call({ op: "card_view", card });
+    if (gen !== this.gen) return;
+    // 失效（換了人物或超過時間）就不顯示：建議本來就可有可無。
+    if (!res.ok || res.op !== "card_view" || res.card.kind !== "suggestion") { this.state = null; this.deps.changed(); return; }
+    this.state = { phase: "shown", requestId, card, text: res.card.text, busy: false, error: null };
+    this.deps.changed();
+  }
+
+  private async answer(choice: "confirm" | "decline"): Promise<void> {
+    const st = this.state;
+    if (!st || st.phase !== "shown" || st.busy) return;
+    const gen = this.gen;
+    this.state = { ...st, busy: true };
+    this.deps.changed();
+    const res = await this.call({ op: "card_answer", card: st.card, choice });
+    if (gen !== this.gen) return;
+    if (!res.ok) { this.state = { ...st, busy: false, error: res.message }; this.deps.changed(); return; }
+    if (res.op === "card_answer") {
+      this.deps.applied(res);
+      // 「不用」：這一行直接消失；「記住」：換成核心的回條（記在 X 名下了…）。
+      this.state = choice === "decline" ? null : { phase: "done", requestId: st.requestId, receipts: res.receipts };
+    }
+    this.deps.changed();
   }
 }

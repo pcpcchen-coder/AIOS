@@ -6,7 +6,7 @@
 // 刪除人物記憶、全部忘記與連結家人辨識的原生確認由核心呼叫主程序的 confirm（頁面無法偽造）。
 
 /** 與 shared/memory.ts 的 MEMORY_OPS 相同（測試對照）。 */
-export const MEMORY_OPS = ["status", "setup", "turn", "card_answer", "card_view", "select", "suspend", "list", "receipt", "edit", "forget", "pin", "profile_delete", "link_face", "profile_minor"];
+export const MEMORY_OPS = ["status", "setup", "turn", "card_answer", "card_view", "select", "suspend", "list", "receipt", "edit", "forget", "pin", "profile_delete", "link_face", "profile_minor", "suggestions"];
 
 const PROFILE = /^profile_[a-f0-9]{16}$/;
 const FACT = /^mem_[a-f0-9]{16}$/;
@@ -152,6 +152,11 @@ export function validateMemoryRequest(req) {
       if (typeof req.minor !== "boolean") return bad("minor must be a boolean");
       if (typeof req.token !== "string" || !TOKEN.test(req.token)) return bad("token is required");
       return { ok: true, request: { op, profile: req.profile, minor: req.minor, token: req.token } };
+    case "suggestions":
+      // MEM-5a：記憶建議只能在記憶管理（token）開關；核心另外檢查 NOUS_MEMORY_ROUTES 的 suggest。
+      if (typeof req.enabled !== "boolean") return bad("enabled must be a boolean");
+      if (typeof req.token !== "string" || !TOKEN.test(req.token)) return bad("token is required");
+      return { ok: true, request: { op, enabled: req.enabled, token: req.token } };
     case "profile_delete":
     case "link_face": {
       if (typeof req.profile !== "string" || !PROFILE.test(req.profile)) return bad("profile is required");
