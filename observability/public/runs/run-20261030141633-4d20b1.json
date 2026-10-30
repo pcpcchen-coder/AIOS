@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-30T14:16:33.492Z",
-  "updated_at": "2026-10-30T14:41:31.685Z",
+  "updated_at": "2026-10-30T15:01:31.224Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,10 +59,10 @@
     {
       "id": "review",
       "title": "review",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-30T14:41:31.685Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-30T15:01:31.223Z",
+      "note": "0 blocker, 3 major",
       "evidence": []
     },
     {
@@ -140,6 +140,13 @@
       "step_id": "review",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-30T15:01:31.223Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "passed",
+      "note": "0 blocker, 3 major"
     }
   ],
   "provenance": "Agent self-reported"
