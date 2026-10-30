@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-29T23:07:52.528Z",
-  "updated_at": "2026-10-30T00:17:29.817Z",
+  "updated_at": "2026-10-30T00:26:01.445Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,10 +59,10 @@
     {
       "id": "review",
       "title": "review",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-10-30T00:17:29.816Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-10-30T00:26:01.445Z",
+      "note": "0 blocker、4 major（回音／模型誘導確認、停播競爭、交辦 log、無同意外洩中繼資料）",
       "evidence": []
     },
     {
@@ -168,6 +168,13 @@
       "step_id": "review",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-30T00:26:01.445Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "passed",
+      "note": "0 blocker、4 major（回音／模型誘導確認、停播競爭、交辦 log、無同意外洩中繼資料）"
     }
   ],
   "provenance": "Agent self-reported"
