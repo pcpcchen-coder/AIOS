@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "claude/mem-2",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-10-29T23:07:52.528Z",
-  "updated_at": "2026-10-30T04:08:08.398Z",
-  "ended_at": null,
+  "updated_at": "2026-10-30T04:08:11.735Z",
+  "ended_at": "2026-10-30T04:08:11.735Z",
   "steps": [
     {
       "id": "how",
@@ -201,6 +201,13 @@
       "step_id": "pr",
       "status": "passed",
       "note": "PR #47"
+    },
+    {
+      "at": "2026-10-30T04:08:11.735Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
