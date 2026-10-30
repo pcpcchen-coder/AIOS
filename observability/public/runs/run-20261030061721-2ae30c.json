@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "repo": "pcpcchen-coder/AIOS",
+  "run_id": "run-20261030061721-2ae30c",
+  "title": "MEM-3：API key 即時語音的記憶與跨路徑一致性",
+  "playbook": "feature",
+  "branch": "claude/mem-3",
+  "commit_sha": "",
+  "status": "running",
+  "started_at": "2026-10-30T06:17:21.276Z",
+  "updated_at": "2026-10-30T06:17:21.276Z",
+  "ended_at": null,
+  "steps": [
+    {
+      "id": "how",
+      "title": "how",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "checkpoint",
+      "title": "checkpoint",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "architect",
+      "title": "architect",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "implement",
+      "title": "implement",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "verify",
+      "title": "verify",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "review",
+      "title": "review",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "fix",
+      "title": "fix",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "pr",
+      "title": "pr",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-30T06:17:21.276Z",
+      "type": "run_started",
+      "step_id": null,
+      "status": "running",
+      "note": ""
+    }
+  ],
+  "provenance": "Agent self-reported"
+}
