@@ -33,7 +33,7 @@ import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
 import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
 import type { TasksRequest, TasksResponse, VaultView } from "../shared/protected-tasks.ts";
-import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, presenceLabel, receiptsText } from "./memory-view.ts";
+import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
 import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
 import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
 import { AmbientIdentity } from "./sense/identity-ambient.ts";
@@ -129,6 +129,15 @@ let memoryProfiles: { id: string; name: string }[] = [];
 let pendingDelegate: { title: string; requestId: string } | null = null;
 /** turn 的原句（卡片處理完後，純記憶指令的回條要配這一句顯示）。 */
 const memoryTurnText = new Map<string, string>();
+/** MEM-5a：回覆下方的記憶建議（內容經 card_view；只有按「記住」才寫入）。 */
+const suggestionPrompt = new SuggestionPrompt({
+  bridge: window.nousDesktop?.memory ? { memory: (request) => window.nousDesktop!.memory!(request) } : null,
+  applied: (view) => {
+    if (view.history_reset) session.forgetMemoryHistory();
+    setMemoryPresence(view.presence);
+  },
+  changed: () => render(),
+});
 let developmentProvider: ExecutorMode | null = null;
 let conversationEpoch = 0;
 let pendingProviderSelection: { epoch: number; account: string } | null = null;
@@ -628,6 +637,9 @@ function applyMemoryTurn(view: MemoryTurnView & { status?: MemoryStatusView }, u
   if (memoryTurnText.size > 32) memoryTurnText.delete(memoryTurnText.keys().next().value!);
   setMemoryPresence(view.presence, view.status?.profiles.map(p => ({ id: p.id, name: p.name })));
   if (view.history_reset) session.forgetMemoryHistory();
+  // MEM-5a：記憶建議只有卡片 ID；這一輪的回覆串流結束後才在回覆下方顯示一行（不擋聊天）。
+  if (view.suggestion && view.chat && !view.card) suggestionPrompt.set(requestId, view.suggestion.card);
+  else if (suggestionPrompt.requestId !== requestId) suggestionPrompt.clear();
   if (view.card) {
     memoryView.showCard(view.card, requestId, view.chat, view.status ?? null);
     dispatch({ type: "show.memory", request_id: requestId });
@@ -663,6 +675,8 @@ function setMemoryPresence(presence: MemoryPresenceView | null, profiles?: { id:
   if (presence && memoryPresence && presence.epoch !== memoryPresence.epoch) {
     session.forgetMemoryHistory(true);
     pendingDelegate = null;
+    // 核心換世代時已丟掉記憶建議；畫面上的那一行也一起收掉。
+    suggestionPrompt.clear();
   }
   memoryPresence = presence;
   if (profiles) memoryProfiles = profiles;
@@ -2062,6 +2076,15 @@ function renderConversation(): void {
   const answer = reply.answer || (reply.kind === "pending" ? "…" : t("沒有收到文字回覆。"));
   conversationAnswer.textContent = `${t(PROVIDER_LABEL[provider])}：${answer}${reply.kind === "error" ? `\n${t(reply.message)}` : reply.kind === "interrupted" ? t("\n已打斷回覆。") : ""}`;
   renderDelegatePrompt(reply.requestId);
+  renderSuggestionPrompt(reply.requestId, reply.kind === "complete");
+}
+
+/** MEM-5a：「要記住『…』嗎？［記住］［不用］」：同一個 request_id 的回覆完成後才出現在回覆下方。 */
+function renderSuggestionPrompt(requestId: string, complete: boolean): void {
+  const el = suggestionPrompt.render(requestId, complete);
+  const existing = conversationReply.querySelector<HTMLElement>(".suggestion-prompt");
+  if (existing && existing !== el) existing.remove();
+  if (el && el.parentElement !== conversationReply) conversationReply.append(el);
 }
 
 /** 「要交辦這件事嗎？」：這一輪用到記憶，所以不自動交辦；按「交辦」才用使用者原句建立任務（docs/16 §9、M15）。 */

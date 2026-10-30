@@ -27,6 +27,7 @@ Rules:
 | 6 | Wake word spike WK-00 | [WK-00 §7](wk-00-spike-2026-10-29.en.md#7-mac-test-steps-for-george) steps 1–6 | Family positives produce hits; TV negatives run for at least 8 hours | `sox`; family members; TV running overnight | Long (includes 8 unattended hours) |
 | 7 (added 2026-10-30) | Voice delegation with memory MEM-4b | [MEM-4b §5](memory-mem4b-2026-10-30.en.md#5-mac-gate-none-of-it-has-been-run-it-cannot-be-claimed-as-passed) steps 1–11 | Calibrate the ASR grace and similarity threshold; on the API key route committed / item_id / response_id match; record short-affirmative and TV bindings honestly | Same as MEM-2/MEM-3; tasks stored encrypted; `NOUS_MEMORY_ROUTES` includes `task` | Medium |
 | 8 (added 2026-10-30) | Protected-result search and plaintext lifecycle MEM-4c | [MEM-4c §5](memory-mem4c-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed) steps 1–12 | The log shows a drop on a real lock, sleep, idle, memory off, and App quit; the latency of the first and second search after unlocking is recorded honestly; on a Keychain denial the screen shows the error honestly, not an empty result; the page is also cleared after a lock | Tasks stored encrypted (MEM-4a); some fictional protected tasks; 500 / 2000 tasks if possible | Short to medium |
+| 9 (added 2026-10-30) | Memory suggestions and family collaboration MEM-5a | [MEM-5a §6](memory-mem5a-2026-10-30.en.md#6-mac-gate-none-executed-no-pass-may-be-claimed) steps 1–8 | The real screen of the one-line suggestion under the reply (Chinese and English); saving only on "Remember" and still there after a restart; one week of real counts recorded honestly; an older App reading version 4 disables memory and leaves the file unchanged | `suggest` in `NOUS_MEMORY_ROUTES`; fictional people George and Amy; an older App built from main `7fc7d09` (step 7) | Short (step 6 takes a week) |
 
 ## 2. Why this order
 
@@ -35,8 +36,9 @@ Rules:
 3. **ID-02 third.** It verifies look to talk and family recognition. The "face candidate" steps of MEM-1 step 5, MEM-2 step 2, and MEM-3 step 2 use the same chain. Confirming recognition and greetings first makes later failures easier to attribute to the right layer.
 4. **MEM-2, then MEM-3.** Both use the same recording rig, so doing them on the same day is recommended. If wire probe P1 or P2 in MEM-3 step 0 fails, MEM-3 is not released and steps 1–15 need not continue (record the result and stop).
 5. **MEM-4b after MEM-3 (added 2026-10-30).** It reuses the MEM-2 and MEM-3 voice routes and MEM-4a's task encryption; if those prerequisites fail on the Mac, MEM-4b results mean nothing. MEM-4a's own Mac steps are in [MEM-4a §5](memory-mem4a-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed); this runbook does not consolidate them separately.
-6. **MEM-4c after MEM-4a's Mac steps (added 2026-10-30).** It builds on MEM-4a's task encryption; steps 1–5 only need locking, sleeping, waiting, and reading the log, so they can be done on the same day as other batches.
-7. **WK-00 independently.** It is a command-line spike not wired into the product and can be scheduled separately. The 8-hour TV negative run suits an unattended evening.
+6. **MEM-5a after MEM-1 (added 2026-10-30).** It uses only ordinary text chat and the memory manager, so steps 1–5 can be done on the same day as MEM-1; step 6 needs a week of normal use; step 7 needs a separately built older App from main `7fc7d09`.
+7. **MEM-4c after MEM-4a's Mac steps (added 2026-10-30).** It builds on MEM-4a's task encryption; steps 1–5 only need locking, sleeping, waiting, and reading the log, so they can be done on the same day as other batches.
+8. **WK-00 independently.** It is a command-line spike not wired into the product and can be scheduled separately. The 8-hour TV negative run suits an unattended evening.
 
 ## 3. Shared preparation (once)
 
@@ -206,6 +208,21 @@ Prerequisites: a signed App; tasks stored encrypted (MEM-4a); some fictional pro
 - [ ] 12. The page is cleared too: lock and unlock with the results history and a result view open; the result view is collapsed, the results history shows only the hidden-content notice (Chinese and English), and tasks continue.
 
 Main release criteria: the drops of steps 1–5 all appear in the log; step 7 is not an empty result; the numbers of step 6 are recorded honestly, and George decides whether to accept them.
+
+## 8c. Supplementary batch: MEM-5a memory suggestions and family collaboration (added 2026-10-30)
+
+Prerequisites: a signed App; the MEM-1 Mac steps done; `suggest` in `NOUS_MEMORY_ROUTES` in `.env`; fictional people George and Amy; logging on. The full conditions for every step are in [MEM-5a §6](memory-mem5a-2026-10-30.en.md#6-mac-gate-none-executed-no-pass-may-be-claimed).
+
+- [ ] 1. Enable flow: the startup log states that memory suggestions are released; the memory manager shows "off (default)"; press "Turn on memory suggestions"; without `suggest` it shows "not available".
+- [ ] 2. Single-line suggestion: for "我不吃香菜，晚餐吃什麼？" one line appears under that same reply only after it completes (screenshots in Chinese and English); "Remember" turns it into the receipt and the list shows the suggestion source; after "No" it disappears and the same sentence does not bring it back.
+- [ ] 3. Where it must not appear: live voice, no person selected, a minor, an explicit memory command in the same turn, a third party, the past, today, an allergy, a cross-sentence joke, a proxy, religion; an unanswered suggestion disappears on the next turn.
+- [ ] 4. Persistence: after a restart, the fact saved with "Remember" is still there and the setting is still on; unanswered suggestions are gone.
+- [ ] 5. Family collaboration: a household addition shows "Household · noted by George · date" and the not-identity-verification note (Chinese and English); Amy gets no push; after deleting George it is no longer shown.
+- [ ] 6. One week of real counts: `grep -c` daily for proposals, Remember, No and rate-limit lines; note every wrong suggestion by hand; compute the acceptance rate.
+- [ ] 7. An older App (main `7fc7d09`) reading version 4: memory is disabled and the SHA-256 of `store.v1.enc` is unchanged; after returning to 2／3 the older App can read it again.
+- [ ] 8. Canary: trigger a suggestion and press "No"; no canary in the logs or `userData/`.
+
+Main release criteria: the real screen of step 2 and "saved only on Remember"; the unchanged file in step 7; the numbers of step 6 recorded honestly, with George deciding whether to expand, keep or turn it off.
 
 ## 9. Batch 6: WK-00 wake word spike
 

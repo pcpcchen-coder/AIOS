@@ -637,5 +637,18 @@
   "正在更新記憶，請稍後再試": "Memory is updating; try again shortly",
   "內容已因鎖定隱藏，請重新搜尋": "Content hidden after lock; search again",
   "內容已因閒置或記憶設定改變而隱藏，請重新搜尋": "Content hidden after inactivity or a memory setting change; search again",
-  "按「搜尋」重新載入。": "Press “Search” to load again."
+  "按「搜尋」重新載入。": "Press “Search” to load again.",
+  " 自動提出記憶建議（預設關閉；要用時請在選單列「記憶…」開啟）": " Suggest memories automatically (off by default; turn it on from “Memory…” in the menu bar)",
+  "要記住『{0}』嗎？": "Remember “{0}”?",
+  "記憶建議": "Memory suggestion",
+  "只有按「記住」才會保存；不會自動記住。": "Saved only if you press “Remember”; nothing is remembered automatically.",
+  "來源：記憶建議（按了記住） · {0}": "Source: memory suggestion (you pressed Remember) · {0}",
+  "全家共用・由 {0} 記下・{1}": "Household · noted by {0} · {1}",
+  "「由誰記下」只是記下當時選定的本次人物，不是身分驗證。": "“Noted by” only records the person selected at that time; it is not identity verification.",
+  "開啟後，打字聊天時說到自己穩定的偏好（例如「我不吃香菜」），會在那一則回覆下方問一次要不要記住；只有按「記住」才保存。不會從語音、成果或模型的回覆提出，也不會替全家共用、未成年家人或沒有選定的人物提出。": "When this is on and you mention a stable preference of your own while typing in chat (for example “I don't eat cilantro”), Nous asks once below that reply whether to remember it; it is saved only if you press “Remember”. Suggestions never come from voice, task results or model replies, and are never made for the household, for minors or when no person is selected.",
+  "記憶建議：沒有開放（NOUS_MEMORY_ROUTES 沒有列出 suggest）。": "Memory suggestions: not available (NOUS_MEMORY_ROUTES does not list suggest).",
+  "記憶建議：已開啟。": "Memory suggestions: on.",
+  "記憶建議：已關閉（預設）。": "Memory suggestions: off (default).",
+  "開啟記憶建議": "Turn on memory suggestions",
+  "關閉記憶建議": "Turn off memory suggestions"
 }

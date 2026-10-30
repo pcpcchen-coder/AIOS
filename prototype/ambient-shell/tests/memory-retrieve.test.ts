@@ -19,7 +19,7 @@ function factsFromSentences(): { facts: MemoryFact[]; owner: Map<string, string 
     for (const seg of parseMemoryText(sentence)) {
       if (seg.op !== "remember") continue;
       const id = `mem_${String(n++).padStart(16, "0")}`;
-      facts.push({ id, profileId: IDS[who]!, revision: 1, kind: seg.kind, topic: seg.topic, key: seg.key, value: seg.value, audience: "household", source: { kind: "explicit", turnId: "req_fixture", at: AT, excerpt: sentence }, validFrom: AT, expiresAt: null, reviewAfter: null, pinned: false });
+      facts.push({ id, profileId: IDS[who]!, revision: 1, kind: seg.kind, topic: seg.topic, key: seg.key, value: seg.value, audience: "household", source: { kind: "explicit", turnId: "req_fixture", at: AT, excerpt: sentence, by: null }, validFrom: AT, expiresAt: null, reviewAfter: null, pinned: false, derivedFrom: null });
       owner.set(seg.value, IDS[who]!);
     }
   };
@@ -90,8 +90,13 @@ describe("retrieval: permission filters come before relevance", () => {
 });
 
 describe("retrieval: validity, pinning and the 8 facts / 4 KB budget", () => {
-  const base = (i: number, extra: Partial<MemoryFact> = {}): MemoryFact => ({ id: `mem_${String(i).padStart(16, "0")}`, profileId: null, revision: 1, kind: "preference", topic: "food", key: `k${i}`, value: `不吃第${i}種菜`, audience: "household", source: { kind: "explicit", turnId: "req_fixture", at: AT, excerpt: "x" }, validFrom: AT, expiresAt: null, reviewAfter: null, pinned: false, ...extra });
+  const base = (i: number, extra: Partial<MemoryFact> = {}): MemoryFact => ({ id: `mem_${String(i).padStart(16, "0")}`, profileId: null, revision: 1, kind: "preference", topic: "food", key: `k${i}`, value: `不吃第${i}種菜`, audience: "household", source: { kind: "explicit", turnId: "req_fixture", at: AT, excerpt: "x", by: null }, validFrom: AT, expiresAt: null, reviewAfter: null, pinned: false, derivedFrom: null, ...extra });
   const consents: MemoryConsent[] = [{ profileId: null, provider: "claude", account: target.account!, allowed: true }];
+
+  it("MEM-5a 審查 m4: work_summary (reserved for MEM-5b) is never sent to a model", () => {
+    const facts = [base(1, { kind: "work_summary", pinned: true, derivedFrom: { taskId: "task_01234567-89ab-cdef-0123-456789abcdef" } }), base(2, { kind: "note" }), base(3)];
+    expect(retrieve({ facts, consents, profileId: null, target, query: "晚餐吃什麼", now: NOW }).facts.map(f => f.text)).toEqual(["不吃第2種菜", "不吃第3種菜"]);
+  });
 
   it("drops expired and not-yet-valid facts (M05)", () => {
     const facts = [base(1, { expiresAt: "2026-10-29T11:00:00Z" }), base(2, { validFrom: "2026-10-30T00:00:00Z" }), base(3)];

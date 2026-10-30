@@ -14,7 +14,8 @@ export const CONTEXT_MAX_BYTES = 4096;
 
 export interface ContextFact {
   text: string;
-  source: "explicit" | "voice_confirmed";
+  /** suggestion：MEM-5a 記憶建議上按了「記住」（使用者確認過的記憶；未確認的候選永遠不在這裡）。 */
+  source: "explicit" | "voice_confirmed" | "suggestion";
   at: string;
   expires: string | null;
 }
@@ -82,7 +83,8 @@ export function retrieve(input: RetrievalInput): RetrievalResult {
   // 1. subject：本次人物＋家庭共用（沒有選定人物時只有家庭共用）。
   const inScope = input.facts.filter(f => f.profileId === null || (input.profileId !== null && f.profileId === input.profileId));
   // 2. audience：首版只有 household。3. 有效狀態與期限。
-  const valid = inScope.filter(f => f.audience === "household" && active(f, now));
+  // 審查 m4：MEM-5b 之前只送 preference 與 note（work_summary 的規則在 MEM-5b）。
+  const valid = inScope.filter(f => f.audience === "household" && (f.kind === "preference" || f.kind === "note") && active(f, now));
   // 4. 當前服務＋帳號的同意（依 fact 的歸屬：人物或家庭）。
   const allowed = valid.filter(f => consentFor(input.consents, f.profileId, target));
   // 5. 相關性：釘選的先放（最多 4 筆），其餘依分數，同分取較新的。

@@ -100,17 +100,18 @@ export function toTraditionalChar(ch: string): string {
 }
 
 // ───────────── 判斷用的固定句型 ─────────────
+// MEM-5a：排除規則（第三人、引文、假設、玩笑、不確定、敏感、今天／這次）也給 server/memory/suggest.ts 用，所以 export。
 
-const THIRD_PERSON = "(?:他|她|它|他們|她們|媽媽|媽|爸爸|爸|哥哥|姊姊|姐姐|弟弟|妹妹|奶奶|爺爺|外婆|外公|阿嬤|阿公|老婆|老公|太太|先生|兒子|女兒|小孩|孩子|阿姨|叔叔|伯伯|舅舅|朋友|同事|老闆|鄰居)";
-const THIRD_SPEAKER = new RegExp(`(${THIRD_PERSON}|電視|新聞|廣播|影片|文章|網路|書上|有人|別人|大家)(?:剛剛|剛才|之前|也)?(?:說|講|提到|寫)`);
-const THIRD_HELPER = new RegExp(`(?:幫|替|為)${THIRD_PERSON}(?:記住|記下|記一下)`);
-const THIRD_SUBJECT = new RegExp(`^(?:我(?:的)?)?${THIRD_PERSON}(?:都|也|很|不|喜歡|討厭|愛|要|想|會|是|對|每天|吃|喝)`);
-const EN_THIRD = /\b(he|she|they|someone|somebody|the tv|the news|my (?:mom|mother|dad|father|wife|husband|son|daughter|kid|kids|friend|boss|brother|sister))\b(?: (?:said|says|told|wants|likes|hates|doesn't|does not|is))/i;
-const EN_THIRD_SUBJECT = /^(?:that\s+)?(?:he|she|they|my (?:mom|mother|dad|father|wife|husband|son|daughter|kid|kids|friend|boss|brother|sister))\b/i;
-const QUOTE = /[「」『』"“”]/;
-const HYPOTHETICAL = /(如果|假如|假設|要是|萬一|倘若|假使|\bif\b|\bsuppose\b|\bimagine\b|\bpretend\b|\bwhat if\b)/i;
-const JOKE = /(開玩笑|開個玩笑|騙你的|說笑的|說著玩|鬧著玩|亂說的|\bjust kidding\b|\bkidding\b|\bjoking\b|\bjk\b)/i;
-const UNCERTAIN = /(可能|大概|好像|也許|或許|說不定|不確定|\bmaybe\b|\bprobably\b|\bperhaps\b|\bnot sure\b)/i;
+export const THIRD_PERSON = "(?:他|她|它|他們|她們|媽媽|媽|爸爸|爸|哥哥|姊姊|姐姐|弟弟|妹妹|奶奶|爺爺|外婆|外公|阿嬤|阿公|老婆|老公|太太|先生|兒子|女兒|小孩|孩子|阿姨|叔叔|伯伯|舅舅|朋友|同事|老闆|鄰居)";
+export const THIRD_SPEAKER = new RegExp(`(${THIRD_PERSON}|電視|新聞|廣播|影片|文章|網路|書上|有人|別人|大家)(?:剛剛|剛才|之前|也)?(?:說|講|提到|寫)`);
+export const THIRD_HELPER = new RegExp(`(?:幫|替|為)${THIRD_PERSON}(?:記住|記下|記一下)`);
+export const THIRD_SUBJECT = new RegExp(`^(?:我(?:的)?)?${THIRD_PERSON}(?:都|也|很|不|喜歡|討厭|愛|要|想|會|是|對|每天|吃|喝)`);
+export const EN_THIRD = /\b(he|she|they|someone|somebody|the tv|the news|my (?:mom|mother|dad|father|wife|husband|son|daughter|kid|kids|friend|boss|brother|sister))\b(?: (?:said|says|told|wants|likes|hates|doesn't|does not|is))/i;
+export const EN_THIRD_SUBJECT = /^(?:that\s+)?(?:he|she|they|my (?:mom|mother|dad|father|wife|husband|son|daughter|kid|kids|friend|boss|brother|sister))\b/i;
+export const QUOTE = /[「」『』"“”]/;
+export const HYPOTHETICAL = /(如果|假如|假設|要是|萬一|倘若|假使|\bif\b|\bsuppose\b|\bimagine\b|\bpretend\b|\bwhat if\b)/i;
+export const JOKE = /(開玩笑|開個玩笑|騙你的|說笑的|說著玩|鬧著玩|亂說的|\bjust kidding\b|\bkidding\b|\bjoking\b|\bjk\b)/i;
+export const UNCERTAIN = /(可能|大概|好像|也許|或許|說不定|不確定|\bmaybe\b|\bprobably\b|\bperhaps\b|\bnot sure\b)/i;
 const ABOUT_ASSISTANT = /^(?:你|妳|nous|you\b)/i;
 
 const ZH_REMEMBER = "(?:記住|記下來|記下|記一下)";
@@ -131,11 +132,11 @@ const NOT_A_TARGET = /^(?:這件事|這個|那個|這|那|它|it|this|that|every
  * 16 §3 不納入記憶的敏感資料：密碼、權杖、卡號、帳號、病歷、身分證等固定詞，以及連續長數字（≥6 位，或含空白與連字號的 ≥9 位）。
  * 命中就拒絕寫入（「這類資料不能存進記憶」），不嘗試遮罩後保存。
  */
-const SENSITIVE = /(密碼|密碼是|口令|驗證碼|權杖|金鑰|token|api ?key|卡號|信用卡|金融卡|提款卡|帳號|帳戶|銀行|存摺|病歷|診斷|病史|處方|身分證|身份證|護照|健保卡|password|passcode|pin|credit card|card number|account number|bank account|social security|ssn|medical record|diagnosis|passport)/i;
-const LONG_NUMBER = /\d{6,}|(?:\d[\s-]?){9,}/;
+export const SENSITIVE = /(密碼|密碼是|口令|驗證碼|權杖|金鑰|token|api ?key|卡號|信用卡|金融卡|提款卡|帳號|帳戶|銀行|存摺|病歷|診斷|病史|處方|身分證|身份證|護照|健保卡|password|passcode|\bpin\b|credit card|card number|account number|bank account|social security|\bssn\b|medical record|diagnosis|passport)/i;
+export const LONG_NUMBER = /\d{6,}|(?:\d[\s-]?){9,}/;
 const FORGET_ALL = /^(?:請)?(?:幫我)?(?:全部忘記|忘記全部|全部都忘記|全部忘掉|忘掉全部|忘記所有(?:的)?(?:事|事情|記憶)?|清除(?:所有|全部)(?:的)?記憶|刪除(?:所有|全部)(?:的)?記憶)(?:吧)?$|^(?:please\s+)?(?:forget everything|forget all(?: of it| memories)?|delete all memories|clear (?:all )?memories)$/i;
 const INSPECT = /^(?:你)?(?:都)?(?:記得|知道|記住了)(?:我|關於我)(?:的)?(?:什麼|哪些|些什麼|哪些事)(?:嗎|呢)?$|^你(?:都)?記得(?:些)?什麼(?:嗎|呢)?$|^(?:看|打開|顯示)?我的記憶(?:有哪些)?$|^what do you (?:remember|know) about me$|^what do you remember$|^show (?:me )?my memories$/i;
-const TEMPORARY = /^(?:今天|今晚|這次|這一次|這餐|這頓|現在先|今天先)(?:先)?(?:不要|別|不想|想|要|改)|^(?:just\s+)?(?:for\s+)?(?:today|tonight|this time)\b/i;
+export const TEMPORARY = /^(?:今天|今晚|這次|這一次|這餐|這頓|現在先|今天先)(?:先)?(?:不要|別|不想|想|要|改)|^(?:just\s+)?(?:for\s+)?(?:today|tonight|this time)\b/i;
 // 「我是 X」只提出名字；service.ts 只在 X 是既有人物（或句子接著「記住」）時才當選人，否則原句交給一般聊天。
 const ZH_SELF = /^(?:我是|我叫)\s*([^\s，,、。]{1,16}?)\s*(?:啦|喔|哦|唷|呀)?$/;
 const EN_SELF = /^(?:[Ii] am|[Ii]'m|[Mm]y name is)\s+([A-Z][A-Za-z'-]{0,30}(?:\s+[A-Z][A-Za-z'-]{0,30}){0,2})$/;

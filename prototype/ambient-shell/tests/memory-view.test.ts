@@ -41,7 +41,7 @@ const status: MemoryStatusView = {
   targets: [{ provider: "claude", account: "fp0000claude0001", label: "Claude", allowed: false, household_allowed: false }, { provider: "chatgpt", account: "fp000chatgpt0001", label: "ChatGPT（fixture@example.invalid）", allowed: false, household_allowed: false }],
   active_facts: 0, limits: { facts: 1000, profiles: 20, value_chars: 512 },
 };
-const turnView = { receipts: [], card: null, chat: { text: "晚餐吃什麼", memory_turn: "mt_" + "0".repeat(32) }, presence: status.presence, history_reset: false, notice: null };
+const turnView = { receipts: [], card: null, chat: { text: "晚餐吃什麼", memory_turn: "mt_" + "0".repeat(32) }, presence: status.presence, history_reset: false, notice: null, suggestion: null };
 
 function make(responses: (req: MemoryRequest) => MemoryResponse) {
   const calls: MemoryRequest[] = [];
@@ -82,7 +82,7 @@ describe("memory cards", () => {
   });
 
   it("「你記得我什麼？」 lists source/time and edit/forget/pin act on that item", async () => {
-    const fact = { id: "mem_0123456789abcdef", revision: 4, subject: "profile_0123456789abcdef", subject_name: "George", text: "不吃香菜", topic: "food", source: "explicit" as const, excerpt: "記住，我不吃香菜", at: "2026-10-29T02:00:00Z", expires: null, pinned: false };
+    const fact = { id: "mem_0123456789abcdef", revision: 4, subject: "profile_0123456789abcdef", subject_name: "George", text: "不吃香菜", topic: "food", source: "explicit" as const, excerpt: "記住，我不吃香菜", at: "2026-10-29T02:00:00Z", expires: null, pinned: false, by_name: null };
     const t = make(req => req.op === "list" ? { ok: true, op: "list", facts: [], subject: null, manage: null, status, face_people: null, consents: [] } : { ok: true, op: "forget", receipt: { status: "forgotten", message: "已忘記 {0} 的一筆記憶", values: ["George"], operation_id: null }, history_reset: true, status });
     t.view.showCard({ kind: "inspect", subject_name: "George", facts: [fact] }, "req_fixture03", null);
     expect(t.el.textContent).toContain("不吃香菜");
@@ -167,5 +167,107 @@ describe("MEM-2 live cards (DOM stand-in)", () => {
     expect(t.el.textContent).toContain("Delegate this? “幫我寫一份晚餐菜單報告”");
     byText(t.el, "Delegate").click();
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("MEM-5a suggestion line and household attribution (DOM stand-in)", () => {
+  const C = "mc_00000000000000000000aaaa";
+  const card: MemoryCardView = { kind: "suggestion", card: C, text: "我不吃香菜", value: "不吃香菜", subject_name: "George" };
+  function prompt(answer: MemoryResponse) {
+    const calls: MemoryRequest[] = [];
+    const applied = vi.fn(), changed = vi.fn();
+    const p = new mod.SuggestionPrompt({ bridge: { memory: async (r) => { calls.push(r); return r.op === "card_view" ? { ok: true, op: "card_view", card, origin: "typed" } : answer; } }, applied, changed });
+    return { p, calls, applied, changed };
+  }
+
+  it("shows one line under the finished reply only (same request id), fetched by card id; 「記住」 answers confirm and shows the core receipt", async () => {
+    const t = prompt({ ok: true, op: "card_answer", ...turnView, chat: null, receipts: [{ status: "saved", message: "記在 {0} 名下了：{1}", values: ["George", "不吃香菜"], operation_id: null }], status });
+    t.p.set("req_fixture20", C);
+    expect(t.p.render("req_fixture20", false)).toBeNull(); // 回覆還在串流：不擋聊天、也不先取內容
+    expect(t.calls).toEqual([]);
+    expect(t.p.render("req_fixture99", true)).toBeNull(); // 別一輪的回覆
+    expect(t.p.render("req_fixture20", true)).toBeNull(); // 第一次：經 card_view 取內容
+    await flush();
+    expect(t.calls).toEqual([{ op: "card_view", card: C }]);
+    expect(t.changed).toHaveBeenCalled();
+    const el = t.p.render("req_fixture20", true) as unknown as El;
+    expect(el.getAttribute("data-visibility-reason")).toBe("user_request");
+    expect(el.getAttribute("data-request-id")).toBe("req_fixture20");
+    expect(el.textContent).toBe("要記住『我不吃香菜』嗎？ 記住不用");
+    expect(el.getAttribute("aria-label")).toBe("記憶建議");
+    setLocale("en");
+    const en = t.p.render("req_fixture20", true) as unknown as El;
+    expect(en.textContent).toBe("Remember “我不吃香菜”? RememberNo thanks");
+    expect(en.getAttribute("aria-label")).toBe("Memory suggestion");
+    expect(en.getAttribute("title")).toBe("Saved only if you press “Remember”; nothing is remembered automatically.");
+    byText(en, "Remember").click();
+    await flush();
+    expect(t.calls[1]).toEqual({ op: "card_answer", card: C, choice: "confirm" });
+    expect(t.applied).toHaveBeenCalledOnce();
+    expect((t.p.render("req_fixture20", true) as unknown as El).textContent).toBe("Saved for George: 不吃香菜");
+    // 審查 n4：回條是固定句型，換語言時重新翻譯。
+    setLocale("zh-TW");
+    expect((t.p.render("req_fixture20", true) as unknown as El).textContent).toBe("記在 George 名下了：不吃香菜");
+  });
+
+  it("「不用」 answers decline and the line disappears; clear() drops it (epoch change)", async () => {
+    const t = prompt({ ok: true, op: "card_answer", ...turnView, chat: null, receipts: [{ status: "cancelled", message: "好，不記這一句", values: [], operation_id: null }], status });
+    t.p.set("req_fixture21", C);
+    t.p.render("req_fixture21", true);
+    await flush();
+    byText(t.p.render("req_fixture21", true) as unknown as El, "不用").click();
+    await flush();
+    expect(t.calls[1]).toEqual({ op: "card_answer", card: C, choice: "decline" });
+    expect(t.p.render("req_fixture21", true)).toBeNull();
+    t.p.set("req_fixture22", C);
+    t.p.clear();
+    expect(t.p.render("req_fixture22", true)).toBeNull();
+    expect(new mod.SuggestionPrompt({ bridge: null, applied: () => {}, changed: () => {} }).render("req_fixture22", true)).toBeNull();
+  });
+
+  it("household facts show 「全家共用・由 X 記下・日期」 with the not-identity-verification note, in both languages", () => {
+    const fact = { id: "mem_0123456789abcde0", revision: 2, subject: null, subject_name: null, text: "晚餐不要太鹹", topic: "food", source: "explicit" as const, excerpt: "晚餐不要太鹹", at: "2026-10-30T02:00:00Z", expires: null, pinned: false, by_name: "George" };
+    const own = { ...fact, id: "mem_0123456789abcde1", subject: "profile_0123456789abcdef", subject_name: "George", text: "不吃香菜", source: "suggestion" as const, by_name: null };
+    const t = make(() => ({ ok: false, code: "unavailable", message: "x" }));
+    t.view.showCard({ kind: "inspect", subject_name: "George", facts: [fact, own] }, "req_fixture23", null);
+    expect(t.el.textContent).toMatch(/全家共用・由 George 記下・2026\/10\/30/);
+    expect(t.el.textContent).toContain("來源：記憶建議（按了記住）");
+    expect(t.el.textContent).toContain("「由誰記下」只是記下當時選定的本次人物，不是身分驗證。");
+    setLocale("en");
+    t.view.showCard({ kind: "inspect", subject_name: "George", facts: [fact, own] }, "req_fixture23", null);
+    expect(t.el.textContent).toMatch(/Household · noted by George · 2026\/10\/30/);
+    expect(t.el.textContent).toContain("Source: memory suggestion (you pressed Remember)");
+    expect(t.el.textContent).toContain("it is not identity verification");
+    expect(t.el.textContent.replace(/晚餐不要太鹹|不吃香菜/g, "")).not.toMatch(/\p{Script=Han}/u);
+  });
+
+  it("the manager's suggestions switch needs the flag and the token, and is translated", async () => {
+    const managed = { ...status, enabled: true, suggestions: { available: true, enabled: false } };
+    const t = make(req => req.op === "list" ? { ok: true, op: "list", facts: [], subject: null, manage: "mm_" + "a".repeat(32), status: managed, face_people: null, consents: [] }
+      : { ok: true, op: "suggestions", receipt: { status: "updated", message: "已關閉記憶建議", values: [], operation_id: null }, history_reset: false, status: managed });
+    t.view.openManager();
+    await flush();
+    expect(t.el.textContent).toContain("記憶建議：已關閉（預設）。");
+    byText(t.el, "開啟記憶建議").click();
+    await flush();
+    expect(t.calls[1]).toEqual({ op: "suggestions", enabled: true, token: "mm_" + "a".repeat(32) });
+    setLocale("en");
+    t.view.openManager();
+    await flush();
+    expect(t.el.textContent).toContain("Memory suggestions: off (default).");
+    expect(t.el.textContent).toContain("Suggestions never come from voice, task results or model replies");
+    const unavailable = make(req => req.op === "list" ? { ok: true, op: "list", facts: [], subject: null, manage: "mm_" + "a".repeat(32), status: { ...managed, suggestions: { available: false, enabled: false } }, face_people: null, consents: [] } : { ok: false, code: "unavailable", message: "x" });
+    unavailable.view.openManager();
+    await flush();
+    expect(unavailable.el.textContent).toContain("Memory suggestions: not available (NOUS_MEMORY_ROUTES does not list suggest).");
+    expect(buttons(unavailable.el).map(b => b.textContent)).not.toContain("Turn on memory suggestions");
+    // 審查 m2：旗標拿掉但建議還開著時，仍可以關掉（降回舊版前要先關）。
+    const stillOn = make(req => req.op === "list" ? { ok: true, op: "list", facts: [], subject: null, manage: "mm_" + "a".repeat(32), status: { ...managed, suggestions: { available: false, enabled: true } }, face_people: null, consents: [] }
+      : { ok: true, op: "suggestions", receipt: { status: "updated", message: "已關閉記憶建議", values: [], operation_id: null }, history_reset: false, status: managed });
+    stillOn.view.openManager();
+    await flush();
+    byText(stillOn.el, "Turn off memory suggestions").click();
+    await flush();
+    expect(stillOn.calls[1]).toEqual({ op: "suggestions", enabled: false, token: "mm_" + "a".repeat(32) });
   });
 });

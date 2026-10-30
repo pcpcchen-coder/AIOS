@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { chatText, commandBodies, keyOf, looksLikeMemoryRequest, parseMemoryText, toTraditional, topicOf } from "../server/memory/parse.ts";
 
@@ -112,5 +113,24 @@ describe("memory parser: review regressions (B1, M-6, nit)", () => {
   it("keeps 「我的…」 instead of leaving 「的…」", () => {
     expect(parseMemoryText("記住我的生日在五月")[0]).toMatchObject({ op: "remember", value: "我的生日在五月" });
     expect(parseMemoryText("記住我們家晚餐不吃牛肉")[0]).toMatchObject({ op: "remember", value: "我們家晚餐不吃牛肉" });
+  });
+});
+
+describe("審查 M4: SENSITIVE uses real word boundaries (it held literal 0x08 characters since MEM-1)", () => {
+  it("refuses PIN and SSN sentences in Chinese and English", () => {
+    for (const text of ["記住我的 PIN 是 4821", "記住我的pin是4821", "remember my pin is 4821", "remember my PIN code", "記住我的 SSN"]) {
+      expect(parseMemoryText(text)).toEqual([{ op: "rejected", part: 0, reason: "sensitive" }]);
+    }
+  });
+
+  it("does not flag spinach, pineapple, shopping or lessons", () => {
+    for (const text of ["remember I always eat spinach", "remember I like pineapple", "remember I hate shopping", "remember I like piano lessons"]) {
+      expect(parseMemoryText(text)[0]).toMatchObject({ op: "remember" });
+    }
+  });
+
+  it("parse.ts contains no literal control characters", () => {
+    const source = readFileSync(new URL("../server/memory/parse.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);
   });
 });

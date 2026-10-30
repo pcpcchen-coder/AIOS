@@ -36,6 +36,10 @@ describe("memory IPC filter", () => {
     expect(validateMemoryRequest({ op: "edit", id: F, revision: 3, value: "不吃香菜", token: T, subject: P })).toEqual({ ok: true, request: { op: "edit", id: F, revision: 3, value: "不吃香菜", token: T } });
     expect(validateMemoryRequest({ op: "edit", id: null, value: "喜歡恐龍", subject: P, token: T })).toEqual({ ok: true, request: { op: "edit", id: null, value: "喜歡恐龍", subject: P, token: T } });
     expect(validateMemoryRequest({ op: "suspend", reason: "multi_face" })).toEqual({ ok: true, request: { op: "suspend", reason: "multi_face" } });
+    // MEM-5a：記憶建議的開關只有記憶管理（token）能送；多的欄位丟掉。
+    expect(validateMemoryRequest({ op: "suggestions", enabled: true, token: T, card: C })).toEqual({ ok: true, request: { op: "suggestions", enabled: true, token: T } });
+    expect(validateMemoryRequest({ op: "suggestions", enabled: true })).toMatchObject({ ok: false });
+    expect(validateMemoryRequest({ op: "suggestions", enabled: "yes", token: T })).toMatchObject({ ok: false });
     expect(validateMemoryRequest({ op: "list", manage: true })).toEqual({ ok: true, request: { op: "list", manage: true } });
     expect(validateMemoryRequest({ op: "select", profile: P, card: C, extra: 1 })).toEqual({ ok: true, request: { op: "select", profile: P, card: C } });
     expect(validateMemoryRequest({ op: "setup", enabled: false, subject: { kind: "household" }, allow: [], token: T })).toEqual({ ok: true, request: { op: "setup", enabled: false, subject: { kind: "household" }, allow: [], token: T } });

@@ -29,6 +29,7 @@ import { literalCommand, MemoryBoundary, type ContextLease, type InputVia, type 
 import { LiveMemoryBinding, VOICE_CARDS_PER_MINUTE, type LiveBindingOptions, type LiveContextResult, type LiveMemoryService, type RevokeWhy, type VoiceAction, type VoiceRoute, type VoiceTurnOutcome } from "./live.ts";
 import { chatText, keyOf, parseMemoryText, topicOf, type ParsedSegment } from "./parse.ts";
 import { relevance, retrieve, type ChatTarget, type ContextFact } from "./retrieve.ts";
+import { SuggestionBook, suggestFrom, suggestionBodies, SUGGEST_TTL_MS, type PendingSuggestion } from "./suggest.ts";
 import type { Locale } from "../../shared/i18n.mjs";
 import type { LiveMemoryReason } from "../../shared/realtime-route.ts";
 import { newStoreOperation, RESULT_LIMIT, type MemoryData, type MemoryFact, type MemoryOutcome, type MemoryProfile, type MemoryResult, type MemorySnapshot, type MemoryStoreLike, type StoreOperation, type StoreResult } from "./store.ts";
@@ -58,6 +59,11 @@ import { DELEGATE_CARD } from "../../shared/protected-tasks.ts";
 //   （api_key：openai_realtime，OPENAI_API_KEY 的 HMAC），boundary 的放行表決定這條路徑能不能帶記憶。同時只允許一通語音通話帶記憶。
 // - MEM-4b（語音交辦自動帶記憶）：delegateVoice 用 binding 核對過的語音辨識原句（via voice_heard）走同一個 delegateProtected；
 //   受保護的原句卡由這裡持有原句（voiceDelegateCard），可信主視窗經 tasks IPC 取標題、按「交辦」算直接確認（confirmation）。
+// - MEM-5a（記憶建議與家庭協同，docs/validation/memory-mem5a-2026-10-30.md）：可信主視窗打字的一輪處理完、沒有任何記憶指令與卡片時，
+//   maybeSuggest 用 server/memory/suggest.ts 的固定規則從 chat 段落找一句第一人稱的穩定偏好，最多 1 筆，只放在記憶體
+//   （SuggestionBook）；turn 只回卡片 ID，內容經 card_view。只有在那張卡上按「記住」（confirmation，suggestFrom 重新解析）才寫入，
+//   source.kind "suggestion"。要 NOUS_MEMORY_ROUTES 列出 suggest、而且記憶管理裡開了 settings.suggestions 才會提。
+//   全家共用的新事實在旗標開著時記下 source.by（當時的本次人物；不是身分驗證），只在查看記憶時顯示。
 
 export const MEMORY_IDLE_MS = 30 * 60_000;
 export const MEMORY_TURN_MS = 60_000;
@@ -129,6 +135,11 @@ export interface MemoryServiceOptions {
   onPlaintextDrop?: (reason: "memory_off" | "memory_closed") => void;
   /** 只限測試：依賴索引的筆數上限（正式一律 RESULT_LIMIT）。 */
   resultLimit?: number;
+  /**
+   * MEM-5a：NOUS_MEMORY_ROUTES 列出 suggest（預設關閉）。關閉時不提建議、不能在記憶管理開啟建議，全家共用的新事實也不記 source.by，
+   * 快照照 2／3 寫。使用者還要在記憶管理開 settings.suggestions，兩者都開才會提。
+   */
+  suggest?: boolean;
 }
 
 /** MEM-4a：受保護交辦需要的任務端介面（只在核心內）。 */
@@ -241,6 +252,14 @@ const UNCLEAR: Record<string, string> = {
 const MINOR = "未成年家人的記憶請由家長在選單列「記憶…」管理；這次沒有保存或改動";
 const NEED_MANAGE = "請從選單列「記憶…」打開記憶管理";
 
+/**
+ * 審查 m4：MEM-5b 之前只處理 preference 與 note。快照 version 4 已經能存 work_summary，但它的顯示、更正與撤銷規則在 MEM-5b；
+ * 在那之前（或從 MEM-5b 降回本版）不列出、不讓聊天更正或忘記、不送給模型（retrieve.ts 同一條規則）。
+ */
+export function shownKind(f: Pick<MemoryFact, "kind">): boolean {
+  return f.kind === "preference" || f.kind === "note";
+}
+
 function endOfLocalDay(now: number): string {
   const d = new Date(now);
   d.setHours(24, 0, 0, 0);
@@ -314,6 +333,8 @@ export class MemoryService implements LiveMemoryService {
   private liveVoiceCard: string | null = null;
   /** MEM-4b：受保護原句卡（核心持有原句；最多 16 張）。 */
   private readonly delegateCards = new Map<string, { title: string; route: VoiceRoute; expires: number; session: MemorySession; epoch: number; locale?: Locale }>();
+  /** MEM-5a：記憶建議（候選、被拒絕的 key、頻率計數）只在記憶體。 */
+  private readonly suggestions = new SuggestionBook();
   private readonly timer: ReturnType<typeof setInterval>;
 
   constructor(private readonly options: MemoryServiceOptions) {
@@ -411,6 +432,8 @@ export class MemoryService implements LiveMemoryService {
     this.cards.clear();
     // MEM-4b 審查 M3：受保護原句卡綁本次人物世代；換人或世代改變就作廢（點擊回 not_found）。
     this.delegateCards.clear();
+    // MEM-5a：換世代（換人、暫停、閒置、OS 鎖定、更正、忘記、撤銷）時，記憶建議的候選與被拒絕的 key 一起丟掉。
+    this.suggestions.clear();
     this.recent.clear();
     this.revokedBy.set(old.session, why);
     void this.boundary.revoke(old.session).then(ok => { if (!ok) this.log("memory: 撤銷清理未完成"); });
@@ -531,11 +554,13 @@ export class MemoryService implements LiveMemoryService {
       target: targets.current ? this.targetView(targets.current, data) : null,
       targets: targets.all.map(t => this.targetView(t, data)).filter((t): t is MemoryTargetView => t !== null),
       active_facts: this.activeFacts(data, () => true).length,
+      suggestions: { available: this.options.suggest === true, enabled: data.settings.suggestions },
     };
   }
 
   private factView(f: MemoryFact, data: MemoryData): MemoryFactView {
-    return { id: f.id, revision: f.revision, subject: f.profileId, subject_name: f.profileId ? data.profiles.find(p => p.id === f.profileId)?.name ?? null : null, text: f.value, topic: f.topic, source: f.source.kind, excerpt: f.source.excerpt, at: f.source.at, expires: f.expiresAt, pinned: f.pinned };
+    const by = f.profileId === null && f.source.by ? data.profiles.find(p => p.id === f.source.by)?.name ?? null : null;
+    return { id: f.id, revision: f.revision, subject: f.profileId, subject_name: f.profileId ? data.profiles.find(p => p.id === f.profileId)?.name ?? null : null, text: f.value, topic: f.topic, source: f.source.kind, excerpt: f.source.excerpt, at: f.source.at, expires: f.expiresAt, pinned: f.pinned, by_name: by };
   }
 
   private activeFacts(data: MemoryData, scope: (f: MemoryFact) => boolean): MemoryFact[] {
@@ -578,6 +603,7 @@ export class MemoryService implements LiveMemoryService {
         case "profile_delete": return await this.exclusive(() => this.profileDelete(req));
         case "link_face": return await this.exclusive(() => this.linkFace(req));
         case "profile_minor": return await this.exclusive(() => this.profileMinor(req));
+        case "suggestions": return await this.exclusive(() => this.suggestionsOp(req));
         default: throw new ServiceError("bad_request", "不認得的記憶操作");
       }
     } catch (error) {
@@ -614,6 +640,8 @@ export class MemoryService implements LiveMemoryService {
         if (cached.text !== text) throw new ServiceError("conflict", "同一個 request_id 帶了不同的內容");
         return { ok: true, op: "turn", ...cached.view, status: this.statusView() };
       }
+      // 審查 m1：建議只屬於提出它的那一輪（16 §11）；新的一輪開始時，上一輪沒回答的建議作廢（不算拒絕）。
+      this.suggestions.dropPending();
       this.touch();
       const settings = this.snapshot().settings;
       let view: MemoryTurnView;
@@ -644,7 +672,7 @@ export class MemoryService implements LiveMemoryService {
       // 過期的 nonce 順手清掉（每次最多 64 筆）。
       for (const [key, binding] of this.turns) if (binding.expires <= this.now() || this.turns.size > 64) this.turns.delete(key); else break;
     }
-    return { receipts, card, chat: chat ? { text: chat, memory_turn: nonce } : null, presence: this.presenceView(), history_reset: reset, notice };
+    return { receipts, card, chat: chat ? { text: chat, memory_turn: nonce } : null, presence: this.presenceView(), history_reset: reset, notice, suggestion: null };
   }
 
   private receipt(status: MemoryReceiptStatus, text: MemoryText, operationId: string | null = null): MemoryReceiptView {
@@ -749,7 +777,7 @@ export class MemoryService implements LiveMemoryService {
         case "forget": {
           if (this.currentIsMinor()) { receipts.push(this.receipt("minor", txt(MINOR))); break; }
           const profile = this.currentProfileId();
-          const scope = this.activeFacts(data, f => f.profileId === null || (profile !== null && f.profileId === profile));
+          const scope = this.activeFacts(data, f => shownKind(f) && (f.profileId === null || (profile !== null && f.profileId === profile)));
           const candidates = this.targetsFor(scope, seg);
           // 找不到明確的記憶目標：不是在講記憶（例如「更正：報告第三段」），原句照樣交給聊天。
           if (candidates.length === 0) { fallback[seg.part] = seg.text; break; }
@@ -768,13 +796,16 @@ export class MemoryService implements LiveMemoryService {
           break;
         case "inspect": {
           const profile = this.currentProfileId();
-          const facts = this.activeFacts(data, f => f.profileId === null || (profile !== null && f.profileId === profile));
+          const facts = this.activeFacts(data, f => shownKind(f) && (f.profileId === null || (profile !== null && f.profileId === profile)));
           return stop({ kind: "inspect", subject_name: profile ? this.nameOf(profile) : null, facts: facts.map(f => this.factView(f, data)) });
         }
       }
     }
     const message = chat();
-    return this.view(receipts, null, message, reset, message ? this.consentNotice() : null, saved, requestId);
+    const view = this.view(receipts, null, message, reset, message ? this.consentNotice() : null, saved, requestId);
+    // MEM-5a：只有打字那一輪從頭處理完（沒有卡片、沒有任何記憶指令）才看要不要提一筆建議；卡片之後的續送不提。
+    if (via === "typed" && from === 0 && message) view.suggestion = this.maybeSuggest(text, segments, requestId);
+    return view;
   }
 
   private consentNotice(): MemoryText | null {
@@ -822,10 +853,10 @@ export class MemoryService implements LiveMemoryService {
    * 依原句（打字或卡片上核心保存的原句）取得票證；票證綁本次 session、世代、序號與命令。
    * voice_confirmed：MEM-2 的語音確認（server/memory/live.ts 核對過時窗、回音、世代與一次性）。
    */
-  private ticketFor(text: string, via: InputVia, command: ParsedMemoryCommand, scope: "subject" | "household"): void {
+  private ticketFor(text: string, via: InputVia, command: ParsedMemoryCommand, scope: "subject" | "household", reparse: (text: string) => readonly ({ op: string; part: number } & Record<string, string | number | boolean | null>)[] = this.reparse(scope)): void {
     const session = this.presence.session;
     const input = via === "typed" ? this.boundary.observeTypedInput(session, text) : via === "confirmation" ? this.boundary.observeConfirmation(session, text) : this.boundary.observeVoiceConfirmation(session, text);
-    const ticket = this.boundary.issueParsed(session, input, command, this.reparse(scope));
+    const ticket = this.boundary.issueParsed(session, input, command, reparse);
     this.boundary.consumeParsed(session, ticket, command);
   }
 
@@ -898,27 +929,40 @@ export class MemoryService implements LiveMemoryService {
     return this.receipt("full", txt("記憶已滿（{0} 筆）；請先整理或忘記一些再保存", String(MEMORY_FACT_MAX)));
   }
 
-  private async writeRemember(seg: Extract<ParsedSegment, { op: "remember" }>, scope: "subject" | "household", text: string, via: InputVia, requestId: string, replace: string | null = null): Promise<MemoryReceiptView> {
+  /**
+   * MEM-5a 家庭協同：全家共用的新事實由哪位本次人物記下（旗標 suggest 開著時；沒有選定人物時 null）。
+   * 只是當時選定的人物（自稱「我是 X」即可），不是身分驗證；畫面照實說明。
+   */
+  private byFor(profileId: string | null): string | null {
+    // 審查 M5：本次人物是未成年時不記（不把未成年家人的名字掛到全家共用的記憶上）。
+    return profileId === null && this.options.suggest === true && !this.currentIsMinor() ? this.currentProfileId() : null;
+  }
+
+  /**
+   * origin suggestion（MEM-5a）：記憶建議上按「記住」。票證用 suggestionBodies（suggestFrom 對卡片上保存的原句重新解析），
+   * 命令的 op 是 "suggest"；source.kind "suggestion"。
+   */
+  private async writeRemember(seg: Extract<ParsedSegment, { op: "remember" }>, scope: "subject" | "household", text: string, via: InputVia, requestId: string, replace: string | null = null, origin: "turn" | "suggestion" = "turn"): Promise<MemoryReceiptView> {
     const profileId = scope === "household" ? null : this.currentProfileId();
     if (scope === "subject" && profileId === null) return this.receipt("rejected", txt(UNCLEAR.no_person!));
     if ([...seg.value].length > MEMORY_VALUE_MAX) return this.receipt("full", txt("內容超過 {0} 字，沒有保存", String(MEMORY_VALUE_MAX)));
     const data = this.snapshot();
     if (!replace && !this.hasRoom(data, 1)) return this.fullReceipt();
-    const operationFields = { op: seg.op, part: seg.part, value: seg.value, topic: seg.topic, key: seg.key, kind: seg.kind, expires: seg.expires, scope };
+    const operationFields = { op: origin === "suggestion" ? "suggest" : seg.op, part: seg.part, value: seg.value, topic: seg.topic, key: seg.key, kind: seg.kind, expires: seg.expires, scope };
     const nowIso = new Date(this.now()).toISOString();
     const excerpt = [...text].length <= MEMORY_EXCERPT_MAX ? text : [...seg.value].length <= MEMORY_EXCERPT_MAX ? seg.value : null;
     if (excerpt === null) return this.receipt("full", txt("內容太長，沒有保存（摘錄上限 {0} 字）", String(MEMORY_EXCERPT_MAX)));
     // 票證的 operationId 與 store 的操作 ID 相同：同一次直接輸入只會落盤一次。
     const operation = this.operation(JSON.stringify([operationFields, replace]));
     try {
-      this.ticketFor(text, via, { ...operationFields, operationId: operation.operationId } as ParsedMemoryCommand, scope);
+      this.ticketFor(text, via, { ...operationFields, operationId: operation.operationId } as ParsedMemoryCommand, scope, origin === "suggestion" ? suggestionBodies : undefined);
     } catch {
       return this.receipt("rejected", txt("這次的來源無法驗證，沒有保存；請再說一次"));
     }
     const fact: MemoryFact = {
       id: `mem_${hex(8)}`, profileId, revision: 0, kind: seg.kind, topic: seg.topic, key: seg.key, value: seg.value, audience: "household",
-      source: { kind: via === "voice_confirmed" ? "voice_confirmed" : "explicit", turnId: requestId, at: nowIso, excerpt }, validFrom: nowIso,
-      expiresAt: seg.expires === "today" ? endOfLocalDay(this.now()) : null, reviewAfter: null, pinned: false,
+      source: { kind: origin === "suggestion" ? "suggestion" : via === "voice_confirmed" ? "voice_confirmed" : "explicit", turnId: requestId, at: nowIso, excerpt, by: this.byFor(profileId) }, validFrom: nowIso,
+      expiresAt: seg.expires === "today" ? endOfLocalDay(this.now()) : null, reviewAfter: null, pinned: false, derivedFrom: null,
     };
     const replaced = replace ? data.facts.find(f => f.id === replace) : undefined;
     // 取代一筆偏好等同更正：帶著記憶的 live 通話先暫停輸出，commit 失敗才恢復（16 §8）。
@@ -951,7 +995,7 @@ export class MemoryService implements LiveMemoryService {
     return seg.op === "forget" ? this.applyForget(target, target.revision, operation) : this.applyCorrect(target, target.revision, seg.value, requestId, text, operation, via);
   }
 
-  private async applyCorrect(target: MemoryFact, revision: number, value: string, requestId: string, excerptSource: string, operation: StoreOperation, via: InputVia = "typed"): Promise<MemoryReceiptView> {
+  private async applyCorrect(target: MemoryFact, revision: number, value: string, requestId: string, excerptSource: string, operation: StoreOperation, via: InputVia = "typed", fromManager = false): Promise<MemoryReceiptView> {
     const data = this.snapshot();
     const current = data.facts.find(f => f.id === target.id);
     if (!current) return this.receipt("not_found", txt("找不到這筆記憶（可能已被忘記）"));
@@ -964,7 +1008,7 @@ export class MemoryService implements LiveMemoryService {
     const { result, operationId: stored } = await this.commit(operation, (d) => {
       const nextRevision = this.snapshot().revision + 1;
       // 更正清掉舊正文與舊摘錄；首版不保存無限全文版本史（16 §6）。
-      d.facts = d.facts.map(f => f.id === current.id ? { ...f, revision: nextRevision, value, topic, key: keyOf(value, topic), source: { kind: via === "voice_confirmed" ? "voice_confirmed" as const : "explicit" as const, turnId: requestId, at: nowIso, excerpt }, validFrom: nowIso } : f);
+      d.facts = d.facts.map(f => f.id === current.id ? { ...f, revision: nextRevision, value, topic, key: keyOf(value, topic), source: { kind: via === "voice_confirmed" ? "voice_confirmed" as const : "explicit" as const, turnId: requestId, at: nowIso, excerpt, by: fromManager ? null : this.byFor(current.profileId) }, validFrom: nowIso } : f);
       return d;
     }, "updated");
     if (result.status !== "updated") { this.liveHold(false); return this.storeFailure(result); }
@@ -1024,7 +1068,7 @@ export class MemoryService implements LiveMemoryService {
     // 首次設定時人物與全家共用一起允許（設定卡上有說明）；之後（記憶管理）只改選定的那一個範圍。
     const subjects = profileId === null || data.settings.setupAt !== null ? [profileId] : [profileId, null];
     const { result } = await this.commit(JSON.stringify(["setup", req.enabled, profileId, allow]), (d) => {
-      d.settings = { enabled: req.enabled as boolean, setupAt: d.settings.setupAt ?? new Date(this.now()).toISOString(), suggestions: false };
+      d.settings = { enabled: req.enabled as boolean, setupAt: d.settings.setupAt ?? new Date(this.now()).toISOString(), suggestions: d.settings.suggestions };
       if (created) d.profiles.push(created);
       // 依「服務＋帳號」逐一允許或撤回；只換模型不影響（同意不綁模型名稱）。
       for (const target of targets) {
@@ -1058,6 +1102,8 @@ export class MemoryService implements LiveMemoryService {
 
   private async cardAnswer(req: Record<string, unknown>): Promise<MemoryResponse> {
     const id = req.card;
+    // MEM-5a：記憶建議的卡（只在記憶體的 SuggestionBook，不在 this.cards）。
+    if (typeof id === "string" && this.suggestions.has(id)) return this.answerSuggestion(id, req.choice);
     const card = typeof id === "string" && CARD_ID.test(id) ? this.cards.get(id) : undefined;
     if (!card || card.expires <= this.now() || card.epoch !== this.presence.epoch) {
       if (card) this.cards.delete(card.id);
@@ -1182,6 +1228,92 @@ export class MemoryService implements LiveMemoryService {
     return { ok: true, op: "select", ...this.view(receipts, null, null, true, null, false), status: this.statusView() };
   }
 
+  // ─────────────── MEM-5a 記憶建議 ───────────────
+
+  /**
+   * 打字那一輪處理完之後：最多提一筆建議（只在記憶體；回傳卡片 ID）。不提的情況：旗標或設定沒開、記憶關著、這一輪有任何記憶指令、
+   * 有還開著的記憶卡、沒有選定人物（含暫停）、本次人物是未成年、找不到合格的句子、已經有相同或衝突的記憶（同一個鍵或相同內容，
+   * 本人或全家共用）、24 小時內按過「不用」、超過頻率（每個世代每小時 3 筆、每 24 小時 10 筆）或記憶已滿。log 只記筆數與主題。
+   */
+  private maybeSuggest(text: string, segments: readonly ParsedSegment[], requestId: string): { card: string } | null {
+    if (this.options.suggest !== true) return null;
+    if (!segments.every(seg => seg.op === "chat" || seg.op === "temporary")) return null;
+    let data: MemorySnapshot;
+    try { data = this.snapshot(); } catch { return null; }
+    if (!data.settings.enabled || data.settings.suggestions !== true) return null;
+    const profile = this.currentProfileId();
+    if (!profile || this.currentIsMinor()) return null;
+    const now = this.now();
+    if ([...this.cards.values()].some(c => c.expires > now && c.epoch === this.presence.epoch)) return null;
+    // 審查 M1、m3：整個打字的一輪一起判斷（跨句的玩笑、轉述、時效詞都算），和離線指標用同一個函式。
+    const candidate = suggestFrom(text);
+    if (!candidate) return null;
+    const found = { text, candidate };
+    const c = found.candidate;
+    if ([...c.value].length > MEMORY_VALUE_MAX || !this.hasRoom(data, 1)) return null;
+    if (this.activeFacts(data, f => f.profileId === profile || f.profileId === null).some(f => f.key === c.key || f.value === c.value)) {
+      this.log("memory: 記憶建議略過（已有相同或相關的記憶）");
+      return null;
+    }
+    if (this.suggestions.rejectedKey(profile, c.key, now)) { this.log("memory: 記憶建議略過（24 小時內按過不用）"); return null; }
+    const block = this.suggestions.rateBlock(now, this.presence.epoch);
+    if (block) { this.log(`memory: 記憶建議略過（頻率上限：${block === "hour" ? "每小時" : "每天"}）`); return null; }
+    const card = `mc_${hex(12)}`;
+    this.suggestions.add({ card, text: found.text, candidate: c, profileId: profile, epoch: this.presence.epoch, requestId, createdAt: now });
+    this.log(`memory: 記憶建議 1 筆（主題 ${c.topic}）`);
+    return { card };
+  }
+
+  /** 還有效的建議：沒過期（24 小時）、同一個世代、本次人物還是同一位。 */
+  private liveSuggestion(card: unknown, take: boolean): PendingSuggestion | null {
+    if (typeof card !== "string" || !CARD_ID.test(card)) return null;
+    const now = this.now();
+    const pending = take ? this.suggestions.take(card, now) : this.suggestions.get(card, now);
+    if (!pending) return null;
+    if (pending.epoch !== this.presence.epoch || this.currentProfileId() !== pending.profileId || now - pending.createdAt >= SUGGEST_TTL_MS) {
+      this.suggestions.take(card, now);
+      return null;
+    }
+    return pending;
+  }
+
+  /** 記憶建議上的「記住」（confirm）或「不用」（decline）。點擊是可信主視窗的直接輸入；一次性。 */
+  private async answerSuggestion(card: string, choice: unknown): Promise<MemoryResponse> {
+    if (choice !== "confirm" && choice !== "decline" && choice !== "cancel") throw new ServiceError("bad_request", "choice 格式不對");
+    const pending = this.liveSuggestion(card, true);
+    if (!pending) throw new ServiceError("expired", "這張卡片已失效（可能換了人物或超過時間）；請再說一次");
+    const done = (receipt: MemoryReceiptView, reset = false): MemoryResponse => ({ ok: true, op: "card_answer", ...this.view([receipt], null, null, reset, null, false), status: this.statusView() });
+    if (choice !== "confirm") {
+      this.suggestions.reject(pending.profileId, pending.candidate.key, this.now());
+      this.log("memory: 記憶建議：不用");
+      return done(this.receipt("cancelled", txt("好，不記這一句")));
+    }
+    // 按下時再核對一次：旗標、設定與記憶都還開著、不是未成年、還沒有相同或相關的記憶。
+    const data = this.snapshot();
+    if (this.options.suggest !== true || !data.settings.enabled || data.settings.suggestions !== true) return done(this.receipt("disabled", txt("記憶建議已關閉，這次沒有保存")));
+    if (this.currentIsMinor()) return done(this.receipt("minor", txt(MINOR)));
+    const c = pending.candidate;
+    const same = this.activeFacts(data, f => (f.profileId === pending.profileId || f.profileId === null) && (f.key === c.key || f.value === c.value));
+    if (same.length) return done(this.receipt("unchanged", txt("已經有相關的記憶，這次沒有保存：{0}", same[0]!.value)));
+    const seg: Extract<ParsedSegment, { op: "remember" }> = { op: "remember", part: 0, value: c.value, topic: c.topic, key: c.key, kind: c.kind, expires: "none" };
+    const receipt = await this.writeRemember(seg, "subject", pending.text, "confirmation", pending.requestId, null, "suggestion");
+    this.log(`memory: 記憶建議：記住 → ${receipt.status}`);
+    return done(receipt);
+  }
+
+  /** 記憶管理（管理權杖）開關記憶建議。開啟還要 NOUS_MEMORY_ROUTES 列出 suggest；關閉時記憶體裡的候選一起丟掉。 */
+  private async suggestionsOp(req: Record<string, unknown>): Promise<MemoryResponse> {
+    if (!this.manageToken(req)) throw new ServiceError("no_manage", NEED_MANAGE);
+    if (typeof req.enabled !== "boolean") throw new ServiceError("bad_request", "enabled 必須是 true 或 false");
+    const enabled = req.enabled;
+    if (enabled && this.options.suggest !== true) throw new ServiceError("unavailable", "記憶建議目前沒有開放（需要 NOUS_MEMORY_ROUTES 列出 suggest）");
+    const { result, operationId } = await this.commit(JSON.stringify(["suggestions", enabled]), (d) => { d.settings = { ...d.settings, suggestions: enabled }; return d; }, "updated");
+    if (result.status !== "updated") return this.mutationResponse("suggestions", this.storeFailure(result), false);
+    if (!enabled) this.suggestions.clear();
+    this.log(`memory: 記憶建議${enabled ? "開啟" : "關閉"}`);
+    return this.mutationResponse("suggestions", this.receipt("updated", txt(enabled ? "已開啟記憶建議：打字聊天說到自己穩定的偏好時，會在回覆下方問一次；只有按「記住」才保存" : "已關閉記憶建議"), operationId), false);
+  }
+
   // ─────────────── 記憶管理 ───────────────
 
   private manageToken(req: Record<string, unknown>): boolean {
@@ -1218,7 +1350,7 @@ export class MemoryService implements LiveMemoryService {
     const subject = req.subject === undefined ? this.currentProfileId() : req.subject;
     if (subject !== null && (typeof subject !== "string" || !PROFILE_ID.test(subject) || !this.profileOf(subject))) throw new ServiceError("not_found", "找不到這位人物");
     if (!managed && subject !== null && subject !== this.currentProfileId()) throw new ServiceError("no_manage", NEED_MANAGE);
-    const facts = this.activeFacts(data, f => f.profileId === subject).map(f => this.factView(f, data));
+    const facts = this.activeFacts(data, f => shownKind(f) && f.profileId === subject).map(f => this.factView(f, data));
     const people = managed ? this.options.identity?.()?.people() ?? null : null;
     const facePeople = people ? people.map(p => ({ person_id: p.person_id, name: p.name, linked: data.profiles.some(x => x.facePersonId === p.person_id) })) : null;
     const consents = this.options.targets().all.filter(t => t.account).map(t => ({ provider: t.provider, account: t.account!, allowed: data.consents.some(c => c.profileId === subject && c.provider === t.provider && c.account === t.account && c.allowed) }));
@@ -1256,7 +1388,7 @@ export class MemoryService implements LiveMemoryService {
     this.boundary.consume(session, ticket, command);
   }
 
-  private mutationResponse(op: "edit" | "forget" | "pin" | "profile_delete" | "link_face" | "profile_minor", receipt: MemoryReceiptView, reset: boolean): MemoryResponse {
+  private mutationResponse(op: "edit" | "forget" | "pin" | "profile_delete" | "link_face" | "profile_minor" | "suggestions", receipt: MemoryReceiptView, reset: boolean): MemoryResponse {
     return { ok: true, op, receipt, history_reset: reset, status: this.statusView() };
   }
 
@@ -1276,7 +1408,7 @@ export class MemoryService implements LiveMemoryService {
       this.literalTicket({ op: "remember", operationId: op.operationId, value });
       const topic = topicOf(value);
       const nowIso = new Date(this.now()).toISOString();
-      const fact: MemoryFact = { id: `mem_${hex(8)}`, profileId: subject as string | null, revision: 0, kind: "preference", topic, key: keyOf(value, topic), value, audience: "household", source: { kind: "explicit", turnId: requestId, at: nowIso, excerpt: [...value].slice(0, MEMORY_EXCERPT_MAX).join("") }, validFrom: nowIso, expiresAt: null, reviewAfter: null, pinned: false };
+      const fact: MemoryFact = { id: `mem_${hex(8)}`, profileId: subject as string | null, revision: 0, kind: "preference", topic, key: keyOf(value, topic), value, audience: "household", source: { kind: "explicit", turnId: requestId, at: nowIso, excerpt: [...value].slice(0, MEMORY_EXCERPT_MAX).join(""), by: null }, validFrom: nowIso, expiresAt: null, reviewAfter: null, pinned: false, derivedFrom: null };
       const { result, operationId } = await this.commit(op, (d) => { fact.revision = this.snapshot().revision + 1; d.facts.push(fact); return d; }, "saved");
       if (result.status !== "saved") return this.mutationResponse("edit", this.storeFailure(result), false);
       return this.mutationResponse("edit", this.receipt("saved", subject ? txt("記在 {0} 名下了：{1}", this.nameOf(subject as string), value) : txt("記在全家共用了：{0}", value), operationId), false);
@@ -1286,7 +1418,8 @@ export class MemoryService implements LiveMemoryService {
     if (parsed.length === 1 && parsed[0]!.op === "rejected" && parsed[0]!.reason === "sensitive") return this.mutationResponse("edit", this.receipt("rejected", txt(REJECTED.sensitive)), false);
     const op = this.operation(JSON.stringify(["edit", fact.id, revision, value]));
     this.literalTicket({ op: "correct", operationId: op.operationId, id: fact.id, expectedRevision: revision, value });
-    const receipt = await this.applyCorrect(fact, revision, value, requestId, value, op);
+    // 審查 M5：記憶管理的修改不記「由誰記下」（管理畫面不代表本次人物在說話）。
+    const receipt = await this.applyCorrect(fact, revision, value, requestId, value, op, "typed", true);
     return this.mutationResponse("edit", receipt, receipt.status === "updated");
   }
 
@@ -1374,7 +1507,8 @@ export class MemoryService implements LiveMemoryService {
     const { result, operationId } = await this.commit(JSON.stringify(["profile_delete", profileId]), (d) => {
       const revision = this.snapshot().revision + 1;
       d.profiles = d.profiles.filter(p => p.id !== profileId);
-      d.facts = d.facts.filter(f => f.profileId !== profileId);
+      // MEM-5a：全家共用的事實上「由 X 記下」的 X 被刪除時，記下的人一併清掉（刪除人物也刪除這個關聯）。
+      d.facts = d.facts.filter(f => f.profileId !== profileId).map(f => f.source.by === profileId ? { ...f, source: { ...f.source, by: null } } : f);
       d.consents = d.consents.filter(c => c.profileId !== profileId);
       d.tombstones = [...d.tombstones, ...facts.map(f => ({ id: f.id, revision }))].slice(-10000);
       return d;
@@ -1641,7 +1775,7 @@ export class MemoryService implements LiveMemoryService {
           case "forget": {
             if (this.currentIsMinor()) return notice(MINOR);
             const profile = this.currentProfileId();
-            const candidates = this.targetsFor(this.activeFacts(data, f => f.profileId === null || (profile !== null && f.profileId === profile)), seg);
+            const candidates = this.targetsFor(this.activeFacts(data, f => shownKind(f) && (f.profileId === null || (profile !== null && f.profileId === profile))), seg);
             // 找不到明確的記憶目標：不是在講記憶，照一般對話。
             if (candidates.length === 0) break;
             if (!allowCard) return notice("語音確認卡太多了；請稍後再說，或在畫面上操作");
@@ -1660,7 +1794,7 @@ export class MemoryService implements LiveMemoryService {
             return notice("全部忘記請從選單列「記憶…」的記憶管理操作；這次沒有刪除");
           case "inspect": {
             const profile = this.currentProfileId();
-            const count = this.activeFacts(data, f => f.profileId === null || (profile !== null && f.profileId === profile)).length;
+            const count = this.activeFacts(data, f => shownKind(f) && (f.profileId === null || (profile !== null && f.profileId === profile))).length;
             const card = this.newCard({ kind: "inspect" }, text, seg.part, seg.part + 1, requestId, {}, "live");
             return { kind: "inspect", card: card.id, count };
           }
@@ -1713,6 +1847,9 @@ export class MemoryService implements LiveMemoryService {
   /** IPC card_view：SSE 只送卡片 ID；可信主視窗用它取內容（只有這個世代、還沒過期的卡）。 */
   private cardView(req: Record<string, unknown>): MemoryResponse {
     const id = req.card;
+    // MEM-5a：記憶建議的內容只經這裡（可信主視窗的 IPC）給畫面；turn 只回卡片 ID。
+    const suggestion = this.liveSuggestion(id, false);
+    if (suggestion) return { ok: true, op: "card_view", card: { kind: "suggestion", card: suggestion.card, text: suggestion.candidate.clause, value: suggestion.candidate.value, subject_name: this.nameOf(suggestion.profileId) || null }, origin: "typed" };
     const card = typeof id === "string" && CARD_ID.test(id) ? this.cards.get(id) : undefined;
     if (!card || card.expires <= this.now() || card.epoch !== this.presence.epoch) throw new ServiceError("expired", "這張卡片已失效（可能換了人物或超過時間）；請再說一次");
     const data = this.snapshot();
@@ -1733,7 +1870,7 @@ export class MemoryService implements LiveMemoryService {
         view = { kind: "pick", card: card.id, action: state.action, value: state.segment.value, candidates: state.candidates.map(fid => data.facts.find(f => f.id === fid)).filter((f): f is MemoryFact => !!f).map(f => this.factView(f, data)) };
         break;
       case "inspect": {
-        const facts = this.activeFacts(data, f => f.profileId === null || (profile !== null && f.profileId === profile));
+        const facts = this.activeFacts(data, f => shownKind(f) && (f.profileId === null || (profile !== null && f.profileId === profile)));
         view = { kind: "inspect", subject_name: profile ? this.nameOf(profile) : null, facts: facts.map(f => this.factView(f, data)) };
         break;
       }
@@ -1787,8 +1924,9 @@ export class MemoryService implements LiveMemoryService {
 
   // ─────────────── MEM-4a 受保護交辦與撤銷傳播 ───────────────
 
-  /** MEM-4c：請任務端丟棄解密內容（失敗只記 log）。 */
+  /** MEM-4c：請任務端丟棄解密內容（失敗只記 log）。MEM-5a：記憶建議的候選與被拒絕的 key 也一起丟掉。 */
   private dropPlaintext(reason: "memory_off" | "memory_closed"): void {
+    this.suggestions.clear();
     try { this.options.onPlaintextDrop?.(reason); } catch { this.log("memory: 任務端丟棄解密內容失敗"); }
   }
 
@@ -1985,6 +2123,7 @@ export class MemoryService implements LiveMemoryService {
     this.turns.clear();
     this.cards.clear();
     this.delegateCards.clear();
+    this.suggestions.clear();
     this.revokedBy.set(this.presence.session, "closed");
     void this.boundary.revoke(this.presence.session);
     await this.queue.catch(() => undefined);

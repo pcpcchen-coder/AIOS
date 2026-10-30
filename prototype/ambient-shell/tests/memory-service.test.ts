@@ -575,7 +575,7 @@ describe.skipIf(!realLockAvailable)("MemoryService: review fixes", () => {
     const snap = seeded.read();
     await seeded.commit(newStoreOperation(snap.revision, "fill", Date.now()), data => {
       const george = data.profiles[0]!.id;
-      data.facts = Array.from({ length: 1000 }, (_, i) => ({ id: `mem_${i.toString(16).padStart(16, "0")}`, profileId: george, revision: 1, kind: "preference" as const, topic: "other", key: `k${i}`, value: `偏好${i}`, audience: "household" as const, source: { kind: "explicit" as const, turnId: "req_seed000", at, excerpt: "x" }, validFrom: at, expiresAt: i === 0 ? new Date(Date.now() - 1000).toISOString() : null, reviewAfter: null, pinned: false }));
+      data.facts = Array.from({ length: 1000 }, (_, i) => ({ id: `mem_${i.toString(16).padStart(16, "0")}`, profileId: george, revision: 1, kind: "preference" as const, topic: "other", key: `k${i}`, value: `偏好${i}`, audience: "household" as const, source: { kind: "explicit" as const, turnId: "req_seed000", at, excerpt: "x", by: null }, validFrom: at, expiresAt: i === 0 ? new Date(Date.now() - 1000).toISOString() : null, reviewAfter: null, pinned: false, derivedFrom: null }));
       return "saved";
     });
     await seeded.close();

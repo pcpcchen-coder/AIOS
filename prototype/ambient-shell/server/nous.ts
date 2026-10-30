@@ -307,6 +307,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
           return { current: providers.chatTarget(), all: [...providers.chatTargets(), ...(live ? [live] : []), ...(apiKey ? [apiKey] : [])], live, byRoute: { live, api_key: apiKey } };
         },
         boundary: new MemoryBoundary({ release: { api_key: apiKeyMemoryReleased, task: config.memoryRoutes.task } }),
+        // MEM-5a：記憶建議與全家共用的「由誰記下」（NOUS_MEMORY_ROUTES 列出 suggest；預設關閉）。
+        suggest: config.memoryRoutes.suggest,
         // MEM-4a：受保護交辦的任務端（同意對象沿用目前任務引擎的 claude／chatgpt 同意；模擬引擎不帶記憶）與撤銷傳播。
         tasks: { sealed: () => store.sealed && store.vaultStatus().failure === null, mode: () => runner.mode, target: () => providers.chatTarget(), submit: (input) => runner.submitProtected(input), publicGet: (taskId) => store.publicGet(taskId) },
         onResultsWithdrawn: (taskIds) => runner.revokeMemory(taskIds),
@@ -377,7 +379,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const idStatus = identity?.status();
   // gallery 要到第一次開 session 才載入：這裡只記模型與鏡頭的狀態，不碰 Keychain。
   log(`家庭記憶：${memory ? (memory.settingsStatus().available ? "可用（第一次使用時才開啟加密檔）" : "此 Mac 無法加密保存，停用") : "瀏覽器版不可用"}`);
-  if (memory) log(`家庭記憶的路徑：ChatGPT 方案即時語音已放行；OpenAI API key 即時語音${apiKeyMemoryReleased ? "已放行（NOUS_MEMORY_ROUTES，Mac gate 尚未通過）" : "未放行（預設關閉）"}；背景任務${config.memoryRoutes.task ? "已放行（NOUS_MEMORY_ROUTES，Mac gate 尚未通過）" : "未放行（預設關閉）"}`);
+  if (memory) log(`家庭記憶的路徑：ChatGPT 方案即時語音已放行；OpenAI API key 即時語音${apiKeyMemoryReleased ? "已放行（NOUS_MEMORY_ROUTES，Mac gate 尚未通過）" : "未放行（預設關閉）"}；背景任務${config.memoryRoutes.task ? "已放行（NOUS_MEMORY_ROUTES，Mac gate 尚未通過）" : "未放行（預設關閉）"}；記憶建議${config.memoryRoutes.suggest ? "已放行（NOUS_MEMORY_ROUTES，另需在「記憶…」開啟；Mac gate 尚未通過）" : "未放行（預設關閉）"}`);
   const vaultState = store.vaultStatus();
   log(`任務保存：${options.tasks ? (vaultState.mode === "sealed" ? (vaultState.failure ? `加密（金鑰不可用：${vaultState.failure}；新任務內容只留在記憶體）` : "加密") : `明文（這次無法加密：${vaultState.failure ?? (vaultState.migration && !vaultState.migration.ok ? `搬遷失敗於 ${vaultState.migration.step}` : "原因不明")}）`) : "明文（瀏覽器版不加密）"}；明文備份 ${vaultState.backups.length} 個`);
   if (!testMode && (env.NOUS_TEST_DROP_STOP_REPORT === "1" || env.NOUS_TEST_RENDERER_IGNORE_REVOKE === "1")) log("警告：只限測試的旗標沒有生效（需要 NOUS_TEST_MODE=1）");

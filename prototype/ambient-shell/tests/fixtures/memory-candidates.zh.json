@@ -1,0 +1,989 @@
+{
+ "note": "MEM-5a fixture. Written alongside server/memory/suggest.ts (NOT an independent evaluation set); labels state the intended behaviour, not what the rules happen to do. Synthetic sentences, fictional people. Value convention: zh = the first-person clause without the leading 我 and trailing punctuation (a trailing 了 after 以後 is dropped); en = the clause without trailing punctuation. attribution: self/third/household/none; timing: stable/today/temporary/past; negative: category or null.",
+ "items": [
+  {
+   "text": "我不吃香菜",
+   "propose": true,
+   "value": "不吃香菜",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不吃香菜，晚餐吃什麼好？",
+   "propose": true,
+   "value": "不吃香菜",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不喝咖啡",
+   "propose": true,
+   "value": "不喝咖啡",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不喝牛奶，有什麼早餐推薦",
+   "propose": true,
+   "value": "不喝牛奶",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我喜歡吃辣",
+   "propose": true,
+   "value": "喜歡吃辣",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我很喜歡日式料理",
+   "propose": true,
+   "value": "很喜歡日式料理",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我討厭洋蔥",
+   "propose": true,
+   "value": "討厭洋蔥",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我最討厭吃苦瓜",
+   "propose": true,
+   "value": "最討厭吃苦瓜",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我習慣早睡",
+   "propose": true,
+   "value": "習慣早睡",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我習慣七點起床",
+   "propose": true,
+   "value": "習慣七點起床",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我都喝無糖的茶",
+   "propose": true,
+   "value": "都喝無糖的茶",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我只喝黑咖啡",
+   "propose": true,
+   "value": "只喝黑咖啡",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我吃素",
+   "propose": true,
+   "value": "吃素",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我是素食者",
+   "propose": true,
+   "value": "是素食者",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不吃海鮮",
+   "propose": true,
+   "value": "不吃海鮮",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我怕熱，冷氣要開幾度？",
+   "propose": true,
+   "value": "怕熱",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我怕辣",
+   "propose": true,
+   "value": "怕辣",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我喜歡簡短的回答",
+   "propose": true,
+   "value": "喜歡簡短的回答",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我比較喜歡詳細一點的解釋",
+   "propose": true,
+   "value": "比較喜歡詳細一點的解釋",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不喜歡太長的回覆",
+   "propose": true,
+   "value": "不喜歡太長的回覆",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我喜歡聽爵士音樂",
+   "propose": true,
+   "value": "喜歡聽爵士音樂",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我愛看電影",
+   "propose": true,
+   "value": "愛看電影",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不太喜歡恐怖電影",
+   "propose": true,
+   "value": "不太喜歡恐怖電影",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我以後都不喝含糖飲料了",
+   "propose": true,
+   "value": "以後都不喝含糖飲料",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "以後我都不吃宵夜",
+   "propose": true,
+   "value": "以後我都不吃宵夜",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我一向不吃牛肉",
+   "propose": true,
+   "value": "一向不吃牛肉",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我真的很討厭香菜",
+   "propose": true,
+   "value": "真的很討厭香菜",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不吃香菜、洋蔥",
+   "propose": true,
+   "value": "不吃香菜、洋蔥",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我偏好清淡的口味",
+   "propose": true,
+   "value": "偏好清淡的口味",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我很少喝酒",
+   "propose": true,
+   "value": "很少喝酒",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不碰辣椒",
+   "propose": true,
+   "value": "不碰辣椒",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我愛喝奶茶，推薦一家店吧",
+   "propose": true,
+   "value": "愛喝奶茶",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我喜歡冷氣開 26 度",
+   "propose": true,
+   "value": "喜歡冷氣開 26 度",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我喜歡燈光暗一點",
+   "propose": true,
+   "value": "喜歡燈光暗一點",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不喜歡太甜的飲料",
+   "propose": true,
+   "value": "不喜歡太甜的飲料",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我都十一點睡覺",
+   "propose": true,
+   "value": "都十一點睡覺",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我早上都喝拿鐵",
+   "propose": true,
+   "value": "早上都喝拿鐵",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不愛吃青菜",
+   "propose": true,
+   "value": "不愛吃青菜",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我喜歡看棒球",
+   "propose": true,
+   "value": "喜歡看棒球",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我從來不喝汽水",
+   "propose": true,
+   "value": "從來不喝汽水",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不吃豬肉，可以推薦晚餐嗎？",
+   "propose": true,
+   "value": "不吃豬肉",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我討厭吵的餐廳",
+   "propose": true,
+   "value": "討厭吵的餐廳",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不吃豬肉，牛肉",
+   "propose": true,
+   "value": "不吃豬肉，牛肉",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我喜歡條列式的回答",
+   "propose": true,
+   "value": "喜歡條列式的回答",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我不吃早餐",
+   "propose": true,
+   "value": "不吃早餐",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "我媽不吃辣",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "我老公不喝咖啡，晚餐煮什麼",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "我兒子討厭青椒",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "他不吃香菜",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "她說她不喝酒",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "朋友說我不吃辣",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "我跟他說我不吃牛肉",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "我女兒喜歡草莓",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "我朋友都不吃海鮮",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "我同事喜歡喝拿鐵",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "我的貓不吃魚",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "我男朋友不吃香菜",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "我們家不吃牛肉",
+   "propose": false,
+   "value": null,
+   "attribution": "household",
+   "timing": "stable",
+   "negative": "household"
+  },
+  {
+   "text": "我們都喜歡吃辣",
+   "propose": false,
+   "value": null,
+   "attribution": "household",
+   "timing": "stable",
+   "negative": "household"
+  },
+  {
+   "text": "全家都不喝酒",
+   "propose": false,
+   "value": null,
+   "attribution": "household",
+   "timing": "stable",
+   "negative": "household"
+  },
+  {
+   "text": "我家都習慣早睡",
+   "propose": false,
+   "value": null,
+   "attribution": "household",
+   "timing": "stable",
+   "negative": "household"
+  },
+  {
+   "text": "「我不吃香菜」是他常說的話",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "quote"
+  },
+  {
+   "text": "她寫說\"我不喝咖啡\"",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "quote"
+  },
+  {
+   "text": "如果我不吃早餐會怎樣",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "hypothetical"
+  },
+  {
+   "text": "假設我不喝咖啡，要怎麼提神",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "hypothetical"
+  },
+  {
+   "text": "萬一我不喜歡這道菜怎麼辦",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "hypothetical"
+  },
+  {
+   "text": "開玩笑的，我不吃飯",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "joke"
+  },
+  {
+   "text": "我討厭吃東西，騙你的",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "joke"
+  },
+  {
+   "text": "我喜歡用信用卡付款",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sensitive"
+  },
+  {
+   "text": "我的密碼是我喜歡的食物",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sensitive"
+  },
+  {
+   "text": "我對花生過敏",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "我不吃藥",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "我有糖尿病，不吃甜的",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "我懷孕了，不喝咖啡",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "health"
+  },
+  {
+   "text": "醫生說我不能吃辣",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "我在吃藥，不能喝酒",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "health"
+  },
+  {
+   "text": "我乳糖不耐，不喝牛奶",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "我在減肥，不吃宵夜",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "health"
+  },
+  {
+   "text": "我以前不吃香菜",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "past"
+  },
+  {
+   "text": "我曾經很喜歡喝可樂",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "past"
+  },
+  {
+   "text": "我小時候討厭青椒",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "past"
+  },
+  {
+   "text": "我之前習慣晚睡",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "past"
+  },
+  {
+   "text": "我本來不喝咖啡，現在會喝了",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "past"
+  },
+  {
+   "text": "我今天不想吃辣",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "today",
+   "negative": "temporal"
+  },
+  {
+   "text": "我最近不喝咖啡",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "我這週不吃甜的",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "我現在不想喝茶",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "我不吃了",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "我不喝了，謝謝",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "我先不吃宵夜",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "我這陣子喜歡喝綠茶",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "我暫時不喝酒",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "今晚不要辣",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "today",
+   "negative": "temporal"
+  },
+  {
+   "text": "我不吃辣了",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "我今晚想吃火鍋",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "today",
+   "negative": "temporal"
+  },
+  {
+   "text": "我喜歡香菜嗎",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "我不吃香菜對吧？",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "我是不是不喝咖啡？",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "我喜歡吃什麼？",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "我習慣幾點睡？",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "我不吃牛肉嗎？",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "我好像不喜歡香菜",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "uncertain"
+  },
+  {
+   "text": "我可能不吃辣",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "uncertain"
+  },
+  {
+   "text": "我大概習慣早睡",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "uncertain"
+  },
+  {
+   "text": "我喜歡這道菜",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "deictic"
+  },
+  {
+   "text": "我不喜歡那家餐廳",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "deictic"
+  },
+  {
+   "text": "我喜歡你推薦的歌",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "deictic"
+  },
+  {
+   "text": "我討厭這部電影",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "deictic"
+  },
+  {
+   "text": "我想吃拉麵",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "request"
+  },
+  {
+   "text": "我要一杯咖啡",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "request"
+  },
+  {
+   "text": "我想喝珍奶",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "request"
+  },
+  {
+   "text": "我需要早點睡",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "request"
+  },
+  {
+   "text": "我喜歡小美",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "off_topic"
+  },
+  {
+   "text": "我討厭下雨天",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "off_topic"
+  },
+  {
+   "text": "我喜歡藍色",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "off_topic"
+  },
+  {
+   "text": "我怕狗",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "off_topic"
+  },
+  {
+   "text": "我習慣用左手",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "off_topic"
+  },
+  {
+   "text": "我吃過晚餐了",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "not_preference"
+  },
+  {
+   "text": "我在吃飯",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "not_preference"
+  },
+  {
+   "text": "晚餐吃什麼好",
+   "propose": false,
+   "value": null,
+   "attribution": "none",
+   "timing": "stable",
+   "negative": "not_preference"
+  },
+  {
+   "text": "我吃了一碗麵",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "not_preference"
+  },
+  {
+   "text": "幫我找附近的咖啡店",
+   "propose": false,
+   "value": null,
+   "attribution": "none",
+   "timing": "stable",
+   "negative": "not_preference"
+  },
+  {
+   "text": "你喜歡吃什麼？",
+   "propose": false,
+   "value": null,
+   "attribution": "none",
+   "timing": "stable",
+   "negative": "not_preference"
+  }
+ ]
+}

@@ -1,0 +1,637 @@
+{
+ "note": "MEM-5a fixture. Written alongside server/memory/suggest.ts (NOT an independent evaluation set); labels state the intended behaviour, not what the rules happen to do. Synthetic sentences, fictional people. Value convention: zh = the first-person clause without the leading 我 and trailing punctuation (a trailing 了 after 以後 is dropped); en = the clause without trailing punctuation. attribution: self/third/household/none; timing: stable/today/temporary/past; negative: category or null.",
+ "items": [
+  {
+   "text": "I don't eat cilantro",
+   "propose": true,
+   "value": "I don't eat cilantro",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I don't eat cilantro, what should I cook tonight?",
+   "propose": true,
+   "value": "I don't eat cilantro",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I don't drink coffee",
+   "propose": true,
+   "value": "I don't drink coffee",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I do not drink alcohol",
+   "propose": true,
+   "value": "I do not drink alcohol",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I like spicy food",
+   "propose": true,
+   "value": "I like spicy food",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I really like Japanese food",
+   "propose": true,
+   "value": "I really like Japanese food",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I love sushi",
+   "propose": true,
+   "value": "I love sushi",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I prefer short answers",
+   "propose": true,
+   "value": "I prefer short answers",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I prefer detailed replies",
+   "propose": true,
+   "value": "I prefer detailed replies",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I hate onions",
+   "propose": true,
+   "value": "I hate onions",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I'm vegetarian",
+   "propose": true,
+   "value": "I'm vegetarian",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I'm a vegan",
+   "propose": true,
+   "value": "I'm a vegan",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I always drink tea in the morning",
+   "propose": true,
+   "value": "I always drink tea in the morning",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I usually go to bed at 11",
+   "propose": true,
+   "value": "I usually go to bed at 11",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I never drink soda",
+   "propose": true,
+   "value": "I never drink soda",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I can't stand spicy food",
+   "propose": true,
+   "value": "I can't stand spicy food",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I avoid caffeine",
+   "propose": true,
+   "value": "I avoid caffeine",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I like my coffee black",
+   "propose": true,
+   "value": "I like my coffee black",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I enjoy jazz music",
+   "propose": true,
+   "value": "I enjoy jazz music",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I love watching movies",
+   "propose": true,
+   "value": "I love watching movies",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I don't like long answers",
+   "propose": true,
+   "value": "I don't like long answers",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "From now on I don't drink soda",
+   "propose": true,
+   "value": "From now on I don't drink soda",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I keep the AC at 26 degrees",
+   "propose": true,
+   "value": "I keep the AC at 26 degrees",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I like the lights dim",
+   "propose": true,
+   "value": "I like the lights dim",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I don't eat pork, beef or lamb",
+   "propose": true,
+   "value": "I don't eat pork, beef or lamb",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "I prefer concise replies, can you help me plan dinner?",
+   "propose": true,
+   "value": "I prefer concise replies",
+   "attribution": "self",
+   "timing": "stable",
+   "negative": null
+  },
+  {
+   "text": "My mom doesn't eat pork",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "My husband hates cilantro",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "She doesn't drink coffee",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "My friend said I don't like spicy food",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "I told her I don't eat beef",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "They like tea",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "My kids love pizza",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "third_party"
+  },
+  {
+   "text": "We don't eat beef at home",
+   "propose": false,
+   "value": null,
+   "attribution": "household",
+   "timing": "stable",
+   "negative": "household"
+  },
+  {
+   "text": "Our family likes spicy food",
+   "propose": false,
+   "value": null,
+   "attribution": "household",
+   "timing": "stable",
+   "negative": "household"
+  },
+  {
+   "text": "\"I don't eat meat,\" he said",
+   "propose": false,
+   "value": null,
+   "attribution": "third",
+   "timing": "stable",
+   "negative": "quote"
+  },
+  {
+   "text": "If I don't drink coffee, I get tired",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "hypothetical"
+  },
+  {
+   "text": "What if I stop eating sugar?",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "hypothetical"
+  },
+  {
+   "text": "Suppose I like tea",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "hypothetical"
+  },
+  {
+   "text": "I hate food, just kidding",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "joke"
+  },
+  {
+   "text": "I only eat chocolate, jk",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "joke"
+  },
+  {
+   "text": "I like my password to be food related",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sensitive"
+  },
+  {
+   "text": "My PIN is my favorite coffee",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "sensitive"
+  },
+  {
+   "text": "I'm allergic to peanuts",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "I don't eat gluten because of my doctor",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "I take medication so I don't drink alcohol",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "health"
+  },
+  {
+   "text": "I'm pregnant so no coffee",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "health"
+  },
+  {
+   "text": "I'm on a diet, no snacks",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "health"
+  },
+  {
+   "text": "I used to drink coffee",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "past"
+  },
+  {
+   "text": "I didn't like spicy food as a kid",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "past"
+  },
+  {
+   "text": "I liked tea back then",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "past"
+  },
+  {
+   "text": "Before, I never ate fish",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "past"
+  },
+  {
+   "text": "I don't want coffee today",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "today",
+   "negative": "temporal"
+  },
+  {
+   "text": "I'm not eating sugar this week",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "I don't feel like tea right now",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "Lately I don't drink coffee",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "For now I don't eat meat",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "I don't like spicy food at the moment",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "temporal"
+  },
+  {
+   "text": "I don't drink coffee tonight",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "today",
+   "negative": "temporal"
+  },
+  {
+   "text": "Do I like coffee?",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "I don't eat pork, right?",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "What do I like to eat?",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "I like tea?",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "question"
+  },
+  {
+   "text": "I think maybe I like tea",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "uncertain"
+  },
+  {
+   "text": "I probably don't eat pork",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "uncertain"
+  },
+  {
+   "text": "I like this song",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "deictic"
+  },
+  {
+   "text": "I love you",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "deictic"
+  },
+  {
+   "text": "I don't like that restaurant",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "deictic"
+  },
+  {
+   "text": "I hate it",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "deictic"
+  },
+  {
+   "text": "I'd like a coffee",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "request"
+  },
+  {
+   "text": "I want pizza tonight",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "today",
+   "negative": "request"
+  },
+  {
+   "text": "I need a nap",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "request"
+  },
+  {
+   "text": "I'll have the salad",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "temporary",
+   "negative": "request"
+  },
+  {
+   "text": "I like blue",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "off_topic"
+  },
+  {
+   "text": "I hate Mondays",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "off_topic"
+  },
+  {
+   "text": "I love my dog",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "stable",
+   "negative": "off_topic"
+  },
+  {
+   "text": "I had pasta for lunch",
+   "propose": false,
+   "value": null,
+   "attribution": "self",
+   "timing": "past",
+   "negative": "not_preference"
+  },
+  {
+   "text": "What's for dinner?",
+   "propose": false,
+   "value": null,
+   "attribution": "none",
+   "timing": "stable",
+   "negative": "not_preference"
+  },
+  {
+   "text": "Do you like coffee?",
+   "propose": false,
+   "value": null,
+   "attribution": "none",
+   "timing": "stable",
+   "negative": "not_preference"
+  }
+ ]
+}
