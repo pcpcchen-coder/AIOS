@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-30T06:17:21.276Z",
-  "updated_at": "2026-10-30T06:25:39.443Z",
+  "updated_at": "2026-10-30T06:25:43.144Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-30T06:25:43.143Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -133,6 +133,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "核心以 call ID 開旁路 WebSocket 為可信來源；預設旗標關"
+    },
+    {
+      "at": "2026-10-30T06:25:43.144Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
