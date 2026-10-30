@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-30T18:09:33.186Z",
+  "updated_at": "2026-10-30T18:09:37.013Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261030171921-c09a4d",
       "title": "MEM-5b 工作決定記憶 work_summary",
       "playbook": "feature",
-      "status": "running",
-      "updated_at": "2026-10-30T18:09:31.417Z",
+      "status": "passed",
+      "updated_at": "2026-10-30T18:09:35.289Z",
       "started_at": "2026-10-30T17:19:21.395Z",
-      "ended_at": null,
+      "ended_at": "2026-10-30T18:09:35.289Z",
       "branch": "",
       "commit_sha": "",
       "passed_steps": 8,
