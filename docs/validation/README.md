@@ -37,3 +37,5 @@
 「真實中控程式」不必然有真實設備與帳號；「真瀏覽器」也可能在帳號、相機或音訊邊界使用 fixture。判讀時要讀每份紀錄的完整限制。
 
 目前總覽見 [實作狀態](../Current_Implementation_Status.md)，擴充提案見 [功能評估](../13_Feature_Expansion_Assessment_2026-10-24.md)。
+
+2026-10-30 另有 [Mac 實機驗收手冊](mac-acceptance-runbook-2026-10-30.md)：把 HIST-1、MEM-1、ID-02、MEM-2、MEM-3、WK-00 尚未執行的 Mac 步驟整理成一份依序執行的清單。它只是整理，不是驗證結果；每一步以各自的來源紀錄為準。

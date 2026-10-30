@@ -228,8 +228,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "b88de07aa6a56f13ef463d9e1b469a14d25c6d5805ec7247a7071cebb3194d91",
-      "translationSha256": "d14f75f7404b48627da959b91313440d1db1062e2450efad1366652fe4f0c6d6"
+      "sourceSha256": "e29dc2b8a99f091a8ec3a79c1698b8f31a7ca1deb19b925653ff450a07116a57",
+      "translationSha256": "8d8092ad8238408c35f6d912a6218c17c0ec1ad0566380acfe5624478025708b"
     },
     {
       "source": "docs/validation/bilingual-2026-10-26.md",
@@ -377,6 +377,13 @@
       "translation": "docs/validation/look-to-talk-greet-2026-10-23.en.md",
       "sourceSha256": "110a555ea58d58b83d94aeec36fb260e478d5c8c9c03346765c607e550eae28a",
       "translationSha256": "43820fd269fa393bc3ba9db00c2722f7854b2007a1671b86e2e9cf1bc7a16f4c"
+    },
+    {
+      "source": "docs/validation/mac-acceptance-runbook-2026-10-30.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/mac-acceptance-runbook-2026-10-30.en.md",
+      "sourceSha256": "9c40018ec9139280efca96ac5b61af4446c8788404df8c4fa4489bbe3e310d1a",
+      "translationSha256": "7b2538f5d12f33b2078afdf9abae2dd8c61bb937f49d63309683d23a1962c07c"
     },
     {
       "source": "docs/validation/memory-mem0-2026-10-26.md",
