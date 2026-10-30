@@ -147,6 +147,21 @@ export class ProtectedTasks {
     return { task: res.task, memoryUsed: res.memory_used };
   }
 
+  /** MEM-4b：受保護原句卡的標題（SSE 只送卡片 ID；原句由核心持有）。 */
+  async cardTitle(card: string): Promise<string> {
+    const res = await this.call({ op: "card_title", card });
+    if (res.op !== "card_title") throw new TaskBridgeError(t("這張卡片已失效（可能換了人物或超過時間）；請再說一次"));
+    return res.title;
+  }
+
+  /** MEM-4b：原句卡上按「交辦」：核心用自己持有的原句交辦（放行時帶記憶）。 */
+  async cardDelegate(card: string, requestId: string): Promise<{ task: Task; memoryUsed: number; memoryUnavailable: boolean }> {
+    const res = await this.call({ op: "card_delegate", card, request_id: requestId });
+    if (res.op !== "card_delegate") throw new TaskBridgeError(t("這張卡片已失效（可能換了人物或超過時間）；請再說一次"));
+    this.cache.set(res.task.task_id, res.task);
+    return { task: res.task, memoryUsed: res.memory_used, memoryUnavailable: res.memory === "unavailable" };
+  }
+
   async status(): Promise<VaultView | null> {
     if (!this.bridge) return null;
     try {

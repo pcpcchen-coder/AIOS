@@ -438,3 +438,30 @@ describe("MEM-3 api_key route: release table, its own 3 s cleanup limit and per-
     expect(third.routeEnabled("api_key")).toBe(true);
   }, 10_000);
 });
+
+describe("MEM-4b voice_heard: the core-held ASR sentence can only become a delegation ticket", () => {
+  it("issues a one-time delegation ticket for the exact sentence; mismatched text, a second use or a newer input are rejected", () => {
+    const boundary = new MemoryBoundary();
+    const session = boundary.openSession({ kind: "household" });
+    const heard = boundary.observeVoiceUtterance(session, "幫我規劃一週晚餐");
+    expect(() => boundary.issueDelegation(session, heard, "規劃一週晚餐（模型改寫）")).toThrow("source_mismatch");
+    const again = boundary.observeVoiceUtterance(session, "幫我規劃一週晚餐");
+    const ticket = boundary.issueDelegation(session, again, "幫我規劃一週晚餐");
+    expect(() => boundary.consumeDelegation(session, ticket, "別的標題")).toThrow("invalid_ticket");
+    expect(boundary.consumeDelegation(session, ticket, "幫我規劃一週晚餐")).toEqual({ subject: { kind: "household" }, via: "voice_heard" });
+    expect(() => boundary.consumeDelegation(session, ticket, "幫我規劃一週晚餐")).toThrow("invalid_ticket");
+    const stale = boundary.observeVoiceUtterance(session, "幫我寫一封感謝信");
+    boundary.observeTypedInput(session, "另一句");
+    expect(() => boundary.issueDelegation(session, stale, "幫我寫一封感謝信")).toThrow("source_mismatch");
+  });
+
+  it("never authorizes a memory write (issueParsed and the literal grammar both refuse voice_heard)", () => {
+    const boundary = new MemoryBoundary();
+    const session = boundary.openSession({ kind: "household" });
+    const command: MemoryCommand = { op: "remember", operationId: randomUUID(), value: "不吃香菜" };
+    const literal = boundary.observeVoiceUtterance(session, literalCommand(command));
+    expect(() => boundary.issue(session, literal, command)).toThrow("source_mismatch");
+    const parsed = boundary.observeVoiceUtterance(session, "記住，我不吃香菜");
+    expect(() => boundary.issueParsed(session, parsed, { op: "remember", operationId: randomUUID(), part: 0, value: "不吃香菜" }, () => [{ op: "remember", part: 0, value: "不吃香菜" }])).toThrow("source_mismatch");
+  });
+});

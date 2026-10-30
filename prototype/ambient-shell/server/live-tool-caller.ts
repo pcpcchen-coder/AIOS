@@ -4,7 +4,7 @@ import { RESULT_UNKNOWN_TEXT, SIDE_EFFECT_TOOLS, type HostToolName } from "../sh
 import type { Task } from "../shared/types.ts";
 import { CodexError, type CodexInputItem, type CodexResponses, type CodexToolSpec, type FunctionToolSpec } from "./codex-responses.ts";
 import { buildRealtimeTools, realtimeToolRules, taskLines, type RealtimeCapabilities } from "./realtime.ts";
-import { delegatePolicy, exactVoiceConfirm, MAX_RECALLS } from "./memory/live.ts";
+import { delegatePolicy, DELEGATE_ONCE_OUTPUT, exactVoiceConfirm, MAX_RECALLS, type VoiceDelegatePort } from "./memory/live.ts";
 import { HOST_TIMEOUT_MS, HostGone, type ApprovalSnapshot, type ToolHost } from "./realtime-routes.ts";
 
 // gpt-live-1-codex 不能呼叫函式；它把使用者的請求用文字交辦（delegation.created）。
@@ -154,6 +154,11 @@ export interface LiveToolCallerOptions {
   locale?: Locale;
   /** MEM-2：只有 caps().memory 為 true 時才會用到。 */
   memory?: LiveCallerMemory;
+  /**
+   * MEM-4b：受保護的語音交辦（task 與 live 都放行、記憶開著時才有；不需要 codex 同意，不影響說明與工具表）。
+   * 有它時 delegate_task 先交給核心：protected 不呼叫頁面、只交回固定句；run 照舊經頁面；card 出原句卡。
+   */
+  voice?: VoiceDelegatePort;
   responses: Pick<CodexResponses, "turn">;
   caps: () => RealtimeCapabilities;
   host: ToolHost;
@@ -201,6 +206,8 @@ export class LiveToolCaller {
       let hostCalls = 0;
       let recalls = 0;
       let ended = false;
+      /** MEM-4b：這次交辦已經由核心處理過一次 delegate_task（第二次回 delegate_once）。 */
+      let voiceDelegated = false;
       for (let turn = 0; turn < CALLER_LIMITS.maxTurns; turn++) {
         const result = await untilAborted(this.options.responses.turn({ instructions, input, tools: specs, signal: combined }), combined);
         this.options.log?.(`即時語音（ChatGPT 方案）：交辦第 ${turn + 1} 輪（${result.model}）${result.calls.length ? `要呼叫 ${result.calls.map((c) => c.name).join("、")}` : "直接回答，沒有呼叫工具"}`);
@@ -212,6 +219,10 @@ export class LiveToolCaller {
         for (const call of result.calls) {
           let output: Record<string, unknown>;
           const name = call.name as HostToolName;
+          // MEM-4b：delegate_task 先交給核心（受保護交辦）；null＝照舊經頁面交辦。同一次交辦的第二次一律 delegate_once。
+          const voiceOut = name === "delegate_task" && this.options.voice && allowed.has(name)
+            ? (voiceDelegated ? { ...DELEGATE_ONCE_OUTPUT } : await this.voiceDelegate(call.arguments, request, combined))
+            : null;
           if (call.name === "recall_memory" && memory && allowed.has("recall_memory")) {
             // 核心工具（不經頁面）：唯讀，結果經 lease.deliver；撤銷後回 ok:false，不交付舊內容。
             if (recalls >= MAX_RECALLS) output = { ok: false, error: `這次交辦查記憶的次數已達上限（${MAX_RECALLS} 次）。` };
@@ -227,7 +238,11 @@ export class LiveToolCaller {
               output = await untilAborted(memory.recall(query, combined), combined);
               this.options.log?.(`即時語音（ChatGPT 方案）：recall_memory ${output.ok === false ? "沒有取用" : "完成"}`);
             }
-          } else if (name === "delegate_task" && memory && allowed.has(name) && !delegatePolicy("live", memory.blocked(), null).run) {
+          } else if (voiceOut) {
+            // MEM-4b：核心已處理（受保護交辦、原句卡或 delegate_once）；不呼叫頁面。模型的描述只記字數。
+            output = voiceOut;
+            voiceDelegated = true;
+          } else if (name === "delegate_task" && memory && allowed.has(name) && !this.options.voice && !delegatePolicy("live", memory.blocked(), null).run) {
             // 這通通話帶著記憶：交辦改成問使用者（16 §9、M15；政策集中在 server/memory/live.ts delegatePolicy），不呼叫頁面、TaskStore 不新增。
             const decision = delegatePolicy("live", true, request.userText ?? null);
             const title = decision.run ? null : decision.title;
@@ -286,6 +301,16 @@ export class LiveToolCaller {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /**
+   * MEM-4b：delegate_task 先交給核心的語音交辦。回傳 null＝照舊經頁面交辦（run）；否則是要交回模型的輸出
+   * （protected 的固定句、原句卡的 delegate_blocked 或 delegate_once）。打字觸發的交辦沒有語音原句（卡片標題用打的字）。
+   */
+  private async voiceDelegate(args: string, request: DelegationRequest, signal: AbortSignal): Promise<Record<string, unknown> | null> {
+    const outcome = await untilAborted(this.options.voice!.delegate({ args, arrivedAt: request.at ?? this.now(), ...(request.source === "typed" ? { itemId: null, fallbackTitle: request.text } : {}) }), signal);
+    this.options.log?.(`即時語音（ChatGPT 方案）：交辦由核心處理（${outcome.kind}）`);
+    return outcome.kind === "run" ? null : outcome.output;
   }
 }
 

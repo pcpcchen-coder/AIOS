@@ -236,3 +236,24 @@ describe.skipIf(!realLockAvailable)("review minor 7 (George D2): person scope fo
     }
   });
 });
+
+describe("MEM-4b protected delegation card over IPC", () => {
+  it("filters card ops to an opaque card ID (and a request ID for the click); extra fields are dropped", () => {
+    const card = `dc_${"a".repeat(24)}`;
+    expect(validateTasksRequest({ op: "card_title", card, title: "偽造的標題" })).toEqual({ ok: true, request: { op: "card_title", card } });
+    expect(validateTasksRequest({ op: "card_delegate", card, request_id: "req_fixture01", title: "偽造的標題" })).toEqual({ ok: true, request: { op: "card_delegate", card, request_id: "req_fixture01" } });
+    expect(validateTasksRequest({ op: "card_title", card: "dc_short" })).toMatchObject({ ok: false });
+    expect(validateTasksRequest({ op: "card_delegate", card })).toMatchObject({ ok: false });
+  });
+
+  it("the page takes the card title only from IPC and clicks through IPC; the SSE card event has no title", () => {
+    const main = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
+    const block = main.slice(main.indexOf('case "delegate_card"'), main.indexOf('case "delegated"'));
+    expect(block).toContain("protectedTasks.cardTitle(card)");
+    expect(block).toContain("delegateCard(card)");
+    expect(block).not.toContain("event.title");
+    expect(main).toContain("protectedTasks.cardDelegate(card, requestId)");
+    // 受保護交辦的任務完成時照即時語音的任務通知。
+    expect(main.slice(main.indexOf('case "delegated"'))).toContain("realtimeTaskIds.add(task.task_id)");
+  });
+});

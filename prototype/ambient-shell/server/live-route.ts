@@ -7,7 +7,7 @@ import { billingLine, LIVE_STOP_REPORT_MS, LIVE_VOICES, unavailableText, type Li
 import { CodexAuthError, CodexUnauthorized, NOUS_ORIGINATOR, type CodexAuth, type CodexRequestAuth } from "./codex-auth.ts";
 import { redact } from "./codex-responses.ts";
 import type { DelegationRequest, DelegationResult, LiveCallerMemory, TranscriptTurn } from "./live-tool-caller.ts";
-import { confirmLine, type LiveCallPort, type LiveMemoryPort, type RevokeWhy } from "./memory/live.ts";
+import { confirmLine, type LiveCallPort, type LiveMemoryPort, type RevokeWhy, type VoiceDelegatePort } from "./memory/live.ts";
 import { RouteStartError, type ApprovalSnapshot, type LiveControl, type Readiness, type RealtimeRoute, type RouteCall, type SessionContext } from "./realtime-routes.ts";
 
 // 即時語音的 ChatGPT 方案路徑：gpt-live-1-codex，用 Nous 自己的 Codex 登入。負責 chatgpt.com 的通話建立與
@@ -71,8 +71,11 @@ export interface LiveRouteOptions {
   voice: () => LiveVoiceId;
   /** NOUS_LIVE_MODEL：一定顯示（預設 gpt-live-1-codex），只有明確設定時才送出（伺服器可能拒絕 session.model）。 */
   model: { display: string; send: string | null };
-  /** 每個工作階段一個 caller（自己的逐字稿與中止範圍）。memory：MEM-2 這通通話的記憶（沒有記憶層時為 null）。 */
-  caller: (ctx: SessionContext, memory?: LiveCallerMemory | null) => DelegationRunner;
+  /**
+   * 每個工作階段一個 caller（自己的逐字稿與中止範圍）。memory：MEM-2 這通通話的記憶（沒有記憶層時為 null）。
+   * voice：MEM-4b 的受保護語音交辦（task 與 live 都放行、記憶開著時才有）。
+   */
+  caller: (ctx: SessionContext, memory?: LiveCallerMemory | null, voice?: VoiceDelegatePort | null) => DelegationRunner;
   /** buildLiveInstructions(tasks, now, caps)。 */
   instructions: (ctx: SessionContext, memory?: boolean) => string;
   /** 這條路徑提供的工具（給設定畫面的文字）。 */
@@ -377,6 +380,8 @@ class LiveCall implements RouteCall, LiveCallPort {
   readonly closed: Promise<void>;
   private resolveClosed!: () => void;
   private readonly caller: DelegationRunner;
+  /** MEM-4b：受保護的語音交辦（放行時）；有它時交辦文字的 log 只記長度。 */
+  private readonly voiceDelegation: VoiceDelegatePort | null;
   private capTimer: ReturnType<typeof setTimeout> | null = null;
   private typed = 0;
   /** 這個工作階段已經送過招呼指示：頁面重送也不會再念一次。 */
@@ -389,13 +394,14 @@ class LiveCall implements RouteCall, LiveCallPort {
     readonly model: string,
     private readonly socket: SidebandSocket,
     private readonly ctx: SessionContext,
-    callerFor: (ctx: SessionContext, memory?: LiveCallerMemory | null) => DelegationRunner,
+    callerFor: (ctx: SessionContext, memory?: LiveCallerMemory | null, voice?: VoiceDelegatePort | null) => DelegationRunner,
     private readonly memory: LiveMemoryPort | null,
     private readonly log?: (line: string) => void,
     private readonly greetingText?: (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting | null,
   ) {
     this.closed = new Promise<void>((resolve) => (this.resolveClosed = resolve));
-    this.caller = callerFor(ctx, memory ? memory.callerPort() : null);
+    this.voiceDelegation = memory?.delegatePort?.() ?? null;
+    this.caller = callerFor(ctx, memory ? memory.callerPort() : null, this.voiceDelegation);
     this.control = { input: (kind, text) => this.input(kind, text) };
     socket.addEventListener("message", (event) => {
       if (this.ended || this.revoked) return;
@@ -467,7 +473,8 @@ class LiveCall implements RouteCall, LiveCallPort {
         break;
       case "delegation":
         // 帶著記憶的通話：交辦文字可能含記憶內容，log 只記長度。
-        this.log?.(this.memory?.carriesMemory() ? `即時語音（ChatGPT 方案）：收到交辦（${[...event.text].length} 字）` : `即時語音（ChatGPT 方案）：收到交辦「${preview(event.text)}」`);
+        // MEM-4b 審查 minor 2：放行受保護語音交辦時也只記長度（旗標關閉時和之前一樣）。
+        this.log?.(this.memory?.carriesMemory() || this.voiceDelegation ? `即時語音（ChatGPT 方案）：收到交辦（${[...event.text].length} 字）` : `即時語音（ChatGPT 方案）：收到交辦「${preview(event.text)}」`);
         this.enqueue(event.id, event.text, "voice");
         break;
       case "speech.started":
@@ -559,6 +566,8 @@ class LiveCall implements RouteCall, LiveCallPort {
   private input(kind: LiveInputKind, text: string): void {
     if (this.ended || this.revoked) return;
     if (kind === "user_text") {
+      // MEM-4b：打字之後，之前的語音原句都不能再當交辦原句。
+      this.memory?.typedInput?.();
       this.enqueue(`typed_${++this.typed}`, text, "typed");
       return;
     }

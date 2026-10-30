@@ -1,5 +1,5 @@
 import { historySearchPath, type HistoryQuery } from "../shared/history.ts";
-import { TASK_ID, type TasksResponse, type VaultView } from "../shared/protected-tasks.ts";
+import { DELEGATE_CARD, TASK_ID, type TasksResponse, type VaultView } from "../shared/protected-tasks.ts";
 import type { Task } from "../shared/types.ts";
 import type { Locale } from "../shared/i18n.mjs";
 import { HistoryQueryError, parseHistoryQuery, searchHistory } from "./history.ts";
@@ -13,6 +13,8 @@ import { shellOf, tasksForTarget, type TaskStore } from "./store.ts";
 // - search：App 內的成果紀錄搜尋加密任務的真實內容（受保護的 HistorySource，MEM-4c 的一部分）；/api/history 仍只有外殼。
 // - redo：核心用自己保存的原句重做；記憶放行時重新檢索目前的記憶（不沿用舊依賴）。
 // - delete_backups：主程序跳原生確認（頁面無法偽造），使用者按「刪除」才刪明文備份。
+// - card_title／card_delegate（MEM-4b）：受保護原句卡。SSE 只送卡片 ID；標題經這裡給可信主視窗；按「交辦」算直接確認，
+//   放行時走受保護交辦（帶記憶），不能時照舊用核心持有的原句建立不帶記憶的任務。
 // log 只記 op 與筆數，不記內容。
 
 export interface TaskIpcOptions {
@@ -23,6 +25,9 @@ export interface TaskIpcOptions {
     taskScope?(full: boolean): Promise<(task: Pick<Task, "task_id" | "memory">) => boolean>;
     taskTitleFilter?(target: ChatTarget | null): ((task: Pick<Task, "task_id" | "memory">) => boolean) | null;
     routeTarget?(route: "live" | "api_key"): ChatTarget | null;
+    /** MEM-4b：受保護原句卡（核心持有原句）。 */
+    delegateCardTitle?(card: string): string | null;
+    delegateCard?(card: string, requestId: string): Promise<{ title: string; locale?: Locale; out: ProtectedDelegation | null } | null>;
   } | null;
   confirmDeleteBackups: (count: number) => Promise<boolean>;
   log?: (line: string) => void;
@@ -111,6 +116,22 @@ export function createTaskIpc(options: TaskIpcOptions): TaskIpc {
         if (!task) return { ok: false, code: "conflict", message: FINISHED_ONLY };
         options.log?.(`tasks: 重做（帶記憶 ${viaMemory?.used ?? 0} 筆）`);
         return { ok: true, op: "redo", task, memory_used: viaMemory?.used ?? 0 };
+      }
+      case "card_title": {
+        if (typeof req.card !== "string" || !DELEGATE_CARD.test(req.card)) return bad("card is required");
+        const title = options.memory?.delegateCardTitle?.(req.card) ?? null;
+        if (title === null) return { ok: false, code: "not_found", message: "這張卡片已失效（可能換了人物或超過時間）；請再說一次" };
+        return { ok: true, op: "card_title", title };
+      }
+      case "card_delegate": {
+        if (typeof req.card !== "string" || !DELEGATE_CARD.test(req.card)) return bad("card is required");
+        if (typeof req.request_id !== "string" || !REQUEST_ID.test(req.request_id)) return bad("request_id is required");
+        const taken = await options.memory?.delegateCard?.(req.card, req.request_id);
+        if (!taken) return { ok: false, code: "not_found", message: "這張卡片已失效（可能換了人物或超過時間）；請再說一次" };
+        // 不能受保護交辦（沒放行、記憶關著、沒有加密保存）：照舊建立不帶記憶的任務（和 MEM-4a 的卡片一樣）。
+        const task = taken.out?.task ?? runner.submit({ title: taken.title, request_id: req.request_id, ...(taken.locale === "en" ? { locale: "en" as const } : {}) });
+        options.log?.(`tasks: 交辦卡（帶記憶 ${taken.out?.used ?? 0} 筆）`);
+        return { ok: true, op: "card_delegate", task, memory_used: taken.out?.used ?? 0, memory: taken.out ? "used" : "unavailable" };
       }
       case "delete_backups": {
         const count = store.vaultStatus().backups.length;

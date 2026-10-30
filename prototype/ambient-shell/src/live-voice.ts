@@ -36,7 +36,7 @@ export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "createPe
   /** MEM-2：取消瀏覽器語音合成（speechSynthesis.cancel）。 */
   cancelSpeech?(): void;
   /** MEM-2：記憶事件（狀態、卡片 ID、固定句提示、交辦封鎖）交給主程式顯示；內容由主程式經 IPC 取得。 */
-  memoryEvent?(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" }>): void;
+  memoryEvent?(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void;
   /**
    * MEM-2：停播並回報之後：顯示原因、清掉字幕與卡片；rebuild 時主程式開一通新的（只一次）。
    * 只有核心採用了停播回報（accepted）才重建；沒採用時不重建，等核心逾時後的「停止未確認」通知。
@@ -439,6 +439,8 @@ export class LiveVoice implements RealtimeSession {
       case "memory_card":
       case "memory_notice":
       case "delegate_blocked":
+      case "delegate_card":
+      case "delegated":
         this.deps.memoryEvent?.(event);
         break;
       case "hold":

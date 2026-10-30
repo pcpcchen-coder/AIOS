@@ -208,8 +208,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     capabilities: () => ({ webSearch: true, home: home.available }),
     // memoryOn：這通記憶開著而且有 codex 同意（LiveMemoryBinding.memoryActive）才加記憶規則；否則和 MEM-2 之前一樣。
     instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp, memory: !!memoryOn }, ctx.locale),
-    caller: (ctx, mem) =>
-      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}) }),
+    // MEM-4b：voice（受保護的語音交辦）只改 delegate_task 的處理，不影響說明與工具表。
+    caller: (ctx, mem, voice) =>
+      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}) }),
     // MEM-2：每通通話一個記憶 binding（server/memory/live.ts）；瀏覽器版沒有記憶層。
     // MEM-3：頁面的確認卡（MCP、家電）開著時不開語音記憶卡（兩條路徑一致）。
     ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
@@ -294,7 +295,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         },
         boundary: new MemoryBoundary({ release: { api_key: apiKeyMemoryReleased, task: config.memoryRoutes.task } }),
         // MEM-4a：受保護交辦的任務端（同意對象沿用目前任務引擎的 claude／chatgpt 同意；模擬引擎不帶記憶）與撤銷傳播。
-        tasks: { sealed: () => store.sealed && store.vaultStatus().failure === null, mode: () => runner.mode, target: () => providers.chatTarget(), submit: (input) => runner.submitProtected(input) },
+        tasks: { sealed: () => store.sealed && store.vaultStatus().failure === null, mode: () => runner.mode, target: () => providers.chatTarget(), submit: (input) => runner.submitProtected(input), publicGet: (taskId) => store.publicGet(taskId) },
         onResultsWithdrawn: (taskIds) => runner.revokeMemory(taskIds),
         confirm: memoryOpts.confirm,
         identity: (): MemoryIdentityHooks | null => identity ? { candidate: () => identity.memoryCandidate(), people: () => identity.memoryPeople(), nameAllowed: () => camera.view().look_to_talk_greet_name } : null,

@@ -1,6 +1,8 @@
 // 即時語音的兩條路徑（核心、頁面與桌面選單共用）：路徑是什麼、誰計費、頁面看得到的事件。
 // 這裡沒有任何線路格式、權杖或帳號 ID；線路細節只在 server/live-route.ts 與 server/codex-responses.ts。
 
+import type { Task } from "./types.ts";
+
 /** 兩條路徑。標籤、計費、聲音的表都以這份清單為鍵。 */
 export const ROUTE_IDS = ["live", "api_key"] as const;
 export type RouteId = (typeof ROUTE_IDS)[number];
@@ -236,6 +238,13 @@ export type LiveCoreEvent =
   | { kind: "memory_notice"; message: string }
   /** MEM-2：這通通話帶著記憶，交辦改成問使用者；title 是 sideband 最近一則使用者原句（不是模型改寫的文字）。 */
   | { kind: "delegate_blocked"; title: string }
+  /**
+   * MEM-4b：受保護交辦的原句卡（task 與語音路徑都放行時取代 delegate_blocked）。只有不透明的卡片 ID：原句由核心持有，
+   * 可信主視窗經 IPC（tasks 的 card_title）取標題；按「交辦」經 IPC card_delegate（算直接確認），不經 SSE 或 HTTP。
+   */
+  | { kind: "delegate_card"; card: string }
+  /** MEM-4b：核心已用使用者的語音原句建立受保護交辦。task 只有外殼（真實標題經 IPC）。 */
+  | { kind: "delegated"; task: Task }
   /** MEM-2：更正或忘記 commit 前先暫停播放（active true），commit 失敗才恢復（false）。 */
   | { kind: "hold"; active: boolean }
   /** rebuild：MEM-2 撤銷記憶後頁面要自動開一通新的（MEM-3：走被撤銷那通的路徑、沒有備援、不問候、第一句是固定句）。 */

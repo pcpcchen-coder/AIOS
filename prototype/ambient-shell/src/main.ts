@@ -291,7 +291,7 @@ const LIVE_MEMORY_REASON: Record<LiveMemoryReason, string> = {
 };
 
 /** MEM-2：live 通話的記憶事件。SSE 只帶卡片 ID、筆數與固定句；卡片內容經 IPC card_view 取得。 */
-function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" }>): void {
+function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void {
   switch (event.kind) {
     case "memory":
       liveMemory = { used: event.used, reason: event.reason };
@@ -312,6 +312,28 @@ function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "mem
       const title = event.title;
       memoryView.showDelegate(title, () => void delegateDirect(title));
       dispatch({ type: "show.memory", request_id: userRequest() });
+      break;
+    }
+    case "delegate_card": {
+      // MEM-4b：受保護原句卡：SSE 只有卡片 ID，標題經 IPC 從核心取；按「交辦」也經 IPC（核心用自己持有的原句）。
+      const card = event.card;
+      void protectedTasks.cardTitle(card).then((title) => {
+        memoryView.showDelegate(title, () => void delegateCard(card));
+        dispatch({ type: "show.memory", request_id: userRequest() });
+      }, (err: unknown) => showSubtitle(err instanceof Error ? err.message : t("這張卡片已失效（可能換了人物或超過時間）；請再說一次")));
+      break;
+    }
+    case "delegated": {
+      // MEM-4b：核心已用使用者的語音原句建立受保護交辦（外殼；畫面經 IPC 讀回真實標題）。完成時照即時語音的任務通知。
+      // SSE 的 task.updated 可能比這個事件先到：用比較新的那一份；已經結束的任務立刻通知（不會再有 task.updated）。
+      const task = tasks.get(event.task.task_id) ?? event.task;
+      if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
+      protectedTasks.noteUpdate(task);
+      const requestId = userRequest();
+      dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
+      dispatch({ type: "task.updated", task });
+      if (isActive(task)) realtimeTaskIds.add(task.task_id);
+      else if (realtime.on) realtime.notify(speakFinished(task));
       break;
     }
   }
@@ -1047,6 +1069,21 @@ async function delegateDirect(title: string): Promise<void> {
   const requestId = userRequest();
   try {
     const task = await api.createTask(title, requestId, getLocale());
+    if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
+    dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
+    dispatch({ type: "task.updated", task: tasks.get(task.task_id)! });
+  } catch (err) {
+    showSubtitle(msg`交辦失敗：${(err as Error).message}`);
+  }
+}
+
+/** MEM-4b：受保護原句卡上按「交辦」（可信主視窗的點擊算直接確認；放行時核心帶記憶交辦，否則照舊不帶記憶）。 */
+async function delegateCard(card: string): Promise<void> {
+  const requestId = userRequest();
+  try {
+    const { task, memoryUnavailable } = await protectedTasks.cardDelegate(card, requestId);
+    // 不能帶記憶時照舊建立不帶記憶的任務，照實告訴使用者。
+    if (memoryUnavailable) showSubtitle(t("這次沒有帶記憶"));
     if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
     dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
     dispatch({ type: "task.updated", task: tasks.get(task.task_id)! });
