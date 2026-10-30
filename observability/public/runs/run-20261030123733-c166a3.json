@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-30T12:37:33.277Z",
-  "updated_at": "2026-10-30T13:17:54.714Z",
+  "updated_at": "2026-10-30T13:17:58.276Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,8 +59,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-30T13:17:58.275Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -133,6 +133,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "1528 passed"
+    },
+    {
+      "at": "2026-10-30T13:17:58.276Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
