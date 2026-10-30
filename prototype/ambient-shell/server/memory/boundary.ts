@@ -14,7 +14,7 @@ export type MemoryCommand =
  * 由放行表決定（RELEASED_ROUTES；預設關閉，NOUS_MEMORY_ROUTES 打開，Mac gate 通過後才改預設）。
  * 兩條即時語音路徑的 cleanup 時限另外設定（LIVE_CLEANUP_MS）：要比 renderer 停播回報的 1.5 秒加上強制靜音更長。
  */
-export type ContextRoute = "isolated_text" | "isolated_voice" | "text" | "live" | "api_key";
+export type ContextRoute = "isolated_text" | "isolated_voice" | "text" | "live" | "api_key" | "task";
 /** 一般路徑的 cleanup 時限。 */
 export const CLEANUP_MS = 1000;
 /** 即時語音路徑（live、api_key）的 cleanup 時限：停播回報最多 1.5 秒（LIVE_STOP_REPORT_MS）＋強制靜音、hangup 與關旁路的餘裕。 */
@@ -25,7 +25,7 @@ const VOICE_ROUTES: ReadonlySet<ContextRoute> = new Set(["live", "api_key"]);
  * 每條路徑的放行表（MEM-4 的 task 路徑沿用）。false＝這條路徑的記憶還沒放行：不取得 lease、不交付；和「停用」不同，
  * 不是故障，而是還沒通過對應的 gate。api_key 預設 false（George 第 8 節第 7 項的預設，等確認）。
  */
-export const RELEASED_ROUTES: Readonly<Record<ContextRoute, boolean>> = { isolated_text: true, isolated_voice: true, text: true, live: true, api_key: false };
+export const RELEASED_ROUTES: Readonly<Record<ContextRoute, boolean>> = { isolated_text: true, isolated_voice: true, text: true, live: true, api_key: false, task: false };
 /**
  * 一條路徑現在為什麼不能帶記憶：not_released＝放行表沒開；stop_unconfirmed＝停播未確認、已強制靜音；
  * cleanup_failed＝cleanup 逾時或失敗。後兩者到重新啟動才解除。
@@ -212,6 +212,28 @@ export class MemoryBoundary {
     if (!source || source.used || source.session !== session || source.epoch !== state.epoch || source.sequence !== state.sequence || source.expires <= this.now() || source.command !== canonicalParsed(command, true)) throw new Error("invalid_ticket");
     source.used = true;
     return { subject: structuredClone(state.subject), sequence: source.sequence, via: source.via };
+  }
+
+  /**
+   * MEM-4a 受保護交辦的來源票證：交辦的標題必須和核心觀察到的直接輸入（可信主視窗的打字，或核心持有原句的重做點擊）
+   * 逐字相同；模型的改寫不能當成標題。票證一次性、綁 session、世代與序號（和記憶寫入相同的自我核對）。
+   */
+  issueDelegation(session: MemorySession, input: DirectInput, text: string): SourceTicket {
+    const state = this.selected(session);
+    const observed = this.inputs.get(input);
+    if (!observed || observed.session !== session || observed.epoch !== state.epoch || observed.sequence !== state.sequence || observed.expires <= this.now() || observed.text !== text) throw new Error("source_mismatch");
+    this.inputs.delete(input);
+    const ticket = Object.freeze({}) as SourceTicket;
+    this.tickets.set(ticket, { ...observed, command: JSON.stringify(["delegate", text]), used: false });
+    return ticket;
+  }
+
+  consumeDelegation(session: MemorySession, ticket: SourceTicket, text: string): { subject: Subject; via: InputVia } {
+    const state = this.selected(session);
+    const source = this.tickets.get(ticket);
+    if (!source || source.used || source.session !== session || source.epoch !== state.epoch || source.sequence !== state.sequence || source.expires <= this.now() || source.command !== JSON.stringify(["delegate", text])) throw new Error("invalid_ticket");
+    source.used = true;
+    return { subject: structuredClone(state.subject), via: source.via };
   }
 
   /** 核心查詢：這個 session 是否仍是選定狀態（撤銷後回 false）。 */

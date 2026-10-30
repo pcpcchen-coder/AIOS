@@ -239,7 +239,8 @@ export interface RealtimeSessionsOptions {
   routes: { api_key?: RealtimeRoute; live?: RealtimeRoute };
   /** RealtimeSettingsStore.view().route；只在 start() 讀一次。 */
   preference: () => RoutePreference;
-  tasks: () => Task[];
+  /** 指示與 get_tasks 用的任務清單；route 是這通的路徑（MEM-4a：依那條路徑的記憶同意決定看到真實標題或外殼）。 */
+  tasks: (route?: RouteId) => Task[];
   /** 送一個事件到指定的 SSE 串流；那條串流已不存在時回傳 false。 */
   send(clientId: string, event: DistributiveOmit<RealtimeServerEvent, "sequence">): boolean;
   liveAccount?: () => LiveAccountInfo;
@@ -746,7 +747,7 @@ export class RealtimeSessions {
       lookToTalk: flags.lookToTalk,
       rebuild: flags.rebuild,
       events: session.clientId !== null,
-      tasks: this.options.tasks,
+      tasks: () => this.options.tasks(session.route),
       now: this.now,
       approval: () => effectiveApproval(session.approval, this.now()),
       emit: (event) => {

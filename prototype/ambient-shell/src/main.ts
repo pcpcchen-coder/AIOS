@@ -31,6 +31,8 @@ import { classify, settingsReply } from "./intent.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
+import { ProtectedTasks, vaultNotice } from "./protected-tasks.ts";
+import type { TasksRequest, TasksResponse, VaultView } from "../shared/protected-tasks.ts";
 import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, presenceLabel, receiptsText } from "./memory-view.ts";
 import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
 import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
@@ -81,6 +83,8 @@ interface DesktopBridge {
   memory?(request: MemoryRequest): Promise<MemoryResponse>;
   /** 本次人物世代改變的通知（不含內容）。 */
   onMemoryChange?(listener: () => void): () => void;
+  /** MEM-4a：加密保存的任務（真實標題、成果、App 內搜尋、重做、刪除明文備份）；只經 IPC。舊版 App 與瀏覽器版沒有這一項。 */
+  tasks?(request: TasksRequest): Promise<TasksResponse>;
 }
 declare global {
   interface Window {
@@ -208,7 +212,8 @@ const realtimeCallbacks: RealtimeCallbacks = {
   },
   onAssistantTranscript: (text) => showTranscript("assistant", text),
   onDelegate: delegateFromRealtime,
-  onGetTasks: async () => ({ ok: true, tasks: taskSummary() }),
+  // MEM-4a：App 裡由核心依這條路徑的記憶同意給真實標題或外殼（George 2026-10-30）；瀏覽器版照舊。
+  onGetTasks: async () => ({ ok: true, tasks: protectedTasks.available ? taskSummary(await protectedTasks.voiceTasks(realtimeTicket?.route === "live" ? "live" : "api_key")) : taskSummary() }),
   onWebSearch: webSearchFromRealtime,
   onHomeStatus: homeStatusFromRealtime,
   onHomeControl: homeControlFromRealtime,
@@ -481,6 +486,13 @@ const session = new ConversationSession({
   activity: (kind, _requestId, text) => brain.pulse(kind, classifyDomain(text)),
   changed: () => render(),
   delegated: (title, requestId, locale) => void delegateTask(title, requestId, locale),
+  // MEM-4a：核心已建立受保護交辦的任務（標題是使用者原句；畫面經 IPC 讀回真實標題）。
+  delegatedTask: (task, requestId) => {
+    if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
+    protectedTasks.noteUpdate(task);
+    dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
+    dispatch({ type: "task.updated", task: tasks.get(task.task_id)! });
+  },
   // 帶記憶的一輪不自動交辦（docs/16 §9、M15）：出卡片問使用者，標題用使用者原句。
   delegateBlocked: (title, requestId) => {
     pendingDelegate = { title, requestId };
@@ -987,25 +999,45 @@ const memoryView = new MemoryView({
 });
 
 // 成果紀錄（HIST-1）：只由使用者的說法、進度卡的「搜尋全部成果」或選單列「成果紀錄…」打開；模型工具不能打開。
+/**
+ * MEM-4a：macOS App 加密保存任務時，SSE 只給外殼；畫面經 IPC 讀回真實標題與成果（只用來畫畫面）。
+ * 給模型的頻道（get_tasks、即時語音的完成通知）照樣用外殼。
+ */
+const protectedTasks = new ProtectedTasks(window.nousDesktop?.tasks ? (request) => window.nousDesktop!.tasks!(request) : null, () => render());
+/** 畫面上顯示的任務（加密任務換成 IPC 讀回的內容；沒有 IPC 時是翻成目前語言的固定句）。 */
+const shown = (task: Task): Task => protectedTasks.display(task);
+
+/** 重做：App 經 IPC（核心用自己保存的原句；記憶放行時重新取用目前的記憶）；沒有 IPC 時沿用重試。 */
+async function redoTask(taskId: string, requestId: string): Promise<Task> {
+  const created = protectedTasks.available ? (await protectedTasks.redo(taskId, requestId)).task : await api.redoTask(taskId, requestId);
+  if (!tasks.has(created.task_id)) tasks.set(created.task_id, created);
+  dispatch({ type: "task.submitted", task_id: created.task_id, request_id: requestId });
+  dispatch({ type: "task.updated", task: tasks.get(created.task_id)! });
+  return created;
+}
+
 const historyView = new HistoryView({
-  api,
+  // MEM-4a：App 內的成果紀錄經 IPC 搜尋加密任務的真實內容；刪除仍走 HTTP（只有任務 ID）。
+  api: protectedTasks.available
+    ? { searchHistory: (query) => protectedTasks.search(query), getHistory: (taskId) => protectedTasks.detail(taskId), deleteHistory: (taskId, requestId) => api.deleteHistory(taskId, requestId) }
+    : api,
   // macOS App 裡 window.confirm 是原生對話框；瀏覽器裡是瀏覽器的確認框。
   confirm: (message) => window.confirm(message),
   requestId: userRequest,
   redo: async (task, requestId) => {
     // 沿用重試：建立新任務（retry_of 指向原任務），換成前景任務的進度。
-    const created = await api.redoTask(task.task_id, requestId);
-    if (!tasks.has(created.task_id)) tasks.set(created.task_id, created);
-    dispatch({ type: "task.submitted", task_id: created.task_id, request_id: requestId });
-    dispatch({ type: "task.updated", task: tasks.get(created.task_id)! });
+    await redoTask(task.task_id, requestId);
     return null;
   },
+  shells: !protectedTasks.available,
   dismiss: () => dispatch({ type: "dismiss" }),
   // 一般瀏覽器可以另開 /history；macOS App 的視窗不開新分頁。
   browserLink: !window.nousDesktop,
 });
 
-function openHistory(requestId: string, query = ""): void {
+function openHistory(requestId: string, query = "", fromMenu = false): void {
+  // MEM-4a（George 的 D2）：只有選單列「成果紀錄…」打開時，才請核心給看其他家人的帶記憶任務（核心再核對點擊時間）。
+  protectedTasks.setAllScope(fromMenu);
   historyView.open(query);
   dispatch({ type: "show.history", request_id: requestId });
 }
@@ -1332,8 +1364,8 @@ function closeApproval(request: ApprovalRequest, _approved: boolean, outcome: Ap
 }
 
 /** get_tasks 工具的回傳：最近的任務與真實進度。 */
-function taskSummary(): Record<string, unknown>[] {
-  return sortForProgress(tasks.values()).slice(0, 8).map((task) => {
+function taskSummary(source: Iterable<Task> = tasks.values()): Record<string, unknown>[] {
+  return sortForProgress(source).slice(0, 8).map((task) => {
     const p = computeProgress(task);
     return {
       title: task.title,
@@ -1486,12 +1518,15 @@ function onServerEvent(event: ServerEvent): void {
     applySettings(event.settings);
     tasks.clear();
     for (const t of event.tasks) tasks.set(t.task_id, t);
+    void protectedTasks.loadAll();
+    void refreshVault();
     render();
     return;
   }
   if (event.type === "task.deleted") {
     // 成果紀錄裡確認刪除的任務（任何一個頁面刪的都一樣）：從畫面移除；正在看它的成果畫面由 Presentation Policy 收起。
     tasks.delete(event.task_id);
+    protectedTasks.forget(event.task_id);
     if (event.artifact_id) {
       artifacts.delete(event.artifact_id);
       artifactErrors.delete(event.artifact_id);
@@ -1503,17 +1538,18 @@ function onServerEvent(event: ServerEvent): void {
   if (event.type !== "task.updated") return;
   const prev = tasks.get(event.task.task_id);
   tasks.set(event.task.task_id, event.task);
+  protectedTasks.noteUpdate(event.task);
   firePulses(prev, event.task);
   const wasForeground = shell.mode === "working" && shell.foreground_task_id === event.task.task_id;
   dispatch({ type: "task.updated", task: event.task });
-  historyView.taskUpdated(event.task);
+  historyView.taskUpdated(shown(event.task));
   if (realtimeTaskIds.has(event.task.task_id) && !isActive(event.task)) {
-    // 即時語音中交辦的任務結束：請模型用一句話轉告（不論是否還在前景）。
+    // 即時語音中交辦的任務結束：請模型用一句話轉告（不論是否還在前景）。MEM-4a：模型只拿到外殼。
     realtimeTaskIds.delete(event.task.task_id);
     if (realtime.on) realtime.notify(speakFinished(event.task));
   } else if (wasForeground && shell.mode !== "working") {
-    // 只有前景任務結束才念；收起後的背景任務保持安靜。
-    say(speakFinished(event.task));
+    // 只有前景任務結束才念；收起後的背景任務保持安靜。本機語音合成，念畫面上的標題。
+    say(speakFinished(shown(event.task)));
   }
   render();
 }
@@ -1653,7 +1689,7 @@ async function cancelTask(taskId: string, requestId: string): Promise<void> {
     const task = await api.cancelTask(taskId);
     tasks.set(task.task_id, task);
     dispatch({ type: "show.progress", request_id: requestId });
-    say(`正在停止：${task.title.slice(0, 18)}。`);
+    say(`正在停止：${shown(task).title.slice(0, 18)}。`);
   } catch (err) {
     const message = `無法停止任務：${(err as Error).message}`;
     dispatch({ type: "show.progress", request_id: requestId, message });
@@ -1663,9 +1699,18 @@ async function cancelTask(taskId: string, requestId: string): Promise<void> {
 
 const actions: ViewActions = {
   cancel: (taskId) => void cancelTask(taskId, userRequest()),
+  redo(taskId) {
+    const requestId = userRequest();
+    void redoTask(taskId, requestId).catch((err) => dispatch({ type: "show.notice", request_id: requestId, message: msg`無法重做：${(err as Error).message}` }));
+  },
   async retry(taskId) {
     const requestId = userRequest();
     try {
+      // MEM-4a：App 經 IPC 重做（核心用自己保存的原句；記憶放行時重新取用目前的記憶，不沿用舊依賴）。
+      if (protectedTasks.available) {
+        await redoTask(taskId, requestId);
+        return;
+      }
       const task = await api.retryTask(taskId, requestId);
       if (!tasks.has(task.task_id)) tasks.set(task.task_id, task);
       dispatch({ type: "task.submitted", task_id: task.task_id, request_id: requestId });
@@ -1841,7 +1886,8 @@ function showCommandError(message: string): void {
 // ───────────── 繪製 ─────────────
 
 function render(): void {
-  const fg = shell.foreground_task_id ? tasks.get(shell.foreground_task_id) : undefined;
+  const fgRaw = shell.foreground_task_id ? tasks.get(shell.foreground_task_id) : undefined;
+  const fg = fgRaw ? shown(fgRaw) : undefined;
   const fgProgress = fg ? computeProgress(fg) : null;
   const live = realtime.current;
   const phase = live !== "off"
@@ -1923,7 +1969,8 @@ window.addEventListener("nous:command", (event) => {
       memoryView.openManager();
       dispatch({ type: "show.memory", request_id: userRequest() });
     },
-    history: () => openHistory(userRequest()),
+    history: () => openHistory(userRequest(), "", true),
+    vault: () => void refreshVault(true),
   });
 });
 
@@ -2122,17 +2169,18 @@ function renderSurface(): void {
     return;
   }
 
-  const task = s.task_id ? tasks.get(s.task_id) : undefined;
+  const rawTask = s.task_id ? tasks.get(s.task_id) : undefined;
+  const task = rawTask ? shown(rawTask) : undefined;
   const key = getLocale() + ":" + (
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
       ? `${s.surface_id}:${JSON.stringify(settings)}:${s.message ?? ""}`
       : s.kind === "progress"
-      ? `${s.surface_id}:${progressStructureKey(tasks.values())}:${s.message ?? ""}`
+      ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
         ? `${s.surface_id}:${artifacts.has(s.artifact_id!)}:${artifactErrors.has(s.artifact_id!)}`
-        : `${s.surface_id}:${task?.updated_at ?? ""}`);
+        : `${s.surface_id}:${task?.updated_at ?? ""}:${task?.title ?? ""}`);
   if (key === renderedKey) {
     updateLiveCounts(surfaceRoot, tasks);
     return;
@@ -2152,11 +2200,11 @@ function renderSurface(): void {
   else if (s.kind === "history") el = historyView.element;
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
   else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop });
-  else if (s.kind === "progress") el = renderProgress([...tasks.values()], s.message, actions);
+  else if (s.kind === "progress") el = renderProgress([...tasks.values()].map(shown), s.message, actions);
   else if (s.kind === "artifact" && task) {
     const artifactId = s.artifact_id!;
     el = renderArtifact(task, artifacts.get(artifactId) ?? null, artifactErrors.get(artifactId) ?? null, actions);
-    if (!artifacts.has(artifactId) && !artifactErrors.has(artifactId)) void loadArtifact(artifactId);
+    if (!artifacts.has(artifactId) && !artifactErrors.has(artifactId)) void loadArtifact(artifactId, task);
   } else if (s.kind === "error" && task) el = renderError(task, actions);
   else el = renderNotice(s.message ?? "", actions);
 
@@ -2167,13 +2215,64 @@ function renderSurface(): void {
   if (pointedZone) applyPointing();
 }
 
-async function loadArtifact(artifactId: string): Promise<void> {
+async function loadArtifact(artifactId: string, task?: Task): Promise<void> {
   try {
-    artifacts.set(artifactId, await api.getArtifact(artifactId));
+    // MEM-4a：加密保存的成果只經 IPC（HTTP 一律 404）。
+    if (task?.protected && protectedTasks.available) artifacts.set(artifactId, await protectedTasks.artifact(task.task_id));
+    else if (task?.protected) throw new Error(t("受保護的任務，請在 App 內查看"));
+    else artifacts.set(artifactId, await api.getArtifact(artifactId));
   } catch (err) {
-    artifactErrors.set(artifactId, err instanceof ApiError ? `無法載入成果：${err.message}` : "無法載入成果");
+    artifactErrors.set(artifactId, err instanceof ApiError ? `無法載入成果：${err.message}` : err instanceof Error && err.message ? err.message : "無法載入成果");
   }
   render();
+}
+
+/** MEM-4a：加密搬遷與明文備份的提示（不是 Surface；和交辦卡一樣是輸入列旁的一個小提示）。 */
+let vault: VaultView | null = null;
+let vaultDismissed = false;
+/** 使用者從選單列「刪除明文備份…」打開（審查 minor 8：平常不在每次啟動都出現）。 */
+let vaultManual = false;
+async function refreshVault(manual = false): Promise<void> {
+  if (manual) { vaultManual = true; vaultDismissed = false; }
+  vault = await protectedTasks.status();
+  renderVaultPrompt();
+}
+
+function renderVaultPrompt(): void {
+  const existing = document.getElementById("vault-prompt");
+  const notice = vaultDismissed ? null : vaultNotice(vault, vaultManual);
+  const key = notice ? `${getLocale()}:${notice.text}:${notice.canDelete}` : "";
+  if (existing?.dataset.key === key && notice) return;
+  existing?.remove();
+  if (!notice) return;
+  const box = document.createElement("div");
+  box.id = "vault-prompt";
+  box.className = "delegate-prompt vault-prompt";
+  box.dataset.key = key;
+  box.setAttribute("role", "status");
+  box.setAttribute("aria-label", t("任務加密保存"));
+  const text = document.createElement("p");
+  text.textContent = notice.text;
+  box.append(text);
+  if (notice.canDelete) {
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "btn btn--danger";
+    del.textContent = t("刪除明文備份");
+    // 核心先跳原生確認；使用者在對話框按「刪除明文備份」才刪。
+    del.addEventListener("click", () => void protectedTasks.deleteBackups().then((out) => {
+      if (out) { vault = out.vault; showSubtitle(msg`已刪除明文備份（${String(out.deleted)} 個資料夾）`); }
+      renderVaultPrompt();
+    }));
+    box.append(del);
+  }
+  const later = document.createElement("button");
+  later.type = "button";
+  later.className = "btn btn--ghost";
+  later.textContent = t(notice.canDelete ? "稍後" : "知道了");
+  later.addEventListener("click", () => { vaultDismissed = true; vaultManual = false; renderVaultPrompt(); });
+  box.append(later);
+  document.body.append(box);
 }
 
 setInterval(() => {

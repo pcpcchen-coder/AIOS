@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { MemoryStore, type MemorySecretBox, type MemoryStoreLike, type MemoryStoreOptions } from "../../server/memory/store.ts";
-import { MemoryService, type MemoryConfirmFn, type MemoryIdentityHooks } from "../../server/memory/service.ts";
+import { MemoryService, type MemoryConfirmFn, type MemoryIdentityHooks, type TaskPort } from "../../server/memory/service.ts";
 import type { ChatTarget } from "../../server/memory/retrieve.ts";
 import { MemoryBoundary, type ContextRoute } from "../../server/memory/boundary.ts";
 import type { MemoryResponse } from "../../shared/memory.ts";
@@ -40,7 +40,7 @@ export interface Harness {
 let seq = 0;
 export const req = () => `req_fixture${String(++seq).padStart(6, "0")}`;
 
-export function harness(options: { dir: string; key: Buffer; clock?: { now: number }; confirm?: MemoryConfirmFn; identity?: MemoryIdentityHooks | null; store?: Partial<MemoryStoreOptions>; wrap?: (store: MemoryStoreLike) => MemoryStoreLike; available?: () => boolean; targets?: ChatTarget[]; onPresence?: () => void; live?: ChatTarget | null; apiKey?: ChatTarget | null; release?: Partial<Record<ContextRoute, boolean>> }): Harness {
+export function harness(options: { dir: string; key: Buffer; clock?: { now: number }; confirm?: MemoryConfirmFn; identity?: MemoryIdentityHooks | null; store?: Partial<MemoryStoreOptions>; wrap?: (store: MemoryStoreLike) => MemoryStoreLike; available?: () => boolean; targets?: ChatTarget[]; onPresence?: () => void; live?: ChatTarget | null; apiKey?: ChatTarget | null; release?: Partial<Record<ContextRoute, boolean>>; tasks?: TaskPort; onResultsWithdrawn?: (taskIds: string[]) => void; resultLimit?: number }): Harness {
   const clock = options.clock ?? { now: Date.parse("2026-10-29T02:00:00Z") };
   const target = { current: CLAUDE as ChatTarget | null };
   const confirms: unknown[] = [];
@@ -69,6 +69,10 @@ export function harness(options: { dir: string; key: Buffer; clock?: { now: numb
       set: (enabled) => writeFileSync(`${options.dir}.hint`, String(enabled)),
     },
     onPresence: options.onPresence,
+    // MEM-4a：受保護交辦的任務端與撤銷傳播（測試接真的 TaskRunner）。
+    ...(options.tasks ? { tasks: options.tasks } : {}),
+    ...(options.onResultsWithdrawn ? { onResultsWithdrawn: options.onResultsWithdrawn } : {}),
+    ...(options.resultLimit ? { resultLimit: options.resultLimit } : {}),
     now: () => clock.now,
   });
   const call = (request: Record<string, unknown>, ctx?: { userInitiated?: boolean }) => service.handle(request, ctx) as Promise<MemoryResponse & Record<string, unknown>>;

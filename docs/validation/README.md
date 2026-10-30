@@ -6,7 +6,7 @@
 
 2026-10-26 新增：[中英文文件與 App／網頁驗證](bilingual-2026-10-26.md)，涵蓋文件同步、介面切換與保存、對話語言及隔離 mock 畫面測試。
 
-更新日期：2026-10-30（加入家庭記憶 MEM-2、MEM-3 與成果紀錄 HIST-1）。2026-10-29 加入 WK-00 喚醒詞 spike 與家庭記憶 MEM-1。本目錄保留每次驗證的原始日期、方法與限制。舊紀錄不因新文件更新而升格為實機通過；後續結果以新增紀錄或明確補記呈現。
+更新日期：2026-10-30（加入家庭記憶 MEM-2、MEM-3、MEM-4a 與成果紀錄 HIST-1）。2026-10-29 加入 WK-00 喚醒詞 spike 與家庭記憶 MEM-1。本目錄保留每次驗證的原始日期、方法與限制。舊紀錄不因新文件更新而升格為實機通過；後續結果以新增紀錄或明確補記呈現。
 
 | 紀錄 | 證據範圍與限制 |
 |---|---|
@@ -14,6 +14,7 @@
 | [成果紀錄 HIST-1](history-hist1-2026-10-30.md) | 2026-10-30：一般任務與成果的成果紀錄（`GET /api/history` 記憶體內搜尋、篩選、分頁、片段標示；App 內按需 Surface 與獨立網頁 `/history`；經原生確認的刪除、沿用重試的重做）；Linux 上的單元、HTTP、假 DOM 與 Vite 建置測試，500 筆合成任務的延遲；審查時另有雲端 headless Chromium 的操作與截圖（截圖不在 repo），Mac 驗證未執行；加密與受保護成果在 MEM-4a、MEM-4c |
 | [家庭記憶 MEM-2](memory-mem2-2026-10-30.md) | 2026-10-30：ChatGPT 方案即時語音的記憶（新通話只帶釘選、codex 獨立同意、`recall_memory`、用說的確認記住／更正／忘記與殘餘風險、撤銷、停播回報與強制靜音、重建、交辦封鎖）；Linux 上真 AES-GCM、假 sideband、真 HTTP／SSE 與 FakePeer 的測試與 canary；主要放行條件（錄音證明沒有晚到的舊聲音）與 Mac 第 0–11 步全部未執行 |
 | [家庭記憶 MEM-3](memory-mem3-2026-10-30.md) | 2026-10-30：OpenAI API key 即時語音的記憶（預設關閉，`NOUS_MEMORY_ROUTES` 打開；核心用 call ID 開 API key 旁路當唯一控制面、只認旁路的語音辨識逐字稿、`session.update` 帶入、旁路接不上就不帶記憶、`openai_realtime` 獨立同意、停播回報加 hangup 兩道停止、重建走同一路徑）；Linux 上假的 GA 伺服器、真 HTTP／SSE、FakePeer 與真 AES-GCM 的測試、請求快照與 canary；第 8 節的決定都是預設、等 George 確認；線路探測 P1–P5 與 Mac 第 0–15 步全部未執行 |
+| [家庭記憶 MEM-4a](memory-mem4a-2026-10-30.md) | 2026-10-30：macOS App 加密全部任務與成果（`data/sealed/` 一筆一檔、AES-256-GCM、safeStorage 包裝；`tasks.json` 只留外殼），舊明文在 App 內搬遷一次、備份保留到使用者確認刪除；所有對外頻道只給外殼，真實內容只經 IPC；背景任務自動帶記憶（預設關閉，`NOUS_MEMORY_ROUTES` 的 `task`）與撤銷傳播（忘記、更正、撤回同意、刪除人物、關閉記憶）；Linux 上真 AES-GCM、真 rename／fsync、flock 測試鎖、假執行器、真 HTTP／SSE 的測試與 canary；Mac 第 1–11 步全部未執行 |
 | [家庭記憶 MEM-1](memory-mem1-2026-10-29.md) | 2026-10-29：桌面版一般文字聊天的記憶閉環；Linux 上真 AES-GCM、測試鎖（flock）與真 SIGKILL 的服務、HTTP、IPC、畫面替身與 canary 測試，30 組中文查詢召回 24/24；Mac gate（正式簽章 Keychain、真 lockf、效能、臉部候選、OS 鎖定、截圖、真帳號）全部未執行 |
 | [家庭記憶 MEM-0](memory-mem0-2026-10-26.md) | 核心私有快照、來源與撤銷的隔離測試；真程序崩潰及 macOS 原生鎖；打包 Electron 44.9.3 真 Keychain 的 1,000 筆虛構記憶跨程序讀回；正式簽章、拒絕、聲音與產品接線待驗 |
 | [三項小決定](small-decisions-2026-10-25.md) | 電子腦放大置中（假 Canvas、合成距離與 Chromium 截圖）、關冷氣說定時、預設模式自動（假中控）；Mac 與真冷氣待驗 |

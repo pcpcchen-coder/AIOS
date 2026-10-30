@@ -42,6 +42,8 @@ export interface RetrievalResult {
   dropped: number;
   /** 人物與期限上可用、也與問題相關（或已釘選），但目前服務／帳號沒有同意的筆數（用來照實告知「這次沒有用到記憶」）。 */
   blockedByConsent: number;
+  /** MEM-4a：送出的每一筆記憶的 ID 與版本（和 facts 同順序）；只給核心的依賴索引，不給模型。 */
+  deps: { factId: string; revision: number }[];
 }
 
 // 比對方式（簡繁對照、中文二字片段、英文詞）與成果紀錄搜尋共用：server/search-terms.ts。
@@ -76,7 +78,7 @@ export function contextLine(fact: ContextFact): string {
 /** 權限過濾後排序；回傳要送給模型的 ContextFact（不含任何 ID）。 */
 export function retrieve(input: RetrievalInput): RetrievalResult {
   const { target, now } = input;
-  if (!target || !target.account) return { facts: [], dropped: 0, blockedByConsent: 0 };
+  if (!target || !target.account) return { facts: [], dropped: 0, blockedByConsent: 0, deps: [] };
   // 1. subject：本次人物＋家庭共用（沒有選定人物時只有家庭共用）。
   const inScope = input.facts.filter(f => f.profileId === null || (input.profileId !== null && f.profileId === input.profileId));
   // 2. audience：首版只有 household。3. 有效狀態與期限。
@@ -91,6 +93,7 @@ export function retrieve(input: RetrievalInput): RetrievalResult {
   const pinned = scored.filter(x => x.f.pinned).sort((a, b) => b.score - a.score || b.f.source.at.localeCompare(a.f.source.at)).slice(0, CONTEXT_MAX_PINNED);
   const rest = scored.filter(x => !pinned.includes(x) && x.score > 0).sort((a, b) => b.score - a.score || b.f.source.at.localeCompare(a.f.source.at));
   const chosen: ContextFact[] = [];
+  const deps: { factId: string; revision: number }[] = [];
   let bytes = 0;
   for (const { f } of [...pinned, ...rest]) {
     if (chosen.length >= CONTEXT_MAX_FACTS) break;
@@ -100,6 +103,7 @@ export function retrieve(input: RetrievalInput): RetrievalResult {
     if (bytes + size > CONTEXT_MAX_BYTES) continue;
     bytes += size;
     chosen.push(fact);
+    deps.push({ factId: f.id, revision: f.revision });
   }
-  return { facts: chosen, dropped: allowed.length - chosen.length, blockedByConsent };
+  return { facts: chosen, dropped: allowed.length - chosen.length, blockedByConsent, deps };
 }

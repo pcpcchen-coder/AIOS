@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
-import type { ExecutorMode, ServerEvent, SettingsView } from "../shared/types.ts";
+import type { ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
 import type { ChatGPTAuth } from "./chatgpt-auth.ts";
 import { buildChatSystem, DelegationFilter, validateMessages, type ChatCapable } from "./chat.ts";
 import { ExecutionError } from "./runner.ts";
@@ -36,7 +36,8 @@ import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity
 import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
 import { historyPageHeaders, pageHeaders } from "./page-headers.ts";
 import type { TaskRunner } from "./runner.ts";
-import type { TaskStore } from "./store.ts";
+import { tasksForTarget, type TaskStore } from "./store.ts";
+import type { VoiceRoute } from "./memory/live.ts";
 import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
 import type { HistoryDetail } from "../shared/history.ts";
 
@@ -94,6 +95,10 @@ export interface AppOptions {
   memory?: {
     settingsStatus(): MemorySettingsStatus;
     withChat<T>(request: { nonce: unknown; requestId: string; lastUser: string; target: ChatTarget | null; historyLength?: number }, run: (ctx: MemoryContext) => Promise<T>): Promise<T>;
+    /** MEM-4a：哪些任務可以把真實標題給這個模型目標（沒有同意回 null＝全部外殼）。 */
+    taskTitleFilter?(target: ChatTarget | null): ((task: Pick<Task, "task_id" | "memory">) => boolean) | null;
+    /** MEM-4a：即時語音路徑的同意對象（live：codex；api_key：openai_realtime）。 */
+    routeTarget?(route: VoiceRoute): ChatTarget | null;
   };
   /** 即時語音的 API key 路徑（OpenAI Realtime GA）；未提供時這條路徑不可用。 */
   realtime?: RealtimeBridge;
@@ -169,7 +174,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     ? new RealtimeSessions({
         routes,
         preference: () => options.realtimePrefs?.view().route ?? "auto",
-        tasks: () => store.list(),
+        // MEM-4a：即時語音（兩條路徑）的指示只在那條路徑的記憶同意成立時放真實標題，其餘外殼（瀏覽器版不加密，照舊）。
+        tasks: (route) => tasksFor(route ? options.memory?.routeTarget?.(route as VoiceRoute) ?? null : null),
         liveAccount: codexAuth ? () => codexAuth.info() : undefined,
         send: (clientId, event) => {
           const res = clients.get(clientId);
@@ -183,6 +189,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         hideRevokeFromPage: options.hideRevokeFromPage,
       })
     : null;
+  const tasksFor = (target: ChatTarget | null) => tasksForTarget(store, options.memory ?? null, target);
   const settings = {
     view: (): SettingsView => {
       const live = sessions?.info();
@@ -207,15 +214,19 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     const frame = `data: ${JSON.stringify(event)}\n\n`;
     for (const res of clients.values()) res.write(frame);
   };
+  // 加密模式下 subscribe 收到的已經是外殼（TaskStore.commit）。
   store.subscribe((task) => broadcast({ type: "task.updated", sequence: ++sequence, task }));
   store.subscribeDeleted((deleted) => {
     // 記憶體裡為搜尋準備的純文字也一起丟掉。
     if (deleted.artifact_id) forgetHistoryArtifact(deleted.artifact_id);
     broadcast({ type: "task.deleted", sequence: ++sequence, ...deleted });
   });
-  /** 成果紀錄的搜尋來源：一般任務（明文）＋選用的其他來源。 */
+  /**
+   * 成果紀錄的搜尋來源：一般任務＋選用的其他來源。MEM-4a：macOS App 加密保存時，HTTP（/history 網頁與 /api/history）
+   * 只搜得到外殼（「受保護的任務，請在 App 內查看」），真正內容只在 App 內經 IPC 搜尋。
+   */
   const historySources: HistorySource[] = [
-    { id: "tasks", protected: false, documents: () => store.documents() },
+    { id: "tasks", get protected() { return store.sealed; }, documents: () => store.publicDocuments() },
     ...(options.historySources ?? []),
   ];
 
@@ -351,7 +362,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (!realtime) throw new HttpError(409, "即時語音模式未啟用");
       try {
         // call ID 只留在核心（MEM-3 的旁路用），不交給頁面。
-        const { sdp: answer, model } = await realtime.connect(sdp, store.list(), normalizeLocale(req.headers["x-nous-locale"]));
+        const { sdp: answer, model } = await realtime.connect(sdp, store.publicList(), normalizeLocale(req.headers["x-nous-locale"]));
         return sendJson(res, 200, { sdp: answer, model });
       } catch (err) {
         if (err instanceof RealtimeError) throw new HttpError(err.status, err.message);
@@ -517,7 +528,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       auth.ackWelcome();
       return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
-    if (method === "GET" && path === "/api/tasks") return sendJson(res, 200, store.list());
+    if (method === "GET" && path === "/api/tasks") return sendJson(res, 200, store.publicList());
     if (method === "GET" && path === "/api/events") return openEvents(req, res);
 
     if (method === "POST" && path === "/api/tasks") {
@@ -525,7 +536,9 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const text = typeof body.text === "string" ? body.text.trim() : "";
       if (!text) throw new HttpError(400, "text is required");
       if (text.length > MAX_TEXT_CHARS) throw new HttpError(400, `text exceeds ${MAX_TEXT_CHARS} chars`);
-      return sendJson(res, 201, runner.submit({ title: text, request_id: requestId(body), ...(normalizeLocale(req.headers["x-nous-locale"]) === "en" ? { locale: "en" as const } : {}) }));
+      // origin "typed"：呼叫端明確表示這是使用者打的原句（審查 M2；只影響之後重做時能不能重新取用記憶）。
+      const created = runner.submit({ title: text, request_id: requestId(body), ...(normalizeLocale(req.headers["x-nous-locale"]) === "en" ? { locale: "en" as const } : {}), ...(body.origin === "typed" ? { origin: "user_sentence" as const } : {}) });
+      return sendJson(res, 201, store.publicGet(created.task_id));
     }
 
     // HIST-1 成果紀錄：搜尋（記憶體內比對，不寫索引、不記查詢文字）、單筆詳細、經明確確認的刪除。
@@ -541,9 +554,9 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     }
     const historyItem = path.match(/^\/api\/history\/([\w-]+)$/);
     if (method === "GET" && historyItem) {
-      const task = store.get(historyItem[1]);
+      const task = store.publicGet(historyItem[1]);
       if (!task) throw new HttpError(404, "找不到這個任務");
-      const detail: HistoryDetail = { task, artifact: task.artifact_id ? store.getArtifact(task.artifact_id) ?? null : null, source: "tasks", protected: false };
+      const detail: HistoryDetail = { task, artifact: task.artifact_id ? store.publicArtifact(task.artifact_id) ?? null : null, source: "tasks", protected: store.sealed };
       return sendJson(res, 200, detail);
     }
     const historyDelete = path.match(/^\/api\/history\/([\w-]+)\/delete$/);
@@ -560,7 +573,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
 
     const artifact = path.match(/^\/api\/artifacts\/([\w-]+)$/);
     if (method === "GET" && artifact) {
-      const found = store.getArtifact(artifact[1]);
+      // MEM-4a：加密保存時成果內容不經 HTTP（一律 404）；macOS App 的主視窗經 IPC 讀。
+      const found = store.publicArtifact(artifact[1]);
       if (!found) throw new HttpError(404, "artifact not found");
       return sendJson(res, 200, found);
     }
@@ -572,13 +586,13 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (verb === "cancel") {
         const task = runner.cancel(taskId);
         if (!task) throw new HttpError(404, "task not found");
-        return sendJson(res, 200, task);
+        return sendJson(res, 200, store.publicGet(task.task_id));
       }
       // redo：成果紀錄的「重做」，也接受已完成的任務（同樣建立新任務、記下 retry_of）。
       const redo = body.redo === true;
       const task = runner.retry(taskId, requestId(body), { redo });
       if (!task) throw new HttpError(409, redo ? "only finished tasks can be redone" : "only failed or cancelled tasks can be retried");
-      return sendJson(res, 201, task);
+      return sendJson(res, 201, store.publicGet(task.task_id));
     }
 
     throw new HttpError(404, "not found");
@@ -652,17 +666,22 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const deliver = (output: () => void) => (ctx ? ctx.deliver(output) : (output(), true));
       let answer = "";
       let blocked = false;
+      // MEM-4a：放行 task 路徑而且這一輪是可信主視窗的打字時，交辦改走受保護交辦（串流結束後由核心建立，標題是使用者原句）。
+      let protectedDelegate = false;
       const emit = (text: string, delegates: string[]) => deliver(() => {
         if (text) { answer += text; send({ type: "delta", text }); }
         for (const title of delegates) {
-          if (block) {
+          if (ctx?.delegate) protectedDelegate = true;
+          else if (block) {
             if (!blocked) send({ type: "delegate_blocked", title: lastUser });
             blocked = true;
           } else send({ type: "delegate", title });
         }
       });
+      // MEM-4a：任務標題只在這個服務帳號有記憶同意時才給模型看（帶記憶的任務另外要同意對象與人物相符）；其他一律外殼。
+      const taskView = tasksFor(chat.chatTarget?.() ?? null);
       const { model } = await chat.chat(
-        { system: buildChatSystem(store.list(), new Date(), locale, ctx?.facts ?? []), messages },
+        { system: buildChatSystem(taskView, new Date(), locale, ctx?.facts ?? []), messages },
         (delta) => {
           const { text, delegates } = filter.push(delta);
           emit(text, delegates);
@@ -672,6 +691,13 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const rest = filter.flush();
       if (rest) emit(rest, []);
       if (revoked) return;
+      if (protectedDelegate && ctx?.delegate) {
+        const out = await ctx.delegate(locale);
+        if (revoked) return;
+        // 對外只送外殼；真正標題由主視窗經 IPC 讀。沒能受保護交辦時照 M15 出交辦卡（標題是使用者原句）。
+        if (out) deliver(() => send({ type: "delegated", task: store.publicGet(out.task.task_id) ?? out.task, memory_used: out.used }));
+        else deliver(() => send({ type: "delegate_blocked", title: lastUser }));
+      }
       if (options.memory) {
         // 模型說「記住了」但核心這一輪沒有成功回條：照實補一句（模型不能代替核心回條）。
         if (MEMORY_CLAIM.test(answer) && !ctx?.saved) send({ type: "memory_notice", message: localize("這次沒有保存到記憶", locale) });
@@ -701,7 +727,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       Connection: "keep-alive",
     });
     const clientId = `sse_${randomUUID().replaceAll("-", "")}`;
-    const hello: ServerEvent = { type: "hello", sequence: ++sequence, settings: settings.view(), tasks: store.list(), client_id: clientId };
+    const hello: ServerEvent = { type: "hello", sequence: ++sequence, settings: settings.view(), tasks: store.publicList(), client_id: clientId };
     res.write(`data: ${JSON.stringify(hello)}\n\n`);
     clients.set(clientId, res);
     req.on("close", () => {

@@ -441,5 +441,13 @@
   "分頁位置不正確": "Invalid page position",
   "每頁筆數不正確": "Invalid page size",
   "日期格式不正確": "Invalid date",
-  "找不到這個任務": "Task not found"
+  "找不到這個任務": "Task not found",
+  "受保護的任務，請在 App 內查看": "Protected task — view it in the Nous app",
+  "受保護的步驟": "Protected step",
+  "受保護的錯誤說明，請在 App 內查看": "Protected error details — view them in the Nous app",
+  "這份成果用到已忘記的記憶，內容已移除": "This result used memory that has since been forgotten, so its content was removed",
+  "沒有刪除明文備份": "The plaintext backup was not deleted",
+  "只有已結束的任務可以重做": "Only finished tasks can be redone",
+  "這個任務的內容這次無法解開，不能重做": "This task's content cannot be decrypted right now, so it cannot be redone",
+  "這是其他家人的任務；請從選單列「成果紀錄…」打開後再重做": "This task belongs to another family member; open it from the menu bar item “Results history…” to redo it"
 }

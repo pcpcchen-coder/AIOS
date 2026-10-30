@@ -1,5 +1,6 @@
 import { localize } from "./localization.ts";
 import { type Locale } from "../shared/i18n.mjs";
+import type { ContextFact } from "./memory/retrieve.ts";
 import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, systemPrompt, WEB_SEARCH_UNAVAILABLE_GAP } from "./prompts.ts";
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 import { RESOURCE, type ChatGPTAuth } from "./chatgpt-auth.ts";
@@ -52,7 +53,8 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
     return model;
   }
 
-  async run(input: { title: string; locale?: Locale }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+  async run(input: { title: string; locale?: Locale; facts?: readonly ContextFact[] }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+    const facts = input.facts ?? [];
     const model = await this.resolveModel(await this.auth.getAccessToken());
     const served = new Set<string>();
     let webSearch = !!this.options.webSearch;
@@ -61,7 +63,7 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
     const planned = await this.stream(
       {
         model,
-        instructions: systemPrompt({ webSearch }, input.locale),
+        instructions: systemPrompt({ webSearch }, input.locale, facts),
         input: [{ role: "user", content: planPrompt(input.title) }],
         format: { type: "json_schema", name: "nous_plan", schema: PLAN_SCHEMA, strict: true },
       },
@@ -92,7 +94,7 @@ export class ChatGPTExecutor implements Executor, ChatCapable {
       };
       const request = (search: boolean) => ({
         model,
-        instructions: systemPrompt({ webSearch: search }, input.locale),
+        instructions: systemPrompt({ webSearch: search }, input.locale, facts),
         input: [{ role: "user" as const, content: stepPrompt(input.title, plan, outputs, i) }],
         ...(search ? { tools: [{ type: "web_search" }] } : {}),
       });

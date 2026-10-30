@@ -75,9 +75,11 @@ describe("Electron wiring for memory (static)", () => {
 
   it("revokes on OS lock and main-window navigation; injects safeStorage-backed memory and native confirms", () => {
     expect(main).toMatch(/powerMonitor\.on\("lock-screen", \(\) => core\?\.memory\?\.suspendAll\(\)\)/);
-    expect(main).toMatch(/did-navigate", \(\) => \{ core\?\.identity\?\.closeSessions\(\); core\?\.memory\?\.closeSessions\(\); \}/);
-    expect(main).toMatch(/render-process-gone", \(\) => \{ core\?\.identity\?\.closeSessions\(\); core\?\.memory\?\.closeSessions\(\); \}/);
-    expect(main).toMatch(/secretBox: createMemorySecretBox\(\{ safeStorage, ready: \(\) => app\.isReady\(\) \}\)/);
+    expect(main).toMatch(/did-navigate", \(\) => \{ core\?\.identity\?\.closeSessions\(\); core\?\.memory\?\.closeSessions\(\); core\?\.tasks\?\.closeSessions\(\); \}/);
+    expect(main).toMatch(/render-process-gone", \(\) => \{ core\?\.identity\?\.closeSessions\(\); core\?\.memory\?\.closeSessions\(\); core\?\.tasks\?\.closeSessions\(\); \}/);
+    // MEM-4a：記憶與任務加密共用同一個 safeStorage secretBox。
+    expect(main).toMatch(/const secretBox = createMemorySecretBox\(\{ safeStorage, ready: \(\) => app\.isReady\(\) \}\)/);
+    expect(main).toMatch(/memory: \{\n\s+dir: memoryDir,\n\s+secretBox,/);
     expect(main).toMatch(/confirm: confirmMemory/);
     expect(main).toMatch(/checkboxChecked: memory\.defaultDelete === true/);
     expect(main).toMatch(/onPresence: \(\) => \{ if \(win && !win\.isDestroyed\(\)\) win\.webContents\.send\("nous:memory-changed"\); \}/);

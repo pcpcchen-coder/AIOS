@@ -159,5 +159,11 @@
   "連結的記憶：": "Linked memory:",
   "同時刪除成人家人的記憶（不勾選只解除連結）": "Also delete adult family members' memory (if unchecked, only the link is removed)",
   "成果紀錄…": "Results history…",
-  "在瀏覽器打開成果紀錄": "Open results history in browser"
+  "在瀏覽器打開成果紀錄": "Open results history in browser",
+  "刪除明文備份": "Delete plaintext backup",
+  "要刪除任務的明文備份嗎？": "Delete the plaintext backup of your tasks?",
+  "任務已加密保存並逐筆驗證；明文備份（{0} 個資料夾）刪除後無法還原。": "Your tasks are now stored encrypted and every record was verified. The plaintext backup ({0} folders) cannot be restored after deletion.",
+  "限制：刪除只移除檔案，不是安全抹除；在此之前的 Time Machine 備份或 APFS 本機快照可能仍保有明文的 tasks.json 與 artifacts.json，Nous 無法刪除那些快照。": "Limitation: deletion only removes the files; it is not a secure wipe. Earlier Time Machine backups or local APFS snapshots may still contain the plaintext tasks.json and artifacts.json. Nous cannot delete those snapshots.",
+  "加密任務不可用": "Encrypted tasks are unavailable",
+  "刪除明文備份…": "Delete plaintext backup…"
 }

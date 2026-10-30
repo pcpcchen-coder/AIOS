@@ -29,10 +29,11 @@ export interface Config {
   /** 即時語音路徑偏好的預設（NOUS_REALTIME_ROUTE：auto、live、api_key）；設定畫面與選單改過後以 realtime.json 為準。 */
   realtimeRoute: RoutePreference;
   /**
-   * MEM-3：記憶的放行旗標（NOUS_MEMORY_ROUTES，逗號分隔：live、api_key）。API key 即時語音的記憶預設關閉，列出 api_key 才打開
+   * MEM-3：記憶的放行旗標（NOUS_MEMORY_ROUTES，逗號分隔：live、api_key、task）。API key 即時語音的記憶預設關閉，列出 api_key 才打開
    * （Mac gate 通過後才改預設）；live 維持 MEM-2 的現狀（一律放行），這個旗標不能關掉它。
+   * MEM-4a：task＝背景任務自動帶記憶（受保護交辦）；預設關閉，關閉時交辦和 M15 一樣。
    */
-  memoryRoutes: { api_key: boolean };
+  memoryRoutes: { api_key: boolean; task: boolean };
   /** ChatGPT 方案路徑的模型（NOUS_LIVE_MODEL）：一定顯示；只有明確設定時才送出（send）。 */
   liveModel: { display: string; send: string | null };
   /** ChatGPT 方案路徑的聲音預設（NOUS_LIVE_VOICE，Codex 的聲音清單）。 */
@@ -127,10 +128,10 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   };
 }
 
-function parseMemoryRoutes(raw: string | undefined): { api_key: boolean } {
+function parseMemoryRoutes(raw: string | undefined): { api_key: boolean; task: boolean } {
   const values = (raw ?? "").split(",").map((v) => v.trim().toLowerCase()).filter(Boolean);
-  for (const value of values) if (value !== "live" && value !== "api_key") throw new Error(`NOUS_MEMORY_ROUTES 只能列出 live、api_key，收到 "${value}"`);
-  return { api_key: values.includes("api_key") };
+  for (const value of values) if (value !== "live" && value !== "api_key" && value !== "task") throw new Error(`NOUS_MEMORY_ROUTES 只能列出 live、api_key、task，收到 "${value}"`);
+  return { api_key: values.includes("api_key"), task: values.includes("task") };
 }
 
 function parseRoute(raw: string | undefined): RoutePreference {
