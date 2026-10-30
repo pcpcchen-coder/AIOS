@@ -42,9 +42,6 @@ jobs:
       contents: write
     env:
       RUN_ID: ${{ format('aios-ci-investigation-{0}-{1}', github.run_id, github.run_attempt) }}
-      GH_TOKEN: ${{ github.token }}
-      PSTACK_OBSERVE_PUBLICATION_ACK: "1"
-      PSTACK_PUBLISH_TRANSPORT: api
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -110,6 +107,10 @@ jobs:
           fi
       - name: Publish APPROVED public metadata to AIOS telemetry branch
         if: always() && steps.start.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PSTACK_OBSERVE_PUBLICATION_ACK: "1"
+          PSTACK_PUBLISH_TRANSPORT: api
         run: node scripts/pstack-public-export.mjs --run "$RUN_ID" --public-ok
       - name: Upload real Recorder receipt as CI evidence
         if: always() && steps.start.outcome == 'success'

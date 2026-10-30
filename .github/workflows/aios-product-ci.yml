@@ -1,0 +1,51 @@
+name: AIOS product verification (mock)
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-product:
+    name: Typecheck, tests, build, mock HTTP
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: prototype/ambient-shell/package-lock.json
+
+      - name: Install locked prototype dependencies
+        working-directory: prototype/ambient-shell
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify pinned pstack integration
+        run: node scripts/check-pstack.mjs
+
+      - name: Verify AIOS prototype with isolated mock HTTP
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: node scripts/verify-aios.mjs
+
+      - name: Retain mock verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aios-mock-verification-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/aios-verification-*/report.json
+            ${{ runner.temp }}/aios-verification-*/typecheck.log
+            ${{ runner.temp }}/aios-verification-*/test.log
+            ${{ runner.temp }}/aios-verification-*/build.log
+            ${{ runner.temp }}/aios-verification-*/server.log
+          if-no-files-found: warn
+          retention-days: 7

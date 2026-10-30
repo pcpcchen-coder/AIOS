@@ -1,0 +1,206 @@
+<!-- bilingual: source=zh-TW -->
+
+> [繁體中文](mac-acceptance-runbook-2026-10-30.md) | [English](mac-acceptance-runbook-2026-10-30.en.md)
+
+# Mac 實機驗收手冊（2026-10-30）
+
+日期：2026-10-30，Asia/Taipei。程式基準：main [`36996d9`](https://github.com/pcpcchen-coder/AIOS/commit/36996d9f22c01080c7bc1175564b362b05ef44f2)。
+
+這份手冊把六個批次散在各自證據檔的 Mac 待驗步驟整理成一份可以照順序做的清單，讓 George 在 Mac 上一次排程完成。**它只是整理，不是新的驗證結果**：寫這份手冊時，下表每一項 Mac 步驟都還沒有執行，也不能因為這份手冊存在就把任何批次標成通過。
+
+規則：
+
+- 每一步的完整文字、指令與通過條件以**來源證據檔**為準。本手冊的摘要和來源不一致時，照來源做，並回報本手冊需要更正。
+- 資料全部用虛構的人物與偏好（例如 George、Amy、「我不吃香菜」）。截圖與錄音不可含真實個人資料。
+- 失敗、模型實際說的話、和預期不同的地方都照實記錄。只看 log 不算通過，要聽到、看到實際結果。
+- 結果寫進新的紀錄檔（見 §11），中英文兩份同時提交；不要回頭改寫原證據檔的雲端結果。
+
+## 1. 總覽
+
+| 順序 | 批次 | 來源步驟 | 主要放行條件 | 特殊設備或條件 | 長度（粗估，未量測） |
+|---|---|---|---|---|---|
+| 1 | 成果紀錄 HIST-1 | [HIST-1 §5](history-hist1-2026-10-30.md#5-mac-驗證步驟未執行) 第 1–9 步 | 選單、Surface、`/history`、原生刪除對話框與收起在 Mac 上正常 | 無；用模擬引擎 | 短 |
+| 2 | 文字聊天記憶 MEM-1 | [MEM-1 §4](memory-mem1-2026-10-29.md#4-mac-gate全部未執行不能宣稱通過) 第 1–10 步 | 正式簽章的 Keychain 允許與拒絕、真 `lockf` 雙核心、SIGKILL 後一致 | 簽章過的 App；真 Claude 與 ChatGPT 帳號（第 8 步） | 中 |
+| 3 | 家人稱名問候 ID-02 | [ID-02 §5](family-id-02-2026-10-25.md#5-待-george-在-mac-上實測) 第 1–10 步 | 兩條語音路徑實際聽到的開場句都在清單內、沒加字、沒猜名 | 鏡頭；至少一位登記的家人；另一位陌生人或未登記的人 | 中 |
+| 4 | ChatGPT 方案語音記憶 MEM-2 | [MEM-2 §4](memory-mem2-2026-10-30.md#4-mac-實測步驟全部未執行不能宣稱通過) 第 0–11 步 | **第 5 步錄音證明撤銷後沒有晚到的舊聲音** | 錄音設備（§3）；第二台播放裝置；Codex 登入 | 長 |
+| 5 | API key 語音記憶 MEM-3 | [MEM-3 §5](memory-mem3-2026-10-30.md#5-mac-實測步驟全部未執行不能宣稱通過) 第 0–15 步 | **線路探測 P1、P2 成立**，且第 5 步錄音同 MEM-2 | 同 MEM-2；真 `OPENAI_API_KEY`（會計費） | 長 |
+| 6 | 喚醒詞 spike WK-00 | [WK-00 §7](wk-00-spike-2026-10-29.md#7-給-george-的-mac-實測步驟) 第 1–6 步 | 家人正例有命中、電視負例至少 8 小時 | `sox`；家人；電視開著過夜 | 長（含 8 小時無人值守） |
+
+## 2. 為什麼是這個順序
+
+1. **HIST-1 最先。** 它最短、不用特殊設備，而且 HIST-1 §7 寫明「George 在 Mac 上完成第 5 節」是開始 MEM-4a 的前置 gate。目前另一個對話正在做記憶層，這一步越早做越好。（HIST-1 已經經 PR #50 合併到 main，但 Mac 驗證仍未執行。）
+2. **MEM-1 第二。** MEM-2、MEM-3 都建立在 MEM-1 的 Keychain、檔案鎖與記憶管理畫面上；這些基礎在 Mac 上不成立，後面的語音記憶沒有意義。
+3. **ID-02 第三。** 它驗證看著說話與家人辨識；MEM-1 第 5 步、MEM-2 第 2 步、MEM-3 第 2 步的「臉部候選」都用到同一條鏈。先確認辨識與問候正常，後面遇到問題比較容易分辨是哪一層。
+4. **MEM-2 再 MEM-3。** 兩者共用同一套錄音設備，建議同一天做。MEM-3 第 0 步的線路探測 P1 或 P2 不成立時，MEM-3 不放行，不用繼續做第 1–15 步（照實記錄後停止）。
+5. **WK-00 獨立。** 它是不接產品的命令列 spike，可以和其他批次分開安排；8 小時電視負例適合晚上無人值守時跑。
+
+## 3. 共同準備（做一次就好）
+
+### 3.1 記錄這台 Mac
+
+寫進每份結果紀錄的開頭：Mac 型號、晶片、macOS 版本、Electron 版本（App 選單「關於」或 `desktop/package.json`）、App 建置用的 commit（`git rev-parse --short HEAD`）、簽章身分（`codesign -dv --verbose=2 Nous.app 2>&1 | grep Authority`）。
+
+### 3.2 建置 App
+
+依 [`desktop/README.md`](../../prototype/ambient-shell/desktop/README.md)「自己打包」：
+
+```bash
+cd prototype/ambient-shell
+npm ci
+cd desktop
+npm ci
+npm run package
+```
+
+MEM-1 第 1 步要的是**正式簽章**的 App：照 desktop README「固定簽章與本機權限」先建 `Nous Local Signing` 憑證再打包，確認終端機顯示固定身分。ad-hoc 簽章的結果要在紀錄裡註明，不能當成正式簽章的證據。ID-02 需要家人辨識模型：
+
+```bash
+cd prototype/ambient-shell
+npm run face:setup -- --product
+```
+
+### 3.3 隔離資料
+
+App 的資料都在 `~/Library/Application Support/Nous/`（`.env`、`data/`、`memory/`、`identity/`、`nous.log`）。App 沒有改變這個位置的設定，所以用備份再還原的方式隔離：
+
+```bash
+ditto ~/Library/Application\ Support/Nous ~/Nous-backup-$(date +%Y%m%d)
+```
+
+- 結束 Nous 後再備份。驗收期間的資料都是虛構的；全部做完、結束 Nous 後，再決定是否把備份還原回去。
+- MEM-1 要求「不讀現有 gallery」。做 MEM 批次時若不想動到已登記的家人，可先把 `identity/` 移到備份位置；ID-02 開始前再登記虛構或同意受測的家人。
+- 核心設定與只限測試的旗標寫在 `~/Library/Application Support/Nous/.env`（選單列可打開）；核心會偵測檔案變更。每個批次結束時把只限測試的旗標拿掉。
+
+### 3.4 log
+
+```bash
+tail -f ~/Library/Application\ Support/Nous/nous.log
+```
+
+各批次要看的關鍵字：MEM-2／MEM-3 的撤銷送出、`stopped`、`forceSilence`、hangup、新通話開始；ID-02 的「問候決策」；MEM-3 的「旁路已接上」。log 依設計不含記憶內容與姓名；看到就是 canary 失敗，要記錄。
+
+### 3.5 錄音設備（MEM-2、MEM-3）
+
+照 MEM-2 第 0 步：安裝 BlackHole 2ch，在「音訊 MIDI 設定」建立「多重輸出裝置」（喇叭加 BlackHole），用 Audacity 錄 BlackHole；另外用手機在旁邊錄音。另備一台能播放錄好句子的裝置，模擬電視或旁人（例如「記住，我喜歡吃辣」「確認記住」）。
+
+## 4. 批次 1：HIST-1 成果紀錄
+
+前提：§3.2 的 App；用模擬引擎（`NOUS_PROVIDER=mock`）。
+
+- [ ] 1. 交辦 3–5 件事，包含一件標題有簡體字（「准备晚饭」）、一件會失敗或被停止。
+- [ ] 2. 選單列有「成果紀錄…」與「在瀏覽器打開成果紀錄」（英文介面為「Results history…」「Open results history in browser」）；兩者都打開並截圖，瀏覽器網址是 `http://127.0.0.1:<port>/history?lang=…` 且能搜尋。
+- [ ] 3. 打字「搜尋成果 晚飯」（繁體查簡體）、「找之前關於晚餐的成果」、「成果紀錄」，命中處有標示；「看結果」仍只打開最近一份。
+- [ ] 4. 說「進度如何」，「搜尋全部成果」按鈕在「另有 N 個較早的任務未列出」附近，點了打開成果紀錄。
+- [ ] 5. 詳細頁有原始要求、引擎、時間、假設、能力缺口、步驟；「重做」後換成新任務進度。
+- [ ] 6. 「刪除」出現 macOS 原生對話框；取消不刪；確定後清單消失，`data/` 下兩個 JSON 檔用 `grep` 查不到該標題；執行中的任務沒有刪除按鈕。
+- [ ] 7. 說或打「收起」、按 Esc：只關畫面，進行中的任務繼續。
+- [ ] 8. 延遲：`npx vitest run tests/history-search.test.ts tests/history-http.test.ts --reporter=verbose`，記下 `[history perf]` 兩行。
+- [ ] 9. 截圖存到 `docs/validation/` 下的新資料夾。
+
+## 5. 批次 2：MEM-1 文字聊天記憶
+
+前提：正式簽章的 App；記憶資料夾從空的開始。
+
+- [ ] 1. **Keychain（主要）**：首次使用記憶時出現系統詢問；允許後結束再開能讀回。另做一次按「拒絕」：記憶停用、沒有建立明文、一般聊天照常。
+- [ ] 2. **雙核心（主要）**：同一個 userData 開兩個核心，第二個顯示「另一個 Nous 核心正在使用記憶」。
+- [ ] 3. **SIGKILL（主要）**：寫入途中強制結束，重開後回條與資料一致。
+- [ ] 4. 效能：1,000 筆有效記憶下，暖檢索 p95 ≤50 ms、持久寫入 p95 ≤300 ms；另記首次解鎖與完整等待時間，Keychain 提示的時間不要藏在平均數裡。
+- [ ] 5. 臉部候選：認出已連結的家人後打字，出現「這次用 X 的偏好？」，確認才選定；多人入鏡、人離開或鏡頭停止時暫停；只是轉頭或看鍵盤時不暫停。
+- [ ] 6. OS 鎖定再解鎖：本次人物暫停、進行中的回覆停止。
+- [ ] 7. 截圖：首次設定、澄清卡、建立人物、清單（修改／忘記／釘選）、記憶管理、刪除家人的勾選對話框，中英文各一份。
+- [ ] 8. 真 Claude 與真 ChatGPT 帳號：同一筆記憶在兩個服務各取一次；換帳號且未同意時不送。
+- [ ] 9. Time Machine 排除結果；`nous.log` canary 掃描。
+- [ ] 10. 記憶沒開時，啟動、查狀態與一般聊天都不出現 Keychain 詢問、不建立 `userData/memory`。
+
+## 6. 批次 3：ID-02 家人稱名問候
+
+前提：`.env` 設 `NOUS_CAMERA=on`；在「家人辨識…」登記 George（再一位更好）；「看著說話」「看著說話時先打招呼」「打招呼時稱呼認出的家人」都開。打開 DevTools console 看 `[看著說話時序]`，`nous.log` 看「問候決策」。**每一項兩條路徑各做一次**（「即時語音路徑」先選 API key，再選 ChatGPT 方案）。
+
+- [ ] 1. **稱名開場（主要）**：從 2 m 外走到 1.0 m 正面看螢幕、不說話。約 0.6 秒後聽到清單內含名字的一句，只說一次；連做 3 次，記錄是否每次和上一次不同。記下實際聽到的整句、字幕與 log 原因（應為 `ok`）。**模型加話、改字、猜名或重複，該路徑記為不通過。**
+- [ ] 2. 陌生人或未登記的人：只聽到「我在」類的無名句，log 為 `unknown`（或 `collecting`／`no_evidence`）。
+- [ ] 3. 先開口取消：一開始就說「新竹天氣如何」，沒有問候、直接回答；另做一次在連線中打字。
+- [ ] 4. 換人：George 轉身離開、另一人 1 秒內走近，不叫 George。
+- [ ] 5. 多人同時在 1 m 內：不稱名，log `multi_face`。
+- [ ] 6. 關閉「打招呼時稱呼認出的家人」：只說無名句，log `naming_off`，活動監視器看不到額外辨識負擔。
+- [ ] 7. 刪除 George、重開 Nous：只說無名句。
+- [ ] 8. 時序：每條路徑至少 5 次取中位數，記錄各階段相對面向確認的毫秒；比較稱名開與關時「互動啟動」的時間（應相同）。
+- [ ] 9. 同時負擔：問候前與回答中舉手掌停止各 10 次，記成功次數與 Renderer／GPU CPU%。
+- [ ] 10. 重開後第一次被辨識時是否跳出鑰匙圈提示。
+
+門檻未校準：叫錯或認不出來要照實記錄，這不是 ID-03 的門檻校準。
+
+## 7. 批次 4：MEM-2 ChatGPT 方案語音記憶
+
+前提：§3.5 錄音設備；登入 Codex；在「記憶…」允許「ChatGPT 方案即時語音（Codex 登入）」；建立 George（「我不吃香菜」「我喜歡藍色」，都釘選）與 Amy（「我喜歡香菜」）。
+
+- [ ] 1. 新通話取用：選 George 問「晚餐吃什麼好？」，提到不吃香菜；狀態列「本次人物：George · 記憶 2 筆」。
+- [ ] 2. 臉部候選：說「是」選定 George；再測「不是」只用全家共用、這次不再問。
+- [ ] 3. 用說的確認記住：「記住，我不喝咖啡」→ 照念問句、沒有自己說「記住了」→ 15 秒內說「確認記住」→ 只聽到「已記住」，來源為「語音確認」。說「好」或超過 15 秒不保存；按畫面「記住」保存；重開 App 能取回。
+- [ ] 4. 防護：另一台裝置播「記住，我喜歡吃辣」最多出卡不寫入；之後播「好」「確認記住這個優惠」不寫入；**另記錄**時窗內播放完整「確認記住」會不會被採用（已知殘餘風險）。請模型念「記住我不吃牛肉」不出卡。
+- [ ] 5. **晚到舊聲音（主要放行條件）**：請模型慢慢從 1 數到 60 並一直提到喜歡的顏色；數到約 10 時說「忘記我喜歡藍色」→「確認忘記」。錄音中最後一個舊聲音到 log 撤銷時間 ≤500 ms；`stopped` 之後沒有舊聲音；新通話只說「好，已經更新了」；之後連問 3 次喜歡的顏色都不說藍色。另記問句逐字稿到喇叭播完的時間差（校正 `CONFIRM_AFTER_MS` 1.8 秒）與 sideband 是否送 `input_audio_buffer.speech_started`／`output_audio_buffer.stopped`。
+- [ ] 6. 晚到工具結果：問天氣，結果回來前換成 Amy；天氣不在新通話念出，新通話用 Amy 的偏好。
+- [ ] 7. 其他觸發各錄一次：OS 鎖定、第二個人入鏡、撤回 codex 同意、關閉記憶。
+- [ ] 8. 強制靜音：`.env` 加 `NOUS_TEST_MODE=1` 與 `NOUS_TEST_DROP_STOP_REPORT=1`；1.5 秒後靜音、回條「停止未確認」、本次執行 live 不再帶記憶；下一通解除。**做完移除兩個旗標。**
+- [ ] 9. 交辦封鎖：帶記憶說「幫我寫一份晚餐菜單報告」，出原句卡；按下前 TaskStore 沒新增。
+- [ ] 10. 「你記得我什麼？」：出記憶卡、模型只說筆數；中英文各截圖。
+- [ ] 11. canary：掃描 `nous.log`、TaskStore、userData（加密快照以外）。
+
+另外只能真機確認、照實記錄：`session.context.append` commentary 的記憶資料是否被模型採用；`session.close` 後上游是否還送 RTP；AEC 與回音逐字稿的實際表現。
+
+## 8. 批次 5：MEM-3 API key 語音記憶
+
+前提：同批次 4 的錄音設備與虛構人物；`.env` 設真的 `OPENAI_API_KEY` 與 `NOUS_MEMORY_ROUTES=live,api_key`；在「記憶…」允許「OpenAI API key 即時語音」；偏好設成「API key」。**這個路徑依用量計費，重建也會再計費一次。**
+
+- [ ] 0. **線路探測（先做，決定要不要繼續）**：
+  - P1 旁路能用 call ID 接上（log 有「旁路已接上」）。
+  - P2 旁路收得到 `input_audio_buffer.committed`（`item_id` 對得上逐字稿）、`conversation.item.input_audio_transcription.completed`、`response.output_audio_transcript.done`、`response.function_call_arguments.done`、`output_audio_buffer.started/stopped`，以及指回核心 `event_id` 的 `error`。
+  - P3 旁路的 `session.update` 生效（問「你知道我不吃什麼嗎」能答對）。
+  - P4 hangup 後 RTP 停止，記錄 `peer.connectionState` 變化。
+  - P5 頁面資料通道是否收到 `session.created`／`session.updated` 與 instructions 回送。
+  - **P1 或 P2 不成立：MEM-3 不放行，記錄後停止**，改評估 MEM-3 計畫 2(b) 的 ②（renderer 只負責媒體）。
+- [ ] 1–11. 與批次 4 的第 1–11 步相同，差別：狀態列為「記憶 3 筆」；同意對象是 `openai_realtime`；強制靜音後 API key 不再帶記憶但 live 仍可帶；canary 另外確認 P5 回送的內容沒有被頁面存下或轉出。
+- [ ] 12. 只靠 hangup：`NOUS_TEST_MODE=1` 加 `NOUS_TEST_RENDERER_IGNORE_REVOKE=1`；記錄 hangup 後多久無聲、1.5 秒強制靜音是否生效。**做完移除旗標。**
+- [ ] 13. fallback：讓 live 失敗（登出 Codex）→ 改用 API key；念出計費通知；只有 `openai_realtime` 有同意才帶記憶；狀態列顯示原因。
+- [ ] 14. 跨路徑：live 記住「我不喝咖啡」→ API key 問「我喝什麼」；API key 忘記 → live 連問 3 次。
+- [ ] 15. 分開放行：移除 `NOUS_MEMORY_ROUTES`；API key 路徑顯示「此路徑未啟用記憶」，log 沒開過旁路，記憶管理沒有列出 API key 即時語音。
+
+主要放行條件：P1、P2 成立，而且第 5 步錄音證明撤銷後沒有晚到的舊聲音。MEM-3 §3 的 11 項預設仍等 George 確認；做完實測後一併決定。
+
+## 9. 批次 6：WK-00 喚醒詞 spike
+
+照 [WK-00 §7](wk-00-spike-2026-10-29.md#7-給-george-的-mac-實測步驟) 的指令做；這裡只列順序與要注意的地方。
+
+- [ ] 1. 安裝：`npm ci`、`npm run wake:setup`、`brew install sox`；允許終端機的麥克風權限。
+- [ ] 2. 確認麥克風與 CPU：說幾次「哈囉努斯」，每次偵測印一行 JSON。
+- [ ] 3. 家人正例：**先每人試跑 5 次**（雲端合成正例 0/300 命中、原因未定），再每人 30 次；安靜與電視開著各一輪、兩個模型各一輪；另跑「哈囉努斯(hā-lóu)」與子詞「努斯」兩輪診斷。`--person` 只填代號（A、B、C），不填名字。
+- [ ] 4. 電視負例：`caffeinate -i` 跑至少 8 小時，只計數不錄音；誤報多時在紙上記下當時大概在說什麼。另一個模型另一天再跑。
+- [ ] 5. 與鏡頭管線同時：Nous 待機 10 分鐘記 CPU，同時跑 `listen` 再記 10 分鐘，期間做幾次張掌停止。
+- [ ] 6. （可選）自建瀏覽器 wasm。
+
+數字填進 WK-00 §7 的記錄表格。音訊依設計不寫檔，報告寫到 repo 外的 `$TMPDIR/aios-wake-spike/`。
+
+## 10. 可以合併做的步驟
+
+| 共同內容 | 出現在 | 建議 |
+|---|---|---|
+| 臉部候選「這次用 X 的偏好？」 | MEM-1 第 5 步、MEM-2 第 2 步、MEM-3 第 2 步 | ID-02 通過後再做，失敗時較容易判斷是辨識還是記憶層 |
+| Keychain 提示時機 | MEM-1 第 1、10 步、ID-02 第 10 步 | 同一次重開 App 時一起觀察，記錄是哪一個功能先觸發 |
+| canary 掃描 | MEM-1 第 9 步、MEM-2 第 11 步、MEM-3 第 11 步 | 每個批次做完各掃一次，不要只在最後掃 |
+| 錄音設備 | MEM-2、MEM-3 | 同一天做，設備只架一次 |
+
+## 11. 記錄結果
+
+每個批次新增一份紀錄，命名為 `<批次>-mac-YYYY-MM-DD.md` 與 `.en.md`（例如 `history-hist1-mac-2026-11-02.md`），截圖放在同名資料夾。兩份紀錄頂端要有互相對應的語言連結，提交前執行 `node scripts/check-bilingual-docs.mjs`。每一步至少一列：
+
+| 步驟 | 預期 | 實際 | 證據（截圖／錄音／log 時間戳） | 通過／不通過／未做 | 備註 |
+|---|---|---|---|---|---|
+|  |  |  |  |  |  |
+
+錄音檔不要放進 repo（可能含家中聲音）；紀錄裡寫量到的時間差與量法即可。之後再依結果更新 [實作狀態](../Current_Implementation_Status.md) 對應的列；只有主要放行條件通過，才能把該批次從「Mac gate 未執行」改掉。
+
+## 12. 這份手冊的限制
+
+- 只整理既有證據檔裡的步驟，沒有新增或放寬任何通過條件，也沒有在 Mac 上執行任何一步。
+- 「長度」欄是依步驟數與是否需要錄音、過夜的粗估，沒有量測，不能當成排程承諾。
+- 來源證據檔之後若更新（例如 MEM-4a 合併後改了記憶流程），以來源為準，本手冊需要跟著更正。
+- 只限測試的旗標（`NOUS_TEST_MODE`、`NOUS_TEST_DROP_STOP_REPORT`、`NOUS_TEST_RENDERER_IGNORE_REVOKE`）做完要移除；`NOUS_MEMORY_ROUTES` 的 `api_key` 在 MEM-3 Mac gate 通過前不要當成日常設定。

@@ -51,7 +51,7 @@ function telemetryRemote({owner='pcpcchen-coder',relative=false}={}){
  return {bare,work};
 }
 const exportRun=(work,env)=>spawnSync(process.execPath,[exporter,'--run','agent-run-1','--workspace',work,'--public-ok'],{
- encoding:'utf8',env:{...process.env,GH_TOKEN:'',GITHUB_TOKEN:'',PSTACK_OBSERVE_PUBLICATION_ACK:'1',...env}
+ encoding:'utf8',env:{...process.env,GH_TOKEN:'',GITHUB_TOKEN:'',PSTACK_OBSERVE_PUBLICATION_ACK:'1',PSTACK_PUBLISH_TRANSPORT:'auto',...env}
 });
 test('publishes with git push to telemetry/pstack when no API token is available',()=>{
  const {bare,work}=telemetryRemote();
