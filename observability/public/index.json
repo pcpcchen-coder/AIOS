@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-30T16:10:52.232Z",
+  "updated_at": "2026-10-30T16:14:24.353Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261030161422-feab21",
+      "title": "MEM-5a 記憶候選提案與離線指標",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-10-30T16:14:22.714Z",
+      "started_at": "2026-10-30T16:14:22.714Z",
+      "ended_at": null,
+      "branch": "",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 8,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261030151119-5f6130",
