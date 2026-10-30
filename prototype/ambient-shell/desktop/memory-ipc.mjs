@@ -18,7 +18,9 @@ const PERSON = /^fam_[0-9a-f]{24}$/;
 // MEM-3：openai_realtime（OpenAI API key 即時語音）的同意鍵含底線。
 const PROVIDER = /^[a-z][a-z_]{0,19}$/;
 const ACCOUNT = /^[A-Za-z0-9_-]{1,64}$/;
-const CHOICES = ["save", "household", "cancel", "create", "select", "accept", "decline", "confirm"];
+// MEM-5b：工作決定卡的 task（連到選的工作）與 note（只記成一般筆記）。
+const CHOICES = ["save", "household", "cancel", "create", "select", "accept", "decline", "confirm", "task", "note"];
+const TASK = /^task_[0-9a-f-]{36}$/;
 
 const isString = (v, max) => typeof v === "string" && v.length > 0 && v.length <= max;
 const isRevision = (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= 1;
@@ -79,6 +81,10 @@ export function validateMemoryRequest(req) {
       if (req.allow !== undefined) {
         if (typeof req.allow !== "boolean") return bad("allow must be a boolean");
         request.allow = req.allow;
+      }
+      if (req.task !== undefined) {
+        if (typeof req.task !== "string" || !TASK.test(req.task)) return bad("task is invalid");
+        request.task = req.task;
       }
       return { ok: true, request };
     }

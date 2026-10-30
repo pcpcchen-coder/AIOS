@@ -9,6 +9,8 @@ import { t, msg, getLocale, onLocaleChange } from "./i18n.ts";
 // - 不建立常駐側欄：收起就回電子腦；「本次人物」標籤只在輸入列與對話 Surface（src/main.ts）。
 // - MEM-5a：記憶建議（SuggestionPrompt）是對話回覆下方的一行，跟著那一輪的 request_id（user_request），不是新的 Surface；
 //   內容經 card_view 取，只有按「記住」才寫入。全家共用的記憶在查看時顯示「由 X 記下」，並說明這不是身分驗證。
+// - MEM-5b：工作決定卡（「記住這次選了方案 B」要連到哪一個最近完成的工作；工作標題只經 IPC，點選才寫入）；清單上的工作決定
+//   標「工作決定」與連到的工作（只有在目前範圍內才顯示標題）；記憶管理可以只看工作決定。
 
 import type {
   ClarifyChoice,
@@ -79,6 +81,13 @@ function button(label: string, onClick: () => void, variant = "", disabled = fal
   return b;
 }
 
+/** MEM-5b：工作決定卡上的「連到這個工作」；無障礙標籤帶工作標題（審查 nit），讀螢幕時分得出是哪一個。 */
+function linkButton(title: string, onClick: () => void, disabled: boolean): HTMLButtonElement {
+  const b = button("連到這個工作", onClick, "btn--primary", disabled);
+  b.setAttribute("aria-label", msg`連到：${title}`);
+  return b;
+}
+
 function checkbox(checked: boolean, disabled = false): HTMLInputElement {
   const c = h("input", { type: "checkbox" });
   c.checked = checked;
@@ -104,6 +113,8 @@ export function presenceLabel(presence: MemoryPresenceView | null): string {
 }
 
 const CHOICE_LABEL: Record<ClarifyChoice, string> = { save: "保存", household: "改記全家共用", cancel: "取消" };
+/** MEM-5b：工作決定卡的說明。 */
+export const WORK_SUMMARY_NOTE = "只保存你說的這句話，連到你選的工作；不會保存工作的標題或成果。這個工作被刪除，或它用到的記憶被忘記或更正時，這筆工作決定也會一起忘記；關閉記憶或撤回同意不會刪除它。";
 /** MEM-2 語音卡的主要按鈕與對應的確認詞（也可以用說的）。 */
 const VOICE_ACTION_LABEL = { remember: "記住", correct: "更正", forget: "忘記" } as const;
 const VOICE_PHRASE = { remember: "確認記住", correct: "確認更正", forget: "確認忘記" } as const;
@@ -122,6 +133,8 @@ export class MemoryView {
   private error: string | null = null;
   private busy = false;
   private editing: string | null = null;
+  /** MEM-5b：記憶管理的篩選（全部／只看工作決定）。 */
+  private filter: "all" | "work" = "all";
   /** 每次打開或收起加一；晚到的 IPC 回應若世代不符就丟掉。 */
   private gen = 0;
 
@@ -148,6 +161,7 @@ export class MemoryView {
     const gen = ++this.gen;
     this.notice = this.error = null;
     this.editing = null;
+    this.filter = "all";
     if (!this.deps.bridge) {
       this.mode = { kind: "unavailable", message: MEMORY_BROWSER_UNAVAILABLE };
       this.render();
@@ -227,7 +241,7 @@ export class MemoryView {
   }
 
   /** 卡片上的選擇（點擊算直接輸入；核心用自己保存的原句重新驗證）。 */
-  private async answer(choice: string, extra: { profile?: string; fact?: string; allow?: boolean } = {}): Promise<void> {
+  private async answer(choice: string, extra: { profile?: string; fact?: string; allow?: boolean; task?: string } = {}): Promise<void> {
     const mode = this.mode;
     if (mode.kind !== "card" || !("card" in mode.card) || this.busy) return;
     this.busy = true;
@@ -317,6 +331,7 @@ export class MemoryView {
       case "inspect": return "你的記憶";
       case "voice_confirm": return mode.card.action === "remember" ? "要記住這一句嗎？" : mode.card.action === "correct" ? "要更正這筆記憶嗎？" : "要忘記這筆記憶嗎？";
       case "suggestion": return "要記住這一句嗎？";
+      case "work_summary": return "要連到哪一個工作？";
     }
   }
 
@@ -382,6 +397,16 @@ export class MemoryView {
         nodes.push(h("p", {}, msg`要記住『${card.text}』嗎？`),
           h("div", { class: "actions" }, button("記住", () => void this.answer("confirm"), "btn--primary", this.busy), button("不用", () => void this.answer("decline"), "btn--ghost", this.busy)));
         break;
+      case "work_summary":
+        // MEM-5b：工作標題只在這張卡上給你核對（經 IPC），不會存進記憶；點選才保存。
+        nodes.push(h("p", {}, card.subject_name ? msg`要把這個決定記在 ${card.subject_name} 名下，連到哪一個工作？` : t("要把這個決定連到哪一個工作？")),
+          h("blockquote", { class: "memory-quote" }, card.value),
+          h("ul", { class: "memory-list", "aria-label": "最近 24 小時完成的工作" }, ...card.tasks.map(task => h("li", { class: "memory-fact" },
+            h("div", { class: "memory-fact-text" }, h("strong", {}, task.title), h("span", { class: "muted small" }, msg`完成於 ${when(task.finished_at)}`)),
+            linkButton(task.title, () => void this.answer("task", { task: task.task_id }), this.busy)))),
+          h("p", { class: "muted small" }, t(WORK_SUMMARY_NOTE)),
+          h("div", { class: "actions" }, button("只記成一般筆記", () => void this.answer("note"), "", this.busy), button("取消", () => void this.answer("cancel"), "btn--ghost", this.busy)));
+        break;
     }
     nodes.push(held);
     return nodes.filter((n): n is Node => !!n && typeof n !== "string");
@@ -428,8 +453,12 @@ export class MemoryView {
       const source = f.source === "voice_confirmed" ? msg`來源：語音確認 · ${when(f.at)}` : f.source === "suggestion" ? msg`來源：記憶建議（按了記住） · ${when(f.at)}` : msg`來源：本人明示 · ${when(f.at)}`;
       // MEM-5a：全家共用的記憶只在查看時顯示是誰記下的（當時選定的本次人物）。
       const household = f.subject === null && f.by_name ? msg`全家共用・由 ${f.by_name} 記下・${when(f.at)}` : f.subject === null && !managed ? t("全家共用") : "";
-      const meta = [source, f.expires ? msg`到 ${when(f.expires)} 為止` : "", household].filter(Boolean).join(" · ");
-      const row = h("li", { class: "memory-fact" }, h("div", { class: "memory-fact-text" }, h("strong", {}, f.text), h("span", { class: "muted small" }, meta)));
+      // MEM-5b：工作決定標出連到的工作；標題只有在目前範圍內才顯示（核心經 IPC 給）。
+      const work = f.kind === "work_summary" && f.work
+        ? (f.work.state === "in_scope" && f.work.title ? msg`工作決定 · 連到：${f.work.title}` : f.work.state === "missing" ? t("工作決定 · 連到的工作已不存在") : t("工作決定 · 連到的工作不在目前範圍內"))
+        : f.kind === "work_summary" ? t("工作決定") : "";
+      const meta = [work, source, f.expires ? msg`到 ${when(f.expires)} 為止` : "", household].filter(Boolean).join(" · ");
+      const row = h("li", { class: "memory-fact", ...(f.kind === "work_summary" ? { "data-kind": "work_summary" } : {}) }, h("div", { class: "memory-fact-text" }, h("strong", {}, f.text), h("span", { class: "muted small" }, meta)));
       if (f.pinned) row.append(h("span", { class: "chip" }, t("釘選")));
       if (this.editing === f.id) {
         const input = h("input", { type: "text", maxlength: "512", "aria-label": "修改記憶內容" });
@@ -475,6 +504,12 @@ export class MemoryView {
     const saveConsent = () => void this.saveSetup(st.enabled, mode.subject ? { kind: "profile", profile: mode.subject } : { kind: "household" },
       consentRows.filter(r => r.box.checked).map(r => ({ provider: r.target.provider, account: r.target.account })));
     const people = mode.people;
+    // MEM-5b：只看工作決定（只篩選畫面，不改資料；不影響成果紀錄）。
+    const filter = h("select", { "aria-label": "篩選記憶" });
+    filter.append(h("option", { value: "all" }, t("全部")), h("option", { value: "work" }, t("工作決定")));
+    filter.value = this.filter;
+    filter.addEventListener("change", () => { this.filter = filter.value === "work" ? "work" : "all"; this.render(); });
+    const shown = this.filter === "work" ? mode.facts.filter(f => f.kind === "work_summary") : mode.facts;
     const link = h("select", { "aria-label": "連結到家人辨識" });
     link.append(h("option", { value: "" }, t("不連結")));
     for (const p of people ?? []) if (!p.linked) link.append(h("option", { value: p.person_id }, p.name));
@@ -483,8 +518,9 @@ export class MemoryView {
         button(st.enabled ? "關閉記憶" : "開啟記憶", () => void this.saveSetup(!st.enabled, mode.subject ? { kind: "profile", profile: mode.subject } : { kind: "household" }, mode.consents.filter(c => c.allowed).map(c => ({ provider: c.provider, account: c.account }))), "btn--ghost", this.busy)),
       h("p", { class: "muted small" }, msg`有效記憶 ${st.active_facts}／${st.limits.facts} 筆 · 人物 ${st.profiles.length}／${st.limits.profiles} 位`),
       h("label", { class: "memory-field" }, t("查看："), subjectSelect),
+      h("label", { class: "memory-field" }, t("類別："), filter),
       profile?.minor ? h("p", { class: "notice" }, t("未成年家人的記憶由家長在這裡整理；聊天時不會直接寫入、更正或忘記。")) : h("span", {}),
-      this.factList(mode.facts, true),
+      this.filter === "work" && shown.length === 0 ? h("p", { class: "muted" }, t("沒有工作決定。")) : this.factList(shown, true),
       h("div", { class: "actions" }, add, button("新增", () => void this.mutate({ op: "edit", id: null, subject: mode.subject, value: add.value }), "", this.busy)),
       this.suggestionsControl(mode.token),
       h("div", { class: "memory-allow" }, h("p", {}, mode.subject ? msg`允許哪些服務帳號取得 ${profile?.name ?? ""} 的記憶片段：` : t("允許哪些服務帳號取得全家共用的記憶片段：")),

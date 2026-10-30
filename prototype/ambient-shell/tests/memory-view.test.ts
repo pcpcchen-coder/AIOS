@@ -82,7 +82,7 @@ describe("memory cards", () => {
   });
 
   it("「你記得我什麼？」 lists source/time and edit/forget/pin act on that item", async () => {
-    const fact = { id: "mem_0123456789abcdef", revision: 4, subject: "profile_0123456789abcdef", subject_name: "George", text: "不吃香菜", topic: "food", source: "explicit" as const, excerpt: "記住，我不吃香菜", at: "2026-10-29T02:00:00Z", expires: null, pinned: false, by_name: null };
+    const fact = { id: "mem_0123456789abcdef", revision: 4, subject: "profile_0123456789abcdef", subject_name: "George", text: "不吃香菜", topic: "food", source: "explicit" as const, excerpt: "記住，我不吃香菜", at: "2026-10-29T02:00:00Z", expires: null, pinned: false, by_name: null, kind: "preference" as const, work: null };
     const t = make(req => req.op === "list" ? { ok: true, op: "list", facts: [], subject: null, manage: null, status, face_people: null, consents: [] } : { ok: true, op: "forget", receipt: { status: "forgotten", message: "已忘記 {0} 的一筆記憶", values: ["George"], operation_id: null }, history_reset: true, status });
     t.view.showCard({ kind: "inspect", subject_name: "George", facts: [fact] }, "req_fixture03", null);
     expect(t.el.textContent).toContain("不吃香菜");
@@ -226,7 +226,7 @@ describe("MEM-5a suggestion line and household attribution (DOM stand-in)", () =
   });
 
   it("household facts show 「全家共用・由 X 記下・日期」 with the not-identity-verification note, in both languages", () => {
-    const fact = { id: "mem_0123456789abcde0", revision: 2, subject: null, subject_name: null, text: "晚餐不要太鹹", topic: "food", source: "explicit" as const, excerpt: "晚餐不要太鹹", at: "2026-10-30T02:00:00Z", expires: null, pinned: false, by_name: "George" };
+    const fact = { id: "mem_0123456789abcde0", revision: 2, subject: null, subject_name: null, text: "晚餐不要太鹹", topic: "food", source: "explicit" as const, excerpt: "晚餐不要太鹹", at: "2026-10-30T02:00:00Z", expires: null, pinned: false, by_name: "George", kind: "note" as const, work: null };
     const own = { ...fact, id: "mem_0123456789abcde1", subject: "profile_0123456789abcdef", subject_name: "George", text: "不吃香菜", source: "suggestion" as const, by_name: null };
     const t = make(() => ({ ok: false, code: "unavailable", message: "x" }));
     t.view.showCard({ kind: "inspect", subject_name: "George", facts: [fact, own] }, "req_fixture23", null);
@@ -269,5 +269,50 @@ describe("MEM-5a suggestion line and household attribution (DOM stand-in)", () =
     byText(stillOn.el, "Turn off memory suggestions").click();
     await flush();
     expect(stillOn.calls[1]).toEqual({ op: "suggestions", enabled: false, token: "mm_" + "a".repeat(32) });
+  });
+});
+
+describe("MEM-5b work decisions", () => {
+  const card: MemoryCardView = { kind: "work_summary", card: "mc_0123456789abcdef0123456f", value: "這次選了方案 B", subject_name: "George", tasks: [{ task_id: "task_01234567-89ab-cdef-0123-456789abcdef", title: "比較兩個方案", finished_at: "2026-10-30T02:00:00Z" }], options: ["task", "note", "cancel"] };
+  const work = { id: "mem_0123456789abcdef", revision: 3, subject: "profile_0123456789abcdef", subject_name: "George", text: "這次選了方案 B", topic: "other", source: "explicit" as const, excerpt: "記住這次選了方案 B", at: "2026-10-30T02:00:00Z", expires: null, pinned: false, by_name: null, kind: "work_summary" as const, work: { task_id: "task_01234567-89ab-cdef-0123-456789abcdef", title: "比較兩個方案", state: "in_scope" as const } };
+  const note = { ...work, id: "mem_0123456789abcde2", text: "不吃香菜", kind: "preference" as const, work: null };
+
+  it("the choice card lists the work, links by task id, and offers 「只記成一般筆記」 and 「取消」 in both languages", async () => {
+    const t = make(() => ({ ok: true, op: "card_answer", ...turnView, status }));
+    t.view.showCard(card, "req_fixture30", null);
+    expect(t.el.getAttribute("data-visibility-reason")).toBe("user_request");
+    expect(t.el.textContent).toContain("要連到哪一個工作？");
+    expect(t.el.textContent).toContain("比較兩個方案");
+    expect(buttons(t.el).map(b => b.textContent)).toEqual(["連到這個工作", "只記成一般筆記", "取消", "收起"]);
+    expect(byText(t.el, "連到這個工作").getAttribute("aria-label")).toBe("連到：比較兩個方案");
+    byText(t.el, "連到這個工作").click();
+    await flush();
+    expect(t.calls[0]).toEqual({ op: "card_answer", card: card.card, choice: "task", task: "task_01234567-89ab-cdef-0123-456789abcdef" });
+    expect(t.resolved).toHaveBeenCalledWith(expect.anything(), "req_fixture30");
+    setLocale("en");
+    t.view.showCard(card, "req_fixture31", null);
+    expect(buttons(t.el).map(b => b.textContent)).toEqual(["Link to this work", "Just save as a regular memory", "Cancel", "Dismiss"]);
+    expect(t.el.textContent).toContain("Which work should this link to?");
+    expect(byText(t.el, "Link to this work").getAttribute("aria-label")).toBe("Linked to: 比較兩個方案");
+    expect(t.el.textContent.replace(/這次選了方案 B|比較兩個方案/g, "")).not.toMatch(/\p{Script=Han}/u);
+  });
+
+  it("the list labels work decisions with the linked work (title only in scope) and the manager can filter to 「工作決定」", async () => {
+    const t = make(req => req.op === "list" ? { ok: true, op: "list", facts: [work, note, { ...work, id: "mem_0123456789abcde3", work: { task_id: work.work.task_id, title: null, state: "missing" as const } }], subject: "profile_0123456789abcdef", manage: "mm_" + "a".repeat(32), status: { ...status, enabled: true }, face_people: null, consents: [] } : { ok: false, code: "unavailable", message: "x" });
+    t.view.openManager();
+    await flush();
+    expect(t.el.textContent).toContain("工作決定 · 連到：比較兩個方案");
+    expect(t.el.textContent).toContain("工作決定 · 連到的工作已不存在");
+    expect(t.el.textContent).toContain("不吃香菜");
+    const filter = t.el.all().find(e => e.tagName === "select" && e.getAttribute("aria-label") === "篩選記憶")!;
+    filter.value = "work";
+    filter.listeners.get("change")!.forEach(cb => cb());
+    expect(t.el.textContent).not.toContain("不吃香菜");
+    expect(t.el.textContent).toContain("這次選了方案 B");
+    setLocale("en");
+    t.view.openManager();
+    await flush();
+    expect(t.el.textContent).toContain("Work decision · linked to: 比較兩個方案");
+    expect(t.el.textContent).toContain("Work decision · the linked work no longer exists");
   });
 });

@@ -139,8 +139,8 @@
       "source": "docs/16_Nous_Memory_Layer_Design_2026-10-26.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/16_Nous_Memory_Layer_Design_2026-10-26.en.md",
-      "sourceSha256": "1e9193a9a3215c3cdf235dcc29ea5351e7f3ec3d4c34b77bdd393ff24481054d",
-      "translationSha256": "5108abad9b0b3fd2b3352e52276d36ab4ac6c1f213cde6559d98acb9dbd5f106"
+      "sourceSha256": "0a98ac458d19ef1d63156ff20be57deb9f3ada47425ac575a0ba99466521143e",
+      "translationSha256": "b1c1d43d04d40a3317bf028bd3159e5f9f8f54f4b879db83aac0e15f62f318cf"
     },
     {
       "source": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md",
@@ -158,8 +158,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "3553f800ee2d04e73fca6f0d1fff566b9b5f534a86bb4554cd9fbb7303b0afc9",
-      "translationSha256": "593ce6d9353e96bbec9b9d7639d0adcbd389a5e90d861d913b2b14a5b2e5280b"
+      "sourceSha256": "d4f12df0cb46d2c6e43c71e1a3a2915da6d8f84f1f61dfebbd85629eedff985b",
+      "translationSha256": "a2f52547d839c493b08c121b543b7ce508beef9a539d1e8a0771a532439e3d9c"
     },
     {
       "source": "docs/README.md",
@@ -179,8 +179,8 @@
       "source": "docs/adr/ADR-0002-nous-family-memory.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/adr/ADR-0002-nous-family-memory.en.md",
-      "sourceSha256": "4ca11f1c0e8927abecd4bd223ca5aeff2414d0da68cb79094580054e48c2ac68",
-      "translationSha256": "a324a5f8dca04069ff32b87248370b98a7d60107f033626c17542b25d3b0b507"
+      "sourceSha256": "6b4396cc525c462e1102da8882aaf450e8fb30a74ef12506d2cf6cc32fffa3ce",
+      "translationSha256": "751ced3f7b439f5316cc14ecfc8bf3cc04b64096502dec2998970556d3c2d9ba"
     },
     {
       "source": "docs/adr/ADR-0003-local-wake-and-voice-recognition.md",
@@ -228,8 +228,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "1ec0e844ac785a46bd66d01ba80c147cb92cb9d023af3e8d8cf80dcaea3987fb",
-      "translationSha256": "b63fcf957876990f1d6ff13178cce0f73792a07be646c16abde204be6e562bbe"
+      "sourceSha256": "3f9d6114b35a0bdc280f543681156f01a4da7a39be203bd686924e2470ab81e7",
+      "translationSha256": "108645043197eb6ef9a33a04a79ab6a79b23d497120c7391560eddc752b2e86c"
     },
     {
       "source": "docs/validation/bilingual-2026-10-26.md",
@@ -382,8 +382,8 @@
       "source": "docs/validation/mac-acceptance-runbook-2026-10-30.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/mac-acceptance-runbook-2026-10-30.en.md",
-      "sourceSha256": "c87468a4bf5b47cb4ff31e45e922ce8dc317eb8cd5db921d04ab7478e9936589",
-      "translationSha256": "4bc91fe7a1c42bcc3b9fc2b47cb9955a071a693f6838b2a6a86c96febbf4c882"
+      "sourceSha256": "f6c05aac99499e25a3e1651d57df3bf18b8a7bed02c9aeafd2c35fda3f68da0f",
+      "translationSha256": "61030082087eca5f7b5adb54a6adb0155683e3a4f5142020b13ee720e5b5d37f"
     },
     {
       "source": "docs/validation/memory-mem0-2026-10-26.md",
@@ -438,8 +438,15 @@
       "source": "docs/validation/memory-mem5a-2026-10-30.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/memory-mem5a-2026-10-30.en.md",
-      "sourceSha256": "ca28f4ca691ba02f0c70fa5ee1045ba8dd08f95bce147f229aa018812c6ba97d",
-      "translationSha256": "a23694aa2c61d80e7ebbc38e5547d9f7b3dfdafc67083ece639302374acd552a"
+      "sourceSha256": "22b501287b7fd4308c96460acd3fde2f878dba0c9b0e594d989011b9bfb7c678",
+      "translationSha256": "653aaf5643b0d221ab4b24a74317f5575739cb70c9273345afd04ddc311ac6b9"
+    },
+    {
+      "source": "docs/validation/memory-mem5b-2026-10-30.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/memory-mem5b-2026-10-30.en.md",
+      "sourceSha256": "cfff4d97e50c739e5b680bb8c98b3fd70f3a2eebb2f58c9d55eb879e3484ead1",
+      "translationSha256": "35d9e5ef0248048e552cfe7a9e4654429e37705b966f4af70f0b4e9ecdbabcd0"
     },
     {
       "source": "docs/validation/menu-seconds-commands-2026-10-22.md",

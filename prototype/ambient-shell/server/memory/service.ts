@@ -24,10 +24,12 @@ import {
   type MemoryText,
   type MemoryTurnView,
   type PresenceState,
+  WORK_CHOICES_MAX,
+  WORK_CHOICE_WINDOW_MS,
 } from "../../shared/memory.ts";
 import { literalCommand, MemoryBoundary, type ContextLease, type InputVia, type MemoryCommand, type MemorySession, type ParsedMemoryCommand, type Subject } from "./boundary.ts";
 import { LiveMemoryBinding, VOICE_CARDS_PER_MINUTE, type LiveBindingOptions, type LiveContextResult, type LiveMemoryService, type RevokeWhy, type VoiceAction, type VoiceRoute, type VoiceTurnOutcome } from "./live.ts";
-import { chatText, keyOf, parseMemoryText, topicOf, type ParsedSegment } from "./parse.ts";
+import { chatText, keyOf, parseMemoryText, topicOf, workDecision, type ParsedSegment } from "./parse.ts";
 import { relevance, retrieve, type ChatTarget, type ContextFact } from "./retrieve.ts";
 import { SuggestionBook, suggestFrom, suggestionBodies, SUGGEST_TTL_MS, type PendingSuggestion } from "./suggest.ts";
 import type { Locale } from "../../shared/i18n.mjs";
@@ -64,6 +66,11 @@ import { DELEGATE_CARD } from "../../shared/protected-tasks.ts";
 //   （SuggestionBook）；turn 只回卡片 ID，內容經 card_view。只有在那張卡上按「記住」（confirmation，suggestFrom 重新解析）才寫入，
 //   source.kind "suggestion"。要 NOUS_MEMORY_ROUTES 列出 suggest、而且記憶管理裡開了 settings.suggestions 才會提。
 //   全家共用的新事實在旗標開著時記下 source.by（當時的本次人物；不是身分驗證），只在查看記憶時顯示。
+// - MEM-5b（工作決定，docs/validation/memory-mem5b-2026-10-30.md）：NOUS_MEMORY_ROUTES 列出 work_summary、任務確實加密保存時，
+//   打字的「記住這次選了方案 B」先出選擇卡（最近 24 小時成功完成、沒有撤回、在目前範圍內的工作，最多 5 個；標題只經 IPC），
+//   點選才寫入 kind work_summary（值＝使用者原話，derivedFrom＝那個任務）。依賴的記憶被忘記、更正或過期而撤回成果時在同一次
+//   提交裡連帶忘記（固定點）；任務已不存在時由對帳忘記（開檔與可信主視窗的 turn／list）。記憶關閉、撤回同意或依賴索引超過上限
+//   只撤回成果、保留工作決定（審查 M1）；讀不到的任務（金鑰問題）不清。
 
 export const MEMORY_IDLE_MS = 30 * 60_000;
 export const MEMORY_TURN_MS = 60_000;
@@ -140,6 +147,11 @@ export interface MemoryServiceOptions {
    * 快照照 2／3 寫。使用者還要在記憶管理開 settings.suggestions，兩者都開才會提。
    */
   suggest?: boolean;
+  /**
+   * MEM-5b：NOUS_MEMORY_ROUTES 列出 work_summary（預設關閉）。關閉時「記住這次選了方案 B」照舊記成一般筆記；
+   * 已經存在的工作決定照樣顯示、檢索，任務被刪或成果被撤回時照樣連帶忘記（撤銷不看旗標）。
+   */
+  workSummary?: boolean;
 }
 
 /** MEM-4a：受保護交辦需要的任務端介面（只在核心內）。 */
@@ -154,6 +166,13 @@ export interface TaskPort {
   submit(input: { task_id: string; title: string; request_id: string; locale?: Locale; retry_of?: string; facts: ContextFact[]; target?: { provider: string; account: string } | null }): Task;
   /** MEM-4b：給頁面的外殼（SSE 的 delegated 事件只帶外殼；真實標題經 IPC）。沒有提供時用 shellOf。 */
   publicGet?(taskId: string): Task | undefined;
+  /**
+   * MEM-5b：可信主視窗看得到的任務清單（TaskStore.listFor）：inScope 為 true、沒有撤回中而且讀得到內容的給真實內容，其他給外殼
+   * （protected: true）。只在核心內用來列工作決定卡與記憶清單上的連結標題；內容不進記憶、不送模型。
+   */
+  scopedList?(inScope: (task: Task) => boolean): Task[];
+  /** MEM-5b：任務還在不在（不解密）：present、withdrawn（成果已撤回）、missing（已刪除）。讀不到內容的任務仍是 present。 */
+  taskState?(taskId: string): "present" | "withdrawn" | "missing";
 }
 
 /** MEM-4b：受保護原句卡的有效時間（卡片留在畫面上，按「交辦」時才核對）。 */
@@ -208,7 +227,9 @@ type CardState =
   | { kind: "create_profile"; name: string }
   | { kind: "choose_profile"; name: string; profiles: string[] }
   | { kind: "face_candidate"; profile: string; person?: string; at?: number }
-  | { kind: "pick"; action: "correct" | "forget"; segment: Extract<ParsedSegment, { op: "correct" | "forget" }>; candidates: string[] };
+  | { kind: "pick"; action: "correct" | "forget"; segment: Extract<ParsedSegment, { op: "correct" | "forget" }>; candidates: string[] }
+  /** MEM-5b：工作決定卡。profileId：出卡時的本次人物；tasks：卡上列出的任務 ID（核心持有，點選只能從這裡選）。 */
+  | { kind: "work_summary"; segment: Extract<ParsedSegment, { op: "remember" }>; profileId: string; tasks: string[] };
 
 /**
  * fallback：處理到卡片前，因為找不到目標而改交給聊天的段落（卡片回答後一起送）。
@@ -253,11 +274,16 @@ const MINOR = "未成年家人的記憶請由家長在選單列「記憶…」�
 const NEED_MANAGE = "請從選單列「記憶…」打開記憶管理";
 
 /**
- * 審查 m4：MEM-5b 之前只處理 preference 與 note。快照 version 4 已經能存 work_summary，但它的顯示、更正與撤銷規則在 MEM-5b；
- * 在那之前（或從 MEM-5b 降回本版）不列出、不讓聊天更正或忘記、不送給模型（retrieve.ts 同一條規則）。
+ * 審查 m4：MEM-5a 只處理 preference 與 note。MEM-5b 起 work_summary（工作決定）也列出、可以更正或忘記、依同意送給模型
+ * （retrieve.ts 同一條規則）。降回 MEM-5a 時那一版仍不顯示它。
  */
 export function shownKind(f: Pick<MemoryFact, "kind">): boolean {
-  return f.kind === "preference" || f.kind === "note";
+  return f.kind === "preference" || f.kind === "note" || f.kind === "work_summary";
+}
+
+/** MEM-5b：這次提交要連帶忘記的工作決定（連到的任務成果被撤回）。 */
+function workFactsOf(facts: readonly MemoryFact[], taskIds: ReadonlySet<string>): MemoryFact[] {
+  return facts.filter(f => f.kind === "work_summary" && f.derivedFrom !== null && taskIds.has(f.derivedFrom.taskId));
 }
 
 function endOfLocalDay(now: number): string {
@@ -286,17 +312,52 @@ function explicitRemember(segments: readonly ParsedSegment[]): boolean {
  * （忘記、更正、過期）；依賴所屬範圍（人物或全家共用）對那個服務帳號的同意不再成立。換人、閒置不在其中。
  */
 export function withdrawals(before: MemoryData, after: MemoryData): Set<string> {
-  const out = new Set<string>();
+  return new Set(withdrawalCauses(before, after).keys());
+}
+
+/**
+ * MEM-5b 審查 M1：同一套撤回規則，另外記下原因。forgotten：依賴的記憶被刪（忘記、過期）或版本變了（更正），或人物被刪除——
+ * 來源真的沒了；reversible：記憶關閉或同意撤回（之後可以再打開）。兩種原因都有時算 forgotten。
+ */
+export function withdrawalCauses(before: MemoryData, after: MemoryData): Map<string, "forgotten" | "reversible"> {
+  const out = new Map<string, "forgotten" | "reversible">();
   for (const r of after.results) {
     if (r.state !== "active") continue;
     const facts = r.deps.map(d => ({ dep: d, old: before.facts.find(f => f.id === d.factId), now: after.facts.find(f => f.id === d.factId) }));
     const consented = (profileId: string | null) => after.consents.some(c => c.allowed && c.profileId === profileId && c.provider === r.target.provider && c.account === r.target.account);
-    if (!after.settings.enabled
-      || (r.subject !== null && !after.profiles.some(p => p.id === r.subject))
-      || facts.some(x => !x.now || x.now.revision !== x.dep.revision)
-      || facts.some(x => !consented((x.now ?? x.old)?.profileId ?? null))) out.add(r.taskId);
+    if ((r.subject !== null && !after.profiles.some(p => p.id === r.subject)) || facts.some(x => !x.now || x.now.revision !== x.dep.revision)) out.set(r.taskId, "forgotten");
+    else if (!after.settings.enabled || facts.some(x => !consented((x.now ?? x.old)?.profileId ?? null))) out.set(r.taskId, "reversible");
   }
   return out;
+}
+
+/**
+ * MEM-5b：一次提交裡的撤回與工作決定連帶忘記（固定點；planned 會被改動）。只有「來源真的沒了」（forgotten）的成果，
+ * 連到它的工作決定才忘記（審查 M1：記憶關閉、撤回同意、依賴索引超過上限都是可以回頭的，只撤回成果，保留使用者的原話）。
+ * 忘記的工作決定若被別的成果用到，那些成果也撤回（原因是 forgotten），再忘記連到它們的工作決定……每一輪至少多撤回一筆成果
+ * 才有下一輪，所以 rounds 不超過依賴索引的筆數；另設上限 results.length + 1。
+ */
+export function settleWithdrawals(before: MemoryData, planned: MemoryData, tombstoneRevision: number): { withdrawn: Set<string>; forgotten: Set<string>; cascaded: number; rounds: number } {
+  const causes = withdrawalCauses(before, planned);
+  const withdrawn = new Set(causes.keys());
+  const forgotten = new Set([...causes].filter(([, c]) => c === "forgotten").map(([id]) => id));
+  const bound = planned.results.length + 1;
+  let cascaded = 0, rounds = 0;
+  for (;;) {
+    if (withdrawn.size) planned.results = planned.results.map(r => withdrawn.has(r.taskId) && r.state === "active" ? { ...r, state: "withdrawn" as const, deps: [], subject: null } : r);
+    const gone = workFactsOf(planned.facts, forgotten);
+    if (!gone.length || rounds >= bound) break;
+    rounds++;
+    const ids = new Set(gone.map(f => f.id));
+    planned.facts = planned.facts.filter(f => !ids.has(f.id));
+    planned.tombstones = [...planned.tombstones.filter(t => !ids.has(t.id)), ...gone.map(f => ({ id: f.id, revision: tombstoneRevision }))].slice(-10000);
+    cascaded += gone.length;
+    for (const [id, cause] of withdrawalCauses(before, planned)) {
+      withdrawn.add(id);
+      if (cause === "forgotten") forgotten.add(id);
+    }
+  }
+  return { withdrawn, forgotten, cascaded, rounds };
 }
 
 /** live 卡片的回條對應到要念的固定句。 */
@@ -388,6 +449,9 @@ export class MemoryService implements LiveMemoryService {
         // MEM-4a：已撤回的受保護成果再確認一次已刪（撤銷提交後、刪檔前中斷的情況）。
         const withdrawn = this.snapshot().results.filter(r => r.state === "withdrawn").map(r => r.taskId);
         if (withdrawn.length) this.propagate(withdrawn);
+        // MEM-5b：對帳（連到的任務已不存在的工作決定一起忘記；任務刪除本身不碰記憶，見 reconcileWork）。
+        // 不等它：開檔可能發生在別的互斥操作裡；排在互斥佇列，下一個操作之前就會做完。
+        void this.exclusive(() => this.reconcileWork("open")).catch(() => this.log("memory: 工作決定對帳失敗"));
         try { await this.options.afterOpen?.(); } catch { this.log("memory: 備份排除失敗"); }
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
@@ -558,9 +622,39 @@ export class MemoryService implements LiveMemoryService {
     };
   }
 
-  private factView(f: MemoryFact, data: MemoryData): MemoryFactView {
+  private factView(f: MemoryFact, data: MemoryData, labels: Map<string, NonNullable<MemoryFactView["work"]>>): MemoryFactView {
     const by = f.profileId === null && f.source.by ? data.profiles.find(p => p.id === f.source.by)?.name ?? null : null;
-    return { id: f.id, revision: f.revision, subject: f.profileId, subject_name: f.profileId ? data.profiles.find(p => p.id === f.profileId)?.name ?? null : null, text: f.value, topic: f.topic, source: f.source.kind, excerpt: f.source.excerpt, at: f.source.at, expires: f.expiresAt, pinned: f.pinned, by_name: by };
+    const work = f.kind === "work_summary" && f.derivedFrom ? labels.get(f.derivedFrom.taskId) ?? { task_id: f.derivedFrom.taskId, title: null, state: "out_of_scope" as const } : null;
+    return { id: f.id, revision: f.revision, subject: f.profileId, subject_name: f.profileId ? data.profiles.find(p => p.id === f.profileId)?.name ?? null : null, text: f.value, topic: f.topic, source: f.source.kind, excerpt: f.source.excerpt, at: f.source.at, expires: f.expiresAt, pinned: f.pinned, by_name: by, kind: f.kind, work };
+  }
+
+  /** 一次組好多筆的畫面資料（MEM-5b：工作決定的連結標題一次查好，只查這幾筆用到的任務）。 */
+  private factViews(facts: readonly MemoryFact[], data: MemoryData): MemoryFactView[] {
+    const ids = new Set(facts.flatMap(f => f.kind === "work_summary" && f.derivedFrom ? [f.derivedFrom.taskId] : []));
+    const labels = this.workLabels(ids);
+    return facts.map(f => this.factView(f, data, labels));
+  }
+
+  /**
+   * MEM-5b：工作決定連到的任務在畫面上的標籤。標題只在任務屬於目前範圍（D2：沒用到記憶的任務、全家共用或本次人物的帶記憶任務）
+   * 而且讀得到內容時才給；範圍外或讀不到的只說 out_of_scope；已刪除的說 missing。只經可信主視窗的 IPC。
+   */
+  private workLabels(ids: ReadonlySet<string>): Map<string, NonNullable<MemoryFactView["work"]>> {
+    const out = new Map<string, NonNullable<MemoryFactView["work"]>>();
+    if (!ids.size) return out;
+    const tasks = this.options.tasks;
+    const scope = this.scopeNow();
+    let listed: Task[] = [];
+    try { listed = tasks?.scopedList?.(t => ids.has(t.task_id) && scope(t)) ?? []; } catch { listed = []; }
+    for (const id of ids) {
+      const task = listed.find(t => t.task_id === id);
+      let state: "present" | "withdrawn" | "missing" | null = null;
+      try { state = tasks?.taskState?.(id) ?? null; } catch { state = null; }
+      if (state === "missing") out.set(id, { task_id: id, title: null, state: "missing" });
+      else if (task && task.protected !== true && state !== null) out.set(id, { task_id: id, title: task.title, state: "in_scope" });
+      else out.set(id, { task_id: id, title: null, state: "out_of_scope" });
+    }
+    return out;
   }
 
   private activeFacts(data: MemoryData, scope: (f: MemoryFact) => boolean): MemoryFact[] {
@@ -595,7 +689,7 @@ export class MemoryService implements LiveMemoryService {
         case "card_answer": return await this.exclusive(() => this.cardAnswer(req));
         case "card_view": return this.cardView(req);
         case "select": return await this.exclusive(() => this.selectOp(req));
-        case "list": return this.list(req, ctx);
+        case "list": await this.exclusive(() => this.reconcileWork("ipc")); return this.list(req, ctx);
         case "receipt": return this.receiptOp(req);
         case "edit": return await this.exclusive(() => this.edit(req));
         case "forget": return await this.exclusive(() => req.all === true ? this.forgetAll(req) : this.forgetOp(req));
@@ -638,8 +732,10 @@ export class MemoryService implements LiveMemoryService {
       const cached = this.recent.get(requestId);
       if (cached) {
         if (cached.text !== text) throw new ServiceError("conflict", "同一個 request_id 帶了不同的內容");
-        return { ok: true, op: "turn", ...cached.view, status: this.statusView() };
+        return { ok: true, op: "turn", ...this.replayView(cached.view), status: this.statusView() };
       }
+      // MEM-5b 審查 m7：連到的任務已經不存在的工作決定，在可信主視窗的這一輪先對帳忘記（任務刪除本身不碰記憶）。
+      await this.reconcileWork("ipc");
       // 審查 m1：建議只屬於提出它的那一輪（16 §11）；新的一輪開始時，上一輪沒回答的建議作廢（不算拒絕）。
       this.suggestions.dropPending();
       this.touch();
@@ -657,10 +753,23 @@ export class MemoryService implements LiveMemoryService {
       } else {
         view = await this.process(text, requestId, segments, 0, "typed", {});
       }
-      this.recent.set(requestId, { text, view });
+      // MEM-5b 審查 m5：工作決定卡的任務標題不留在 request_id 快取裡（重送時依目前的任務重新取得）。
+      this.recent.set(requestId, { text, view: view.card?.kind === "work_summary" ? { ...view, card: { ...view.card, tasks: view.card.tasks.map(t => ({ ...t, title: "" })) } } : view });
       while (this.recent.size > REQUEST_LRU) this.recent.delete(this.recent.keys().next().value!);
       return { ok: true, op: "turn", ...view, status: this.statusView() };
     });
+  }
+
+  /**
+   * MEM-5b 審查 m5：同一個 request_id 重送時，工作決定卡的標題重新取得：卡片還有效時只列仍然可選的工作，失效時不列任何工作
+   * （按下也會回「已失效」）。
+   */
+  private replayView(view: MemoryTurnView): MemoryTurnView {
+    if (view.card?.kind !== "work_summary") return view;
+    const card = this.cards.get(view.card.card);
+    const live = card && card.state.kind === "work_summary" && card.epoch === this.presence.epoch && card.expires > this.now() ? card.state.tasks : [];
+    const choices = live.length ? this.workChoices().filter(c => live.includes(c.task_id)) : [];
+    return { ...view, card: { ...view.card, tasks: choices } };
   }
 
   /** chat 與 card 都在時，chat 只是暫緩顯示，不發 memory_turn；卡片處理完才發。 */
@@ -748,6 +857,18 @@ export class MemoryService implements LiveMemoryService {
             return stop({ kind: "clarify", card: card.id, value: seg.value, reason: txt(why), options: ["household", "cancel"] });
           }
           if (this.currentIsMinor()) { receipts.push(this.receipt("minor", txt(MINOR))); break; }
+          // MEM-5b：「記住這次選了方案 B」→ 先問連到哪一個最近完成的工作（旗標與加密保存都要開著；否則照舊記成一般筆記）。
+          if (this.workSummaryOn() && workDecision(seg)) {
+            const choices = this.workChoices();
+            if (choices.length) {
+              const card = this.newCard({ kind: "work_summary", segment: seg, profileId: profile, tasks: choices.map(c => c.task_id) }, text, seg.part, next, requestId, fallback);
+              this.log(`memory: 工作決定卡（${choices.length} 個工作）`);
+              return stop({ kind: "work_summary", card: card.id, value: seg.value, subject_name: this.nameOf(profile) || null, tasks: choices, options: ["task", "note", "cancel"] });
+            }
+            // 沒有可以連結的工作：照實說，照舊記成一般筆記（下面的一般流程）。
+            receipts.push(this.receipt("not_found", txt("最近 24 小時沒有可以連結的已完成工作，改用一般記住處理")));
+            this.log("memory: 工作決定沒有可連結的工作，記成一般筆記");
+          }
           const same = this.activeFacts(data, f => f.profileId === profile && f.key === seg.key);
           if (same.some(f => f.value === seg.value)) {
             receipts.push(this.receipt("unchanged", txt("已經記得了（{0}）：{1}", this.nameOf(profile), seg.value)));
@@ -783,7 +904,7 @@ export class MemoryService implements LiveMemoryService {
           if (candidates.length === 0) { fallback[seg.part] = seg.text; break; }
           if (candidates.length > 1) {
             const card = this.newCard({ kind: "pick", action: seg.op, segment: seg, candidates: candidates.map(f => f.id) }, text, seg.part, next, requestId, fallback);
-            return stop({ kind: "pick", card: card.id, action: seg.op, value: seg.value, candidates: candidates.map(f => this.factView(f, data)) });
+            return stop({ kind: "pick", card: card.id, action: seg.op, value: seg.value, candidates: this.factViews(candidates, data) });
           }
           const result = await this.writeTarget(seg, candidates[0]!, text, via, requestId);
           receipts.push(result);
@@ -797,7 +918,7 @@ export class MemoryService implements LiveMemoryService {
         case "inspect": {
           const profile = this.currentProfileId();
           const facts = this.activeFacts(data, f => shownKind(f) && (f.profileId === null || (profile !== null && f.profileId === profile)));
-          return stop({ kind: "inspect", subject_name: profile ? this.nameOf(profile) : null, facts: facts.map(f => this.factView(f, data)) });
+          return stop({ kind: "inspect", subject_name: profile ? this.nameOf(profile) : null, facts: this.factViews(facts, data) });
         }
       }
     }
@@ -882,10 +1003,11 @@ export class MemoryService implements LiveMemoryService {
     }
     // MEM-4a：撤銷傳播在同一次提交裡算好（所有改資料的操作都經過這裡）：依賴的記憶被刪、被更正、人物被刪、
     // 同意被撤回或記憶被關閉的成果改成 withdrawn（清掉 deps 與人物）。快照寫入成功後才刪成果檔。
-    const withdrawn = withdrawals(snap, planned);
-    if (withdrawn.size) planned.results = planned.results.map(r => withdrawn.has(r.taskId) && r.state === "active" ? { ...r, state: "withdrawn" as const, deps: [], subject: null } : r);
+    // MEM-5b：只有依賴的記憶真的被忘記、更正、過期或人物被刪時，連到那些任務的工作決定才一起忘記（固定點，見 settleWithdrawals）。
+    // log 只記筆數。
+    const { withdrawn, cascaded, rounds } = settleWithdrawals(snap, planned, snap.revision + 1);
     // 超過上限：先丟最舊的已撤回項目；沒有可丟的才丟最舊的有效項目，而且那筆成果一併撤回（審查 M4b），
-    // 不留下一份沒有依賴索引、撤銷傳播不到的成果。
+    // 不留下一份沒有依賴索引、撤銷傳播不到的成果。MEM-5b 審查 M1：這種撤回不忘記工作決定（不換世代、不清歷史）。
     while (planned.results.length > (this.options.resultLimit ?? RESULT_LIMIT)) {
       const oldest = planned.results.findIndex(r => r.state === "withdrawn");
       const [dropped] = planned.results.splice(oldest >= 0 ? oldest : 0, 1);
@@ -906,8 +1028,11 @@ export class MemoryService implements LiveMemoryService {
         this.replacePresence("unselected", { kind: "household" }, null, "unavailable");
         this.dropPlaintext("memory_closed");
       }
-      this.log(`memory: commit ${result.status}${expired.length ? `（清除過期 ${expired.length} 筆）` : ""}${withdrawn.size && result.status !== "unavailable" && result.status !== "conflict" && result.status !== "receipt_expired" ? `（撤回受保護成果 ${withdrawn.size} 筆）` : ""}`);
-      if (withdrawn.size && (result.status === "saved" || result.status === "updated" || result.status === "forgotten" || result.status === "unchanged")) this.propagate([...withdrawn]);
+      const ok = result.status === "saved" || result.status === "updated" || result.status === "forgotten" || result.status === "unchanged";
+      this.log(`memory: commit ${result.status}${expired.length ? `（清除過期 ${expired.length} 筆）` : ""}${withdrawn.size && ok ? `（撤回受保護成果 ${withdrawn.size} 筆）` : ""}${cascaded && ok ? `（連帶忘記工作決定 ${cascaded} 筆，${rounds} 輪）` : ""}`);
+      if (withdrawn.size && ok) this.propagate([...withdrawn]);
+      // MEM-5b：連帶忘記了工作決定：用過它的對話歷史、卡片與串流一起作廢（呼叫端若也換世代，多換一次無妨）。
+      if (cascaded && ok) this.bumpEpoch();
       return { result, operationId: operation.operationId };
     } finally {
       release?.();
@@ -1211,6 +1336,25 @@ export class MemoryService implements LiveMemoryService {
         this.liveReceipt(r.status);
         return finish(card.resume);
       }
+      case "work_summary": {
+        // MEM-5b：點選算直接確認（confirmation）；核心用卡片上保存的原句重新解析，工作只能從卡上列出的那幾個選。
+        if (choice !== "task" && choice !== "note") throw new ServiceError("bad_request", "choice 格式不對");
+        if (this.currentIsMinor()) { receipts.push(this.receipt("minor", txt(MINOR))); return finish(card.resume); }
+        if (this.currentProfileId() !== state.profileId) throw new ServiceError("expired", "這張卡片已失效（可能換了人物或超過時間）；請再說一次");
+        if (choice === "note") {
+          const profile = state.profileId;
+          // 審查 m2：和一般記住同一個判斷（同一個鍵、同一句、不是工作決定的就是已經記得了）。
+          const same = this.activeFacts(this.snapshot(), f => f.profileId === profile && f.kind !== "work_summary" && f.key === state.segment.key && f.value === state.segment.value);
+          if (same.length) receipts.push(this.receipt("unchanged", txt("已經記得了（{0}）：{1}", this.nameOf(profile), state.segment.value)));
+          else receipts.push(await this.writeRemember(state.segment, "subject", card.text, "confirmation", card.requestId));
+          this.log("memory: 工作決定卡：只記成一般筆記");
+          return finish(card.resume);
+        }
+        const taskId = req.task;
+        if (typeof taskId !== "string" || !state.tasks.includes(taskId)) throw new ServiceError("bad_request", "請從卡片上的工作選擇");
+        receipts.push(await this.writeWorkSummary(state.segment, taskId, card.text, "confirmation", card.requestId));
+        return finish(card.resume);
+      }
       case "inspect":
         throw new ServiceError("bad_request", "這張卡片只能查看");
     }
@@ -1350,7 +1494,7 @@ export class MemoryService implements LiveMemoryService {
     const subject = req.subject === undefined ? this.currentProfileId() : req.subject;
     if (subject !== null && (typeof subject !== "string" || !PROFILE_ID.test(subject) || !this.profileOf(subject))) throw new ServiceError("not_found", "找不到這位人物");
     if (!managed && subject !== null && subject !== this.currentProfileId()) throw new ServiceError("no_manage", NEED_MANAGE);
-    const facts = this.activeFacts(data, f => shownKind(f) && f.profileId === subject).map(f => this.factView(f, data));
+    const facts = this.factViews(this.activeFacts(data, f => shownKind(f) && f.profileId === subject), data);
     const people = managed ? this.options.identity?.()?.people() ?? null : null;
     const facePeople = people ? people.map(p => ({ person_id: p.person_id, name: p.name, linked: data.profiles.some(x => x.facePersonId === p.person_id) })) : null;
     const consents = this.options.targets().all.filter(t => t.account).map(t => ({ provider: t.provider, account: t.account!, allowed: data.consents.some(c => c.profileId === subject && c.provider === t.provider && c.account === t.account && c.allowed) }));
@@ -1657,7 +1801,7 @@ export class MemoryService implements LiveMemoryService {
     const profileId = this.currentProfileId();
     const consented = data.consents.some(c => c.allowed && c.provider === target.provider && c.account === target.account && (c.profileId === null || c.profileId === profileId));
     if (!consented) return result("no_consent");
-    const found = retrieve({ facts: data.facts, consents: data.consents, profileId, target, query, now: this.now() });
+    const found = retrieve({ facts: this.usableFacts(data.facts), consents: data.consents, profileId, target, query, now: this.now() });
     this.log(`memory: ${route} 檢索 ${found.facts.length} 筆（捨去 ${found.dropped}，未同意 ${found.blockedByConsent}）`);
     return result(null, found.facts);
   }
@@ -1867,11 +2011,11 @@ export class MemoryService implements LiveMemoryService {
         view = { kind: "face_candidate", card: card.id, name: this.nameOf(state.profile) };
         break;
       case "pick":
-        view = { kind: "pick", card: card.id, action: state.action, value: state.segment.value, candidates: state.candidates.map(fid => data.facts.find(f => f.id === fid)).filter((f): f is MemoryFact => !!f).map(f => this.factView(f, data)) };
+        view = { kind: "pick", card: card.id, action: state.action, value: state.segment.value, candidates: this.factViews(state.candidates.map(fid => data.facts.find(f => f.id === fid)).filter((f): f is MemoryFact => !!f), data) };
         break;
       case "inspect": {
         const facts = this.activeFacts(data, f => shownKind(f) && (f.profileId === null || (profile !== null && f.profileId === profile)));
-        view = { kind: "inspect", subject_name: profile ? this.nameOf(profile) : null, facts: facts.map(f => this.factView(f, data)) };
+        view = { kind: "inspect", subject_name: profile ? this.nameOf(profile) : null, facts: this.factViews(facts, data) };
         break;
       }
       default:
@@ -1905,7 +2049,7 @@ export class MemoryService implements LiveMemoryService {
     if (!data.settings.enabled) return run(plainContext(txt("記憶功能已關閉；這次沒有用到記憶"), tainted));
     this.touch();
     const profileId = this.currentProfileId();
-    const result = retrieve({ facts: data.facts, consents: data.consents, profileId, target: request.target, query: request.lastUser, now: this.now() });
+    const result = retrieve({ facts: this.usableFacts(data.facts), consents: data.consents, profileId, target: request.target, query: request.lastUser, now: this.now() });
     this.log(`memory: 檢索 ${result.facts.length} 筆（捨去 ${result.dropped}，未同意 ${result.blockedByConsent}）`);
     const notice = result.facts.length === 0 && result.blockedByConsent > 0 ? txt("這次沒有用到記憶：目前的服務或帳號尚未允許取用") : null;
     // MEM-4a：受保護交辦（放行 task 路徑時）。標題是這一輪核心核對過的使用者原句（binding.text），不是模型的改寫。
@@ -1922,11 +2066,163 @@ export class MemoryService implements LiveMemoryService {
     }
   }
 
+  // ─────────────── MEM-5b 工作決定（work_summary） ───────────────
+
+  /** 旗標（NOUS_MEMORY_ROUTES 的 work_summary）開著，而且任務確實加密保存（任務端在、加密模式、金鑰沒有問題）。 */
+  private workSummaryOn(): boolean {
+    const tasks = this.options.tasks;
+    if (this.options.workSummary !== true || !tasks?.scopedList) return false;
+    try { return tasks.sealed(); } catch { return false; }
+  }
+
+  /**
+   * 可信主視窗任務清單的範圍（D2，和 taskScope(false) 同一條規則；記憶檔已開時同步算）：沒有用到記憶的任務、
+   * 全家共用或本次人物的帶記憶任務。記憶檔讀不到時帶記憶的任務一律不在範圍內。
+   */
+  private scopeNow(): (task: Pick<Task, "task_id" | "memory">) => boolean {
+    let index: Map<string, MemoryResult> | null = null;
+    try { index = new Map(this.snapshot().results.map(r => [r.taskId, r])); } catch { index = null; }
+    const profileId = this.currentProfileId();
+    return (task) => {
+      if (task.memory !== true) return true;
+      const r = index?.get(task.task_id);
+      return !!r && (r.subject === null || r.subject === profileId);
+    };
+  }
+
+  /**
+   * 工作決定卡上的工作：最近 24 小時內成功完成、沒有撤回（也不在撤回中）、讀得到內容、在目前範圍內的受保護任務，
+   * 依完成時間新到舊最多 5 個。標題只給畫面（IPC），不進記憶、不送模型。
+   */
+  private workChoices(): { task_id: string; title: string; finished_at: string }[] {
+    const tasks = this.options.tasks;
+    if (!tasks?.scopedList) return [];
+    const scope = this.scopeNow();
+    const now = this.now();
+    const recent = (t: Pick<Task, "finished_at">) => { const at = typeof t.finished_at === "string" ? Date.parse(t.finished_at) : NaN; return Number.isFinite(at) && at <= now + 60_000 && now - at <= WORK_CHOICE_WINDOW_MS; };
+    // 審查 m3：先用外殼上就有的欄位（範圍、狀態、撤回、完成時間）篩選，不合格的任務不解密。
+    const eligible = (t: Task) => scope(t) && t.status === "succeeded" && t.withdrawn !== true && !t.cancel_reason && recent(t);
+    let listed: Task[];
+    try { listed = tasks.scopedList(eligible); } catch { return []; }
+    return listed
+      .filter(t => t.protected !== true && eligible(t) && !!t.title)
+      .sort((a, b) => b.finished_at!.localeCompare(a.finished_at!))
+      .slice(0, WORK_CHOICES_MAX)
+      .map(t => ({ task_id: t.task_id, title: t.title, finished_at: t.finished_at! }));
+  }
+
+  /**
+   * 票證比對用的重新解析（工作決定）：卡片上保存的原句再跑一次 parser，第 part 段必須仍是工作決定，命令才對得上；
+   * 任務 ID 來自核心卡片上列出、使用者點選的那一個（頁面不能指定別的）。
+   */
+  private workSummaryBodies(taskId: string, part: number): (text: string) => ({ op: string; part: number } & Record<string, string | number | boolean | null>)[] {
+    return (text) => parseMemoryText(text).map(seg => (seg.op === "remember" && seg.part === part && workDecision(seg)
+      ? { op: "work_summary", part: seg.part, value: seg.value, topic: seg.topic, key: seg.key, kind: "work_summary", expires: "none", task: taskId, scope: "subject" }
+      : { ...seg, scope: "subject" }) as { op: string; part: number } & Record<string, string | number | boolean | null>);
+  }
+
+  /**
+   * 寫入一筆工作決定：kind work_summary，值＝使用者原話（不含任務標題或成果，也不經模型摘要），derivedFrom＝選的任務；
+   * 不設期限（待 George 確認）。按下時再核對：旗標與加密保存、記憶開著、這個任務仍可選（沒刪、沒撤回、在範圍內、24 小時內）。
+   */
+  private async writeWorkSummary(seg: Extract<ParsedSegment, { op: "remember" }>, taskId: string, text: string, via: InputVia, requestId: string): Promise<MemoryReceiptView> {
+    const profileId = this.currentProfileId();
+    if (profileId === null) return this.receipt("rejected", txt(UNCLEAR.no_person!));
+    if (!this.workSummaryOn() || !this.snapshot().settings.enabled) return this.receipt("disabled", txt("工作決定目前沒有開放（或任務沒有加密保存），這次沒有保存"));
+    if (!this.workChoices().some(c => c.task_id === taskId)) return this.receipt("not_found", txt("這個工作已不存在、已撤回或不在目前範圍內，這次沒有保存"));
+    if ([...seg.value].length > MEMORY_VALUE_MAX) return this.receipt("full", txt("內容超過 {0} 字，沒有保存", String(MEMORY_VALUE_MAX)));
+    const data = this.snapshot();
+    const same = this.activeFacts(data, f => f.profileId === profileId && f.kind === "work_summary" && f.derivedFrom?.taskId === taskId && f.value === seg.value);
+    if (same.length) return this.receipt("unchanged", txt("已經記得這個工作決定了（{0}）：{1}", this.nameOf(profileId), seg.value));
+    if (!this.hasRoom(data, 1)) return this.fullReceipt();
+    const excerpt = [...text].length <= MEMORY_EXCERPT_MAX ? text : [...seg.value].length <= MEMORY_EXCERPT_MAX ? seg.value : null;
+    if (excerpt === null) return this.receipt("full", txt("內容太長，沒有保存（摘錄上限 {0} 字）", String(MEMORY_EXCERPT_MAX)));
+    const fields = { op: "work_summary", part: seg.part, value: seg.value, topic: seg.topic, key: seg.key, kind: "work_summary", expires: "none", task: taskId, scope: "subject" as const };
+    const operation = this.operation(JSON.stringify([fields]));
+    try {
+      this.ticketFor(text, via, { ...fields, operationId: operation.operationId } as ParsedMemoryCommand, "subject", this.workSummaryBodies(taskId, seg.part));
+    } catch {
+      return this.receipt("rejected", txt("這次的來源無法驗證，沒有保存；請再說一次"));
+    }
+    const nowIso = new Date(this.now()).toISOString();
+    const fact: MemoryFact = {
+      id: `mem_${hex(8)}`, profileId, revision: 0, kind: "work_summary", topic: seg.topic, key: seg.key, value: seg.value, audience: "household",
+      source: { kind: "explicit", turnId: requestId, at: nowIso, excerpt, by: null }, validFrom: nowIso, expiresAt: null, reviewAfter: null, pinned: false,
+      derivedFrom: { taskId },
+    };
+    const { result, operationId } = await this.commit(operation, (d) => { fact.revision = this.snapshot().revision + 1; d.facts.push(fact); return d; }, "saved");
+    if (result.status === "conflict" && !this.hasRoom(this.snapshot(), 1)) return this.fullReceipt();
+    if (result.status !== "saved") return this.storeFailure(result);
+    this.log("memory: 工作決定 1 筆（連到 1 個工作）");
+    return this.receipt("saved", txt("記在 {0} 名下的工作決定了：{1}", this.nameOf(profileId), seg.value), operationId);
+  }
+
+  /** 忘記這幾筆工作決定（一次提交、只留墓碑）；成功後換世代（用過它們的歷史作廢）。回傳忘記的筆數。 */
+  private async forgetWork(ids: ReadonlySet<string>): Promise<number> {
+    this.liveHold(true);
+    const { result } = await this.commit(JSON.stringify(["work_gone", [...ids].sort()]), (d) => {
+      const revision = this.snapshot().revision + 1;
+      d.facts = d.facts.filter(f => !ids.has(f.id));
+      d.tombstones = [...d.tombstones.filter(t => !ids.has(t.id)), ...[...ids].map(id => ({ id, revision }))].slice(-10000);
+      return d;
+    }, "forgotten");
+    if (result.status !== "forgotten") {
+      this.liveHold(false);
+      this.log(`memory: 工作決定連帶忘記失敗（${result.status}）`);
+      return 0;
+    }
+    this.recent.clear();
+    this.bumpEpoch();
+    this.log(`memory: 工作決定連帶忘記 ${ids.size} 筆（任務已不存在）`);
+    return ids.size;
+  }
+
+  /**
+   * 對帳（MEM-5b 審查 M1、m7）：連到的任務已經不存在（taskState missing）的工作決定一起忘記。任務被刪除的路徑（成果紀錄的
+   * HTTP 刪除）不帶記憶票證、也不一定來自可信主視窗，所以刪除本身不碰記憶；記憶檔開啟時，以及可信主視窗的下一次 turn 與 list
+   * （互斥區內）才對帳。成果被撤回（任務還在）不算：記憶關閉或撤回同意可以回頭，使用者的原話保留。任務端不在、沒有加密保存
+   * 或金鑰有問題（tasks.sealed() 為 false）時不知道任務在不在，一律不清；讀不到內容的任務仍在清單上，算存在（和 MEM-4a B1 一致）。
+   */
+  private async reconcileWork(trigger: "open" | "ipc"): Promise<number> {
+    const tasks = this.options.tasks;
+    if (!tasks?.taskState || this.closed || this.storeState !== "ready" || !this.store) return 0;
+    let data: MemorySnapshot;
+    try { data = this.snapshot(); } catch { return 0; }
+    const work = data.facts.filter(f => f.kind === "work_summary" && f.derivedFrom !== null);
+    if (!work.length) return 0;
+    let sealed = false;
+    try { sealed = tasks.sealed(); } catch { sealed = false; }
+    if (!sealed) {
+      if (trigger === "open") this.log(`memory: 工作決定對帳略過（任務沒有加密保存或金鑰不可用；${work.length} 筆不動）`);
+      return 0;
+    }
+    const ids = new Set(work.filter(f => {
+      try { return tasks.taskState!(f.derivedFrom!.taskId) === "missing"; } catch { return false; }
+    }).map(f => f.id));
+    if (!ids.size) return 0;
+    return this.forgetWork(ids);
+  }
+
+  /**
+   * 送模型前（聊天、即時語音、受保護交辦）先排除連到的任務已不存在的工作決定：任務刪除不碰記憶，要等對帳才真正忘記；
+   * 在那之前不讓它被取用。成果已撤回、任務還在的照常（審查 M1）。任務端不知道時照常。
+   */
+  private usableFacts(facts: readonly MemoryFact[]): MemoryFact[] {
+    const state = this.options.tasks?.taskState;
+    if (!state) return [...facts];
+    return facts.filter(f => {
+      if (f.kind !== "work_summary" || !f.derivedFrom) return true;
+      try { return state(f.derivedFrom.taskId) !== "missing"; } catch { return true; }
+    });
+  }
+
   // ─────────────── MEM-4a 受保護交辦與撤銷傳播 ───────────────
 
   /** MEM-4c：請任務端丟棄解密內容（失敗只記 log）。MEM-5a：記憶建議的候選與被拒絕的 key 也一起丟掉。 */
   private dropPlaintext(reason: "memory_off" | "memory_closed"): void {
     this.suggestions.clear();
+    // MEM-5b 審查 m5：request_id 快取裡的卡片（含原句）一起丟掉。
+    this.recent.clear();
     try { this.options.onPlaintextDrop?.(reason); } catch { this.log("memory: 任務端丟棄解密內容失敗"); }
   }
 
@@ -1964,7 +2260,7 @@ export class MemoryService implements LiveMemoryService {
       const target = mode === "mock" ? null : tasks.target();
       // MEM-4b：語音交辦在臉部候選還沒有結果時只用全家共用（profileId null）。
       const profileId = args.profileId !== undefined ? args.profileId : this.currentProfileId();
-      const found = target ? retrieve({ facts: data.facts, consents: data.consents, profileId, target, query: args.text, now: this.now() }) : { facts: [], deps: [], dropped: 0, blockedByConsent: 0 };
+      const found = target ? retrieve({ facts: this.usableFacts(data.facts), consents: data.consents, profileId, target, query: args.text, now: this.now() }) : { facts: [], deps: [], dropped: 0, blockedByConsent: 0 };
       const taskId = `task_${randomUUID()}`;
       if (found.facts.length > 0 && target?.account) {
         const entry: MemoryResult = { id: `res_${hex(8)}`, taskId, subject: profileId, deps: found.deps, target: { provider: target.provider, account: target.account }, createdAt: new Date(this.now()).toISOString(), state: "active" };
@@ -2106,14 +2402,8 @@ export class MemoryService implements LiveMemoryService {
       const memoryUnknown = !ready && this.hint();
       return (task) => task.memory !== true || !memoryUnknown;
     }
-    let index: Map<string, MemoryResult> | null = null;
-    try { if (ready) index = new Map(this.snapshot().results.map(r => [r.taskId, r])); } catch { index = null; }
-    const profileId = this.currentProfileId();
-    return (task) => {
-      if (task.memory !== true) return true;
-      const r = index?.get(task.task_id);
-      return !!r && (r.subject === null || r.subject === profileId);
-    };
+    // MEM-5b：同一條規則也給工作決定卡與記憶清單的連結標題用（scopeNow）。
+    return ready ? this.scopeNow() : (task) => task.memory !== true;
   }
 
   async shutdown(): Promise<void> {
