@@ -7,6 +7,8 @@ import { SCHEMA_VERSION, type Artifact, type ExecutorMode, type Task } from "../
 import { isDomain } from "../shared/domain.ts";
 
 type Listener = (task: Task) => void;
+/** 刪除通知：被刪的任務 ID 與它的成果 ID（沒有成果時 null）。 */
+type DeleteListener = (deleted: { task_id: string; artifact_id: string | null }) => void;
 
 const INTERRUPTED = "本機核心重新啟動，任務在完成前中斷（未產生成果）。";
 
@@ -18,6 +20,7 @@ export class TaskStore {
   private tasks = new Map<string, Task>();
   private artifacts = new Map<string, Artifact>();
   private listeners = new Set<Listener>();
+  private deleteListeners = new Set<DeleteListener>();
 
   constructor(private readonly dataDir: string | null) {
     if (dataDir) this.load(dataDir);
@@ -27,7 +30,14 @@ export class TaskStore {
     mkdirSync(dir, { recursive: true });
     const tasks = readJson<Task[]>(join(dir, "tasks.json")) ?? [];
     const artifacts = readJson<Artifact[]>(join(dir, "artifacts.json")) ?? [];
-    for (const a of artifacts) this.artifacts.set(a.artifact_id, a);
+    const taskIds = new Set(tasks.map((t) => t.task_id));
+    let orphans = 0;
+    for (const a of artifacts) {
+      // 刪除時先寫 artifacts.json 再寫 tasks.json；萬一中間中斷，留下的只會是沒有成果的任務，不會是沒有任務的成果。
+      // 保險起見，載入時仍丟掉找不到任務的成果。
+      if (!taskIds.has(a.task_id)) { orphans += 1; continue; }
+      this.artifacts.set(a.artifact_id, a);
+    }
     const now = new Date().toISOString();
     for (const t of tasks) {
       if (normalizeLocale(t.locale) !== "en") delete t.locale;
@@ -43,6 +53,7 @@ export class TaskStore {
       this.tasks.set(t.task_id, t);
     }
     this.persistTasks();
+    if (orphans > 0) this.persistArtifacts();
   }
 
   private persistTasks(): void {
@@ -56,6 +67,39 @@ export class TaskStore {
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  subscribeDeleted(listener: DeleteListener): () => void {
+    this.deleteListeners.add(listener);
+    return () => this.deleteListeners.delete(listener);
+  }
+
+  /** 成果紀錄搜尋用（HIST-1）：每個任務與它的成果（快照）。 */
+  documents(): { task: Task; artifact: Artifact | null }[] {
+    return [...this.tasks.values()].map((t) => {
+      const artifact = t.artifact_id ? this.artifacts.get(t.artifact_id) : undefined;
+      return { task: clone(t), artifact: artifact ? clone(artifact) : null };
+    });
+  }
+
+  /**
+   * 刪除任務與它的成果（成果紀錄裡經使用者明確確認後）。執行中（排隊、執行、停止中）的任務不能刪：
+   * 回 "active"，要先停止。不存在回 "not_found"。兩個檔都改寫後才通知訂閱者。
+   */
+  delete(taskId: string): { ok: true; task_id: string; artifact_id: string | null } | { ok: false; reason: "not_found" | "active" } {
+    const task = this.tasks.get(taskId);
+    if (!task) return { ok: false, reason: "not_found" };
+    if (task.status === "queued" || task.status === "running" || task.status === "cancelling") return { ok: false, reason: "active" };
+    const artifactId = task.artifact_id;
+    this.tasks.delete(taskId);
+    // 同一個任務的成果（正常只有 artifact_id 那一份；保險起見依 task_id 一併清掉）。
+    for (const [id, a] of this.artifacts) if (id === artifactId || a.task_id === taskId) this.artifacts.delete(id);
+    // 先移除成果內容，再移除任務（見 load 的說明）。
+    this.persistArtifacts();
+    this.persistTasks();
+    const deleted = { task_id: taskId, artifact_id: artifactId };
+    for (const l of this.deleteListeners) l(deleted);
+    return { ok: true, ...deleted };
   }
 
   list(): Task[] {

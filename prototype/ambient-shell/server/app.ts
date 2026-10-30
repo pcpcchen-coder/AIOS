@@ -34,9 +34,11 @@ import {
 import { COMMANDS_PATH, commandsPageHeaders, renderCommandsPage } from "./commands-page.ts";
 import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity.ts";
 import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
-import { pageHeaders } from "./page-headers.ts";
+import { historyPageHeaders, pageHeaders } from "./page-headers.ts";
 import type { TaskRunner } from "./runner.ts";
 import type { TaskStore } from "./store.ts";
+import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
+import type { HistoryDetail } from "../shared/history.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
@@ -124,6 +126,10 @@ export interface AppOptions {
   identity?: { status(): IdentityStatus };
   /** 家人辨識模型與 onnxruntime wasm 的資料夾（只提供清單上的檔名）；未提供時 /face-runtime/ 一律 404。 */
   faceRuntimeDir?: string | null;
+  /**
+   * 成果紀錄（HIST-1）額外的搜尋來源；一般任務（TaskStore）一律包含。MEM-4c 的受保護成果之後由這裡併入。
+   */
+  historySources?: HistorySource[];
   port: number;
   devPort: number;
   distDir: string | null;
@@ -202,6 +208,16 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     for (const res of clients.values()) res.write(frame);
   };
   store.subscribe((task) => broadcast({ type: "task.updated", sequence: ++sequence, task }));
+  store.subscribeDeleted((deleted) => {
+    // 記憶體裡為搜尋準備的純文字也一起丟掉。
+    if (deleted.artifact_id) forgetHistoryArtifact(deleted.artifact_id);
+    broadcast({ type: "task.deleted", sequence: ++sequence, ...deleted });
+  });
+  /** 成果紀錄的搜尋來源：一般任務（明文）＋選用的其他來源。 */
+  const historySources: HistorySource[] = [
+    { id: "tasks", protected: false, documents: () => store.documents() },
+    ...(options.historySources ?? []),
+  ];
 
   const heartbeat = setInterval(() => {
     for (const res of clients.values()) res.write(": keep-alive\n\n");
@@ -220,7 +236,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         res.writeHead(200, commandsPageHeaders());
         res.end(method === "HEAD" ? undefined : renderCommandsPage(settings.view(), new Date(), normalizeLocale(url.searchParams.get("lang"))));
       } else if (url.pathname.startsWith("/api/")) {
-        await handleApi(req, res, url.pathname);
+        await handleApi(req, res, url.pathname, url.searchParams);
       } else if (url.pathname.startsWith("/face-runtime/")) {
         serveFaceRuntime(res, req.method ?? "GET", url.pathname, options.faceRuntimeDir);
       } else {
@@ -235,7 +251,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
   });
   server.on("close", () => clearInterval(heartbeat));
 
-  async function handleApi(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
+  async function handleApi(req: IncomingMessage, res: ServerResponse, path: string, params: URLSearchParams): Promise<void> {
     const method = req.method ?? "GET";
     if (method === "GET" && path === "/api/settings") return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     if (method === "POST" && path === "/api/settings/provider") {
@@ -512,6 +528,36 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       return sendJson(res, 201, runner.submit({ title: text, request_id: requestId(body), ...(normalizeLocale(req.headers["x-nous-locale"]) === "en" ? { locale: "en" as const } : {}) }));
     }
 
+    // HIST-1 成果紀錄：搜尋（記憶體內比對，不寫索引、不記查詢文字）、單筆詳細、經明確確認的刪除。
+    if (method === "GET" && path === "/api/history") {
+      let query: ReturnType<typeof parseHistoryQuery>;
+      try {
+        query = parseHistoryQuery(params);
+      } catch (err) {
+        if (err instanceof HistoryQueryError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      return sendJson(res, 200, searchHistory(historySources, query));
+    }
+    const historyItem = path.match(/^\/api\/history\/([\w-]+)$/);
+    if (method === "GET" && historyItem) {
+      const task = store.get(historyItem[1]);
+      if (!task) throw new HttpError(404, "找不到這個任務");
+      const detail: HistoryDetail = { task, artifact: task.artifact_id ? store.getArtifact(task.artifact_id) ?? null : null, source: "tasks", protected: false };
+      return sendJson(res, 200, detail);
+    }
+    const historyDelete = path.match(/^\/api\/history\/([\w-]+)\/delete$/);
+    if (method === "POST" && historyDelete) {
+      const body = await readJson(req);
+      requestId(body);
+      // 刪除不能復原：頁面先經原生確認，再帶 confirm: true；沒有就不刪。
+      if (body.confirm !== true) throw new HttpError(400, "刪除需要明確確認");
+      const result = store.delete(historyDelete[1]);
+      if (!result.ok && result.reason === "not_found") throw new HttpError(404, "找不到這個任務");
+      if (!result.ok) throw new HttpError(409, "執行中的任務不能刪除，請先停止任務");
+      return sendJson(res, 200, result);
+    }
+
     const artifact = path.match(/^\/api\/artifacts\/([\w-]+)$/);
     if (method === "GET" && artifact) {
       const found = store.getArtifact(artifact[1]);
@@ -528,8 +574,10 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         if (!task) throw new HttpError(404, "task not found");
         return sendJson(res, 200, task);
       }
-      const task = runner.retry(taskId, requestId(body));
-      if (!task) throw new HttpError(409, "only failed or cancelled tasks can be retried");
+      // redo：成果紀錄的「重做」，也接受已完成的任務（同樣建立新任務、記下 retry_of）。
+      const redo = body.redo === true;
+      const task = runner.retry(taskId, requestId(body), { redo });
+      if (!task) throw new HttpError(409, redo ? "only finished tasks can be redone" : "only failed or cancelled tasks can be retried");
       return sendJson(res, 201, task);
     }
 
@@ -705,13 +753,15 @@ function serveStatic(res: ServerResponse, pathname: string, distDir: string | nu
     res.end("前端尚未建置：請用 npm start（會先 vite build），或開發時用 npm run dev:web。");
     return;
   }
+  // 成果紀錄的獨立網頁（HIST-1）：只有使用者自己打開 /history 才提供，不是預設頁。
+  if (pathname === "/history" || pathname === "/history/") pathname = "/history.html";
   const relative = normalize(decodeURIComponent(pathname)).replace(/^([/\\])+/, "");
   let file = join(distDir, relative);
   if (!file.startsWith(distDir + sep) && file !== distDir) throw new HttpError(403, "forbidden");
   if (!existsSync(file) || statSync(file).isDirectory()) file = join(distDir, "index.html");
   const type = CONTENT_TYPES[extname(file)] ?? "application/octet-stream";
   const headers: Record<string, string> = { "Content-Type": type };
-  if (type.startsWith("text/html")) Object.assign(headers, pageHeaders(camera), { "Cache-Control": "no-cache" });
+  if (type.startsWith("text/html")) Object.assign(headers, file.endsWith(`${sep}history.html`) ? historyPageHeaders() : pageHeaders(camera), { "Cache-Control": "no-cache" });
   if (type.startsWith("text/javascript")) Object.assign(headers, scriptHeaders());
   res.writeHead(200, headers);
   res.end(readFileSync(file));

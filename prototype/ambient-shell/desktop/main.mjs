@@ -290,6 +290,12 @@ function openMemory() {
   command("memory");
 }
 
+/** 選單列「在瀏覽器打開成果紀錄」：只開本機核心的 /history（同一個本機位址與連接埠；沒有權杖，靠本機位址限制）。 */
+function openHistoryInBrowser() {
+  if (!core) return;
+  void shell.openExternal(`${core.url}/history?lang=${prefs.locale}`);
+}
+
 /** 選單列「家人辨識…」的點擊時間：10 秒內頁面才能開管理 session（語音或頁面腳本不能自己開）。 */
 const familyClick = new MenuClickWindow();
 
@@ -673,6 +679,9 @@ function rebuildMenu() {
     },
     { label: "鏡頭與語音設定", submenu: secondsMenu() },
     { label: "語音指令表", click: openCommandsWindow },
+    // 成果紀錄（HIST-1）：使用者點了才打開（App 內的按需畫面，或用系統瀏覽器開核心的 /history）。
+    { label: "成果紀錄…", click: () => command("history") },
+    { label: "在瀏覽器打開成果紀錄", click: openHistoryInBrowser, enabled: !!core },
     {
       label: "記憶…",
       sublabel: settings?.memory && !settings.memory.available ? t("此 Mac 無法安全保存，記憶停用") : settings?.memory?.enabled ? undefined : t("尚未開啟"),

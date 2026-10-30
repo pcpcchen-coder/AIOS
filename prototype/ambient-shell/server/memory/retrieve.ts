@@ -5,7 +5,8 @@
 // ContextFact 只含 text、source、at、expires，不含人物 ID、記憶 ID、票證或版本。
 
 import type { MemoryConsent, MemoryFact } from "./store.ts";
-import { questionTopics, synonymGroups, toTraditional, type TopicId } from "./parse.ts";
+import { questionTopics, synonymGroups, type TopicId } from "./parse.ts";
+import { bigrams, words } from "../search-terms.ts";
 
 export const CONTEXT_MAX_FACTS = 8;
 export const CONTEXT_MAX_PINNED = 4;
@@ -43,25 +44,7 @@ export interface RetrievalResult {
   blockedByConsent: number;
 }
 
-const STOP_BIGRAMS = new Set(["什麼", "怎麼", "可以", "我們", "你們", "他們", "一下", "這個", "那個", "今天", "明天", "現在", "幫我", "請你", "一個", "沒有", "不是", "就是", "還是", "因為", "所以", "如果", "知道", "覺得", "應該", "需要", "想要", "喜歡", "不要", "要不", "好嗎", "嗎？", "一點"]);
-const EN_STOP = new Set(["the", "and", "for", "you", "are", "what", "how", "can", "should", "with", "that", "this", "have", "has", "was", "were", "about", "please", "help", "me", "my", "your", "i", "it", "is", "do", "does", "don't", "not", "like"]);
-
-/** 中文二字片段（簡繁對照後，只取漢字連續段）。 */
-export function bigrams(text: string): Set<string> {
-  const out = new Set<string>();
-  for (const run of toTraditional(text).match(/\p{Script=Han}+/gu) ?? []) {
-    const chars = [...run];
-    for (let i = 0; i + 1 < chars.length; i++) {
-      const gram = chars[i]! + chars[i + 1]!;
-      if (!STOP_BIGRAMS.has(gram)) out.add(gram);
-    }
-  }
-  return out;
-}
-
-function words(text: string): Set<string> {
-  return new Set((text.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? []).filter(w => !EN_STOP.has(w)));
-}
+// 比對方式（簡繁對照、中文二字片段、英文詞）與成果紀錄搜尋共用：server/search-terms.ts。
 
 function consentFor(consents: readonly MemoryConsent[], profileId: string | null, target: ChatTarget): boolean {
   return consents.some(c => c.profileId === profileId && c.provider === target.provider && c.account === target.account && c.allowed);

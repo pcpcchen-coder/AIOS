@@ -1181,3 +1181,156 @@ body[data-camera-preview="open"] .subtitle {
 .memory-fact-text { display: grid; flex: 1 1 200px; }
 .memory-field { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
 .memory-allow { margin: 8px 0; display: grid; gap: 4px; }
+
+/* ───── 成果紀錄（HIST-1）：App 內的 Surface 與獨立網頁 /history 共用 ───── */
+
+.history-entry {
+  margin-top: 10px;
+}
+
+.history-form {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.history-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-input {
+  flex: 1;
+  min-width: 180px;
+  font: inherit;
+  font-size: 15px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+}
+
+.history-filters label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.history-filters select,
+.history-filters input {
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  color-scheme: dark;
+}
+
+.history-status {
+  margin: 4px 0 10px;
+  font-size: 13px;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.history-item {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.history-open {
+  all: unset;
+  display: block;
+  width: 100%;
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.history-open:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.history-meta {
+  margin: 4px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.history-snippet {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.surface--history mark {
+  color: var(--bg);
+  background: var(--amber);
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+.history-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.history-facts dt {
+  color: var(--muted);
+}
+
+.history-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.history-source h3,
+.history-steps h3 {
+  margin: 16px 0 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 獨立網頁：一般捲動的頁面，不是漂浮在電子腦上的 Surface。 */
+html:has(body.history-page),
+body.history-page {
+  height: auto;
+  min-height: 100%;
+  overflow: auto;
+}
+
+.history-page-main {
+  width: min(860px, 94vw);
+  margin: 4vh auto;
+}
+
+.history-page .surface {
+  max-height: none;
+  overflow: visible;
+}

@@ -30,6 +30,7 @@ import { homeControlLine, homeStatusLine } from "../shared/home.ts";
 import { classify, settingsReply } from "./intent.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { FamilyView } from "./family-view.ts";
+import { HistoryView } from "./history-view.ts";
 import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, presenceLabel, receiptsText } from "./memory-view.ts";
 import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
 import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
@@ -985,6 +986,30 @@ const memoryView = new MemoryView({
   },
 });
 
+// 成果紀錄（HIST-1）：只由使用者的說法、進度卡的「搜尋全部成果」或選單列「成果紀錄…」打開；模型工具不能打開。
+const historyView = new HistoryView({
+  api,
+  // macOS App 裡 window.confirm 是原生對話框；瀏覽器裡是瀏覽器的確認框。
+  confirm: (message) => window.confirm(message),
+  requestId: userRequest,
+  redo: async (task, requestId) => {
+    // 沿用重試：建立新任務（retry_of 指向原任務），換成前景任務的進度。
+    const created = await api.redoTask(task.task_id, requestId);
+    if (!tasks.has(created.task_id)) tasks.set(created.task_id, created);
+    dispatch({ type: "task.submitted", task_id: created.task_id, request_id: requestId });
+    dispatch({ type: "task.updated", task: tasks.get(created.task_id)! });
+    return null;
+  },
+  dismiss: () => dispatch({ type: "dismiss" }),
+  // 一般瀏覽器可以另開 /history；macOS App 的視窗不開新分頁。
+  browserLink: !window.nousDesktop,
+});
+
+function openHistory(requestId: string, query = ""): void {
+  historyView.open(query);
+  dispatch({ type: "show.history", request_id: requestId });
+}
+
 /** 「要交辦這件事嗎？」按「交辦」：用使用者原句建立任務（新的 user_request，不帶記憶、不帶模型改寫）。 */
 async function delegateDirect(title: string): Promise<void> {
   const requestId = userRequest();
@@ -1464,12 +1489,24 @@ function onServerEvent(event: ServerEvent): void {
     render();
     return;
   }
+  if (event.type === "task.deleted") {
+    // 成果紀錄裡確認刪除的任務（任何一個頁面刪的都一樣）：從畫面移除；正在看它的成果畫面由 Presentation Policy 收起。
+    tasks.delete(event.task_id);
+    if (event.artifact_id) {
+      artifacts.delete(event.artifact_id);
+      artifactErrors.delete(event.artifact_id);
+    }
+    historyView.taskDeleted(event.task_id);
+    render();
+    return;
+  }
   if (event.type !== "task.updated") return;
   const prev = tasks.get(event.task.task_id);
   tasks.set(event.task.task_id, event.task);
   firePulses(prev, event.task);
   const wasForeground = shell.mode === "working" && shell.foreground_task_id === event.task.task_id;
   dispatch({ type: "task.updated", task: event.task });
+  historyView.taskUpdated(event.task);
   if (realtimeTaskIds.has(event.task.task_id) && !isActive(event.task)) {
     // 即時語音中交辦的任務結束：請模型用一句話轉告（不論是否還在前景）。
     realtimeTaskIds.delete(event.task.task_id);
@@ -1578,6 +1615,12 @@ async function handleCommand(text: string, source: "typed" | "speech" = "typed")
       }
       return;
     }
+    case "history":
+      input.value = "";
+      historyView.open(intent.query);
+      dispatch({ type: "show.history", request_id: requestId });
+      say(intent.query ? msg`這是「${intent.query.slice(0, 18)}」的搜尋結果。` : t("這是成果紀錄。"));
+      return;
     case "stop": {
       input.value = "";
       const active = [...tasks.values()].filter((t) => t.status === "queued" || t.status === "running");
@@ -1634,6 +1677,7 @@ const actions: ViewActions = {
   openArtifact: (taskId, artifactId) =>
     dispatch({ type: "show.artifact", request_id: userRequest(), task_id: taskId, artifact_id: artifactId }),
   showProgress: () => dispatch({ type: "show.progress", request_id: userRequest() }),
+  openHistory: () => openHistory(userRequest()),
   dismiss: () => dispatch({ type: "dismiss" }),
   openSettings: () => dispatch({ type: "show.settings", request_id: userRequest() }),
   selectProvider: (provider) => void selectProvider(provider, userRequest()),
@@ -1879,6 +1923,7 @@ window.addEventListener("nous:command", (event) => {
       memoryView.openManager();
       dispatch({ type: "show.memory", request_id: userRequest() });
     },
+    history: () => openHistory(userRequest()),
   });
 });
 
@@ -2079,7 +2124,7 @@ function renderSurface(): void {
 
   const task = s.task_id ? tasks.get(s.task_id) : undefined;
   const key = getLocale() + ":" + (
-    s.kind === "family" || s.kind === "memory"
+    s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
       ? `${s.surface_id}:${JSON.stringify(settings)}:${s.message ?? ""}`
@@ -2103,6 +2148,8 @@ function renderSurface(): void {
   else if (s.kind === "family") el = familyView.element;
   // 記憶卡與記憶管理自己更新內容（等 IPC 回應、原生確認時不重建）。
   else if (s.kind === "memory") el = memoryView.element;
+  // 成果紀錄自己更新內容（搜尋、詳細頁、刪除確認時不重建）。
+  else if (s.kind === "history") el = historyView.element;
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
   else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop });
   else if (s.kind === "progress") el = renderProgress([...tasks.values()], s.message, actions);
@@ -2167,6 +2214,8 @@ window.addEventListener("keydown", (e) => {
   if (document.activeElement === input || e.ctrlKey || e.metaKey || e.altKey) return;
   const target = e.target as HTMLElement;
   if (target.closest("button, a, summary, details")) return;
+  // 畫面裡的輸入欄（成果紀錄的搜尋框、日期、下拉選單等）自己接收按鍵，不打開指令列。
+  if (target.closest("input, textarea, select, [contenteditable]")) return;
   const printable = e.key.length === 1 || e.key === "Process";
   if (!shell.listening && (printable || e.key === "Enter")) {
     if (e.key === " " || e.key === "Enter") e.preventDefault();

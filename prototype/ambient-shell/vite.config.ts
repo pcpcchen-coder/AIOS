@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defaultClientConditions, defineConfig } from "vite";
 import { pageHeaders } from "./server/page-headers.ts";
 
@@ -23,5 +24,16 @@ export default defineConfig({
     headers: dev,
   },
   preview: { headers: page },
-  build: { outDir: "dist", emptyOutDir: true, target: "es2022" },
+  // 兩個頁面：主畫面（index.html）與成果紀錄的獨立網頁（history.html，核心以 /history 提供；只在使用者自己打開時出現）。
+  build: {
+    outDir: "dist",
+    emptyOutDir: true,
+    target: "es2022",
+    rolldownOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        history: fileURLToPath(new URL("./history.html", import.meta.url)),
+      },
+    },
+  },
 });

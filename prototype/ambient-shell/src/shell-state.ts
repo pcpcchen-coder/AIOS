@@ -17,8 +17,10 @@ export type VisibilityReason =
  * family：家人辨識（docs/14 ID-01），只由選單列「家人辨識…」打開，visibility_reason 為 user_request。
  * memory：記憶卡（首次設定、澄清、選人物、「你記得我什麼？」）與記憶管理（docs/16 MEM-1）；request_id 是觸發它的
  * 使用者輸入或選單列點擊，visibility_reason 為 user_request（不冒用外部動作的確認 ID）。
+ * history：成果紀錄（HIST-1），只由使用者的說法（「搜尋成果 香菜」）、進度卡的「搜尋全部成果」或選單列「成果紀錄…」打開；
+ * visibility_reason 一律 user_request，request_id 是那一次輸入或點擊。模型工具不能打開。
  */
-export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation" | "confirm" | "family" | "memory";
+export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation" | "confirm" | "family" | "memory" | "history";
 
 export interface Surface {
   surface_id: string;
@@ -52,6 +54,8 @@ export type ShellEvent =
   | { type: "show.family"; request_id: string }
   /** 記憶卡或記憶管理；request_id 是那一輪打字或選單列點擊。 */
   | { type: "show.memory"; request_id: string }
+  /** 成果紀錄；request_id 是那一輪打字、說話、按鈕或選單列點擊。查詢詞由畫面自己保存。 */
+  | { type: "show.history"; request_id: string }
   /** 外部動作的確認卡；request_id 為確認請求 id，由 Presentation Policy 對照待確認清單。 */
   | { type: "show.confirm"; request_id: string; message: string }
   | { type: "dismiss" };
@@ -80,11 +84,12 @@ function surface(
 }
 
 /**
- * 這個畫面開著時不能自動開始對話（看著說話）：startRealtime 會收起畫面。家人辨識畫面（登記、試認）與記憶卡不能被打斷。
+ * 這個畫面開著時不能自動開始對話（看著說話）：startRealtime 會收起畫面。家人辨識畫面（登記、試認）、記憶卡與成果紀錄
+ * （正在搜尋或閱讀）不能被打斷。
  * 使用者自己按「開始語音對話」不受影響（那是明確的動作）。
  */
 export function blocksAutoTalk(surface: Surface | null): boolean {
-  return surface?.kind === "family" || surface?.kind === "memory";
+  return surface?.kind === "family" || surface?.kind === "memory" || surface?.kind === "history";
 }
 
 /** 純函式 reducer；不產生任何副作用（例如取消任務），副作用由呼叫端明確發出。 */
@@ -167,6 +172,13 @@ export function reduceShell(state: ShellState, event: ShellEvent): ShellState {
         listening: false,
         foreground_task_id: null,
         surface: surface("memory", event.request_id),
+      };
+    case "show.history":
+      return {
+        mode: "presenting",
+        listening: false,
+        foreground_task_id: null,
+        surface: surface("history", event.request_id),
       };
     case "show.confirm":
       return {

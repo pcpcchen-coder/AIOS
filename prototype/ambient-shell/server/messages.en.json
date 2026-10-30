@@ -52,7 +52,6 @@
   "即時語音確認卡開著時說這幾句，除了改手掌停止的設定，也會因為含「停止」而拒絕確認卡。用打的不會（鏡頭規則先處理，不再檢查確認語句）": "Spoken with a realtime card changes settings and rejects the card because it includes 停止. Typing does not, as camera rules run first and skip approval parsing",
   "即時語音中說鏡頭指令：本機照做，這句話也仍會送到 AI，AI 可能另外回應": "Spoken realtime camera commands execute locally and still reach AI, which may respond separately",
   "收起畫面的同時也會結束語音模式或即時語音；進行中的任務不會停止（停止任務才會）": "Dismisses and ends voice, without stopping tasks",
-  "即時語音確認卡開著時打這些字：會換上進度、設定、成果或通知畫面，確認卡被換掉就算拒絕，外部動作不執行（即使這句話本身不是確認或取消的說法）。要同意請打或說「確認執行」等確認語句": "Typed with a realtime card replaces it with progress/settings/artifact/notice, rejecting the external action even without an approval/cancel phrase. Approve with 確認執行 instead",
   "即時語音中用說的，這些都不在本機處理，會交給 AI：問進度 AI 會查真實狀態回答；AI 沒有停止任務或收起畫面的工具。要停止任務，請打「停止任務」或按進度畫面上的停止按鈕；要收起，請打「收起」、按 Esc 或點畫面上的按鈕。Esc 只會打斷說話或收起畫面，不會停止任務。確認卡開著時，含「停止」的話會拒絕確認卡": "Spoken realtime goes to AI. AI can query progress, but has no task-stop or dismiss tools. Type 停止任務 or use task buttons to stop. Type 收起, press Esc, or click to dismiss. Esc interrupts/dismisses, not cancels tasks. With a card open, phrases including 停止 reject it",
   "確認卡開著時，這句話因為含「停止」而算取消，家電指令不會執行。要同意只說「確認執行」，不要把動作接在後面": "Includes 停止 and therefore rejects the card. Say only 確認執行 to approve, without appending the action",
   "確認卡開著時只說「好」不算同意，也不算取消：指令不會送出，確認卡繼續等你說「確認執行」或「取消」，60 秒後自動取消": "Neither approval nor cancellation. Nothing is sent. Card waits for 確認執行 or 取消, then cancels at 60 seconds",
@@ -429,5 +428,18 @@
   "已經有一個帶記憶的 API key 即時語音在進行中（一次只能一個）": "An API key realtime voice call with memory is already in progress (only one at a time)",
   "找不到要重建的通話，請重新開始": "No call to rebuild was found; please start again",
   "記憶設定沒有被即時語音確認，這次沒有開始；請再開始一次。": "Realtime voice did not confirm the memory settings, so it did not start this time; please start again.",
-  "與 OpenAI 即時語音的核心控制連線在連線期間中斷，這次沒有開始；請再開始一次。": "The core's control connection to OpenAI realtime voice was lost while connecting, so it did not start this time; please start again."
+  "與 OpenAI 即時語音的核心控制連線在連線期間中斷，這次沒有開始；請再開始一次。": "The core's control connection to OpenAI realtime voice was lost while connecting, so it did not start this time; please start again.",
+  "即時語音確認卡開著時打這些字：會換上進度、設定、成果、成果紀錄或通知畫面，確認卡被換掉就算拒絕，外部動作不執行（即使這句話本身不是確認或取消的說法）。要同意請打或說「確認執行」等確認語句": "Typed with a realtime card replaces it with progress/settings/artifact/results history/notice, rejecting the external action even without an approval/cancel phrase. Approve with 確認執行 instead",
+  "刪除需要明確確認": "Deletion requires explicit confirmation",
+  "執行中的任務不能刪除，請先停止任務": "A running task cannot be deleted; stop the task first",
+  "打開成果紀錄：搜尋過去的任務與成果（標題、步驟、成果內容），可篩選狀態、引擎與日期，看詳細內容、重做或刪除（刪除前會再確認）": "Open results history: search past tasks and results (titles, steps, result content), filter by status, engine, and date, view details, redo, or delete (deletion asks for confirmation first)",
+  "要以「搜尋成果」「找之前…的成果」「成果紀錄」等說法開頭或結尾；查詢詞像在交辦（「然後寫…」「幫我整理…」）時會當成交辦；「之前的比賽結果」這類沒說「做過」的「結果」不算。只說「成果」「看結果」仍是打開最近一份。英文要說 my／past results。macOS App 也可以從選單列「成果紀錄…」打開": "Start or end with phrases such as 搜尋成果, 找之前…的成果, or 成果紀錄. If the query reads like a new assignment (然後寫…, 幫我整理…), it is delegated instead; 結果 without 做過 (such as 之前的比賽結果) does not count. Saying only 成果 or 看結果 still opens the latest result. In English, say “my” or “past” results (“search past results for …”, “results history”). In the macOS App, also open it from the menu bar item “Results history…”",
+  "查詢文字超過 200 字": "Query text exceeds 200 characters",
+  "未知的任務狀態": "Unknown task status",
+  "未知的引擎": "Unknown engine",
+  "開始日期晚於結束日期": "The start date is after the end date",
+  "分頁位置不正確": "Invalid page position",
+  "每頁筆數不正確": "Invalid page size",
+  "日期格式不正確": "Invalid date",
+  "找不到這個任務": "Task not found"
 }

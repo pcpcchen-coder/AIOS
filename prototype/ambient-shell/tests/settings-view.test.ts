@@ -98,7 +98,7 @@ function actions() {
     cancel: noop, retry: noop, openArtifact: noop, showProgress: noop, dismiss: noop, openSettings: noop, ackWelcome: noop,
     selectProvider: vi.fn(), chatgptLogin: vi.fn(), chatgptCancel: vi.fn(), chatgptLogout: vi.fn(),
     updateCamera: vi.fn(), openCameraPreview: vi.fn(), updateVoice: vi.fn(), updateRealtime: vi.fn(),
-    codexLogin: vi.fn(), codexCancel: vi.fn(), codexLogout: vi.fn(),
+    codexLogin: vi.fn(), codexCancel: vi.fn(), codexLogout: vi.fn(), openHistory: vi.fn(),
   };
 }
 

@@ -46,6 +46,8 @@ function updateLocale(value: unknown, persist: boolean): void {
   for (const listener of [...listeners]) listener(locale);
 }
 export function setLocale(value: Locale): void { updateLocale(value, true); }
+/** 只換這一頁的介面語言，不寫入共用的語言偏好（成果紀錄獨立網頁的 ?lang= 與語言切換用）。 */
+export function useLocale(value: Locale): void { updateLocale(value, false); }
 export function onLocaleChange(listener: (locale: Locale) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
