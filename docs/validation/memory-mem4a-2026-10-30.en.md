@@ -54,7 +54,7 @@ When local speech synthesis reads a completion notice, it reads the real on-scre
 
 ### 2.5 In-App results history (part of MEM-4c)
 
-The in-App results history Surface searches the real content of encrypted tasks through the IPC `search` op (in-memory matching in the core, as in HIST-1; the protected source has `protected: true`), and the detail page uses IPC `get`; deletion still uses HTTP (task ID only). The `/history` page and `/api/history` only have shells. What remains for MEM-4c is a RAM inverted index for protected results, discarding it on lock or close, and removing entries inside the same mutex as revocation (today every query rematches from core memory, with no extra index).
+The in-App results history Surface searches the real content of encrypted tasks through the IPC `search` op (in-memory matching in the core, as in HIST-1; the protected source has `protected: true`), and the detail page uses IPC `get`; deletion still uses HTTP (task ID only). The `/history` page and `/api/history` only have shells. What remains for MEM-4c is a RAM inverted index for protected results, discarding it on lock or close, and removing entries inside the same mutex as revocation (today every query rematches from core memory, with no extra index). **Update 2026-10-30:** MEM-4c has been delivered (code and cloud tests; the Mac gate has not been run); see [MEM-4c validation](memory-mem4c-2026-10-30.en.md).
 
 ### 2.6 Protected delegation (automatic memory for background tasks)
 
@@ -139,7 +139,7 @@ The baseline main `368235a` has 86 test files, 1469 passed, 4 skipped (this batc
 ## 6. Unfinished items and next gate
 
 - Protected delegation for realtime voice (see §3 item 3).
-- The rest of MEM-4c: a RAM inverted index for protected results that is discarded on lock; today in-App search rematches in core memory every time.
+- The rest of MEM-4c: a RAM inverted index for protected results that is discarded on lock; today in-App search rematches in core memory every time. (Update 2026-10-30: delivered in [MEM-4c](memory-mem4c-2026-10-30.en.md); the Mac gate has not been run.)
 - Sourced work summaries (work_summary) and automatic curation are in MEM-5.
 - Next gate: Mac steps 1–11 in §5, especially steps 1, 3, 5, 7, and 11.
 
@@ -147,12 +147,12 @@ The baseline main `368235a` has 86 test files, 1469 passed, 4 skipped (this batc
 
 - **Deletion is not a secure wipe**: deleting a file only removes that file and its data key; existing Time Machine backups, local APFS snapshots, or not-yet-overwritten disk blocks may still hold the old file, and the application key does not rotate, so they could theoretically still be decrypted. A deleted plaintext backup may likewise remain in snapshots.
 - **Web search**: web search is allowed (Q4-A). The model may write memory content into search queries, which go to the same service account's search (Claude or ChatGPT); the system prompt warns against it but cannot guarantee it.
-- **Core memory**: while the core runs, its memory holds every task in plaintext (executors and the App screens need it); encryption only protects files on disk.
+- **Core memory**: while the core runs, its memory holds every task in plaintext (executors and the App screens need it); encryption only protects files on disk. (MEM-4c update, 2026-10-30: finished protected tasks are now decrypted only when needed and dropped on OS lock, sleep, 10 minutes of idle, memory off, and App quit; queued and running tasks still hold plaintext; dropping is not a secure wipe. See [MEM-4c §7](memory-mem4c-2026-10-30.en.md#7-residual-risks).)
 - **Trusted main window**: real content reaches the main window through IPC; a script injected into the main window page could read it (the same trust boundary as the memory IPC).
 - **Titles visible to models**: a service account with memory consent sees real task titles in the chat prompt.
 - **Rollback**: once the memory snapshot is version 3, older Apps disable memory (accepted by George, 2026-10-30).
 - **The dependency index lives in the memory file**: if the memory file is corrupted or deleted, the index is lost with it, and later revoke propagation cannot find those results (they stay encrypted but are not removed by a forget); only the "memory off" hint withdraws all memory-derived results on the next start.
-- **Results history cache**: HIST-1's `CONTENT_CACHE` keeps folded result plaintext in core memory (never written to disk) and is cleared on deletion and withdrawal.
+- **Results history cache**: HIST-1's `CONTENT_CACHE` keeps folded result plaintext in core memory (never written to disk) and is cleared on deletion and withdrawal. (MEM-4c update, 2026-10-30: protected content no longer enters `CONTENT_CACHE`, which is cleared entirely on every drop; the RAM inverted index keeps the folded fields instead and is dropped together with the decrypted content.)
 - **Character counts in shells**: shells keep each step's `output_chars` (the App's progress and counts need it), so outsiders can see output length but not content.
 - **Keychain at startup**: the App needs Keychain approval at startup; otherwise it stays plaintext (when plaintext exists) or keeps content in memory only.
 

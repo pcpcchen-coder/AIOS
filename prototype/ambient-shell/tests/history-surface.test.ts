@@ -398,3 +398,76 @@ describe("MEM-4a: protected shells and withdrawn results on screen", () => {
     expect(d.redo).toHaveBeenCalled();
   });
 });
+
+describe("MEM-4c review M1: the page clears its own caches when the core drops plaintext", () => {
+  const CANARY = "canary犀牛蛋糕七七三一";
+  const shellTask = (id: string): Task => ({ ...task({ task_id: id, artifact_id: `artifact_${id}`, title: "受保護的任務，請在 App 內查看" }), protected: true, steps: [{ title: "受保護的步驟", status: "done", started_at: null, finished_at: null, output_chars: null }] });
+
+  it("ProtectedTasks: want() loads only the given cards; after the drop display() is the shell and late replies do not refill the cache", async () => {
+    const { ProtectedTasks, applyPlaintextDrop } = await import("../src/protected-tasks.ts");
+    let release: (() => void) | null = null;
+    const bridge = vi.fn(async (request: { op: string; task_id?: string }) => {
+      if (request.task_id === "task_late") await new Promise<void>((r) => { release = r; });
+      return { ok: true as const, op: "get" as const, task: { ...shellTask(request.task_id!), protected: undefined, title: `真實${CANARY}`, steps: [{ title: `步驟${CANARY}`, status: "done" as const, started_at: null, finished_at: null, output_chars: null }] }, artifact: null };
+    });
+    const p = new ProtectedTasks(bridge as never, () => {});
+    const shown = [shellTask("task_a"), shellTask("task_b")];
+    p.want(shown);
+    await flush();
+    expect(bridge).toHaveBeenCalledTimes(2);
+    expect(bridge.mock.calls.every((c) => c[0].op === "get")).toBe(true);
+    expect(p.display(shown[0]!).title).toBe(`真實${CANARY}`);
+    p.want([shellTask("task_late")]);
+    const tasks = new Map(shown.map((t) => [t.task_id, t] as const));
+    const artifacts = new Map<string, Artifact>([["artifact_task_a", { ...artifact, artifact_id: "artifact_task_a", task_id: "task_a", content: CANARY }]]);
+    const artifactErrors = new Map<string, string>([["artifact_task_b", "x"]]);
+    const hidden: string[] = [];
+    const dismiss = vi.fn();
+    const render = vi.fn();
+    applyPlaintextDrop("os_lock", { protectedTasks: p, tasks, artifacts, artifactErrors, history: { hideContent: (r) => hidden.push(r) }, surface: { kind: "artifact", task_id: "task_a" }, dismiss, render });
+    release!();
+    await flush();
+    expect(p.cachedCount).toBe(0);
+    for (const t of [...shown, shellTask("task_late")]) expect(JSON.stringify(p.display(t))).not.toContain(CANARY);
+    expect(artifacts.size).toBe(0);
+    expect(artifactErrors.size).toBe(0);
+    expect(hidden).toEqual(["os_lock"]);
+    expect(dismiss).toHaveBeenCalledTimes(1); // 收起受保護成果的畫面（只關畫面）
+    expect(render).toHaveBeenCalled();
+    // 另一個畫面（例如進度）不收起。
+    applyPlaintextDrop("idle", { protectedTasks: p, tasks, artifacts, artifactErrors, history: { hideContent: () => {} }, surface: { kind: "progress" }, dismiss, render });
+    expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it("HistoryView.hideContent removes results, snippets, the open detail and the query, and shows a bilingual notice", async () => {
+    const d = deps();
+    d.api.searchHistory.mockResolvedValue({ ...page, items: [{ ...page.items[0]!, title: `標題${CANARY}`, snippet: { ...page.items[0]!.snippet!, text: `片段${CANARY}` } }] });
+    d.api.getHistory.mockResolvedValue({ task: task({ title: `標題${CANARY}` }), artifact: { ...artifact, content: `內容${CANARY}` }, source: "tasks", protected: true });
+    const view = new historyView.HistoryView(d);
+    view.open(`查${CANARY}`);
+    await flush();
+    const root = view.element as unknown as El;
+    expect(root.textContent).toContain(CANARY);
+    root.all().find((el) => el.getAttribute("class") === "history-open")!.fire("click");
+    await flush();
+    view.hideContent("os_lock");
+    expect(JSON.stringify(root.textContent)).not.toContain("犀牛");
+    expect(root.all().some((el) => el.value.includes("犀牛"))).toBe(false);
+    expect(root.textContent).toContain("內容已因鎖定隱藏，請重新搜尋");
+    setLocale("en");
+    view.hideContent("idle");
+    expect(root.textContent).toContain("Content hidden after inactivity or a memory setting change; search again");
+    view.hideContent("suspend");
+    expect(root.textContent).toContain("Content hidden after lock; search again");
+    // 再搜尋：提示消失，照常顯示。
+    await view.search();
+    expect(root.textContent).not.toContain("Content hidden");
+  });
+
+  it("main.ts wires the event, never calls loadAll, and only wants the displayed progress cards", () => {
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    expect(main).toMatch(/window\.nousDesktop\?\.onTasksPlaintextDropped\?\.\(\(reason\) => applyPlaintextDrop\(reason,/);
+    expect(main).not.toMatch(/protectedTasks\.loadAll\(\)/);
+    expect(main).toMatch(/protectedTasks\.want\(sortForProgress\(\[\.\.\.tasks\.values\(\)\]\)\.slice\(0, MAX_LISTED\)\)/);
+  });
+});

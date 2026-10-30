@@ -130,7 +130,7 @@ describe("Electron wiring (static)", () => {
     };
     new Function("require", preload)(require);
     expect(Object.keys(exposed)).toEqual(["nousDesktop"]);
-    expect(Object.keys(exposed.nousDesktop!).sort()).toEqual(["identity", "initialLocale", "memory", "onLocaleChange", "onMemoryChange", "openExternal", "reportState", "tasks"]);
+    expect(Object.keys(exposed.nousDesktop!).sort()).toEqual(["identity", "initialLocale", "memory", "onLocaleChange", "onMemoryChange", "onTasksPlaintextDropped", "openExternal", "reportState", "tasks"]);
     (exposed.nousDesktop!.identity as (r: unknown) => unknown)({ op: "open_session" });
     expect(invoke).toHaveBeenCalledWith("nous:identity", { op: "open_session" });
     expect(send).not.toHaveBeenCalled();

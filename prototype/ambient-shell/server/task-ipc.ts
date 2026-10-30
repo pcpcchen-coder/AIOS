@@ -6,11 +6,14 @@ import { HistoryQueryError, parseHistoryQuery, searchHistory } from "./history.t
 import type { ProtectedDelegation } from "./memory/service.ts";
 import type { ChatTarget } from "./memory/retrieve.ts";
 import type { TaskRunner } from "./runner.ts";
-import { shellOf, tasksForTarget, type TaskStore } from "./store.ts";
+import { RELOAD_FAILED, shellOf, tasksForTarget, type TaskStore } from "./store.ts";
+import { VaultError } from "./sealed-vault.ts";
 
 // MEM-4a：加密保存任務的 IPC 處理（只有 macOS App；desktop/tasks-ipc.mjs 先過濾發送者與形狀，這裡再完整驗證）。
 // - list／get：完整內容只給可信主視窗（進度卡、成果畫面用真實標題與成果）。
-// - search：App 內的成果紀錄搜尋加密任務的真實內容（受保護的 HistorySource，MEM-4c 的一部分）；/api/history 仍只有外殼。
+// - search：App 內的成果紀錄搜尋加密任務的真實內容（MEM-4c：TaskStore.searchProtected 的 RAM 倒排索引，結果和逐筆掃描相同）；
+//   /api/history 仍只有外殼。範圍（D2）在解密片段之前就套用。
+// - MEM-4c：已結束任務的內容在需要時才解密；金鑰不可用時 get／search／redo 照實回 RELOAD_FAILED，不給空結果或外殼冒充。
 // - redo：核心用自己保存的原句重做；記憶放行時重新檢索目前的記憶（不沿用舊依賴）。
 // - delete_backups：主程序跳原生確認（頁面無法偽造），使用者按「刪除」才刪明文備份。
 // - card_title／card_delegate（MEM-4b）：受保護原句卡。SSE 只送卡片 ID；標題經這裡給可信主視窗；按「交辦」算直接確認，
@@ -45,6 +48,8 @@ export interface TaskIpc {
 
 const REQUEST_ID = /^req_[A-Za-z0-9_-]{6,64}$/;
 const FINISHED_ONLY = "只有已結束的任務可以重做";
+/** MEM-4c 審查 minor 3：記憶層正在提交撤回（hold）。 */
+export const MEMORY_UPDATING = "正在更新記憶，請稍後再試";
 
 export function vaultView(store: TaskStore): VaultView {
   const s = store.vaultStatus();
@@ -62,13 +67,21 @@ export function createTaskIpc(options: TaskIpcOptions): TaskIpc {
     // 選單列點擊（主程序的 10 秒時間窗）開出的權限；帶 all 的請求在期限內才看得到其他家人的帶記憶任務。
     if (ctx.userInitiated === true) fullUntil = now() + FULL_SCOPE_MS;
     const full = req.all === true && now() < fullUntil;
-    const scope = async () => (options.memory?.taskScope ? await options.memory.taskScope(full) : (task: Pick<Task, "memory">) => full || task.memory !== true);
+    const baseScope = async () => (options.memory?.taskScope ? await options.memory.taskScope(full) : (task: Pick<Task, "memory">) => full || task.memory !== true);
+    // MEM-4c：記憶層正在提交撤回的任務（hold）與記憶被撤銷、停止中的任務（審查 minor 1）一律當範圍外（外殼）。
+    const scope = async () => { const inScope = await baseScope(); return (task: Pick<Task, "task_id" | "memory" | "cancel_reason" | "withdrawn">) => inScope(task) && !store.hiddenNow(task); };
+    const reloadFailed = (): TasksResponse => ({ ok: false, code: "unavailable", message: RELOAD_FAILED });
     switch (req.op) {
       case "status":
         return { ok: true, op: "status", vault: vaultView(store) };
       case "list": {
         const inScope = await scope();
-        return { ok: true, op: "list", tasks: store.list().map((t) => (inScope(t) ? t : shellOf(t))) };
+        const st = { decrypted: 0 };
+        const started = now();
+        const tasks = store.listFor(inScope, st);
+        // 只記筆數與耗時（審查 minor 5；Mac gate 第 6 步量延遲用）。
+        if (store.sealed) options.log?.(`tasks: 受保護清單（${tasks.length} 筆，解密 ${st.decrypted}，${now() - started} ms）`);
+        return { ok: true, op: "list", tasks };
       }
       case "voice_tasks": {
         if (req.route !== "live" && req.route !== "api_key") return bad("route must be live or api_key");
@@ -77,10 +90,14 @@ export function createTaskIpc(options: TaskIpcOptions): TaskIpc {
       }
       case "get": {
         if (typeof req.task_id !== "string" || !TASK_ID.test(req.task_id)) return bad("task_id is required");
-        const task = store.get(req.task_id);
-        if (!task) return { ok: false, code: "not_found", message: "找不到這個任務" };
-        if (!(await scope())(task)) return { ok: true, op: "get", task: shellOf(task), artifact: null };
-        return { ok: true, op: "get", task, artifact: task.artifact_id ? store.getArtifact(task.artifact_id) ?? null : null };
+        const shell = store.publicGet(req.task_id);
+        if (!shell) return { ok: false, code: "not_found", message: "找不到這個任務" };
+        // 範圍在解密之前判斷（外殼就有 task_id 與 memory）：範圍外的任務不解密。
+        if (!(await scope())(shell)) return { ok: true, op: "get", task: shellOf(shell), artifact: null };
+        let opened: ReturnType<TaskStore["open"]>;
+        try { opened = store.open(req.task_id); } catch (error) { if (error instanceof VaultError) return reloadFailed(); throw error; }
+        if (!opened) return { ok: false, code: "not_found", message: "找不到這個任務" };
+        return { ok: true, op: "get", task: opened.task, artifact: opened.artifact };
       }
       case "search": {
         const query = req.query && typeof req.query === "object" && !Array.isArray(req.query) ? req.query as HistoryQuery : null;
@@ -89,20 +106,38 @@ export function createTaskIpc(options: TaskIpcOptions): TaskIpc {
           const params = new URLSearchParams(historySearchPath(query).split("?")[1] ?? "");
           const parsed = parseHistoryQuery(params);
           const inScope = await scope();
+          // 加密模式（MEM-4c）：倒排索引；await 之後到回傳之間是同步的，撤回或刪除不會插在中間。
+          if (store.sealed) {
+            const st = { built: false, decrypted: 0, scored: 0, filtered: 0 };
+            const started = now();
+            const page = store.searchProtected(parsed, inScope, st);
+            // 只記筆數與耗時（Mac gate 量延遲用），不記查詢文字或內容。
+            options.log?.(`tasks: 受保護搜尋（${st.built ? "建立索引" : parsed.q.trim() === "" ? "清單不用索引" : "索引已建立"}，解密 ${st.decrypted}，比對 ${st.scored}／${st.filtered}，結果 ${page.total}，${now() - started} ms）`);
+            return { ok: true, op: "search", page };
+          }
           const documents = () => store.documents().map((d) => (inScope(d.task) ? d : { task: shellOf(d.task), artifact: null }));
           return { ok: true, op: "search", page: searchHistory([{ id: "tasks", protected: store.sealed, documents }], parsed) };
         } catch (error) {
           if (error instanceof HistoryQueryError) return bad(error.message);
+          if (error instanceof VaultError) return reloadFailed();
           throw error;
         }
       }
       case "redo": {
         if (typeof req.task_id !== "string" || !TASK_ID.test(req.task_id)) return bad("task_id is required");
         if (typeof req.request_id !== "string" || !REQUEST_ID.test(req.request_id)) return bad("request_id is required");
-        const original = store.get(req.task_id);
+        const shell = store.publicGet(req.task_id);
+        if (!shell) return { ok: false, code: "not_found", message: "找不到這個任務" };
+        // 審查 minor 3：記憶正在提交撤回時照實說，不說成「其他家人的任務」。
+        if (store.isHeld(req.task_id)) return { ok: false, code: "conflict", message: MEMORY_UPDATING };
+        if (!(await scope())(shell)) return { ok: false, code: "conflict", message: "這是其他家人的任務；請從選單列「成果紀錄…」打開後再重做" };
+        if (shell.status !== "succeeded" && shell.status !== "failed" && shell.status !== "cancelled") return { ok: false, code: "conflict", message: FINISHED_ONLY };
+        // 經授權的存取（open：解密、留在記憶體、重新計時）；金鑰不可用照實說，不拿外殼的固定句重做。
+        let opened: ReturnType<TaskStore["open"]>;
+        try { opened = store.open(req.task_id); } catch (error) { if (error instanceof VaultError) return reloadFailed(); throw error; }
+        if (store.isHeld(req.task_id)) return { ok: false, code: "conflict", message: MEMORY_UPDATING };
+        const original = opened?.task;
         if (!original) return { ok: false, code: "not_found", message: "找不到這個任務" };
-        if (!(await scope())(original)) return { ok: false, code: "conflict", message: "這是其他家人的任務；請從選單列「成果紀錄…」打開後再重做" };
-        if (original.status !== "succeeded" && original.status !== "failed" && original.status !== "cancelled") return { ok: false, code: "conflict", message: FINISHED_ONLY };
         // 審查 M2：讀不到內容的任務只有外殼的固定句，不能重做。
         if (store.contentMissing(original.task_id)) return { ok: false, code: "conflict", message: "這個任務的內容這次無法解開，不能重做" };
         // 原句由核心保存（不是頁面送來的）。只有確定是使用者原句的任務（origin user_sentence）才在放行時重新取用記憶；

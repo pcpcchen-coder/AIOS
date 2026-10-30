@@ -11,6 +11,8 @@ import { systemPrompt } from "../server/prompts.ts";
 import { TaskRunner, type ExecutionResult, type Executor, type Reporter } from "../server/runner.ts";
 import { SealedVault } from "../server/sealed-vault.ts";
 import { TaskStore } from "../server/store.ts";
+import { createTaskIpc } from "../server/task-ipc.ts";
+import type { TasksResponse } from "../shared/protected-tasks.ts";
 import type { ExecutorMode } from "../shared/types.ts";
 import type { Locale } from "../shared/i18n.mjs";
 import { CHATGPT, CLAUDE, enable, fakeBox, harness, manage, req, selectProfile, type Harness } from "./fixtures/memory-service.ts";
@@ -327,6 +329,30 @@ describe.skipIf(!realLockAvailable)("MEM-4a revoke propagation (Q3-A)", () => {
     await second.h.call({ op: "list", manage: true }, { userInitiated: true });
     expect(second.store.get(first.task.task_id)).toMatchObject({ withdrawn: true, artifact_id: null });
     expect(second.vault.ids()).toEqual([first.task.task_id]);
+  });
+
+  it("MEM-4c review M2: after that crash, the menu-opened full scope opens memory first, so search and get never show the withdrawn result", async () => {
+    const memoryKey = randomBytes(32), taskKey = randomBytes(32);
+    const env = setup({ memoryKey, taskKey });
+    await enable(env.h, "George");
+    await env.h.turn("記住，我不吃香菜");
+    const { out } = await delegate(env.h, "幫我規劃一週晚餐");
+    await env.runner.idle();
+    const task = env.store.get(out!.task.task_id)!;
+    (env.h.service as unknown as { options: { onResultsWithdrawn: (ids: string[]) => void } }).options.onResultsWithdrawn = () => {};
+    const f = await factId(env.h);
+    await env.h.call({ op: "forget", id: f.id, revision: f.revision, token: f.token });
+    expect(env.vault.ids()).toContain(task.artifact_id);
+    await env.h.close();
+    env.vault.close();
+    const second = setup({ memoryDir: env.memoryDir, memoryKey, dataDir: env.dataDir, taskKey });
+    const handle = createTaskIpc({ store: second.store, runner: second.runner, memory: { redoProtected: async () => null, taskScope: (full) => second.h.service.taskScope(full) }, confirmDeleteBackups: async () => true });
+    const found = await handle({ op: "search", query: { q: "IBEX" }, all: true }, { userInitiated: true }) as Extract<TasksResponse, { op: "search" }>;
+    expect(found).toMatchObject({ ok: true, page: { total: 0 } });
+    const got = await handle({ op: "get", task_id: task.task_id, all: true }) as Extract<TasksResponse, { op: "get" }>;
+    expect(got).toMatchObject({ ok: true, artifact: null, task: { withdrawn: true } });
+    expect(second.vault.ids()).toEqual([task.task_id]);
+    expect(JSON.stringify([found, got])).not.toContain(ART_CANARY);
   });
 
   it("concurrency: a delegation and a forget racing through the writer mutex never leave an active result on a forgotten fact", async () => {

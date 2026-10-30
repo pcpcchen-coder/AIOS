@@ -117,6 +117,16 @@ export interface MemoryServiceOptions {
    * withdrawn，之後才呼叫；記憶檔開啟時也會為已撤銷的成果再呼叫一次（重啟後清掉中斷前沒刪完的成果檔）。
    */
   onResultsWithdrawn?: (taskIds: string[]) => void;
+  /**
+   * MEM-4c：提交撤回（寫快照）期間先把這些任務對外改成外殼（TaskStore.hold），回傳釋放函式。快照寫入與 onResultsWithdrawn
+   * 之間有非同步的空檔；這段期間的搜尋、詳細與模型標題都不會用到撤回中的成果。
+   */
+  holdResults?: (taskIds: string[]) => () => void;
+  /**
+   * MEM-4c：記憶關閉（設定改成關閉）、記憶檔因寫入失敗而停用、或記憶層關閉（結束 App）時，請任務端丟棄記憶體裡
+   * 已結束受保護任務的解密內容與倒排索引。OS 鎖定與睡眠由主程序直接通知任務端（desktop/main.mjs）。
+   */
+  onPlaintextDrop?: (reason: "memory_off" | "memory_closed") => void;
   /** 只限測試：依賴索引的筆數上限（正式一律 RESULT_LIMIT）。 */
   resultLimit?: number;
 }
@@ -852,17 +862,25 @@ export class MemoryService implements LiveMemoryService {
     }
     if (planned.facts.length > MEMORY_FACT_MAX) return { result: { status: "conflict" }, operationId: operation.operationId };
     if (Buffer.byteLength(JSON.stringify({ ...snap, ...planned })) > SNAPSHOT_BUDGET * 0.98) return { result: { status: "unavailable" }, operationId: operation.operationId };
-    const result = await this.store!.commit(operation, data => {
-      data.settings = planned.settings; data.profiles = planned.profiles; data.facts = planned.facts; data.consents = planned.consents; data.tombstones = planned.tombstones; data.results = planned.results;
-      return status;
-    });
-    if (result.status === "unavailable") {
-      this.storeState = "unavailable";
-      this.replacePresence("unselected", { kind: "household" }, null, "unavailable");
+    // MEM-4c：寫快照到傳給任務端之間（非同步），撤回中的成果對外一律外殼；傳完（或提交失敗）才釋放。
+    let release: (() => void) | undefined;
+    if (withdrawn.size) { try { release = this.options.holdResults?.([...withdrawn]); } catch { this.log("memory: 撤回中的成果無法先隱藏"); } }
+    try {
+      const result = await this.store!.commit(operation, data => {
+        data.settings = planned.settings; data.profiles = planned.profiles; data.facts = planned.facts; data.consents = planned.consents; data.tombstones = planned.tombstones; data.results = planned.results;
+        return status;
+      });
+      if (result.status === "unavailable") {
+        this.storeState = "unavailable";
+        this.replacePresence("unselected", { kind: "household" }, null, "unavailable");
+        this.dropPlaintext("memory_closed");
+      }
+      this.log(`memory: commit ${result.status}${expired.length ? `（清除過期 ${expired.length} 筆）` : ""}${withdrawn.size && result.status !== "unavailable" && result.status !== "conflict" && result.status !== "receipt_expired" ? `（撤回受保護成果 ${withdrawn.size} 筆）` : ""}`);
+      if (withdrawn.size && (result.status === "saved" || result.status === "updated" || result.status === "forgotten" || result.status === "unchanged")) this.propagate([...withdrawn]);
+      return { result, operationId: operation.operationId };
+    } finally {
+      release?.();
     }
-    this.log(`memory: commit ${result.status}${expired.length ? `（清除過期 ${expired.length} 筆）` : ""}${withdrawn.size && result.status !== "unavailable" && result.status !== "conflict" && result.status !== "receipt_expired" ? `（撤回受保護成果 ${withdrawn.size} 筆）` : ""}`);
-    if (withdrawn.size && (result.status === "saved" || result.status === "updated" || result.status === "forgotten" || result.status === "unchanged")) this.propagate([...withdrawn]);
-    return { result, operationId: operation.operationId };
   }
 
   private storeFailure(result: StoreResult): MemoryReceiptView {
@@ -1021,6 +1039,8 @@ export class MemoryService implements LiveMemoryService {
     if (result.status !== "updated") return { ok: false, code: "unavailable", message: this.storeFailure(result).message };
     this.setHint(req.enabled);
     this.log(`memory: 設定（enabled ${req.enabled}，允許 ${allow.length} 個帳號）`);
+    // MEM-4c：關閉記憶時，任務端一併丟棄已結束受保護任務的解密內容與索引。
+    if (!req.enabled) this.dropPlaintext("memory_off");
     // 關閉記憶或改變同意：撤銷持有舊內容的串流與 memory_turn（M11）。首次設定卡才順便選定人物；記憶管理改同意不換本次人物。
     if (profileId !== null && req.enabled && setupCard) this.select(profileId);
     else this.bumpEpoch();
@@ -1767,6 +1787,11 @@ export class MemoryService implements LiveMemoryService {
 
   // ─────────────── MEM-4a 受保護交辦與撤銷傳播 ───────────────
 
+  /** MEM-4c：請任務端丟棄解密內容（失敗只記 log）。 */
+  private dropPlaintext(reason: "memory_off" | "memory_closed"): void {
+    try { this.options.onPlaintextDrop?.(reason); } catch { this.log("memory: 任務端丟棄解密內容失敗"); }
+  }
+
   /** 撤回的成果交給任務端（停止執行中的、移除已完成的成果內容）。失敗只記 log（下次開啟記憶檔時再做一次）。 */
   private propagate(taskIds: string[]): void {
     try { this.options.onResultsWithdrawn?.(taskIds); } catch { this.log("memory: 撤回受保護成果時任務端失敗"); }
@@ -1936,8 +1961,13 @@ export class MemoryService implements LiveMemoryService {
    * （點擊 10 秒內，full）才可以；否則顯示外殼。記憶檔開不了時，帶記憶的任務一律外殼。
    */
   async taskScope(full: boolean): Promise<(task: Pick<Task, "task_id" | "memory">) => boolean> {
-    if (full) return () => true;
+    // MEM-4c 審查 M2：選單列打開的「全部」也要先開記憶檔。開檔時會把已撤回、但當機前還沒傳到任務端的成果再傳一次
+    // （刪成果檔），之後的搜尋與詳細才不會看到撤回的內容。記憶上次開著卻開不了時，帶記憶的任務一律外殼。
     const ready = this.storeState === "ready" || (this.hint() && await this.ensureOpen());
+    if (full) {
+      const memoryUnknown = !ready && this.hint();
+      return (task) => task.memory !== true || !memoryUnknown;
+    }
     let index: Map<string, MemoryResult> | null = null;
     try { if (ready) index = new Map(this.snapshot().results.map(r => [r.taskId, r])); } catch { index = null; }
     const profileId = this.currentProfileId();
@@ -1960,5 +1990,6 @@ export class MemoryService implements LiveMemoryService {
     await this.queue.catch(() => undefined);
     await this.store?.close().catch(() => undefined);
     this.store = null;
+    this.dropPlaintext("memory_closed");
   }
 }

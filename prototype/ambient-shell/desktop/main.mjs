@@ -158,10 +158,18 @@ async function startCore() {
       onPresence: () => { if (win && !win.isDestroyed()) win.webContents.send("nous:memory-changed"); },
     },
     // MEM-4a：全部任務加密保存（data/sealed/）；舊的明文在核心啟動時搬遷一次，備份保留到使用者在畫面上確認刪除。
-    tasks: { secretBox, confirmDeleteBackups, excludeFromBackup: excludeFromTimeMachine },
+    // MEM-4c 審查 M1：核心丟棄解密內容後（鎖定、睡眠、閒置、關閉記憶、結束），送一個不含內容的事件給主視窗清掉畫面快取。
+    tasks: { secretBox, confirmDeleteBackups, excludeFromBackup: excludeFromTimeMachine, onPlaintextDropped: notifyPlaintextDropped },
     // MEM-2：記憶撤銷後頁面沒有在 1.5 秒內回報停播時，核心把主視窗的聲音強制靜音（下一次回報停播或新通話開始才解除）。
     audio: { setMuted: (muted) => { if (win && !win.isDestroyed()) win.webContents.setAudioMuted(muted); } },
   });
+}
+
+/** MEM-4c 審查 M1：只送原因（固定白名單），不含任何內容；preload 也只接受白名單裡的原因。 */
+const PLAINTEXT_DROP_REASONS = ["os_lock", "suspend", "idle", "memory_off", "memory_closed", "quit"];
+function notifyPlaintextDropped(reason) {
+  if (!PLAINTEXT_DROP_REASONS.includes(reason)) return;
+  if (win && !win.isDestroyed()) win.webContents.send("tasks:plaintext-dropped", { reason });
 }
 
 // ───────────── 家人辨識（ADR-0001；資料與比對在核心，這裡只提供 safeStorage、原生確認與 IPC 傳輸） ─────────────
@@ -960,7 +968,14 @@ app.whenReady().then(async () => {
 
   rebuildAppMenu();
   // 作業系統鎖定：暫停本次人物（記憶撤銷舊世代；解鎖後要重新選擇）。
-  powerMonitor.on("lock-screen", () => core?.memory?.suspendAll());
+  // MEM-4c：鎖定與睡眠時，核心也丟棄已結束受保護任務的解密內容與搜尋索引（解鎖後要用時才重新解密）。
+  // 核心的 dropPlaintext 會經 onPlaintextDropped 通知主視窗；核心不在時主程序自己通知（頁面的快取一樣要清）。
+  powerMonitor.on("lock-screen", () => {
+    core?.memory?.suspendAll();
+    if (core?.tasks) core.tasks.dropPlaintext("os_lock");
+    else notifyPlaintextDropped("os_lock");
+  });
+  powerMonitor.on("suspend", () => (core?.tasks ? core.tasks.dropPlaintext("suspend") : notifyPlaintextDropped("suspend")));
 
   tray = new Tray(trayImage(false));
   setTimeout(() => log(`選單列圖示位置：${JSON.stringify(tray.getBounds())}`), 3000);

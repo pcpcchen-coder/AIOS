@@ -90,6 +90,8 @@ export class HistoryView {
   private loading = false;
   private error: string | null = null;
   private notice: string | null = null;
+  /** MEM-4c：內容已因丟棄而隱藏（狀態列不說「還沒有任何任務」）。 */
+  private hidden = false;
   private detail: DetailState | null = null;
   /** 搜尋的世代：較晚送出的查詢回來後，較早的回應不再覆蓋畫面。 */
   private generation = 0;
@@ -106,6 +108,7 @@ export class HistoryView {
 
   /** 打開（或重新打開）並搜尋；query 為空字串時列出全部（新到舊）。 */
   open(query = ""): void {
+    this.hidden = false;
     this.query = { q: query, status: "", mode: "", from: "", to: "" };
     this.detail = null;
     this.notice = null;
@@ -142,6 +145,25 @@ export class HistoryView {
     if (changed) this.render();
   }
 
+  /**
+   * MEM-4c 審查 M1：核心丟棄解密內容後（鎖定、睡眠、閒置、關閉記憶）清掉結果、片段與詳細頁（包括還在路上的查詢），
+   * 只留一句提示；畫面本身不收起，任務照常。查詢文字也清掉（可能含內容的關鍵字）。
+   */
+  hideContent(reason: "os_lock" | "suspend" | "idle" | "memory_off" | "memory_closed" | "quit"): void {
+    this.generation += 1;
+    this.items = [];
+    this.total = 0;
+    this.nextCursor = null;
+    this.loading = false;
+    this.error = null;
+    this.detail = null;
+    this.query = { q: "", status: "", mode: "", from: "", to: "" };
+    this.form = null;
+    this.hidden = true;
+    this.notice = reason === "os_lock" || reason === "suspend" ? t("內容已因鎖定隱藏，請重新搜尋") : t("內容已因閒置或記憶設定改變而隱藏，請重新搜尋");
+    this.render();
+  }
+
   private async reloadDetail(taskId: string): Promise<void> {
     try {
       const data = await this.deps.api.getHistory(taskId);
@@ -155,6 +177,8 @@ export class HistoryView {
 
   async search(append = false): Promise<void> {
     const generation = ++this.generation;
+    if (this.hidden) this.notice = null;
+    this.hidden = false;
     this.loading = true;
     this.error = null;
     if (!append) this.detail = null;
@@ -284,6 +308,7 @@ export class HistoryView {
     let text: string;
     if (this.loading) text = t("搜尋中…");
     else if (this.error) return h("p", { class: "error-text", role: "alert" }, this.error);
+    else if (this.hidden) text = t("按「搜尋」重新載入。");
     else if (this.total === 0) text = this.filtered() ? t("沒有符合的任務或成果。") : t("還沒有任何任務或成果。");
     else text = this.query.q.trim() ? msg`找到 ${formatCount(this.total)} 筆` : msg`共 ${formatCount(this.total)} 筆（新到舊）`;
     return h("p", { class: "muted history-status", role: "status", "aria-live": "polite" }, text);

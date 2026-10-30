@@ -632,5 +632,10 @@
   "任務與成果已加密保存並逐筆驗證。明文備份保留在資料夾「{0}」，確認不需要後可以刪除。": "Tasks and results are stored encrypted and every record was verified. The plaintext backup is kept in the folder “{0}”; delete it once you are sure you no longer need it.",
   "沒有任務的明文備份。": "There is no plaintext backup of tasks.",
   "這張卡片已失效（可能換了人物或超過時間）；請再說一次": "This card is no longer valid (the person may have changed or it timed out); please say it again",
-  "這次沒有帶記憶": "Memory wasn't used this time"
+  "這次沒有帶記憶": "Memory wasn't used this time",
+  "這次無法解開加密的任務內容（金鑰不可用）；內容仍安全保存在這台 Mac，請稍後再試": "The encrypted task content could not be decrypted this time (key unavailable); it is still stored safely on this Mac. Please try again later.",
+  "正在更新記憶，請稍後再試": "Memory is updating; try again shortly",
+  "內容已因鎖定隱藏，請重新搜尋": "Content hidden after lock; search again",
+  "內容已因閒置或記憶設定改變而隱藏，請重新搜尋": "Content hidden after inactivity or a memory setting change; search again",
+  "按「搜尋」重新載入。": "Press “Search” to load again."
 }

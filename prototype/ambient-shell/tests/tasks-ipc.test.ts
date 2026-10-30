@@ -50,7 +50,7 @@ describe("desktop/tasks-ipc.mjs shape filter", () => {
     const handler = main.slice(main.indexOf('ipcMain.handle("nous:tasks"'));
     expect(handler).toMatch(/checkTrustedSender\(event, win, core\.url\)/);
     expect(handler).toMatch(/validateTasksRequest\(request\)/);
-    expect(main).toMatch(/tasks: \{ secretBox, confirmDeleteBackups, excludeFromBackup: excludeFromTimeMachine \}/);
+    expect(main).toMatch(/tasks: \{ secretBox, confirmDeleteBackups, excludeFromBackup: excludeFromTimeMachine, onPlaintextDropped: notifyPlaintextDropped \}/);
     expect(main).toMatch(/buttons: \["刪除明文備份", "取消"\], defaultId: 1, cancelId: 1/);
     const preload = readFileSync(join(import.meta.dirname, "../desktop/preload.cjs"), "utf8");
     const invoke = vi.fn();
@@ -60,6 +60,22 @@ describe("desktop/tasks-ipc.mjs shape filter", () => {
     expect(invoke).toHaveBeenCalledWith("nous:tasks", { op: "list" });
     const build = readFileSync(join(import.meta.dirname, "../desktop/scripts/build.mjs"), "utf8");
     expect(build).toContain('cpSync(join(desktop, "tasks-ipc.mjs"), join(out, "tasks-ipc.mjs"));');
+  });
+});
+
+describe("MEM-4c review M1: preload drop notice", () => {
+  it("passes only allow-listed reasons (no content) from tasks:plaintext-dropped to the page", () => {
+    const preload = readFileSync(join(import.meta.dirname, "../desktop/preload.cjs"), "utf8");
+    const handlers = new Map<string, (event: unknown, payload: unknown) => void>();
+    let exposed: Record<string, unknown> = {};
+    new Function("require", "process", preload)(() => ({ contextBridge: { exposeInMainWorld: (_k: string, api: typeof exposed) => { exposed = api; } }, ipcRenderer: { invoke: vi.fn(), send: vi.fn(), sendSync: vi.fn(() => "zh-TW"), on: (ch: string, l: (e: unknown, p: unknown) => void) => handlers.set(ch, l), removeListener: vi.fn() } }), { argv: [] });
+    const got: unknown[] = [];
+    (exposed.onTasksPlaintextDropped as (cb: (r: unknown) => void) => () => void)((r) => got.push(r));
+    const fire = handlers.get("tasks:plaintext-dropped")!;
+    for (const reason of ["os_lock", "suspend", "idle", "memory_off", "memory_closed", "quit"]) fire({}, { reason, title: "x" });
+    fire({}, { reason: "evil" });
+    fire({}, null);
+    expect(got).toEqual(["os_lock", "suspend", "idle", "memory_off", "memory_closed", "quit"]);
   });
 });
 

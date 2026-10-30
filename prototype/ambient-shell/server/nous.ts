@@ -24,7 +24,7 @@ import { RealtimeSettingsStore } from "./realtime-settings.ts";
 import { WEB_SEARCH_TIMEOUT_MS, WebSearch } from "./web-search.ts";
 import { HomeBridge } from "./home-bridge.ts";
 import { TaskRunner } from "./runner.ts";
-import { TaskStore } from "./store.ts";
+import { TaskStore, type PlaintextDropReason } from "./store.ts";
 import { checkFaceRuntime, FACE_MODEL_VERSION } from "./face-runtime.ts";
 import { GalleryStore, type SecretBox } from "./identity-store.ts";
 import { IdentityService, type ConfirmFn, type IdentityContext, type IdentityMemoryLink } from "./identity-service.ts";
@@ -81,6 +81,11 @@ export interface TasksInjection {
   lockProvider?: MemoryLockProvider;
   /** 加密檔與明文備份資料夾排除在 Time Machine 之外（App：tmutil addexclusion）。 */
   excludeFromBackup?: (dir: string) => Promise<void>;
+  /**
+   * MEM-4c 審查 M1：核心丟棄解密內容後（鎖定、睡眠、閒置、關閉記憶、記憶層關閉、結束）通知主程序，主程序再送一個
+   * 不含內容的事件給主視窗，讓頁面清掉自己的快取與成果紀錄畫面。
+   */
+  onPlaintextDropped?: (reason: PlaintextDropReason) => void;
 }
 
 export interface MemoryInjection {
@@ -120,7 +125,7 @@ export interface NousHandle {
     closeSessions(): void;
   };
   /** MEM-4a：只有注入 tasks 時存在；主程序的 IPC 處理器（desktop/tasks-ipc.mjs 過濾後）把請求轉到這裡。 */
-  tasks?: { handle(request: unknown, ctx?: { userInitiated?: boolean }): Promise<TasksResponse>; closeSessions(): void };
+  tasks?: { handle(request: unknown, ctx?: { userInitiated?: boolean }): Promise<TasksResponse>; closeSessions(): void; /** MEM-4c：OS 鎖定或睡眠時丟棄已結束受保護任務的解密內容。 */ dropPlaintext(reason: PlaintextDropReason): void };
   /** 只有注入 memory 時存在；主程序的 IPC 處理器（desktop/memory-ipc.mjs 過濾後）把請求轉到這裡。 */
   memory?: {
     handle(request: unknown, ctx: { userInitiated?: boolean }): Promise<MemoryResponse>;
@@ -245,6 +250,14 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     ...(options.memory ? { memoryEnabled: () => memoryEnabledHint(hintFile).get() } : {}),
   } : undefined);
   const runner = new TaskRunner(store, providers, config.maxConcurrent);
+  // MEM-4c：已結束受保護任務的解密內容閒置 10 分鐘（PLAINTEXT_IDLE_MS）就丟棄；每分鐘檢查一次。
+  const plaintextTimer = options.tasks ? setInterval(() => store.dropIfIdle(), 60_000) : null;
+  plaintextTimer?.unref?.();
+  // MEM-4c 審查 M1：每次丟棄都通知主視窗（只有原因）。
+  if (options.tasks?.onPlaintextDropped) {
+    const notifyDropped = options.tasks.onPlaintextDropped;
+    store.subscribeDropped((reason) => notifyDropped(reason));
+  }
   // 審查 minor 4：執行前核對受保護交辦的同意對象仍是目前設定的帳號。
   runner.setTargetCheck((target) => providers.chatTargets().some((t) => t.provider === target.provider && t.account === target.account));
   // 審查 minor 6：加密檔與明文備份排除在 Time Machine 之外（失敗只記 log）。
@@ -297,6 +310,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         // MEM-4a：受保護交辦的任務端（同意對象沿用目前任務引擎的 claude／chatgpt 同意；模擬引擎不帶記憶）與撤銷傳播。
         tasks: { sealed: () => store.sealed && store.vaultStatus().failure === null, mode: () => runner.mode, target: () => providers.chatTarget(), submit: (input) => runner.submitProtected(input), publicGet: (taskId) => store.publicGet(taskId) },
         onResultsWithdrawn: (taskIds) => runner.revokeMemory(taskIds),
+        // MEM-4c：撤回提交期間先隱藏、關閉記憶或記憶層關閉時丟棄解密內容。
+        holdResults: (taskIds) => store.hold(taskIds),
+        onPlaintextDrop: (reason) => store.dropPlaintext(reason),
         confirm: memoryOpts.confirm,
         identity: (): MemoryIdentityHooks | null => identity ? { candidate: () => identity.memoryCandidate(), people: () => identity.memoryPeople(), nameAllowed: () => camera.view().look_to_talk_greet_name } : null,
         afterOpen: memoryOpts.excludeFromBackup ? () => memoryOpts.excludeFromBackup!(memoryOpts.dir) : undefined,
@@ -376,13 +392,17 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     ...(memory ? { memory: { handle: (request: unknown, ctx: { userInitiated?: boolean }) => memory.handle(request, ctx), closeSessions: () => memory.closeSessions(), suspendAll: () => memory.suspendAll() } } : {}),
     ...(options.tasks ? { tasks: (() => {
       const ipc = createTaskIpc({ store, runner, memory, confirmDeleteBackups: options.tasks.confirmDeleteBackups, log });
-      return { handle: (request: unknown, ctx?: { userInitiated?: boolean }) => ipc(request, ctx), closeSessions: () => ipc.closeSessions() };
+      // MEM-4c：dropPlaintext＝OS 鎖定與睡眠（desktop/main.mjs 的 powerMonitor）時丟棄解密內容。
+      return { handle: (request: unknown, ctx?: { userInitiated?: boolean }) => ipc(request, ctx), closeSessions: () => ipc.closeSessions(), dropPlaintext: (reason: PlaintextDropReason) => { store.dropPlaintext(reason); } };
     })() } : {}),
     close: () =>
       new Promise<void>((resolve) => {
         // 先讓家人辨識進入關閉狀態：結束 session，等待中的原生確認回來後也不寫檔。
         identity?.shutdown();
         void memory?.shutdown();
+        // MEM-4c：結束 App 時丟棄解密內容與索引（只是放掉參照，不是安全抹除）。
+        if (plaintextTimer) clearInterval(plaintextTimer);
+        store.dropPlaintext("quit");
         vault?.close();
         server.closeAllConnections();
         server.close(() => resolve());

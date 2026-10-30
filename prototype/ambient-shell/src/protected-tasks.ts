@@ -30,6 +30,10 @@ export function shellView(task: Task): Task {
 export class ProtectedTasks {
   private readonly cache = new Map<string, Task>();
   private readonly pending = new Set<string>();
+  /** want 讀失敗的任務（不在每次重畫時重試；clear 或 SSE 更新時才再試）。 */
+  private readonly failed = new Set<string>();
+  /** clear 之後，之前送出的請求回來也不再寫進快取。 */
+  private generation = 0;
   private listLoaded = false;
   /** 成果紀錄是從選單列「成果紀錄…」打開的（George 的 D2）：搜尋、詳細與重做帶 all。 */
   private all = false;
@@ -79,9 +83,10 @@ export class ProtectedTasks {
   /** 第一次（hello 之後）讀全部任務的真實內容。 */
   async loadAll(): Promise<void> {
     if (!this.bridge) return;
+    const generation = this.generation;
     try {
       const res = await this.call({ op: "list" });
-      if (res.op !== "list") return;
+      if (res.op !== "list" || generation !== this.generation) return;
       for (const task of res.tasks) this.cache.set(task.task_id, task);
       this.listLoaded = true;
       this.changed();
@@ -96,24 +101,55 @@ export class ProtectedTasks {
     const real = this.cache.get(shell.task_id);
     if (real && real.steps.length === shell.steps.length && real.status === shell.status && (real.error === null) === (shell.error === null) && !!real.withdrawn === !!shell.withdrawn) return;
     if (!real && !this.listLoaded && this.pending.size > 16) return;
+    this.failed.delete(shell.task_id);
     void this.refresh(shell.task_id);
   }
 
   forget(taskId: string): void {
     this.cache.delete(taskId);
+    this.failed.delete(taskId);
+  }
+
+  /**
+   * MEM-4c 審查 M1：核心丟棄解密內容（鎖定、睡眠、閒置、關閉記憶）時，畫面這邊的真實標題、步驟與錯誤也全部清掉；
+   * 之後只為畫面上正在顯示的進度卡再讀（want），不再一次讀全部。
+   */
+  clear(): void {
+    this.cache.clear();
+    this.pending.clear();
+    this.failed.clear();
+    this.listLoaded = false;
+    this.generation += 1;
+  }
+
+  /** 只為這幾筆（畫面上正在顯示的）讀回真實內容；已有或正在讀的略過。 */
+  want(tasks: Iterable<Task>): void {
+    if (!this.bridge) return;
+    for (const task of tasks) {
+      if (!task.protected || this.cache.has(task.task_id) || this.pending.has(task.task_id) || this.failed.has(task.task_id)) continue;
+      void this.refresh(task.task_id);
+    }
+  }
+
+  /** 測試用：目前快取了幾筆真實內容。 */
+  get cachedCount(): number {
+    return this.cache.size;
   }
 
   private async refresh(taskId: string): Promise<void> {
     if (this.pending.has(taskId)) return;
     this.pending.add(taskId);
+    const generation = this.generation;
     try {
       const res = await this.call({ op: "get", task_id: taskId });
+      if (generation !== this.generation) return;
       if (res.op === "get") {
         this.cache.set(taskId, res.task);
         this.changed();
       }
     } catch {
       // 照外殼顯示
+      if (generation === this.generation) this.failed.add(taskId);
     } finally {
       this.pending.delete(taskId);
     }
@@ -209,4 +245,33 @@ export function vaultNotice(vault: VaultView | null, manual = false): { text: st
   }
   if (manual) return { text: t("沒有任務的明文備份。"), canDelete: false };
   return null;
+}
+
+/** MEM-4c 審查 M1：核心丟棄解密內容的原因（和 desktop/preload.cjs 的白名單相同）。 */
+export type PlaintextDropReason = "os_lock" | "suspend" | "idle" | "memory_off" | "memory_closed" | "quit";
+
+/**
+ * MEM-4c 審查 M1：主視窗收到「核心已丟棄解密內容」時，畫面這邊也清掉：真實標題快取、受保護成果的內容、成果紀錄的結果、
+ * 片段與詳細頁；正在看受保護成果時收起那個畫面（只關畫面，不停止任務）。之後只為正在顯示的進度卡重新讀（不一次讀全部）。
+ */
+export function applyPlaintextDrop(reason: PlaintextDropReason, deps: {
+  protectedTasks: ProtectedTasks;
+  tasks: ReadonlyMap<string, Task>;
+  artifacts: Map<string, Artifact>;
+  artifactErrors: Map<string, string>;
+  history: { hideContent(reason: PlaintextDropReason): void };
+  surface: { kind: string; task_id?: string | null } | null;
+  dismiss: () => void;
+  render: () => void;
+}): void {
+  deps.protectedTasks.clear();
+  for (const task of deps.tasks.values()) {
+    if (!task.protected || !task.artifact_id) continue;
+    deps.artifacts.delete(task.artifact_id);
+    deps.artifactErrors.delete(task.artifact_id);
+  }
+  deps.history.hideContent(reason);
+  const s = deps.surface;
+  if (s?.kind === "artifact" && s.task_id && deps.tasks.get(s.task_id)?.protected) deps.dismiss();
+  deps.render();
 }

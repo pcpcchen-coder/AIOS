@@ -74,7 +74,11 @@ describe("Electron wiring for memory (static)", () => {
   });
 
   it("revokes on OS lock and main-window navigation; injects safeStorage-backed memory and native confirms", () => {
-    expect(main).toMatch(/powerMonitor\.on\("lock-screen", \(\) => core\?\.memory\?\.suspendAll\(\)\)/);
+    expect(main).toMatch(/powerMonitor\.on\("lock-screen", \(\) => \{\s*core\?\.memory\?\.suspendAll\(\);\s*if \(core\?\.tasks\) core\.tasks\.dropPlaintext\("os_lock"\);\s*else notifyPlaintextDropped\("os_lock"\);\s*\}\)/);
+    // MEM-4c：睡眠也丟棄已結束受保護任務的解密內容。
+    expect(main).toMatch(/powerMonitor\.on\("suspend", \(\) => \(core\?\.tasks \? core\.tasks\.dropPlaintext\("suspend"\) : notifyPlaintextDropped\("suspend"\)\)\)/);
+    // MEM-4c 審查 M1：只送白名單裡的原因、不含內容。
+    expect(main).toMatch(/win\.webContents\.send\("tasks:plaintext-dropped", \{ reason \}\)/);
     expect(main).toMatch(/did-navigate", \(\) => \{ core\?\.identity\?\.closeSessions\(\); core\?\.memory\?\.closeSessions\(\); core\?\.tasks\?\.closeSessions\(\); \}/);
     expect(main).toMatch(/render-process-gone", \(\) => \{ core\?\.identity\?\.closeSessions\(\); core\?\.memory\?\.closeSessions\(\); core\?\.tasks\?\.closeSessions\(\); \}/);
     // MEM-4a：記憶與任務加密共用同一個 safeStorage secretBox。

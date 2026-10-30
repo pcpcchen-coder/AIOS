@@ -26,6 +26,7 @@ Rules:
 | 5 | API key voice memory MEM-3 | [MEM-3 §5](memory-mem3-2026-10-30.en.md#5-mac-test-steps-none-run-must-not-be-claimed-as-passed) steps 0–15 | **Wire probes P1 and P2 hold**, and the step 5 recording as in MEM-2 | Same as MEM-2; a real `OPENAI_API_KEY` (billed) | Long |
 | 6 | Wake word spike WK-00 | [WK-00 §7](wk-00-spike-2026-10-29.en.md#7-mac-test-steps-for-george) steps 1–6 | Family positives produce hits; TV negatives run for at least 8 hours | `sox`; family members; TV running overnight | Long (includes 8 unattended hours) |
 | 7 (added 2026-10-30) | Voice delegation with memory MEM-4b | [MEM-4b §5](memory-mem4b-2026-10-30.en.md#5-mac-gate-none-of-it-has-been-run-it-cannot-be-claimed-as-passed) steps 1–11 | Calibrate the ASR grace and similarity threshold; on the API key route committed / item_id / response_id match; record short-affirmative and TV bindings honestly | Same as MEM-2/MEM-3; tasks stored encrypted; `NOUS_MEMORY_ROUTES` includes `task` | Medium |
+| 8 (added 2026-10-30) | Protected-result search and plaintext lifecycle MEM-4c | [MEM-4c §5](memory-mem4c-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed) steps 1–12 | The log shows a drop on a real lock, sleep, idle, memory off, and App quit; the latency of the first and second search after unlocking is recorded honestly; on a Keychain denial the screen shows the error honestly, not an empty result; the page is also cleared after a lock | Tasks stored encrypted (MEM-4a); some fictional protected tasks; 500 / 2000 tasks if possible | Short to medium |
 
 ## 2. Why this order
 
@@ -34,7 +35,8 @@ Rules:
 3. **ID-02 third.** It verifies look to talk and family recognition. The "face candidate" steps of MEM-1 step 5, MEM-2 step 2, and MEM-3 step 2 use the same chain. Confirming recognition and greetings first makes later failures easier to attribute to the right layer.
 4. **MEM-2, then MEM-3.** Both use the same recording rig, so doing them on the same day is recommended. If wire probe P1 or P2 in MEM-3 step 0 fails, MEM-3 is not released and steps 1–15 need not continue (record the result and stop).
 5. **MEM-4b after MEM-3 (added 2026-10-30).** It reuses the MEM-2 and MEM-3 voice routes and MEM-4a's task encryption; if those prerequisites fail on the Mac, MEM-4b results mean nothing. MEM-4a's own Mac steps are in [MEM-4a §5](memory-mem4a-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed); this runbook does not consolidate them separately.
-6. **WK-00 independently.** It is a command-line spike not wired into the product and can be scheduled separately. The 8-hour TV negative run suits an unattended evening.
+6. **MEM-4c after MEM-4a's Mac steps (added 2026-10-30).** It builds on MEM-4a's task encryption; steps 1–5 only need locking, sleeping, waiting, and reading the log, so they can be done on the same day as other batches.
+7. **WK-00 independently.** It is a command-line spike not wired into the product and can be scheduled separately. The 8-hour TV negative run suits an unattended evening.
 
 ## 3. Shared preparation (once)
 
@@ -185,6 +187,25 @@ Prerequisites: the same rig and fictional people as batches 4 and 5; tasks store
 - [ ] 11. Protected original-sentence card: an SSE capture contains no sentence; "Delegate" carries memory; with the flags off the card is the same as in MEM-4a.
 
 Main release criteria: the mapping and timing in steps 1 and 10 hold; wrong guesses in steps 4 and 5 are recorded honestly, and George decides whether to accept them.
+
+## 8b. Supplementary batch: MEM-4c protected-result search and plaintext lifecycle (added 2026-10-30)
+
+Prerequisites: a signed App; tasks stored encrypted (MEM-4a); some fictional protected tasks in the data folder (at least one with a canary); logging on. The full conditions for every step are in [MEM-4c §5](memory-mem4c-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed).
+
+- [ ] 1. OS lock, then unlock: the log shows an `os_lock` drop; content reads back normally; record the ms of the first search after unlocking.
+- [ ] 2. Sleep, then wake: the log shows `suspend`.
+- [ ] 3. 11 minutes of idle: the log shows `idle`; the next search rebuilds the index.
+- [ ] 4. Memory off: the log shows `memory_off`.
+- [ ] 5. App quit: the log shows `quit`.
+- [ ] 6. Latency: record cold and warm once each (500 and 2000 tasks if possible).
+- [ ] 7. Keychain denial: the screen shows the error honestly (Chinese and English), not an empty result; `sealed/` is unchanged; everything recovers after allowing access.
+- [ ] 8. A running task finishes normally after a lock.
+- [ ] 9. After forgetting the memory, the result content is no longer found by search.
+- [ ] 10. Scope: other family members' memory-backed results show only shells and become visible only after opening from the menu-bar "Results history…".
+- [ ] 11. Canary scan of `userData/data/`.
+- [ ] 12. The page is cleared too: lock and unlock with the results history and a result view open; the result view is collapsed, the results history shows only the hidden-content notice (Chinese and English), and tasks continue.
+
+Main release criteria: the drops of steps 1–5 all appear in the log; step 7 is not an empty result; the numbers of step 6 are recorded honestly, and George decides whether to accept them.
 
 ## 9. Batch 6: WK-00 wake word spike
 
