@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-30T09:14:31.314Z",
+  "updated_at": "2026-10-30T11:29:26.367Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261030112924-81fcfb",
+      "title": "MEM-4 背景任務記憶",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-10-30T11:29:24.715Z",
+      "started_at": "2026-10-30T11:29:24.715Z",
+      "ended_at": null,
+      "branch": "",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 8,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261030061721-2ae30c",
