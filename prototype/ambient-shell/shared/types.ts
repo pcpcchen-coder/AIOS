@@ -153,6 +153,8 @@ export type ServerEvent =
   | { type: "hello"; sequence: number; settings: SettingsView; tasks: Task[]; client_id?: string }
   | { type: "task.updated"; sequence: number; task: Task }
   | { type: "settings.updated"; sequence: number; settings: SettingsView }
+  /** HIST-1：使用者在成果紀錄裡確認刪除了一個任務（與它的成果）。 */
+  | { type: "task.deleted"; sequence: number; task_id: string; artifact_id: string | null }
   | RealtimeServerEvent;
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";

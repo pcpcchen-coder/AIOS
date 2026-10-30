@@ -48,6 +48,7 @@ Click the brain or “Start voice conversation,” sign in as prompted, then act
 | Click “End conversation,” say/type “收起,” or press Esc when not speaking | Stop foreground capture/reply, dismiss the view, and end voice. Existing background tasks continue. “結束對話” is not a local command and goes to AI; see the command table |
 | “進度如何” or “做到哪了” | Show all task progress: state, `completed steps / total steps · percentage`, per-step state/duration, and streamed character counts |
 | “看結果” or “剛才那份” | Show the latest completed artifact |
+| “搜尋成果 香菜”, “找之前關於晚餐的成果”, “search past results for dinner”, the progress view's “Search all results” button, or the macOS menu bar item “Results history…” | Open **results history** (HIST-1): search past tasks and results, filter by status, engine, and date, view details, redo, or delete (deletion asks for native confirmation; stop a running task first). You can also open `http://localhost:8787/history` yourself in a browser |
 | “停止任務” | Stop directly if exactly one task runs. If several run, list them for selection |
 | Microphone button (Chrome / Edge) | Press and speak. First explain that the browser sends audio to cloud recognition; enable only after consent |
 | Say/type “開啟語音模式” or click the waveform input button | **Voice conversation mode**, similar to ChatGPT voice: speak directly with AI and hear replies sentence by sentence while generated. **Interrupt while it speaks** and it stops to listen. AI delegates longer work, such as reports/research, to background tasks with normal progress. Commands such as “進度如何,” “停止任務,” and “收起” remain local, except spoken realtime commands go to AI as described below. End with “關閉語音模式,” the top-right indicator, or inactivity (default 1 minute 30 seconds, configurable) |
@@ -115,6 +116,7 @@ Only phrases of at most 14 characters without delegation verbs qualify.
 |---|---|---|---|---|---|---|
 | 「進度如何」「做到哪了」「好了沒」 | Show progress; voice mode also reads real state. Realtime typed input also gets an AI status lookup/reply | ✓ | ✓ | ✓ | — | |
 | 「看結果」「給我看成果」「剛才那份」 | Show latest completed artifact or explain none exists | ✓ | ✓ | ✓ | — | |
+| 「搜尋成果 香菜」「找之前關於晚餐的成果」「成果紀錄」「search past results for dinner」 | Open results history: search past tasks and results (titles, steps, result content), filter by status, engine, and date, view details, redo, or delete (deletion asks for confirmation first) | ✓ | ✓ | ✓ | — | Start or end with phrases such as 搜尋成果, 找之前…的成果, or 成果紀錄. If the query reads like a new assignment (然後寫…, 幫我整理…), it is delegated instead; 結果 without 做過 (such as 之前的比賽結果) does not count. Saying only 成果 or 看結果 still opens the latest result. In English, say “my” or “past” results (“search past results for …”, “results history”). In the macOS App, also open it from the menu bar item “Results history…” |
 | 「停止任務」「不要做了」「取消」 | Stop the sole running task, otherwise show progress for selection or explain no tasks | ✓ | ✓ | ✓ | — | Spoken realtime does not stop tasks; AI lacks a task-stop tool |
 
 <a id="外部動作確認"></a>
@@ -151,7 +153,7 @@ Tests confirm every phrase's matching result.
 | 「關閉手掌停止」「停用停止手勢」「打開手掌停止」「啟用停止手勢」 | Spoken with a realtime card changes settings and rejects the card because it includes 停止. Typing does not, as camera rules run first and skip approval parsing |
 | 「關掉鏡頭」 | Spoken realtime camera commands execute locally and still reach AI, which may respond separately |
 | 「收起」 | Dismisses and ends voice, without stopping tasks |
-| 「進度如何」「設定」「看結果」「改用 Claude」「停止任務」 | Typed with a realtime card replaces it with progress/settings/artifact/notice, rejecting the external action even without an approval/cancel phrase. Approve with 確認執行 instead |
+| 「進度如何」「設定」「看結果」「搜尋成果 香菜」「改用 Claude」「停止任務」 | Typed with a realtime card replaces it with progress/settings/artifact/results history/notice, rejecting the external action even without an approval/cancel phrase. Approve with 確認執行 instead |
 | 「停止任務」「進度如何」「收起」 | Spoken realtime goes to AI. AI can query progress, but has no task-stop or dismiss tools. Type 停止任務 or use task buttons to stop. Type 收起, press Esc, or click to dismiss. Esc interrupts/dismisses, not cancels tasks. With a card open, phrases including 停止 reject it |
 | 「確認執行停止播放」 | Includes 停止 and therefore rejects the card. Say only 確認執行 to approve, without appending the action |
 | 「好」 | Neither approval nor cancellation. Nothing is sent. Card waits for 確認執行 or 取消, then cancels at 60 seconds |
@@ -361,6 +363,8 @@ Set `.env` `SMARTHOME_URL` and `SMARTHOME_TOKEN` to add two realtime tools. `hom
 Verified: Fake-controller tests and real SmartHomeAI code with example configuration. Example devices lack real addresses, reaching only stale/not-integrated/unsupported/failed paths. H1b uses fixture lists/keys written into controller, without AIFA/Tuya authentication, reaching only failed/not-sent/cooldown retry. See [H0](../../docs/validation/smarthome-h0-2026-10-21.en.md), [H1](../../docs/validation/smarthome-h1-2026-10-22.en.md), and [H1b](../../docs/validation/smarthome-h1b-2026-10-22.en.md) validation. George verbally reported switching home lights through realtime. AC/IR home tests remain undone.
 
 Tasks/artifacts persist in gitignored `data/` and can be recalled after restart. Unfinished restart tasks fail as interrupted. Retry creates a linked new task, replans, and reruns completely, without step resumption. Ordinary chat remains page memory, without knowledge-base or cross-device memory.
+
+Results history (HIST-1) searches the ordinary tasks and results in the same `data/`. Each query is matched in core memory (Traditional/Simplified folding, Chinese two-character fragments, English words); no search index is built or written, and query text is not logged. Deleting removes both the task and its result, rewrites both JSON files, and notifies every view with a `task.deleted` event. Protected (encrypted) results and memory in tasks are not implemented yet (MEM-4a, MEM-4c); see the [HIST-1 validation record](../../docs/validation/history-hist1-2026-10-30.en.md).
 
 <a id="與產品紅線的對照"></a>
 ## Product red-line comparison

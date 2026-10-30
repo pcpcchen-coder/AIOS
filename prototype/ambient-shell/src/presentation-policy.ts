@@ -26,6 +26,10 @@ export function evaluateSurface(surface: Surface | null, ctx: PolicyContext): Po
       ? { allowed: true }
       : { allowed: false, reason: "沒有對應的待確認動作" };
   }
+  // 成果紀錄（HIST-1）只能由使用者的請求打開：一律 user_request，而且要對到真實的輸入（下面檢查）。
+  if (surface.kind === "history" && surface.visibility_reason !== "user_request") {
+    return { allowed: false, reason: "成果紀錄只能由使用者請求打開" };
+  }
   if (!SUPPORTED_REASONS.has(surface.visibility_reason)) {
     return { allowed: false, reason: `visibility_reason "${surface.visibility_reason}" 尚未支援` };
   }

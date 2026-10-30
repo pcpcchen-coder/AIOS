@@ -37,7 +37,7 @@ beforeAll(async () => {
 afterEach(() => setLocale("zh-TW"));
 afterAll(() => { vi.unstubAllGlobals(); if (originalDocument) globalThis.document = originalDocument; });
 const noop = () => {};
-const actions = { cancel: noop, retry: noop, openArtifact: noop, showProgress: noop, dismiss: noop, openSettings: noop, ackWelcome: noop, selectProvider: noop, chatgptLogin: noop, chatgptCancel: noop, chatgptLogout: noop, updateCamera: noop, openCameraPreview: noop, updateVoice: noop, updateRealtime: noop, codexLogin: noop, codexCancel: noop, codexLogout: noop };
+const actions = { cancel: noop, retry: noop, openArtifact: noop, showProgress: noop, dismiss: noop, openSettings: noop, ackWelcome: noop, selectProvider: noop, chatgptLogin: noop, chatgptCancel: noop, chatgptLogout: noop, updateCamera: noop, openCameraPreview: noop, updateVoice: noop, updateRealtime: noop, codexLogin: noop, codexCancel: noop, codexLogout: noop, openHistory: noop };
 const settings: SettingsView = {
   schema_version: "proto-0.1", provider: "mock", providers: [{ id: "mock", label: "模擬模式", available: true, detail: "未呼叫任何模型" }],
   chatgpt: { signed_in: false, email: null, plan_usage: false, needs_reauth: false, welcome_ack: false, pending_login: false, last_error: null },

@@ -12,3 +12,16 @@ export function pageHeaders(camera: boolean): Record<string, string> {
     "Permissions-Policy": `camera=(${camera ? "self" : ""}), microphone=(self), geolocation=()`,
   };
 }
+
+/**
+ * 成果紀錄獨立網頁（/history）的標頭：比主畫面更嚴。不用鏡頭、麥克風，也不編譯 wasm；表單只在頁面內處理，
+ * 不送到任何地方（form-action 'none'）。
+ */
+export function historyPageHeaders(): Record<string, string> {
+  const page = pageHeaders(false);
+  return {
+    ...page,
+    "Content-Security-Policy": `${page["Content-Security-Policy"]}; form-action 'none'`,
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  };
+}

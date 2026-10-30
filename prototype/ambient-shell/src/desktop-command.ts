@@ -12,9 +12,11 @@ export interface DesktopCommandHandlers {
   family(): void;
   /** 選單列「記憶…」（主程序已記下點擊時間；記憶管理能不能打開由核心決定）。 */
   memory(): void;
+  /** 選單列「成果紀錄…」（HIST-1）：打開成果紀錄 Surface。 */
+  history(): void;
 }
 
-export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family", "memory"] as const;
+export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family", "memory", "history"] as const;
 
 /** 認得的指令執行對應動作並回 true；不認得的不做任何事，回 false。 */
 export function runDesktopCommand(command: string, handlers: DesktopCommandHandlers): boolean {
@@ -39,6 +41,9 @@ export function runDesktopCommand(command: string, handlers: DesktopCommandHandl
       return true;
     case "memory":
       handlers.memory();
+      return true;
+    case "history":
+      handlers.history();
       return true;
     default:
       return false;

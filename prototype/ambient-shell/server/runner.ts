@@ -74,9 +74,11 @@ export class TaskRunner {
     return this.store.get(task.task_id)!;
   }
 
-  retry(taskId: string, requestId: string): Task | null {
+  /** 重試失敗或已停止的任務；redo（成果紀錄的「重做」）也接受已完成的任務。都建立新任務並記下 retry_of。 */
+  retry(taskId: string, requestId: string, options: { redo?: boolean } = {}): Task | null {
     const original = this.store.get(taskId);
-    if (!original || (original.status !== "failed" && original.status !== "cancelled")) return null;
+    const allowed = original && (original.status === "failed" || original.status === "cancelled" || (options.redo === true && original.status === "succeeded"));
+    if (!original || !allowed) return null;
     return this.submit({ title: original.title, request_id: requestId, retry_of: taskId, ...(original.locale === "en" ? { locale: "en" as const } : {}) });
   }
 

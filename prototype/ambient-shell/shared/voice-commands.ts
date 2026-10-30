@@ -57,10 +57,10 @@ export const LOCAL_ROUTING: Record<Channel, Routing> = {
  * 打字時會 dispatch show.*（換上進度、設定、成果或通知畫面）的意圖：即時語音確認卡開著時，換掉確認卡就算拒絕。
  * 測試比對 src/main.ts handleCommand 每個 case 是否（直接或經 selectProvider、cancelTask）dispatch show.*。
  */
-export const REPLACES_CONFIRM_CARD: readonly LocalIntentKind[] = ["settings", "use_provider", "progress", "result", "stop"];
+export const REPLACES_CONFIRM_CARD: readonly LocalIntentKind[] = ["settings", "use_provider", "progress", "result", "history", "stop"];
 
 /** classify 的指令類意圖（不含 empty、task）；測試在編譯期比對 src/intent.ts 的 Intent。 */
-export type LocalIntentKind = "voice_on" | "voice_off" | "settings" | "use_provider" | "dismiss" | "stop" | "progress" | "result";
+export type LocalIntentKind = "voice_on" | "voice_off" | "settings" | "use_provider" | "dismiss" | "stop" | "progress" | "result" | "history";
 export type Provider = "claude" | "chatgpt" | "mock";
 /** 測試在編譯期比對 src/approval.ts 的 ApprovalDecision。 */
 export type ApprovalDecision = "approve" | "reject";
@@ -194,6 +194,12 @@ export const INTENT_COMMANDS: { readonly [K in LocalIntentKind]: NonEmpty<LocalC
     { id: "result", says: ["看結果", "給我看成果", "剛才那份"], works: HANDLE_COMMAND,
       does: "打開最近完成的成果；還沒有時會說明", expect: { matcher: "intent", kind: "result" } },
   ],
+  history: [
+    { id: "history", says: ["搜尋成果 香菜", "找之前關於晚餐的成果", "成果紀錄", "search past results for dinner"], works: HANDLE_COMMAND,
+      does: "打開成果紀錄：搜尋過去的任務與成果（標題、步驟、成果內容），可篩選狀態、引擎與日期，看詳細內容、重做或刪除（刪除前會再確認）",
+      note: "要以「搜尋成果」「找之前…的成果」「成果紀錄」等說法開頭或結尾；查詢詞像在交辦（「然後寫…」「幫我整理…」）時會當成交辦；「之前的比賽結果」這類沒說「做過」的「結果」不算。只說「成果」「看結果」仍是打開最近一份。英文要說 my／past results。macOS App 也可以從選單列「成果紀錄…」打開",
+      expect: { matcher: "intent", kind: "history" } },
+  ],
   stop: [
     { id: "stop", says: ["停止任務", "不要做了", "取消"], works: HANDLE_COMMAND,
       does: "只有一個任務在跑就停止它；有多個時打開進度讓你選；沒有時會說明",
@@ -254,10 +260,11 @@ export const CAVEATS: readonly Caveat[] = [
       { says: "進度如何", checks: { intent: "progress", approval: null } },
       { says: "設定", checks: { intent: "settings", approval: null } },
       { says: "看結果", checks: { intent: "result", approval: null } },
+      { says: "搜尋成果 香菜", checks: { intent: "history", approval: null } },
       { says: "改用 Claude", checks: { intent: "use_provider", approval: null } },
       { says: "停止任務", checks: { intent: "stop", approval: "reject" } },
     ],
-    truth: "即時語音確認卡開著時打這些字：會換上進度、設定、成果或通知畫面，確認卡被換掉就算拒絕，外部動作不執行（即使這句話本身不是確認或取消的說法）。要同意請打或說「確認執行」等確認語句" },
+    truth: "即時語音確認卡開著時打這些字：會換上進度、設定、成果、成果紀錄或通知畫面，確認卡被換掉就算拒絕，外部動作不執行（即使這句話本身不是確認或取消的說法）。要同意請打或說「確認執行」等確認語句" },
   { id: "realtime-not-local", cases: [
       { says: "停止任務", checks: { intent: "stop", approval: "reject" } },
       { says: "進度如何", checks: { intent: "progress", notLocalIn: ["realtime"] } },
@@ -386,7 +393,7 @@ export function commandSections(ctx: CommandContext | null): TableSection[] {
     { id: "conversation", title: "對話與畫面", intro: "只認 14 個字以內、沒有交辦動詞的短句。", columns: LOCAL_COLUMNS,
       rows: [...intents.voice_on, ...intents.voice_off, ...intents.dismiss, ...intents.settings, ...intents.use_provider].map((r) => localRow(r, ctx)) },
     { id: "tasks", title: "任務", intro: null, columns: LOCAL_COLUMNS,
-      rows: [...intents.progress, ...intents.result, ...intents.stop].map((r) => localRow(r, ctx)) },
+      rows: [...intents.progress, ...intents.result, ...intents.history, ...intents.stop].map((r) => localRow(r, ctx)) },
     { id: "approval", title: "外部動作確認", intro: "外部服務要寄出、發布等動作，或中控設為需要確認的家電時，出現確認卡；由本機固定語句判斷，不由 AI 轉述。60 秒沒回應或收起確認卡都不執行。家電確認卡要等中控提供每台設備的語音設定（H2）才會出現，目前家電一律直接執行。", columns: LOCAL_COLUMNS,
       rows: [...APPROVAL_COMMANDS.approve, ...APPROVAL_COMMANDS.reject].map((r) => localRow(r, ctx)) },
     { id: "barge-in", title: "插話", intro: null, columns: LOCAL_COLUMNS,

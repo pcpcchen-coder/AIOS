@@ -157,5 +157,7 @@
   "{0}：{1} 筆記憶（未成年，一併刪除）": "{0}: {1} memories (minor, deleted too)",
   "{0}：{1} 筆記憶（成人，預設保留）": "{0}: {1} memories (adult, kept by default)",
   "連結的記憶：": "Linked memory:",
-  "同時刪除成人家人的記憶（不勾選只解除連結）": "Also delete adult family members' memory (if unchecked, only the link is removed)"
+  "同時刪除成人家人的記憶（不勾選只解除連結）": "Also delete adult family members' memory (if unchecked, only the link is removed)",
+  "成果紀錄…": "Results history…",
+  "在瀏覽器打開成果紀錄": "Open results history in browser"
 }

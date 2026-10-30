@@ -106,6 +106,16 @@ try {
   assert.equal((await json('/api/tasks')).length, 1, 'ordinary mock dialogue creates no extra task');
   report.checks.push('direct mock chat SSE with terminal event and no unsolicited background task');
   report.chatEvents = events;
+  // HIST-1：成果紀錄的搜尋 API 與獨立網頁（只在使用者打開 /history 時提供）。
+  const history = await json(`/api/history?q=${encodeURIComponent('環境驗證')}`);
+  assert.deepEqual(history.items.map(item => item.task_id), [task.task_id]);
+  assert.equal(history.items[0].source, 'tasks');
+  assert.equal(history.items[0].protected, false);
+  const historyPage = await request('/history');
+  assert.equal(historyPage.status, 200);
+  assert.match(await historyPage.text(), /id="history-root"/);
+  assert.doesNotMatch(await (await request('/')).text(), /history-root/);
+  report.checks.push('results history search API and standalone /history page (not the default route)');
   report.passed = true;
 } catch (error) {
   report.error = String(error);

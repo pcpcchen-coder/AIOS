@@ -3,6 +3,7 @@ import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
+import { historySearchPath, type HistoryDetail, type HistoryPage, type HistoryQuery } from "../shared/history.ts";
 import type { ApprovalReport, CallAnswer, FallbackOffer, LiveInputKind, RealtimePrefsPatch, StartDecision, StopEvidence } from "../shared/realtime-route.ts";
 import { FallbackOfferError } from "./realtime-session.ts";
 
@@ -41,6 +42,12 @@ export const api = {
   retryTask: (taskId: string, request_id: string) =>
     call<Task>("POST", `/api/tasks/${taskId}/retry`, { request_id }),
   getArtifact: (artifactId: string) => call<Artifact>("GET", `/api/artifacts/${artifactId}`),
+  /** 成果紀錄（HIST-1）：搜尋、單筆詳細、經確認的刪除、重做（沿用重試，接受已完成的任務）。 */
+  searchHistory: (query: HistoryQuery) => call<HistoryPage>("GET", historySearchPath(query)),
+  getHistory: (taskId: string) => call<HistoryDetail>("GET", `/api/history/${encodeURIComponent(taskId)}`),
+  deleteHistory: (taskId: string, request_id: string) =>
+    call<{ ok: true; task_id: string; artifact_id: string | null }>("POST", `/api/history/${encodeURIComponent(taskId)}/delete`, { request_id, confirm: true }),
+  redoTask: (taskId: string, request_id: string) => call<Task>("POST", `/api/tasks/${encodeURIComponent(taskId)}/retry`, { request_id, redo: true }),
   selectProvider: (provider: ExecutorMode) => call<SettingsView>("POST", "/api/settings/provider", { provider }),
   /** 鏡頭使用者設定（保存在本機 camera.json）；回傳更新後的設定。 */
   updateCamera: (patch: CameraPrefsPatch) => call<SettingsView>("POST", "/api/settings/camera", patch),

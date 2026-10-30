@@ -1,4 +1,4 @@
-import { t, msg, getLocale, setLocale, uiText } from "./i18n.ts";
+import { t, msg, getLocale, setLocale, useLocale, uiText } from "./i18n.ts";
 import DOMPurify from "dompurify";
 import { confirmIcon } from "./icons.ts";
 import { marked } from "marked";
@@ -35,15 +35,18 @@ export interface ViewActions {
   codexLogin(method: "browser" | "device"): void;
   codexCancel(): void;
   codexLogout(): void;
+  /** 進度卡的「搜尋全部成果」（HIST-1）：打開成果紀錄。 */
+  openHistory(): void;
 }
 
 const MAX_LISTED = 8;
 
 type RawText = { readonly raw: string };
-type Child = Node | string | RawText | null | undefined | false;
-const raw = (text: string): RawText => ({ raw: text });
+export type Child = Node | string | RawText | null | undefined | false;
+/** 資料（使用者原句、模型輸出、任務內容）：當成文字節點加入，不翻譯、不解析成 HTML。 */
+export const raw = (text: string): RawText => ({ raw: text });
 
-function h<K extends keyof HTMLElementTagNameMap>(
+export function h<K extends keyof HTMLElementTagNameMap>(
   tag: K,
   attrs: Record<string, string> = {},
   ...children: Child[]
@@ -62,7 +65,7 @@ function usageLink(label = t("管理用量"), variant = ""): HTMLAnchorElement {
   return h("a", { class: `btn ${variant}`.trim(), href: CHATGPT_USAGE_URL, target: "_blank", rel: "noopener noreferrer" }, label);
 }
 
-function button(label: string, onClick: () => void, variant = ""): HTMLButtonElement {
+export function button(label: string, onClick: () => void, variant = ""): HTMLButtonElement {
   const b = h("button", { type: "button", class: `btn ${variant}`.trim() }, t(label));
   b.addEventListener("click", onClick);
   return b;
@@ -86,7 +89,7 @@ export function refreshTimers(root: ParentNode): void {
   root.querySelectorAll<HTMLElement>(".elapsed").forEach(refreshElapsed);
 }
 
-function surfaceShell(kind: string, ...children: Child[]): HTMLElement {
+export function surfaceShell(kind: string, ...children: Child[]): HTMLElement {
   return h("section", { class: `surface surface--${kind}`, role: "region" }, ...children);
 }
 
@@ -123,6 +126,8 @@ export function renderProgress(tasks: Task[], message: string | null, actions: V
   for (const task of sorted.slice(0, MAX_LISTED)) list.append(renderTaskCard(task, actions));
   const more =
     sorted.length > MAX_LISTED ? h("p", { class: "muted" }, msg`另有 ${sorted.length - MAX_LISTED} 個較早的任務未列出`) : null;
+  // 成果紀錄（HIST-1）只在使用者按下這顆按鈕時打開；不是常駐入口。
+  const history = sorted.length > 0 ? h("div", { class: "actions history-entry" }, button(t("搜尋全部成果"), actions.openHistory)) : null;
 
   return surfaceShell(
     "progress",
@@ -130,6 +135,7 @@ export function renderProgress(tasks: Task[], message: string | null, actions: V
     message && h("p", { class: "notice" }, t(message)),
     sorted.length ? list : h("p", { class: "muted" }, t("說出或輸入一件事交辦給我，之後問「進度如何」就會看到這裡。")),
     more,
+    history,
     footer(actions),
   );
 }
@@ -196,7 +202,7 @@ function renderTaskCard(task: Task, actions: ViewActions): HTMLElement {
   );
 }
 
-function renderStep(taskId: string, index: number, step: TaskStep): HTMLElement {
+export function renderStep(taskId: string, index: number, step: TaskStep): HTMLElement {
   const chars = h("span", { "data-chars": `${taskId}:${index}` }, charsText(step));
   const time = step.status === "running" || step.status === "done" ? elapsed(step.started_at, step.finished_at) : null;
   return h(
@@ -249,12 +255,12 @@ export function renderMarkdown(markdown: string): string {
   });
 }
 
-export function renderArtifact(
+/** 成果的標題列、內容與註記（能力缺口、假設）：成果畫面與成果紀錄的詳細頁共用。 */
+export function artifactSections(
   task: Task,
   artifact: Artifact | null,
   loadError: string | null,
-  actions: ViewActions,
-): HTMLElement {
+): { header: HTMLElement; body: HTMLElement; notes: HTMLElement[] } {
   const metaParts = [
     artifact ? `v${artifact.version}` : null,
     task.finished_at ? msg`${formatClock(task.finished_at)} 完成` : null,
@@ -277,15 +283,26 @@ export function renderArtifact(
   }
   if (artifact && artifact.assumptions.length > 0) notes.push(listBlock(t("假設"), artifact.assumptions));
 
+  const header = h(
+    "header",
+    { class: "surface-header" },
+    h("p", { class: "eyebrow" }, msg`成果${metaParts.length ? " · " + metaParts.join(" · ") : ""}`),
+    h("h2", {}, raw(task.title)),
+    artifact?.status === "partial" && h("p", { class: "notice" }, t("這份成果不完整，請看下方的缺口說明。")),
+  );
+  return { header, body, notes };
+}
+
+export function renderArtifact(
+  task: Task,
+  artifact: Artifact | null,
+  loadError: string | null,
+  actions: ViewActions,
+): HTMLElement {
+  const { header, body, notes } = artifactSections(task, artifact, loadError);
   return surfaceShell(
     "artifact",
-    h(
-      "header",
-      { class: "surface-header" },
-      h("p", { class: "eyebrow" }, msg`成果${metaParts.length ? " · " + metaParts.join(" · ") : ""}`),
-      h("h2", {}, raw(task.title)),
-      artifact?.status === "partial" && h("p", { class: "notice" }, t("這份成果不完整，請看下方的缺口說明。")),
-    ),
+    header,
     body,
     ...notes,
     footer(actions, button(t("看進度"), actions.showProgress)),
@@ -329,17 +346,22 @@ export interface SettingsRenderOptions {
   desktop?: boolean;
 }
 
-function languageSelector(): HTMLElement {
+/**
+ * 介面語言切換。persist=false：只換這一頁、不寫進共用的語言偏好（成果紀錄獨立網頁用，免得在瀏覽器換語言時連 App 一起換）；
+ * hint=false：不顯示「新語音對話使用所選語言」的說明（沒有語音的頁面）。
+ */
+export function languageSelector(options: { persist?: boolean; hint?: boolean } = {}): HTMLElement {
   const select = h("select", { "aria-label": t("介面語言"), "data-locale-select": "", id: "interface-language" });
   for (const [value, label] of [["zh-TW", "繁體中文"], ["en", "English"]]) {
     const option = h("option", { value }, raw(label!));
     option.selected = getLocale() === value;
     select.append(option);
   }
-  select.addEventListener("change", () => setLocale(select.value === "en" ? "en" : "zh-TW"));
+  const change = options.persist === false ? useLocale : setLocale;
+  select.addEventListener("change", () => change(select.value === "en" ? "en" : "zh-TW"));
   return h("section", { class: "camera-settings language-settings" },
     h("label", {}, t("語言 / Language"), select),
-    h("p", { class: "muted small" }, t("介面立即切換；新語音對話使用所選語言，既有對話與成果不會改寫。")));
+    options.hint !== false && h("p", { class: "muted small" }, t("介面立即切換；新語音對話使用所選語言，既有對話與成果不會改寫。")));
 }
 
 /** App 內設定頁的說明：其他設定在選單列的哪裡。 */
