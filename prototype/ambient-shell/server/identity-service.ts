@@ -118,6 +118,11 @@ export interface IdentityServiceOptions {
    * 成功一次之後同一個 ID 就不能再用。
    */
   claimGreeting?: (interaction: string) => { route: GreetingRoute; session_id: string; locale?: Locale } | null;
+  /**
+   * MEM-3：API key 路徑的問候決策做出後通知（RealtimeSessions.greeted）：這次問候有沒有稱名。帶記憶的通話等問候那一輪
+   * 結束後才問臉部候選（只有稱名過，問句才帶名字）。只有互動 ID 換得到真的工作階段時才呼叫。
+   */
+  apiKeyGreeted?: (sessionId: string, named: boolean) => void;
   /** 開場句挑選（固定清單、依時段、避開上一次）；未提供時建一個（Math.random、這台電腦的時區）。 */
   picker?: GreetingPicker;
   /** 模型與 runtime 的雜湊核對結果（啟動時算一次）。 */
@@ -636,7 +641,12 @@ export class IdentityService {
     // 證據只為這一次問候存在：決策後丟掉，晚到的推論不能讓下一次互動沿用。
     this.ambient = null;
     this.lastMatch = decision.person_id && decision.reason === null ? { person_id: decision.person_id, track, at: this.now() } : null;
-    if (route === "api_key") return { ok: true, op: "greeting", text: greetingInstructions(sentence, locale) };
+    if (route === "api_key") {
+      if (session) {
+        try { this.options.apiKeyGreeted?.(session.session_id, name !== null); } catch { /* 通知失敗不影響問候 */ }
+      }
+      return { ok: true, op: "greeting", text: greetingInstructions(sentence, locale) };
+    }
     this.pendingLive = session ? { locale, interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence, locale), sentence, at: this.now() } : null;
     return { ok: true, op: "greeting", text: null };
   }

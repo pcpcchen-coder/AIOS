@@ -173,12 +173,35 @@ export interface HostResult {
 }
 
 /**
- * MEM-2：這通 live 通話為什麼沒有用到記憶（頁面依代碼顯示固定句，不含內容）。
- * not_setup／disabled／unavailable：記憶沒設定、關閉或不可用；no_consent：「ChatGPT 方案即時語音」尚未允許；
- * no_account：沒有 Codex 登入的帳號 ID；route_disabled：這次執行期間停播未確認，已停用這條路徑的記憶；
+ * MEM-2／MEM-3：這通即時語音通話（兩條路徑共用）為什麼沒有用到記憶（頁面依代碼與路徑顯示固定句，不含內容）。
+ * not_setup／disabled／unavailable：記憶沒設定、關閉或不可用；no_consent：這條路徑的同意對象
+ * （live：「ChatGPT 方案即時語音」；api_key：「OpenAI API key 即時語音」）尚未允許；
+ * no_account：沒有這條路徑的帳號（Codex 登入的帳號 ID，或 OPENAI_API_KEY）；route_disabled：這次執行期間停播未確認，已停用這條路徑的記憶；
  * waiting_candidate：等臉部候選確認；no_pinned：沒有釘選的記憶（之後依問題取用）。
+ * MEM-3 新增：route_off：這條路徑的記憶還沒放行（NOUS_MEMORY_ROUTES；API key 路徑預設關閉）；
+ * no_control：接不上核心的控制連線（API key 路徑的旁路），這通完全不帶記憶；
+ * busy：另一通即時語音正在使用記憶（同時只允許一通）。
  */
-export type LiveMemoryReason = "not_setup" | "disabled" | "unavailable" | "no_consent" | "no_account" | "route_disabled" | "waiting_candidate" | "no_pinned";
+export type LiveMemoryReason = "not_setup" | "disabled" | "unavailable" | "no_consent" | "no_account" | "route_disabled" | "waiting_candidate" | "no_pinned" | "route_off" | "no_control" | "busy";
+
+/**
+ * MEM-3：API key 路徑上由核心（旁路）處理、頁面一律略過的工具。只在這通帶記憶規則（記憶開著、有 openai_realtime 同意、
+ * 旁路接上）時才有；由 POST /api/realtime/call 的回應帶給頁面，整通固定不變。
+ */
+export const CORE_TOOLS = ["recall_memory", "delegate_task"] as const;
+export type CoreToolName = (typeof CORE_TOOLS)[number];
+
+/** MEM-3：POST /api/realtime/call 的回答（兩條路徑）。memory 只有原因代碼與筆數，沒有內容。 */
+export interface CallAnswer {
+  sdp: string;
+  model: string;
+  route: RouteId;
+  session_id: string;
+  /** API key 路徑上由核心處理的工具（頁面略過）；沒有記憶時是空陣列。 */
+  core_tools: readonly CoreToolName[];
+  /** 這通記憶的初始狀態；沒有記憶層（瀏覽器版）時為 null。 */
+  memory: { used: number; reason: LiveMemoryReason | null } | null;
+}
 
 /**
  * MEM-2：撤銷記憶後等頁面回報「已停播」的最長時間（POST /api/realtime/stopped）。逾時就強制靜音並停用這條路徑的記憶；
@@ -194,7 +217,10 @@ export interface StopEvidence {
   ms: number;
 }
 
-/** live 工作階段在核心發生的真實事件（sideband 或 LiveToolCaller），不是模型的口頭填充。 */
+/**
+ * 工作階段在核心發生的真實事件，不是模型的口頭填充。live：sideband 或 LiveToolCaller；MEM-3 起 API key 路徑帶記憶時，
+ * 核心的旁路（server/apikey-call.ts）也用同一組事件（SSE realtime.live；名稱沿用，兩條路徑都會用）。
+ */
 export type LiveCoreEvent =
   | { kind: "started"; expires_at: number | null }
   /** sideband 收到的逐字稿（資料通道沒有送時頁面用這份；依 item_id 去重）。 */
@@ -212,11 +238,12 @@ export type LiveCoreEvent =
   | { kind: "delegate_blocked"; title: string }
   /** MEM-2：更正或忘記 commit 前先暫停播放（active true），commit 失敗才恢復（false）。 */
   | { kind: "hold"; active: boolean }
-  /** rebuild：MEM-2 撤銷記憶後頁面要自動開一通新的（只走 live、不問候、第一句是固定句）。 */
+  /** rebuild：MEM-2 撤銷記憶後頁面要自動開一通新的（MEM-3：走被撤銷那通的路徑、沒有備援、不問候、第一句是固定句）。 */
   | { kind: "closed"; reason: LiveCloseReason; message: string; rebuild?: boolean };
 
 export type LiveCloseReason = "ended" | "expired" | "connection_lost" | "auth" | "usage_limit" | "error" | "page_gone" | "memory_revoked";
 
+/** realtime.host／realtime.live：MEM-3 起兩條路徑都會用（API key 路徑只在帶記憶規則、旁路接上時才有）。 */
 export type RealtimeServerEvent =
   | { type: "realtime.host"; sequence: number; session_id: string; call: HostCall }
   | { type: "realtime.live"; sequence: number; session_id: string; event: LiveCoreEvent };

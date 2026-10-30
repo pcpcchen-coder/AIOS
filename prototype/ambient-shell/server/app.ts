@@ -107,6 +107,8 @@ export interface AppOptions {
   realtimeAudio?: { setMuted(muted: boolean): void };
   /** 只限測試 build（NOUS_TEST_DROP_STOP_REPORT=1）：丟掉頁面的停播回報。 */
   dropStopReport?: boolean;
+  /** MEM-3 只限測試 build：記憶撤銷的 closed 事件不送給頁面（NOUS_TEST_RENDERER_IGNORE_REVOKE=1）。 */
+  hideRevokeFromPage?: boolean;
   /** 即時語音的上網查詢；未提供時不可用。 */
   webSearch?: WebSearch;
   /** 武陵居中控的查詢與控制（docs/12 H0、H1）；未提供時不可用。 */
@@ -172,6 +174,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         log: (line) => console.log(line),
         audio: options.realtimeAudio,
         dropStopReport: options.dropStopReport,
+        hideRevokeFromPage: options.hideRevokeFromPage,
       })
     : null;
   const settings = {
@@ -331,7 +334,9 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       // 沒有 session_id：原本的 API key 路徑，行為不變。
       if (!realtime) throw new HttpError(409, "即時語音模式未啟用");
       try {
-        return sendJson(res, 200, await realtime.connect(sdp, store.list(), normalizeLocale(req.headers["x-nous-locale"])));
+        // call ID 只留在核心（MEM-3 的旁路用），不交給頁面。
+        const { sdp: answer, model } = await realtime.connect(sdp, store.list(), normalizeLocale(req.headers["x-nous-locale"]));
+        return sendJson(res, 200, { sdp: answer, model });
       } catch (err) {
         if (err instanceof RealtimeError) throw new HttpError(err.status, err.message);
         throw err;
@@ -384,6 +389,14 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       }
       const accepted = sessionCall(() => sessions!.stoppedReport(sessionId, owner, { paused: e.paused as boolean, peer_closed: e.peer_closed as boolean, tracks_ended: e.tracks_ended as boolean, ms: Math.round(e.ms as number) }));
       return sendJson(res, 200, { ok: true, accepted });
+    }
+    if (method === "POST" && path === "/api/realtime/playback") {
+      // MEM-3：API key 路徑的頁面在資料通道收到播放結束（output_audio_buffer.stopped）。沒有內容也沒有時間戳：核心用收到的時間，
+      // 只會把語音確認的時窗往後延，不能縮短。
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      sessionCall(() => sessions!.playback(sessionId, owner));
+      return sendJson(res, 200, { ok: true });
     }
     if (method === "POST" && path === "/api/realtime/end") {
       const body = await readJson(req);

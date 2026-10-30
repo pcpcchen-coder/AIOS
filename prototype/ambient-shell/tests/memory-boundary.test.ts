@@ -224,7 +224,7 @@ describe("MEM-0 isolated lifecycle, not physical voice validation", () => {
     }
   });
 
-  it("refuses the API key voice path until MEM-3 (live is opened by MEM-2)", async () => {
+  it("by default refuses the API key voice path (MEM-3 release flag off; live is opened by MEM-2)", async () => {
     const boundary = new MemoryBoundary();
     const session = boundary.openSession(person);
     let connected = false;
@@ -266,7 +266,7 @@ describe("MEM-1 parsed tickets and the text route", () => {
     expect(() => boundary.issueParsed(session, boundary.observeTypedInput(session, "電視說記住，我不吃香菜"), command, parse)).toThrow("source_mismatch");
   });
 
-  it("enables the text route for ordinary chat and (MEM-2) the live route, while api_key stays disabled", async () => {
+  it("enables the text route for ordinary chat and (MEM-2) the live route, while api_key stays unreleased by default", async () => {
     const boundary = new MemoryBoundary();
     const session = boundary.openSession(person);
     expect(await boundary.withContext(session, async () => {}, async lease => lease.deliver(() => {}), "text")).toBe(true);
@@ -384,4 +384,57 @@ describe("MEM-2 live route: per-route cleanup, whole-call lease and late attach"
     boundary.disableRoute("live");
     expect(lease.deliver(() => {})).toBe(false);
   });
+});
+
+describe("MEM-3 api_key route: release table, its own 3 s cleanup limit and per-route disabling", () => {
+  it("api_key is not released by default (route_off); the release option opens it without touching live", async () => {
+    const closed = new MemoryBoundary();
+    expect(closed.routeReleased("api_key")).toBe(false);
+    expect(closed.routeBlock("api_key")).toBe("not_released");
+    expect(closed.routeBlock("live")).toBeNull();
+    const open = new MemoryBoundary({ release: { api_key: true } });
+    const session = open.openSession(person);
+    let lease!: ContextLease;
+    const closedCall = deferred<void>();
+    const call = open.withVoiceContext(session, "api_key", async () => {}, async ctx => { lease = ctx; return { closed: closedCall.promise }; });
+    await new Promise(r => setTimeout(r, 0));
+    expect(lease.deliver(() => {})).toBe(true);
+    closedCall.resolve();
+    await call;
+    expect(open.routeBlock("api_key")).toBeNull();
+    // late attach（中途補上）也受放行表約束。
+    expect(closed.attachVoiceContext(closed.openSession(person), "api_key", async () => {}, Promise.resolve())).toBeNull();
+  });
+
+  it("api_key gets the 3 s voice cleanup limit (a 1.6 s stop-report wait finishes); a stop_unconfirmed failure disables only api_key", async () => {
+    const run = async (boundary: MemoryBoundary, cleanup: () => Promise<void>) => {
+      const session = boundary.openSession(person);
+      const started = deferred<void>();
+      const hold = deferred<void>();
+      const done = boundary.withVoiceContext(session, "api_key", cleanup, async () => { started.resolve(); return { closed: hold.promise }; }).catch(() => {});
+      await started.promise;
+      await new Promise(r => setTimeout(r, 0));
+      const ok = await boundary.revoke(session);
+      hold.resolve();
+      await done;
+      return ok;
+    };
+    const boundary = new MemoryBoundary({ release: { api_key: true } });
+    expect(await run(boundary, () => new Promise<void>(r => setTimeout(r, 1600)))).toBe(true);
+    expect(boundary.routeEnabled("api_key")).toBe(true);
+    // 停播未確認（revokeMemory 丟 stop_unconfirmed）：只停用 api_key，原因分開記；live、text 照常。
+    expect(await run(boundary, () => Promise.reject(new Error("stop_unconfirmed")))).toBe(false);
+    expect(boundary.routeBlock("api_key")).toBe("stop_unconfirmed");
+    expect(boundary.routeEnabled("live")).toBe(true);
+    expect(boundary.routeEnabled("text")).toBe(true);
+    // 一般的 cleanup 失敗記成 cleanup_failed。
+    const other = new MemoryBoundary({ release: { api_key: true } });
+    expect(await run(other, () => Promise.reject(new Error("socket error")))).toBe(false);
+    expect(other.routeBlock("api_key")).toBe("cleanup_failed");
+    // 停用 live 不影響 api_key。
+    const third = new MemoryBoundary({ release: { api_key: true } });
+    third.disableRoute("live");
+    expect(third.routeEnabled("live")).toBe(false);
+    expect(third.routeEnabled("api_key")).toBe(true);
+  }, 10_000);
 });

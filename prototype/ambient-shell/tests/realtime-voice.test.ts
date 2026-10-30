@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RealtimeVoice, type ApprovalOutcome, type ApprovalRequest, type HomeResult, type RealtimeDeps, type RealtimePhase } from "../src/realtime.ts";
+import { RealtimeVoice, type ApprovalOutcome, type ApprovalRequest, type HomeResult, type RealtimeCoreDeps, type RealtimeDeps, type RealtimePhase } from "../src/realtime.ts";
+import type { HostCall, LiveCoreEvent, StopEvidence } from "../shared/realtime-route.ts";
 import type { HomeControlArgs } from "../src/api.ts";
 import { homeControlLine, type HomeControlResult } from "../shared/home.ts";
 
@@ -38,7 +39,7 @@ interface HomeFixture {
 
 const CONFIRMED: HomeResult = { ok: true, status: "confirmed", device: "客廳主燈", room: "客廳", action: "關閉", message: "設備回讀已確認（fixture）" };
 
-function setup(overrides: Partial<RealtimeDeps> = {}, home: HomeFixture = {}) {
+function setup(overrides: Partial<RealtimeDeps> = {}, home: HomeFixture = {}, options: { rebuild?: boolean } = {}) {
   vi.useFakeTimers();
   const peer = new FakePeer();
   const track = { stop: vi.fn() };
@@ -108,7 +109,7 @@ function setup(overrides: Partial<RealtimeDeps> = {}, home: HomeFixture = {}) {
       },
       ...overrides,
     },
-    { idleMs: 120_000, approvalMs: 60_000 },
+    { idleMs: 120_000, approvalMs: 60_000, ...options },
   );
   const ch = peer.channel;
   const sentTypes = () => ch.sent.map((e) => e.type);
@@ -733,5 +734,152 @@ describe("RealtimeVoice home_control", () => {
     finish(CONFIRMED);
     await flush();
     expect(u.ch.sent.length).toBe(sent);
+  });
+});
+
+// ─────────────── MEM-3：帶記憶的 API key 通話（核心旁路是記憶的控制面；頁面略過核心工具、可靠停播並回報） ───────────────
+
+const CANARY = "MEM3_PAGE_CANARY_四二";
+
+function core(coreTools: readonly string[] = ["recall_memory", "delegate_task"]) {
+  const probe = {
+    handlers: null as null | { host(call: HostCall): void; core(event: LiveCoreEvent): void },
+    unsubscribed: 0,
+    muted: [] as boolean[],
+    stopped: [] as StopEvidence[],
+    accept: true,
+    playback: 0,
+    approvals: [] as unknown[],
+    hostResults: [] as { callId: string; output: Record<string, unknown> }[],
+    memory: [] as LiveCoreEvent[],
+    revoked: [] as { message: string; rebuild: boolean; accepted: boolean }[],
+    speech: { cancelled: 0, spoken: [] as string[] },
+    order: [] as string[],
+  };
+  const deps: RealtimeCoreDeps = {
+    subscribe: (handlers) => {
+      probe.handlers = handlers;
+      return () => void probe.unsubscribed++;
+    },
+    hostResult: async (callId, output) => void probe.hostResults.push({ callId, output }),
+    approval: async (report) => void probe.approvals.push(report),
+    stopped: async (evidence) => {
+      probe.order.push("stopped");
+      probe.stopped.push(evidence);
+      return probe.accept;
+    },
+    playback: async () => void probe.playback++,
+    setMuted: (muted) => {
+      probe.order.push(`muted:${muted}`);
+      probe.muted.push(muted);
+    },
+    audioPaused: () => true,
+    cancelSpeech: () => {
+      probe.order.push("cancelSpeech");
+      probe.speech.cancelled++;
+    },
+    speak: (text) => void probe.speech.spoken.push(text),
+    memoryEvent: (event) => void probe.memory.push(event),
+    revoked: (message, rebuild, accepted) => void probe.revoked.push({ message, rebuild, accepted }),
+    coreTools: () => coreTools,
+  };
+  return { probe, deps };
+}
+
+describe("MEM-3 RealtimeVoice with the core seam", () => {
+  it("skips core tools on the data channel (no output, not counted, no follow-up response)", async () => {
+    const { deps } = core();
+    const t = setup({ core: deps });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.function_call_arguments.done", name: "recall_memory", call_id: "c1", arguments: "{}" });
+    t.ch.emit({ type: "response.function_call_arguments.done", name: "delegate_task", call_id: "c2", arguments: JSON.stringify({ title: "寫週報" }) });
+    t.ch.emit({ type: "response.done" });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(t.delegated).toEqual([]);
+    expect(t.ch.sent.filter((e) => e.type === "conversation.item.create")).toEqual([]);
+    expect(t.ch.sent.filter((e) => e.type === "response.create")).toEqual([]);
+  });
+
+  it("revoke: mute first, stop remote tracks, close peer and mic, cancel speech, then report the evidence and hand over", async () => {
+    const { probe, deps } = core();
+    const t = setup({ core: deps });
+    const remote = { readyState: "live", stop() { this.readyState = "ended"; probe.order.push("track.stop"); } };
+    Object.assign(t.peer, { getReceivers: () => [{ track: remote }], close() { (t.peer as unknown as { connectionState: string }).connectionState = "closed"; probe.order.push("peer.close"); } });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    probe.handlers!.core({ kind: "closed", reason: "memory_revoked", message: "記憶已更新，對話已重新開始", rebuild: true });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(probe.order.slice(0, 4)).toEqual(["muted:true", "track.stop", "peer.close", "cancelSpeech"]);
+    expect(probe.order.at(-1)).toBe("stopped");
+    expect(probe.stopped[0]).toMatchObject({ paused: true, peer_closed: true, tracks_ended: true });
+    expect(t.track.stop).toHaveBeenCalled();
+    expect(probe.revoked).toEqual([{ message: "記憶已更新，對話已重新開始", rebuild: true, accepted: true }]);
+    expect(t.voice.on).toBe(false);
+    expect(probe.unsubscribed).toBe(1);
+    // 撤銷不念原因、不叫頁面的 onClosed（主程式另外顯示）。
+    expect(probe.speech.spoken).toEqual([]);
+    expect(t.closed).toEqual([]);
+  });
+
+  it("a stop report the core does not accept means no rebuild", async () => {
+    const { probe, deps } = core();
+    probe.accept = false;
+    const t = setup({ core: deps });
+    await t.voice.start();
+    probe.handlers!.core({ kind: "closed", reason: "memory_revoked", message: "x", rebuild: true });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(probe.revoked).toEqual([{ message: "x", rebuild: false, accepted: false }]);
+  });
+
+  it("hold mutes playback at once and releases it; a sideband loss ends the call and says why", async () => {
+    const { probe, deps } = core();
+    const t = setup({ core: deps });
+    await t.voice.start();
+    probe.handlers!.core({ kind: "hold", active: true });
+    probe.handlers!.core({ kind: "hold", active: false });
+    expect(probe.muted).toEqual([true, false]);
+    probe.handlers!.core({ kind: "closed", reason: "connection_lost", message: "與 OpenAI 即時語音的核心控制連線中斷，即時語音已結束。" });
+    expect(probe.speech.spoken).toEqual(["與 OpenAI 即時語音的核心控制連線中斷，即時語音已結束。"]);
+    expect(t.closed).toEqual(["與 OpenAI 即時語音的核心控制連線中斷，即時語音已結束。"]);
+  });
+
+  it("a rebuilt call's first sentence is the fixed, content-free line", async () => {
+    const { deps } = core();
+    const t = setup({ core: deps }, {}, { rebuild: true });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    const create = t.ch.sent.find((e) => e.type === "response.create") as { response: { instructions: string } };
+    expect(create.response.instructions).toContain("「好，已經更新了。」");
+  });
+
+  it("reports playback end only for a call with core tools, and never forwards session.* or system item content", async () => {
+    const { probe, deps } = core();
+    const t = setup({ core: deps });
+    await t.voice.start();
+    t.ch.emit({ type: "session.created", session: { instructions: `<<<NOUS_MEMORY_DATA ${CANARY}` } });
+    t.ch.emit({ type: "session.updated", session: { instructions: CANARY } });
+    t.ch.emit({ type: "conversation.item.added", item: { type: "message", role: "system", content: [{ type: "input_text", text: `（記憶資料）${CANARY}` }] } });
+    t.modelSpeaks("好的");
+    await vi.advanceTimersByTimeAsync(10);
+    expect(probe.playback).toBe(1);
+    const everything = JSON.stringify({ memory: probe.memory, host: probe.hostResults, approvals: probe.approvals, sent: t.ch.sent, user: t.user, assistant: t.assistant, activity: t.activity });
+    expect(everything).not.toContain(CANARY);
+    const plain = core([]);
+    const u = setup({ core: plain.deps });
+    await u.voice.start();
+    u.modelSpeaks("好的");
+    expect(plain.probe.playback).toBe(0);
+  });
+
+  it("a host call from the core runs the shared executor and posts the result", async () => {
+    const { probe, deps } = core();
+    const t = setup({ core: deps });
+    await t.voice.start();
+    probe.handlers!.host({ call_id: "hc_1", name: "delegate_task", arguments: JSON.stringify({ title: "寫週報" }) });
+    await vi.advanceTimersByTimeAsync(10);
+    expect(t.delegated).toEqual(["寫週報"]);
+    expect(probe.hostResults).toEqual([{ callId: "hc_1", output: { ok: true, title: "寫週報", status: "running" } }]);
   });
 });

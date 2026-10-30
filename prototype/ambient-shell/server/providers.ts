@@ -27,6 +27,17 @@ export const CODEX_TARGET_LABEL = "ChatGPT 方案即時語音（Codex 登入）"
 export function codexTarget(accountId: string | null): ChatTarget | null {
   return accountId ? { provider: "codex", account: codexAccountKey(accountId), label: CODEX_TARGET_LABEL } : null;
 }
+/**
+ * MEM-3：OpenAI API key 即時語音的同意鍵：OPENAI_API_KEY 的 HMAC 指紋前 16 碼（比照 claudeAccountKey，不保存 key 本身）。
+ * 不沿用 codex 或 chatgpt 的同意；換 key 就是另一個帳號，要重新允許。
+ */
+export function openaiRealtimeAccountKey(apiKey: string): string {
+  return createHmac("sha256", "nous.memory.account.openai_realtime.v1").update(apiKey).digest("hex").slice(0, 16);
+}
+export const OPENAI_REALTIME_TARGET_LABEL = "OpenAI API key 即時語音";
+export function openaiRealtimeTarget(apiKey: string | null): ChatTarget | null {
+  return apiKey ? { provider: "openai_realtime", account: openaiRealtimeAccountKey(apiKey), label: OPENAI_REALTIME_TARGET_LABEL } : null;
+}
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 
 export interface ProviderManagerOptions {

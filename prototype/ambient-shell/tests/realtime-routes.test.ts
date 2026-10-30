@@ -290,6 +290,14 @@ describe("RealtimeSessions", () => {
 describe("MEM-2 RealtimeSessions: rebuild start and stop reports", () => {
   it("a rebuild start uses live only (even with preference api_key), issues no interaction, and never offers the API key fallback", async () => {
     const t = setup("api_key");
+    // MEM-3 審查：重建一定要有被撤銷、停播回報被採用的那一通；先在 live 上撤銷一通。
+    t.setPref("live");
+    const first = t.sessions.start("sse_a");
+    if (!first.ok) throw new Error("expected start");
+    await t.sessions.call("v=0", first.session_id, first.owner);
+    t.live.ctx!.emit({ kind: "closed", reason: "memory_revoked", message: "x", rebuild: true });
+    expect(t.sessions.stoppedReport(first.session_id, first.owner, { paused: true, peer_closed: true, tracks_ended: true, ms: 1 })).toBe(true);
+    t.setPref("api_key");
     const d = t.sessions.start("sse_a", "look_to_talk", "zh-TW", true);
     expect(d).toMatchObject({ ok: true, route: "live", interaction: null });
     if (!d.ok) throw new Error("expected start");
@@ -297,7 +305,8 @@ describe("MEM-2 RealtimeSessions: rebuild start and stop reports", () => {
     await expect(t.sessions.call("v=0", d.session_id, d.owner)).rejects.toBeInstanceOf(RouteStartError);
     expect(t.live.ctx).toMatchObject({ rebuild: true, lookToTalk: false });
     t.live.ready = USAGE;
-    expect(t.sessions.start("sse_a", "user", "zh-TW", true)).toMatchObject({ ok: false, reasons: { live: "usage_limit" } });
+    // 那一次撤銷已經重建過：再要求重建照實拒絕（不默默改走別的路徑）。
+    expect(t.sessions.start("sse_a", "user", "zh-TW", true)).toMatchObject({ ok: false, reasons: {} });
   });
 
   it("only a memory-revoked session accepts a stop report (owner checked); a late host result is refused; force silence lifts on the report or the next call", async () => {
@@ -327,5 +336,164 @@ describe("MEM-2 RealtimeSessions: rebuild start and stop reports", () => {
     if (!next.ok) throw new Error("expected start");
     await sessions.call("v=0", next.session_id, next.owner);
     expect(muted).toEqual([true, false]);
+  });
+});
+
+describe("MEM-3 RealtimeSessions: the API key route uses the same session, revocation and rebuild rules", () => {
+  /** api_key 的假通話：記下 greetingDecided／playback（ApiKeyCall 的掛鉤）。 */
+  function keyWithHooks() {
+    const t = setup("api_key");
+    const hooks = { greeted: [] as boolean[], playback: 0 };
+    t.key.connect = async (_sdp, ctx) => {
+      t.key.ctx = ctx;
+      if (t.key.fail) throw t.key.fail;
+      return {
+        route: "api_key", answerSdp: "v=0 answer", model: "gpt-realtime", control: null,
+        coreTools: ["recall_memory", "delegate_task"], memoryStatus: () => ({ used: 2, reason: null }),
+        greetingDecided: (named) => void hooks.greeted.push(named), playback: () => void hooks.playback++,
+        close: async (reason) => void t.key.closes.push(reason),
+      };
+    };
+    return { ...t, hooks };
+  }
+
+  it("the /call answer carries core tools and the memory status; tool calls go to the owning stream; greeting and playback reach the call", async () => {
+    const t = keyWithHooks();
+    const d = t.sessions.start("sse_a", "look_to_talk");
+    if (!d.ok) throw new Error("expected start");
+    const answer = await t.sessions.call("v=0", d.session_id, d.owner);
+    expect(answer).toEqual({ sdp: "v=0 answer", model: "gpt-realtime", route: "api_key", session_id: d.session_id, core_tools: ["recall_memory", "delegate_task"], memory: { used: 2, reason: null } });
+    expect(t.key.ctx).toMatchObject({ events: true, lookToTalk: true });
+    const pending = t.key.ctx!.host.call("delegate_task", { title: "寫週報" }, new AbortController().signal);
+    const host = t.sent.at(-1)!.event as { type: string; call: { call_id: string; name: string } };
+    expect(host).toMatchObject({ type: "realtime.host", call: { name: "delegate_task" } });
+    expect(t.sessions.hostResult(d.session_id, d.owner, host.call.call_id, { output: { ok: true } })).toBe(true);
+    expect(await pending).toEqual({ ok: true });
+    t.sessions.greeted(d.session_id, true);
+    t.sessions.playback(d.session_id, d.owner);
+    expect(t.hooks).toEqual({ greeted: [true], playback: 1 });
+    expect(() => t.sessions.playback(d.session_id, "own_someone_else_00000000")).toThrow(SessionError);
+    // API key 路徑的輸入走資料通道，不經核心。
+    expect(() => t.sessions.input(d.session_id, d.owner, "notice", "x")).toThrow(SessionError);
+  });
+
+  it("a page without an SSE stream gets no events (ctx.events false)", async () => {
+    const t = keyWithHooks();
+    const d = t.sessions.start(null);
+    if (!d.ok) throw new Error("expected start");
+    await t.sessions.call("v=0", d.session_id, d.owner);
+    expect(t.key.ctx).toMatchObject({ events: false });
+    await expect(t.key.ctx!.host.call("delegate_task", {}, new AbortController().signal)).rejects.toBeInstanceOf(HostGone);
+  });
+
+  it("revoked: new starts wait for the stop result, the stop report checks the owner, late host results are refused, and the rebuild uses api_key again with no fallback", async () => {
+    const muted: boolean[] = [];
+    const live = fakeRoute("live", "gpt-live-1-codex");
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sent: Record<string, unknown>[] = [];
+    let preference: RoutePreference = "api_key";
+    const sessions = new RealtimeSessions({ routes: { live, api_key: key }, preference: () => preference, tasks: () => [], send: (_c, e) => (sent.push(e as unknown as Record<string, unknown>), true), audio: { setMuted: (m) => void muted.push(m) } });
+    const d = sessions.start("sse_a");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    const ctx = key.ctx!;
+    const pending = ctx.host.call("delegate_task", { title: "x" }, new AbortController().signal);
+    const host = sent.at(-1) as { call: { call_id: string } };
+    ctx.emit({ kind: "closed", reason: "memory_revoked", message: "記憶已更新，對話已重新開始", rebuild: true });
+    await expect(pending).rejects.toBeInstanceOf(HostGone);
+    expect(key.closes).toEqual(["ended"]);
+    expect(sessions.start("sse_a", "user", "zh-TW", true)).toMatchObject({ ok: false, reasons: { live: "session_busy" } });
+    expect(sessions.hostResult(d.session_id, d.owner, host.call.call_id, { output: { ok: true } })).toBe(false);
+    expect(sessions.isOwner(d.session_id, d.owner)).toBe(false);
+    expect(() => sessions.stoppedReport(d.session_id, "own_someone_else_00000000", { paused: true, peer_closed: true, tracks_ended: true, ms: 1 })).toThrow(SessionError);
+    expect(sessions.stoppedReport(d.session_id, d.owner, { paused: true, peer_closed: true, tracks_ended: true, ms: 3 })).toBe(true);
+    // 偏好改成 live：重建仍走被撤銷那通的路徑（api_key）。
+    preference = "live";
+    const rebuilt = sessions.start("sse_a", "look_to_talk", "zh-TW", true);
+    expect(rebuilt).toMatchObject({ ok: true, route: "api_key", interaction: null });
+    if (!rebuilt.ok) throw new Error("expected rebuild");
+    key.fail = new RouteStartError("api_key_rejected", 502, "x", false);
+    await expect(sessions.call("v=0", rebuilt.session_id, rebuilt.owner)).rejects.toBeInstanceOf(RouteStartError);
+    expect(key.ctx).toMatchObject({ rebuild: true });
+    // 同一次撤銷不能重建兩次；找不到要重建的通話時照實拒絕，不默默改走 live。
+    expect(sessions.start("sse_a", "user", "zh-TW", true)).toMatchObject({ ok: false, message: "即時語音無法開始：找不到要重建的通話，請重新開始" });
+  });
+
+  it("forced silence after an unconfirmed api_key stop lifts when the next call starts; key unavailable refuses a rebuild honestly", async () => {
+    const muted: boolean[] = [];
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sent: Record<string, unknown>[] = [];
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: (_c, e) => (sent.push(e as unknown as Record<string, unknown>), true), audio: { setMuted: (m) => void muted.push(m) } });
+    const d = sessions.start("sse_a");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    const ctx = key.ctx!;
+    ctx.emit({ kind: "closed", reason: "memory_revoked", message: "x", rebuild: true });
+    expect(await ctx.stopped!(10)).toBeNull();
+    ctx.forceSilence!("即時語音停止未確認；這條路徑的記憶已停用");
+    expect(muted).toEqual([true]);
+    expect(sent.at(-1)).toMatchObject({ type: "realtime.live", event: { kind: "memory_notice" } });
+    const next = sessions.start("sse_a");
+    if (!next.ok) throw new Error("expected start");
+    await sessions.call("v=0", next.session_id, next.owner);
+    expect(muted).toEqual([true, false]);
+    // 停播回報沒被採用的撤銷不能拿來重建；key 不能用時照實拒絕（不改走 live）。
+    key.ready = NO_KEY;
+    expect(sessions.start("sse_a", "user", "zh-TW", true)).toMatchObject({ ok: false });
+  });
+});
+
+describe("MEM-3 test flag NOUS_TEST_RENDERER_IGNORE_REVOKE", () => {
+  it("hides only the memory_revoked closed event from the page (hangup alone must stop it); the session still ends and forced silence still works", async () => {
+    const muted: boolean[] = [];
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sent: Record<string, unknown>[] = [];
+    const logs: string[] = [];
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: (_c, e) => (sent.push(e as unknown as Record<string, unknown>), true), audio: { setMuted: (m) => void muted.push(m) }, hideRevokeFromPage: true, log: (l) => void logs.push(l) });
+    const d = sessions.start("sse_a");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    const ctx = key.ctx!;
+    ctx.emit({ kind: "memory_notice", message: "x" });
+    ctx.emit({ kind: "closed", reason: "memory_revoked", message: "記憶已更新，對話已重新開始", rebuild: true });
+    expect(sent.map((e) => (e.event as { kind: string }).kind)).toEqual(["memory_notice"]);
+    expect(key.closes).toEqual(["ended"]);
+    expect(sessions.isOwner(d.session_id, d.owner)).toBe(false);
+    ctx.forceSilence!("即時語音停止未確認；這條路徑的記憶已停用");
+    expect(muted).toEqual([true]);
+    expect(logs.some((l) => l.includes("NOUS_TEST_RENDERER_IGNORE_REVOKE"))).toBe(true);
+  });
+});
+
+describe("MEM-3 review: one memory-carrying voice call at a time", () => {
+  it("while an API key call with core tools (memory rules) is active, any new start and a second /call are refused; the old call is never closed silently", async () => {
+    const t = setup("api_key");
+    t.key.connect = async (_sdp, ctx) => {
+      t.key.ctx = ctx;
+      return { route: "api_key", answerSdp: "v=0", model: "gpt-realtime", control: null, coreTools: ["recall_memory", "delegate_task"], memoryStatus: () => null, close: async (reason) => void t.key.closes.push(reason) };
+    };
+    const a = t.sessions.start("sse_a");
+    const b = t.sessions.start("sse_a");
+    if (!a.ok || !b.ok) throw new Error("expected decisions");
+    await t.sessions.call("v=0", a.session_id, a.owner);
+    expect(t.sessions.start("sse_a")).toMatchObject({ ok: false, reasons: { api_key: "session_busy" } });
+    t.setPref("live");
+    expect(t.sessions.start("sse_a")).toMatchObject({ ok: false, reasons: { api_key: "session_busy" } });
+    // 開始之前就決定好的第二個 API key 工作階段：/call 也拒絕，不取代（取代會只關旁路、留下帶記憶的上游通話）。
+    await expect(t.sessions.call("v=0", b.session_id, b.owner)).rejects.toMatchObject({ status: 409 });
+    expect(t.key.closes).toEqual([]);
+    await t.sessions.end(a.session_id, a.owner);
+    expect(t.key.closes).toEqual(["ended"]);
+    expect(t.sessions.start("sse_a")).toMatchObject({ ok: true });
+  });
+
+  it("an API key call without memory is still replaced by the next one (same as before MEM-3)", async () => {
+    const t = setup("api_key");
+    const a = t.sessions.start("sse_a");
+    const b = t.sessions.start("sse_a");
+    if (!a.ok || !b.ok) throw new Error("expected decisions");
+    await t.sessions.call("v=0", a.session_id, a.owner);
+    await t.sessions.call("v=0", b.session_id, b.owner);
+    expect(t.key.closes).toEqual(["ended"]);
   });
 });

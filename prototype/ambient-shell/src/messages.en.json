@@ -549,5 +549,13 @@
   "本次人物：{0} · {1}｜": "Current person: {0} · {1} | ",
   "本次人物：未選定 · 記憶 {0} 筆｜": "Current person: not selected · {0} memories | ",
   "本次人物：未選定 · {0}｜": "Current person: not selected · {0} | ",
-  "此路徑未啟用記憶｜": "Memory is not enabled on this path | "
+  "此路徑未啟用記憶｜": "Memory is not enabled on this path | ",
+  "此路徑未啟用記憶": "Memory is not enabled on this path",
+  "未用記憶（接不上核心的控制連線，這通不帶記憶）": "No memory used (the core's control connection was unavailable; this call carries no memory)",
+  "未用記憶（另一通即時語音正在使用記憶）": "No memory used (another realtime voice call is using memory)",
+  "未用記憶（OpenAI API key 即時語音尚未允許）": "No memory used (OpenAI API key realtime voice is not allowed)",
+  "未用記憶（沒有設定 OPENAI_API_KEY）": "No memory used (OPENAI_API_KEY is not set)",
+  "這次沒有用到記憶：OpenAI API key 即時語音尚未允許": "No memory was used this time: OpenAI API key realtime voice is not allowed",
+  "「OpenAI API key 即時語音」的同意只涵蓋用 .env 的 OPENAI_API_KEY 進行的即時語音；換一把 key 要重新允許，和上面的 ChatGPT 方案即時語音是分開的同意。": "Consent for “OpenAI API key realtime voice” covers only realtime voice that uses OPENAI_API_KEY from .env. A different key must be allowed again, and it is separate from the ChatGPT plan realtime voice consent above.",
+  "與本機核心的事件連線中斷，即時語音已結束。": "The local-core event connection was lost. Realtime voice ended."
 }

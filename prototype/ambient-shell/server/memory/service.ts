@@ -26,7 +26,7 @@ import {
   type PresenceState,
 } from "../../shared/memory.ts";
 import { literalCommand, MemoryBoundary, type ContextLease, type InputVia, type MemoryCommand, type MemorySession, type ParsedMemoryCommand, type Subject } from "./boundary.ts";
-import { LiveMemoryBinding, VOICE_CARDS_PER_MINUTE, type LiveContextResult, type LiveMemoryService, type RevokeWhy, type VoiceAction, type VoiceTurnOutcome } from "./live.ts";
+import { LiveMemoryBinding, VOICE_CARDS_PER_MINUTE, type LiveBindingOptions, type LiveContextResult, type LiveMemoryService, type RevokeWhy, type VoiceAction, type VoiceRoute, type VoiceTurnOutcome } from "./live.ts";
 import { chatText, keyOf, parseMemoryText, topicOf, type ParsedSegment } from "./parse.ts";
 import { relevance, retrieve, type ChatTarget, type ContextFact } from "./retrieve.ts";
 import type { Locale } from "../../shared/i18n.mjs";
@@ -51,6 +51,8 @@ import { newStoreOperation, type MemoryData, type MemoryFact, type MemoryOutcome
 //   log 只記操作、狀態與數字，不記內容或姓名。
 // - MEM-2（ChatGPT 方案即時語音）：openLive 建立每通通話的 LiveMemoryBinding（server/memory/live.ts）；同意鍵是獨立的
 //   codex（targets().live），不沿用 chatgpt。語音的記住、更正、忘記只出 voice_confirm 卡，語音確認詞或畫面點擊才寫入。
+// - MEM-3（OpenAI API key 即時語音）：openVoice(route) 依路徑建立 binding；同意對象來自 targets().byRoute[route]
+//   （api_key：openai_realtime，OPENAI_API_KEY 的 HMAC），boundary 的放行表決定這條路徑能不能帶記憶。同時只允許一通語音通話帶記憶。
 
 export const MEMORY_IDLE_MS = 30 * 60_000;
 export const MEMORY_TURN_MS = 60_000;
@@ -83,7 +85,7 @@ export interface MemoryServiceOptions {
    * 一般聊天目前的服務帳號，以及所有已設定的服務帳號（首次設定逐一允許）。live：ChatGPT 方案即時語音（Codex 登入）的
    * 同意鍵（provider codex）；沒有登入時為 null。all 也要含它，首次設定卡與記憶管理才能逐一允許。
    */
-  targets: () => { current: ChatTarget | null; all: ChatTarget[]; live?: ChatTarget | null };
+  targets: () => { current: ChatTarget | null; all: ChatTarget[]; live?: ChatTarget | null; byRoute?: Partial<Record<VoiceRoute, ChatTarget | null>> };
   confirm: MemoryConfirmFn;
   identity?: () => MemoryIdentityHooks | null;
   /**
@@ -146,7 +148,8 @@ type CardState =
  * fallback：處理到卡片前，因為找不到目標而改交給聊天的段落（卡片回答後一起送）。
  * origin：typed＝打字那一輪（回答後續送剩下的聊天）；live＝即時語音（模型已經聽到了，不經 /api/chat 續送）。
  */
-interface Card { id: string; state: CardState; text: string; part: number; resume: number; requestId: string; epoch: number; expires: number; fallback: Record<number, string>; origin: "typed" | "live" }
+/** route：MEM-3 語音卡來自哪條即時語音路徑（origin live 的卡；回條與 log 記路徑）。 */
+interface Card { id: string; state: CardState; text: string; part: number; resume: number; requestId: string; epoch: number; expires: number; fallback: Record<number, string>; origin: "typed" | "live"; route?: VoiceRoute }
 
 class ServiceError extends Error {
   constructor(readonly code: MemoryErrorCode, message: string) { super(message); }
@@ -229,6 +232,8 @@ export class MemoryService implements LiveMemoryService {
   private closed = false;
   /** MEM-2：進行中的 live 通話（一個核心只有一個）。 */
   private live: LiveMemoryBinding | null = null;
+  /** MEM-3：建立 binding 時的上一通（busy 的那通結束時把位置交還）。 */
+  private readonly previousVoice = new WeakMap<LiveMemoryBinding, LiveMemoryBinding>();
   /** 被撤銷的世代為什麼被撤銷（live 的 cleanup 依此決定重建或結束）。 */
   private readonly revokedBy = new WeakMap<MemorySession, RevokeWhy>();
   /** MEM-2：語音卡的建立時間（以核心計數，重建後不歸零）與目前那一張（同時最多 1 張，挑選卡也算）。 */
@@ -331,7 +336,7 @@ export class MemoryService implements LiveMemoryService {
     void this.boundary.revoke(old.session).then(ok => { if (!ok) this.log("memory: 撤銷清理未完成"); });
     this.options.onChange?.();
     try { this.options.onPresence?.(); } catch { /* 通知失敗不影響撤銷 */ }
-    try { this.live?.presenceChanged(); } catch { /* live 通話自己處理 */ }
+    try { this.live?.presenceChanged(); } catch { /* 語音通話自己處理 */ }
   }
 
   /** 換新世代但維持同一人物（更正、忘記、撤回同意之後）。 */
@@ -1318,14 +1323,36 @@ export class MemoryService implements LiveMemoryService {
   // ─────────────── MEM-2：ChatGPT 方案即時語音（只給核心，不是 IPC、HTTP 或模型工具） ───────────────
 
   /** 每通 live 通話建立一個 binding（server/live-route.ts 經 server/nous.ts 呼叫）；同時只有一通。 */
-  openLive(options: { lookToTalk: boolean; rebuild: boolean; now: () => number; locale?: Locale }): LiveMemoryBinding {
-    const binding = new LiveMemoryBinding(this, { ...options, log: this.log });
+  openLive(options: { lookToTalk: boolean; rebuild: boolean; now: () => number; locale?: Locale; approvalOpen?: () => boolean }): LiveMemoryBinding {
+    return this.openVoice("live", options);
+  }
+
+  /**
+   * MEM-3：每通即時語音通話（live 或 api_key）建立一個 binding。同時只允許一通語音通話帶記憶：上一通的 binding 還沒結束時，
+   * 新的這通完全不處理記憶（reason busy）。
+   */
+  openVoice(route: VoiceRoute, options: Omit<LiveBindingOptions, "route" | "log" | "busy">): LiveMemoryBinding {
+    const previous = this.live;
+    // 連線時（不是建立時）才判斷：上一通的結束是非同步的（closed promise），建立當下可能還沒處理完。
+    // 上一通還開著而且有記憶規則（memoryActive：可能隨時取用或中途補上記憶），或還帶著 lease：這通不處理記憶。
+    const busy = () => previous !== null && !previous.finished && (previous.memoryActive || previous.carriesMemory());
+    const binding = new LiveMemoryBinding(this, { ...options, route, busy, log: this.log });
     this.live = binding;
+    if (previous) this.previousVoice.set(binding, previous);
     return binding;
   }
 
+  /** 這條路徑的同意對象（live 沿用 targets().live）。 */
+  private targetFor(route: VoiceRoute): ChatTarget | null {
+    const targets = this.options.targets();
+    return targets.byRoute?.[route] ?? (route === "live" ? targets.live ?? null : null);
+  }
+
   clearLive(binding: LiveMemoryBinding): void {
-    if (this.live === binding) this.live = null;
+    if (this.live !== binding) return;
+    // 因為 busy 而沒有用記憶的那通結束：交還給還在帶著記憶的上一通。
+    const previous = this.previousVoice.get(binding);
+    this.live = previous && !previous.finished ? previous : null;
   }
 
   private liveHold(active: boolean): void {
@@ -1340,44 +1367,48 @@ export class MemoryService implements LiveMemoryService {
     return this.revokedBy.get(session) ?? "updated";
   }
 
-  holdLive(session: MemorySession, cleanup: () => Promise<void>, connect: (lease: ContextLease) => Promise<{ closed: Promise<void> }>): Promise<void> {
-    return this.boundary.withVoiceContext(session, "live", cleanup, connect);
+  holdVoice(route: VoiceRoute, session: MemorySession, cleanup: () => Promise<void>, connect: (lease: ContextLease) => Promise<{ closed: Promise<void> }>): Promise<void> {
+    return this.boundary.withVoiceContext(session, route, cleanup, connect);
   }
 
-  attachLive(session: MemorySession, cleanup: () => Promise<void>, closed: Promise<void>): ContextLease | null {
-    return this.boundary.attachVoiceContext(session, "live", cleanup, closed);
+  attachVoice(route: VoiceRoute, session: MemorySession, cleanup: () => Promise<void>, closed: Promise<void>): ContextLease | null {
+    return this.boundary.attachVoiceContext(session, route, cleanup, closed);
   }
 
   /**
-   * live 的檢索：同一套 retrieve（人物、可見範圍、期限、同意、相關性；8 筆、4 KB），同意鍵是 codex（targets().live）。
+   * 即時語音的檢索：同一套 retrieve（人物、可見範圍、期限、同意、相關性；8 筆、4 KB），同意鍵依路徑（live：codex；api_key：openai_realtime）。
    * query 空字串＝連線時的記憶包（只有釘選的，最多 4 筆）。只在記憶上次是開著（enabledHint）時才開 store，不為了查狀態碰 Keychain。
+   * 這條路徑還沒放行（boundary 的放行表）時回 route_off，不開 store。
    */
-  async liveContext(query: string): Promise<LiveContextResult> {
+  async voiceContext(route: VoiceRoute, query: string): Promise<LiveContextResult> {
     const result = (reason: LiveMemoryReason | null, facts: ContextFact[] = []): LiveContextResult =>
       ({ session: this.presence.session, epoch: this.presence.epoch, facts, reason, selected: this.presence.state === "selected" });
     if (this.closed) return result("unavailable");
-    if (!this.boundary.routeEnabled("live")) return result("route_disabled");
+    const block = this.boundary.routeBlock(route);
+    if (block === "not_released") return result("route_off");
+    if (block !== null) return result("route_disabled");
     const open = this.storeState === "ready" || (this.hint() && await this.ensureOpen());
     if (!open || !this.store) return result(this.storeState === "unloaded" && this.options.available() ? "not_setup" : "unavailable");
     let data: MemorySnapshot;
     try { data = this.snapshot(); } catch { return result("unavailable"); }
     if (data.settings.setupAt === null) return result("not_setup");
     if (!data.settings.enabled) return result("disabled");
-    const target = this.options.targets().live ?? null;
+    const target = this.targetFor(route);
     if (!target?.account) return result("no_account");
     this.touch();
     const profileId = this.currentProfileId();
     const consented = data.consents.some(c => c.allowed && c.provider === target.provider && c.account === target.account && (c.profileId === null || c.profileId === profileId));
     if (!consented) return result("no_consent");
     const found = retrieve({ facts: data.facts, consents: data.consents, profileId, target, query, now: this.now() });
-    this.log(`memory: live 檢索 ${found.facts.length} 筆（捨去 ${found.dropped}，未同意 ${found.blockedByConsent}）`);
+    this.log(`memory: ${route} 檢索 ${found.facts.length} 筆（捨去 ${found.dropped}，未同意 ${found.blockedByConsent}）`);
     return result(null, found.facts);
   }
 
-  /** 目前範圍（本次人物或全家共用）有沒有 codex 同意（不開 store；store 沒開時當作沒有）。 */
-  liveConsented(): boolean {
-    if (this.closed || this.storeState !== "ready" || !this.store) return false;
-    const target = this.options.targets().live ?? null;
+  /** 目前範圍（本次人物或全家共用）有沒有這條路徑的同意（不開 store；store 沒開時當作沒有）。 */
+  voiceConsented(route: VoiceRoute): boolean {
+    // 放行表與執行期間的停用（stop_unconfirmed、cleanup_failed）都要通過。
+    if (this.closed || this.storeState !== "ready" || !this.store || !this.boundary.routeEnabled(route)) return false;
+    const target = this.targetFor(route);
     if (!target?.account) return false;
     let data: MemorySnapshot;
     try { data = this.snapshot(); } catch { return false; }
@@ -1428,7 +1459,7 @@ export class MemoryService implements LiveMemoryService {
    * 記住、更正、忘記一律只出 voice_confirm 卡（MEM-2 不直接寫入）；「你記得我什麼？」出查看卡。拒絕規則照舊
    * （第三人、引文、假設、玩笑、敏感資料）；未成年仍不准從語音寫入。記憶沒開過時不為語音開 store。
    */
-  async voiceTurn(text: string): Promise<VoiceTurnOutcome> {
+  async voiceTurn(text: string, route: VoiceRoute = "live"): Promise<VoiceTurnOutcome> {
     const none: VoiceTurnOutcome = { kind: "none" };
     if (this.closed || typeof text !== "string" || !text.trim() || text.length > 2000) return none;
     const segments = parseMemoryText(text);
@@ -1452,12 +1483,14 @@ export class MemoryService implements LiveMemoryService {
         const replaced = this.liveVoiceCard && this.cards.has(this.liveVoiceCard) ? this.liveVoiceCard : null;
         if (replaced) this.cards.delete(replaced);
         const card = this.newCard(state, text, seg.part, seg.part + 1, requestId, {}, "live");
+        // MEM-3：回條記錄路徑（只在核心的卡片與 log；store 格式不變），MEM-5 的 derived_from 可以用。
+        card.route = route;
         this.voiceCardTimes.push(now);
         this.liveVoiceCard = card.id;
         return { card, replaced };
       };
-      // 稱名：有 codex 同意、稱名設定開著才把人物名交給 binding（沒有同意時不念任何記憶的中繼資料）。
-      const nameOf = (profileId: string | null) => profileId && this.liveConsented() && (this.options.identity?.()?.nameAllowed?.() ?? true) ? this.nameOf(profileId) : null;
+      // 稱名：有這條路徑的同意、稱名設定開著才把人物名交給 binding（沒有同意時不念任何記憶的中繼資料）。
+      const nameOf = (profileId: string | null) => profileId && this.voiceConsented(route) && (this.options.identity?.()?.nameAllowed?.() ?? true) ? this.nameOf(profileId) : null;
       for (const seg of segments) {
         const data = this.snapshot();
         switch (seg.op) {
@@ -1528,7 +1561,7 @@ export class MemoryService implements LiveMemoryService {
       }
       this.cards.delete(cardId);
       const receipt = await this.applyVoiceCard(card, card.state, "voice_confirmed", "confirm");
-      this.log(`memory: 語音確認（${card.state.action}）→ ${receipt.status}`);
+      this.log(`memory: 語音確認（${card.state.action}，${card.route ?? "live"}）→ ${receipt.status}`);
       this.liveReceipt(receipt.status);
       try { this.options.onPresence?.(); } catch { /* 只是請頁面重讀狀態 */ }
       return { status: receipt.status };
