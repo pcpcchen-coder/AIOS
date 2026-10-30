@@ -162,6 +162,11 @@ export class CodexAuth {
     };
   }
 
+  /** 目前帳號的 ChatGPT 帳號 ID；只給核心算記憶同意的帳號指紋（codexAccountKey），不外傳、不寫 log。需要重新登入時為 null。 */
+  accountSubject(): string | null {
+    return this.data && !this.needsReauth && this.data.account_id ? this.data.account_id : null;
+  }
+
   /** 本機、同步：有沒有可用的登入。不連網（每次設定畫面都會呼叫）。 */
   readiness(): Readiness {
     if (this.needsReauth) return { ready: false, reason: "needs_reauth", message: unavailableText("needs_reauth") };

@@ -3,7 +3,7 @@ import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
-import type { ApprovalReport, FallbackOffer, LiveInputKind, RealtimePrefsPatch, RouteId, StartDecision } from "../shared/realtime-route.ts";
+import type { ApprovalReport, FallbackOffer, LiveInputKind, RealtimePrefsPatch, RouteId, StartDecision, StopEvidence } from "../shared/realtime-route.ts";
 import { FallbackOfferError } from "./realtime-session.ts";
 
 /** 一個經 /api/realtime/start 決定的工作階段（session_id ＋ 擁有者憑證）。 */
@@ -50,8 +50,9 @@ export const api = {
   chatgptLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/chatgpt/logout", {}),
   chatgptWelcomeAck: () => call<SettingsView>("POST", "/api/auth/chatgpt/welcome-ack", {}),
   /** 即時語音：開麥克風前先決定路徑（client_id：這個頁面的 SSE 串流）。 */
-  realtimeStart: (clientId: string | null, source: "look_to_talk" | "user" = "user", locale?: Locale) =>
-    call<StartDecision>("POST", "/api/realtime/start", { ...(clientId ? { client_id: clientId } : {}), ...(source === "look_to_talk" ? { source } : {}) }, locale),
+  /** rebuild：MEM-2 記憶撤銷後自動重建（只走 live、不問候）。 */
+  realtimeStart: (clientId: string | null, source: "look_to_talk" | "user" = "user", locale?: Locale, rebuild = false) =>
+    call<StartDecision>("POST", "/api/realtime/start", { ...(clientId ? { client_id: clientId } : {}), ...(source === "look_to_talk" ? { source } : {}), ...(rebuild ? { rebuild: true } : {}) }, locale),
   /**
    * 即時語音：把 WebRTC SDP offer 交給本機核心，由它代為建立連線（API key 或 ChatGPT 方案）。
    * 沒有 ticket 是原本的 API key 呼叫。核心提議改路徑（409 ＋ fallback）時丟 FallbackOfferError。
@@ -70,6 +71,8 @@ export const api = {
   realtimeHostResult: (ticket: RealtimeTicket, callId: string, output: Record<string, unknown>) =>
     call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/host-result", { ...ticket, call_id: callId, output }),
   realtimeEnd: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/end", { ...ticket }),
+  /** MEM-2：記憶撤銷後停播並核對的證據（只有布林值與毫秒數）。 */
+  realtimeStopped: (ticket: RealtimeTicket, evidence: StopEvidence) => call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/stopped", { ...ticket, evidence }),
   /** 路徑偏好與 ChatGPT 方案路徑的聲音；下一次開始才生效。 */
   updateRealtime: (patch: RealtimePrefsPatch) => call<SettingsView>("POST", "/api/settings/realtime", patch),
   codexLogin: (method: "browser" | "device") =>

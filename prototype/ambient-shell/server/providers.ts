@@ -15,6 +15,18 @@ export function claudeAccountKey(apiKey: string): string {
 export function chatgptAccountKey(subject: string): string {
   return createHash("sha256").update(`nous.memory.account.chatgpt.v1:${subject}`).digest("hex").slice(0, 16);
 }
+/**
+ * MEM-2：ChatGPT 方案即時語音（Nous 自己的 Codex 登入）用 ChatGPT 帳號 ID 的雜湊前 16 碼。和 chatgpt（Sign in with ChatGPT）
+ * 是不同的同意鍵：新增服務要另外確認（16 §4），即使背後是同一個 ChatGPT 帳號也不沿用。
+ */
+export function codexAccountKey(accountId: string): string {
+  return createHash("sha256").update(`nous.memory.account.codex.v1:${accountId}`).digest("hex").slice(0, 16);
+}
+/** 記憶管理與首次設定卡上的名稱；同一個同意涵蓋 live 語音模型與交辦用的 Codex Responses（同一個帳號）。 */
+export const CODEX_TARGET_LABEL = "ChatGPT 方案即時語音（Codex 登入）";
+export function codexTarget(accountId: string | null): ChatTarget | null {
+  return accountId ? { provider: "codex", account: codexAccountKey(accountId), label: CODEX_TARGET_LABEL } : null;
+}
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 
 export interface ProviderManagerOptions {

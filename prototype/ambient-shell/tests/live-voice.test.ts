@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalReport, HostCall, LiveCoreEvent, LiveInputKind } from "../shared/realtime-route.ts";
 import type { HomeControlResult } from "../shared/home.ts";
-import { LiveVoice, SPEAKING_OFF_MS, SPEAKING_ON_MS, SPEAKING_RMS, type LiveDeps } from "../src/live-voice.ts";
+import { LiveVoice, orphanStopReport, SPEAKING_OFF_MS, SPEAKING_ON_MS, SPEAKING_RMS, type LiveDeps } from "../src/live-voice.ts";
 import { FallbackOfferError, openRealtime, type RealtimeSession } from "../src/realtime-session.ts";
 import type { ApprovalOutcome, ApprovalRequest, HomeResult, RealtimePhase } from "../src/realtime.ts";
 
@@ -480,5 +480,152 @@ describe("openRealtime", () => {
     expect(t.closed).toEqual([]);
     expect(t.voice.fallbackOffer).toEqual(offer);
     expect(t.track.stop).toHaveBeenCalled();
+  });
+});
+
+describe("MEM-2: reliable stop on memory revocation (fixture peer and audio)", () => {
+  function revocable() {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    const remote = { readyState: "live", stop() { this.readyState = "ended"; order.push("remote-track.stop"); } };
+    class Peer extends FakePeer {
+      getReceivers() { return [{ track: remote }]; }
+      close() { order.push("peer.close"); this.connectionState = "closed"; super.close(); }
+    }
+    const peer = new Peer();
+    const mic = { stop: () => void order.push("mic.stop"), readyState: "live" };
+    let handlers: { host(call: HostCall): void; core(event: LiveCoreEvent): void } | null = null;
+    let paused = false;
+    const stopped: unknown[] = [];
+    const revoked: { message: string; rebuild: boolean; accepted?: boolean }[] = [];
+    const accept = { value: true };
+    const spoken: string[] = [];
+    const memory: LiveCoreEvent[] = [];
+    const muted: boolean[] = [];
+    const closed: string[] = [];
+    let ended = 0;
+    const deps: LiveDeps = {
+      getMicrophone: async () => ({ getAudioTracks: () => [mic], getTracks: () => [mic] }) as unknown as MediaStream,
+      createPeer: () => peer as unknown as RTCPeerConnection,
+      playRemote: () => () => { order.push("audio.pause+srcObject=null"); paused = true; },
+      exchange: async () => "v=0 live-answer",
+      input: async () => {},
+      hostResult: async () => {},
+      approval: async () => {},
+      end: async () => void ended++,
+      subscribe: (h) => { handlers = h; return () => (handlers = null); },
+      watchLevel: () => () => {},
+      setMuted: (m) => { muted.push(m); order.push(`muted:${m}`); },
+      speak: (text) => void spoken.push(text),
+      stopped: async (evidence) => { stopped.push(evidence); return accept.value; },
+      audioPaused: () => paused,
+      cancelSpeech: () => void order.push("speechSynthesis.cancel"),
+      memoryEvent: (event) => void memory.push(event),
+      revoked: (message, rebuild, accepted) => void revoked.push({ message, rebuild, accepted }),
+    };
+    const noop = async () => ({ ok: true });
+    const voice = new LiveVoice({
+      onPhase: () => {}, onUserTranscript: () => {}, onAssistantTranscript: () => {}, onDelegate: noop, onGetTasks: noop, onWebSearch: noop,
+      onHomeStatus: noop, onHomeControl: noop as never, onHomeConfirm: noop as never, onApprovalPrompt: () => {}, onApprovalResolved: () => {}, onToolActivity: () => {}, onClosed: (r) => void closed.push(r),
+    }, deps, { idleMs: 120_000 });
+    const start = async () => {
+      await voice.start();
+      peer.ontrack?.({ streams: [{}] });
+      peer.connect();
+      handlers!.core({ kind: "started", expires_at: null });
+    };
+    const core = (event: LiveCoreEvent) => handlers?.core(event);
+    return { voice, peer, order, stopped, revoked, spoken, memory, muted, closed, start, core, accept, ended: () => ended, subscribed: () => !!handlers };
+  }
+
+  it("mutes and pauses before closing the peer, stops remote tracks, never speaks the old content, reports evidence, then asks for one rebuild", async () => {
+    const t = revocable();
+    await t.start();
+    t.core({ kind: "closed", reason: "memory_revoked", message: "記憶已更新，對話已重新開始", rebuild: true });
+    await vi.runAllTimersAsync();
+    expect(t.order.slice(0, 4)).toEqual(["muted:true", "audio.pause+srcObject=null", "remote-track.stop", "peer.close"]);
+    expect(t.order).toContain("mic.stop");
+    expect(t.order.at(-1)).toBe("speechSynthesis.cancel");
+    expect(t.muted).toEqual([true]);
+    expect(t.spoken).toEqual([]);
+    expect(t.stopped).toEqual([{ paused: true, peer_closed: true, tracks_ended: true, ms: expect.any(Number) }]);
+    expect(t.revoked).toEqual([{ message: "記憶已更新，對話已重新開始", rebuild: true, accepted: true }]);
+    expect(t.voice.on).toBe(false);
+    // 核心已經結束工作階段：頁面不再叫 end，也不走一般的 onClosed（不會說出原因）。
+    expect(t.ended()).toBe(0);
+    expect(t.closed).toEqual([]);
+    // 舊工作階段的事件之後全部丟掉（不再訂閱），也不會重建第二次。
+    expect(t.subscribed()).toBe(false);
+    t.core({ kind: "closed", reason: "memory_revoked", message: "again", rebuild: true });
+    t.core({ kind: "transcript", role: "assistant", text: "你喜歡藍色", final: true, item_id: "late" });
+    await vi.runAllTimersAsync();
+    expect(t.revoked).toHaveLength(1);
+  });
+
+  it("does not ask for a rebuild when the core did not accept the stop report (waits for the core's notice instead)", async () => {
+    const t = revocable();
+    t.accept.value = false;
+    await t.start();
+    t.core({ kind: "closed", reason: "memory_revoked", message: "記憶已更新，對話已重新開始", rebuild: true });
+    await vi.runAllTimersAsync();
+    expect(t.stopped).toHaveLength(1);
+    expect(t.revoked).toEqual([{ message: "記憶已更新，對話已重新開始", rebuild: false, accepted: false }]);
+  });
+
+  it("a revocation that arrives after the page already left the call is still reported (no false route disable)", () => {
+    const tickets = new Map([["rt_old", { session_id: "rt_old", owner: "own_x" }]]);
+    const revoked = { session_id: "rt_old", event: { kind: "closed", reason: "memory_revoked", message: "m", rebuild: true } as LiveCoreEvent };
+    expect(orphanStopReport(revoked, null, tickets, true)).toEqual({ ticket: { session_id: "rt_old", owner: "own_x" }, evidence: { paused: true, peer_closed: true, tracks_ended: true, ms: 0 } });
+    // 還在這通上：交給 LiveVoice.revoke；其他事件或不認得的工作階段：不回報。
+    expect(orphanStopReport(revoked, "rt_old", tickets, true)).toBeNull();
+    expect(orphanStopReport({ ...revoked, session_id: "rt_unknown" }, null, tickets, true)).toBeNull();
+    expect(orphanStopReport({ session_id: "rt_old", event: { kind: "closed", reason: "ended", message: "m" } }, null, tickets, true)).toBeNull();
+  });
+
+  it("OS lock ends without rebuild", async () => {
+    const t = revocable();
+    await t.start();
+    t.core({ kind: "closed", reason: "memory_revoked", message: "即時語音已結束（電腦已鎖定）", rebuild: false });
+    await vi.runAllTimersAsync();
+    expect(t.revoked).toEqual([{ message: "即時語音已結束（電腦已鎖定）", rebuild: false, accepted: true }]);
+  });
+
+  it("hold mutes playback immediately and releases only when the core says so", async () => {
+    const t = revocable();
+    await t.start();
+    t.core({ kind: "hold", active: true });
+    expect(t.muted).toEqual([true]);
+    t.core({ kind: "hold", active: false });
+    expect(t.muted).toEqual([true, false]);
+  });
+
+  it("forwards memory events (ids, counts and fixed sentences only) to the page", async () => {
+    const t = revocable();
+    await t.start();
+    t.core({ kind: "memory", used: 2, reason: null, epoch: 3 });
+    t.core({ kind: "memory_card", card: "mc_000000000000000000000001", open: true });
+    t.core({ kind: "delegate_blocked", title: "幫我寫一份晚餐菜單報告" });
+    expect(t.memory.map((e) => e.kind)).toEqual(["memory", "memory_card", "delegate_blocked"]);
+  });
+});
+
+describe("MEM-2: openRealtime rebuild", () => {
+  it("a rebuild start goes to the core once with rebuild:true and no greeting; no API key fallback is offered", async () => {
+    const starts: unknown[] = [];
+    const began: string[] = [];
+    const session = { start: async () => {}, stop: () => {}, fallbackOffer: null } as unknown as RealtimeSession;
+    const result = await openRealtime({
+      start: async () => { starts.push({ rebuild: true }); return { ok: true, session_id: "rt_1", owner: "own_x", route: "live", model: "m", billing_line: "b", notice: null, interaction: null }; },
+      makeSession: () => session,
+      announce: async () => {},
+      refused: () => {},
+      began: (_s, d) => void began.push(d.route),
+    });
+    expect(result).toBe(session);
+    expect(starts).toEqual([{ rebuild: true }]);
+    expect(began).toEqual(["live"]);
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    expect(main).toContain("const greeting = rebuild ? null : greetingFor(");
+    expect(main).toContain("api.realtimeStart(sseClientId, source, realtimeLocale, rebuild)");
   });
 });

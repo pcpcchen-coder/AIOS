@@ -103,6 +103,10 @@ export interface AppOptions {
   realtimePrefs?: RealtimeSettingsSource;
   /** 即時語音用的 Codex 登入（ChatGPT 方案路徑）；未提供時沒有這個登入。 */
   codexAuth?: CodexAuth;
+  /** MEM-2：停播未確認時強制靜音（macOS App：主視窗 webContents.setAudioMuted）。 */
+  realtimeAudio?: { setMuted(muted: boolean): void };
+  /** 只限測試 build（NOUS_TEST_DROP_STOP_REPORT=1）：丟掉頁面的停播回報。 */
+  dropStopReport?: boolean;
   /** 即時語音的上網查詢；未提供時不可用。 */
   webSearch?: WebSearch;
   /** 武陵居中控的查詢與控制（docs/12 H0、H1）；未提供時不可用。 */
@@ -166,6 +170,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
           return true;
         },
         log: (line) => console.log(line),
+        audio: options.realtimeAudio,
+        dropStopReport: options.dropStopReport,
       })
     : null;
   const settings = {
@@ -298,7 +304,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const clientId = typeof body.client_id === "string" && CLIENT_ID.test(body.client_id) && clients.has(body.client_id) ? body.client_id : null;
       // source 只決定要不要發看著說話的互動 ID（ID-02），不是授權；其他值都當成 user。
       const locale = normalizeLocale(req.headers["x-nous-locale"]);
-      const decision = sessions.start(clientId, body.source === "look_to_talk" ? "look_to_talk" : "user", locale);
+      // rebuild：MEM-2 記憶撤銷後頁面自動重建（只走 live、不問候）；只是開始方式，不是授權。
+      const decision = sessions.start(clientId, body.source === "look_to_talk" ? "look_to_talk" : "user", locale, body.rebuild === true);
       return sendJson(res, 200, decision.ok
         ? { ...decision, billing_line: localize(decision.billing_line, locale), notice: decision.notice === null ? null : localize(decision.notice, locale) }
         : { ...decision, message: localize(decision.message, locale) });
@@ -365,6 +372,17 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (typeof callId !== "string" || !CALL_ID.test(callId)) throw new HttpError(400, "call_id is required");
       if (!output || typeof output !== "object" || Array.isArray(output)) throw new HttpError(400, "output must be a JSON object");
       const accepted = sessionCall(() => sessions!.hostResult(sessionId, owner, callId, { output: output as Record<string, unknown> }));
+      return sendJson(res, 200, { ok: true, accepted });
+    }
+    if (method === "POST" && path === "/api/realtime/stopped") {
+      // MEM-2：頁面在記憶撤銷後停播並核對的證據（只有布林值與毫秒數，沒有內容）。
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      const e = body.evidence as Record<string, unknown> | undefined;
+      if (!e || typeof e !== "object" || typeof e.paused !== "boolean" || typeof e.peer_closed !== "boolean" || typeof e.tracks_ended !== "boolean" || typeof e.ms !== "number" || !Number.isFinite(e.ms) || e.ms < 0 || e.ms > 60_000) {
+        throw new HttpError(400, "evidence must be {paused, peer_closed, tracks_ended, ms}");
+      }
+      const accepted = sessionCall(() => sessions!.stoppedReport(sessionId, owner, { paused: e.paused as boolean, peer_closed: e.peer_closed as boolean, tracks_ended: e.tracks_ended as boolean, ms: Math.round(e.ms as number) }));
       return sendJson(res, 200, { ok: true, accepted });
     }
     if (method === "POST" && path === "/api/realtime/end") {

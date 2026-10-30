@@ -3,7 +3,7 @@
 // 文字欄位 message 是核心的固定句型（中文原文，{0}… 由 values 帶入），畫面用共用翻譯表 t(message, ...values) 顯示；
 // values 是使用者自己的話或人物名稱，不翻譯。
 
-export const MEMORY_OPS = ["status", "setup", "turn", "card_answer", "select", "suspend", "list", "receipt", "edit", "forget", "pin", "profile_delete", "link_face", "profile_minor"] as const;
+export const MEMORY_OPS = ["status", "setup", "turn", "card_answer", "card_view", "select", "suspend", "list", "receipt", "edit", "forget", "pin", "profile_delete", "link_face", "profile_minor"] as const;
 export type MemoryOp = (typeof MEMORY_OPS)[number];
 
 /** 本次人物狀態（16 §4）：unselected 只用家庭共用；suspended 是撤銷後暫停，要重新選擇。 */
@@ -81,7 +81,8 @@ export interface MemoryFactView {
   subject_name: string | null;
   text: string;
   topic: string;
-  source: "explicit";
+  /** explicit：打字或畫面點擊；voice_confirmed：MEM-2 即時語音的確認詞（George 2026-10-30）。 */
+  source: "explicit" | "voice_confirmed";
   excerpt: string;
   at: string;
   expires: string | null;
@@ -99,6 +100,8 @@ export interface MemoryReceiptView extends MemoryText {
 }
 
 export type ClarifyChoice = "save" | "household" | "cancel";
+/** MEM-2 語音卡（即時語音）上的選擇：記住／更正／忘記（confirm）、改記全家共用、取消。 */
+export type VoiceConfirmChoice = "confirm" | "household" | "cancel";
 
 export type MemoryCardView =
   | { kind: "setup"; card: string; text: string }
@@ -107,6 +110,11 @@ export type MemoryCardView =
   | { kind: "choose_profile"; card: string; name: string; profiles: { id: string; name: string }[] }
   | { kind: "face_candidate"; card: string; name: string }
   | { kind: "pick"; card: string; action: "correct" | "forget"; value: string; candidates: MemoryFactView[] }
+  /**
+   * MEM-2：即時語音聽到的記住、更正、忘記。heard 是核心觀察到的逐字稿（轉成繁體後）；value 是要記住或更正成的內容；
+   * target 是要更正或忘記的那一筆；replaces：記住時會取代原本的說法。也可以說出確認詞（確認記住／確認更正／確認忘記）。
+   */
+  | { kind: "voice_confirm"; card: string; action: "remember" | "correct" | "forget"; heard: string; value: string; subject_name: string | null; target: string | null; options: VoiceConfirmChoice[]; replaces: boolean }
   | { kind: "inspect"; subject_name: string | null; facts: MemoryFactView[] };
 
 export interface MemoryTurnView {
@@ -129,6 +137,8 @@ export type MemoryResponse =
   | { ok: true; op: "suspend"; presence: MemoryPresenceView }
   | { ok: true; op: "list"; facts: MemoryFactView[]; subject: string | null; manage: string | null; status: MemoryStatusView; face_people: { person_id: string; name: string; linked: boolean }[] | null; consents: { provider: string; account: string; allowed: boolean }[] }
   | { ok: true; op: "receipt"; status: MemoryReceiptStatus }
+  /** MEM-2：SSE 只送卡片 ID，可信主視窗用 card_view 取內容；origin live＝即時語音的卡（回答後不續送聊天）。 */
+  | { ok: true; op: "card_view"; card: MemoryCardView; origin: "typed" | "live" }
   | ({ ok: true; op: "edit" | "forget" | "pin" | "profile_delete" | "link_face" | "profile_minor" } & { receipt: MemoryReceiptView; history_reset: boolean; status: MemoryStatusView })
   | { ok: false; code: MemoryErrorCode; message: string };
 
@@ -140,6 +150,7 @@ export type MemoryRequest =
   | { op: "setup"; enabled: boolean; subject: MemorySetupSubject; allow: { provider: string; account: string }[]; card?: string; token?: string }
   | { op: "turn"; text: string; request_id: string }
   | { op: "card_answer"; card: string; choice: string; profile?: string; fact?: string; allow?: boolean }
+  | { op: "card_view"; card: string }
   /** card：presence.select_card（主視窗「本次人物」選單）；或記憶管理的 token。 */
   | { op: "select"; profile: string | null; card?: string; token?: string }
   | { op: "suspend"; reason: "multi_face" | "tracking_lost" }

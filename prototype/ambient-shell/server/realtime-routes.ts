@@ -22,6 +22,8 @@ import {
   type RouteOption,
   type RoutePreference,
   type StartDecision,
+  type StopEvidence,
+  LIVE_STOP_REPORT_MS,
   type UnavailableReason,
 } from "../shared/realtime-route.ts";
 import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
@@ -54,6 +56,14 @@ export interface SessionContext {
   /** 頁面確認卡的狀態。 */
   approval(): ApprovalSnapshot;
   now(): number;
+  /** MEM-2：看著說話開始的（核心發了互動 ID）：本次人物可能由臉部候選決定，連線時先不放記憶。 */
+  readonly lookToTalk?: boolean;
+  /** MEM-2：記憶撤銷後自動重建的通話（只走 live、不問候、第一句是固定句）。 */
+  readonly rebuild?: boolean;
+  /** MEM-2：等頁面回報這個工作階段已停播（POST /api/realtime/stopped）；逾時回 null。 */
+  stopped?(timeoutMs: number): Promise<StopEvidence | null>;
+  /** MEM-2：停播未確認：強制靜音（Electron setAudioMuted），並把分開的回條送給頁面。 */
+  forceSilence?(message: string): void;
 }
 
 export interface RealtimeRoute {
@@ -219,6 +229,10 @@ export interface RealtimeSessionsOptions {
   /** 頁面一直沒送 offer 時，開始的決定多久後作廢。 */
   pendingTtlMs?: number;
   log?: (line: string) => void;
+  /** MEM-2：停播未確認時強制靜音的開關（macOS App：主視窗 webContents.setAudioMuted）；沒有時只記 log。 */
+  audio?: { setMuted(muted: boolean): void };
+  /** 只限測試 build（NOUS_TEST_DROP_STOP_REPORT=1）：丟掉頁面的停播回報，用來驗證強制靜音的路徑。 */
+  dropStopReport?: boolean;
 }
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
@@ -251,7 +265,23 @@ interface Decision {
   plan: Extract<StartPlan, { kind: "start" }>;
   route: RouteId;
   at: number;
+  /** MEM-2：記憶撤銷後的重建。 */
+  rebuild: boolean;
 }
+
+/** MEM-2：因為記憶撤銷而結束的工作階段（等頁面的停播回報；晚到的 host-result 回 accepted:false）。 */
+interface RevokedSession {
+  owner: string;
+  clientId: string;
+  at: number;
+  report: StopEvidence | null;
+  waiters: ((report: StopEvidence) => void)[];
+  /** 已有結果：停播回報被採用，或逾時後已強制靜音（或頁面已不在、不需要等）。 */
+  settled: boolean;
+}
+
+/** 撤銷後最多等這麼久就不再擋新的開始（停播回報時限加餘裕；頁面已不在時 revokeMemory 不會等回報）。 */
+const REVOKE_SETTLE_MS = LIVE_STOP_REPORT_MS + 1_000;
 
 interface PendingHost {
   name: HostToolName;
@@ -285,6 +315,9 @@ export class RealtimeSessions {
   /** API key 路徑的工作階段只記下來給畫面顯示（控制面在頁面的資料通道）。 */
   private ga: { id: string; owner: string; clientId: string | null } | null = null;
   private readonly now: () => number;
+  private readonly revoked = new Map<string, RevokedSession>();
+  /** forceSilence 之後為 true：下一次頁面回報停播或新通話開始才解除。 */
+  private muted = false;
 
   constructor(private readonly options: RealtimeSessionsOptions) {
     this.now = options.now ?? Date.now;
@@ -341,18 +374,27 @@ export class RealtimeSessions {
    * POST /api/realtime/start。偏好只在這裡讀一次；之後改偏好只影響下一次開始。
    * clientId：開始的頁面的 SSE 串流；live 路徑一定要有（工具呼叫只送到這條串流）。
    */
-  start(clientId: string | null, source: RealtimeStartSource = "user", locale: Locale = "zh-TW"): StartDecision {
+  start(clientId: string | null, source: RealtimeStartSource = "user", locale: Locale = "zh-TW", rebuild = false): StartDecision {
     this.sweep();
     if (this.live) {
       return { ok: false, message: `即時語音無法開始：${unavailableText("session_busy")}`, reasons: { live: "session_busy" } };
     }
-    const plan = this.plan();
+    // MEM-2：上一通因記憶撤銷結束、還沒有停播結果（沒回報也還沒逾時）：不開始新的，避免重建和強制靜音、停用路徑互相競爭。
+    if ([...this.revoked.values()].some((r) => !r.settled && this.now() - r.at < REVOKE_SETTLE_MS)) {
+      return { ok: false, message: "即時語音無法開始：上一通還在確認是否已停止播放，請稍候再試", reasons: { live: "session_busy" } };
+    }
+    // MEM-2 重建：只走 live、沒有 API key 備援、不發互動 ID（不會再問候）。live 不能用就照實拒絕。
+    const live = this.readiness("live");
+    const plan: StartPlan = !rebuild ? this.plan()
+      : !live ? { kind: "refuse", message: "即時語音無法開始：ChatGPT 方案路徑未設定", reasons: {} }
+        : live.ready ? { kind: "start", route: "live", fallback: null, notice: null }
+          : { kind: "refuse", message: `即時語音無法開始：${live.message}`, reasons: { live: live.reason } };
     if (plan.kind === "refuse") return { ok: false, message: plan.message, reasons: plan.reasons };
     if (plan.route === "live" && !clientId) {
       return { ok: false, message: "即時語音無法開始：頁面沒有連上本機核心的事件串流，請重新整理後再試。", reasons: {} };
     }
-    const interaction = source === "look_to_talk" ? this.issueInteraction() : null;
-    const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale));
+    const interaction = source === "look_to_talk" && !rebuild ? this.issueInteraction() : null;
+    const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale), rebuild);
     const model = this.options.routes[plan.route]!.describe().model;
     return { ok: true, session_id: decision.id, owner: decision.owner, route: plan.route, model, billing_line: billingLine(plan.route, model), notice: plan.notice, interaction };
   }
@@ -385,8 +427,9 @@ export class RealtimeSessions {
     return { route: s.route, session_id: s.id, ...(s.locale === "en" ? { locale: "en" as const } : {}) };
   }
 
-  private decide(plan: Extract<StartPlan, { kind: "start" }>, route: RouteId, clientId: string | null, interaction: string | null = null, locale: Locale = "zh-TW"): Decision {
+  private decide(plan: Extract<StartPlan, { kind: "start" }>, route: RouteId, clientId: string | null, interaction: string | null = null, locale: Locale = "zh-TW", rebuild = false): Decision {
     const decision: Decision = {
+      rebuild,
       locale,
       id: `rt_${randomUUID().replaceAll("-", "")}`,
       owner: `own_${randomBytes(24).toString("base64url")}`,
@@ -404,6 +447,7 @@ export class RealtimeSessions {
     const ttl = this.options.pendingTtlMs ?? 60_000;
     for (const [id, d] of this.decisions) if (this.now() - d.at > ttl) this.decisions.delete(id);
     for (const [id, it] of this.interactions) if (this.now() - it.issuedAt > ttl + GREETING_CLAIM_MS) this.interactions.delete(id);
+    for (const [id, r] of this.revoked) if (this.now() - r.at > ttl) this.revoked.delete(id);
   }
 
   /**
@@ -424,6 +468,8 @@ export class RealtimeSessions {
       return { sdp: call.answerSdp, model: call.model, route: "api_key", session_id: decision.id };
     }
     if (this.live) throw new SessionError(409, unavailableText("session_busy"));
+    // 新通話開始：解除上次停播未確認時的強制靜音。
+    this.unmute();
     const session: LiveSession = {
       id: decision.id,
       owner: decision.owner,
@@ -435,7 +481,7 @@ export class RealtimeSessions {
     };
     this.live = session;
     try {
-      const call = await route.connect(offerSdp, this.contextFor(session, decision.id, decision.locale));
+      const call = await route.connect(offerSdp, this.contextFor(session, decision.id, decision.locale, { lookToTalk: decision.interaction !== null, rebuild: decision.rebuild }));
       if (session.closed) {
         // 連線期間工作階段已結束（頁面離開或控制連線中斷）：掛斷剛建立的通話，照實說沒有開始。
         await call.close("page_gone").catch(() => undefined);
@@ -484,8 +530,16 @@ export class RealtimeSessions {
     else live.approval = { open: false, resolvedAt: isApprovalAnswer(report.outcome) ? this.now() : live.approval.resolvedAt, openUntil: null };
   }
 
-  /** POST /api/realtime/host-result：交回一個等待中的工具結果；不認得或已逾時的 call_id 丟掉。 */
+  /**
+   * POST /api/realtime/host-result：交回一個等待中的工具結果；不認得或已逾時的 call_id 丟掉。
+   * MEM-2：記憶撤銷後才到的結果回 false（accepted:false），不交給任何人。
+   */
   hostResult(sessionId: string, owner: string, callId: string, result: HostResult): boolean {
+    const gone = this.revoked.get(sessionId);
+    if (gone && (!this.live || this.live.id !== sessionId)) {
+      if (gone.owner !== owner) throw new SessionError(403, "不是開始這個即時語音的頁面。");
+      return false;
+    }
     const live = this.owned(sessionId, owner);
     const pending = live.pendingHost.get(callId);
     if (!pending) return false;
@@ -493,6 +547,38 @@ export class RealtimeSessions {
     clearTimeout(pending.timer);
     pending.resolve(result.output);
     return true;
+  }
+
+  /**
+   * MEM-2：POST /api/realtime/stopped。頁面在 closed{memory_revoked} 之後停播並核對（audio 暫停、peer 關閉、遠端軌道結束）
+   * 再回報；只接受因記憶撤銷而結束、擁有者相符的工作階段。收到後解除強制靜音。回傳是否採用。
+   */
+  stoppedReport(sessionId: string, owner: string, evidence: StopEvidence): boolean {
+    const gone = this.revoked.get(sessionId);
+    if (!gone) return false;
+    if (gone.owner !== owner) throw new SessionError(403, "不是開始這個即時語音的頁面。");
+    if (this.options.dropStopReport) {
+      this.options.log?.("即時語音：測試旗標 NOUS_TEST_DROP_STOP_REPORT，丟掉停播回報");
+      return false;
+    }
+    // 三項證據都成立（播放已暫停、peer 已關、遠端軌道都結束）才採用、解除靜音；否則等逾時後強制靜音。
+    if (!evidence.paused || !evidence.peer_closed || !evidence.tracks_ended) {
+      this.options.log?.("即時語音：停播回報的證據不完整，不採用");
+      return false;
+    }
+    gone.settled = true;
+    if (!gone.report) {
+      gone.report = evidence;
+      for (const waiter of gone.waiters.splice(0)) waiter(evidence);
+    }
+    this.unmute();
+    return true;
+  }
+
+  private unmute(): void {
+    if (!this.muted) return;
+    this.muted = false;
+    try { this.options.audio?.setMuted(false); } catch { /* 主視窗已不在 */ }
   }
 
   /** POST /api/realtime/end。可重複呼叫。 */
@@ -514,6 +600,8 @@ export class RealtimeSessions {
    */
   clientClosed(clientId: string): void {
     for (const [id, d] of this.decisions) if (d.clientId === clientId) this.decisions.delete(id);
+    // 頁面已不在：它的撤銷不會有停播回報，也不用再等（不擋重新整理後的新開始）。
+    for (const r of this.revoked.values()) if (r.clientId === clientId) r.settled = true;
     if (this.ga?.clientId === clientId) this.ga = null;
     const live = this.live;
     if (live && live.clientId === clientId) {
@@ -553,16 +641,20 @@ export class RealtimeSessions {
     live.pendingHost.clear();
   }
 
-  private contextFor(live: LiveSession | null, sessionId: string, locale: Locale): SessionContext {
+  private contextFor(live: LiveSession | null, sessionId: string, locale: Locale, flags: { lookToTalk: boolean; rebuild: boolean } = { lookToTalk: false, rebuild: false }): SessionContext {
     const sessions = this;
     return {
       sessionId,
       locale,
+      lookToTalk: flags.lookToTalk,
+      rebuild: flags.rebuild,
       tasks: this.options.tasks,
       now: this.now,
       approval: () => (live ? effectiveApproval(live.approval, this.now()) : { open: false, resolvedAt: null }),
       emit: (event) => {
         if (!live || live.closed) return;
+        // 記憶撤銷：先記下這個工作階段（等停播回報、拒絕晚到的 host-result），再送給頁面。
+        if (event.kind === "closed" && event.reason === "memory_revoked") this.revoked.set(sessionId, { owner: live.owner, clientId: live.clientId, at: this.now(), report: null, waiters: [], settled: false });
         this.options.send(live.clientId, { type: "realtime.live", session_id: sessionId, event });
         if (event.kind === "closed") {
           this.options.log?.(`即時語音：ChatGPT 方案工作階段結束（${event.reason}）`);
@@ -576,6 +668,36 @@ export class RealtimeSessions {
           return live?.pendingHost.size ?? 0;
         },
         call: (name, args, signal) => sessions.hostCall(live, sessionId, name, args, signal),
+      },
+      stopped: (timeoutMs) => {
+        const gone = this.revoked.get(sessionId);
+        if (!gone) return Promise.resolve(null);
+        if (gone.report) return Promise.resolve(gone.report);
+        return new Promise((resolve) => {
+          const timer = setTimeout(() => {
+            gone.waiters = gone.waiters.filter((w) => w !== waiter);
+            resolve(null);
+          }, timeoutMs);
+          timer.unref?.();
+          const waiter = (report: StopEvidence) => {
+            clearTimeout(timer);
+            resolve(report);
+          };
+          gone.waiters.push(waiter);
+        });
+      },
+      forceSilence: (message) => {
+        this.muted = true;
+        const settled = this.revoked.get(sessionId);
+        if (settled) settled.settled = true;
+        try {
+          this.options.audio?.setMuted(true);
+        } catch {
+          // 主視窗已不在
+        }
+        this.options.log?.(`即時語音：停播未確認，已強制靜音（${this.options.audio ? "主視窗" : "沒有可用的靜音開關"}）`);
+        const gone = this.revoked.get(sessionId);
+        if (gone) this.options.send(gone.clientId, { type: "realtime.live", session_id: sessionId, event: { kind: "memory_notice", message } });
       },
     };
   }

@@ -371,3 +371,91 @@ describe("model lookup is inside each turn's time budget", () => {
     expect(at!).toBeLessThanOrEqual(WEB_SEARCH_TIMEOUT_MS);
   });
 });
+
+describe("MEM-2: recall_memory and the delegation block", () => {
+  function memoryCaller(turns: CodexTurn[], memory: { blocked: boolean; recall?: (q: string, s: AbortSignal) => Promise<Record<string, unknown>> }) {
+    const requests: CodexTurnRequest[] = [];
+    const hostCalls: string[] = [];
+    const blockedTitles: (string | null)[] = [];
+    const recalls: string[] = [];
+    const c = new LiveToolCaller({
+      responses: { turn: async (req) => { requests.push({ ...req, input: [...req.input] }); const next = turns.shift(); if (!next) throw new Error("no more turns"); return next; } },
+      caps: () => ({ ...CAPS, memory: true }),
+      host: { outstanding: 0, call: async (name) => { hostCalls.push(name); return { ok: true, title: "fixture" }; } },
+      tasks: () => [],
+      approval: () => NO_CARD,
+      memory: {
+        blocked: () => memory.blocked,
+        recall: memory.recall ?? (async (q) => { recalls.push(q); return { facts: [{ text: "不吃香菜", at: "2026-10-30T00:00:00.000Z", expires: null }] }; }),
+        delegateBlocked: (title) => void blockedTitles.push(title),
+      },
+    });
+    return { c, requests, hostCalls, blockedTitles, recalls };
+  }
+
+  it("offers recall_memory only with caps.memory (never to the API key path); the rule text says it cannot write", () => {
+    expect(liveCallerTools(CAPS).map((t) => (t.type === "function" ? t.name : ""))).not.toContain("recall_memory");
+    expect(liveCallerTools({ ...CAPS, memory: true }).map((t) => (t.type === "function" ? t.name : ""))).toContain("recall_memory");
+    expect(REALTIME_TOOLS.map((t) => t.name)).not.toContain("recall_memory");
+    expect(realtimeToolRules({ ...CAPS, memory: true }).join("\n")).toContain("你沒有保存、更正或忘記記憶的工具");
+    expect(buildRealtimeInstructions([], new Date(), CAPS)).not.toContain("recall_memory");
+    const live = buildLiveInstructions([], new Date(), { mcp: [], memory: true });
+    expect(live).toContain("收到以「（記憶確認）」開頭的內容時，只說其中「」裡的那一句");
+    expect(live).toContain("（記憶資料）");
+    expect(buildLiveInstructions([], new Date(), { mcp: [] })).not.toContain("（記憶確認）");
+  });
+
+  it("recall_memory runs in the core (not the page) and its result goes back to Codex as data", async () => {
+    const { c, requests, hostCalls, recalls } = memoryCaller([
+      turn({ calls: [{ name: "recall_memory", arguments: JSON.stringify({ query: "晚餐吃什麼" }), call_id: "r1" }], replay: [{ type: "function_call", call_id: "r1", name: "recall_memory", arguments: "{}" } as never] }),
+      turn({ text: "依你之前交代的，晚餐避開香菜。" }),
+    ], { blocked: false });
+    const result = await c.run(request("晚餐吃什麼好"), new AbortController().signal);
+    expect(result).toMatchObject({ ok: true, text: "依你之前交代的，晚餐避開香菜。" });
+    expect(recalls).toEqual(["晚餐吃什麼"]);
+    expect(hostCalls).toEqual([]);
+    const output = requests[1]!.input.find((i) => (i as { type?: string }).type === "function_call_output") as { output: string };
+    expect(JSON.parse(output.output)).toEqual({ facts: [{ text: "不吃香菜", at: "2026-10-30T00:00:00.000Z", expires: null }] });
+    expect(requests[0]!.instructions).toContain("你沒有寫入記憶的工具");
+  });
+
+  it("a revoked lease means recall answers ok:false (nothing stale is delivered)", async () => {
+    const { c, requests } = memoryCaller([
+      turn({ calls: [{ name: "recall_memory", arguments: JSON.stringify({ query: "顏色" }), call_id: "r1" }] }),
+      turn({ text: "我不確定。" }),
+    ], { blocked: true, recall: async () => ({ ok: false, error: "記憶已更新，這次的結果作廢。" }) });
+    await c.run(request("我喜歡什麼顏色"), new AbortController().signal);
+    const output = requests[1]!.input.find((i) => (i as { type?: string }).type === "function_call_output") as { output: string };
+    expect(JSON.parse(output.output)).toEqual({ ok: false, error: "記憶已更新，這次的結果作廢。" });
+  });
+
+  it("delegate_task is blocked once the call carries memory: no host call (so no TaskStore entry), the page gets the original-sentence card", async () => {
+    const { c, hostCalls, blockedTitles, requests } = memoryCaller([
+      turn({ calls: [{ name: "delegate_task", arguments: JSON.stringify({ title: "照 George 不吃香菜的偏好寫菜單" }), call_id: "t1" }] }),
+      turn({ text: "請看畫面上的卡，按「交辦」就會開始。" }),
+    ], { blocked: true });
+    await c.run({ ...request("寫一份照偏好的晚餐菜單報告"), userText: "幫我寫一份晚餐菜單報告" }, new AbortController().signal);
+    expect(hostCalls).toEqual([]);
+    expect(blockedTitles).toEqual(["幫我寫一份晚餐菜單報告"]);
+    const output = requests[1]!.input.find((i) => (i as { type?: string }).type === "function_call_output") as { output: string };
+    expect(JSON.parse(output.output)).toMatchObject({ ok: false, status: "delegate_blocked", message: expect.stringContaining("看畫面上的卡") });
+    // 找不到觸發交辦的使用者原句：不出卡，Codex 不能說「請看畫面上的卡」，改請使用者再說一次完整的要求。
+    const untitled = memoryCaller([turn({ calls: [{ name: "delegate_task", arguments: JSON.stringify({ title: "寫菜單" }), call_id: "t1" }] }), turn({ text: "請再說一次" })], { blocked: true });
+    await untitled.c.run(request("寫菜單"), new AbortController().signal);
+    expect(untitled.blockedTitles).toEqual([null]);
+    const quiet = untitled.requests[1]!.input.find((i) => (i as { type?: string }).type === "function_call_output") as { output: string };
+    expect(JSON.parse(quiet.output).message).not.toContain("看畫面上的卡");
+    expect(JSON.parse(quiet.output).message).toContain("再說一次");
+    const free = memoryCaller([turn({ calls: [{ name: "delegate_task", arguments: JSON.stringify({ title: "寫報告" }), call_id: "t1" }] }), turn({ text: "好" })], { blocked: false });
+    await free.c.run(request("寫報告"), new AbortController().signal);
+    expect(free.hostCalls).toEqual(["delegate_task"]);
+  });
+
+  it("the spoken confirmation phrases never reach Codex (the core's voice confirmation handles them)", async () => {
+    const { c, requests } = memoryCaller([], { blocked: false });
+    for (const text of ["確認記住", "確認忘記", "confirm change"]) {
+      expect(await c.run(request(text), new AbortController().signal)).toMatchObject({ ok: true, text: "記憶的確認由 Nous 核心處理，結果會另外通知。", tools: [] });
+    }
+    expect(requests).toEqual([]);
+  });
+});

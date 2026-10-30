@@ -10,6 +10,13 @@ export type FramelessEvent =
   | { kind: "transcript"; role: "user" | "assistant"; text: string; final: boolean; item_id: string | null }
   /** output_audio_buffer.cleared：模型被插話、清掉了要播的聲音。 */
   | { kind: "audio.cleared" }
+  /**
+   * MEM-2：input_audio_buffer.speech_started（使用者開始說話）與 output_audio_buffer.stopped（助理音訊結束）。
+   * 這兩個是 OpenAI Realtime GA 的事件名，Codex live 的 frameless wire 是否送出未證實；有送時，語音確認用它們判斷
+   * 「問句播完之後才開口」，沒有時退回時間差（server/memory/live.ts CONFIRM_AFTER_MS）。
+   */
+  | { kind: "speech.started" }
+  | { kind: "audio.done" }
   /** delegation.created：只在 item.type 是 delegation、target 是 client 時。 */
   | { kind: "delegation"; id: string; text: string }
   | { kind: "error"; code: string | null; message: string; status: number | null; fatal: boolean };
@@ -56,6 +63,10 @@ export function parseFramelessEvent(raw: unknown): FramelessEvent | null {
     }
     case "output_audio_buffer.cleared":
       return { kind: "audio.cleared" };
+    case "input_audio_buffer.speech_started":
+      return { kind: "speech.started" };
+    case "output_audio_buffer.stopped":
+      return { kind: "audio.done" };
     case "delegation.created": {
       const item = rec(event.item);
       if (!item || item.type !== "delegation" || item.target !== "client" || !str(item.id)) return null;

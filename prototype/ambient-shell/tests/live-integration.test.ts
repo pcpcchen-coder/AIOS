@@ -15,7 +15,7 @@ import { LiveToolCaller } from "../server/live-tool-caller.ts";
 import { MockExecutor } from "../server/mock-executor.ts";
 import { ProviderManager } from "../server/providers.ts";
 import { buildLiveInstructions, RealtimeBridge } from "../server/realtime.ts";
-import { ApiKeyRoute } from "../server/realtime-routes.ts";
+import { ApiKeyRoute, type SessionContext } from "../server/realtime-routes.ts";
 import { RealtimeSettingsStore } from "../server/realtime-settings.ts";
 import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
@@ -23,6 +23,10 @@ import { WebSearch } from "../server/web-search.ts";
 import type { StartDecision } from "../shared/realtime-route.ts";
 import { codexTurn, scriptedFetch, sseResponse, SECRET_TOKEN_MARK, writeCredentials } from "./fixtures/fake-chatgpt.ts";
 import { startFakeSideband, type FakeConnection, type FakeSideband } from "./fixtures/fake-sideband.ts";
+import { randomBytes } from "node:crypto";
+import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { realLockAvailable } from "./fixtures/memory-lock.ts";
+import { CODEX, enable, harness, manage, type Harness } from "./fixtures/memory-service.ts";
 
 // 端到端（全部 fixture）：本機核心 ↔ 真的 SSE 串流 ↔ 假的頁面；假的 chatgpt.com、假的 sideband、假的 OpenAI。
 // 驗證 host RPC 走真的 SSE、擁有者規則、頁面離開與 sideband 掉線，以及權杖不出現在任何 HTTP、SSE 或 log。
@@ -97,7 +101,7 @@ async function page(base: string) {
   return { frames, events, waitFor, clientId: hello.client_id as string, close: () => controller.abort() };
 }
 
-async function start(options: { turns?: Response[] } = {}) {
+async function start(options: { turns?: Response[]; memory?: Harness; audio?: { setMuted(muted: boolean): void }; dropStopReport?: boolean } = {}) {
   sideband = await startFakeSideband();
   const port = await freePort();
   const dir = mkdtempSync(join(tmpdir(), "nous-live-int-"));
@@ -126,8 +130,9 @@ async function start(options: { turns?: Response[] } = {}) {
     auth: codexAuth,
     voice: () => prefs.view().live_voice,
     model: { display: "gpt-live-1-codex", send: null },
-    caller: (ctx) => new LiveToolCaller({ responses: codex, caps, host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log: (l) => logs.push(l) }),
-    instructions: (ctx) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: [] }),
+    caller: (ctx, mem) => new LiveToolCaller({ responses: codex, caps: () => ({ ...caps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log: (l) => logs.push(l), ...(mem ? { memory: mem } : {}) }),
+    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: [], memory: !!memoryOn }),
+    ...(options.memory ? { memory: (ctx: SessionContext) => options.memory!.service.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale }) } : {}),
     capabilities: () => ({ webSearch: true, home: true }),
     clientVersion: "0.1.0",
     fetch: callFetch.fetch,
@@ -153,6 +158,8 @@ async function start(options: { turns?: Response[] } = {}) {
     realtimePrefs: prefs,
     codexAuth,
     webSearch,
+    realtimeAudio: options.audio,
+    dropStopReport: options.dropStopReport,
     port,
     devPort: 5173,
     distDir: null,
@@ -173,7 +180,7 @@ async function start(options: { turns?: Response[] } = {}) {
     bodies.push(text);
     return text;
   };
-  return { base, post, get, bodies, logs, creds, openaiKey, prefs, codexFetch };
+  return { base, post, get, bodies, logs, creds, openaiKey, prefs, codexFetch, callFetch, store };
 }
 
 async function startLive(t: Awaited<ReturnType<typeof start>>, clientId: string): Promise<{ decision: Extract<StartDecision, { ok: true }>; conn: FakeConnection }> {
@@ -303,5 +310,167 @@ describe("live route end to end (fixture)", () => {
     expect((await t.post("/api/settings/realtime", { route: "nope" })).status).toBe(400);
     await t.post("/api/realtime/end", { session_id: decision.session_id, owner: decision.owner });
     expect(((await t.post("/api/realtime/start", { client_id: p.clientId })).json as StartDecision)).toMatchObject({ ok: true, route: "api_key", notice: null });
+  });
+});
+
+// ─────────────── MEM-2：記憶在 live 路徑上的端到端（真 HTTP、真 SSE、假 sideband、真 AES-GCM 記憶） ───────────────
+
+const CANARY = "MEM2_LIVE_CANARY_五八一";
+
+function scanDir(dir: string): string[] {
+  const hits: string[] = [];
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) hits.push(...scanDir(path));
+    else if (readFileSync(path).includes(Buffer.from(CANARY))) hits.push(path);
+  }
+  return hits;
+}
+
+describe.skipIf(!realLockAvailable)("MEM-2 live memory end to end (fixture)", () => {
+  const dirs: string[] = [];
+  const harnesses: Harness[] = [];
+  afterEach(async () => {
+    await Promise.all(harnesses.splice(0).map((h) => h.close()));
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  async function georgeWithCanary(): Promise<Harness> {
+    const dir = mkdtempSync(join(tmpdir(), "nous-mem2-int-"));
+    dirs.push(dir);
+    const h = harness({ dir, key: randomBytes(32), live: CODEX });
+    harnesses.push(h);
+    await enable(h, "George", [CODEX]);
+    await h.turn(`記住，我喜歡${CANARY}色`);
+    await h.turn("記住，我不吃香菜");
+    const token = await manage(h);
+    for (const f of (await h.call({ op: "list" })).facts as { id: string; revision: number }[]) await h.call({ op: "pin", id: f.id, revision: f.revision, pinned: true, token });
+    const status = (await h.call({ op: "status" })) as unknown as { profiles: { id: string }[] };
+    await h.call({ op: "select", profile: status.profiles[0]!.id, token });
+    return h;
+  }
+
+  it("forget during a delegation: hold, revoke, session.close, late host-result refused, stop report, rebuild without the forgotten canary; canary only in consented payloads", async () => {
+    const h = await georgeWithCanary();
+    const logs: string[] = [];
+    (h.service as unknown as { log: (l: string) => void }).log = (l) => logs.push(l);
+    const muted: boolean[] = [];
+    const t = await start({ memory: h, audio: { setMuted: (m) => void muted.push(m) }, turns: [codexTurn({ calls: [{ name: "web_search", arguments: { query: "明天台北天氣" }, call_id: "call_ws" }] })] });
+    const p = await page(t.base);
+    const other = await page(t.base);
+    const { decision, conn } = await startLive(t, p.clientId);
+    // 已同意的 codex：連線時的記憶包在 /calls 的 instructions 裡（canary 只允許出現在這裡與 Codex Responses）。
+    expect(JSON.parse(t.callFetch.calls[0]!.body).session.instructions).toContain(CANARY);
+    conn.send({ type: "session.started", session: {} });
+    await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "memory");
+    // 模型念出記憶（助理逐字稿含 canary）：只送到擁有這通的頁面當字幕，不廣播、不進 log。
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: `你喜歡${CANARY}色`, id: "a0" } });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "查一下明天台北天氣", id: "u1" } });
+    // 交辦文字含 canary（模型把記憶寫進交辦）：帶著記憶的通話 log 只記長度。
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "d1", content: [{ type: "input_text", text: `查明天台北天氣，順便提${CANARY}` }] } });
+    const host = await p.waitFor((e) => e.type === "realtime.host");
+    const callId = (host.call as { call_id: string }).call_id;
+
+    // 交辦途中忘記那筆 canary（記憶管理的「忘記」）。
+    const token = await manage(h);
+    const fact = ((await h.call({ op: "list" })).facts as { id: string; revision: number; text: string }[]).find((f) => f.text.includes(CANARY))!;
+    expect(await h.call({ op: "forget", id: fact.id, revision: fact.revision, token })).toMatchObject({ ok: true, receipt: { status: "forgotten" } });
+    const hold = await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "hold");
+    const closed = await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "closed");
+    expect(p.events.indexOf(hold)).toBeLessThan(p.events.indexOf(closed));
+    expect(closed.event).toMatchObject({ reason: "memory_revoked", rebuild: true });
+    await conn.waitFor((e) => e.type === "session.close");
+    const appendsAtClose = conn.received.filter((e) => String(e.type).endsWith("context.append")).length;
+    // 晚到的工具結果：不交給任何人。
+    const late = await t.post("/api/realtime/host-result", { session_id: decision.session_id, owner: decision.owner, call_id: callId, output: { ok: true, answer: `明天晴（${CANARY}）` } });
+    expect(late).toMatchObject({ status: 200, json: { ok: true, accepted: false } });
+    // 頁面停播後回報（擁有者才行）。
+    expect((await t.post("/api/realtime/stopped", { session_id: decision.session_id, owner: "own_" + "x".repeat(32), evidence: { paused: true, peer_closed: true, tracks_ended: true, ms: 9 } })).status).toBe(403);
+    expect(await t.post("/api/realtime/stopped", { session_id: decision.session_id, owner: decision.owner, evidence: { paused: true, peer_closed: true, tracks_ended: true, ms: 9 } })).toMatchObject({ status: 200, json: { accepted: true } });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(conn.received.filter((e) => String(e.type).endsWith("context.append")).length).toBe(appendsAtClose);
+    expect(muted).toEqual([]);
+
+    // 重建：只走 live、不發互動 ID；新的 /calls 不含被忘記的 canary；第一句是固定句。
+    const rebuilt = (await t.post("/api/realtime/start", { client_id: p.clientId, rebuild: true, source: "look_to_talk" })).json as StartDecision;
+    expect(rebuilt).toMatchObject({ ok: true, route: "live", interaction: null });
+    if (!rebuilt.ok) throw new Error("rebuild refused");
+    expect((await t.post("/api/realtime/call", { sdp: "v=0 offer", session_id: rebuilt.session_id, owner: rebuilt.owner })).status).toBe(200);
+    const second = JSON.parse(t.callFetch.calls[1]!.body).session.instructions as string;
+    expect(second).not.toContain(CANARY);
+    expect(second).toContain("不吃香菜");
+    const conn2 = await sideband!.next();
+    conn2.send({ type: "session.started", session: {} });
+    const first = await conn2.waitFor((e) => e.type === "session.context.append");
+    expect(first).toMatchObject({ channel: "speakable", content: [{ text: "（記憶確認）「好，已經更新了。」" }] });
+
+    // canary：不在 SSE、log、TaskStore、/api/settings、任何 HTTP 回應或記憶資料夾的明文。
+    const settings = await t.get("/api/settings");
+    expect(p.frames.join("\n")).toContain(CANARY); // 擁有這通的頁面看得到模型念出的字幕
+    p.close();
+    other.close();
+    expect(other.frames.join("\n")).not.toContain(CANARY);
+    expect([...t.logs, ...logs].some((l) => l.includes("收到交辦（"))).toBe(true);
+    expect(p.frames.filter((f) => !f.includes('"kind":"transcript"')).join("\n")).not.toContain(CANARY);
+    expect([...t.logs, ...logs].join("\n")).not.toContain(CANARY);
+    expect(JSON.stringify(t.store.list())).not.toContain(CANARY);
+    expect(settings).not.toContain(CANARY);
+    expect(t.bodies.join("\n")).not.toContain(CANARY);
+    expect(scanDir(dirs[0]!)).toEqual([]);
+  });
+
+  it("no stop report (test flag NOUS_TEST_DROP_STOP_REPORT): forced silence after 1.5 s, a separate notice, and no memory on the next call", async () => {
+    const h = await georgeWithCanary();
+    const muted: boolean[] = [];
+    const t = await start({ memory: h, audio: { setMuted: (m) => void muted.push(m) }, dropStopReport: true });
+    const p = await page(t.base);
+    const { decision, conn } = await startLive(t, p.clientId);
+    conn.send({ type: "session.started", session: {} });
+    await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "memory");
+    const status = (await h.call({ op: "status" })) as unknown as { presence: { select_card: string } };
+    await h.call({ op: "select", profile: null, card: status.presence.select_card });
+    await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "closed");
+    const started = Date.now();
+    expect(await t.post("/api/realtime/stopped", { session_id: decision.session_id, owner: decision.owner, evidence: { paused: true, peer_closed: true, tracks_ended: true, ms: 3 } })).toMatchObject({ json: { accepted: false } });
+    // 真實頁面的時序：回報沒被採用就立刻要求重建（舊版頁面的行為）：核心在停播結果出來前拒絕，不和強制靜音競爭。
+    const early = (await t.post("/api/realtime/start", { client_id: p.clientId, rebuild: true })).json as StartDecision;
+    expect(early).toMatchObject({ ok: false, reasons: { live: "session_busy" } });
+    const notice = await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "memory_notice", 4000);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1000);
+    expect((notice.event as { message: string }).message).toBe("即時語音停止未確認；這條路徑的記憶已停用");
+    expect(muted).toEqual([true]);
+    // 下一通：解除靜音，但這次執行期間 live 不再帶記憶。
+    await startLive(t, p.clientId);
+    expect(muted).toEqual([true, false]);
+    const next = JSON.parse(t.callFetch.calls[1]!.body).session.instructions as string;
+    expect(next).not.toContain("不吃香菜");
+    expect(next).not.toContain(CANARY);
+  });
+});
+
+describe.skipIf(!realLockAvailable)("MEM-2 review: stop-report evidence", () => {
+  it("a report whose evidence is incomplete is not accepted and does not lift forced silence; a complete one is", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nous-mem2-evidence-"));
+    const h = harness({ dir, key: randomBytes(32), live: CODEX });
+    try {
+      await enable(h, "George", [CODEX]);
+      await h.turn("記住，我不吃香菜");
+      const token = await manage(h);
+      for (const f of (await h.call({ op: "list" })).facts as { id: string; revision: number }[]) await h.call({ op: "pin", id: f.id, revision: f.revision, pinned: true, token });
+      const t = await start({ memory: h });
+      const p = await page(t.base);
+      const { decision, conn } = await startLive(t, p.clientId);
+      conn.send({ type: "session.started", session: {} });
+      await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "memory");
+      h.service.suspendAll();
+      await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "closed");
+      const body = (evidence: Record<string, unknown>) => ({ session_id: decision.session_id, owner: decision.owner, evidence: { paused: true, peer_closed: true, tracks_ended: true, ms: 4, ...evidence } });
+      expect(await t.post("/api/realtime/stopped", body({ tracks_ended: false }))).toMatchObject({ json: { accepted: false } });
+      expect(await t.post("/api/realtime/stopped", body({ paused: false }))).toMatchObject({ json: { accepted: false } });
+      expect(await t.post("/api/realtime/stopped", body({}))).toMatchObject({ json: { accepted: true } });
+      p.close();
+    } finally {
+      await h.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

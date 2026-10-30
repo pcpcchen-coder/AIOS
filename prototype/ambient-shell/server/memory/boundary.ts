@@ -9,8 +9,15 @@ export type MemoryCommand =
   | { op: "remember"; operationId: string; value: string }
   | { op: "correct"; operationId: string; id: string; expectedRevision: number; value: string }
   | { op: "forget"; operationId: string; id: string; expectedRevision: number };
-/** MEM-1 起 text（一般文字聊天）可用；live 與 api_key 要等 MEM-2／MEM-3 的語音 gate，這裡一律停用。 */
+/**
+ * MEM-1 起 text（一般文字聊天）可用；MEM-2 起 live（ChatGPT 方案即時語音）可用；api_key 要等 MEM-3，這裡一律停用。
+ * live 的 cleanup 時限另外設定（LIVE_CLEANUP_MS）：要比 renderer 停播回報的 1.5 秒加上強制靜音更長。
+ */
 export type ContextRoute = "isolated_text" | "isolated_voice" | "text" | "live" | "api_key";
+/** 一般路徑的 cleanup 時限。 */
+export const CLEANUP_MS = 1000;
+/** live 路徑的 cleanup 時限：停播回報最多 1.5 秒（LIVE_STOP_REPORT_MS）＋強制靜音與關 sideband 的餘裕。 */
+export const LIVE_CLEANUP_MS = 3000;
 /**
  * MEM-1 的解析命令：由核心的確定性 parser 產生（server/memory/parse.ts），只含基本型別欄位；part 是原句中的第幾段。
  * 模型不能提供它，票證也不從它推導授權：issueParsed 會用同一個 parser 重新解析核心觀察到的原句再比對。
@@ -30,8 +37,13 @@ type SessionState = {
   cleanupFailed?: boolean;
   revocation?: Promise<boolean>;
 };
-/** via：typed＝可信主視窗的當次打字；confirmation＝核心持有原句的澄清卡上被點選（同樣算直接輸入）。 */
-type InputState = { session: MemorySession; epoch: number; sequence: number; text: string; expires: number; via: "typed" | "confirmation" };
+/**
+ * via：typed＝可信主視窗的當次打字；confirmation＝核心持有原句的澄清卡上被點選（同樣算直接輸入）；
+ * voice_confirmed＝MEM-2 的語音確認：核心持有原句（sideband 的使用者逐字稿），使用者在問句念完後 15 秒內說出錨定的確認詞
+ * （George 2026-10-30 決定；與 16 §5「只顯示待確認卡」不同，殘餘風險見 docs/16 §5、ADR-0002）。
+ */
+export type InputVia = "typed" | "confirmation" | "voice_confirmed";
+type InputState = { session: MemorySession; epoch: number; sequence: number; text: string; expires: number; via: InputVia };
 type TicketState = InputState & { command: string; used: boolean };
 type Lease = { route: ContextRoute; abort: AbortController; cleanup: () => Promise<void>; active: boolean; cleaned?: Promise<boolean> };
 
@@ -74,9 +86,26 @@ export class MemoryBoundary {
   private readonly sessions = new WeakMap<MemorySession, SessionState>();
   private readonly inputs = new WeakMap<DirectInput, InputState>();
   private readonly tickets = new WeakMap<SourceTicket, TicketState>();
-  private readonly disabledRoutes = new Set<ContextRoute>(["live", "api_key"]);
+  private readonly disabledRoutes = new Set<ContextRoute>(["api_key"]);
 
-  constructor(private readonly options: { now?: () => number; ticketMs?: number; cleanupMs?: number } = {}) {}
+  /** cleanupMs：數字＝所有路徑同一個時限；物件＝每條路徑分開設定（沒寫的用預設：live LIVE_CLEANUP_MS，其他 CLEANUP_MS）。 */
+  constructor(private readonly options: { now?: () => number; ticketMs?: number; cleanupMs?: number | Partial<Record<ContextRoute, number>> } = {}) {}
+
+  private cleanupMs(route: ContextRoute): number {
+    const set = this.options.cleanupMs;
+    if (typeof set === "number") return set;
+    return set?.[route] ?? (route === "live" ? LIVE_CLEANUP_MS : CLEANUP_MS);
+  }
+
+  /** 這條路徑在這次執行期間是否還能帶記憶（cleanup 逾時或停播未確認後停用，直到重新啟動）。 */
+  routeEnabled(route: ContextRoute): boolean {
+    return !this.disabledRoutes.has(route);
+  }
+
+  /** 停用一條路徑直到重新啟動（例如 live 停播未確認、已強制靜音）。 */
+  disableRoute(route: ContextRoute): void {
+    this.disabledRoutes.add(route);
+  }
 
   private now(): number { return (this.options.now ?? (() => performance.now()))(); }
 
@@ -108,7 +137,15 @@ export class MemoryBoundary {
     return this.observe(session, text, "confirmation");
   }
 
-  private observe(session: MemorySession, text: string, via: InputState["via"]): DirectInput {
+  /**
+   * MEM-2 語音確認（George 2026-10-30）：live 路徑的語音卡在時窗內收到錨定的確認詞。呼叫端必須傳核心保存的原句
+   * （sideband 的使用者逐字稿），而且只在 server/memory/live.ts 核對過時窗、回音、世代與一次性之後才呼叫。
+   */
+  observeVoiceConfirmation(session: MemorySession, text: string): DirectInput {
+    return this.observe(session, text, "voice_confirmed");
+  }
+
+  private observe(session: MemorySession, text: string, via: InputVia): DirectInput {
     const state = this.selected(session);
     if (typeof text !== "string" || text.length === 0 || text.length > 2048) throw new Error("invalid_input");
     const input = Object.freeze({}) as DirectInput;
@@ -138,7 +175,7 @@ export class MemoryBoundary {
     return ticket;
   }
 
-  consumeParsed(session: MemorySession, ticket: SourceTicket, command: ParsedMemoryCommand): { subject: Subject; sequence: number; via: InputState["via"] } {
+  consumeParsed(session: MemorySession, ticket: SourceTicket, command: ParsedMemoryCommand): { subject: Subject; sequence: number; via: InputVia } {
     const state = this.selected(session);
     const source = this.tickets.get(ticket);
     if (!source || source.used || source.session !== session || source.epoch !== state.epoch || source.sequence !== state.sequence || source.expires <= this.now() || source.command !== canonicalParsed(command, true)) throw new Error("invalid_ticket");
@@ -193,15 +230,33 @@ export class MemoryBoundary {
     });
   }
 
+  /**
+   * 中途補上（MEM-2）：已經在進行、還沒帶記憶的 live 通話第一次要放入記憶時，用通話自己的 closed 掛上 lease，
+   * 一直持有到通話結束；撤銷時一樣 abort、deliver 回 false、跑 cleanup。不做換綁：通話一旦帶著記憶，世代改變就重建。
+   * 同步回傳 lease；session 已撤銷或路徑停用時回 null（這次不放記憶）。
+   */
+  attachVoiceContext(session: MemorySession, route: Exclude<ContextRoute, "isolated_text">, cleanup: () => Promise<void>, closed: Promise<void>): ContextLease | null {
+    let captured: ContextLease | null = null;
+    const done = this.holdContext(session, route, cleanup, async lease => {
+      captured = lease;
+      const until = Promise.resolve(closed);
+      void until.catch(() => {});
+      await until;
+    });
+    void done.catch(() => {});
+    return captured;
+  }
+
   private async holdContext<T>(session: MemorySession, route: ContextRoute, cleanup: () => Promise<void>, run: (lease: ContextLease) => Promise<T>): Promise<T> {
     const state = this.selected(session);
-    if (!["isolated_text", "isolated_voice", "text"].includes(route) || this.disabledRoutes.has(route)) throw new Error("route_memory_disabled");
+    if (!["isolated_text", "isolated_voice", "text", "live"].includes(route) || this.disabledRoutes.has(route)) throw new Error("route_memory_disabled");
     const epoch = state.epoch;
     const lease: Lease = { route, cleanup, abort: new AbortController(), active: true };
     state.leases.add(lease);
     try {
       const result = await run({ signal: lease.abort.signal, deliver: output => {
-        if (!lease.active || lease.abort.signal.aborted || state.phase !== "selected" || state.epoch !== epoch) return false;
+        // 路徑在 lease 期間被停用（例如另一通停播未確認）：之後一律不交付。
+        if (!lease.active || lease.abort.signal.aborted || state.phase !== "selected" || state.epoch !== epoch || this.disabledRoutes.has(route)) return false;
         output();
         return true;
       } });
@@ -225,7 +280,7 @@ export class MemoryBoundary {
       try {
         await Promise.race([
           Promise.resolve().then(lease.cleanup),
-          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("cleanup_timeout")), this.options.cleanupMs ?? 1000); }),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("cleanup_timeout")), this.cleanupMs(lease.route)); }),
         ]);
         return true;
       } catch {

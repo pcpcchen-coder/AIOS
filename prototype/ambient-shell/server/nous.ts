@@ -13,7 +13,7 @@ import { loadConfig } from "./config.ts";
 import { MockExecutor } from "./mock-executor.ts";
 import { ProviderManager } from "./providers.ts";
 import { buildLiveInstructions, RealtimeBridge } from "./realtime.ts";
-import { ApiKeyRoute, type RealtimeSessions } from "./realtime-routes.ts";
+import { ApiKeyRoute, type RealtimeSessions, type SessionContext } from "./realtime-routes.ts";
 import type { RouteId } from "../shared/realtime-route.ts";
 import { CodexAuth } from "./codex-auth.ts";
 import { CodexResponses, type CodexModelCache } from "./codex-responses.ts";
@@ -32,7 +32,7 @@ import type { IdentityResponse } from "../shared/identity.ts";
 import type { MemoryResponse } from "../shared/memory.ts";
 import { MemoryService, type MemoryConfirmFn, type MemoryIdentityHooks } from "./memory/service.ts";
 import { MemoryStore, type MemorySecretBox } from "./memory/store.ts";
-import { claudeAccountKey } from "./providers.ts";
+import { claudeAccountKey, codexTarget } from "./providers.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
 
@@ -56,6 +56,8 @@ export interface NousOptions {
    * 沒有注入（瀏覽器版）時 settings.memory 回報不可用，一般聊天照舊。
    */
   memory?: MemoryInjection;
+  /** MEM-2：即時語音停播未確認時強制靜音（App：主視窗 webContents.setAudioMuted）；沒有注入時只記 log。 */
+  audio?: { setMuted(muted: boolean): void };
 }
 
 export interface MemoryInjection {
@@ -164,6 +166,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     home: home.available,
   });
   const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available });
+  // MEM-2：ChatGPT 方案即時語音的記憶同意鍵（provider codex，獨立於 chatgpt）；沒有 Codex 登入時為 null。
+  const liveTarget = () => codexTarget(codexAuth.accountSubject());
   // 開場句挑選（固定清單、依本機時段、避開上一次）：家人辨識的決策與 live 保底共用一個。
   const greetings = new GreetingPicker();
   const live = new LiveRoute({
@@ -172,9 +176,12 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     model: config.liveModel,
     clientVersion: config.nousVersion,
     capabilities: () => ({ webSearch: true, home: home.available }),
-    instructions: (ctx) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp }, ctx.locale),
-    caller: (ctx) =>
-      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: liveCaps, host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log }),
+    // memoryOn：這通記憶開著而且有 codex 同意（LiveMemoryBinding.memoryActive）才加記憶規則；否則和 MEM-2 之前一樣。
+    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp, memory: !!memoryOn }, ctx.locale),
+    caller: (ctx, mem) =>
+      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}) }),
+    // MEM-2：每通通話一個記憶 binding（server/memory/live.ts）；瀏覽器版沒有記憶層。
+    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale }) ?? null } : {}),
     // 看著說話的問候（ID-02）：頁面只帶互動 ID，短句由家人辨識的核心決策組成；瀏覽器版（沒有 identity）一律「我在」。
     greeting: liveGreetingSource(() => identity, greetings),
     log,
@@ -215,9 +222,12 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     ? new MemoryService({
         openStore: () => MemoryStore.open({ dir: memoryOpts.dir, secretBox: memoryOpts.secretBox }),
         available: () => memoryOpts.secretBox.available(),
-        targets: () => ({ current: providers.chatTarget(), all: providers.chatTargets() }),
+        targets: () => {
+          const live = liveTarget();
+          return { current: providers.chatTarget(), all: [...providers.chatTargets(), ...(live ? [live] : [])], live };
+        },
         confirm: memoryOpts.confirm,
-        identity: (): MemoryIdentityHooks | null => identity ? { candidate: () => identity.memoryCandidate(), people: () => identity.memoryPeople() } : null,
+        identity: (): MemoryIdentityHooks | null => identity ? { candidate: () => identity.memoryCandidate(), people: () => identity.memoryPeople(), nameAllowed: () => camera.view().look_to_talk_greet_name } : null,
         afterOpen: memoryOpts.excludeFromBackup ? () => memoryOpts.excludeFromBackup!(memoryOpts.dir) : undefined,
         // 上次執行時記憶是否開著：加密檔外只留這一個布林值（不含內容），讓重啟後第一次打字就能取用記憶，
         // 而記憶沒開時查狀態、一般聊天都不碰 Keychain。
@@ -237,6 +247,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     realtimeRoutes: { live, api_key: apiKeyRoute },
     realtimePrefs,
     codexAuth,
+    realtimeAudio: options.audio,
+    // 只限測試 build：丟掉停播回報，驗證強制靜音（docs/validation/memory-mem2-2026-10-30.md 第 8 步）。
+    dropStopReport: env.NOUS_TEST_DROP_STOP_REPORT === "1",
     webSearch,
     home,
     camera,
@@ -275,6 +288,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const idStatus = identity?.status();
   // gallery 要到第一次開 session 才載入：這裡只記模型與鏡頭的狀態，不碰 Keychain。
   log(`家庭記憶：${memory ? (memory.settingsStatus().available ? "可用（第一次使用時才開啟加密檔）" : "此 Mac 無法加密保存，停用") : "瀏覽器版不可用"}`);
+  if (env.NOUS_TEST_DROP_STOP_REPORT === "1") log("警告：NOUS_TEST_DROP_STOP_REPORT=1（只限測試）：即時語音的停播回報會被丟掉，用來驗證強制靜音");
   log(`家人辨識：${idStatus ? (idStatus.disabled_reason ?? `可用（模型 ${runtime.state}${idStatus.limited_reason ? `；${idStatus.limited_reason}` : ""}；門檻未校準；家人資料在第一次打開時才載入）`) : "瀏覽器版不可用"}`);
 
   return {

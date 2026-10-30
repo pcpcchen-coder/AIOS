@@ -1,5 +1,5 @@
 import { parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
-import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind } from "../shared/realtime-route.ts";
+import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind, type StopEvidence } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimeCallbacks, RealtimeDeps, RealtimePhase } from "./realtime.ts";
 import type { GreetingOnce, RealtimeSession } from "./realtime-session.ts";
 import { FallbackOfferError, GREETING_SETTLE_MS } from "./realtime-session.ts";
@@ -29,6 +29,19 @@ export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "createPe
   setMuted(muted: boolean): void;
   /** 說出結束原因（瀏覽器語音合成）。 */
   speak(text: string): void;
+  /** MEM-2：記憶撤銷後的停播回報（POST /api/realtime/stopped）；回傳核心是否採用。 */
+  stopped?(evidence: StopEvidence): Promise<boolean>;
+  /** MEM-2：播放元素在停播後是不是已暫停（核對用）。 */
+  audioPaused?(): boolean;
+  /** MEM-2：取消瀏覽器語音合成（speechSynthesis.cancel）。 */
+  cancelSpeech?(): void;
+  /** MEM-2：記憶事件（狀態、卡片 ID、固定句提示、交辦封鎖）交給主程式顯示；內容由主程式經 IPC 取得。 */
+  memoryEvent?(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" }>): void;
+  /**
+   * MEM-2：停播並回報之後：顯示原因、清掉字幕與卡片；rebuild 時主程式開一通新的（只一次）。
+   * 只有核心採用了停播回報（accepted）才重建；沒採用時不重建，等核心逾時後的「停止未確認」通知。
+   */
+  revoked?(message: string, rebuild: boolean, accepted: boolean): void;
 }
 
 /** 超過這個 RMS 至少 SPEAKING_ON_MS 算在說話；低於它至少 SPEAKING_OFF_MS 算說完。實際門檻在 George 的家中測試調整並記錄。 */
@@ -65,6 +78,8 @@ export class LiveVoice implements RealtimeSession {
   private speaking = false;
   private levelSince: number | null = null;
   private muted = false;
+  /** MEM-2：核心要求暫停（更正、忘記 commit 前）：播放靜音到恢復或通話結束。 */
+  private held = false;
   /** 聆聽中的證據。 */
   private evidence = { mic: false, peer: false, started: false };
   /** 逐字稿去重：資料通道與核心可能各送一次。有 item_id 時依 item_id。 */
@@ -347,7 +362,7 @@ export class LiveVoice implements RealtimeSession {
     this.callbacks.onAssistantTranscript(clean);
     if (this.muted) {
       this.muted = false;
-      this.deps.setMuted(false);
+      this.deps.setMuted(this.held);
     }
     if (!this.speaking && this.phase === "thinking" && !this.delegations.size) this.setPhase("listening");
     if (this.endRequested) this.scheduleEnd(END_GRACE_MS);
@@ -387,7 +402,7 @@ export class LiveVoice implements RealtimeSession {
         }
         if (this.muted) {
           this.muted = false;
-          this.deps.setMuted(false);
+          this.deps.setMuted(this.held);
         }
         break;
       case "delegation":
@@ -420,12 +435,64 @@ export class LiveVoice implements RealtimeSession {
       case "tool_unknown":
         this.callbacks.onToolActivity(`${RESULT_UNKNOWN_TEXT}（${event.name === "home_control" ? "家電指令" : "交辦工作"}沒有在時限內回報）`);
         break;
+      case "memory":
+      case "memory_card":
+      case "memory_notice":
+      case "delegate_blocked":
+        this.deps.memoryEvent?.(event);
+        break;
+      case "hold":
+        // 更正或忘記 commit 前：立刻把播放靜音（核心同時停止 append）；commit 失敗才恢復。
+        this.held = event.active;
+        this.deps.setMuted(event.active || this.muted);
+        break;
       case "closed":
+        if (event.reason === "memory_revoked") {
+          // 記憶撤銷：可靠停播、回報證據；不說出原因（不 speak 舊內容），需要時重建一次。
+          void this.revoke(event.message, event.rebuild === true);
+          break;
+        }
         // sideband 斷線、登入失效、時間到：結束、拆掉 peer、顯示並說出原因。不改路徑。
         if (event.reason !== "ended") this.deps.speak(event.message);
         this.close(event.message, false);
         break;
     }
+  }
+
+  /**
+   * MEM-2：記憶撤銷後可靠停播（16 §8）。順序：generation++ → 播放先靜音、暫停、拿掉 srcObject → 停掉每個遠端軌道 →
+   * peer.close、channel.close、麥克風軌道停止 → 取消語音合成。核對（audio 已暫停、peer 已關、遠端軌道都 ended）後
+   * 把證據與花費毫秒數 POST stopped，再交給主程式（清字幕、重建）。不呼叫 end（核心已經結束這個工作階段）。
+   */
+  async revoke(message: string, rebuild: boolean): Promise<void> {
+    if (!this.on) return;
+    const started = Date.now();
+    this.generation++;
+    this.deps.setMuted(true);
+    this.stopAudio?.();
+    this.stopAudio = null;
+    const peer = this.peer;
+    const receivers = peer?.getReceivers?.() ?? [];
+    for (const receiver of receivers) receiver.track?.stop();
+    // 已經靜音並拆掉播放：teardown 不要再解除靜音。
+    this.muted = false;
+    this.held = false;
+    this.teardown();
+    this.deps.cancelSpeech?.();
+    this.setPhase("off");
+    const evidence: StopEvidence = {
+      paused: this.deps.audioPaused?.() ?? true,
+      peer_closed: !peer || peer.connectionState === "closed",
+      tracks_ended: receivers.every((r) => !r.track || r.track.readyState === "ended"),
+      ms: Date.now() - started,
+    };
+    let accepted = false;
+    try {
+      accepted = (await this.deps.stopped?.(evidence)) === true;
+    } catch {
+      // 回報送不到：核心在 1.5 秒後強制靜音並停用這條路徑的記憶。
+    }
+    this.deps.revoked?.(message, rebuild && accepted, accepted);
   }
 
   /** 核心請頁面執行一個工具：和 API key 路徑同一個 executeRealtimeTool、同一份 callbacks（字幕、腦區、確認卡、任務）。 */
@@ -532,8 +599,9 @@ export class LiveVoice implements RealtimeSession {
     this.stopLevel = null;
     this.stopAudio?.();
     this.stopAudio = null;
-    if (this.muted) this.deps.setMuted(false);
+    if (this.muted || this.held) this.deps.setMuted(false);
     this.muted = false;
+    this.held = false;
     this.speaking = false;
     this.levelSince = null;
     this.delegations.clear();
@@ -550,6 +618,23 @@ export class LiveVoice implements RealtimeSession {
     this.phase = phase;
     this.callbacks.onPhase(phase);
   }
+}
+
+/**
+ * MEM-2：頁面已經不在這通通話上（例如同時按了結束、或已經拆掉）時收到的 closed{memory_revoked}：仍要回報停播，
+ * 否則核心會把它當成停播未確認而停用整條路徑。peer 與遠端軌道已經在結束時拆掉；播放是否暫停由頁面的播放元素決定。
+ * 回傳要送的回報（ticket 與證據），或 null（不是這種情況、或不認得這個工作階段）。
+ */
+export function orphanStopReport(
+  event: { session_id: string; event: LiveCoreEvent },
+  current: string | null,
+  tickets: ReadonlyMap<string, { session_id: string; owner: string }>,
+  audioPaused: boolean,
+): { ticket: { session_id: string; owner: string }; evidence: StopEvidence } | null {
+  if (event.event.kind !== "closed" || event.event.reason !== "memory_revoked" || event.session_id === current) return null;
+  const ticket = tickets.get(event.session_id);
+  if (!ticket) return null;
+  return { ticket, evidence: { paused: audioPaused, peer_closed: true, tracks_ended: true, ms: 0 } };
 }
 
 export function isLocalGoodbye(text: string): boolean {

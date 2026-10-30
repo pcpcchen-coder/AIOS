@@ -10,6 +10,11 @@ import { RouteStartError, type ApprovalSnapshot, type SessionContext } from "../
 import { requestText, type DelegationRequest, type DelegationResult } from "../server/live-tool-caller.ts";
 import { scriptedFetch, SECRET_TOKEN_MARK, writeCredentials, type Recorded } from "./fixtures/fake-chatgpt.ts";
 import { startFakeSideband, type FakeSideband } from "./fixtures/fake-sideband.ts";
+import { randomBytes } from "node:crypto";
+import { rmSync } from "node:fs";
+import type { LiveMemoryPort } from "../server/memory/live.ts";
+import { realLockAvailable } from "./fixtures/memory-lock.ts";
+import { CODEX, enable, harness, manage, selectProfile, type Harness } from "./fixtures/memory-service.ts";
 
 // ChatGPT 方案路徑的線路：假的 chatgpt.com（fetch）＋假的 sideband（真的 WebSocket 握手）。全部是 fixture。
 
@@ -27,7 +32,7 @@ function answer(headers: Record<string, string> = { Location: "/v1/realtime/call
   return new Response("v=0 live-answer", { status: 201, headers });
 }
 
-async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string, sessionId: string) => LiveGreeting | null } = {}) {
+async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string, sessionId: string) => LiveGreeting | null; memory?: (ctx: SessionContext) => LiveMemoryPort | null; ctx?: Partial<SessionContext> } = {}) {
   sideband = await startFakeSideband();
   const dir = mkdtempSync(join(tmpdir(), "nous-live-"));
   const creds = writeCredentials(dir);
@@ -49,6 +54,7 @@ async function setup(options: { model?: string | null; handler?: (req: Recorded)
     host: { call: async () => ({ ok: true }), get outstanding() { return outstanding; } },
     approval: options.approval ?? (() => ({ open: false, resolvedAt: null })),
     now: () => Date.now(),
+    ...options.ctx,
   };
   const route = new LiveRoute({
     auth,
@@ -62,6 +68,7 @@ async function setup(options: { model?: string | null; handler?: (req: Recorded)
     urls: { call: "https://chatgpt.fixture/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas", sideband: (id) => sideband!.url(id) },
     sleep: async () => {},
     ...(options.greeting ? { greeting: options.greeting } : {}),
+    ...(options.memory ? { memory: options.memory } : {}),
   });
   return { route, ctx, events, requests, delegations, creds, setOutstanding: (n: number) => (outstanding = n) };
 }
@@ -422,5 +429,151 @@ describe("LiveRoute sideband", () => {
     await conn.waitFor((e) => e.type === "session.context.append" && (e.content as { text: string }[])[0].text.startsWith("（系統通知）"));
     const texts = conn.received.filter((e) => e.type === "session.context.append").map((e) => (e.content as { text: string }[])[0].text);
     expect(texts).toEqual([LIVE_GREETING_TEXT, "（系統通知）之後的通知"]);
+  });
+});
+
+describe.skipIf(!realLockAvailable)("MEM-2 memory on the live wire (fixture sideband)", () => {
+  const harnesses: Harness[] = [];
+  const dirs: string[] = [];
+  afterEach(async () => {
+    await Promise.all(harnesses.splice(0).map((h) => h.close()));
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  async function memoryWith(value: string | null): Promise<Harness> {
+    const dir = mkdtempSync(join(tmpdir(), "nous-live-mem-"));
+    dirs.push(dir);
+    const h = harness({ dir, key: randomBytes(32), live: CODEX });
+    harnesses.push(h);
+    await enable(h, "George", [CODEX]);
+    if (value) {
+      await h.turn(`記住，我${value}`);
+      const token = await manage(h);
+      for (const f of (await h.call({ op: "list" })).facts as { id: string; revision: number }[]) await h.call({ op: "pin", id: f.id, revision: f.revision, pinned: true, token });
+      const status = (await h.call({ op: "status" })) as unknown as { profiles: { id: string }[] };
+      await h.call({ op: "select", profile: status.profiles[0]!.id, token });
+    }
+    return h;
+  }
+  const port = (h: Harness) => (ctx: SessionContext) => h.service.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale });
+
+  it("appends the memory block to instructions only when a lease holds pinned memory", async () => {
+    const h = await memoryWith("喜歡月光藍");
+    const t = await setup({ memory: port(h) });
+    const call = await t.route.connect("v=0 offer", t.ctx);
+    calls.push(call);
+    const instructions = JSON.parse(t.requests[0].body).session.instructions as string;
+    expect(instructions.startsWith("你是 Nous 的語音層（fixture）\n")).toBe(true);
+    expect(instructions).toContain("<<<NOUS_MEMORY_DATA");
+    expect(instructions).toContain("喜歡月光藍");
+    const empty = await memoryWith(null);
+    const t2 = await setup({ memory: port(empty) });
+    calls.push(await t2.route.connect("v=0 offer", t2.ctx));
+    expect(JSON.parse(t2.requests[0].body).session.instructions).toBe("你是 Nous 的語音層（fixture）");
+  });
+
+  it("revocation: closed{memory_revoked} first, then session.close; transcripts cleared; late sideband events and a late delegation result are never appended", async () => {
+    const h = await memoryWith("喜歡月光藍");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = await setup({ memory: port(h), runner: async () => (await gate, { ok: true, channel: "speakable", text: "晚到的結果：月光藍", tools: [] }), ctx: { stopped: async () => ({ paused: true, peer_closed: true, tracks_ended: true, ms: 5 }) } });
+    const call = await t.route.connect("v=0 offer", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "session.started", session: {} });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "我喜歡什麼顏色", id: "u1" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "d1", content: [{ type: "input_text", text: "回答顏色" }] } });
+    await expect.poll(() => t.delegations.length).toBe(1);
+    await selectProfile(h, null);
+    await conn.waitFor((e) => e.type === "session.close");
+    const closed = t.events.find((e) => e.kind === "closed");
+    expect(closed).toMatchObject({ kind: "closed", reason: "memory_revoked", rebuild: true });
+    const count = conn.received.length;
+    release();
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "記住，我喜歡紅色", id: "u2" } });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(conn.received.slice(count).filter((e) => e.type !== "session.close")).toEqual([]);
+    expect(conn.received.some((e) => JSON.stringify(e).includes("晚到的結果"))).toBe(false);
+    expect(t.events.filter((e) => e.kind === "memory_card")).toEqual([]);
+    expect((call as unknown as { transcript: unknown[] }).transcript).toEqual([]);
+  });
+
+  it("no stop report within LIVE_STOP_REPORT_MS: force silence, report separately, and disable live memory until restart", async () => {
+    const h = await memoryWith("喜歡月光藍");
+    const silenced: string[] = [];
+    const t = await setup({ memory: port(h), ctx: { stopped: async () => null, forceSilence: (m) => void silenced.push(m) } });
+    calls.push(await t.route.connect("v=0 offer", t.ctx));
+    const conn = await sideband!.next();
+    conn.send({ type: "session.started", session: {} });
+    await expect.poll(() => t.events.some((e) => e.kind === "memory")).toBe(true);
+    const token = await manage(h);
+    const fact = ((await h.call({ op: "list" })).facts as { id: string; revision: number }[])[0]!;
+    await h.call({ op: "forget", id: fact.id, revision: fact.revision, token });
+    await expect.poll(() => silenced.length).toBe(1);
+    expect(silenced[0]).toContain("資料已刪除或更正，但即時語音停止未確認");
+    expect(t.events).toContainEqual({ kind: "hold", active: true });
+    // 新通話：這條路徑的記憶已停用。
+    await h.turn("記住，我喜歡紅色");
+    const t2 = await setup({ memory: port(h) });
+    calls.push(await t2.route.connect("v=0 offer", t2.ctx));
+    expect(JSON.parse(t2.requests[0].body).session.instructions).not.toContain("NOUS_MEMORY_DATA");
+    const conn2 = await sideband!.next();
+    conn2.send({ type: "session.started", session: {} });
+    await expect.poll(() => t2.events.find((e) => e.kind === "memory")).toMatchObject({ kind: "memory", used: 0, reason: "route_disabled" });
+  });
+
+  it("a rebuilt call speaks only the fixed, content-free sentence first", async () => {
+    const t = await setup({ ctx: { rebuild: true } });
+    calls.push(await t.route.connect("v=0 offer", t.ctx));
+    const conn = await sideband!.next();
+    conn.send({ type: "session.started", session: {} });
+    const first = await conn.waitFor((e) => e.type === "session.context.append");
+    expect(first).toMatchObject({ channel: "speakable", content: [{ type: "input_text", text: "（記憶確認）「好，已經更新了。」" }] });
+  });
+});
+
+describe("MEM-2 review fixes on the live wire (fixture sideband)", () => {
+  it("Minor 3: a handshake revoked while the sideband hangs aborts at once (well inside the 3 s cleanup limit)", async () => {
+    const t = await setup();
+    sideband!.hang = true;
+    const abort = new AbortController();
+    const started = Date.now();
+    const opening = (t.route as unknown as { open(sdp: string, ctx: SessionContext, block: string | null, signal: AbortSignal | null, memory: null): Promise<unknown> }).open("v=0 offer", t.ctx, null, abort.signal, null);
+    setTimeout(() => abort.abort(), 50);
+    await expect(opening).rejects.toMatchObject({ fallbackable: false });
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it("Minor 4: the delegation card title is the sentence that triggered it — typed text for typed, the last unused sideband user sentence for voice, else null", async () => {
+    const t = await setup();
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "session.started", session: {} });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "幫我寫一份晚餐菜單報告", id: "u1" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "d1", content: [{ type: "input_text", text: "寫晚餐菜單報告" }] } });
+    await expect.poll(() => t.delegations.length).toBe(1);
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "d2", content: [{ type: "input_text", text: "再寫一份" }] } });
+    await expect.poll(() => t.delegations.length).toBe(2);
+    call.control!.input("user_text", "打字的交辦");
+    await expect.poll(() => t.delegations.length).toBe(3);
+    expect(t.delegations.map((d) => d.userText)).toEqual(["幫我寫一份晚餐菜單報告", null, "打字的交辦"]);
+  });
+
+  it("Minor 5: appends held during a correction are sent once the hold is released (commit failed), and dropped if revoked", async () => {
+    const t = await setup();
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "session.started", session: {} });
+    await expect.poll(() => t.events.some((e) => e.kind === "started")).toBe(true);
+    const port = call as unknown as { hold(active: boolean): void };
+    port.hold(true);
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "d1", content: [{ type: "input_text", text: "查天氣" }] } });
+    await expect.poll(() => t.events.some((e) => e.kind === "delegation" && e.state === "finished")).toBe(true);
+    expect(conn.received.filter((e) => e.type === "delegation.context.append")).toEqual([]);
+    port.hold(false);
+    const sent = await conn.waitFor((e) => e.type === "delegation.context.append");
+    expect(sent).toMatchObject({ delegation_item_id: "d1", content: [{ text: "結果：查天氣" }] });
+    expect(t.events.filter((e) => e.kind === "hold")).toEqual([{ kind: "hold", active: true }, { kind: "hold", active: false }]);
   });
 });

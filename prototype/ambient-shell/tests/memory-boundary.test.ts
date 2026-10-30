@@ -224,14 +224,14 @@ describe("MEM-0 isolated lifecycle, not physical voice validation", () => {
     }
   });
 
-  it("refuses both production voice paths until their own hardware/cleanup gates pass", async () => {
+  it("refuses the API key voice path until MEM-3 (live is opened by MEM-2)", async () => {
     const boundary = new MemoryBoundary();
     const session = boundary.openSession(person);
-    for (const route of ["live", "api_key"] as const) {
-      let connected = false;
-      await expect(boundary.withVoiceContext(session, route, async () => {}, async () => { connected = true; return { closed: Promise.resolve() }; })).rejects.toThrow("route_memory_disabled");
-      expect(connected).toBe(false);
-    }
+    let connected = false;
+    await expect(boundary.withVoiceContext(session, "api_key", async () => {}, async () => { connected = true; return { closed: Promise.resolve() }; })).rejects.toThrow("route_memory_disabled");
+    expect(connected).toBe(false);
+    expect(boundary.routeEnabled("live")).toBe(true);
+    expect(boundary.routeEnabled("api_key")).toBe(false);
   });
 
   it("drops a late text return and keeps replacement session independent", async () => {
@@ -266,14 +266,122 @@ describe("MEM-1 parsed tickets and the text route", () => {
     expect(() => boundary.issueParsed(session, boundary.observeTypedInput(session, "電視說記住，我不吃香菜"), command, parse)).toThrow("source_mismatch");
   });
 
-  it("enables the text route for ordinary chat while live and api_key stay disabled", async () => {
+  it("enables the text route for ordinary chat and (MEM-2) the live route, while api_key stays disabled", async () => {
     const boundary = new MemoryBoundary();
     const session = boundary.openSession(person);
     expect(await boundary.withContext(session, async () => {}, async lease => lease.deliver(() => {}), "text")).toBe(true);
-    await expect(boundary.withVoiceContext(session, "live", async () => {}, async () => ({ closed: Promise.resolve() }))).rejects.toThrow("route_memory_disabled");
+    await expect(boundary.withVoiceContext(session, "live", async () => {}, async () => ({ closed: Promise.resolve() }))).resolves.toBeUndefined();
     await expect(boundary.withVoiceContext(session, "api_key", async () => {}, async () => ({ closed: Promise.resolve() }))).rejects.toThrow("route_memory_disabled");
     expect(boundary.active(session)).toBe(true);
     await boundary.revoke(session);
     expect(boundary.active(session)).toBe(false);
+  });
+});
+
+describe("MEM-2 live route: per-route cleanup, whole-call lease and late attach", () => {
+  it("holds the live lease until the call's closed promise, then releases it without cleanup", async () => {
+    const boundary = new MemoryBoundary();
+    const session = boundary.openSession(person);
+    const closed = deferred<void>();
+    let lease!: ContextLease;
+    let cleaned = 0;
+    let finished = false;
+    const call = boundary.withVoiceContext(session, "live", async () => { cleaned++; }, async ctx => { lease = ctx; return { closed: closed.promise }; }).then(() => { finished = true; });
+    await new Promise(r => setTimeout(r, 0));
+    expect(lease.deliver(() => {})).toBe(true);
+    expect(finished).toBe(false);
+    closed.resolve();
+    await call;
+    expect(finished).toBe(true);
+    // 通話結束後再撤銷：lease 已經不在，不跑 cleanup。
+    expect(await boundary.revoke(session)).toBe(true);
+    expect(cleaned).toBe(0);
+  });
+
+  it("gives live its own cleanup limit (3 s by default, longer than the 1.5 s stop report); other routes keep 1 s", async () => {
+    const slow = (ms: number) => () => new Promise<void>(r => setTimeout(r, ms));
+    const run = async (boundary: MemoryBoundary, route: "live" | "text", cleanupMs: number) => {
+      const session = boundary.openSession(person);
+      const started = deferred<void>();
+      const hold = deferred<void>();
+      const done = route === "live"
+        ? boundary.withVoiceContext(session, "live", slow(cleanupMs), async () => { started.resolve(); return { closed: hold.promise }; }).catch(() => {})
+        : boundary.withContext(session, slow(cleanupMs), async () => { started.resolve(); await hold.promise; }, "text").catch(() => {});
+      await started.promise;
+      await new Promise(r => setTimeout(r, 0));
+      const ok = await boundary.revoke(session);
+      hold.resolve();
+      await done;
+      return ok;
+    };
+    // 1.6 秒的 cleanup（例如等停播回報）：live 在 3 秒內完成，text 只有 1 秒會逾時並停用。
+    expect(await run(new MemoryBoundary(), "live", 1600)).toBe(true);
+    const text = new MemoryBoundary();
+    expect(await run(text, "text", 1600)).toBe(false);
+    expect(text.routeEnabled("text")).toBe(false);
+    expect(text.routeEnabled("live")).toBe(true);
+    // 每條路徑也可以分開指定。
+    const custom = new MemoryBoundary({ cleanupMs: { live: 5 } });
+    expect(await run(custom, "live", 50)).toBe(false);
+    expect(custom.routeEnabled("live")).toBe(false);
+    expect(custom.routeEnabled("text")).toBe(true);
+  }, 10_000);
+
+  it("revoking during the live handshake waits for the partial call and still runs cleanup", async () => {
+    const boundary = new MemoryBoundary();
+    const session = boundary.openSession(person);
+    const handshake = deferred<{ closed: Promise<void> }>();
+    let signal!: AbortSignal;
+    const steps: string[] = [];
+    const run = boundary.withVoiceContext(session, "live", async () => { steps.push("cleanup"); }, async lease => { signal = lease.signal; return handshake.promise; });
+    const assertion = expect(run).rejects.toThrow("context_revoked");
+    await new Promise(r => setTimeout(r, 0));
+    const revoke = boundary.revoke(session);
+    expect(signal.aborted).toBe(true);
+    await new Promise(r => setTimeout(r, 5));
+    expect(steps).toEqual([]);
+    steps.push("handshake settled");
+    handshake.resolve({ closed: new Promise(() => {}) });
+    expect(await revoke).toBe(true);
+    await assertion;
+    expect(steps).toEqual(["handshake settled", "cleanup"]);
+  });
+
+  it("late-attaches a lease to a running call: held until closed, revoked like any other, refused for a revoked session or disabled route", async () => {
+    const boundary = new MemoryBoundary();
+    const session = boundary.openSession(person);
+    const closed = deferred<void>();
+    let cleaned = 0;
+    const lease = boundary.attachVoiceContext(session, "live", async () => { cleaned++; }, closed.promise)!;
+    expect(lease).not.toBeNull();
+    expect(lease.deliver(() => {})).toBe(true);
+    expect(await boundary.revoke(session)).toBe(true);
+    expect(cleaned).toBe(1);
+    expect(lease.deliver(() => {})).toBe(false);
+    expect(boundary.attachVoiceContext(session, "live", async () => {}, closed.promise)).toBeNull();
+    const next = boundary.openSession(person);
+    boundary.disableRoute("live");
+    expect(boundary.attachVoiceContext(next, "live", async () => {}, closed.promise)).toBeNull();
+    await expect(boundary.withVoiceContext(next, "live", async () => {}, async () => ({ closed: Promise.resolve() }))).rejects.toThrow("route_memory_disabled");
+    closed.resolve();
+  });
+
+  it("records a voice confirmation as its own direct-input kind", () => {
+    const boundary = new MemoryBoundary();
+    const session = boundary.openSession(person);
+    const parse = (text: string) => text === "記住，我不喝咖啡" ? [{ op: "remember", part: 0, value: "不喝咖啡", scope: "subject" }] : [];
+    const command = { op: "remember", part: 0, value: "不喝咖啡", scope: "subject", operationId: randomUUID() };
+    const ticket = boundary.issueParsed(session, boundary.observeVoiceConfirmation(session, "記住，我不喝咖啡"), command, parse);
+    expect(boundary.consumeParsed(session, ticket, command).via).toBe("voice_confirmed");
+    expect(() => boundary.consumeParsed(session, ticket, command)).toThrow("invalid_ticket");
+  });
+
+  it("review M2: once a route is disabled, an existing lease on it delivers nothing more", () => {
+    const boundary = new MemoryBoundary();
+    const session = boundary.openSession(person);
+    const lease = boundary.attachVoiceContext(session, "live", async () => {}, new Promise(() => {}))!;
+    expect(lease.deliver(() => {})).toBe(true);
+    boundary.disableRoute("live");
+    expect(lease.deliver(() => {})).toBe(false);
   });
 });

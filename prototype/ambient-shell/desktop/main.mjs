@@ -155,6 +155,8 @@ async function startCore() {
       // 本次人物世代改變（換人、暫停、撤銷）：推一個不含內容的通知，頁面再用 status（不開記憶檔）讀新狀態。
       onPresence: () => { if (win && !win.isDestroyed()) win.webContents.send("nous:memory-changed"); },
     },
+    // MEM-2：記憶撤銷後頁面沒有在 1.5 秒內回報停播時，核心把主視窗的聲音強制靜音（下一次回報停播或新通話開始才解除）。
+    audio: { setMuted: (muted) => { if (win && !win.isDestroyed()) win.webContents.setAudioMuted(muted); } },
   });
 }
 

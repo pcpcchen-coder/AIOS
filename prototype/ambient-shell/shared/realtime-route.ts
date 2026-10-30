@@ -172,6 +172,28 @@ export interface HostResult {
   output: Record<string, unknown>;
 }
 
+/**
+ * MEM-2：這通 live 通話為什麼沒有用到記憶（頁面依代碼顯示固定句，不含內容）。
+ * not_setup／disabled／unavailable：記憶沒設定、關閉或不可用；no_consent：「ChatGPT 方案即時語音」尚未允許；
+ * no_account：沒有 Codex 登入的帳號 ID；route_disabled：這次執行期間停播未確認，已停用這條路徑的記憶；
+ * waiting_candidate：等臉部候選確認；no_pinned：沒有釘選的記憶（之後依問題取用）。
+ */
+export type LiveMemoryReason = "not_setup" | "disabled" | "unavailable" | "no_consent" | "no_account" | "route_disabled" | "waiting_candidate" | "no_pinned";
+
+/**
+ * MEM-2：撤銷記憶後等頁面回報「已停播」的最長時間（POST /api/realtime/stopped）。逾時就強制靜音並停用這條路徑的記憶；
+ * 這段時間內還沒有結果的撤銷存在時，核心拒絕開始新的即時語音（避免重建和強制靜音互相競爭）。
+ */
+export const LIVE_STOP_REPORT_MS = 1_500;
+
+/** 頁面停播後的核對結果（POST /api/realtime/stopped）：只有布林值與毫秒數，沒有任何內容。 */
+export interface StopEvidence {
+  paused: boolean;
+  peer_closed: boolean;
+  tracks_ended: boolean;
+  ms: number;
+}
+
 /** live 工作階段在核心發生的真實事件（sideband 或 LiveToolCaller），不是模型的口頭填充。 */
 export type LiveCoreEvent =
   | { kind: "started"; expires_at: number | null }
@@ -180,9 +202,20 @@ export type LiveCoreEvent =
   | { kind: "delegation"; id: string; state: "started" | "finished" | "failed" | "unknown" }
   /** 有副作用的工具沒有在時限內回覆：照實說結果不明。 */
   | { kind: "tool_unknown"; name: HostToolName; message: string }
-  | { kind: "closed"; reason: LiveCloseReason; message: string };
+  /** MEM-2：這通通話送出的記憶筆數（累計）與沒有用到的原因；只有數字與代碼，人物名稱由頁面經 IPC 取得。 */
+  | { kind: "memory"; used: number; reason: LiveMemoryReason | null; epoch: number }
+  /** MEM-2：核心建立（open）或作廢（!open）一張記憶卡。只有不透明的卡片 ID；內容由頁面經 IPC card_view 取得。 */
+  | { kind: "memory_card"; card: string; open: boolean }
+  /** MEM-2：固定句型的提示（拒絕原因、還沒有保存等）；不含使用者的話或記憶內容。 */
+  | { kind: "memory_notice"; message: string }
+  /** MEM-2：這通通話帶著記憶，交辦改成問使用者；title 是 sideband 最近一則使用者原句（不是模型改寫的文字）。 */
+  | { kind: "delegate_blocked"; title: string }
+  /** MEM-2：更正或忘記 commit 前先暫停播放（active true），commit 失敗才恢復（false）。 */
+  | { kind: "hold"; active: boolean }
+  /** rebuild：MEM-2 撤銷記憶後頁面要自動開一通新的（只走 live、不問候、第一句是固定句）。 */
+  | { kind: "closed"; reason: LiveCloseReason; message: string; rebuild?: boolean };
 
-export type LiveCloseReason = "ended" | "expired" | "connection_lost" | "auth" | "usage_limit" | "error" | "page_gone";
+export type LiveCloseReason = "ended" | "expired" | "connection_lost" | "auth" | "usage_limit" | "error" | "page_gone" | "memory_revoked";
 
 export type RealtimeServerEvent =
   | { type: "realtime.host"; sequence: number; session_id: string; call: HostCall }
