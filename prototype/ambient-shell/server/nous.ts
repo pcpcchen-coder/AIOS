@@ -32,7 +32,8 @@ import type { IdentityResponse } from "../shared/identity.ts";
 import type { MemoryResponse } from "../shared/memory.ts";
 import { MemoryService, type MemoryConfirmFn, type MemoryIdentityHooks } from "./memory/service.ts";
 import { MemoryStore, type MemorySecretBox } from "./memory/store.ts";
-import { claudeAccountKey, codexTarget } from "./providers.ts";
+import { claudeAccountKey, codexTarget, openaiRealtimeTarget } from "./providers.ts";
+import { MemoryBoundary } from "./memory/boundary.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
 
@@ -114,6 +115,11 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const env: NodeJS.ProcessEnv = { ...process.env, ...fileEnv };
   for (const [key, value] of Object.entries(options.overrides ?? {})) if (value !== undefined) env[key] = value;
   const config = loadConfig(env);
+  // 只限測試的旗標（NOUS_TEST_DROP_STOP_REPORT、NOUS_TEST_RENDERER_IGNORE_REVOKE）只在明確的測試模式（NOUS_TEST_MODE=1）下生效；
+  // 一般啟動時就算設了也忽略，避免正式使用時誤開而關掉停播保護。
+  const testMode = env.NOUS_TEST_MODE === "1";
+  const dropStopReport = testMode && env.NOUS_TEST_DROP_STOP_REPORT === "1";
+  const hideRevokeFromPage = testMode && env.NOUS_TEST_RENDERER_IGNORE_REVOKE === "1";
   const port = options.fallbackPort ? await freePort(config.port) : config.port;
 
   let notify = () => {};
@@ -181,12 +187,20 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     caller: (ctx, mem) =>
       new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}) }),
     // MEM-2：每通通話一個記憶 binding（server/memory/live.ts）；瀏覽器版沒有記憶層。
-    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale }) ?? null } : {}),
+    // MEM-3：頁面的確認卡（MCP、家電）開著時不開語音記憶卡（兩條路徑一致）。
+    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
     // 看著說話的問候（ID-02）：頁面只帶互動 ID，短句由家人辨識的核心決策組成；瀏覽器版（沒有 identity）一律「我在」。
     greeting: liveGreetingSource(() => identity, greetings),
     log,
   });
-  const apiKeyRoute = new ApiKeyRoute(realtime, !!config.openaiApiKey, config.realtimeVoice);
+  // MEM-3：API key 即時語音的記憶（核心旁路，server/apikey-call.ts）。放行旗標（NOUS_MEMORY_ROUTES）沒開時 binding 一律 route_off，
+  // 不開旁路，請求和 MEM-2 之前一樣；瀏覽器版沒有記憶層。
+  const apiKeyMemoryReleased = config.memoryRoutes.api_key;
+  const apiKeyTarget = () => (apiKeyMemoryReleased ? openaiRealtimeTarget(config.openaiApiKey) : null);
+  const apiKeyRoute = new ApiKeyRoute(realtime, !!config.openaiApiKey, config.realtimeVoice, {
+    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openVoice("api_key", { lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
+    log,
+  });
   const camera = new CameraSettingsStore({ base: config.camera, dir: config.configDir, onChange: () => notify(), log });
   const voice = new VoiceSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   const store = new TaskStore(options.dataDir);
@@ -211,6 +225,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         model: FACE_MODEL_VERSION,
         // 問候決策只接受 /api/realtime/start 發出、真的連上的互動 ID（server 在下面建立，呼叫時已存在）。
         claimGreeting: greetingClaims(() => server.realtimeSessions),
+        // MEM-3：API key 路徑的問候決策（有沒有稱名）交給那通的旁路，問候結束後才問臉部候選。
+        apiKeyGreeted: (sessionId, named) => server.realtimeSessions?.greeted(sessionId, named),
         picker: greetings,
         log,
         onChange: () => notify(),
@@ -222,10 +238,13 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     ? new MemoryService({
         openStore: () => MemoryStore.open({ dir: memoryOpts.dir, secretBox: memoryOpts.secretBox }),
         available: () => memoryOpts.secretBox.available(),
+        // 記憶管理只在 API key 路徑已放行時才列出它的同意對象（openai_realtime）。
         targets: () => {
           const live = liveTarget();
-          return { current: providers.chatTarget(), all: [...providers.chatTargets(), ...(live ? [live] : [])], live };
+          const apiKey = apiKeyTarget();
+          return { current: providers.chatTarget(), all: [...providers.chatTargets(), ...(live ? [live] : []), ...(apiKey ? [apiKey] : [])], live, byRoute: { live, api_key: apiKey } };
         },
+        boundary: new MemoryBoundary({ release: { api_key: apiKeyMemoryReleased } }),
         confirm: memoryOpts.confirm,
         identity: (): MemoryIdentityHooks | null => identity ? { candidate: () => identity.memoryCandidate(), people: () => identity.memoryPeople(), nameAllowed: () => camera.view().look_to_talk_greet_name } : null,
         afterOpen: memoryOpts.excludeFromBackup ? () => memoryOpts.excludeFromBackup!(memoryOpts.dir) : undefined,
@@ -249,7 +268,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     codexAuth,
     realtimeAudio: options.audio,
     // 只限測試 build：丟掉停播回報，驗證強制靜音（docs/validation/memory-mem2-2026-10-30.md 第 8 步）。
-    dropStopReport: env.NOUS_TEST_DROP_STOP_REPORT === "1",
+    dropStopReport,
+    // 只限測試 build：頁面收不到記憶撤銷（只靠核心 hangup；docs/validation/memory-mem3-2026-10-30.md 第 12 步）。
+    hideRevokeFromPage,
     webSearch,
     home,
     camera,
@@ -288,7 +309,10 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const idStatus = identity?.status();
   // gallery 要到第一次開 session 才載入：這裡只記模型與鏡頭的狀態，不碰 Keychain。
   log(`家庭記憶：${memory ? (memory.settingsStatus().available ? "可用（第一次使用時才開啟加密檔）" : "此 Mac 無法加密保存，停用") : "瀏覽器版不可用"}`);
-  if (env.NOUS_TEST_DROP_STOP_REPORT === "1") log("警告：NOUS_TEST_DROP_STOP_REPORT=1（只限測試）：即時語音的停播回報會被丟掉，用來驗證強制靜音");
+  if (memory) log(`家庭記憶的路徑：ChatGPT 方案即時語音已放行；OpenAI API key 即時語音${apiKeyMemoryReleased ? "已放行（NOUS_MEMORY_ROUTES，Mac gate 尚未通過）" : "未放行（預設關閉）"}`);
+  if (!testMode && (env.NOUS_TEST_DROP_STOP_REPORT === "1" || env.NOUS_TEST_RENDERER_IGNORE_REVOKE === "1")) log("警告：只限測試的旗標沒有生效（需要 NOUS_TEST_MODE=1）");
+  if (hideRevokeFromPage) log("警告：NOUS_TEST_RENDERER_IGNORE_REVOKE=1（只限測試）：記憶撤銷不會送給頁面，只靠核心 hangup 停止，1.5 秒後強制靜音");
+  if (dropStopReport) log("警告：NOUS_TEST_DROP_STOP_REPORT=1（只限測試）：即時語音的停播回報會被丟掉，用來驗證強制靜音");
   log(`家人辨識：${idStatus ? (idStatus.disabled_reason ?? `可用（模型 ${runtime.state}${idStatus.limited_reason ? `；${idStatus.limited_reason}` : ""}；門檻未校準；家人資料在第一次打開時才載入）`) : "瀏覽器版不可用"}`);
 
   return {

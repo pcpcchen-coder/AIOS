@@ -21,7 +21,8 @@ describe("RealtimeBridge", () => {
     ]);
     const bridge = new RealtimeBridge({ apiKey: "sk-fixture", model: "gpt-realtime", voice: "marin", fetch: api.fetch });
     const result = await bridge.connect("v=0 offer", [makeTask({ title: "寫週報", status: "running" })]);
-    expect(result).toEqual({ sdp: "v=0 answer", model: "gpt-realtime" });
+    // MEM-3：call ID 取自 Location（這個回應沒有，所以是 null）。
+    expect(result).toEqual({ sdp: "v=0 answer", model: "gpt-realtime", callId: null });
 
     const [mint, call] = api.calls;
     expect(mint.url).toBe("https://api.openai.com/v1/realtime/client_secrets");

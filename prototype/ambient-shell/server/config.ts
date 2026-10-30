@@ -28,6 +28,11 @@ export interface Config {
   realtimeVoice: string;
   /** 即時語音路徑偏好的預設（NOUS_REALTIME_ROUTE：auto、live、api_key）；設定畫面與選單改過後以 realtime.json 為準。 */
   realtimeRoute: RoutePreference;
+  /**
+   * MEM-3：記憶的放行旗標（NOUS_MEMORY_ROUTES，逗號分隔：live、api_key）。API key 即時語音的記憶預設關閉，列出 api_key 才打開
+   * （Mac gate 通過後才改預設）；live 維持 MEM-2 的現狀（一律放行），這個旗標不能關掉它。
+   */
+  memoryRoutes: { api_key: boolean };
   /** ChatGPT 方案路徑的模型（NOUS_LIVE_MODEL）：一定顯示；只有明確設定時才送出（send）。 */
   liveModel: { display: string; send: string | null };
   /** ChatGPT 方案路徑的聲音預設（NOUS_LIVE_VOICE，Codex 的聲音清單）。 */
@@ -95,6 +100,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     realtimeModel: env.NOUS_REALTIME_MODEL?.trim() || "gpt-realtime",
     realtimeVoice: env.NOUS_REALTIME_VOICE?.trim() || "marin",
     realtimeRoute: parseRoute(env.NOUS_REALTIME_ROUTE),
+    memoryRoutes: parseMemoryRoutes(env.NOUS_MEMORY_ROUTES),
     liveModel: { display: env.NOUS_LIVE_MODEL?.trim() || "gpt-live-1-codex", send: env.NOUS_LIVE_MODEL?.trim() || null },
     liveVoice: parseLiveVoice(env.NOUS_LIVE_VOICE),
     liveAgentModel: env.NOUS_LIVE_AGENT_MODEL?.trim() || null,
@@ -119,6 +125,12 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
       look_to_talk: (env.NOUS_LOOK_TO_TALK ?? "on").trim().toLowerCase() !== "off",
     },
   };
+}
+
+function parseMemoryRoutes(raw: string | undefined): { api_key: boolean } {
+  const values = (raw ?? "").split(",").map((v) => v.trim().toLowerCase()).filter(Boolean);
+  for (const value of values) if (value !== "live" && value !== "api_key") throw new Error(`NOUS_MEMORY_ROUTES 只能列出 live、api_key，收到 "${value}"`);
+  return { api_key: values.includes("api_key") };
 }
 
 function parseRoute(raw: string | undefined): RoutePreference {

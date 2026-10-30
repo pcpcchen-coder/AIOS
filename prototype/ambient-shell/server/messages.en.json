@@ -417,5 +417,17 @@
   "要記住：{0}。請說『確認記住』。": "To remember: {0}. Say “confirm remember”.",
   "要記住：{0}（會取代原本的說法）。請說『確認記住』。": "To remember: {0} (replacing the earlier wording). Say “confirm remember”.",
   "沒有採用這次的回答：請在問句念完後再回答，或在畫面上選擇": "This answer was not accepted: answer after the question finishes, or choose on the screen",
-  "即時語音無法開始：上一通還在確認是否已停止播放，請稍候再試": "Realtime voice cannot start: still confirming that the previous call stopped playing; please try again shortly"
+  "即時語音無法開始：上一通還在確認是否已停止播放，請稍候再試": "Realtime voice cannot start: still confirming that the previous call stopped playing; please try again shortly",
+  "OpenAI API key 即時語音": "OpenAI API key realtime voice",
+  "畫面上有另一張確認卡；請先回答那張卡，再說一次要記住或忘記的內容": "Another confirmation card is on screen. Answer it first, then say again what to remember or forget",
+  "與 OpenAI 即時語音的核心控制連線中斷，即時語音已結束。": "The core's control connection to OpenAI realtime voice was lost. Realtime voice ended.",
+  "沒有這個即時語音工作階段（可能已結束）。": "There is no such realtime voice session (it may have ended).",
+  "API key 路徑的輸入走頁面的資料通道。": "Input on the API key route goes through the page's data channel.",
+  "即時語音在連線期間就結束了（頁面離開），這次沒有開始。": "Realtime voice ended while connecting (the page left); it did not start this time.",
+  "API key 路徑未設定": "API key route is not configured",
+  "ChatGPT 方案路徑未設定": "ChatGPT plan route is not configured",
+  "已經有一個帶記憶的 API key 即時語音在進行中（一次只能一個）": "An API key realtime voice call with memory is already in progress (only one at a time)",
+  "找不到要重建的通話，請重新開始": "No call to rebuild was found; please start again",
+  "記憶設定沒有被即時語音確認，這次沒有開始；請再開始一次。": "Realtime voice did not confirm the memory settings, so it did not start this time; please start again.",
+  "與 OpenAI 即時語音的核心控制連線在連線期間中斷，這次沒有開始；請再開始一次。": "The core's control connection to OpenAI realtime voice was lost while connecting, so it did not start this time; please start again."
 }

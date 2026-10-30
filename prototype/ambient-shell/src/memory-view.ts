@@ -45,6 +45,8 @@ export const MEMORY_EXPLANATION =
 export const MEMORY_BROWSER_UNAVAILABLE = "記憶：瀏覽器版不可用（只在 macOS App 提供）。";
 /** MEM-2：codex 同意的範圍（16 §4：新增服務要另外確認，不沿用 ChatGPT 的同意）。 */
 export const CODEX_CONSENT_NOTE = "「ChatGPT 方案即時語音」的同意同時涵蓋即時語音模型與它交辦用的 Codex（同一個 ChatGPT 帳號）；和上面的 ChatGPT 是分開的同意。";
+/** MEM-3：openai_realtime 同意的範圍（OPENAI_API_KEY 的指紋；換 key 要重新允許）。只有 API key 路徑的記憶已放行時才會列出。 */
+export const OPENAI_REALTIME_CONSENT_NOTE = "「OpenAI API key 即時語音」的同意只涵蓋用 .env 的 OPENAI_API_KEY 進行的即時語音；換一把 key 要重新允許，和上面的 ChatGPT 方案即時語音是分開的同意。";
 
 type Mode =
   | { kind: "idle" }
@@ -397,6 +399,7 @@ export class MemoryView {
       allows.length ? h("div", { class: "memory-allow" }, h("p", {}, t("允許哪些模型服務帳號取得相關片段（未允許的只保存在本機）：")),
         ...allows.map(a => h("label", { class: "family-check" }, a.box, ` ${t(a.target.label)}`))) : h("p", { class: "muted small" }, t("目前沒有可用的模型服務帳號；記憶只保存在本機。")),
       allows.some(a => a.target.provider === "codex") ? h("p", { class: "muted small" }, t(CODEX_CONSENT_NOTE)) : null,
+      allows.some(a => a.target.provider === "openai_realtime") ? h("p", { class: "muted small" }, t(OPENAI_REALTIME_CONSENT_NOTE)) : null,
       allows.length ? h("p", { class: "muted small" }, t("第一次設定時，勾選的服務帳號也會一併允許取得全家共用的記憶；之後可在「記憶…」分開調整。")) : null,
       h("label", { class: "family-check" }, checkbox(false, true), t(" 自動提出記憶建議（首版未提供）")),
       h("p", { class: "muted small" }, t("沒有啟用或按取消時，你的問題照樣送出，但不會記住任何內容。")),
@@ -456,6 +459,7 @@ export class MemoryView {
       h("div", { class: "memory-allow" }, h("p", {}, mode.subject ? msg`允許哪些服務帳號取得 ${profile?.name ?? ""} 的記憶片段：` : t("允許哪些服務帳號取得全家共用的記憶片段：")),
         ...consentRows.map(r => h("label", { class: "family-check" }, r.box, ` ${t(r.target.label)}`)),
         consentRows.some(r => r.target.provider === "codex") ? h("p", { class: "muted small" }, t(CODEX_CONSENT_NOTE)) : h("span", {}),
+        consentRows.some(r => r.target.provider === "openai_realtime") ? h("p", { class: "muted small" }, t(OPENAI_REALTIME_CONSENT_NOTE)) : h("span", {}),
         button("保存同意設定", saveConsent, "", this.busy)),
       profile ? h("div", { class: "actions" },
         people === null ? h("span", { class: "muted small" }, t("要連結家人辨識，請先打開一次「家人辨識…」。"))

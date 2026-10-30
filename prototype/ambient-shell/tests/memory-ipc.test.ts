@@ -28,6 +28,10 @@ describe("memory IPC filter", () => {
     expect(validateMemoryRequest({ op: "turn", text: "記住我不吃香菜", request_id: "req_abcdef12", subject: "profile_x", extra: 1 })).toEqual({ ok: true, request: { op: "turn", text: "記住我不吃香菜", request_id: "req_abcdef12" } });
     expect(validateMemoryRequest({ op: "setup", enabled: true, subject: { kind: "name", name: "George", profileId: "x" }, allow: [{ provider: "claude", account: "fp0000claude0001", allowed: true }] }))
       .toEqual({ ok: true, request: { op: "setup", enabled: true, subject: { kind: "name", name: "George" }, allow: [{ provider: "claude", account: "fp0000claude0001" }] } });
+    // MEM-3：openai_realtime（OpenAI API key 即時語音）的同意鍵含底線；大寫或開頭不是字母的仍拒絕。
+    expect(validateMemoryRequest({ op: "setup", enabled: true, subject: { kind: "household" }, allow: [{ provider: "openai_realtime", account: "fp000openairt001" }] }))
+      .toEqual({ ok: true, request: { op: "setup", enabled: true, subject: { kind: "household" }, allow: [{ provider: "openai_realtime", account: "fp000openairt001" }] } });
+    expect(validateMemoryRequest({ op: "setup", enabled: true, subject: { kind: "household" }, allow: [{ provider: "_openai", account: "fp000openairt001" }] })).toMatchObject({ ok: false });
     expect(validateMemoryRequest({ op: "card_answer", card: C, choice: "household", ticket: "forged" })).toEqual({ ok: true, request: { op: "card_answer", card: C, choice: "household" } });
     expect(validateMemoryRequest({ op: "edit", id: F, revision: 3, value: "不吃香菜", token: T, subject: P })).toEqual({ ok: true, request: { op: "edit", id: F, revision: 3, value: "不吃香菜", token: T } });
     expect(validateMemoryRequest({ op: "edit", id: null, value: "喜歡恐龍", subject: P, token: T })).toEqual({ ok: true, request: { op: "edit", id: null, value: "喜歡恐龍", subject: P, token: T } });

@@ -4,7 +4,7 @@ import { RESULT_UNKNOWN_TEXT, SIDE_EFFECT_TOOLS, type HostToolName } from "../sh
 import type { Task } from "../shared/types.ts";
 import { CodexError, type CodexInputItem, type CodexResponses, type CodexToolSpec, type FunctionToolSpec } from "./codex-responses.ts";
 import { buildRealtimeTools, realtimeToolRules, taskLines, type RealtimeCapabilities } from "./realtime.ts";
-import { exactVoiceConfirm } from "./memory/live.ts";
+import { delegatePolicy, exactVoiceConfirm, MAX_RECALLS } from "./memory/live.ts";
 import { HOST_TIMEOUT_MS, HostGone, type ApprovalSnapshot, type ToolHost } from "./realtime-routes.ts";
 
 // gpt-live-1-codex 不能呼叫函式；它把使用者的請求用文字交辦（delegation.created）。
@@ -141,8 +141,8 @@ export interface LiveCallerMemory {
   delegateBlocked(title: string | null): void;
 }
 
-/** recall_memory 每次交辦最多呼叫幾次（每次都受 8 筆、4 KB 限制）。 */
-export const MAX_RECALLS = 2;
+/** recall_memory 每次交辦最多呼叫幾次（每次都受 8 筆、4 KB 限制；MEM-3 起定義在 server/memory/live.ts，API key 路徑每一輪也用它）。 */
+export { MAX_RECALLS };
 
 /** 記憶確認詞的交辦：核心的語音確認已經處理（server/memory/live.ts），不交給 Codex，也不能由模型替使用者確認。 */
 export function memoryConfirmGuard(text: string): DelegationResult | null {
@@ -227,13 +227,12 @@ export class LiveToolCaller {
               output = await untilAborted(memory.recall(query, combined), combined);
               this.options.log?.(`即時語音（ChatGPT 方案）：recall_memory ${output.ok === false ? "沒有取用" : "完成"}`);
             }
-          } else if (name === "delegate_task" && memory?.blocked() && allowed.has(name)) {
-            // 這通通話帶著記憶：交辦改成問使用者（16 §9、M15），不呼叫頁面、TaskStore 不新增。
-            const title = request.userText?.trim() || null;
+          } else if (name === "delegate_task" && memory && allowed.has(name) && !delegatePolicy("live", memory.blocked(), null).run) {
+            // 這通通話帶著記憶：交辦改成問使用者（16 §9、M15；政策集中在 server/memory/live.ts delegatePolicy），不呼叫頁面、TaskStore 不新增。
+            const decision = delegatePolicy("live", true, request.userText ?? null);
+            const title = decision.run ? null : decision.title;
             memory.delegateBlocked(title);
-            output = title
-              ? { ok: false, status: "delegate_blocked", message: "這次通話用到記憶，交辦要使用者在畫面上按「交辦」；請使用者看畫面上的卡，不對的話請他說出完整的要求。" }
-              : { ok: false, status: "delegate_blocked", message: "這次通話用到記憶，不能自動交辦，畫面上也沒有交辦卡；請使用者用一句完整的話再說一次要交辦的工作。" };
+            output = decision.run ? { ok: false } : decision.output;
             this.options.log?.("即時語音（ChatGPT 方案）：交辦被封鎖（這通用到記憶），改成畫面上的交辦卡");
           } else if (!HOST_TOOLS.includes(name) || !allowed.has(name)) {
             output = { ok: false, error: `這條路徑沒有這個工具：${call.name}` };

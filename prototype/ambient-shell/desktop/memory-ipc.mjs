@@ -15,7 +15,8 @@ const TOKEN = /^mm_[a-f0-9]{32}$/;
 const REQUEST = /^req_[A-Za-z0-9_-]{6,64}$/;
 const OPERATION = /^[a-f0-9]{8}-[a-f0-9]{4}-7[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const PERSON = /^fam_[0-9a-f]{24}$/;
-const PROVIDER = /^[a-z]{1,20}$/;
+// MEM-3：openai_realtime（OpenAI API key 即時語音）的同意鍵含底線。
+const PROVIDER = /^[a-z][a-z_]{0,19}$/;
 const ACCOUNT = /^[A-Za-z0-9_-]{1,64}$/;
 const CHOICES = ["save", "household", "cancel", "create", "select", "accept", "decline", "confirm"];
 

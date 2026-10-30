@@ -1,0 +1,38 @@
+{
+  "source": "658b97a prototype/ambient-shell/server/realtime.ts RealtimeBridge.connect",
+  "note": "MEM-2 之前（658b97a）的 RealtimeBridge.connect 送出的請求：用 git archive 取出 658b97a 的 server/shared，以假 fetch（tasks []、zh-TW、webSearch true、home false、gpt-realtime／marin、sk-fixture-ga）各跑一次沒有 MCP 與有 fixture MCP；instructions 的日期以 <DATE> 取代。只存路徑（不含主機）。",
+  "requests": {
+    "plain": [
+      {
+        "method": "POST",
+        "path": "/v1/realtime/client_secrets",
+        "authorization": "Bearer sk-fixture-ga",
+        "contentType": "application/json",
+        "body": "{\"expires_after\":{\"anchor\":\"created_at\",\"seconds\":120},\"session\":{\"type\":\"realtime\",\"model\":\"gpt-realtime\",\"instructions\":\"你是 Nous，使用者桌面上的語音助理，正在和使用者即時語音對話。\\n一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。\\n使用者隨時會插話；被打斷後以使用者的新內容為準，不要重複剛才的話。\\n你可以上網：需要即時或最新資訊（天氣、新聞、股價、匯率、營業時間、交通、最近的事）時，立刻呼叫 web_search，不要憑記憶回答。呼叫前先說一句「我查一下」。回答講結論和數字，來源會顯示在畫面上，不用念網址。\\n需要較長時間產出的工作（報告、整理、規劃、研究）交給背景任務。\\n工具回傳的結果才是事實；工具失敗或查不到時照實說，不確定的事要說是推測。\\n使用者明確要你做需要較長時間產出的工作時，呼叫 delegate_task 交辦成背景任務，然後用一句話告訴使用者已經開始做、進度會顯示在畫面上。不要自己把長篇內容念出來。\\n使用者問進度時呼叫 get_tasks，依真實狀態回答；排隊中的任務要說明輪到時會自動開始。\\n收到以「（系統通知）」開頭的訊息時，用一句話轉告使用者，不要逐字念。\\n使用者要結束對話時，用一句話道別並呼叫 end_conversation。\\n今天日期：<DATE>。\\n目前沒有交辦的任務。\",\"output_modalities\":[\"audio\"],\"audio\":{\"input\":{\"transcription\":{\"model\":\"gpt-4o-mini-transcribe\",\"language\":\"zh\"},\"turn_detection\":{\"type\":\"semantic_vad\",\"eagerness\":\"auto\"},\"noise_reduction\":{\"type\":\"near_field\"}},\"output\":{\"voice\":\"marin\"}},\"tools\":[{\"type\":\"function\",\"name\":\"web_search\",\"description\":\"上網查即時或最新的資訊：天氣、新聞、股價、匯率、營業時間、交通、賽事、產品規格、最近發生的事等。回傳簡短答案與來源。需要最新資料時一定要用，不要憑記憶回答。\",\"parameters\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"查詢內容，具體寫出地點與時間（例如「新竹市今天天氣與降雨機率」）\"}},\"required\":[\"query\"],\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"delegate_task\",\"description\":\"把使用者明確要求、需要較長時間產出的工作（寫報告、整理資料、做規劃、比較研究、翻譯長文等）交辦成背景任務。查詢類問題（天氣、新聞、單一事實）用 web_search 直接回答，不要交辦；一般聊天也不要呼叫。\",\"parameters\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\",\"description\":\"任務描述，一句話寫清楚要產出什麼（繁體中文）\"}},\"required\":[\"title\"],\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"get_tasks\",\"description\":\"查詢目前交辦任務的真實狀態與進度。使用者問進度、問做好了沒時呼叫，不要用猜的。\",\"parameters\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"end_conversation\",\"description\":\"使用者要結束對話（說再見、結束對話、先這樣、不用了）時呼叫；呼叫的同時用一句話道別。\",\"parameters\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}}],\"tool_choice\":\"auto\"}}"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/realtime/calls",
+        "authorization": "Bearer ek_fixture_ga",
+        "contentType": "application/sdp",
+        "body": "v=0 offer"
+      }
+    ],
+    "mcp": [
+      {
+        "method": "POST",
+        "path": "/v1/realtime/client_secrets",
+        "authorization": "Bearer sk-fixture-ga",
+        "contentType": "application/json",
+        "body": "{\"expires_after\":{\"anchor\":\"created_at\",\"seconds\":120},\"session\":{\"type\":\"realtime\",\"model\":\"gpt-realtime\",\"instructions\":\"你是 Nous，使用者桌面上的語音助理，正在和使用者即時語音對話。\\n一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。\\n使用者隨時會插話；被打斷後以使用者的新內容為準，不要重複剛才的話。\\n你可以上網：需要即時或最新資訊（天氣、新聞、股價、匯率、營業時間、交通、最近的事）時，立刻呼叫 web_search，不要憑記憶回答。呼叫前先說一句「我查一下」。回答講結論和數字，來源會顯示在畫面上，不用念網址。\\n你也接上了這些外部服務，可以直接使用它們的工具：fixture_mcp。需要確認的動作（寄出、發布、刪除等），系統會在畫面顯示確認卡；你用一句話說明要做什麼、對象和影響，請使用者說「確認執行」或「取消」。使用者要說出「確認執行」才會執行，只說「好」不算，你也不能替使用者確認。沒有執行時照實說。\\n需要較長時間產出的工作（報告、整理、規劃、研究）交給背景任務。\\n工具回傳的結果才是事實；工具失敗或查不到時照實說，不確定的事要說是推測。\\n使用者明確要你做需要較長時間產出的工作時，呼叫 delegate_task 交辦成背景任務，然後用一句話告訴使用者已經開始做、進度會顯示在畫面上。不要自己把長篇內容念出來。\\n使用者問進度時呼叫 get_tasks，依真實狀態回答；排隊中的任務要說明輪到時會自動開始。\\n收到以「（系統通知）」開頭的訊息時，用一句話轉告使用者，不要逐字念。\\n使用者要結束對話時，用一句話道別並呼叫 end_conversation。\\n今天日期：<DATE>。\\n目前沒有交辦的任務。\",\"output_modalities\":[\"audio\"],\"audio\":{\"input\":{\"transcription\":{\"model\":\"gpt-4o-mini-transcribe\",\"language\":\"zh\"},\"turn_detection\":{\"type\":\"semantic_vad\",\"eagerness\":\"auto\"},\"noise_reduction\":{\"type\":\"near_field\"}},\"output\":{\"voice\":\"marin\"}},\"tools\":[{\"type\":\"function\",\"name\":\"web_search\",\"description\":\"上網查即時或最新的資訊：天氣、新聞、股價、匯率、營業時間、交通、賽事、產品規格、最近發生的事等。回傳簡短答案與來源。需要最新資料時一定要用，不要憑記憶回答。\",\"parameters\":{\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"查詢內容，具體寫出地點與時間（例如「新竹市今天天氣與降雨機率」）\"}},\"required\":[\"query\"],\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"delegate_task\",\"description\":\"把使用者明確要求、需要較長時間產出的工作（寫報告、整理資料、做規劃、比較研究、翻譯長文等）交辦成背景任務。查詢類問題（天氣、新聞、單一事實）用 web_search 直接回答，不要交辦；一般聊天也不要呼叫。\",\"parameters\":{\"type\":\"object\",\"properties\":{\"title\":{\"type\":\"string\",\"description\":\"任務描述，一句話寫清楚要產出什麼（繁體中文）\"}},\"required\":[\"title\"],\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"get_tasks\",\"description\":\"查詢目前交辦任務的真實狀態與進度。使用者問進度、問做好了沒時呼叫，不要用猜的。\",\"parameters\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}},{\"type\":\"function\",\"name\":\"end_conversation\",\"description\":\"使用者要結束對話（說再見、結束對話、先這樣、不用了）時呼叫；呼叫的同時用一句話道別。\",\"parameters\":{\"type\":\"object\",\"properties\":{},\"additionalProperties\":false}},{\"type\":\"mcp\",\"server_label\":\"fixture_mcp\",\"server_url\":\"https://mcp.example.invalid/sse\",\"require_approval\":\"always\"}],\"tool_choice\":\"auto\"}}"
+      },
+      {
+        "method": "POST",
+        "path": "/v1/realtime/calls",
+        "authorization": "Bearer ek_fixture_ga",
+        "contentType": "application/sdp",
+        "body": "v=0 offer"
+      }
+    ]
+  }
+}

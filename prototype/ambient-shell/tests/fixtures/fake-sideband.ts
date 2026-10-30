@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
+import { createServer, type IncomingHttpHeaders, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 
@@ -7,6 +7,9 @@ import type { Duplex } from "node:stream";
 // 和 Node 22 內建的 WebSocket 真的握手，所以也證明 Nous 送出的自訂標頭（Authorization、chatgpt-account-id、
 // OpenAI-Alpha）確實到達伺服器——不需要 ws 套件。只實作測試用到的部分：文字框、close、遮罩。
 // 內容不代表 OpenAI 伺服器的真實行為。
+// MEM-3：startFakeGa 用同一個伺服器做 OpenAI Realtime GA 的假版本（/realtime/client_secrets、/realtime/calls 回
+// Location: /v1/realtime/calls/rtc_test、/v1/realtime?call_id= 的 WebSocket 檢查 Bearer API key、/hangup）。
+// P1–P5（旁路真的收得到哪些事件）只能在 Mac 上用真 key 驗證，這裡的事件順序只是假設。
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -50,8 +53,26 @@ function encode(text: string, opcode = 0x1): Buffer {
   return Buffer.concat([header, payload]);
 }
 
-export async function startFakeSideband(): Promise<FakeSideband> {
-  const server: Server = createServer((_req, res) => res.writeHead(404).end());
+interface FakeOptions {
+  /** HTTP 請求（非 upgrade）；沒有時一律 404。 */
+  http?: (req: IncomingMessage, body: string, res: ServerResponse) => void;
+  /** upgrade 前的驗證；false 回 401。 */
+  authorize?: (req: IncomingMessage) => boolean;
+  /** 收到一個用戶端事件之後（例如自動回 session.updated）。 */
+  onMessage?: (conn: FakeConnection, event: Record<string, unknown>) => void;
+}
+
+export async function startFakeSideband(options: FakeOptions = {}): Promise<FakeSideband> {
+  const server: Server = createServer((req, res) => {
+    if (!options.http) {
+      res.writeHead(404).end();
+      return;
+    }
+    let body = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk: string) => (body += chunk));
+    req.on("end", () => options.http!(req, body, res));
+  });
   const waiters: ((c: FakeConnection) => void)[] = [];
   const sockets = new Set<Duplex>();
   const fake: FakeSideband = {
@@ -79,6 +100,7 @@ export async function startFakeSideband(): Promise<FakeSideband> {
     close: () =>
       new Promise((resolve) => {
         for (const s of sockets) s.destroy();
+        server.closeAllConnections();
         server.close(() => resolve());
       }),
   };
@@ -88,8 +110,8 @@ export async function startFakeSideband(): Promise<FakeSideband> {
     socket.on("close", () => sockets.delete(socket));
     fake.upgrades++;
     if (fake.hang) return;
-    if (fake.refuse > 0) {
-      fake.refuse--;
+    if (fake.refuse > 0 || (options.authorize && !options.authorize(req))) {
+      if (fake.refuse > 0) fake.refuse--;
       socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
       return;
     }
@@ -170,12 +192,15 @@ export async function startFakeSideband(): Promise<FakeSideband> {
           continue;
         }
         if (opcode === 0x1) {
+          let event: Record<string, unknown> | null = null;
           try {
-            conn.received.push(JSON.parse(payload.toString("utf8")) as Record<string, unknown>);
+            event = JSON.parse(payload.toString("utf8")) as Record<string, unknown>;
+            conn.received.push(event);
           } catch {
             // 測試只送 JSON
           }
           for (const l of listeners) l();
+          if (event) options.onMessage?.(conn, event);
         }
       }
     });
@@ -190,5 +215,102 @@ export async function startFakeSideband(): Promise<FakeSideband> {
 
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   fake.base = `ws://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  return fake;
+}
+
+// ─────────────── MEM-3：OpenAI Realtime GA 的假伺服器 ───────────────
+
+export interface FakeGaRequest {
+  method: string;
+  path: string;
+  headers: IncomingHttpHeaders;
+  body: string;
+}
+
+export interface FakeGa extends FakeSideband {
+  /** http://127.0.0.1:port */
+  http: string;
+  /** 旁路只接受這把 key（Bearer）。 */
+  apiKey: string;
+  /** 每個 REST 請求（client_secrets、calls、hangup），依到達順序。 */
+  requests: FakeGaRequest[];
+  /** 被掛斷的 call ID。 */
+  hangups: string[];
+  /** /calls 回應的 Location；null＝不送（測試「沒有 call ID」）。 */
+  location: string | null;
+  /** 收到 session.update 時自動回 session.updated（false＝測試自己送）。 */
+  autoAck: boolean;
+  /** 收到 response.create 時自動回 response.created＋response.done（模擬模型說完；false＝測試自己送）。 */
+  autoRespond: boolean;
+  /** 收到 session.update 時改回一個指回它的 error（error.event_id），模擬上游拒絕記憶設定。 */
+  rejectUpdate: boolean;
+  /** 送一個 error 給這條旁路（event_id：指回哪一個用戶端事件；可以是頁面或核心的）。 */
+  error(conn: FakeConnection, code: string, eventId: string | null): void;
+  /** /calls 的回應狀態碼（預設 201）。 */
+  callStatus: number;
+  /** RealtimeBridge 的 urls 選項。 */
+  bridgeUrls: { api: string; sideband: (callId: string) => string };
+  /** 送出的 REST 請求（不含 hangup）的快照：方法、路徑、標頭（只取會影響內容的）與內容。 */
+  snapshot(): { method: string; path: string; authorization: string | undefined; contentType: string | undefined; body: string }[];
+}
+
+export async function startFakeGa(apiKey = "sk-fixture-ga"): Promise<FakeGa> {
+  const state = { requests: [] as FakeGaRequest[], hangups: [] as string[], location: "/v1/realtime/calls/rtc_test" as string | null, autoAck: true, autoRespond: true, rejectUpdate: false, callStatus: 201, responses: 0 };
+  const base = await startFakeSideband({
+    http: (req, body, res) => {
+      const path = req.url ?? "";
+      state.requests.push({ method: req.method ?? "", path, headers: req.headers, body });
+      if (path === "/v1/realtime/client_secrets") {
+        res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ value: "ek_fixture_ga", expires_at: 1 }));
+        return;
+      }
+      if (path === "/v1/realtime/calls") {
+        res.writeHead(state.callStatus, { "Content-Type": "application/sdp", ...(state.location ? { Location: state.location } : {}) }).end(state.callStatus < 300 ? "v=0 ga-answer" : "fixture error");
+        return;
+      }
+      const hang = /^\/v1\/realtime\/calls\/([^/]+)\/hangup$/.exec(path);
+      if (hang) {
+        state.hangups.push(decodeURIComponent(hang[1]!));
+        res.writeHead(200).end("{}");
+        return;
+      }
+      res.writeHead(404).end();
+    },
+    authorize: (req) => (req.url ?? "").startsWith("/v1/realtime?call_id=") && req.headers.authorization === `Bearer ${apiKey}`,
+    onMessage: (conn, event) => {
+      if (state.rejectUpdate && event.type === "session.update") {
+        conn.send({ type: "error", event_id: "event_server_1", error: { type: "invalid_request_error", code: "invalid_value", message: "fixture rejection", event_id: event.event_id ?? null } });
+        return;
+      }
+      if (state.autoAck && event.type === "session.update") conn.send({ type: "session.updated", session: { type: "realtime" } });
+      if (state.autoRespond && event.type === "response.create") {
+        const id = `resp_fixture_${++state.responses}`;
+        conn.send({ type: "response.created", response: { id } });
+        conn.send({ type: "response.done", response: { id, status: "completed" } });
+      }
+    },
+  });
+  const http = base.base.replace(/^ws:/, "http:");
+  const fake = base as FakeGa;
+  Object.defineProperties(fake, {
+    location: { get: () => state.location, set: (v: string | null) => (state.location = v) },
+    autoAck: { get: () => state.autoAck, set: (v: boolean) => (state.autoAck = v) },
+    autoRespond: { get: () => state.autoRespond, set: (v: boolean) => (state.autoRespond = v) },
+    rejectUpdate: { get: () => state.rejectUpdate, set: (v: boolean) => (state.rejectUpdate = v) },
+    callStatus: { get: () => state.callStatus, set: (v: number) => (state.callStatus = v) },
+  });
+  fake.error = (conn, code, eventId) => conn.send({ type: "error", event_id: `event_server_${Math.random().toString(36).slice(2, 8)}`, error: { type: "invalid_request_error", code, message: "fixture", event_id: eventId } });
+  fake.http = http;
+  fake.apiKey = apiKey;
+  fake.requests = state.requests;
+  fake.hangups = state.hangups;
+  fake.bridgeUrls = { api: `${http}/v1`, sideband: (callId) => `${base.base}/v1/realtime?call_id=${encodeURIComponent(callId)}` };
+  fake.snapshot = () => state.requests.filter((r) => !r.path.endsWith("/hangup")).map((r) => ({
+    method: r.method,
+    path: r.path,
+    authorization: r.headers.authorization,
+    contentType: r.headers["content-type"],
+    body: r.body,
+  }));
   return fake;
 }

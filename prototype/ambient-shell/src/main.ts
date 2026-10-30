@@ -21,7 +21,7 @@ import {
 } from "./realtime.ts";
 import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts";
 import { greetingFor, idleSession, newInteractionId, openRealtime, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
-import type { LiveCoreEvent, LiveMemoryReason, RealtimeServerEvent } from "../shared/realtime-route.ts";
+import type { CallAnswer, LiveCoreEvent, LiveMemoryReason, RealtimeServerEvent, RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
@@ -236,16 +236,40 @@ let realtimeStart: AbortController | null = null;
 let sseClientId: string | null = null;
 const liveListeners = new Set<(event: RealtimeServerEvent) => void>();
 let liveAudio: HTMLAudioElement | null = null;
-/** MEM-2：最後一個 live 播放元素拆掉時是不是已暫停（停播核對用）。 */
+/** MEM-2：最後一個即時語音播放元素拆掉時是不是已暫停（停播核對用；MEM-3 起兩條路徑共用）。 */
 let liveAudioPaused = true;
-/** MEM-2：這通 live 通話的記憶狀態（只有筆數與原因代碼；人物名稱來自 IPC 的 memoryPresence）。 */
+/** MEM-2：這通即時語音通話的記憶狀態（只有筆數與原因代碼；人物名稱來自 IPC 的 memoryPresence）。MEM-3 起兩條路徑共用。 */
 let liveMemory: { used: number; reason: LiveMemoryReason | null } | null = null;
-/** MEM-2：這個頁面開過的 live 工作階段憑證（結束後收到記憶撤銷時仍要回報停播）。 */
+/** MEM-3：這通 API key 通話由核心處理、頁面略過的工具（POST /api/realtime/call 的回應帶來）。 */
+let realtimeCoreTools: readonly string[] = [];
+/** MEM-2：這個頁面開過的工作階段憑證（結束後收到記憶撤銷時仍要回報停播；MEM-3 起兩條路徑都記）。 */
 const liveTickets = new Map<string, RealtimeTicket>();
-/** 「這次沒有用到記憶：ChatGPT 方案即時語音尚未允許」每次執行只說一次。 */
-let liveConsentNoticeShown = false;
+/** 「這次沒有用到記憶：…尚未允許」每條路徑每次執行只說一次。 */
+const consentNoticeShown = new Set<RouteId>();
 
-/** MEM-2：live 通話沒有用到記憶的原因（固定句，頁面翻譯）。 */
+/** MEM-3：沒有同意、沒有帳號時的原因依路徑不同（同意對象與帳號不同）。 */
+const ROUTE_MEMORY_REASON: Record<RouteId, Partial<Record<LiveMemoryReason, string>>> = {
+  live: {},
+  api_key: {
+    no_consent: "未用記憶（OpenAI API key 即時語音尚未允許）",
+    no_account: "未用記憶（沒有設定 OPENAI_API_KEY）",
+  },
+};
+const CONSENT_NOTICE: Record<RouteId, string> = {
+  live: "這次沒有用到記憶：ChatGPT 方案即時語音尚未允許",
+  api_key: "這次沒有用到記憶：OpenAI API key 即時語音尚未允許",
+};
+/**
+ * 記憶沒設定或已關閉：狀態列什麼都不顯示（和 MEM-2 的 live 一樣）。記憶不可用（unavailable）照實顯示「未用記憶（記憶目前不可用）」，
+ * 不說成「此路徑未啟用記憶」。
+ */
+const QUIET_MEMORY_REASONS: ReadonlySet<LiveMemoryReason> = new Set(["not_setup", "disabled"]);
+
+function memoryReasonText(route: RouteId, reason: LiveMemoryReason): string {
+  return ROUTE_MEMORY_REASON[route][reason] ?? LIVE_MEMORY_REASON[reason];
+}
+
+/** MEM-2：即時語音通話沒有用到記憶的原因（固定句，頁面翻譯）。 */
 const LIVE_MEMORY_REASON: Record<LiveMemoryReason, string> = {
   not_setup: "未用記憶（記憶尚未設定）",
   disabled: "未用記憶（記憶已關閉）",
@@ -255,6 +279,9 @@ const LIVE_MEMORY_REASON: Record<LiveMemoryReason, string> = {
   route_disabled: "未用記憶（這次執行期間已停用）",
   waiting_candidate: "未用記憶（等你確認本次人物）",
   no_pinned: "未用記憶（沒有釘選的記憶；需要時才查）",
+  route_off: "此路徑未啟用記憶",
+  no_control: "未用記憶（接不上核心的控制連線，這通不帶記憶）",
+  busy: "未用記憶（另一通即時語音正在使用記憶）",
 };
 
 /** MEM-2：live 通話的記憶事件。SSE 只帶卡片 ID、筆數與固定句；卡片內容經 IPC card_view 取得。 */
@@ -262,10 +289,7 @@ function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "mem
   switch (event.kind) {
     case "memory":
       liveMemory = { used: event.used, reason: event.reason };
-      if (event.reason === "no_consent" && !liveConsentNoticeShown) {
-        liveConsentNoticeShown = true;
-        showSubtitle(t("這次沒有用到記憶：ChatGPT 方案即時語音尚未允許"));
-      }
+      noteConsentNotice(event.reason);
       render();
       break;
     case "memory_card":
@@ -287,9 +311,17 @@ function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "mem
   }
 }
 
+/** 沒有同意：每條路徑每次執行只說一次。 */
+function noteConsentNotice(reason: LiveMemoryReason | null): void {
+  const route = realtimeTicket?.route ?? "live";
+  if (reason !== "no_consent" || consentNoticeShown.has(route)) return;
+  consentNoticeShown.add(route);
+  showSubtitle(t(CONSENT_NOTICE[route]));
+}
+
 /**
  * MEM-2：記憶撤銷後頁面已停播並回報：清掉字幕、逐字稿畫面、交辦卡與記憶卡，顯示原因（不念）。
- * rebuild：自動開一通新的（只走 live、不問候；新通話第一句由核心送固定句）。
+ * rebuild：自動開一通新的（核心走被撤銷那通的路徑、不問候；第一句是固定句：live 由核心送，API key 由頁面送）。
  */
 function onLiveRevoked(message: string, rebuild: boolean, accepted: boolean): void {
   liveMemory = null;
@@ -329,17 +361,79 @@ function stopRealtime(): void {
   endRealtimeTicket();
 }
 
-function makeRealtimeSession(decision: SessionDecision, greeting: GreetingOnce | null): RealtimeSession {
-  const next = createRealtimeSession(decision, greeting);
+function makeRealtimeSession(decision: SessionDecision, greeting: GreetingOnce | null, rebuild = false): RealtimeSession {
+  const next = createRealtimeSession(decision, greeting, rebuild);
   // 和其他計時器一樣：建構時用預設值，再套用目前的設定（applySettings 之後的改動也走 setIdleMs）。
   next.setIdleMs(idleTimeoutsMs(settings?.voice).realtime);
   return next;
 }
 
-function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce | null): RealtimeSession {
+/** 播放遠端聲音並記下播放元素（MEM-2 停播核對、靜音；MEM-3 起兩條路徑共用）。 */
+function trackedPlayRemote(stream: MediaStream): () => void {
+  const audio = new Audio();
+  audio.autoplay = true;
+  audio.srcObject = stream;
+  liveAudio = audio;
+  liveAudioPaused = false;
+  void audio.play().catch(() => {});
+  return () => {
+    // MEM-2：先靜音再暫停、拿掉來源（停播核對要看 paused）。
+    audio.muted = true;
+    audio.pause();
+    audio.srcObject = null;
+    liveAudioPaused = audio.paused;
+    if (liveAudio === audio) liveAudio = null;
+  };
+}
+
+/** 只收這個工作階段的 SSE realtime.host／realtime.live（兩條路徑共用）。 */
+function subscribeSession(sessionId: string, handlers: { host(call: Extract<RealtimeServerEvent, { type: "realtime.host" }>["call"]): void; core(event: LiveCoreEvent): void }): () => void {
+  const listener = (event: RealtimeServerEvent) => {
+    if (event.session_id !== sessionId) return;
+    if (event.type === "realtime.host") handlers.host(event.call);
+    else handlers.core(event.event);
+  };
+  liveListeners.add(listener);
+  return () => liveListeners.delete(listener);
+}
+
+function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce | null, rebuild = false): RealtimeSession {
   const ticket = ticketOf(decision);
   if (decision.route === "api_key") {
-    return new RealtimeVoice(realtimeCallbacks, browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp, ticket)).sdp), { idleMs: idleTimeoutsMs(undefined).realtime, greeting });
+    // MEM-3：/call 的回應帶這通的記憶狀態與核心處理的工具（沒有記憶層時為 null 與空陣列，行為和 MEM-2 之前一樣）。
+    realtimeCoreTools = [];
+    const base = browserRealtimeDeps(async (sdp) => {
+      // 帶 ticket 的呼叫一定是 CallAnswer；舊的核心沒有 core_tools／memory 欄位時當成沒有。
+      const answer = (await api.realtimeCall(sdp, ticket)) as Partial<CallAnswer> & { sdp: string };
+      realtimeCoreTools = answer.core_tools ?? [];
+      const status = answer.memory ?? null;
+      liveMemory = status && !(status.reason && QUIET_MEMORY_REASONS.has(status.reason)) ? status : null;
+      noteConsentNotice(status?.reason ?? null);
+      render();
+      return answer.sdp;
+    });
+    return new RealtimeVoice(realtimeCallbacks, {
+      ...base,
+      playRemote: trackedPlayRemote,
+      core: {
+        subscribe: (handlers) => subscribeSession(ticket.session_id, handlers),
+        hostResult: async (callId, output) => void (await api.realtimeHostResult(ticket, callId, output)),
+        approval: async (report) => void (await api.realtimeApproval(ticket, report)),
+        stopped: async (evidence) => (await api.realtimeStopped(ticket, evidence)).accepted,
+        playback: async () => void (await api.realtimePlayback(ticket)),
+        setMuted: (muted) => {
+          if (liveAudio) liveAudio.muted = muted;
+        },
+        audioPaused: () => liveAudioPaused && (!liveAudio || liveAudio.paused),
+        cancelSpeech: () => {
+          try { globalThis.speechSynthesis?.cancel(); } catch { /* 沒有語音合成 */ }
+        },
+        speak: (text) => void speakText(text, { locale: realtimeLocale }).catch(() => undefined),
+        memoryEvent: onLiveMemoryEvent,
+        revoked: onLiveRevoked,
+        coreTools: () => realtimeCoreTools,
+      },
+    }, { idleMs: idleTimeoutsMs(undefined).realtime, greeting, rebuild, rebuildLine: t("好，已經更新了。") });
   }
   const base = browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp, ticket)).sdp);
   return new LiveVoice(
@@ -347,36 +441,13 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
     {
       getMicrophone: base.getMicrophone,
       createPeer: base.createPeer,
-      playRemote(stream) {
-        const audio = new Audio();
-        audio.autoplay = true;
-        audio.srcObject = stream;
-        liveAudio = audio;
-        liveAudioPaused = false;
-        void audio.play().catch(() => {});
-        return () => {
-          // MEM-2：先靜音再暫停、拿掉來源（停播核對要看 paused）。
-          audio.muted = true;
-          audio.pause();
-          audio.srcObject = null;
-          liveAudioPaused = audio.paused;
-          if (liveAudio === audio) liveAudio = null;
-        };
-      },
+      playRemote: trackedPlayRemote,
       exchange: base.exchange,
       input: async (kind, text) => void (await api.realtimeInput(ticket, kind, text)),
       hostResult: async (callId, output) => void (await api.realtimeHostResult(ticket, callId, output)),
       approval: async (report) => void (await api.realtimeApproval(ticket, report)),
       end: async () => void (await api.realtimeEnd(ticket)),
-      subscribe(handlers) {
-        const listener = (event: RealtimeServerEvent) => {
-          if (event.session_id !== ticket.session_id) return;
-          if (event.type === "realtime.host") handlers.host(event.call);
-          else handlers.core(event.event);
-        };
-        liveListeners.add(listener);
-        return () => liveListeners.delete(listener);
-      },
+      subscribe: (handlers) => subscribeSession(ticket.session_id, handlers),
       watchLevel: browserWatchLevel,
       setMuted: (muted) => {
         if (liveAudio) liveAudio.muted = muted;
@@ -1074,7 +1145,7 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
       coreInteraction = decision.ok ? (decision.interaction ?? null) : null;
       return decision;
     },
-    makeSession: (decision) => makeRealtimeSession(decision, greeting),
+    makeSession: (decision) => makeRealtimeSession(decision, greeting, rebuild),
     announce: announceRealtime,
     refused: (message) => {
       ambient.endInteraction(interaction);
@@ -1085,10 +1156,9 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     began: (next, decision) => {
       realtime = next;
       realtimeTicket = decision;
-      if (decision.route === "live") {
-        liveTickets.set(decision.session_id, ticketOf(decision));
-        if (liveTickets.size > 8) liveTickets.delete(liveTickets.keys().next().value!);
-      }
+      // MEM-3：兩條路徑都記下憑證（結束後收到記憶撤銷時仍要回報停播）。
+      liveTickets.set(decision.session_id, ticketOf(decision));
+      if (liveTickets.size > 8) liveTickets.delete(liveTickets.keys().next().value!);
       render();
     },
   }, start.signal)
@@ -1155,7 +1225,10 @@ async function webSearchFromRealtime(query: string): Promise<Record<string, unkn
   brain.pulse("step", classifyDomain(query));
   try {
     // ChatGPT 方案路徑的查詢帶工作階段憑證：本機核心改用 Codex 額度查（不需要 OPENAI_API_KEY）。
-    const result = await api.webSearch(query, realtimeTicket?.route === "live" ? ticketOf(realtimeTicket) : undefined);
+    // MEM-3：帶記憶的 API key 通話也帶憑證：工作階段被撤銷後核心回 403，晚到的查詢不再執行。沒有記憶的 API key 通話照舊不帶
+    // （事件串流重連時核心會結束它的紀錄，但通話本身還在，查詢不能因此失敗）。
+    const ticketed = realtimeTicket && (realtimeTicket.route === "live" || realtimeCoreTools.length > 0);
+    const result = await api.webSearch(query, ticketed ? ticketOf(realtimeTicket!) : undefined);
     if (result.sources.length) showSubtitle(`來源：${result.sources.map((s) => s.title).slice(0, 3).join("、")}`);
     return { ok: true, answer: result.answer, sources: result.sources.map((s) => s.title) };
   } catch (err) {
@@ -1376,9 +1449,11 @@ function onServerEvent(event: ServerEvent): void {
   if (event.type === "hello") {
     const previous = sseClientId;
     sseClientId = event.client_id ?? null;
-    if (previous && previous !== sseClientId && realtimeTicket?.route === "live" && realtime.on) {
-      // 事件串流斷過：核心已經結束了這個 ChatGPT 方案工作階段（不假裝重連）。
-      const message = "與本機核心的事件連線中斷，ChatGPT 方案即時語音已結束。";
+    // MEM-3：帶記憶的 API key 通話也一樣（核心已經掛斷）。
+    const coreOwned = realtimeTicket?.route === "live" || (realtimeTicket?.route === "api_key" && realtimeCoreTools.length > 0);
+    if (previous && previous !== sseClientId && coreOwned && realtime.on) {
+      // 事件串流斷過：核心已經結束了這個工作階段（不假裝重連）。
+      const message = realtimeTicket?.route === "live" ? "與本機核心的事件連線中斷，ChatGPT 方案即時語音已結束。" : "與本機核心的事件連線中斷，即時語音已結束。";
       realtime.stop();
       realtimeCallbacks.onClosed(message);
       void speakText(message).catch(() => undefined);
@@ -1928,16 +2003,20 @@ function renderEngineLine(): void {
   if (realtime.on) {
     const next = rt?.billing_line && rt.billing_line !== activeLine ? msg`（下次開始時改用：${t(rt.billing_line)}）` : "";
     engineLine.append(msg`即時語音：${t(activeLine ?? rt?.billing_line ?? "—")}${next}｜`);
-    // MEM-2：這通 live 通話的本次人物與記憶筆數（或沒有用到記憶的原因）；不含內容。
-    if (realtimeTicket?.route === "live" && liveMemory && window.nousDesktop?.memory) {
+    // MEM-2／MEM-3：這通即時語音通話的本次人物與記憶筆數（或沒有用到記憶的原因，依路徑）；不含內容。
+    const route = realtimeTicket?.route ?? null;
+    if (route && liveMemory && liveMemory.reason === "route_off") {
+      // 這條路徑的記憶還沒放行：記憶開著時照實標示（和 MEM-2 的 API key 路徑一樣）。
+      if (window.nousDesktop?.memory && settings.memory?.enabled) engineLine.append(t("此路徑未啟用記憶｜"));
+    } else if (route && liveMemory && window.nousDesktop?.memory) {
       const name = memoryPresence?.state === "selected" ? memoryPresence.name : null;
-      const why = t(liveMemory.reason ? LIVE_MEMORY_REASON[liveMemory.reason] : "未用記憶");
+      const why = t(liveMemory.reason ? memoryReasonText(route, liveMemory.reason) : "未用記憶");
       engineLine.append(name
         ? liveMemory.used > 0 ? msg`本次人物：${name} · 記憶 ${liveMemory.used} 筆｜` : msg`本次人物：${name} · ${why}｜`
         : liveMemory.used > 0 ? msg`本次人物：未選定 · 記憶 ${liveMemory.used} 筆｜` : msg`本次人物：未選定 · ${why}｜`);
     }
-    // API key 路徑在 MEM-2 不帶記憶（MEM-3 才處理）：照實標示。
-    if (realtimeTicket?.route === "api_key" && window.nousDesktop?.memory && settings.memory?.enabled) engineLine.append(t("此路徑未啟用記憶｜"));
+    // API key 路徑沒有記憶狀態（舊的核心或沒有事件串流）而記憶開著：照實標示沒有用到。
+    else if (route === "api_key" && !liveMemory && window.nousDesktop?.memory && settings.memory?.enabled) engineLine.append(t("此路徑未啟用記憶｜"));
     engineLine.append(t("交辦工作："));
   }
   if (settings.provider === "chatgpt") {

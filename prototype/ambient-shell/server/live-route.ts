@@ -58,14 +58,8 @@ export const ANSWER_BOUND_MS =
 const TRANSCRIPT_RING = 12;
 const ANSWER_MAX_BYTES = 256 * 1024;
 
-/** 測試注入的 WebSocket：Node 22 的全域 WebSocket（undici）符合這個形狀。 */
-export interface SidebandSocket {
-  readonly readyState: number;
-  send(data: string): void;
-  close(): void;
-  addEventListener(type: "open" | "message" | "close" | "error", listener: (event: { data?: unknown }) => void): void;
-}
-export type SidebandSocketCtor = new (url: string, init: { headers: Record<string, string> }) => SidebandSocket;
+export { callIdFrom, openSidebandSocket, type SidebandSocket, type SidebandSocketCtor } from "./sideband.ts";
+import { openSidebandSocket, callIdFrom, type SidebandSocket, type SidebandSocketCtor } from "./sideband.ts";
 
 export interface DelegationRunner {
   run(request: DelegationRequest, signal: AbortSignal): Promise<DelegationResult>;
@@ -310,58 +304,7 @@ export class LiveRoute implements RealtimeRoute {
 
   /** 開一條 sideband；open 才 resolve，錯誤、關閉、逾時或 signal 中止 reject（中止時關掉 socket）。 */
   private openSocket(url: string, headers: Record<string, string>, timeoutMs: number = LIVE_TIMEOUTS_MS.sidebandAttempt, signal: AbortSignal | null = null): Promise<SidebandSocket> {
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      let socket: SidebandSocket;
-      if (signal?.aborted) {
-        reject(new Error("sideband 連線已中止"));
-        return;
-      }
-      try {
-        socket = new this.WS(url, { headers });
-      } catch (err) {
-        reject(err);
-        return;
-      }
-      const onAbort = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        try {
-          socket.close();
-        } catch {
-          // 已關閉
-        }
-        reject(new Error("sideband 連線已中止"));
-      };
-      signal?.addEventListener("abort", onAbort, { once: true });
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        try {
-          socket.close();
-        } catch {
-          // 已關閉
-        }
-        reject(new Error("sideband 連線逾時"));
-      }, timeoutMs);
-      socket.addEventListener("open", () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        resolve(socket);
-      });
-      const fail = () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        signal?.removeEventListener("abort", onAbort);
-        reject(new Error("sideband 連線失敗"));
-      };
-      socket.addEventListener("error", fail);
-      socket.addEventListener("close", fail);
-    });
+    return openSidebandSocket(this.WS, url, headers, timeoutMs, signal);
   }
 
   /** 把登入錯誤轉成開始錯誤（可以改路徑：使用者沒做錯設定，只是這條路徑現在不能用）。 */
@@ -404,22 +347,6 @@ function callError(status: number, raw: string, voice: string): RouteStartError 
 async function readBounded(res: Response, max: number): Promise<string> {
   const text = await res.text().catch(() => "");
   return new TextEncoder().encode(text).length > max ? "" : text;
-}
-
-/** Location 最後一段是 rtc_… 或 UUID；沒有時用 openai-session-id。 */
-export function callIdFrom(location: string | null, sessionHeader: string | null): string | null {
-  if (location) {
-    let path = location;
-    try {
-      path = new URL(location, "https://chatgpt.com").pathname;
-    } catch {
-      // 不是網址：當成路徑
-    }
-    const last = path.split("/").filter(Boolean).at(-1) ?? "";
-    if (/^rtc_[\w-]{1,128}$/.test(last) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(last)) return last;
-  }
-  const header = sessionHeader?.trim();
-  return header && /^[\w-]{1,128}$/.test(header) ? header : null;
 }
 
 /** 一個進行中的 live 工作階段。只在這個模組內。 */

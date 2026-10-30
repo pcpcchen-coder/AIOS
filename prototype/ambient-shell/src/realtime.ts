@@ -1,4 +1,5 @@
 import type { HomeControlResult } from "../shared/home.ts";
+import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type HostCall, type LiveCoreEvent, type StopEvidence } from "../shared/realtime-route.ts";
 import type { HomeControlArgs } from "./api.ts";
 import { GREETING_SETTLE_MS, type GreetingOnce } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
@@ -12,6 +13,11 @@ import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 // 使用者說出固定語句（「確認執行」或「取消」）才回覆 OpenAI，不需要按任何東西。
 // 家電控制（home_control）由本機核心執行；設為需要確認的設備用同一張確認卡，答案交給本機核心，不經 OpenAI。
 // 這是 API key 路徑的頁面模組；工具執行與確認卡在 src/realtime-tools.ts，ChatGPT 方案路徑（src/live-voice.ts）共用同一份。
+// MEM-3：記憶開著時，記憶的控制面是核心的旁路（server/apikey-call.ts），不是這個頁面：
+//  - 核心處理的工具（coreTools：recall_memory、delegate_task）在資料通道上一律略過，不計入 pendingTools；
+//  - 核心經 SSE 送來工具呼叫（realtime.host，例如還沒帶記憶時的交辦）與記憶事件（realtime.live）；
+//  - 撤銷時（closed{memory_revoked}）可靠停播並回報（POST /api/realtime/stopped），和 LiveVoice.revoke 同樣的順序；
+//  - session.*、system 角色項目只看 type：不存、不記 log、不經 SSE 或 HTTP 轉出（上游可能把 instructions 與記憶區塊回送到資料通道）。
 
 export type RealtimePhase = "off" | "connecting" | "listening" | "hearing" | "thinking" | "speaking";
 
@@ -56,7 +62,39 @@ export interface RealtimeDeps {
   playRemote(stream: MediaStream): () => void;
   /** 把 SDP offer 交給本機核心，取回 OpenAI 的 SDP answer。 */
   exchange(offerSdp: string): Promise<string>;
+  /** MEM-3：經 /api/realtime/start 決定的工作階段才有（核心的事件、工具呼叫、停播回報）；沒有時行為和 MEM-2 之前一樣。 */
+  core?: RealtimeCoreDeps;
 }
+
+/** MEM-3：API key 路徑和核心之間的接縫（同 LiveDeps 的對應成員）。 */
+export interface RealtimeCoreDeps {
+  /** 只收這個工作階段的 SSE realtime.host／realtime.live。回傳取消訂閱。 */
+  subscribe(handlers: { host(call: HostCall): void; core(event: LiveCoreEvent): void }): () => void;
+  hostResult(callId: string, output: Record<string, unknown>): Promise<void>;
+  /** POST /api/realtime/approval（確認卡開著時核心不開語音記憶卡，「取消」留給那張卡）。 */
+  approval(report: ApprovalReport): Promise<void>;
+  /** POST /api/realtime/stopped；回傳核心是否採用。 */
+  stopped(evidence: StopEvidence): Promise<boolean>;
+  /** POST /api/realtime/playback：資料通道收到播放結束（只會把語音確認時窗往後延）。 */
+  playback(): Promise<void>;
+  /** 播放靜音（核心要求暫停、撤銷時）。 */
+  setMuted(muted: boolean): void;
+  /** 播放元素在停播後是不是已暫停（核對用）。 */
+  audioPaused(): boolean;
+  /** 取消瀏覽器語音合成。 */
+  cancelSpeech(): void;
+  /** 說出結束原因（瀏覽器語音合成）。 */
+  speak(text: string): void;
+  /** 記憶事件（狀態、卡片 ID、固定句提示、交辦封鎖）交給主程式顯示；內容由主程式經 IPC 取得。 */
+  memoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" }>): void;
+  /** 停播並回報之後：顯示原因、清掉字幕與卡片；rebuild 而且核心採用了回報時主程式開一通新的（只一次）。 */
+  revoked(message: string, rebuild: boolean, accepted: boolean): void;
+  /** 核心處理、頁面略過的工具（POST /api/realtime/call 的回應帶來，整通固定）。 */
+  coreTools(): readonly string[];
+}
+
+/** MEM-3：重建的新通話第一句（固定、不含任何記憶內容；核心把它記進回音清單）。 */
+export const REBUILD_LINE = "好，已經更新了。";
 
 interface RealtimeOptions {
   /** 多久沒有任何說話就自動結束（毫秒），避免忘記關而持續計費；之後可用 setIdleMs 改。 */
@@ -68,6 +106,10 @@ interface RealtimeOptions {
    * 不加假的使用者訊息）。使用者先開口或打字就不打；改路徑時共用同一個物件，最多一次。
    */
   greeting?: GreetingOnce | null;
+  /** MEM-3：記憶撤銷後自動重建的通話：session.created 之後第一句是固定句（REBUILD_LINE），不問候。 */
+  rebuild?: boolean;
+  /** 重建固定句的語言版本（預設繁中原文）。 */
+  rebuildLine?: string;
 }
 
 interface ServerEvent {
@@ -110,6 +152,16 @@ export class RealtimeVoice {
   private greetTimer: ReturnType<typeof setTimeout> | null = null;
   /** 連線中（session.created 之前）打的字：連上後合併成一輪送出。 */
   private queuedText: string[] = [];
+  /** MEM-3：核心事件的訂閱（取消用）。 */
+  private unsubscribe: (() => void) | null = null;
+  /** MEM-3：核心要求暫停（更正、忘記 commit 前）：播放靜音到恢復或通話結束。 */
+  private held = false;
+  /** MEM-3：核心送來、頁面還在執行的工具。 */
+  private hostCalls = 0;
+  private readonly rebuild: boolean;
+  private readonly rebuildLine: string;
+  /** 確認卡狀態的回報要先於工具結果到達核心。 */
+  private approvalSync: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly callbacks: RealtimeCallbacks,
@@ -118,6 +170,8 @@ export class RealtimeVoice {
   ) {
     this.idleMs = options.idleMs;
     this.greeting = options.greeting ?? null;
+    this.rebuild = options.rebuild === true;
+    this.rebuildLine = options.rebuildLine ?? REBUILD_LINE;
     this.approvals = new ApprovalQueue(
       callbacks,
       {
@@ -128,6 +182,14 @@ export class RealtimeVoice {
         pendingChanged: (kind, delta) => {
           if (kind === "mcp") this.mcpPending = delta > 0 ? this.mcpPending + 1 : Math.max(0, this.mcpPending - 1);
           else this.homePending = delta > 0 ? this.homePending + 1 : Math.max(0, this.homePending - 1);
+        },
+        // MEM-3：確認卡狀態回報給核心（沒有核心接縫時不送）。
+        cardChanged: (report) => {
+          const core = this.deps.core;
+          if (!core) return;
+          const generation = this.generation;
+          const post = () => (generation === this.generation ? core.approval(report) : undefined);
+          this.approvalSync = this.approvalSync.then(post).catch(post).catch(() => undefined);
         },
         sendMcpApproval: (request, approve, reason) =>
           this.send({
@@ -188,6 +250,18 @@ export class RealtimeVoice {
         return;
       }
       this.mic = mic;
+      // MEM-3：先訂閱核心事件再交換 SDP（核心在回 answer 之前就可能送出記憶狀態）。
+      const core = this.deps.core;
+      if (core) {
+        this.unsubscribe = core.subscribe({
+          host: (call) => {
+            if (generation === this.generation) this.onHostCall(call, generation);
+          },
+          core: (event) => {
+            if (generation === this.generation) this.onCore(event);
+          },
+        });
+      }
       const peer = this.deps.createPeer();
       this.peer = peer;
       peer.ontrack = (e) => {
@@ -322,9 +396,12 @@ export class RealtimeVoice {
   private handle(event: ServerEvent): void {
     switch (event.type) {
       case "session.created": {
+        // 只看 type：session 的內容（instructions、工具、記憶區塊）不存、不轉出。
         this.setPhase("listening");
         const queued = this.queuedText.splice(0);
         if (queued.length) this.sendText(queued.join("\n"));
+        // MEM-3 重建：第一句是不含內容的固定句（不重念被忘記的內容），不問候。
+        if (this.rebuild && !queued.length) this.requestResponse({ instructions: `只說這一句，一字不改，不加字、不提問：「${this.rebuildLine}」` });
         this.scheduleGreeting();
         break;
       }
@@ -356,15 +433,21 @@ export class RealtimeVoice {
         break;
       case "output_audio_buffer.stopped":
       case "output_audio_buffer.cleared":
+        // MEM-3：帶記憶的通話補報播放結束（核心只會把語音確認時窗往後延）。
+        if (event.type === "output_audio_buffer.stopped" && this.deps.core?.coreTools().length) void this.deps.core.playback().catch(() => undefined);
         if (this.phase === "speaking") this.setPhase(this.responding ? "thinking" : "listening");
         if (this.endRequested && !this.responding) this.close("對話已結束。");
         break;
       case "response.output_audio_transcript.done":
         if (typeof event.transcript === "string" && event.transcript.trim()) this.callbacks.onAssistantTranscript(event.transcript.trim());
         break;
-      case "response.function_call_arguments.done":
-        void this.runTool(String(event.name ?? ""), String(event.call_id ?? ""), String(event.arguments ?? "{}"));
+      case "response.function_call_arguments.done": {
+        const name = String(event.name ?? "");
+        // MEM-3：核心處理的工具（recall_memory、delegate_task）：頁面略過，不計入 pendingTools；結果由核心經旁路交回。
+        if (this.deps.core?.coreTools().includes(name)) break;
+        void this.runTool(name, String(event.call_id ?? ""), String(event.arguments ?? "{}"));
         break;
+      }
       case "conversation.item.done":
       case "conversation.item.added": {
         const item = event.item as { type?: string; id?: string; server_label?: string; name?: string; arguments?: string } | undefined;
@@ -488,10 +571,106 @@ export class RealtimeVoice {
     if (this.channel?.readyState === "open") this.channel.send(JSON.stringify(event));
   }
 
+  /** MEM-3：核心事件（帶記憶的 API key 通話）。 */
+  private onCore(event: LiveCoreEvent): void {
+    const core = this.deps.core;
+    if (!core) return;
+    switch (event.kind) {
+      case "memory":
+      case "memory_card":
+      case "memory_notice":
+      case "delegate_blocked":
+        core.memoryEvent(event);
+        break;
+      case "hold":
+        // 更正或忘記 commit 前：立刻把播放靜音（核心同時停止送出）；commit 失敗才恢復。
+        this.held = event.active;
+        core.setMuted(event.active);
+        break;
+      case "tool_unknown":
+        this.callbacks.onToolActivity(`${RESULT_UNKNOWN_TEXT}（${event.name === "home_control" ? "家電指令" : "交辦工作"}沒有在時限內回報）`);
+        break;
+      case "closed":
+        if (event.reason === "memory_revoked") {
+          void this.revoke(event.message, event.rebuild === true);
+          break;
+        }
+        // 旁路斷線：核心已經掛斷；結束、說出原因。不改路徑。
+        if (event.reason !== "ended") core.speak(event.message);
+        this.close(event.message);
+        break;
+      case "started":
+      case "transcript":
+      case "delegation":
+        break;
+    }
+  }
+
+  /** MEM-3：核心請頁面執行一個工具（還沒帶記憶時的交辦）：同一個 executeRealtimeTool、同一份 callbacks。 */
+  private onHostCall(call: HostCall, generation: number): void {
+    const core = this.deps.core;
+    if (!core) return;
+    this.hostCalls += 1;
+    const post = (output: Record<string, unknown>) => {
+      this.hostCalls = Math.max(0, this.hostCalls - 1);
+      if (generation !== this.generation) return;
+      this.resetIdle();
+      void this.approvalSync.then(() => (generation === this.generation ? core.hostResult(call.call_id, output) : undefined)).catch(() => undefined);
+    };
+    void executeRealtimeTool(call.name, call.arguments, {
+      callbacks: this.callbacks,
+      approvals: this.approvals,
+      generation,
+      stale: (g) => g !== this.generation,
+      end: () => {
+        this.endRequested = true;
+        post({ ok: true });
+      },
+      deliver: post,
+    });
+  }
+
+  /**
+   * MEM-3：記憶撤銷後可靠停播（16 §8，和 LiveVoice.revoke 同樣的順序）：generation++ → 播放先靜音、暫停、拿掉 srcObject →
+   * 停掉每個遠端軌道 → peer.close、channel.close、麥克風軌道停止 → 取消語音合成。核對（audio 已暫停、peer 已關、遠端軌道都 ended）
+   * 後把證據與花費毫秒數 POST stopped，再交給主程式（清字幕、重建）。不呼叫 end（核心已經結束這個工作階段並掛斷）。
+   * 已在執行的工具（web_search、家電）因 generation 檢查被丟掉。
+   */
+  async revoke(message: string, rebuild: boolean): Promise<void> {
+    const core = this.deps.core;
+    if (!this.on || !core) return;
+    const started = Date.now();
+    this.generation++;
+    core.setMuted(true);
+    this.stopAudio?.();
+    this.stopAudio = null;
+    const peer = this.peer;
+    const receivers = peer?.getReceivers?.() ?? [];
+    for (const receiver of receivers) receiver.track?.stop();
+    // 已經靜音並拆掉播放：teardown 不要再解除靜音。
+    this.held = false;
+    this.teardown();
+    core.cancelSpeech();
+    this.setPhase("off");
+    const evidence: StopEvidence = {
+      paused: core.audioPaused(),
+      peer_closed: !peer || peer.connectionState === "closed",
+      tracks_ended: receivers.every((r) => !r.track || r.track.readyState === "ended"),
+      ms: Date.now() - started,
+    };
+    let accepted = false;
+    try {
+      accepted = (await core.stopped(evidence)) === true;
+    } catch {
+      // 回報送不到：核心在 1.5 秒後強制靜音並停用這條路徑的記憶。
+    }
+    core.revoked(message, rebuild && accepted, accepted);
+  }
+
   private resetIdle(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
-      if (this.responding || this.phase === "speaking" || this.pendingTools > 0 || this.mcpPending > 0 || this.homePending > 0) {
+      if (this.responding || this.phase === "speaking" || this.pendingTools > 0 || this.mcpPending > 0 || this.homePending > 0 || this.hostCalls > 0) {
         this.resetIdle();
         return;
       }
@@ -515,6 +694,11 @@ export class RealtimeVoice {
     this.endRequested = false;
     this.cancelGreetTimer();
     this.queuedText = [];
+    this.unsubscribe?.();
+    this.unsubscribe = null;
+    if (this.held) this.deps.core?.setMuted(false);
+    this.held = false;
+    this.hostCalls = 0;
     this.channel?.close();
     this.channel = null;
     this.peer?.close();
