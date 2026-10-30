@@ -449,5 +449,7 @@
   "沒有刪除明文備份": "The plaintext backup was not deleted",
   "只有已結束的任務可以重做": "Only finished tasks can be redone",
   "這個任務的內容這次無法解開，不能重做": "This task's content cannot be decrypted right now, so it cannot be redone",
-  "這是其他家人的任務；請從選單列「成果紀錄…」打開後再重做": "This task belongs to another family member; open it from the menu bar item “Results history…” to redo it"
+  "這是其他家人的任務；請從選單列「成果紀錄…」打開後再重做": "This task belongs to another family member; open it from the menu bar item “Results history…” to redo it",
+  "這次無法解開加密的任務內容（金鑰不可用）；內容仍安全保存在這台 Mac，請稍後再試": "The encrypted task content could not be decrypted this time (key unavailable); it is still stored safely on this Mac. Please try again later.",
+  "正在更新記憶，請稍後再試": "Memory is updating; try again shortly"
 }

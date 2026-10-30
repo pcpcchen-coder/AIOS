@@ -31,7 +31,7 @@ import { classify, settingsReply } from "./intent.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
-import { ProtectedTasks, vaultNotice } from "./protected-tasks.ts";
+import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
 import type { TasksRequest, TasksResponse, VaultView } from "../shared/protected-tasks.ts";
 import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, presenceLabel, receiptsText } from "./memory-view.ts";
 import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
@@ -55,6 +55,7 @@ import {
   updateLiveCounts,
   type ConfirmDetail,
   type ViewActions,
+  MAX_LISTED,
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
 import {
@@ -85,6 +86,8 @@ interface DesktopBridge {
   onMemoryChange?(listener: () => void): () => void;
   /** MEM-4a：加密保存的任務（真實標題、成果、App 內搜尋、重做、刪除明文備份）；只經 IPC。舊版 App 與瀏覽器版沒有這一項。 */
   tasks?(request: TasksRequest): Promise<TasksResponse>;
+  /** MEM-4c 審查 M1：核心丟棄解密內容（只有原因，不含內容）。舊版 App 與瀏覽器版沒有這一項。 */
+  onTasksPlaintextDropped?(listener: (reason: PlaintextDropReason) => void): () => void;
 }
 declare global {
   interface Window {
@@ -1057,6 +1060,15 @@ const historyView = new HistoryView({
   browserLink: !window.nousDesktop,
 });
 
+// MEM-4c 審查 M1：核心丟棄解密內容（鎖定、睡眠、閒置、關閉記憶、結束）時，畫面的快取與成果紀錄也清掉；
+// 正在看受保護成果就收起（只關畫面，任務照常）。之後只為正在顯示的進度卡重讀，不呼叫 loadAll。
+window.nousDesktop?.onTasksPlaintextDropped?.((reason) => applyPlaintextDrop(reason, {
+  protectedTasks, tasks, artifacts, artifactErrors, history: historyView,
+  surface: shell.surface ? { kind: shell.surface.kind, task_id: shell.surface.task_id ?? null } : null,
+  dismiss: () => dispatch({ type: "dismiss" }),
+  render,
+}));
+
 function openHistory(requestId: string, query = "", fromMenu = false): void {
   // MEM-4a（George 的 D2）：只有選單列「成果紀錄…」打開時，才請核心給看其他家人的帶記憶任務（核心再核對點擊時間）。
   protectedTasks.setAllScope(fromMenu);
@@ -1555,7 +1567,7 @@ function onServerEvent(event: ServerEvent): void {
     applySettings(event.settings);
     tasks.clear();
     for (const t of event.tasks) tasks.set(t.task_id, t);
-    void protectedTasks.loadAll();
+    // MEM-4c 審查 M1／minor 5：不一次讀全部任務的真實內容；只為畫面上正在顯示的讀（renderProgress、前景任務）。
     void refreshVault();
     render();
     return;
@@ -1924,6 +1936,7 @@ function showCommandError(message: string): void {
 
 function render(): void {
   const fgRaw = shell.foreground_task_id ? tasks.get(shell.foreground_task_id) : undefined;
+  if (fgRaw) protectedTasks.want([fgRaw]);
   const fg = fgRaw ? shown(fgRaw) : undefined;
   const fgProgress = fg ? computeProgress(fg) : null;
   const live = realtime.current;
@@ -2207,6 +2220,7 @@ function renderSurface(): void {
   }
 
   const rawTask = s.task_id ? tasks.get(s.task_id) : undefined;
+  if (rawTask) protectedTasks.want([rawTask]);
   const task = rawTask ? shown(rawTask) : undefined;
   const key = getLocale() + ":" + (
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
@@ -2237,7 +2251,10 @@ function renderSurface(): void {
   else if (s.kind === "history") el = historyView.element;
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
   else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop });
-  else if (s.kind === "progress") el = renderProgress([...tasks.values()].map(shown), s.message, actions);
+  else if (s.kind === "progress") {
+    protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));
+    el = renderProgress([...tasks.values()].map(shown), s.message, actions);
+  }
   else if (s.kind === "artifact" && task) {
     const artifactId = s.artifact_id!;
     el = renderArtifact(task, artifacts.get(artifactId) ?? null, artifactErrors.get(artifactId) ?? null, actions);

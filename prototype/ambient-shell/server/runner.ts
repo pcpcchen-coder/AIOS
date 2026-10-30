@@ -112,7 +112,8 @@ export class TaskRunner {
    */
   revokeMemory(taskIds: readonly string[]): void {
     for (const taskId of taskIds) {
-      const task = this.store.get(taskId);
+      // MEM-4c 審查 minor 2：只看狀態，不解密（publicGet 是外殼）。
+      const task = this.store.publicGet(taskId);
       if (!task) continue;
       this.facts.delete(taskId);
       if (task.status === "queued") {
@@ -143,7 +144,8 @@ export class TaskRunner {
 
   /** 「停止任務」：排隊中直接取消；執行中先標為 cancelling 再中止請求。 */
   cancel(taskId: string): Task | null {
-    const task = this.store.get(taskId);
+    // MEM-4c 審查 minor 2：只看狀態，不解密；已結束的任務回外殼（呼叫端只用 task_id 與狀態）。
+    const task = this.store.publicGet(taskId);
     if (!task) return null;
     if (task.status === "queued") {
       this.queue = this.queue.filter((id) => id !== taskId);

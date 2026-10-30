@@ -1,4 +1,4 @@
-// 只開放五個動作給網頁：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示、家人辨識、記憶與加密任務的請求。
+// 只開放五個動作給網頁（另有幾個不含內容的通知）：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示、家人辨識、記憶與加密任務的請求。
 // identity 與 memory 只是傳輸：發送者、op 白名單與形狀在主程序檢查（desktop/identity-ipc.mjs、desktop/memory-ipc.mjs），
 // 資料、比對與記憶規則在核心（ADR-0001 §2.1、docs/16 §9）。
 const { contextBridge, ipcRenderer } = require("electron");
@@ -27,6 +27,15 @@ contextBridge.exposeInMainWorld("nousDesktop", {
   memory: (request) => ipcRenderer.invoke("nous:memory", request),
   // MEM-4a：加密保存的任務（真實標題、成果、App 內搜尋、重做、刪除明文備份）只經這個通道給主視窗。
   tasks: (request) => ipcRenderer.invoke("nous:tasks", request),
+  // MEM-4c 審查 M1：核心丟棄已結束受保護任務的解密內容（鎖定、睡眠、閒置、關閉記憶、結束）。只傳白名單裡的原因，不含內容；
+  // 頁面收到後清掉自己的快取與成果紀錄畫面。
+  onTasksPlaintextDropped: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const reasons = ["os_lock", "suspend", "idle", "memory_off", "memory_closed", "quit"];
+    const listener = (_event, payload) => { if (reasons.includes(payload?.reason)) callback(payload.reason); };
+    ipcRenderer.on("tasks:plaintext-dropped", listener);
+    return () => ipcRenderer.removeListener("tasks:plaintext-dropped", listener);
+  },
   // 本次人物世代改變的通知（不含內容）；頁面收到後用 status 讀新狀態（不開記憶檔）。
   onMemoryChange: (callback) => {
     if (typeof callback !== "function") return () => {};

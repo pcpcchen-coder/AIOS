@@ -42,7 +42,7 @@ export interface ViewActions {
   openHistory(): void;
 }
 
-const MAX_LISTED = 8;
+export const MAX_LISTED = 8;
 
 type RawText = { readonly raw: string };
 export type Child = Node | string | RawText | null | undefined | false;

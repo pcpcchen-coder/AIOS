@@ -1,8 +1,8 @@
 // HIST-1：成果紀錄的搜尋（一般任務與成果，明文）。
 // - 每次查詢都在記憶體內比對，不建立、不寫入任何搜尋索引；查詢文字不寫 log（呼叫端只記筆數）。
 // - 比對沿用記憶檢索的方式（server/search-terms.ts）：簡繁對照、中文二字片段、英文詞。
-// - 來源可插拔（HistorySource）：MEM-4c 的受保護成果之後以另一個來源（protected: true）併入同一個搜尋，
-//   這裡只處理 TaskStore 的一般任務。
+// - 來源可插拔（HistorySource）。MEM-4c：加密保存的任務（macOS App）改走 server/protected-index.ts 的 RAM 倒排索引，
+//   排序與片段沿用這裡的 prepareFields／scoreFields／scoreDocument（同一份程式，結果逐筆相同）；受保護內容不進 CONTENT_CACHE。
 
 import { foldForSearch, queryTerms } from "./search-terms.ts";
 import type { Artifact, ExecutorMode, Task, TaskStatus } from "../shared/types.ts";
@@ -122,29 +122,53 @@ export function forgetHistoryArtifact(artifactId: string): void {
   CONTENT_CACHE.delete(artifactId);
 }
 
+/** MEM-4c：丟棄記憶體裡全部的成果純文字快取（OS 鎖定、閒置、關閉記憶、結束 App 時，和受保護內容一起丟）。 */
+export function forgetAllHistoryContent(): number {
+  const count = CONTENT_CACHE.size;
+  CONTENT_CACHE.clear();
+  return count;
+}
+
+/** 測試用：快取裡目前有幾筆成果純文字。 */
+export function historyContentCacheSize(): number {
+  return CONTENT_CACHE.size;
+}
+
+export type HistoryField = Field;
+/** 一個可比對的欄位（folded 是 foldForSearch 的結果，長度和 text 相同）。 */
+export interface PreparedField { field: Field; text: string; folded: string }
+
 interface Prepared {
   doc: HistoryDocument;
   source: HistorySource;
-  fields: { field: Field; text: string; folded: string }[];
+  fields: PreparedField[];
 }
 
-function prepare(doc: HistoryDocument, source: HistorySource): Prepared {
-  const fields: Prepared["fields"] = [];
+/**
+ * 一筆紀錄的可比對欄位（順序固定：標題、成果內容、步驟、註記）。cache=false（MEM-4c 的受保護內容）時不讀寫 CONTENT_CACHE，
+ * 純文字只留在呼叫端（倒排索引或這一頁的片段），丟棄時不必另外清快取。
+ */
+export function prepareFields(doc: HistoryDocument, cache = true): PreparedField[] {
+  const fields: PreparedField[] = [];
   const add = (field: Field, text: string) => {
     if (text) fields.push({ field, text, folded: foldForSearch(text) });
   };
   add("title", doc.task.title);
   if (doc.artifact) {
-    const content = contentField(doc.artifact);
+    const content = cache ? contentField(doc.artifact) : (() => { const text = markdownToPlain(doc.artifact!.content); return { text, folded: foldForSearch(text) }; })();
     if (content.text) fields.push({ field: "content", text: content.text, folded: content.folded });
   }
   // 「規劃步驟」那一步是系統加的，不是任務內容，但標題就是普通文字；一併比對無害。
   for (const step of doc.task.steps) add("step", step.title);
   if (doc.artifact) for (const note of [...doc.artifact.assumptions, ...doc.artifact.capability_gaps]) add("notes", note);
-  return { doc, source, fields };
+  return fields;
 }
 
-function passesFilters(task: Task, filters: HistoryFilters): boolean {
+function prepare(doc: HistoryDocument, source: HistorySource, cache = true): Prepared {
+  return { doc, source, fields: prepareFields(doc, cache) };
+}
+
+export function passesFilters(task: Task, filters: HistoryFilters): boolean {
   if (filters.statuses.length > 0 && !filters.statuses.includes(task.status)) return false;
   if (filters.modes.length > 0 && !filters.modes.includes(task.mode)) return false;
   const created = Date.parse(task.created_at);
@@ -210,8 +234,7 @@ interface Scored {
  * 有兩個以上的查詢詞時，至少要命中一半才算（避免只命中一個二字片段的雜訊）。
  */
 export function searchHistory(sources: readonly HistorySource[], filters: HistoryFilters & { cursor: number; limit: number }): HistoryPage {
-  const terms = queryTerms(filters.q);
-  const phrase = foldForSearch(filters.q.normalize("NFKC")).replace(/\s+/g, " ").trim();
+  const { terms, phrase } = searchTermsOf(filters.q);
   const hasQuery = filters.q.trim() !== "";
   const sourceList = sources.map((s) => ({ id: s.id, protected: s.protected }));
   const next = filters.cursor + filters.limit;
@@ -262,18 +285,27 @@ function baseItem(doc: HistoryDocument, source: HistorySource): Omit<HistoryItem
   };
 }
 
-function listItem(doc: HistoryDocument, source: HistorySource): HistoryItem {
-  const content = doc.artifact ? contentField(doc.artifact).text : "";
+export function listItem(doc: HistoryDocument, source: HistorySource, cache = true): HistoryItem {
+  const content = doc.artifact ? (cache ? contentField(doc.artifact).text : markdownToPlain(doc.artifact.content)) : "";
   return { ...baseItem(doc, source), score: 0, title_matches: [], snippet: content ? makeSnippet("content", content, []) : null };
 }
 
-function scoreDocument(p: Prepared, terms: readonly string[], phrase: string): { coverage: number; score: number; item: HistoryItem } | null {
+/** 查詢詞與整句（searchHistory 和 MEM-4c 的受保護搜尋共用同一份計算）。 */
+export function searchTermsOf(q: string): { terms: string[]; phrase: string } {
+  return { terms: queryTerms(q), phrase: foldForSearch(q.normalize("NFKC")).replace(/\s+/g, " ").trim() };
+}
+
+/**
+ * 只用折疊後的欄位計算排序用的命中比例與分數（不需要原文）。不算命中回 null。
+ * MEM-4c 的倒排索引用它排序，片段則只為這一頁解密原文後再用 scoreDocument 產生，所以兩邊的結果逐筆相同。
+ */
+export function scoreFields(fields: readonly { field: Field; folded: string }[], terms: readonly string[], phrase: string): { coverage: number; score: number } | null {
   if (terms.length === 0) return null;
   let score = 0;
   let hit = 0;
   for (const term of terms) {
     let best = 0;
-    for (const f of p.fields) if (WEIGHT[f.field] > best && f.folded.includes(term)) best = WEIGHT[f.field];
+    for (const f of fields) if (WEIGHT[f.field] > best && f.folded.includes(term)) best = WEIGHT[f.field];
     if (best > 0) hit += 1;
     score += best;
   }
@@ -281,8 +313,20 @@ function scoreDocument(p: Prepared, terms: readonly string[], phrase: string): {
   const coverage = hit / terms.length;
   if (terms.length >= 2 && coverage < 0.5) return null;
   if (phrase.length >= 2) {
-    for (const f of p.fields) if (f.folded.includes(phrase)) score += WEIGHT[f.field] * 2;
+    for (const f of fields) if (f.folded.includes(phrase)) score += WEIGHT[f.field] * 2;
   }
+  return { coverage, score };
+}
+
+/** 一筆紀錄的完整結果（含標題標示與片段）；cache=false 時不碰 CONTENT_CACHE。 */
+export function scoreHistoryDocument(doc: HistoryDocument, source: HistorySource, terms: readonly string[], phrase: string, cache = true): { coverage: number; score: number; item: HistoryItem } | null {
+  return scoreDocument(prepare(doc, source, cache), terms, phrase);
+}
+
+function scoreDocument(p: Prepared, terms: readonly string[], phrase: string): { coverage: number; score: number; item: HistoryItem } | null {
+  const ranked = scoreFields(p.fields, terms, phrase);
+  if (!ranked) return null;
+  const { coverage, score } = ranked;
   const title = p.fields.find((f) => f.field === "title");
   const titleMatches = title ? findMatches(title.folded, terms) : [];
   // 片段：成果內容優先，其次步驟、註記；都沒有命中（只命中標題）時給內容開頭。
