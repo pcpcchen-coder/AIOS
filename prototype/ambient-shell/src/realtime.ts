@@ -86,7 +86,7 @@ export interface RealtimeCoreDeps {
   /** 說出結束原因（瀏覽器語音合成）。 */
   speak(text: string): void;
   /** 記憶事件（狀態、卡片 ID、固定句提示、交辦封鎖）交給主程式顯示；內容由主程式經 IPC 取得。 */
-  memoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" }>): void;
+  memoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void;
   /** 停播並回報之後：顯示原因、清掉字幕與卡片；rebuild 而且核心採用了回報時主程式開一通新的（只一次）。 */
   revoked(message: string, rebuild: boolean, accepted: boolean): void;
   /** 核心處理、頁面略過的工具（POST /api/realtime/call 的回應帶來，整通固定）。 */
@@ -580,6 +580,8 @@ export class RealtimeVoice {
       case "memory_card":
       case "memory_notice":
       case "delegate_blocked":
+      case "delegate_card":
+      case "delegated":
         core.memoryEvent(event);
         break;
       case "hold":

@@ -25,6 +25,7 @@ Rules:
 | 4 | ChatGPT-plan voice memory MEM-2 | [MEM-2 §4](memory-mem2-2026-10-30.en.md#4-mac-test-steps-all-unexecuted-no-pass-may-be-claimed) steps 0–11 | **Step 5 recording proves no late old audio after revocation** | Recording rig (§3); a second playback device; Codex sign-in | Long |
 | 5 | API key voice memory MEM-3 | [MEM-3 §5](memory-mem3-2026-10-30.en.md#5-mac-test-steps-none-run-must-not-be-claimed-as-passed) steps 0–15 | **Wire probes P1 and P2 hold**, and the step 5 recording as in MEM-2 | Same as MEM-2; a real `OPENAI_API_KEY` (billed) | Long |
 | 6 | Wake word spike WK-00 | [WK-00 §7](wk-00-spike-2026-10-29.en.md#7-mac-test-steps-for-george) steps 1–6 | Family positives produce hits; TV negatives run for at least 8 hours | `sox`; family members; TV running overnight | Long (includes 8 unattended hours) |
+| 7 (added 2026-10-30) | Voice delegation with memory MEM-4b | [MEM-4b §5](memory-mem4b-2026-10-30.en.md#5-mac-gate-none-of-it-has-been-run-it-cannot-be-claimed-as-passed) steps 1–11 | Calibrate the ASR grace and similarity threshold; on the API key route committed / item_id / response_id match; record short-affirmative and TV bindings honestly | Same as MEM-2/MEM-3; tasks stored encrypted; `NOUS_MEMORY_ROUTES` includes `task` | Medium |
 
 ## 2. Why this order
 
@@ -32,7 +33,8 @@ Rules:
 2. **MEM-1 second.** MEM-2 and MEM-3 build on MEM-1's Keychain, file lock, and memory management screen. If those foundations fail on the Mac, the voice memory steps mean nothing.
 3. **ID-02 third.** It verifies look to talk and family recognition. The "face candidate" steps of MEM-1 step 5, MEM-2 step 2, and MEM-3 step 2 use the same chain. Confirming recognition and greetings first makes later failures easier to attribute to the right layer.
 4. **MEM-2, then MEM-3.** Both use the same recording rig, so doing them on the same day is recommended. If wire probe P1 or P2 in MEM-3 step 0 fails, MEM-3 is not released and steps 1–15 need not continue (record the result and stop).
-5. **WK-00 independently.** It is a command-line spike not wired into the product and can be scheduled separately. The 8-hour TV negative run suits an unattended evening.
+5. **MEM-4b after MEM-3 (added 2026-10-30).** It reuses the MEM-2 and MEM-3 voice routes and MEM-4a's task encryption; if those prerequisites fail on the Mac, MEM-4b results mean nothing. MEM-4a's own Mac steps are in [MEM-4a §5](memory-mem4a-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed); this runbook does not consolidate them separately.
+6. **WK-00 independently.** It is a command-line spike not wired into the product and can be scheduled separately. The 8-hour TV negative run suits an unattended evening.
 
 ## 3. Shared preparation (once)
 
@@ -165,6 +167,24 @@ Prerequisites: the same rig and fictional people as batch 4; set a real `OPENAI_
 - [ ] 15. Separate release: remove `NOUS_MEMORY_ROUTES`; the API key route shows that memory is not enabled for this route, the log shows no sideband opened, and memory management does not list API key realtime voice.
 
 Main release condition: P1 and P2 hold, and the step 5 recording proves no late old audio after revocation. The 11 defaults in MEM-3 §3 still await George's confirmation; decide them together after the hardware tests.
+
+## 8a. Supplementary batch: MEM-4b voice delegation with memory (added 2026-10-30)
+
+Prerequisites: the same rig and fictional people as batches 4 and 5; tasks stored encrypted (MEM-4a); `NOUS_MEMORY_ROUTES=task` in `.env` (`task,api_key` for the API key route); memory on, with the task engine (Claude or ChatGPT) allowed. The full conditions for every step are in [MEM-4b §5](memory-mem4b-2026-10-30.en.md#5-mac-gate-none-of-it-has-been-run-it-cannot-be-claimed-as-passed).
+
+- [ ] 1. Calibrate grace: at least 10 runs each of "ASR first, delegation second" and "delegation first, ASR second"; record the distribution of the gap.
+- [ ] 2. ASR title quality: 10 sentences each in Chinese and English; record how titles differ from what was said, and how often similarity falls below the threshold and a card appears.
+- [ ] 3. Echo while the model speaks: no task may be created from the model's speech.
+- [ ] 4. A TV or bystander says something that sounds like a delegation: record which sentence is bound.
+- [ ] 5. Short affirmatives: "幫我規劃晚餐" (plan dinner for me) → the model asks → "好" (OK); only "好"; a different request inserted in between; "不要" (don't) and "等一下" (wait) never delegate.
+- [ ] 6. No consent: live without codex consent can still do protected delegation; API key without `openai_realtime` consent follows M15.
+- [ ] 7. Keychain refusal (tasks not stored encrypted): no protected delegation.
+- [ ] 8. Forget after delegation: the task stops with `memory_revoked`; a person change or ending the call: the task continues.
+- [ ] 9. Record the completion announcement: no other family member's memory-carrying title is spoken.
+- [ ] 10. API key P2 mapping: the `item_id` of `committed`, the `response.id` of `response.created` and the `response_id` of `function_call` match; if not, protected delegation on the API key route is not released.
+- [ ] 11. Protected original-sentence card: an SSE capture contains no sentence; "Delegate" carries memory; with the flags off the card is the same as in MEM-4a.
+
+Main release criteria: the mapping and timing in steps 1 and 10 hold; wrong guesses in steps 4 and 5 are recorded honestly, and George decides whether to accept them.
 
 ## 9. Batch 6: WK-00 wake word spike
 

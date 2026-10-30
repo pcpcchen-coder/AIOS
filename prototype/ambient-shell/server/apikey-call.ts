@@ -18,13 +18,22 @@ import type { SidebandSocket } from "./sideband.ts";
 //  - 撤銷有兩道停止：renderer 停播回報（POST /api/realtime/stopped，1.5 秒），以及核心 POST /realtime/calls/{id}/hangup。
 //    停播回報逾時就強制靜音，並停用這條路徑的記憶到重新啟動。
 //  - recall_memory 與 delegate_task 由核心從旁路處理（CORE_TOOLS；頁面略過）；交辦政策集中在 delegatePolicy。
+//  - MEM-4b：task 與 api_key 都放行時，delegate_task 走受保護的語音交辦：response.created 記下觸發它的使用者項目（最近一個
+//    committed 的麥克風項目；打字或核心送出的一句沒有可信的語音），function_call 依 response_id 找回那個項目，只綁那一句的
+//    語音辨識逐字稿。核心處理工具結果之後的接續回應沿用原本的觸發項目（同一輪）。
 // log 只記事件類型、原因與數字，不記使用者的話、記憶內容或 instructions。
 
 /** 旁路的最近一則使用者語音（used：已經當過某個交辦的原句）。 */
 type UserFinal = { text: string; used: boolean };
 
-/** 等待中的回應請求（核心要模型說的一句，或工具結果之後請模型接著說）。eventId：送出時配上的用戶端事件 ID。 */
-type Speak = { response: Record<string, unknown> | null; eventId?: string };
+/**
+ * 等待中的回應請求（核心要模型說的一句，或工具結果之後請模型接著說）。eventId：送出時配上的用戶端事件 ID。
+ * trigger：MEM-4b 這個回應沿用的觸發項目（工具結果之後的接續回應沿用原本那一句；核心要念的句子是 null）。
+ */
+type Speak = { response: Record<string, unknown> | null; eventId?: string; trigger?: string | null };
+
+/** MEM-4b：最近的使用者輸入：committed＝麥克風緩衝提交的項目；typed＝資料通道上的 user 文字項目（打字、通知）。 */
+type LastInput = { kind: "committed"; itemId: string } | { kind: "typed" };
 
 /** 等 session.updated 的結果：ok＝已確認；rejected＝上游回了這個 session.update 的錯誤；timeout；lost＝旁路斷了；aborted＝撤銷。 */
 export type UpdateOutcome = "ok" | "rejected" | "timeout" | "lost" | "aborted";
@@ -76,6 +85,11 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
   private readonly speakQueue: Speak[] = [];
   private lastUserFinal: UserFinal | null = null;
   private recalls = 0;
+  /** MEM-4b：最近的使用者輸入與每個回應的觸發項目（null＝不是語音觸發）。 */
+  private lastInput: LastInput | null = null;
+  private readonly triggers = new Map<string, string | null>();
+  /** MEM-4b 審查 minor 4：核心送出的 response.create 的標記（response.metadata.nous_trigger）→ 它沿用的觸發項目。 */
+  private readonly coreTags = new Map<string, string | null>();
   /** 問候（頁面送出）之後才問臉部候選：armed＝核心知道要問候了；inflight＝問候那一輪已開始。 */
   private greeting: { named: boolean; phase: "armed" | "inflight" } | null = null;
   private readonly unhandled = new Set<string>();
@@ -125,6 +139,7 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
         if (event.item_id) {
           this.committed.add(event.item_id);
           if (this.committed.size > 200) this.committed.delete(this.committed.values().next().value!);
+          this.lastInput = { kind: "committed", itemId: event.item_id };
         }
         break;
       case "speech_started":
@@ -139,7 +154,7 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
         if (event.text.trim()) {
           this.lastUserFinal = { text: event.text.trim(), used: false };
           this.recalls = 0;
-          this.memory.onUserFinal(event.text, this.ctx.now());
+          this.memory.onUserFinal(event.text, this.ctx.now(), event.item_id);
         }
         break;
       case "assistant_final":
@@ -148,11 +163,17 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
       case "item_added":
         // typed／system：頁面打字、通知或背景資料，不是語音，不解析成記憶指令（和 MEM-2 打字不解析一致）。
         // 打字之後，之前的語音原句不再是「觸發交辦的那一句」：交辦卡不顯示過時的原句。
-        if (event.source === "typed") this.lastUserFinal = null;
+        if (event.source === "typed") {
+          this.lastUserFinal = null;
+          // MEM-4b：打字之後，之前的語音原句都不能再當交辦原句；接著的回應不是語音觸發。
+          this.lastInput = { kind: "typed" };
+          this.memory.typedInput?.();
+        }
         break;
       case "response":
         if (event.phase === "created") {
           this.responding = true;
+          this.noteTrigger(event.response_id, event.core_tag);
           if (this.greeting?.phase === "armed") this.greeting.phase = "inflight";
         } else {
           this.responding = false;
@@ -169,7 +190,7 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
         if (event.phase === "stopped") this.memory.onAssistantAudioDone(this.ctx.now());
         break;
       case "function_call":
-        if ((CORE_TOOLS as readonly string[]).includes(event.name)) void this.coreTool(event.name as CoreToolName, event.call_id, event.arguments);
+        if ((CORE_TOOLS as readonly string[]).includes(event.name)) void this.coreTool(event.name as CoreToolName, event.call_id, event.arguments, event.response_id);
         break;
       case "error":
         // 只處理指回核心自己事件的錯誤（error.event_id）；頁面請求的錯誤由頁面自己處理。
@@ -181,7 +202,7 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
           this.awaiting = null;
           if (event.code && /active_response/.test(event.code)) {
             // 和頁面的回應撞在一起：放回佇列最前面（換新的 event_id），等那一輪結束再送。
-            this.speakQueue.unshift({ response: speak.response });
+            this.speakQueue.unshift({ response: speak.response, trigger: speak.trigger ?? null });
             this.responding = true;
           } else {
             this.deps.log?.(`即時語音（API key）：核心的 response.create 被拒絕（${(event.code ?? "").slice(0, 60)}），不重送`);
@@ -194,8 +215,27 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
     }
   }
 
+  /**
+   * MEM-4b：記下這個回應的觸發項目。核心送出的 response.create 帶 response.metadata.nous_trigger（審查 minor 4：用上游回送的標記對應，
+   * 不靠送出的先後）：工具結果之後的接續回應沿用原本那一句，核心要念的句子是 null；標記對不上任何核心請求時也是 null。
+   * 其他（頁面或伺服器 VAD）：最近的輸入是麥克風提交的項目就是它，打字是 null。
+   */
+  private noteTrigger(responseId: string | null, coreTag: string | null): void {
+    if (!responseId) return;
+    let trigger: string | null;
+    if (coreTag !== null) {
+      trigger = this.coreTags.get(coreTag) ?? null;
+      this.coreTags.delete(coreTag);
+    } else trigger = this.lastInput?.kind === "committed" ? this.lastInput.itemId : null;
+    this.triggers.set(responseId, trigger);
+    if (this.triggers.size > 64) this.triggers.delete(this.triggers.keys().next().value!);
+  }
+
   /** 核心處理的工具（recall_memory、delegate_task）：結果經旁路交回，再請模型接著說。 */
-  private async coreTool(name: CoreToolName, callId: string, rawArgs: string): Promise<void> {
+  private async coreTool(name: CoreToolName, callId: string, rawArgs: string, responseId: string | null = null): Promise<void> {
+    const arrivedAt = this.ctx.now();
+    /** MEM-4b：觸發這個回應的使用者項目（沒有 response_id 或找不到時 null：沒有可信的語音）。 */
+    const trigger = responseId ? this.triggers.get(responseId) ?? null : null;
     let args: Record<string, unknown> = {};
     try {
       const parsed = JSON.parse(rawArgs || "{}") as unknown;
@@ -213,6 +253,18 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
         output = await port.recall(typeof args.query === "string" ? args.query : "", this.abort.signal);
         this.deps.log?.(`即時語音（API key）：recall_memory ${output.ok === false ? "沒有取用" : "完成"}`);
       }
+    } else if (this.memory.delegatePort?.()) {
+      // MEM-4b：受保護的語音交辦（task 與 api_key 都放行、這通有記憶規則）。只綁觸發這個回應的那一句；模型描述只記字數。
+      const outcome = await this.memory.delegatePort()!.delegate({ args: rawArgs, arrivedAt, itemId: trigger });
+      if (this.lastUserFinal) this.lastUserFinal.used = true;
+      this.deps.log?.(`即時語音（API key）：交辦由核心處理（${outcome.kind}）`);
+      if (outcome.kind === "run") {
+        try {
+          output = await this.ctx.host.call("delegate_task", args, this.abort.signal);
+        } catch {
+          return;
+        }
+      } else output = outcome.output;
     } else {
       // 交辦：政策集中在 delegatePolicy；原句是旁路最近一則還沒對應過交辦的使用者語音。
       let title: string | null = null;
@@ -236,7 +288,7 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
     }
     if (this.ended || this.revoked) return;
     this.send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: callId, output: JSON.stringify(output) } });
-    this.enqueueSpeak({ response: null });
+    this.enqueueSpeak({ response: null, trigger });
   }
 
   /** 一個回應請求：上游還在回應時排隊，這一輪結束再送（一次一個）。 */
@@ -251,7 +303,10 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
     if (!next) return;
     const eventId = this.nextEventId();
     this.awaiting = { ...next, eventId };
-    this.send(next.response ? { type: "response.create", event_id: eventId, response: next.response } : { type: "response.create", event_id: eventId });
+    // MEM-4b：標記這個核心請求（上游在 response.created 的 response.metadata 回送），回應的觸發項目依它對應。
+    this.coreTags.set(eventId, next.trigger ?? null);
+    if (this.coreTags.size > 64) this.coreTags.delete(this.coreTags.keys().next().value!);
+    this.send({ type: "response.create", event_id: eventId, response: { ...(next.response ?? {}), metadata: { nous_trigger: eventId } } });
   }
 
   private send(event: Record<string, unknown>): void {
@@ -381,6 +436,9 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
       void this.deps.hangup(this.callId).then((ok) => this.deps.log?.(`即時語音（API key）：hangup ${ok ? "已接受" : "沒有成功"}`));
       await this.close("ended");
       this.lastUserFinal = null;
+      this.lastInput = null;
+      this.triggers.clear();
+      this.coreTags.clear();
       this.speakQueue.length = 0;
       this.heldQueue.length = 0;
       this.greeting = null;

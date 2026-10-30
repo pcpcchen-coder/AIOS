@@ -1,6 +1,8 @@
 import { translate, type Locale } from "../../shared/i18n.mjs";
+import { exactApproval } from "../../shared/approval.ts";
 import { MEMORY_CLAIM, type MemoryReceiptStatus } from "../../shared/memory.ts";
 import type { LiveCoreEvent, LiveMemoryReason } from "../../shared/realtime-route.ts";
+import type { ExecutorMode, Task } from "../../shared/types.ts";
 import { memoryBlock } from "../chat.ts";
 import type { LiveCallerMemory } from "../live-tool-caller.ts";
 import type { ContextLease, MemorySession } from "./boundary.ts";
@@ -27,6 +29,10 @@ import type { ContextFact } from "./retrieve.ts";
 // MEM-3（docs/validation/memory-mem3-2026-10-30.md）：binding 依 route 參數化（"live" | "api_key"），兩條路徑用同一套規則：
 // 同意對象 targets().byRoute[route]、boundary 的路徑與放行表、原因文字都依 route；API key 路徑的通話是 server/apikey-call.ts 的
 // ApiKeyCall（核心旁路），使用者語音只認旁路上的語音辨識逐字稿。同時只允許一通語音通話帶記憶。MEM-4 的背景任務可以再加一條路徑。
+// MEM-4b（docs/validation/memory-mem4b-2026-10-30.md）：語音交辦自動帶記憶。核心自己記下最近幾句合格的使用者原句（heard），
+// 模型呼叫 delegate_task 時用 delegate() 綁到那一句（時窗、開口時間、世代、一次性、和模型描述的相似度），標題與檢索查詢一律是
+// 原句，經 MemoryService.delegateVoice 走 MEM-4a 的受保護交辦；模型只拿到固定句。綁不到時：帶記憶的通話出原句卡（核心持有原句），
+// 沒帶記憶的通話照舊由頁面交辦。task 或這條語音路徑沒有放行時，delegatePort() 是 null，一切和 MEM-4a 一樣。
 
 /** 帶記憶的即時語音路徑（boundary 的 ContextRoute 的子集）。 */
 export type VoiceRoute = "live" | "api_key";
@@ -40,6 +46,10 @@ export const VOICE_ROUTE_LABEL: Record<VoiceRoute, string> = { live: "ChatGPT �
  * 還沒帶記憶時照常交辦（live：LiveToolCaller 經頁面；api_key：核心經 ToolHost 請頁面照常交辦）。兩條路徑目前規則相同。
  */
 export type DelegateDecision = { run: true } | { run: false; title: string | null; output: Record<string, unknown> };
+/**
+ * 上面這個兩態政策是 task 或語音路徑沒有放行時的行為（和 MEM-4a 逐位元組相同，tests/memory-live.test.ts 的快照核對）。
+ * MEM-4b 放行時改用三態的 voiceDelegateDecision。
+ */
 export function delegatePolicy(_route: VoiceRoute, carriesMemory: boolean, title: string | null): DelegateDecision {
   if (!carriesMemory) return { run: true };
   const clean = title?.trim() || null;
@@ -50,6 +60,84 @@ export function delegatePolicy(_route: VoiceRoute, carriesMemory: boolean, title
       ? { ok: false, status: "delegate_blocked", message: "這次通話用到記憶，交辦要使用者在畫面上按「交辦」；請使用者看畫面上的卡，不對的話請他說出完整的要求。" }
       : { ok: false, status: "delegate_blocked", message: "這次通話用到記憶，不能自動交辦，畫面上也沒有交辦卡；請使用者用一句完整的話再說一次要交辦的工作。" },
   };
+}
+
+/**
+ * MEM-4b 的三態交辦政策：protected＝核心用使用者原句建立受保護交辦；run＝照舊由頁面交辦（不帶記憶）；card＝出原句卡。
+ * 只有放行（task 與這條語音路徑）而且綁得到可信的語音辨識原句時才是 protected；綁不到時帶記憶的通話出卡、沒帶記憶的照常交辦。
+ */
+export type VoiceDelegateKind = "protected" | "run" | "card";
+/** 只在放行時（delegatePort 不是 null）才會呼叫；沒放行時照舊用上面的 delegatePolicy。 */
+export function voiceDelegateDecision(input: { trusted: boolean; carriesMemory: boolean }): VoiceDelegateKind {
+  if (input.trusted) return "protected";
+  return input.carriesMemory ? "card" : "run";
+}
+
+/** MEM-4b：工具呼叫到達之後，等那一句語音辨識逐字稿的最長時間（只等開口時間不晚於工具到達的那一句；Mac 上依兩種到達順序校正）。 */
+export const ASR_GRACE_MS = 2_000;
+/** MEM-4b：交辦原句的有效時間：那一句的 final 到工具到達不能超過它。 */
+export const DELEGATE_WINDOW_MS = 30_000;
+/** MEM-4b：模型給的交辦描述和原句（正規化後）的二字片段 Dice 係數低於它，就當成對不上，改出原句卡（Mac 上校正）。 */
+export const DELEGATE_ARG_MATCH = 0.1;
+/** MEM-4b：最多記住幾句使用者原句。 */
+const HEARD_LIMIT = 8;
+/**
+ * MEM-4b：整句（正規化後）就是這些時才算短肯定（「好」「對」「可以」…；George 決定 3 只涵蓋肯定詞）。
+ * 審查 M1：只認白名單；其他短句（例如「寫首詩」）是一般的一句話，自己就是標題（照樣要和模型描述相符）。
+ */
+const AFFIRMATIVE_WORDS = new Set(["好", "好的", "好啊", "好呀", "好喔", "好吧", "對", "對的", "對啊", "對呀", "可以", "可以啊", "可以呀", "嗯", "嗯嗯", "是", "是的", "要", "行", "沒問題", "麻煩你", "麻煩了", "拜託", "就這樣", "ok", "okay", "yes", "yeah", "yep", "sure", "please", "doit", "goahead"]);
+/** MEM-4b 審查 M1：否定或猶豫（「不要」「等一下」「算了」…）：這次一律不交辦（沒有可信原句），不會往前找。 */
+const NEGATION_WORDS = new Set(["不", "不要", "不用", "不必", "不是", "不對", "不了", "不行", "算了", "等一下", "等等", "等下", "先不要", "先不用", "取消", "停", "no", "nope", "wait", "dont", "donot", "stop", "cancel", "never mind", "nevermind"].map((w) => w.replace(/\s/g, "")));
+/** 交辦給模型的固定句（不含標題、筆數或任何記憶內容）。 */
+export const DELEGATED_NOTE = "已開始處理，完成會通知";
+const ENGINE_LABEL: Record<ExecutorMode, string> = { claude: "Claude", chatgpt: "ChatGPT", mock: "模擬模式" };
+
+/** 這一句（正規化後）是不是只是短肯定：只認白名單。 */
+export function shortAffirmative(norm: string): boolean {
+  return AFFIRMATIVE_WORDS.has(norm);
+}
+
+/** 這一句（正規化後）是不是否定或猶豫：這次不交辦。 */
+export function negationOrHesitation(norm: string): boolean {
+  return NEGATION_WORDS.has(norm);
+}
+
+/** MEM-4b：delegate_task 的參數裡模型寫的描述（只用來比對相似度與記字數，不會成為標題或查詢）。 */
+export function delegateArg(raw: string | Record<string, unknown>): string {
+  let args: unknown = raw;
+  if (typeof raw === "string") {
+    try { args = JSON.parse(raw || "{}"); } catch { return ""; }
+  }
+  const title = args && typeof args === "object" && !Array.isArray(args) ? (args as { title?: unknown }).title : undefined;
+  return typeof title === "string" ? title.trim() : "";
+}
+
+/** 受保護交辦成功時交回語音模型的內容：固定句，不含標題或筆數。 */
+export function delegatedOutput(mode: ExecutorMode): Record<string, unknown> {
+  return { ok: true, status: "delegated", engine: ENGINE_LABEL[mode], note: DELEGATED_NOTE };
+}
+
+/** 同一次交辦第二次呼叫 delegate_task（或同一句已經交辦過）：不再建立任務。 */
+export const DELEGATE_ONCE_OUTPUT: Readonly<Record<string, unknown>> = Object.freeze({ ok: false, status: "delegate_once", message: "這句話已經交辦過了，不會重複建立任務；要交辦別的工作，請使用者再說一次。" });
+
+/** MEM-4b：binding 給 LiveToolCaller（live）與 ApiKeyCall（api_key）的交辦介面。 */
+export interface VoiceDelegateRequest {
+  /** delegate_task 的參數（模型寫的描述只用來比對，不會成為標題）。 */
+  args: string | Record<string, unknown>;
+  /** 工具呼叫到達的時間（live：delegation.created 到達核心的時間；api_key：function_call 到達旁路的時間）。 */
+  arrivedAt: number;
+  /** api_key：觸發這個回應的使用者語音項目（committed 看過）；undefined＝依順序（live）；null＝沒有可信的語音（打字或核心觸發）。 */
+  itemId?: string | null;
+  /** 打字觸發的交辦：卡片的標題（不是語音，不會受保護交辦）。 */
+  fallbackTitle?: string | null;
+}
+export type VoiceDelegateOutcome =
+  | { kind: "protected"; output: Record<string, unknown> }
+  | { kind: "run" }
+  | { kind: "card"; output: Record<string, unknown> }
+  | { kind: "once"; output: Record<string, unknown> };
+export interface VoiceDelegatePort {
+  delegate(request: VoiceDelegateRequest): Promise<VoiceDelegateOutcome>;
 }
 
 /** 撤銷的原因：決定重建新通話還是直接結束（docs/validation/memory-mem2-2026-10-30.md §撤銷的處理表）。 */
@@ -96,6 +184,15 @@ const NO_WORDS = new Set(["不是", "不用", "不要", "不對", "不", "no", "
 export function isMemoryCommand(text: string): boolean {
   try {
     return parseMemoryText(toTraditional(text)).some((s) => s.op === "remember" || s.op === "correct" || s.op === "forget" || s.op === "forget_all" || s.op === "unclear" || s.op === "inspect");
+  } catch {
+    return false;
+  }
+}
+
+/** MEM-4b 審查 minor 1：這句是「我是 X」這類自我介紹（就算本次人物沒有改變也不能當交辦原句）。 */
+export function selfIdentifies(text: string): boolean {
+  try {
+    return parseMemoryText(toTraditional(text)).some((s) => s.op === "self_id");
   } catch {
     return false;
   }
@@ -188,6 +285,14 @@ export interface LiveMemoryService {
   voiceConfirm(card: string): Promise<{ status: MemoryReceiptStatus }>;
   voiceCancel(card: string): void;
   clearLive(binding: LiveMemoryBinding): void;
+  /** MEM-4b：task 與這條語音路徑都已放行、有任務端：可以做語音的受保護交辦。 */
+  voiceDelegationOn(route: VoiceRoute): boolean;
+  /** MEM-4b：目前的本次人物 session 與世代（記在每一句原句上，交辦時要仍然相同）。 */
+  voiceStamp(): { session: MemorySession; epoch: number };
+  /** MEM-4b：用核心核對過的語音原句做受保護交辦；不能時回 null（呼叫端退回原句卡或照常交辦）。 */
+  delegateVoice(input: { route: VoiceRoute; text: string; session: MemorySession; epoch: number; householdOnly: boolean; locale?: Locale }): Promise<{ task: Task; shell: Task; used: number } | null>;
+  /** MEM-4b：建立受保護的原句卡（核心持有原句，回傳不透明的卡片 ID）。 */
+  voiceDelegateCard(title: string, route: VoiceRoute, locale?: Locale): string;
 }
 
 /** 通話提供給 binding 的控制面（live：server/live-route.ts 的 LiveCall；api_key：server/apikey-call.ts 的 ApiKeyCall）。 */
@@ -230,9 +335,14 @@ export interface LiveMemoryPort {
   onUserSpeechStart(at: number): void;
   /** 助理的音訊結束（sideband 有這個事件時）。 */
   onAssistantAudioDone(at: number): void;
-  onUserFinal(text: string, at: number): void;
+  /** itemId：API key 旁路上這一句的使用者項目（MEM-4b 交辦綁定用）；live 沒有。 */
+  onUserFinal(text: string, at: number, itemId?: string | null): void;
   onAssistantFinal(text: string, at: number): void;
   callerPort(): LiveCallerMemory | null;
+  /** MEM-4b：受保護的語音交辦；沒有放行、記憶沒開（live）或這通沒有記憶規則（api_key）時為 null（照 MEM-4a）。 */
+  delegatePort?(): VoiceDelegatePort | null;
+  /** MEM-4b：使用者打了字：之前的語音原句都不能再當交辦原句。 */
+  typedInput?(): void;
   close(): void;
 }
 
@@ -240,6 +350,11 @@ export interface LiveMemoryPort {
 type Pending = { card: string; action: VoiceAction; phrase: string; sentence: string; sentAt: number; doneAt: number | null; question: Set<string> };
 /** spoken：有沒有用語音問（沒有同意時只有畫面卡，語音回答不算）。 */
 type Candidate = { card: string; sentence: string; sentAt: number; doneAt: number | null; spoken: boolean };
+/**
+ * MEM-4b：核心記下的一句使用者原句（繁體）。eligible false：回音、確認詞、是／不是、記憶指令、確認卡開著時的確認或取消；
+ * 這種句子不能當交辦原句，也不能被短肯定往前略過以外的方式使用。session／epoch：記下時的本次人物世代。
+ */
+type Heard = { text: string; norm: string; at: number; speechStart: number; itemId: string | null; session: MemorySession; epoch: number; used: boolean; eligible: boolean };
 
 export interface LiveBindingOptions {
   lookToTalk: boolean;
@@ -253,6 +368,8 @@ export interface LiveBindingOptions {
   approvalOpen?: () => boolean;
   /** MEM-3：另一通語音通話正在使用記憶（同時只允許一通；連線時判斷）：這通完全不處理記憶。 */
   busy?: () => boolean;
+  /** MEM-4b：等語音辨識逐字稿的時間（預設 ASR_GRACE_MS；測試用）。 */
+  asrGraceMs?: number;
 }
 
 const SENTENCES = {
@@ -300,6 +417,10 @@ export class LiveMemoryBinding implements LiveMemoryPort {
   private ended = false;
   /** 使用者逐字稿一則一則處理（核心的記憶操作也有自己的 mutex）。 */
   private queue: Promise<void> = Promise.resolve();
+  /** MEM-4b：最近幾句使用者原句（由舊到新）。 */
+  private readonly heard: Heard[] = [];
+  /** MEM-4b：等新原句的交辦（記下一句就叫醒）。 */
+  private heardWaiters: (() => void)[] = [];
 
   readonly route: VoiceRoute;
 
@@ -434,6 +555,7 @@ export class LiveMemoryBinding implements LiveMemoryPort {
   private async cleanup(session: MemorySession): Promise<void> {
     this.pending = null;
     this.candidate = null;
+    this.heard.length = 0;
     const call = this.call;
     if (!call) return;
     const why = this.service.revokeReasonOf(session);
@@ -614,6 +736,131 @@ export class LiveMemoryBinding implements LiveMemoryPort {
     };
   }
 
+  /** MEM-4b：使用者打了字：之前的語音原句都不能再當交辦原句。 */
+  typedInput(): void {
+    for (const h of this.heard) h.eligible = false;
+  }
+
+  /**
+   * MEM-4b：受保護的語音交辦。live：記憶開著（不是 passive）就做，不需要 codex 同意（原句是核心自己從 sideband 解析的）；
+   * api_key：只在這通有記憶規則（旁路接上、有 openai_realtime 同意）時。task 與這條路徑沒有放行時回 null（照 MEM-4a）。
+   */
+  delegatePort(): VoiceDelegatePort | null {
+    if (this.passive || (this.route === "api_key" && !this.active)) return null;
+    if (!this.service.voiceDelegationOn(this.route)) return null;
+    return { delegate: (request) => this.delegate(request) };
+  }
+
+  private noteHeard(text: string, norm: string, at: number, speechStart: number, itemId: string | null, eligible: boolean): void {
+    const stamp = this.service.voiceStamp();
+    this.heard.push({ text, norm, at, speechStart, itemId, session: stamp.session, epoch: stamp.epoch, used: false, eligible });
+    while (this.heard.length > HEARD_LIMIT) this.heard.shift();
+    for (const wake of this.heardWaiters.splice(0)) wake();
+  }
+
+  /** 等新原句（最多 ms）；記下一句、或時間到就回來。 */
+  private waitHeard(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.heardWaiters = this.heardWaiters.filter((w) => w !== done);
+        resolve();
+      };
+      const timer = setTimeout(done, Math.max(0, ms));
+      this.heardWaiters.push(done);
+    });
+  }
+
+  /** 找交辦的那一句：api_key 依觸發的項目；live 依順序（開口時間不晚於工具到達的最後一句）。還在說或還沒處理完時最多等 grace。 */
+  private async findHeard(request: VoiceDelegateRequest): Promise<Heard | null> {
+    const grace = this.options.asrGraceMs ?? ASR_GRACE_MS;
+    const deadline = Date.now() + grace;
+    const byItem = request.itemId !== undefined;
+    for (;;) {
+      // 審查 minor 6：佇列卡住（例如記憶檔很慢）也不超過 grace；之後照「還沒處理完」看待。
+      const left0 = deadline - Date.now();
+      await Promise.race([this.queue, new Promise<void>((r) => setTimeout(r, Math.max(0, left0)))]);
+      const found = byItem
+        ? (request.itemId ? this.heard.find((h) => h.itemId === request.itemId) ?? null : null)
+        : [...this.heard].reverse().find((h) => h.speechStart <= request.arrivedAt) ?? null;
+      if (byItem && (found || !request.itemId)) return found;
+      // live：比找到的那句更新的一句已開口（開口時間不晚於工具到達）但 final 還沒到：等它，不用舊的那句。
+      // api_key：觸發的項目還沒有逐字稿。
+      const inFlight = byItem || (this.userSpeechStart !== null && this.userSpeechStart <= request.arrivedAt && (!found || this.userSpeechStart > found.speechStart));
+      if (!inFlight) return found;
+      const left = deadline - Date.now();
+      // 等完 grace 那一句還沒到：沒有可信的原句（不退回更舊的那句）。
+      if (left <= 0 || this.ended) return null;
+      await this.waitHeard(left);
+    }
+  }
+
+  /**
+   * MEM-4b 的綁定：await 佇列 → 找原句（最多等 grace）→ 合格、時窗、世代、沒用過 → 短肯定就往前找上一句 → 和模型描述對得上
+   * → 標記用過 → MemoryService.delegateVoice（受保護交辦）。任何一步不成立都當成「沒有可信的語音原句」。
+   */
+  private async delegate(request: VoiceDelegateRequest): Promise<VoiceDelegateOutcome> {
+    const arg = delegateArg(request.args);
+    const argNorm = normalizeSpoken(arg);
+    const untrusted = (title: string | null, why: string): VoiceDelegateOutcome => {
+      this.options.log?.(`memory: ${this.route} 語音交辦沒有綁到原句（${why}；模型描述 ${[...arg].length} 字）`);
+      return this.untrusted(title ?? request.fallbackTitle ?? null);
+    };
+    if (!this.call?.active || this.ended) return untrusted(null, "通話已結束");
+    const latest = await this.findHeard(request);
+    if (!this.call?.active || this.ended) return untrusted(null, "通話已結束");
+    if (!latest) return untrusted(null, request.itemId === null ? "不是語音觸發" : "沒有語音原句");
+    if (!latest.eligible) return untrusted(null, "原句不合格");
+    if (latest.used) {
+      this.options.log?.(`memory: ${this.route} 語音交辦：這句已經交辦過`);
+      return { kind: "once", output: { ...DELEGATE_ONCE_OUTPUT } };
+    }
+    const stamp = this.service.voiceStamp();
+    const fresh = (h: Heard) => h.eligible && !h.used && request.arrivedAt - h.at <= DELEGATE_WINDOW_MS && h.session === stamp.session && h.epoch === stamp.epoch;
+    if (!fresh(latest)) {
+      latest.used = true;
+      return untrusted(null, request.arrivedAt - latest.at > DELEGATE_WINDOW_MS ? "超過時窗" : "本次人物已改變");
+    }
+    if (negationOrHesitation(latest.norm)) {
+      // 審查 M1：「不要」「等一下」「算了」：使用者沒有要交辦，不往前找、不建立任務。
+      latest.used = true;
+      return untrusted(null, "否定或猶豫");
+    }
+    let chosen = latest;
+    if (shortAffirmative(latest.norm)) {
+      // George 2026-10-30（決定 3＝C）：最後一句只是短肯定時，自動用緊接在前的那一句。審查 M2：只看緊接的前一句
+      // （合格、沒用過、時窗內、同世代、自己不是短肯定或否定），而且兩句之間要有一則助理逐字稿（模型真的問了）；不跳過任何句子。
+      const index = this.heard.indexOf(latest);
+      const previous = index > 0 ? this.heard[index - 1]! : null;
+      latest.used = true;
+      const asked = previous !== null && this.assistant.some((a) => a.at >= previous.at && a.at <= latest.speechStart);
+      if (!previous || !fresh(previous) || shortAffirmative(previous.norm) || negationOrHesitation(previous.norm) || !asked) return untrusted(null, "短肯定之前沒有合格的原句");
+      chosen = previous;
+    }
+    chosen.used = true;
+    if (similarity(argNorm, chosen.norm) < DELEGATE_ARG_MATCH) return untrusted(chosen.text, "模型描述和原句對不上");
+    let result: Awaited<ReturnType<LiveMemoryService["delegateVoice"]>> = null;
+    try {
+      result = await this.service.delegateVoice({ route: this.route, text: chosen.text, session: chosen.session, epoch: chosen.epoch, householdOnly: this.candidate !== null || this.waitingCandidate, ...(this.options.locale ? { locale: this.options.locale } : {}) });
+    } catch {
+      result = null;
+    }
+    if (!result) return untrusted(chosen.text, "受保護交辦不可用");
+    this.options.log?.(`memory: ${this.route} 語音交辦已建立（帶 ${result.used} 筆；模型描述 ${[...arg].length} 字）`);
+    this.call?.emit({ kind: "delegated", task: result.shell });
+    return { kind: "protected", output: delegatedOutput(result.task.mode) };
+  }
+
+  /** 綁不到可信的語音原句：帶記憶的通話出原句卡（核心持有原句），沒帶記憶的通話照常由頁面交辦。 */
+  private untrusted(title: string | null): VoiceDelegateOutcome {
+    const kind = voiceDelegateDecision({ trusted: false, carriesMemory: this.lease !== null });
+    if (kind !== "card") return { kind: "run" };
+    const decision = delegatePolicy(this.route, true, title);
+    const clean = decision.run ? null : decision.title;
+    if (clean) this.call?.emit({ kind: "delegate_card", card: this.service.voiceDelegateCard(clean, this.route, this.options.locale) });
+    return { kind: "card", output: decision.run ? { ok: false } : decision.output };
+  }
+
   /** 回音：被最近的助理逐字稿或核心送出的句子包含（或包含它們）。skip：這些句子不算（語音確認的問句本身）。
    * 一兩個字的話（「是」「好」）只有和整句完全相同才算回音：問候「George，你好」不能讓使用者的「好」被當成回音。 */
   private isEcho(norm: string, at: number, skip: (text: string) => boolean = () => false): boolean {
@@ -659,26 +906,30 @@ export class LiveMemoryBinding implements LiveMemoryPort {
     }
   }
 
-  onUserFinal(text: string, at: number): void {
+  onUserFinal(text: string, at: number, itemId: string | null = null): void {
     // 這一句的開口時間：有 speech_started 或未完成逐字稿時用最早的那一個，否則用 final 到達的時間。
     const speechStart = this.userSpeechStart ?? at;
     this.userSpeechStart = null;
-    this.enqueue(() => this.handleUser(text, at, speechStart));
+    this.enqueue(() => this.handleUser(text, at, speechStart, itemId));
   }
 
-  private async handleUser(raw: string, at: number, speechStart: number): Promise<void> {
+  private async handleUser(raw: string, at: number, speechStart: number, itemId: string | null = null): Promise<void> {
     const call = this.call;
     if (!call?.active || this.ended || this.passive) return;
     const text = toTraditional(raw.trim());
     const norm = normalizeSpoken(text);
     if (!norm) return;
+    // MEM-4b：每一句分類後記下（合格與否）；只有合格的才能當交辦原句。助理的話不經這裡，永遠不會成為原句。
+    const heard = (eligible: boolean) => this.noteHeard(text, norm, at, speechStart, itemId, eligible);
     const confirm = exactVoiceConfirm(text);
     // MEM-3：頁面的確認卡（MCP、家電）開著時，「確認執行／取消」屬於那張卡：不當成記憶卡的取消，也不開新的語音記憶卡。
     const approvalOpen = this.options.approvalOpen?.() === true;
+    const approvalAnswer = approvalOpen && (exactApproval(text) !== null || exactVoiceCancel(text));
     // 1. 語音確認詞：只給等待中的語音卡；問句念完並播完、時窗、回音、世代、一次性都核對過才交給核心。
     if (this.pending) {
       const p = this.pending;
       if (confirm !== null) {
+        heard(false);
         const echo = this.isEcho(norm, at, (x) => p.question.has(x));
         if (confirm !== p.action || echo || p.doneAt === null || speechStart < this.readyAt(p.doneAt)) {
           call.emit({ kind: "memory_notice", message: "沒有採用這次的確認：請在問句念完後再說確認詞，或在畫面上確認" });
@@ -696,6 +947,7 @@ export class LiveMemoryBinding implements LiveMemoryPort {
         return;
       }
       if (!approvalOpen && exactVoiceCancel(text) && !this.isEcho(norm, at)) {
+        heard(false);
         this.pending = null;
         this.service.voiceCancel(p.card);
         call.emit({ kind: "memory_card", card: p.card, open: false });
@@ -708,6 +960,7 @@ export class LiveMemoryBinding implements LiveMemoryPort {
       const c = this.candidate;
       const answer = exactYesNo(text);
       if (answer) {
+        heard(false);
         const sentence = normalizeSpoken(c.sentence);
         if (this.isEcho(norm, at, (x) => x.includes(sentence) || sentence.includes(x))) return;
         if (c.doneAt === null || speechStart < this.readyAt(c.doneAt)) {
@@ -731,15 +984,21 @@ export class LiveMemoryBinding implements LiveMemoryPort {
       }
     }
     // 3. 其他：回音不處理；單獨的確認詞（沒有等待中的卡）不當成指令。
-    if (this.isEcho(norm, at) || confirm !== null) return;
+    if (this.isEcho(norm, at) || confirm !== null) {
+      heard(false);
+      return;
+    }
     // MEM-3：另一張確認卡（MCP、家電）開著：先用純解析判斷這句是不是記憶指令；是的話只回固定句，不建立或取代任何卡
     // （不碰等待中的語音卡），請使用者先回答那張卡。
     if (approvalOpen && isMemoryCommand(text)) {
+      heard(false);
       call.emit({ kind: "memory_notice", message: "畫面上有另一張確認卡；請先回答那張卡，再說一次要記住或忘記的內容" });
       return;
     }
     if (this.waitingCandidate && !this.candidate) this.afterGreeting(false);
     const outcome = await this.service.voiceTurn(text, this.route);
+    // MEM-4b：記憶指令（出卡或固定句）、「我是 X」（審查 minor 1）、確認卡開著時的確認或取消都不能當交辦原句；只有一般的話可以。
+    heard(!approvalAnswer && outcome.kind === "none" && !selfIdentifies(text));
     if (!this.call?.active || this.ended) return;
     // 沒有 codex 同意（或這通沒有記憶規則）：只出畫面卡，不念任何句子（不透露有沒有符合的記憶或筆數）。
     const speakable = this.speakable();
@@ -802,6 +1061,8 @@ export class LiveMemoryBinding implements LiveMemoryPort {
     this.ended = true;
     this.pending = null;
     this.candidate = null;
+    this.heard.length = 0;
+    for (const wake of this.heardWaiters.splice(0)) wake();
     this.service.clearLive(this);
   }
 }

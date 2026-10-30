@@ -630,5 +630,7 @@
   "這個任務的內容這次無法解開，不能重做": "This task's content cannot be decrypted right now, so it cannot be redone",
   "這是其他家人的任務；請從選單列「成果紀錄…」打開後再重做": "This task belongs to another family member; open it from the menu bar item “Results history…” to redo it",
   "任務與成果已加密保存並逐筆驗證。明文備份保留在資料夾「{0}」，確認不需要後可以刪除。": "Tasks and results are stored encrypted and every record was verified. The plaintext backup is kept in the folder “{0}”; delete it once you are sure you no longer need it.",
-  "沒有任務的明文備份。": "There is no plaintext backup of tasks."
+  "沒有任務的明文備份。": "There is no plaintext backup of tasks.",
+  "這張卡片已失效（可能換了人物或超過時間）；請再說一次": "This card is no longer valid (the person may have changed or it timed out); please say it again",
+  "這次沒有帶記憶": "Memory wasn't used this time"
 }

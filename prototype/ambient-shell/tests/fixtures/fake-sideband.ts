@@ -285,7 +285,9 @@ export async function startFakeGa(apiKey = "sk-fixture-ga"): Promise<FakeGa> {
       if (state.autoAck && event.type === "session.update") conn.send({ type: "session.updated", session: { type: "realtime" } });
       if (state.autoRespond && event.type === "response.create") {
         const id = `resp_fixture_${++state.responses}`;
-        conn.send({ type: "response.created", response: { id } });
+        // 上游把 response.metadata 放在 response 物件回送（MEM-4b 的觸發項目對應用）。
+        const metadata = (event.response as { metadata?: unknown } | undefined)?.metadata;
+        conn.send({ type: "response.created", response: { id, ...(metadata ? { metadata } : {}) } });
         conn.send({ type: "response.done", response: { id, status: "completed" } });
       }
     },

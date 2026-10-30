@@ -4,7 +4,7 @@
 import type { Artifact, Task } from "./types.ts";
 import type { HistoryPage, HistoryQuery } from "./history.ts";
 
-export const TASK_OPS = ["status", "list", "get", "search", "redo", "delete_backups", "voice_tasks"] as const;
+export const TASK_OPS = ["status", "list", "get", "search", "redo", "delete_backups", "voice_tasks", "card_title", "card_delegate"] as const;
 export type TaskOp = (typeof TASK_OPS)[number];
 
 export type MigrationView = { ok: true; tasks: number; artifacts: number; backup: string } | { ok: false; step: "read" | "encrypt" | "verify" | "backup" | "switch" };
@@ -32,7 +32,11 @@ export type TasksRequest =
   | { op: "redo"; task_id: string; request_id: string; all?: boolean }
   | { op: "delete_backups" }
   /** get_tasks（即時語音）：依那條路徑的記憶同意給真實標題或外殼。 */
-  | { op: "voice_tasks"; route: "live" | "api_key" };
+  | { op: "voice_tasks"; route: "live" | "api_key" }
+  /** MEM-4b：受保護原句卡的標題（SSE 只送卡片 ID）。 */
+  | { op: "card_title"; card: string }
+  /** MEM-4b：原句卡上按「交辦」（可信主視窗的點擊算直接確認；卡片一次性）。 */
+  | { op: "card_delegate"; card: string; request_id: string };
 
 export type TasksResponse =
   | { ok: true; op: "status"; vault: VaultView }
@@ -42,6 +46,11 @@ export type TasksResponse =
   | { ok: true; op: "redo"; task: Task; memory_used: number }
   | { ok: true; op: "delete_backups"; deleted: number; vault: VaultView }
   | { ok: true; op: "voice_tasks"; tasks: Task[] }
+  | { ok: true; op: "card_title"; title: string }
+  /** memory：unavailable＝這次不能受保護交辦，照舊建立了不帶記憶的任務（頁面照實告知）。 */
+  | { ok: true; op: "card_delegate"; task: Task; memory_used: number; memory: "used" | "unavailable" }
   | { ok: false; code: "unavailable" | "bad_request" | "not_found" | "conflict" | "cancelled"; message: string };
 
 export const TASK_ID = /^task_[0-9a-f-]{36}$/;
+/** MEM-4b：受保護原句卡的 ID（和 server/memory/service.ts 的 DELEGATE_CARD_ID 相同）。 */
+export const DELEGATE_CARD = /^dc_[0-9a-f]{24}$/;

@@ -25,8 +25,9 @@ import { codexTurn, scriptedFetch, sseResponse, SECRET_TOKEN_MARK, writeCredenti
 import { startFakeSideband, type FakeConnection, type FakeSideband } from "./fixtures/fake-sideband.ts";
 import { randomBytes } from "node:crypto";
 import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
-import { realLockAvailable } from "./fixtures/memory-lock.ts";
-import { CODEX, enable, harness, manage, type Harness } from "./fixtures/memory-service.ts";
+import { realLockAvailable, testLockProvider } from "./fixtures/memory-lock.ts";
+import { CLAUDE, CODEX, enable, fakeBox, harness, manage, type Harness } from "./fixtures/memory-service.ts";
+import { SealedVault } from "../server/sealed-vault.ts";
 
 // 端到端（全部 fixture）：本機核心 ↔ 真的 SSE 串流 ↔ 假的頁面；假的 chatgpt.com、假的 sideband、假的 OpenAI。
 // 驗證 host RPC 走真的 SSE、擁有者規則、頁面離開與 sideband 掉線，以及權杖不出現在任何 HTTP、SSE 或 log。
@@ -101,7 +102,10 @@ async function page(base: string) {
   return { frames, events, waitFor, clientId: hello.client_id as string, close: () => controller.abort() };
 }
 
-async function start(options: { turns?: Response[]; memory?: Harness; audio?: { setMuted(muted: boolean): void }; dropStopReport?: boolean } = {}) {
+/** MEM-4b：加密保存的任務（受保護交辦需要 sealed）；bind 讓測試的記憶 harness 接上這次的 store 與 runner。 */
+type SealedTasks = { dir: string; vault: SealedVault; bind(store: TaskStore, runner: TaskRunner): void };
+
+async function start(options: { turns?: Response[]; memory?: Harness; audio?: { setMuted(muted: boolean): void }; dropStopReport?: boolean; tasks?: SealedTasks } = {}) {
   sideband = await startFakeSideband();
   const port = await freePort();
   const dir = mkdtempSync(join(tmpdir(), "nous-live-int-"));
@@ -110,10 +114,11 @@ async function start(options: { turns?: Response[]; memory?: Harness; audio?: { 
   for (const method of ["log", "warn", "error", "info"] as const) {
     vi.spyOn(console, method).mockImplementation((...args: unknown[]) => void logs.push(args.map(String).join(" ")));
   }
-  const store = new TaskStore(null);
+  const store = options.tasks ? new TaskStore(options.tasks.dir, { vault: options.tasks.vault }) : new TaskStore(null);
   const siwc = new ChatGPTAuth({ dir, callbackPort: 0, onChange: () => {} });
   const providers = new ProviderManager({ claude: null, chatgpt: new ChatGPTExecutor(siwc, { model: null }), mock: new MockExecutor(5), auth: siwc, dir, preferred: "mock", onChange: () => {} });
   const runner = new TaskRunner(store, providers);
+  options.tasks?.bind(store, runner);
   let notify = () => {};
   const codexAuth = new CodexAuth({ dir, onChange: () => notify(), fetch: scriptedFetch(() => new Response("{}", { status: 500 })).fetch, log: (l) => logs.push(l) });
   const turns = [...(options.turns ?? [])];
@@ -130,7 +135,7 @@ async function start(options: { turns?: Response[]; memory?: Harness; audio?: { 
     auth: codexAuth,
     voice: () => prefs.view().live_voice,
     model: { display: "gpt-live-1-codex", send: null },
-    caller: (ctx, mem) => new LiveToolCaller({ responses: codex, caps: () => ({ ...caps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log: (l) => logs.push(l), ...(mem ? { memory: mem } : {}) }),
+    caller: (ctx, mem, voice) => new LiveToolCaller({ responses: codex, caps: () => ({ ...caps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log: (l) => logs.push(l), ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}) }),
     instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: [], memory: !!memoryOn }),
     ...(options.memory ? { memory: (ctx: SessionContext) => options.memory!.service.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale }) } : {}),
     capabilities: () => ({ webSearch: true, home: true }),
@@ -472,5 +477,61 @@ describe.skipIf(!realLockAvailable)("MEM-2 review: stop-report evidence", () => 
       await h.close();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe.skipIf(!realLockAvailable)("MEM-4b live voice delegation end to end (fixture)", () => {
+  const dirs: string[] = [];
+  const harnesses: Harness[] = [];
+  const vaults: SealedVault[] = [];
+  afterEach(async () => {
+    await Promise.all(harnesses.splice(0).map((h) => h.close()));
+    for (const v of vaults.splice(0)) v.close();
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+  const DESC_CANARY = "犀牛九三";
+
+  it("the user's ASR sentence becomes the protected task title; SSE carries only the shell; the page is never asked; the model's description lands nowhere", async () => {
+    const memDir = mkdtempSync(join(tmpdir(), "nous-mem4b-int-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "nous-mem4b-data-"));
+    dirs.push(memDir, dataDir);
+    const vault = SealedVault.open({ dir: join(dataDir, "sealed"), secretBox: fakeBox(randomBytes(32)), lockProvider: testLockProvider });
+    vaults.push(vault);
+    const ref: { store: TaskStore | null; runner: TaskRunner | null } = { store: null, runner: null };
+    const h = harness({
+      dir: memDir, key: randomBytes(32), live: CODEX, release: { task: true },
+      tasks: { sealed: () => !!ref.store?.sealed, mode: () => ref.runner!.mode, target: () => CLAUDE, submit: (input) => ref.runner!.submitProtected(input), publicGet: (id) => ref.store!.publicGet(id) },
+    });
+    harnesses.push(h);
+    await enable(h, "George", [CLAUDE]);
+    await h.turn("記住，我不吃香菜");
+    const t = await start({
+      memory: h,
+      tasks: { dir: dataDir, vault, bind: (store, runner) => { ref.store = store; ref.runner = runner; } },
+      turns: [codexTurn({ calls: [{ name: "delegate_task", arguments: { title: `這週的週報，${DESC_CANARY}` }, call_id: "call_dt" }] }), codexTurn({ text: "好，已經開始寫週報了。" })],
+    });
+    const p = await page(t.base);
+    const { conn } = await startLive(t, p.clientId);
+    conn.send({ type: "session.started", session: {} });
+    await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "memory");
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "幫我寫這週的週報", id: "u1" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "d1", content: [{ type: "input_text", text: `寫週報 ${DESC_CANARY}` }] } });
+    const event = await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "delegated");
+    const append = await conn.waitFor((e) => e.type === "delegation.context.append");
+    expect(append).toMatchObject({ delegation_item_id: "d1", content: [{ text: "好，已經開始寫週報了。" }] });
+    const shell = (event.event as { task: { task_id: string; title: string; protected: boolean } }).task;
+    expect(shell).toMatchObject({ protected: true });
+    expect(t.store.get(shell.task_id)).toMatchObject({ title: "幫我寫這週的週報", origin: "user_sentence" });
+    expect(p.events.some((e) => e.type === "realtime.host")).toBe(false);
+    // 交給 Codex 的工具結果是固定句（沒有標題）。
+    const second = t.codexFetch.calls.filter((c) => !c.url.includes("/models"))[1]!.body;
+    expect(second).toContain("已開始處理，完成會通知");
+    // 任務標題只在可信的 IPC；SSE 除了逐字稿字幕，沒有原句；模型的描述不在 SSE、log 或任務裡。
+    expect(p.frames.filter((f) => !f.includes('"kind":"transcript"')).join("\n")).not.toContain("週報");
+    await ref.runner!.idle();
+    // 這通沒帶記憶：「收到交辦」照 MEM-2 記預覽（帶記憶的通話只記長度）；核心處理交辦的 log 不含模型的描述。
+    expect([...p.frames, ...t.logs.filter((l) => !l.includes("收到交辦「"))].join("\n")).not.toContain(DESC_CANARY);
+    expect(JSON.stringify(t.store.list())).not.toContain(DESC_CANARY);
+    p.close();
   });
 });

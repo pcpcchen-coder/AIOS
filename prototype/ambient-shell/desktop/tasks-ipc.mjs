@@ -3,10 +3,11 @@
 // 發送者檢查沿用 desktop/trusted-sender.mjs（主視窗主框架、頁面來自本機核心）。
 
 /** 與 shared/protected-tasks.ts 的 TASK_OPS 相同（測試對照）。 */
-export const TASK_OPS = ["status", "list", "get", "search", "redo", "delete_backups", "voice_tasks"];
+export const TASK_OPS = ["status", "list", "get", "search", "redo", "delete_backups", "voice_tasks", "card_title", "card_delegate"];
 
 const TASK = /^task_[0-9a-f-]{36}$/;
 const REQUEST = /^req_[A-Za-z0-9_-]{6,64}$/;
+const CARD = /^dc_[0-9a-f]{24}$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const STATUSES = ["", "succeeded", "failed", "cancelled", "running", "queued", "cancelling"];
 const MODES = ["", "claude", "chatgpt", "mock"];
@@ -28,6 +29,13 @@ export function validateTasksRequest(req) {
     case "voice_tasks":
       if (req.route !== "live" && req.route !== "api_key") return bad("route must be live or api_key");
       return { ok: true, request: { op, route: req.route } };
+    case "card_title":
+      if (typeof req.card !== "string" || !CARD.test(req.card)) return bad("card is required");
+      return { ok: true, request: { op, card: req.card } };
+    case "card_delegate":
+      if (typeof req.card !== "string" || !CARD.test(req.card)) return bad("card is required");
+      if (typeof req.request_id !== "string" || !REQUEST.test(req.request_id)) return bad("request_id is required");
+      return { ok: true, request: { op, card: req.card, request_id: req.request_id } };
     case "get":
       if (typeof req.task_id !== "string" || !TASK.test(req.task_id)) return bad("task_id is required");
       return { ok: true, request: { op, task_id: req.task_id, ...all } };

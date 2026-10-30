@@ -54,8 +54,10 @@ type SessionState = {
  * via：typed＝可信主視窗的當次打字；confirmation＝核心持有原句的澄清卡上被點選（同樣算直接輸入）；
  * voice_confirmed＝MEM-2 的語音確認：核心持有原句（sideband 的使用者逐字稿），使用者在問句念完後 15 秒內說出錨定的確認詞
  * （George 2026-10-30 決定；與 16 §5「只顯示待確認卡」不同，殘餘風險見 docs/16 §5、ADR-0002）。
+ * voice_heard＝MEM-4b 的語音交辦：核心持有原句（live 的 sideband 或 API key 旁路上的語音辨識逐字稿），server/memory/live.ts
+ * 核對過回音、確認詞、記憶指令、時窗、世代與一次性之後才觀察；只能發交辦票證（issueDelegation），不能寫入記憶。
  */
-export type InputVia = "typed" | "confirmation" | "voice_confirmed";
+export type InputVia = "typed" | "confirmation" | "voice_confirmed" | "voice_heard";
 type InputState = { session: MemorySession; epoch: number; sequence: number; text: string; expires: number; via: InputVia };
 type TicketState = InputState & { command: string; used: boolean };
 type Lease = { route: ContextRoute; abort: AbortController; cleanup: () => Promise<void>; active: boolean; cleaned?: Promise<boolean> };
@@ -176,6 +178,14 @@ export class MemoryBoundary {
     return this.observe(session, text, "voice_confirmed");
   }
 
+  /**
+   * MEM-4b 語音交辦（docs/validation/memory-mem4b-2026-10-30.md）：呼叫端必須傳核心保存的語音辨識原句，而且只在
+   * server/memory/live.ts 核對過之後才呼叫。這種直接輸入只能換交辦票證：issueParsed／issue 一律拒絕（不能寫入記憶）。
+   */
+  observeVoiceUtterance(session: MemorySession, text: string): DirectInput {
+    return this.observe(session, text, "voice_heard");
+  }
+
   private observe(session: MemorySession, text: string, via: InputVia): DirectInput {
     const state = this.selected(session);
     if (typeof text !== "string" || text.length === 0 || text.length > 2048) throw new Error("invalid_input");
@@ -192,7 +202,7 @@ export class MemoryBoundary {
     const state = this.selected(session);
     const observed = this.inputs.get(input);
     const encoded = canonicalParsed(command, true);
-    if (!observed || observed.session !== session || observed.epoch !== state.epoch || observed.sequence !== state.sequence || observed.expires <= this.now()) throw new Error("source_mismatch");
+    if (!observed || observed.via === "voice_heard" || observed.session !== session || observed.epoch !== state.epoch || observed.sequence !== state.sequence || observed.expires <= this.now()) throw new Error("source_mismatch");
     let expected: string | null = null;
     try {
       const parts = reparse(observed.text);
@@ -215,7 +225,8 @@ export class MemoryBoundary {
   }
 
   /**
-   * MEM-4a 受保護交辦的來源票證：交辦的標題必須和核心觀察到的直接輸入（可信主視窗的打字，或核心持有原句的重做點擊）
+   * MEM-4a 受保護交辦的來源票證：交辦的標題必須和核心觀察到的直接輸入（可信主視窗的打字、核心持有原句的重做或交辦卡點擊，
+   * MEM-4b 起也包括核心核對過的語音辨識原句）
    * 逐字相同；模型的改寫不能當成標題。票證一次性、綁 session、世代與序號（和記憶寫入相同的自我核對）。
    */
   issueDelegation(session: MemorySession, input: DirectInput, text: string): SourceTicket {
@@ -245,7 +256,7 @@ export class MemoryBoundary {
     const state = this.selected(session);
     const observed = this.inputs.get(input);
     const encoded = canonical(command);
-    if (!observed || observed.session !== session || observed.epoch !== state.epoch || observed.sequence !== state.sequence || observed.expires <= this.now() || observed.text !== literalCommand(command)) throw new Error("source_mismatch");
+    if (!observed || observed.via === "voice_heard" || observed.session !== session || observed.epoch !== state.epoch || observed.sequence !== state.sequence || observed.expires <= this.now() || observed.text !== literalCommand(command)) throw new Error("source_mismatch");
     this.inputs.delete(input);
     const ticket = Object.freeze({}) as SourceTicket;
     this.tickets.set(ticket, { ...observed, command: encoded, used: false });

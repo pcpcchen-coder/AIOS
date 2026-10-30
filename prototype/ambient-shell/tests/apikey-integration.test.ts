@@ -25,8 +25,9 @@ import type { MemoryFactView } from "../shared/memory.ts";
 import { ga, gaBridge, until } from "./fixtures/apikey.ts";
 import { scriptedFetch, writeCredentials } from "./fixtures/fake-chatgpt.ts";
 import { startFakeGa, type FakeGa } from "./fixtures/fake-sideband.ts";
-import { realLockAvailable } from "./fixtures/memory-lock.ts";
-import { CLAUDE, CODEX, enable, harness, manage, OPENAI_RT, type Harness } from "./fixtures/memory-service.ts";
+import { realLockAvailable, testLockProvider } from "./fixtures/memory-lock.ts";
+import { CLAUDE, CODEX, enable, fakeBox, harness, manage, OPENAI_RT, type Harness } from "./fixtures/memory-service.ts";
+import { SealedVault } from "../server/sealed-vault.ts";
 import { ApiKeyRoute } from "../server/realtime-routes.ts";
 
 // MEM-3 端到端（全部 fixture）：本機核心 ↔ 真的 SSE 串流 ↔ 假的頁面；假的 GA 伺服器（REST＋旁路 WebSocket）、
@@ -116,7 +117,7 @@ async function memoryHarness(allow = [CLAUDE, OPENAI_RT, CODEX]): Promise<Harnes
   return h;
 }
 
-async function start(h: Harness, options: { route?: "auto" | "live" | "api_key"; liveFails?: boolean } = {}) {
+async function start(h: Harness, options: { route?: "auto" | "live" | "api_key"; liveFails?: boolean; tasks?: { dir: string; vault: SealedVault; bind(store: TaskStore, runner: TaskRunner): void } } = {}) {
   fake = await startFakeGa();
   const port = await freePort();
   const dir = mkdtempSync(join(tmpdir(), "nous-mem3-app-"));
@@ -126,10 +127,12 @@ async function start(h: Harness, options: { route?: "auto" | "live" | "api_key";
   for (const method of ["log", "warn", "error", "info"] as const) {
     vi.spyOn(console, method).mockImplementation((...args: unknown[]) => void logs.push(args.map(String).join(" ")));
   }
-  const store = new TaskStore(null);
+  // MEM-4b：受保護交辦要加密保存的任務。
+  const store = options.tasks ? new TaskStore(options.tasks.dir, { vault: options.tasks.vault }) : new TaskStore(null);
   const siwc = new ChatGPTAuth({ dir, callbackPort: 0, onChange: () => {} });
   const providers = new ProviderManager({ claude: null, chatgpt: new ChatGPTExecutor(siwc, { model: null }), mock: new MockExecutor(5), auth: siwc, dir, preferred: "mock", onChange: () => {} });
   const runner = new TaskRunner(store, providers);
+  options.tasks?.bind(store, runner);
   let notify = () => {};
   const codexAuth = new CodexAuth({ dir, onChange: () => notify(), fetch: scriptedFetch(() => new Response("{}", { status: 500 })).fetch, log: (l) => logs.push(l) });
   const codex = new CodexResponses(codexAuth, { model: null, clientVersion: "0.1.0", turnTimeoutMs: 20_000, baseUrl: "https://chatgpt.fixture/backend-api/codex", fetch: scriptedFetch(() => new Response("no", { status: 500 })).fetch });
@@ -327,5 +330,48 @@ describe.skipIf(!realLockAvailable)("MEM-3 live → API key fallback", () => {
     const conn = await t.fake.next();
     expect(JSON.stringify(await conn.waitFor((e) => e.type === "session.update"))).toContain("不吃香菜");
     p.close();
+  });
+});
+
+describe.skipIf(!realLockAvailable)("MEM-4b API key voice delegation end to end (fixture)", () => {
+  const vaults: SealedVault[] = [];
+  afterEach(() => { for (const v of vaults.splice(0)) v.close(); });
+
+  it("committed → response.created → function_call: the ASR sentence is the protected title; the page gets only a shell and never the tool call", async () => {
+    const memDir = mkdtempSync(join(tmpdir(), "nous-mem4b-int-"));
+    const dataDir = mkdtempSync(join(tmpdir(), "nous-mem4b-data-"));
+    dirs.push(memDir, dataDir);
+    const vault = SealedVault.open({ dir: join(dataDir, "sealed"), secretBox: fakeBox(randomBytes(32)), lockProvider: testLockProvider });
+    vaults.push(vault);
+    const ref: { store: TaskStore | null; runner: TaskRunner | null } = { store: null, runner: null };
+    const h = harness({
+      dir: memDir, key: randomBytes(32), live: CODEX, apiKey: OPENAI_RT, release: { api_key: true, task: true },
+      tasks: { sealed: () => !!ref.store?.sealed, mode: () => ref.runner!.mode, target: () => CLAUDE, submit: (input) => ref.runner!.submitProtected(input), publicGet: (id) => ref.store!.publicGet(id) },
+    });
+    harnesses.push(h);
+    await enable(h, "George", [CLAUDE, OPENAI_RT]);
+    const t = await start(h, { route: "api_key", tasks: { dir: dataDir, vault, bind: (store, runner) => { ref.store = store; ref.runner = runner; } } });
+    const p = await page(t.base);
+    const decision = (await t.post("/api/realtime/start", { client_id: p.clientId })).json as StartDecision;
+    if (!decision.ok) throw new Error(decision.message);
+    const answer = (await t.post("/api/realtime/call", { sdp: "v=0 offer", session_id: decision.session_id, owner: decision.owner })).json as unknown as CallAnswer;
+    expect(answer.core_tools).toContain("delegate_task");
+    const conn = await t.fake.next();
+    await conn.waitFor((e) => e.type === "session.update");
+    ga.user(conn, "幫我寫這週的週報", "item_w1");
+    conn.send({ type: "response.created", response: { id: "resp_w1" } });
+    conn.send({ type: "response.function_call_arguments.done", name: "delegate_task", call_id: "c_w1", response_id: "resp_w1", arguments: JSON.stringify({ title: "這週的週報，犀牛七三" }) });
+    const event = await p.waitFor(liveEvent("delegated"));
+    const output = await conn.waitFor((e) => e.type === "conversation.item.create" && (e.item as { type?: string }).type === "function_call_output");
+    expect(JSON.parse((output.item as { output: string }).output)).toEqual({ ok: true, status: "delegated", engine: "模擬模式", note: "已開始處理，完成會通知" });
+    const shell = (event.event as { task: { task_id: string } }).task;
+    expect(t.store.get(shell.task_id)).toMatchObject({ title: "幫我寫這週的週報", origin: "user_sentence" });
+    expect(p.events.some((e) => e.type === "realtime.host")).toBe(false);
+    await ref.runner!.idle();
+    await t.post("/api/realtime/end", { session_id: decision.session_id, owner: decision.owner });
+    p.close();
+    expect(p.frames.join("\n")).not.toContain("週報");
+    expect([...p.frames, ...t.logs, ...t.bodies].join("\n")).not.toContain("犀牛七三");
+    expect(JSON.stringify(t.store.list())).not.toContain("犀牛七三");
   });
 });

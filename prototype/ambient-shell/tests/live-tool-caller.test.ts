@@ -15,7 +15,9 @@ import {
   liveCallerTools,
   LiveToolCaller,
   MAX_HOST_TIMEOUT_MS,
+  type LiveCallerMemory,
 } from "../server/live-tool-caller.ts";
+import type { VoiceDelegateOutcome, VoiceDelegatePort, VoiceDelegateRequest } from "../server/memory/live.ts";
 import { buildLiveInstructions, buildRealtimeInstructions, realtimeToolRules, REALTIME_TOOLS } from "../server/realtime.ts";
 import { HOST_REPLY_MARGIN_MS, HOST_TIMEOUT_MS, hostTimeoutOutput, type ApprovalSnapshot, type ToolHost } from "../server/realtime-routes.ts";
 import { WEB_SEARCH_TIMEOUT_MS } from "../server/web-search.ts";
@@ -457,5 +459,52 @@ describe("MEM-2: recall_memory and the delegation block", () => {
       expect(await c.run(request(text), new AbortController().signal)).toMatchObject({ ok: true, text: "記憶的確認由 Nous 核心處理，結果會另外通知。", tools: [] });
     }
     expect(requests).toEqual([]);
+  });
+});
+
+describe("MEM-4b protected voice delegation in the tool caller", () => {
+  const CANARY = "CANARY_交辦描述_LYNX_5521";
+  function voiceCaller(turns: CodexTurn[], outcomes: VoiceDelegateOutcome[], memory?: Partial<LiveCallerMemory>) {
+    const requests: CodexTurnRequest[] = [];
+    const hostCalls: string[] = [];
+    const asked: VoiceDelegateRequest[] = [];
+    const logs: string[] = [];
+    const responses = { turn: async (req: CodexTurnRequest) => { requests.push({ ...req, input: [...req.input] }); const next = turns.shift(); if (!next) throw new Error("no more turns"); return next; } };
+    const host: ToolHost = { outstanding: 0, call: async (name) => { hostCalls.push(name); return { ok: true, status: "queued" }; } };
+    const voice: VoiceDelegatePort = { delegate: async (r) => { asked.push(r); return outcomes.shift() ?? { kind: "run" }; } };
+    const mem: LiveCallerMemory | undefined = memory ? { blocked: () => false, recall: async () => ({}), delegateBlocked: () => {}, ...memory } : undefined;
+    const c = new LiveToolCaller({ responses, caps: () => ({ ...CAPS, memory: !!mem }), host, tasks: () => [], approval: () => NO_CARD, now: () => 1_000, log: (l) => logs.push(l), voice, ...(mem ? { memory: mem } : {}) });
+    return { c, requests, hostCalls, asked, logs };
+  }
+  const outputs = (requests: CodexTurnRequest[]) => requests.flatMap((r) => r.input.filter((i) => (i as { type?: string }).type === "function_call_output").map((i) => JSON.parse((i as { output: string }).output) as Record<string, unknown>));
+  const call = (id: string) => ({ name: "delegate_task", arguments: JSON.stringify({ title: `寫報告 ${CANARY}` }), call_id: id });
+  const fixed = { ok: true, status: "delegated", engine: "Claude", note: "已開始處理，完成會通知" };
+
+  it("protected: the page is never called, the model gets the fixed sentence, a second delegate_task is delegate_once, the canary lands nowhere", async () => {
+    const { c, requests, hostCalls, asked, logs } = voiceCaller([turn({ calls: [call("t1"), call("t2")] }), turn({ text: "已開始處理。" })], [{ kind: "protected", output: fixed }]);
+    const result = await c.run({ ...request("幫我寫報告"), at: 900 }, new AbortController().signal);
+    expect(result).toMatchObject({ ok: true, text: "已開始處理。" });
+    expect(hostCalls).toEqual([]);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ arrivedAt: 900 });
+    expect(asked[0]).not.toHaveProperty("fallbackTitle");
+    const out = outputs(requests);
+    expect(out[0]).toEqual(fixed);
+    expect(out[1]).toMatchObject({ ok: false, status: "delegate_once" });
+    expect(logs.join("\n")).not.toContain(CANARY);
+    expect(JSON.stringify([result, out])).not.toContain(CANARY);
+  });
+
+  it("run falls through to the page as before; card answers with the card output and skips the old memory branch", async () => {
+    const run = voiceCaller([turn({ calls: [call("t1")] }), turn({ text: "好" })], [{ kind: "run" }]);
+    await run.c.run(request("寫報告"), new AbortController().signal);
+    expect(run.hostCalls).toEqual(["delegate_task"]);
+    const blocked: (string | null)[] = [];
+    const card = voiceCaller([turn({ calls: [call("t1")] }), turn({ text: "請看畫面" })], [{ kind: "card", output: { ok: false, status: "delegate_blocked", message: "看卡" } }], { blocked: () => true, delegateBlocked: (t) => void blocked.push(t) });
+    await card.c.run({ ...request("寫報告"), source: "typed", userText: "幫我寫報告" }, new AbortController().signal);
+    expect(card.hostCalls).toEqual([]);
+    expect(blocked).toEqual([]);
+    expect(card.asked[0]).toMatchObject({ itemId: null, fallbackTitle: "寫報告" });
+    expect(outputs(card.requests)[0]).toEqual({ ok: false, status: "delegate_blocked", message: "看卡" });
   });
 });

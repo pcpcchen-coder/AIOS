@@ -33,6 +33,8 @@ import type { Locale } from "../../shared/i18n.mjs";
 import type { LiveMemoryReason } from "../../shared/realtime-route.ts";
 import { newStoreOperation, RESULT_LIMIT, type MemoryData, type MemoryFact, type MemoryOutcome, type MemoryProfile, type MemoryResult, type MemorySnapshot, type MemoryStoreLike, type StoreOperation, type StoreResult } from "./store.ts";
 import type { ExecutorMode, Task } from "../../shared/types.ts";
+import { shellOf } from "../store.ts";
+import { DELEGATE_CARD } from "../../shared/protected-tasks.ts";
 
 // MemoryService：記憶的唯一規則入口（16 §9、§10）。擁有 profile、同意、來源票證、更新、檢索與撤銷；store 只管加密快照。
 // - 開啟時機（碰 Keychain 與建資料夾）：只有使用者說「記住…」、打開選單列「記憶…」，或上次執行時記憶是開著的
@@ -54,6 +56,8 @@ import type { ExecutorMode, Task } from "../../shared/types.ts";
 //   codex（targets().live），不沿用 chatgpt。語音的記住、更正、忘記只出 voice_confirm 卡，語音確認詞或畫面點擊才寫入。
 // - MEM-3（OpenAI API key 即時語音）：openVoice(route) 依路徑建立 binding；同意對象來自 targets().byRoute[route]
 //   （api_key：openai_realtime，OPENAI_API_KEY 的 HMAC），boundary 的放行表決定這條路徑能不能帶記憶。同時只允許一通語音通話帶記憶。
+// - MEM-4b（語音交辦自動帶記憶）：delegateVoice 用 binding 核對過的語音辨識原句（via voice_heard）走同一個 delegateProtected；
+//   受保護的原句卡由這裡持有原句（voiceDelegateCard），可信主視窗經 tasks IPC 取標題、按「交辦」算直接確認（confirmation）。
 
 export const MEMORY_IDLE_MS = 30 * 60_000;
 export const MEMORY_TURN_MS = 60_000;
@@ -127,7 +131,14 @@ export interface TaskPort {
   mode(): ExecutorMode;
   target(): ChatTarget | null;
   submit(input: { task_id: string; title: string; request_id: string; locale?: Locale; retry_of?: string; facts: ContextFact[]; target?: { provider: string; account: string } | null }): Task;
+  /** MEM-4b：給頁面的外殼（SSE 的 delegated 事件只帶外殼；真實標題經 IPC）。沒有提供時用 shellOf。 */
+  publicGet?(taskId: string): Task | undefined;
 }
+
+/** MEM-4b：受保護原句卡的有效時間（卡片留在畫面上，按「交辦」時才核對）。 */
+export const DELEGATE_CARD_MS = 10 * 60_000;
+/** MEM-4b：受保護原句卡的 ID（不透明；SSE 只送它）。和 IPC 過濾共用 shared/protected-tasks.ts 的同一個 regex。 */
+export const DELEGATE_CARD_ID = DELEGATE_CARD;
 
 /** 受保護交辦的結果：task 是核心的完整任務（對外前要換外殼）；used 是帶了幾筆記憶。 */
 export interface ProtectedDelegation { task: Task; used: number }
@@ -291,6 +302,8 @@ export class MemoryService implements LiveMemoryService {
   /** MEM-2：語音卡的建立時間（以核心計數，重建後不歸零）與目前那一張（同時最多 1 張，挑選卡也算）。 */
   private readonly voiceCardTimes: number[] = [];
   private liveVoiceCard: string | null = null;
+  /** MEM-4b：受保護原句卡（核心持有原句；最多 16 張）。 */
+  private readonly delegateCards = new Map<string, { title: string; route: VoiceRoute; expires: number; session: MemorySession; epoch: number; locale?: Locale }>();
   private readonly timer: ReturnType<typeof setInterval>;
 
   constructor(private readonly options: MemoryServiceOptions) {
@@ -386,6 +399,8 @@ export class MemoryService implements LiveMemoryService {
     this.presence = this.openPresence(state, subject, reason);
     this.turns.clear();
     this.cards.clear();
+    // MEM-4b 審查 M3：受保護原句卡綁本次人物世代；換人或世代改變就作廢（點擊回 not_found）。
+    this.delegateCards.clear();
     this.recent.clear();
     this.revokedBy.set(old.session, why);
     void this.boundary.revoke(old.session).then(ok => { if (!ok) this.log("memory: 撤銷清理未完成"); });
@@ -1762,7 +1777,7 @@ export class MemoryService implements LiveMemoryService {
    * 依原句檢索（本次人物＋全家共用、任務引擎的同意、8 筆、4 KB），先把依賴索引寫進快照再建立任務。
    * 模擬引擎不帶記憶；沒有相關記憶時照樣建立任務（標題仍是原句，沒有依賴）。不能交辦時回 null。
    */
-  private delegateProtected(args: { session: MemorySession; epoch: number; text: string; requestId: string; via: "typed" | "confirmation"; locale?: Locale; retryOf?: string }): Promise<ProtectedDelegation | null> {
+  private delegateProtected(args: { session: MemorySession; epoch: number; text: string; requestId: string; via: "typed" | "confirmation" | "voice_heard"; locale?: Locale; retryOf?: string; profileId?: string | null }): Promise<ProtectedDelegation | null> {
     return this.exclusive(async () => {
       const tasks = this.options.tasks;
       if (!tasks || this.closed || !this.boundary.routeEnabled("task")) return null;
@@ -1773,7 +1788,9 @@ export class MemoryService implements LiveMemoryService {
       if (!data.settings.enabled) return null;
       if (args.session !== this.presence.session || args.epoch !== this.presence.epoch || !this.boundary.active(args.session)) return null;
       try {
-        const input = args.via === "typed" ? this.boundary.observeTypedInput(args.session, args.text) : this.boundary.observeConfirmation(args.session, args.text);
+        const input = args.via === "typed" ? this.boundary.observeTypedInput(args.session, args.text)
+          : args.via === "voice_heard" ? this.boundary.observeVoiceUtterance(args.session, args.text)
+            : this.boundary.observeConfirmation(args.session, args.text);
         const ticket = this.boundary.issueDelegation(args.session, input, args.text);
         this.boundary.consumeDelegation(args.session, ticket, args.text);
       } catch {
@@ -1782,7 +1799,8 @@ export class MemoryService implements LiveMemoryService {
       }
       const mode = tasks.mode();
       const target = mode === "mock" ? null : tasks.target();
-      const profileId = this.currentProfileId();
+      // MEM-4b：語音交辦在臉部候選還沒有結果時只用全家共用（profileId null）。
+      const profileId = args.profileId !== undefined ? args.profileId : this.currentProfileId();
       const found = target ? retrieve({ facts: data.facts, consents: data.consents, profileId, target, query: args.text, now: this.now() }) : { facts: [], deps: [], dropped: 0, blockedByConsent: 0 };
       const taskId = `task_${randomUUID()}`;
       if (found.facts.length > 0 && target?.account) {
@@ -1808,6 +1826,73 @@ export class MemoryService implements LiveMemoryService {
     if (!(this.storeState === "ready" || (this.hint() && await this.ensureOpen()))) return null;
     const p = this.presence;
     return this.delegateProtected({ session: p.session, epoch: p.epoch, text: input.title, requestId: input.requestId, via: "confirmation", retryOf: input.retryOf, ...(input.locale ? { locale: input.locale } : {}) });
+  }
+
+  // ─────────────── MEM-4b 語音交辦自動帶記憶 ───────────────
+
+  /** task 與這條語音路徑都放行、有任務端、核心還開著。 */
+  voiceDelegationOn(route: VoiceRoute): boolean {
+    return !!this.options.tasks && !this.closed && this.boundary.routeEnabled("task") && this.boundary.routeEnabled(route);
+  }
+
+  voiceStamp(): { session: MemorySession; epoch: number } {
+    return { session: this.presence.session, epoch: this.presence.epoch };
+  }
+
+  /**
+   * 語音的受保護交辦：server/memory/live.ts 已核對原句（回音、確認詞、記憶指令、時窗、開口時間、世代、一次性、和模型描述相符），
+   * 這裡再走 MEM-4a 的 delegateProtected（session 與世代、voice_heard 的來源票證、任務引擎的同意、8 筆／4 KB、依賴索引先寫）。
+   * 標題與檢索查詢都是原句。回傳的 shell 是給頁面的外殼。
+   */
+  async delegateVoice(input: { route: VoiceRoute; text: string; session: MemorySession; epoch: number; householdOnly: boolean; locale?: Locale }): Promise<{ task: Task; shell: Task; used: number } | null> {
+    if (!this.voiceDelegationOn(input.route) || typeof input.text !== "string" || !input.text.trim()) return null;
+    if (!(this.storeState === "ready" || (this.hint() && await this.ensureOpen()))) return null;
+    const out = await this.delegateProtected({ session: input.session, epoch: input.epoch, text: input.text, requestId: `req_voice${hex(8)}`, via: "voice_heard", ...(input.householdOnly ? { profileId: null } : {}), ...(input.locale ? { locale: input.locale } : {}) });
+    if (!out) return null;
+    const shell = this.options.tasks?.publicGet?.(out.task.task_id) ?? shellOf(out.task);
+    return { task: out.task, shell, used: out.used };
+  }
+
+  /** 受保護的原句卡：核心持有原句，回傳不透明的 ID（SSE 只送它）。 */
+  voiceDelegateCard(title: string, route: VoiceRoute, locale?: Locale): string {
+    const now = this.now();
+    for (const [id, card] of this.delegateCards) if (card.expires <= now) this.delegateCards.delete(id);
+    while (this.delegateCards.size >= 16) this.delegateCards.delete(this.delegateCards.keys().next().value!);
+    const id = `dc_${hex(12)}`;
+    this.delegateCards.set(id, { title, route, expires: now + DELEGATE_CARD_MS, session: this.presence.session, epoch: this.presence.epoch, ...(locale ? { locale } : {}) });
+    return id;
+  }
+
+  /** 這張原句卡仍然有效：沒過期，而且建立時的本次人物 session 與世代沒變。 */
+  private liveDelegateCard(card: string) {
+    const c = typeof card === "string" && DELEGATE_CARD_ID.test(card) ? this.delegateCards.get(card) : undefined;
+    if (!c) return null;
+    if (c.expires <= this.now() || c.session !== this.presence.session || c.epoch !== this.presence.epoch) {
+      this.delegateCards.delete(card);
+      return null;
+    }
+    return c;
+  }
+
+  /** 可信主視窗（tasks IPC card_title）取原句卡的標題；過期、換了人物或不存在時 null。 */
+  delegateCardTitle(card: string): string | null {
+    return this.liveDelegateCard(card)?.title ?? null;
+  }
+
+  /**
+   * 原句卡上按「交辦」（tasks IPC card_delegate；可信主視窗的點擊算直接確認，via confirmation）：卡片一次性。放行、記憶開著、
+   * 加密保存時走受保護交辦（目前的本次人物、任務引擎的同意）；不能時 out 為 null，呼叫端照舊建立不帶記憶的任務。
+   */
+  async delegateCard(card: string, requestId: string): Promise<{ title: string; locale?: Locale; out: ProtectedDelegation | null } | null> {
+    const c = this.liveDelegateCard(card);
+    if (!c) return null;
+    this.delegateCards.delete(card);
+    const base = { title: c.title, ...(c.locale ? { locale: c.locale } : {}) };
+    if (!this.voiceDelegationOn(c.route)) return { ...base, out: null };
+    if (!(this.storeState === "ready" || (this.hint() && await this.ensureOpen()))) return { ...base, out: null };
+    // 卡片建立時的本次人物世代（審查 M3）：開記憶檔之間換了人物，delegateProtected 會因世代不符回 null。
+    const out = await this.delegateProtected({ session: c.session, epoch: c.epoch, text: c.title, requestId, via: "confirmation", ...(c.locale ? { locale: c.locale } : {}) });
+    return { ...base, out };
   }
 
   /**
@@ -1869,6 +1954,7 @@ export class MemoryService implements LiveMemoryService {
     this.manager = null;
     this.turns.clear();
     this.cards.clear();
+    this.delegateCards.clear();
     this.revokedBy.set(this.presence.session, "closed");
     void this.boundary.revoke(this.presence.session);
     await this.queue.catch(() => undefined);

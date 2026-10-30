@@ -22,9 +22,11 @@ export type GaEvent =
   | { kind: "assistant_final"; source: "assistant"; text: string; item_id: string | null }
   /** 對話項目被加入（不帶內容）：typed／system 只用來說明它不是語音。 */
   | { kind: "item_added"; source: GaSource; item_id: string | null }
-  | { kind: "response"; phase: "created" | "done"; response_id: string | null }
+  /** core_tag：MEM-4b 核心自己送出的 response.create 帶的 response.metadata.nous_trigger（上游在 response 物件回送）；頁面或伺服器 VAD 觸發的是 null。 */
+  | { kind: "response"; phase: "created" | "done"; response_id: string | null; core_tag: string | null }
   | { kind: "audio"; phase: "started" | "stopped" | "cleared" }
-  | { kind: "function_call"; name: string; call_id: string; arguments: string }
+  /** response_id：MEM-4b 用來找出觸發這個回應的使用者項目（只有那一句的語音辨識逐字稿能當交辦原句）。 */
+  | { kind: "function_call"; name: string; call_id: string; arguments: string; response_id: string | null }
   /** event_id：上游指出是哪一個用戶端事件出錯（核心只處理自己送出的事件的錯誤）。 */
   | { kind: "error"; code: string | null; message: string; event_id: string | null };
 
@@ -68,7 +70,8 @@ export function parseGaEvent(raw: unknown): GaEvent | null {
     case "response.created":
     case "response.done": {
       const response = event.response as Record<string, unknown> | undefined;
-      return { kind: "response", phase: type === "response.created" ? "created" : "done", response_id: str(response?.id) };
+      const metadata = response?.metadata as Record<string, unknown> | undefined;
+      return { kind: "response", phase: type === "response.created" ? "created" : "done", response_id: str(response?.id), core_tag: metadata && typeof metadata === "object" ? str(metadata.nous_trigger) : null };
     }
     case "output_audio_buffer.started":
       return { kind: "audio", phase: "started" };
@@ -79,7 +82,7 @@ export function parseGaEvent(raw: unknown): GaEvent | null {
     case "response.function_call_arguments.done": {
       const name = str(event.name);
       const callId = str(event.call_id);
-      return name && callId ? { kind: "function_call", name, call_id: callId, arguments: str(event.arguments) ?? "{}" } : null;
+      return name && callId ? { kind: "function_call", name, call_id: callId, arguments: str(event.arguments) ?? "{}", response_id: str(event.response_id) } : null;
     }
     case "error": {
       const error = event.error as Record<string, unknown> | undefined;
