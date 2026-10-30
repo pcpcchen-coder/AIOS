@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "repo": "pcpcchen-coder/AIOS",
+  "run_id": "run-20261030171921-c09a4d",
+  "title": "MEM-5b 工作決定記憶 work_summary",
+  "playbook": "feature",
+  "branch": "",
+  "commit_sha": "",
+  "status": "running",
+  "started_at": "2026-10-30T17:19:21.395Z",
+  "updated_at": "2026-10-30T17:19:21.395Z",
+  "ended_at": null,
+  "steps": [
+    {
+      "id": "how",
+      "title": "how",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "checkpoint",
+      "title": "checkpoint",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "architect",
+      "title": "architect",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "implement",
+      "title": "implement",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "verify",
+      "title": "verify",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "review",
+      "title": "review",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "fix",
+      "title": "fix",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "pr",
+      "title": "pr",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-30T17:19:21.395Z",
+      "type": "run_started",
+      "step_id": null,
+      "status": "running",
+      "note": ""
+    }
+  ],
+  "provenance": "Agent self-reported"
+}
