@@ -28,6 +28,7 @@ Rules:
 | 7 (added 2026-10-30) | Voice delegation with memory MEM-4b | [MEM-4b §5](memory-mem4b-2026-10-30.en.md#5-mac-gate-none-of-it-has-been-run-it-cannot-be-claimed-as-passed) steps 1–11 | Calibrate the ASR grace and similarity threshold; on the API key route committed / item_id / response_id match; record short-affirmative and TV bindings honestly | Same as MEM-2/MEM-3; tasks stored encrypted; `NOUS_MEMORY_ROUTES` includes `task` | Medium |
 | 8 (added 2026-10-30) | Protected-result search and plaintext lifecycle MEM-4c | [MEM-4c §5](memory-mem4c-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed) steps 1–12 | The log shows a drop on a real lock, sleep, idle, memory off, and App quit; the latency of the first and second search after unlocking is recorded honestly; on a Keychain denial the screen shows the error honestly, not an empty result; the page is also cleared after a lock | Tasks stored encrypted (MEM-4a); some fictional protected tasks; 500 / 2000 tasks if possible | Short to medium |
 | 9 (added 2026-10-30) | Memory suggestions and family collaboration MEM-5a | [MEM-5a §6](memory-mem5a-2026-10-30.en.md#6-mac-gate-none-executed-no-pass-may-be-claimed) steps 1–8 | The real screen of the one-line suggestion under the reply (Chinese and English); saving only on "Remember" and still there after a restart; one week of real counts recorded honestly; an older App reading version 4 disables memory and leaves the file unchanged | `suggest` in `NOUS_MEMORY_ROUTES`; fictional people George and Amy; an older App built from main `7fc7d09` (step 7) | Short (step 6 takes a week) |
+| 10 (added 2026-10-30) | Work decisions linked to tasks MEM-5b | [MEM-5b §5](memory-mem5b-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed) steps 1–10 | The real choice card (Chinese and English); saving only on a click, and the same as MEM-5a with the flag off; work decisions disappear on the reconcile after deletion and on two-hop withdrawal, and are kept when memory is turned off; unreadable tasks are not purged | Tasks stored encrypted (MEM-4a); `work_summary` in `NOUS_MEMORY_ROUTES` (plus `task` for step 6); fictional people George and Amy; an older App built from main `d0ff7bb` (step 9) | Short to medium |
 
 ## 2. Why this order
 
@@ -38,7 +39,8 @@ Rules:
 5. **MEM-4b after MEM-3 (added 2026-10-30).** It reuses the MEM-2 and MEM-3 voice routes and MEM-4a's task encryption; if those prerequisites fail on the Mac, MEM-4b results mean nothing. MEM-4a's own Mac steps are in [MEM-4a §5](memory-mem4a-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed); this runbook does not consolidate them separately.
 6. **MEM-5a after MEM-1 (added 2026-10-30).** It uses only ordinary text chat and the memory manager, so steps 1–5 can be done on the same day as MEM-1; step 6 needs a week of normal use; step 7 needs a separately built older App from main `7fc7d09`.
 7. **MEM-4c after MEM-4a's Mac steps (added 2026-10-30).** It builds on MEM-4a's task encryption; steps 1–5 only need locking, sleeping, waiting, and reading the log, so they can be done on the same day as other batches.
-8. **WK-00 independently.** It is a command-line spike not wired into the product and can be scheduled separately. The 8-hour TV negative run suits an unattended evening.
+8. **MEM-5b after MEM-4a and MEM-5a (added 2026-10-30).** It builds on task encryption (MEM-4a) and the memory cards; step 6 also needs memory in background tasks (`task`); step 7 deletes work from `/history` and quits the App straight away.
+9. **WK-00 independently.** It is a command-line spike not wired into the product and can be scheduled separately. The 8-hour TV negative run suits an unattended evening.
 
 ## 3. Shared preparation (once)
 
@@ -223,6 +225,24 @@ Prerequisites: a signed App; the MEM-1 Mac steps done; `suggest` in `NOUS_MEMORY
 - [ ] 8. Canary: trigger a suggestion and press "No"; no canary in the logs or `userData/`.
 
 Main release criteria: the real screen of step 2 and "saved only on Remember"; the unchanged file in step 7; the numbers of step 6 recorded honestly, with George deciding whether to expand, keep or turn it off.
+
+## 8d. Supplementary batch: MEM-5b work decisions linked to tasks (added 2026-10-30)
+
+Prerequisites: a signed App; the MEM-1 and MEM-4a Mac steps done (tasks stored encrypted); `work_summary` in `NOUS_MEMORY_ROUTES` in `.env` (plus `task` for step 6); fictional people George and Amy; logging on. The full conditions for every step are in [MEM-5b §5](memory-mem5b-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed).
+
+- [ ] 1. Flag: the start-up log says work decisions are released; without `work_summary`, "記住這次選了方案 B" is still a plain note with no choice card.
+- [ ] 2. Choice card: after two pieces of work finish, the same sentence shows "要連到哪一個工作？" and both titles (screenshots in both languages); after a click the receipt is a work decision and the list shows "工作決定 · 連到：…".
+- [ ] 3. No eligible work: first an honest receipt, then a plain note.
+- [ ] 4. Scope: George's memory task is not on Amy's card; George's list only says "outside the current scope".
+- [ ] 5. Reconcile after deletion: delete the work in "Results history…" and type another sentence; the work decision disappears and the log says "任務已不存在" (task no longer exists).
+- [ ] 6. Two-hop withdrawal: after forgetting "不吃香菜" both results are withdrawn and both work decisions disappear; the log says "2 筆，2 輪" (2 facts, 2 rounds).
+- [ ] 6a. Turn memory off or revoke consent: the result is withdrawn, the work decision is kept and is still there after turning memory back on.
+- [ ] 7. Reconcile after restart: delete the work from `/history` and quit the App straight away; after reopening and typing, the log says "任務已不存在" (task no longer exists).
+- [ ] 8. Unreadable is not purged: with the tasks' Keychain denied, the log says "對帳略過" (reconcile skipped) and the work decision remains.
+- [ ] 9. The older App (main `d0ff7bb`) understands the file and does not show work decisions; with no writes the file's SHA-256 is unchanged.
+- [ ] 10. Canary: link a work decision to work whose title contains a canary; no canary in the log.
+
+Main release criteria: the real screen of step 2 and "saved only on a click"; the cascading revocation of steps 5–7 and the keeping in 6a; no wrongful purge in step 8.
 
 ## 9. Batch 6: WK-00 wake word spike
 

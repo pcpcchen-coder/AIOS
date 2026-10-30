@@ -650,5 +650,22 @@
   "記憶建議：已開啟。": "Memory suggestions: on.",
   "記憶建議：已關閉（預設）。": "Memory suggestions: off (default).",
   "開啟記憶建議": "Turn on memory suggestions",
-  "關閉記憶建議": "Turn off memory suggestions"
+  "關閉記憶建議": "Turn off memory suggestions",
+  "要連到哪一個工作？": "Which work should this link to?",
+  "要把這個決定記在 {0} 名下，連到哪一個工作？": "Save this decision for {0}, linked to which work?",
+  "要把這個決定連到哪一個工作？": "Link this decision to which work?",
+  "最近 24 小時完成的工作": "Work finished in the last 24 hours",
+  "完成於 {0}": "Finished {0}",
+  "連到這個工作": "Link to this work",
+  "只記成一般筆記": "Just save as a regular memory",
+  "工作決定 · 連到：{0}": "Work decision · linked to: {0}",
+  "工作決定 · 連到的工作已不存在": "Work decision · the linked work no longer exists",
+  "工作決定 · 連到的工作不在目前範圍內": "Work decision · the linked work is outside the current scope",
+  "工作決定": "Work decision",
+  "篩選記憶": "Filter memories",
+  "全部": "All",
+  "類別：": "Type:",
+  "沒有工作決定。": "No work decisions.",
+  "只保存你說的這句話，連到你選的工作；不會保存工作的標題或成果。這個工作被刪除，或它用到的記憶被忘記或更正時，這筆工作決定也會一起忘記；關閉記憶或撤回同意不會刪除它。": "Only your own words are saved, linked to the work you choose; the work's title and result are not saved. If that work is deleted, or a memory it used is forgotten or corrected, this work decision is forgotten too; turning memory off or withdrawing consent does not delete it.",
+  "連到：{0}": "Linked to: {0}"
 }

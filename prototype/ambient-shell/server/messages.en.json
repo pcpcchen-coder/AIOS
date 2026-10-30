@@ -457,5 +457,11 @@
   "已經有相關的記憶，這次沒有保存：{0}": "A related memory already exists, so nothing was saved: {0}",
   "已開啟記憶建議：打字聊天說到自己穩定的偏好時，會在回覆下方問一次；只有按「記住」才保存": "Memory suggestions are on: when you mention a stable preference of your own while typing, Nous asks once below the reply; it is saved only if you press “Remember”",
   "已關閉記憶建議": "Memory suggestions are off",
-  "記憶建議目前沒有開放（需要 NOUS_MEMORY_ROUTES 列出 suggest）": "Memory suggestions are not available (NOUS_MEMORY_ROUTES must list suggest)"
+  "記憶建議目前沒有開放（需要 NOUS_MEMORY_ROUTES 列出 suggest）": "Memory suggestions are not available (NOUS_MEMORY_ROUTES must list suggest)",
+  "工作決定目前沒有開放（或任務沒有加密保存），這次沒有保存": "Work decisions are not available right now (or tasks are not stored encrypted); nothing was saved",
+  "這個工作已不存在、已撤回或不在目前範圍內，這次沒有保存": "That work no longer exists, was withdrawn, or is outside the current scope; nothing was saved",
+  "已經記得這個工作決定了（{0}）：{1}": "Already remembered this work decision ({0}): {1}",
+  "記在 {0} 名下的工作決定了：{1}": "Saved as {0}'s work decision: {1}",
+  "請從卡片上的工作選擇": "Please choose a work item from the card",
+  "最近 24 小時沒有可以連結的已完成工作，改用一般記住處理": "No work finished in the last 24 hours to link to, so this is handled as a regular memory"
 }

@@ -27,7 +27,7 @@ Following [16 §4](../16_Nous_Memory_Layer_Design_2026-10-26.en.md#4-人物綁�
 9. **Snapshot version 4**: see §2.6.
 10. **Offline metrics**: see §4.
 
-Not in this batch: the behaviour of `work_summary` (MEM-5b; this batch only adds it to the snapshot format), memories relayed for someone else, any memory applied automatically, and suggestions from voice.
+Not in this batch: the behaviour of `work_summary` (MEM-5b; this batch only adds it to the snapshot format; 2026-10-30 addendum: now implemented in [MEM-5b](memory-mem5b-2026-10-30.en.md), off by default), memories relayed for someone else, any memory applied automatically, and suggestions from voice.
 
 ## 2. Design and implementation
 
@@ -246,7 +246,7 @@ Prerequisites: a signed App; the MEM-1 Mac steps done; `suggest` added to `NOUS_
 ## 7. Unfinished items and the next gate
 
 - Mac steps 1–8 in §6, especially step 2 (the real screen), step 6 (one week of real counts) and step 7 (the older App).
-- MEM-5b (`work_summary`): the snapshot format is already in version 4; the behaviour comes in the next batch.
+- MEM-5b (`work_summary`): the snapshot format is already in version 4; the behaviour comes in the next batch. (2026-10-30 addendum: now implemented in [MEM-5b](memory-mem5b-2026-10-30.en.md), Mac gate not run; from MEM-5b on, `shownKind` and `retrieve.ts` list `work_summary` and send it subject to consent, so the D23 restriction applies only to this MEM-5a version.)
 - Questions for George: D1–D24 in §3, and whether to enlarge the English topic lexicon (English recall is currently 76.9%).
 
 ## 8. Residual risks

@@ -970,6 +970,22 @@ export function tasksForTarget<T>(store: TaskStore, memory: { taskTitleFilter?(t
   return store.modelTasks(allow);
 }
 
+/**
+ * MEM-5b：記憶層看任務的兩個窗口（server/nous.ts 的 TaskPort 與測試共用）。
+ * scopedList：可信主視窗的清單規則（listFor）；inScope 為 false、撤回中或讀不到內容的一律外殼（protected: true），範圍外的不解密。
+ * taskState：不解密，只看任務還在不在、成果有沒有撤回；讀不到內容的任務仍是 present（不能當成已刪除）。
+ */
+export function memoryTaskViews(store: TaskStore): { scopedList(inScope: (task: Task) => boolean): Task[]; taskState(taskId: string): "present" | "withdrawn" | "missing" } {
+  return {
+    // listFor 已經把撤回中（hiddenNow）的任務當成範圍外（外殼）。
+    scopedList: (inScope) => store.listFor(inScope).map((task) => (store.contentMissing(task.task_id) ? shellOf(task) : task)),
+    taskState: (taskId) => {
+      const task = store.publicGet(taskId);
+      return !task ? "missing" : task.withdrawn ? "withdrawn" : "present";
+    },
+  };
+}
+
 /** 受保護外殼：標題、步驟標題與錯誤換成固定句；狀態、時間、步驟數與腦區（domain）照舊，電子腦動畫仍由真實事件驅動。 */
 export function shellOf(task: Task): Task {
   const t = clone(task);

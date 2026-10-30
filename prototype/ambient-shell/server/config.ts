@@ -32,8 +32,9 @@ export interface Config {
    * MEM-3：記憶的放行旗標（NOUS_MEMORY_ROUTES，逗號分隔：live、api_key、task）。API key 即時語音的記憶預設關閉，列出 api_key 才打開
    * （Mac gate 通過後才改預設）；live 維持 MEM-2 的現狀（一律放行），這個旗標不能關掉它。
    * MEM-4a：task＝背景任務自動帶記憶（受保護交辦）；預設關閉，關閉時交辦和 M15 一樣。
+   * MEM-5a：suggest＝記憶建議；MEM-5b：work_summary＝工作決定連到任務。兩者都預設關閉。
    */
-  memoryRoutes: { api_key: boolean; task: boolean; suggest: boolean };
+  memoryRoutes: { api_key: boolean; task: boolean; suggest: boolean; work_summary: boolean };
   /** ChatGPT 方案路徑的模型（NOUS_LIVE_MODEL）：一定顯示；只有明確設定時才送出（send）。 */
   liveModel: { display: string; send: string | null };
   /** ChatGPT 方案路徑的聲音預設（NOUS_LIVE_VOICE，Codex 的聲音清單）。 */
@@ -128,11 +129,14 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
   };
 }
 
-/** MEM-5a：suggest（打字聊天的記憶建議與全家共用的「由誰記下」）同樣預設關閉。 */
-function parseMemoryRoutes(raw: string | undefined): { api_key: boolean; task: boolean; suggest: boolean } {
+/**
+ * MEM-5a：suggest（打字聊天的記憶建議與全家共用的「由誰記下」）同樣預設關閉。
+ * MEM-5b：work_summary（「記住這次選了方案 B」連到最近完成的受保護工作）同樣預設關閉；關閉時照舊記成一般筆記。
+ */
+function parseMemoryRoutes(raw: string | undefined): { api_key: boolean; task: boolean; suggest: boolean; work_summary: boolean } {
   const values = (raw ?? "").split(",").map((v) => v.trim().toLowerCase()).filter(Boolean);
-  for (const value of values) if (value !== "live" && value !== "api_key" && value !== "task" && value !== "suggest") throw new Error(`NOUS_MEMORY_ROUTES 只能列出 live、api_key、task、suggest，收到 "${value}"`);
-  return { api_key: values.includes("api_key"), task: values.includes("task"), suggest: values.includes("suggest") };
+  for (const value of values) if (value !== "live" && value !== "api_key" && value !== "task" && value !== "suggest" && value !== "work_summary") throw new Error(`NOUS_MEMORY_ROUTES 只能列出 live、api_key、task、suggest、work_summary，收到 "${value}"`);
+  return { api_key: values.includes("api_key"), task: values.includes("task"), suggest: values.includes("suggest"), work_summary: values.includes("work_summary") };
 }
 
 function parseRoute(raw: string | undefined): RoutePreference {

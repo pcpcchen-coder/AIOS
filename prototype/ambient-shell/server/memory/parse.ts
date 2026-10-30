@@ -321,6 +321,33 @@ export function chatText(segments: readonly ParsedSegment[]): string | null {
   return parts.length ? parts.join("。") : null;
 }
 
+// ───────────── MEM-5b：工作決定（work_summary） ─────────────
+// 明說「記住」而且內容是第一人稱、指著最近一次工作的決定：「記住這次選了方案 B」「記住我們剛剛決定用 Postgres」
+// 「remember I chose plan B」「remember we decided to use Postgres」。只看 parse 已經接受的 remember 段落（第三人、引文、
+// 假設、玩笑、敏感、不確定、問句都已在 content() 排除）；「記住今天…」（只到今天）不算。是不是真的要連到某個工作，由
+// service.ts 的選擇卡讓使用者點選；這裡不知道有哪些工作。
+
+const ZH_DECISION = /^(?:我們|我)?(?:這次|這一次|剛剛|剛才|上次|上一次)(?:我們|我)?(?:是)?(?:選了|選擇了|選擇|選|決定了|決定|採用了|採用|定了|用了|用)\s*\S/u;
+/**
+ * 審查 m1：不是決定的常見說法。「用了很久／一下」是時間長短；「這次用中文／英文」是這一次的回覆方式（交給一般記住）；
+ * 「這次選了」沒有說選了什麼。
+ * 只排除這幾個固定說法；其他漏網的（例如「剛剛用了很多錢」）仍會出選擇卡，使用者可以選「只記成一般筆記」。
+ */
+const ZH_NOT_DECISION = /(?:用了?|選了?)\s*(?:很久|好久|一下|一陣子|半天|很多次)|用\s*(?:中文|英文|日文|台語|國語)(?:回答|回覆|說)?$|(?:選擇|選|決定|採用|定|用)了?$/u;
+// 英文：時間錨點（this time／just now／last time）或動詞後面的受詞都要有；used to（以前習慣）、picked up（接人、拿起）、
+// 受詞是 nothing／anything／none 的不算。
+const EN_DECISION = /^(?:(?:this time|just now|last time),?\s+)?(?:i|we)\s+(?:(?:just|finally)\s+)?(?:chose|picked(?!\s+up\b)|selected|decided(?:\s+on|\s+to)?|went with|settled on|opted for|used(?!\s+to\b))\s+(?!(?:(?:on|to)\s+)?(?:nothing|anything|none|it)\b)\S/i;
+
+/**
+ * 這個 remember 段落是不是「工作決定」（MEM-5b）：只認第一人稱的「這次／剛剛／上次＋選／決定／採用／定了／用」，不含今天有效的；
+ * 審查 m2：parse 判成偏好（preference）的也不算，和旗標關閉時一樣交給一般記住（含衝突確認）。
+ */
+export function workDecision(seg: Extract<ParsedSegment, { op: "remember" }>): boolean {
+  if (seg.expires !== "none" || seg.kind !== "note") return false;
+  if (ZH_DECISION.test(seg.value)) return !ZH_NOT_DECISION.test(seg.value);
+  return EN_DECISION.test(seg.value);
+}
+
 /** 句子看起來像在要求記住（給瀏覽器版或語音路徑判斷要不要提示「這裡沒有記憶」）。 */
 export function looksLikeMemoryRequest(text: string): boolean {
   return parseMemoryText(text).some(s => s.op !== "chat" && s.op !== "temporary");

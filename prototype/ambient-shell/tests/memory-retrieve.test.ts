@@ -93,9 +93,13 @@ describe("retrieval: validity, pinning and the 8 facts / 4 KB budget", () => {
   const base = (i: number, extra: Partial<MemoryFact> = {}): MemoryFact => ({ id: `mem_${String(i).padStart(16, "0")}`, profileId: null, revision: 1, kind: "preference", topic: "food", key: `k${i}`, value: `不吃第${i}種菜`, audience: "household", source: { kind: "explicit", turnId: "req_fixture", at: AT, excerpt: "x", by: null }, validFrom: AT, expiresAt: null, reviewAfter: null, pinned: false, derivedFrom: null, ...extra });
   const consents: MemoryConsent[] = [{ profileId: null, provider: "claude", account: target.account!, allowed: true }];
 
-  it("MEM-5a 審查 m4: work_summary (reserved for MEM-5b) is never sent to a model", () => {
+  it("MEM-5b: work_summary follows the normal rules and only its value (the user's own words) is sent, never the task id", () => {
     const facts = [base(1, { kind: "work_summary", pinned: true, derivedFrom: { taskId: "task_01234567-89ab-cdef-0123-456789abcdef" } }), base(2, { kind: "note" }), base(3)];
-    expect(retrieve({ facts, consents, profileId: null, target, query: "晚餐吃什麼", now: NOW }).facts.map(f => f.text)).toEqual(["不吃第2種菜", "不吃第3種菜"]);
+    const found = retrieve({ facts, consents, profileId: null, target, query: "晚餐吃什麼", now: NOW });
+    expect(found.facts.map(f => f.text)).toEqual(["不吃第1種菜", "不吃第2種菜", "不吃第3種菜"]);
+    expect(JSON.stringify(found.facts)).not.toContain("task_");
+    // 同意不成立時一樣不送（和其他類別同一條規則）。
+    expect(retrieve({ facts, consents: [], profileId: null, target, query: "晚餐吃什麼", now: NOW }).facts).toEqual([]);
   });
 
   it("drops expired and not-yet-valid facts (M05)", () => {

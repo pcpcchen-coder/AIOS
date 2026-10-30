@@ -276,13 +276,15 @@ describe.skipIf(!realLockAvailable)("MEM-3 memory on: lease → session.update �
 
 describe("MEM-3 release flag and consent key", () => {
   it("NOUS_MEMORY_ROUTES opens the API key route only when it lists api_key (default off); unknown values are refused", () => {
-    expect(loadConfig({}).memoryRoutes).toEqual({ api_key: false, task: false, suggest: false });
-    expect(loadConfig({ NOUS_MEMORY_ROUTES: "live" }).memoryRoutes).toEqual({ api_key: false, task: false, suggest: false });
-    expect(loadConfig({ NOUS_MEMORY_ROUTES: " live, API_KEY " }).memoryRoutes).toEqual({ api_key: true, task: false, suggest: false });
+    expect(loadConfig({}).memoryRoutes).toEqual({ api_key: false, task: false, suggest: false, work_summary: false });
+    expect(loadConfig({ NOUS_MEMORY_ROUTES: "live" }).memoryRoutes).toEqual({ api_key: false, task: false, suggest: false, work_summary: false });
+    expect(loadConfig({ NOUS_MEMORY_ROUTES: " live, API_KEY " }).memoryRoutes).toEqual({ api_key: true, task: false, suggest: false, work_summary: false });
     // MEM-4a：task（背景任務自動帶記憶）同樣預設關閉。
-    expect(loadConfig({ NOUS_MEMORY_ROUTES: "task" }).memoryRoutes).toEqual({ api_key: false, task: true, suggest: false });
+    expect(loadConfig({ NOUS_MEMORY_ROUTES: "task" }).memoryRoutes).toEqual({ api_key: false, task: true, suggest: false, work_summary: false });
     // MEM-5a：suggest（記憶建議與全家共用的「由誰記下」）同樣預設關閉。
-    expect(loadConfig({ NOUS_MEMORY_ROUTES: "suggest, task" }).memoryRoutes).toEqual({ api_key: false, task: true, suggest: true });
+    expect(loadConfig({ NOUS_MEMORY_ROUTES: "suggest, task" }).memoryRoutes).toEqual({ api_key: false, task: true, suggest: true, work_summary: false });
+    // MEM-5b：work_summary（工作決定連到任務）同樣預設關閉。
+    expect(loadConfig({ NOUS_MEMORY_ROUTES: "task,work_summary" }).memoryRoutes).toEqual({ api_key: false, task: true, suggest: false, work_summary: true });
     expect(() => loadConfig({ NOUS_MEMORY_ROUTES: "live,chatgpt" })).toThrow(/NOUS_MEMORY_ROUTES/);
   });
 

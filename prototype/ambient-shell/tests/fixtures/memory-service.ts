@@ -40,7 +40,7 @@ export interface Harness {
 let seq = 0;
 export const req = () => `req_fixture${String(++seq).padStart(6, "0")}`;
 
-export function harness(options: { dir: string; key: Buffer; clock?: { now: number }; confirm?: MemoryConfirmFn; identity?: MemoryIdentityHooks | null; store?: Partial<MemoryStoreOptions>; wrap?: (store: MemoryStoreLike) => MemoryStoreLike; available?: () => boolean; targets?: ChatTarget[]; onPresence?: () => void; live?: ChatTarget | null; apiKey?: ChatTarget | null; release?: Partial<Record<ContextRoute, boolean>>; tasks?: TaskPort; onResultsWithdrawn?: (taskIds: string[]) => void; resultLimit?: number; holdResults?: (taskIds: string[]) => () => void; onPlaintextDrop?: (reason: "memory_off" | "memory_closed") => void; suggest?: boolean; log?: (line: string) => void }): Harness {
+export function harness(options: { dir: string; key: Buffer; clock?: { now: number }; confirm?: MemoryConfirmFn; identity?: MemoryIdentityHooks | null; store?: Partial<MemoryStoreOptions>; wrap?: (store: MemoryStoreLike) => MemoryStoreLike; available?: () => boolean; targets?: ChatTarget[]; onPresence?: () => void; live?: ChatTarget | null; apiKey?: ChatTarget | null; release?: Partial<Record<ContextRoute, boolean>>; tasks?: TaskPort; onResultsWithdrawn?: (taskIds: string[]) => void; resultLimit?: number; holdResults?: (taskIds: string[]) => () => void; onPlaintextDrop?: (reason: "memory_off" | "memory_closed") => void; suggest?: boolean; workSummary?: boolean; log?: (line: string) => void }): Harness {
   const clock = options.clock ?? { now: Date.parse("2026-10-29T02:00:00Z") };
   const target = { current: CLAUDE as ChatTarget | null };
   const confirms: unknown[] = [];
@@ -78,6 +78,8 @@ export function harness(options: { dir: string; key: Buffer; clock?: { now: numb
     ...(options.onPlaintextDrop ? { onPlaintextDrop: options.onPlaintextDrop } : {}),
     // MEM-5a：NOUS_MEMORY_ROUTES 的 suggest（預設關閉）與 log 收集（canary 測試用）。
     ...(options.suggest ? { suggest: true } : {}),
+    // MEM-5b：NOUS_MEMORY_ROUTES 的 work_summary（預設關閉）。
+    ...(options.workSummary ? { workSummary: true } : {}),
     ...(options.log ? { log: options.log } : {}),
     now: () => clock.now,
   });

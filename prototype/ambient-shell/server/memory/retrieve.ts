@@ -2,7 +2,7 @@
 //   subject（本次人物＋家庭共用）→ audience（household）→ 有效狀態與期限 → 當前服務帳號的同意 → 相關性。
 // 不能跨人物搜尋後才刪掉不該看的結果，也不拿其他家人的資料補空結果。相關性只用固定主題、同義詞組、簡繁對照
 // （只用於搜尋 token）與中文二字片段；沒有命中就回空。總共最多 8 筆、其中釘選最多 4 筆、4 KB UTF-8；超額捨去整筆，不截斷。
-// ContextFact 只含 text、source、at、expires，不含人物 ID、記憶 ID、票證或版本。
+// ContextFact 只含 text、source、at、expires，不含人物 ID、記憶 ID、票證或版本（MEM-5b 的工作決定也不含任務 ID、標題或成果）。
 
 import type { MemoryConsent, MemoryFact } from "./store.ts";
 import { questionTopics, synonymGroups, type TopicId } from "./parse.ts";
@@ -83,8 +83,9 @@ export function retrieve(input: RetrievalInput): RetrievalResult {
   // 1. subject：本次人物＋家庭共用（沒有選定人物時只有家庭共用）。
   const inScope = input.facts.filter(f => f.profileId === null || (input.profileId !== null && f.profileId === input.profileId));
   // 2. audience：首版只有 household。3. 有效狀態與期限。
-  // 審查 m4：MEM-5b 之前只送 preference 與 note（work_summary 的規則在 MEM-5b）。
-  const valid = inScope.filter(f => f.audience === "household" && (f.kind === "preference" || f.kind === "note") && active(f, now));
+  // MEM-5b：work_summary（工作決定）和 preference、note 一樣依人物、期限、同意與相關性；送出的只有使用者原話（value），
+  // 不含連結的任務 ID、標題或成果。任務已不存在的工作決定由 service.ts 在呼叫前先排除（usableFacts）。
+  const valid = inScope.filter(f => f.audience === "household" && (f.kind === "preference" || f.kind === "note" || f.kind === "work_summary") && active(f, now));
   // 4. 當前服務＋帳號的同意（依 fact 的歸屬：人物或家庭）。
   const allowed = valid.filter(f => consentFor(input.consents, f.profileId, target));
   // 5. 相關性：釘選的先放（最多 4 筆），其餘依分數，同分取較新的。

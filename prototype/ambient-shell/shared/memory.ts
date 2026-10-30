@@ -94,6 +94,13 @@ export interface MemoryFactView {
   pinned: boolean;
   /** MEM-5a：全家共用的記憶由哪位本次人物記下（名字；只是當時選定的人物，不是身分驗證）。其他為 null。 */
   by_name: string | null;
+  /** MEM-5b：preference、note，或 work_summary（工作決定：使用者原話，連到一個受保護任務）。 */
+  kind: "preference" | "note" | "work_summary";
+  /**
+   * MEM-5b：工作決定連到的任務（只經可信主視窗的 IPC）。title 只在任務屬於目前範圍（本次人物或全家共用，D2）時才有；
+   * out_of_scope：任務存在但不在目前範圍（只顯示外殼）；missing：任務已不存在（記憶檔開啟時的對帳會忘記這一筆）。其他類別為 null。
+   */
+  work: { task_id: string; title: string | null; state: "in_scope" | "out_of_scope" | "missing" } | null;
 }
 
 export type MemoryReceiptStatus =
@@ -109,6 +116,12 @@ export interface MemoryReceiptView extends MemoryText {
 export type ClarifyChoice = "save" | "household" | "cancel";
 /** MEM-2 語音卡（即時語音）上的選擇：記住／更正／忘記（confirm）、改記全家共用、取消。 */
 export type VoiceConfirmChoice = "confirm" | "household" | "cancel";
+/** MEM-5b 工作決定卡：task＝連到選的那個工作（card_answer 帶 task）；note＝只記成一般筆記；cancel＝取消。 */
+export type WorkSummaryChoice = "task" | "note" | "cancel";
+/** MEM-5b：工作決定卡最多列幾個工作。 */
+export const WORK_CHOICES_MAX = 5;
+/** MEM-5b：工作決定卡只列這段時間內成功完成的工作。 */
+export const WORK_CHOICE_WINDOW_MS = 24 * 60 * 60_000;
 
 export type MemoryCardView =
   | { kind: "setup"; card: string; text: string }
@@ -127,7 +140,12 @@ export type MemoryCardView =
    * MEM-5a 記憶建議（只經 card_view；turn 只帶卡片 ID）：text 是使用者打的那一句，value 是按「記住」後要保存的內容。
    * 卡片答案：confirm＝記住，decline＝不用。
    */
-  | { kind: "suggestion"; card: string; text: string; value: string; subject_name: string | null };
+  | { kind: "suggestion"; card: string; text: string; value: string; subject_name: string | null }
+  /**
+   * MEM-5b 工作決定（只經 turn／card_answer 的 IPC 回應，不經 SSE）：value 是要記住的使用者原話；tasks 是最近 24 小時內成功完成、
+   * 沒有被撤回、在目前範圍內的受保護工作（最多 5 個；title 是那個工作的標題，只給畫面顯示，不保存進記憶、不送模型）。
+   */
+  | { kind: "work_summary"; card: string; value: string; subject_name: string | null; tasks: { task_id: string; title: string; finished_at: string }[]; options: WorkSummaryChoice[] };
 
 export interface MemoryTurnView {
   receipts: MemoryReceiptView[];
@@ -165,7 +183,8 @@ export type MemoryRequest =
   /** 首次設定卡（card）或記憶管理（token）才可以開關記憶、改同意。 */
   | { op: "setup"; enabled: boolean; subject: MemorySetupSubject; allow: { provider: string; account: string }[]; card?: string; token?: string }
   | { op: "turn"; text: string; request_id: string }
-  | { op: "card_answer"; card: string; choice: string; profile?: string; fact?: string; allow?: boolean }
+  /** task：MEM-5b 工作決定卡上選的工作（choice "task"）。 */
+  | { op: "card_answer"; card: string; choice: string; profile?: string; fact?: string; allow?: boolean; task?: string }
   | { op: "card_view"; card: string }
   /** card：presence.select_card（主視窗「本次人物」選單）；或記憶管理的 token。 */
   | { op: "select"; profile: string | null; card?: string; token?: string }
