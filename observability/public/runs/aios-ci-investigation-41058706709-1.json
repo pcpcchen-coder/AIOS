@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "repo": "pcpcchen-coder/AIOS",
+  "run_id": "aios-ci-investigation-41058706709-1",
+  "title": "AIOS pstack observability E2E (scripted CI, not native Agent)",
+  "playbook": "investigation-ci",
+  "branch": "main",
+  "commit_sha": "36996d9f22c01080c7bc1175564b362b05ef44f2",
+  "status": "passed",
+  "started_at": "2026-10-30T12:53:19.256Z",
+  "updated_at": "2026-10-30T12:53:20.628Z",
+  "ended_at": "2026-10-30T12:53:20.628Z",
+  "steps": [
+    {
+      "id": "inspect",
+      "title": "inspect",
+      "status": "passed",
+      "started_at": "2026-10-30T12:53:19.339Z",
+      "ended_at": "2026-10-30T12:53:19.370Z",
+      "note": "Observed pinned pstack sources, playbook and local Recorder",
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/tree/36996d9f22c01080c7bc1175564b362b05ef44f2/vendor/pstack"
+        }
+      ]
+    },
+    {
+      "id": "verify",
+      "title": "verify",
+      "status": "passed",
+      "started_at": "2026-10-30T12:53:19.614Z",
+      "ended_at": "2026-10-30T12:53:20.507Z",
+      "note": "Real CI checks passed: pstack hashes, links, observer and public export",
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/actions/runs/41058706709"
+        }
+      ]
+    },
+    {
+      "id": "report",
+      "title": "report",
+      "status": "passed",
+      "started_at": "2026-10-30T12:53:20.550Z",
+      "ended_at": "2026-10-30T12:53:20.586Z",
+      "note": "Generated source-grounded investigation report with explicit CI limitations",
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/actions/runs/41058706709"
+        }
+      ]
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-10-30T12:53:19.257Z",
+      "type": "run_started",
+      "step_id": null,
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-10-30T12:53:19.339Z",
+      "type": "step_updated",
+      "step_id": "inspect",
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-10-30T12:53:19.371Z",
+      "type": "step_updated",
+      "step_id": "inspect",
+      "status": "passed",
+      "note": "Observed pinned pstack sources, playbook and local Recorder"
+    },
+    {
+      "at": "2026-10-30T12:53:19.614Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-10-30T12:53:20.508Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "passed",
+      "note": "Real CI checks passed: pstack hashes, links, observer and public export"
+    },
+    {
+      "at": "2026-10-30T12:53:20.551Z",
+      "type": "step_updated",
+      "step_id": "report",
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-10-30T12:53:20.586Z",
+      "type": "step_updated",
+      "step_id": "report",
+      "status": "passed",
+      "note": "Generated source-grounded investigation report with explicit CI limitations"
+    },
+    {
+      "at": "2026-10-30T12:53:20.628Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
+    }
+  ],
+  "provenance": "Scripted CI investigation, not native pstack Agent"
+}
