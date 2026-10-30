@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-30T06:17:21.276Z",
-  "updated_at": "2026-10-30T06:17:57.385Z",
+  "updated_at": "2026-10-30T06:18:00.797Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,8 +32,8 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-30T06:18:00.797Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -119,6 +119,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "George：先做"
+    },
+    {
+      "at": "2026-10-30T06:18:00.797Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
