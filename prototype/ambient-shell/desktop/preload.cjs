@@ -1,4 +1,4 @@
-// 只開放四個動作給網頁：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示、家人辨識與記憶的請求。
+// 只開放五個動作給網頁：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示、家人辨識、記憶與加密任務的請求。
 // identity 與 memory 只是傳輸：發送者、op 白名單與形狀在主程序檢查（desktop/identity-ipc.mjs、desktop/memory-ipc.mjs），
 // 資料、比對與記憶規則在核心（ADR-0001 §2.1、docs/16 §9）。
 const { contextBridge, ipcRenderer } = require("electron");
@@ -25,6 +25,8 @@ contextBridge.exposeInMainWorld("nousDesktop", {
     }),
   identity: (request) => ipcRenderer.invoke("nous:identity", request),
   memory: (request) => ipcRenderer.invoke("nous:memory", request),
+  // MEM-4a：加密保存的任務（真實標題、成果、App 內搜尋、重做、刪除明文備份）只經這個通道給主視窗。
+  tasks: (request) => ipcRenderer.invoke("nous:tasks", request),
   // 本次人物世代改變的通知（不含內容）；頁面收到後用 status 讀新狀態（不開記憶檔）。
   onMemoryChange: (callback) => {
     if (typeof callback !== "function") return () => {};

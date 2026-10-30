@@ -9,6 +9,7 @@ import { t, msg, onLocaleChange } from "./i18n.ts";
 
 import { artifactSections, button, h, raw, renderStep, type Child } from "./views.ts";
 import { TASK_STATUS_LABEL, formatCount } from "./format.ts";
+import { PROTECTED_TITLE, WITHDRAWN_TEXT, shellView } from "./protected-tasks.ts";
 import { isDeletable, type HistoryDetail, type HistoryItem, type HistoryMatch, type HistoryPage, type HistoryQuery } from "../shared/history.ts";
 import type { ExecutorMode, Task, TaskStatus } from "../shared/types.ts";
 
@@ -32,6 +33,11 @@ export interface HistoryViewDeps {
   browserLink?: boolean;
   /** 獨立網頁：在標題列放語言切換。 */
   header?: () => HTMLElement | null;
+  /**
+   * MEM-4a：這個畫面的資料來自 HTTP（/api/history）。macOS App 加密保存時，HTTP 只有外殼：受保護的項目只顯示
+   * 「受保護的任務，請在 App 內查看」（依目前介面語言），不顯示片段。App 內經 IPC 搜尋時為 false。
+   */
+  shells?: boolean;
 }
 
 const STATUS_FILTERS: readonly ("" | TaskStatus)[] = ["", "succeeded", "failed", "cancelled", "running", "queued"];
@@ -356,7 +362,8 @@ export class HistoryView {
   }
 
   private resultItem(item: HistoryItem): HTMLElement {
-    const open = h("button", { type: "button", class: "history-open" }, h("span", { class: "history-title" }, ...highlight(item.title, item.title_matches)));
+    const shell = !!this.deps.shells && item.protected;
+    const open = h("button", { type: "button", class: "history-open" }, h("span", { class: "history-title" }, ...(shell ? [t(PROTECTED_TITLE)] : highlight(item.title, item.title_matches))));
     open.addEventListener("click", () => void this.openDetail(item.task_id));
     const meta = h(
       "p",
@@ -367,7 +374,7 @@ export class HistoryView {
       " · ",
       msg`交辦於 ${formatDate(item.created_at)}`,
     );
-    const snippet = item.snippet
+    const snippet = item.snippet && !shell
       ? h(
           "p",
           { class: "history-snippet" },
@@ -387,8 +394,11 @@ export class HistoryView {
         h("p", { class: detail.error ? "error-text" : "muted", role: detail.error ? "alert" : "status" }, detail.error ?? t("載入中…")),
       ];
     }
-    const { task, artifact } = detail.data;
-    const { header, body, notes } = artifactSections(task, artifact, artifact ? null : task.status === "succeeded" ? "找不到這個任務的成果" : null);
+    const { artifact } = detail.data;
+    const task = shellView(detail.data.task);
+    // MEM-4a：撤銷後只留外殼與重做；HTTP 看到的受保護任務只有外殼（內容請在 App 內查看）。
+    const missing = task.withdrawn ? WITHDRAWN_TEXT : task.protected && this.deps.shells ? PROTECTED_TITLE : task.status === "succeeded" ? "找不到這個任務的成果" : null;
+    const { header, body, notes } = artifactSections(task, artifact, artifact ? null : missing);
     const showBody = !!artifact || task.status === "succeeded";
     const facts = h(
       "dl",

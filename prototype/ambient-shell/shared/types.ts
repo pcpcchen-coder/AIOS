@@ -64,6 +64,22 @@ export interface Task {
   artifact_id: string | null;
   /** 由哪個任務重試而來。 */
   retry_of: string | null;
+  /**
+   * MEM-4a：受保護的外殼（macOS App 加密保存任務時，對外的 SSE、/api/tasks、模型提示都只看到它）。標題、步驟標題與錯誤
+   * 換成固定句；真正內容只經可信主視窗的 IPC 取得。瀏覽器版（不加密）沒有這個欄位。
+   */
+  protected?: boolean;
+  /** MEM-4a：這個任務帶著記憶執行（受保護交辦）；只是標記，不含任何記憶內容。 */
+  memory?: boolean;
+  /** MEM-4a：用到的記憶被忘記、更正、撤回同意、刪除人物或關閉記憶：成果內容已移除（crypto-shred），只留外殼與重做。 */
+  withdrawn?: boolean;
+  /**
+   * MEM-4a（審查 M2）：標題確定是使用者自己的原句（受保護交辦，或明確標為打字的 POST /api/tasks）。只有這種任務的重做
+   * 才會重新取用記憶；模型改寫的交辦標題或交辦卡沒有這個欄位，重做時不帶記憶。
+   */
+  origin?: "user_sentence";
+  /** MEM-4a：停止的原因；memory_revoked＝執行中用到的記憶被撤銷，沒有產生成果。 */
+  cancel_reason?: "memory_revoked" | null;
 }
 
 export interface Artifact {

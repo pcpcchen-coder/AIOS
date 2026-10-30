@@ -1175,6 +1175,8 @@ body[data-camera-preview="open"] .subtitle {
 .conversation-notice { margin: 6px 0 0; font-size: 12px; opacity: 0.8; }
 .delegate-prompt { margin-top: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .delegate-prompt p { margin: 0; flex-basis: 100%; }
+/* MEM-4a：任務加密搬遷與明文備份的提示（不是 Surface；使用者按「稍後」或刪除後就消失）。 */
+.vault-prompt { position: fixed; left: 16px; bottom: 16px; max-width: min(460px, calc(100vw - 32px)); margin: 0; padding: 10px 12px; border-radius: 10px; background: rgba(20, 24, 32, 0.92); color: inherit; font-size: 13px; z-index: 30; }
 .memory-quote { margin: 8px 0; padding: 6px 10px; border-left: 3px solid rgba(255, 255, 255, 0.3); white-space: pre-wrap; }
 .memory-list { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
 .memory-fact { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

@@ -1,3 +1,4 @@
+import { WITHDRAWN_TEXT } from "./protected-tasks.ts";
 import { t, msg, getLocale, setLocale, useLocale, uiText } from "./i18n.ts";
 import DOMPurify from "dompurify";
 import { confirmIcon } from "./icons.ts";
@@ -14,6 +15,8 @@ import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration 
 export interface ViewActions {
   cancel(taskId: string): void;
   retry(taskId: string): void;
+  /** MEM-4a：撤銷後的成果「重做」（重新取用目前的記憶，不沿用舊依賴）。 */
+  redo?(taskId: string): void;
   openArtifact(taskId: string, artifactId: string): void;
   showProgress(): void;
   dismiss(): void;
@@ -186,6 +189,9 @@ function renderTaskCard(task: Task, actions: ViewActions): HTMLElement {
   }
   if (task.status === "failed" || task.status === "cancelled") {
     buttons.push(button(t("重試"), () => actions.retry(task.task_id)));
+  } else if (task.withdrawn && task.status === "succeeded" && actions.redo) {
+    const redo = actions.redo;
+    buttons.push(button(t("重做"), () => redo(task.task_id)));
   }
 
   return h(
@@ -197,6 +203,9 @@ function renderTaskCard(task: Task, actions: ViewActions): HTMLElement {
     meta,
     task.steps.length > 0 && steps,
     task.error && h("p", { class: "error-text" }, t(task.error)),
+    // MEM-4a：用到的記憶被撤銷：成果內容已移除，只留外殼與重做（重做會重新取用目前的記憶）。
+    task.withdrawn && h("p", { class: "muted" }, t(WITHDRAWN_TEXT)),
+    task.cancel_reason === "memory_revoked" && h("p", { class: "muted" }, t("用到的記憶已被撤銷，任務已停止，沒有產生成果。")),
     task.model && h("p", { class: "muted small" }, msg`模型：${task.model}`),
     buttons.length > 0 && h("div", { class: "actions" }, ...buttons),
   );

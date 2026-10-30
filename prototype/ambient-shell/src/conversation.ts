@@ -1,5 +1,6 @@
 import type { Locale } from "../shared/i18n.mjs";
 import type { ChatEvent, ChatTurn } from "./api.ts";
+import type { Task } from "../shared/types.ts";
 
 interface Exchange {
   requestId: string;
@@ -28,6 +29,8 @@ interface ConversationOptions {
   changed(): void;
   activity?(kind: "submit" | "stream", requestId: string, text: string): void;
   delegated(title: string, requestId: string, locale?: Locale): void;
+  /** MEM-4a：核心已經建立受保護交辦的任務（外殼）。 */
+  delegatedTask?(task: Task, requestId: string): void;
   /** 帶記憶的一輪想交辦：改由使用者決定（title 是使用者原句）。 */
   delegateBlocked?(title: string, requestId: string, locale?: Locale): void;
 }
@@ -97,6 +100,9 @@ export class ConversationSession {
             break;
           case "delegate_blocked":
             this.options.delegateBlocked?.(event.title, requestId, turn.locale);
+            break;
+          case "delegated":
+            this.options.delegatedTask?.(event.task, requestId);
             break;
           case "memory_notice":
             turn.exchange.notice = event.message;

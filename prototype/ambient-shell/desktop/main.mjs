@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, safeStorage, session, shell, Tray } from "electron";
 import { checkIdentitySender, MenuClickWindow, validateIdentityRequest } from "./identity-ipc.mjs";
 import { validateMemoryRequest } from "./memory-ipc.mjs";
+import { validateTasksRequest } from "./tasks-ipc.mjs";
 import { createMemorySecretBox } from "./memory-safe-storage.mjs";
 import { checkTrustedSender } from "./trusted-sender.mjs";
 import { radio, settingsMenu } from "./settings-menu.mjs";
@@ -128,6 +129,8 @@ let quitting = false;
 
 async function startCore() {
   const { startNous } = await import(pathToFileURL(join(here, "server.mjs")).href);
+  // safeStorage 包裝資料金鑰（記憶與任務加密共用同一個 secretBox；只在 darwin、App ready 且可加密時可用，失敗不退回明文）。
+  const secretBox = createMemorySecretBox({ safeStorage, ready: () => app.isReady() });
   core = await startNous({
     envFile,
     dataDir,
@@ -148,13 +151,14 @@ async function startCore() {
     },
     memory: {
       dir: memoryDir,
-      // safeStorage 包裝資料金鑰（只在 darwin、App ready 且可加密時可用；失敗一律不可用，不退回明文）。
-      secretBox: createMemorySecretBox({ safeStorage, ready: () => app.isReady() }),
+      secretBox,
       excludeFromBackup: excludeFromTimeMachine,
       confirm: confirmMemory,
       // 本次人物世代改變（換人、暫停、撤銷）：推一個不含內容的通知，頁面再用 status（不開記憶檔）讀新狀態。
       onPresence: () => { if (win && !win.isDestroyed()) win.webContents.send("nous:memory-changed"); },
     },
+    // MEM-4a：全部任務加密保存（data/sealed/）；舊的明文在核心啟動時搬遷一次，備份保留到使用者在畫面上確認刪除。
+    tasks: { secretBox, confirmDeleteBackups, excludeFromBackup: excludeFromTimeMachine },
     // MEM-2：記憶撤銷後頁面沒有在 1.5 秒內回報停播時，核心把主視窗的聲音強制靜音（下一次回報停播或新通話開始才解除）。
     audio: { setMuted: (muted) => { if (win && !win.isDestroyed()) win.webContents.setAudioMuted(muted); } },
   });
@@ -251,6 +255,19 @@ async function confirmIdentity(request) {
 const MEMORY_NOTE = "限制：在此之前已存在的 Time Machine 備份或 APFS 本機快照，可能仍保有舊的加密記憶檔；已送給模型服務的內容也不會因此刪除。";
 
 /** 記憶的原生確認（docs/16 §8、§9）：刪除整個人物記憶、全部忘記、連結家人辨識。頁面無法偽造；回 true 才寫檔。 */
+const PLAINTEXT_BACKUP_NOTE = "限制：刪除只移除檔案，不是安全抹除；在此之前的 Time Machine 備份或 APFS 本機快照可能仍保有明文的 tasks.json 與 artifacts.json，Nous 無法刪除那些快照。";
+
+/** MEM-4a：刪除明文備份前的原生確認（頁面無法偽造）。回 true 才刪。 */
+async function confirmDeleteBackups(count) {
+  const parent = win && !win.isDestroyed() ? win : undefined;
+  const { response } = await showMessage({
+    type: "warning", buttons: ["刪除明文備份", "取消"], defaultId: 1, cancelId: 1,
+    message: t("要刪除任務的明文備份嗎？"),
+    detail: `${t("任務已加密保存並逐筆驗證；明文備份（{0} 個資料夾）刪除後無法還原。", String(count))}\n\n${t(PLAINTEXT_BACKUP_NOTE)}`,
+  }, parent);
+  return response === 0;
+}
+
 async function confirmMemory(request) {
   const parent = win && !win.isDestroyed() ? win : undefined;
   const ask = (options) => showMessage(options, parent);
@@ -284,6 +301,13 @@ async function confirmMemory(request) {
 
 /** 選單列「記憶…」的點擊時間：10 秒內頁面才能打開記憶管理。 */
 const memoryClick = new MenuClickWindow();
+/** MEM-4a（George 的 D2）：選單列「成果紀錄…」的點擊時間；10 秒內第一個帶 all 的任務請求，核心才給看其他家人的帶記憶任務。 */
+const historyClick = new MenuClickWindow();
+
+function openHistoryMenu() {
+  historyClick.mark(Date.now());
+  command("history");
+}
 
 function openMemory() {
   memoryClick.mark(Date.now());
@@ -392,8 +416,8 @@ function createWindow() {
     if (/^https?:/.test(url)) void shell.openExternal(url);
   });
   // 家人辨識的管理 session 只屬於當下這一頁：主視窗導覽、重新載入（也會觸發 did-navigate）或 renderer 結束就關掉。
-  win.webContents.on("did-navigate", () => { core?.identity?.closeSessions(); core?.memory?.closeSessions(); });
-  win.webContents.on("render-process-gone", () => { core?.identity?.closeSessions(); core?.memory?.closeSessions(); });
+  win.webContents.on("did-navigate", () => { core?.identity?.closeSessions(); core?.memory?.closeSessions(); core?.tasks?.closeSessions(); });
+  win.webContents.on("render-process-gone", () => { core?.identity?.closeSessions(); core?.memory?.closeSessions(); core?.tasks?.closeSessions(); });
 }
 
 function showWindow() {
@@ -680,7 +704,9 @@ function rebuildMenu() {
     { label: "鏡頭與語音設定", submenu: secondsMenu() },
     { label: "語音指令表", click: openCommandsWindow },
     // 成果紀錄（HIST-1）：使用者點了才打開（App 內的按需畫面，或用系統瀏覽器開核心的 /history）。
-    { label: "成果紀錄…", click: () => command("history") },
+    { label: "成果紀錄…", click: openHistoryMenu },
+    // MEM-4a：任務加密搬遷後的明文備份（顯示提示；刪除前另跳原生確認）。
+    { label: "刪除明文備份…", click: () => command("vault"), enabled: !!core },
     { label: "在瀏覽器打開成果紀錄", click: openHistoryInBrowser, enabled: !!core },
     {
       label: "記憶…",
@@ -835,6 +861,15 @@ ipcMain.handle("nous:identity", async (event, request) => {
   if (!checked.ok) return { ok: false, code: "bad_request", message: checked.error };
   const userInitiated = checked.request.op === "open_session" ? familyClick.consume(Date.now()) : false;
   return core.identity.handle(checked.request, { userInitiated });
+});
+
+// MEM-4a 加密任務：只接受主視窗主框架、來自本機核心頁面的請求；形狀過濾後交給核心（核心再完整驗證）。
+ipcMain.handle("nous:tasks", async (event, request) => {
+  if (!core?.tasks || !checkTrustedSender(event, win, core.url)) return { ok: false, code: "unavailable", message: t("加密任務不可用") };
+  const checked = validateTasksRequest(request);
+  if (!checked.ok) return { ok: false, code: "bad_request", message: checked.error };
+  const userInitiated = checked.request.all === true ? historyClick.consume(Date.now()) : false;
+  return core.tasks.handle(checked.request, { userInitiated });
 });
 
 // 記憶：只接受主視窗主框架、來自本機核心頁面的請求；形狀過濾後交給核心（核心再完整驗證）。

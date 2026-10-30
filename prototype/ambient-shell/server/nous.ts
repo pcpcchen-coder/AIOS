@@ -34,6 +34,10 @@ import { MemoryService, type MemoryConfirmFn, type MemoryIdentityHooks } from ".
 import { MemoryStore, type MemorySecretBox } from "./memory/store.ts";
 import { claudeAccountKey, codexTarget, openaiRealtimeTarget } from "./providers.ts";
 import { MemoryBoundary } from "./memory/boundary.ts";
+import { SealedVault, VaultError, type VaultFailure } from "./sealed-vault.ts";
+import type { MemoryLockProvider } from "./memory/store.ts";
+import { createTaskIpc } from "./task-ipc.ts";
+import type { TasksResponse } from "../shared/protected-tasks.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
 
@@ -59,6 +63,24 @@ export interface NousOptions {
   memory?: MemoryInjection;
   /** MEM-2：即時語音停播未確認時強制靜音（App：主視窗 webContents.setAudioMuted）；沒有注入時只記 log。 */
   audio?: { setMuted(muted: boolean): void };
+  /**
+   * MEM-4a：任務加密保存（只有 macOS App 注入；George 2026-10-30 決定全部任務都加密）。沒有注入（瀏覽器版）時照舊明文，
+   * 也不搬遷。
+   */
+  tasks?: TasksInjection;
+}
+
+export interface TasksInjection {
+  /** 包裝每檔資料金鑰（App：和記憶相同的 safeStorage secretBox）。 */
+  secretBox: MemorySecretBox;
+  /** 加密檔資料夾；預設 dataDir/sealed（0700）。 */
+  dir?: string;
+  /** 刪除明文備份前的原生確認（App：dialog.showMessageBox）。回 true 才刪。 */
+  confirmDeleteBackups: (count: number) => Promise<boolean>;
+  /** 只限測試（同 MemoryStoreOptions.lockProvider）。 */
+  lockProvider?: MemoryLockProvider;
+  /** 加密檔與明文備份資料夾排除在 Time Machine 之外（App：tmutil addexclusion）。 */
+  excludeFromBackup?: (dir: string) => Promise<void>;
 }
 
 export interface MemoryInjection {
@@ -97,6 +119,8 @@ export interface NousHandle {
     /** 主視窗導覽、重新載入或 renderer 結束時，主程序呼叫它結束管理 session。 */
     closeSessions(): void;
   };
+  /** MEM-4a：只有注入 tasks 時存在；主程序的 IPC 處理器（desktop/tasks-ipc.mjs 過濾後）把請求轉到這裡。 */
+  tasks?: { handle(request: unknown, ctx?: { userInitiated?: boolean }): Promise<TasksResponse>; closeSessions(): void };
   /** 只有注入 memory 時存在；主程序的 IPC 處理器（desktop/memory-ipc.mjs 過濾後）把請求轉到這裡。 */
   memory?: {
     handle(request: unknown, ctx: { userInitiated?: boolean }): Promise<MemoryResponse>;
@@ -203,8 +227,32 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   });
   const camera = new CameraSettingsStore({ base: config.camera, dir: config.configDir, onChange: () => notify(), log });
   const voice = new VoiceSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
-  const store = new TaskStore(options.dataDir);
+  // MEM-4a：macOS App 加密保存全部任務（金鑰不可用或鎖被占用時 vault 為 null，TaskStore 照實處理並記 log）。
+  let vault: SealedVault | null = null;
+  let vaultFailure: VaultFailure | null = null;
+  if (options.tasks) {
+    try {
+      vault = SealedVault.open({ dir: options.tasks.dir ?? join(options.dataDir, "sealed"), secretBox: options.tasks.secretBox, lockProvider: options.tasks.lockProvider });
+    } catch (error) {
+      vaultFailure = error instanceof VaultError ? error.code : "unavailable";
+    }
+  }
+  const hintFile = join(config.configDir, "memory-enabled.json");
+  const store = new TaskStore(options.dataDir, options.tasks ? {
+    vault, failure: vaultFailure, log,
+    // 審查 M4a：上次執行時記憶已關閉，就在載入時撤回帶記憶的成果（不必等記憶檔開啟）。
+    ...(options.memory ? { memoryEnabled: () => memoryEnabledHint(hintFile).get() } : {}),
+  } : undefined);
   const runner = new TaskRunner(store, providers, config.maxConcurrent);
+  // 審查 minor 4：執行前核對受保護交辦的同意對象仍是目前設定的帳號。
+  runner.setTargetCheck((target) => providers.chatTargets().some((t) => t.provider === target.provider && t.account === target.account));
+  // 審查 minor 6：加密檔與明文備份排除在 Time Machine 之外（失敗只記 log）。
+  if (options.tasks?.excludeFromBackup) {
+    const exclude = options.tasks.excludeFromBackup;
+    for (const dir of [vault?.dir, ...store.vaultStatus().backups.map((name) => join(options.dataDir, name))]) {
+      if (dir) void exclude(dir).catch(() => log("任務保存：Time Machine 排除失敗"));
+    }
+  }
   // 雜湊核對沒過（缺檔或不符）就不提供 /face-runtime/，頁面也就載不到未核對的模型。
   const runtime = checkFaceRuntime(options.identity?.modelDir ?? null);
   const faceRuntimeDir = runtime.state === "ok" ? (options.identity?.modelDir ?? null) : null;
@@ -244,13 +292,16 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
           const apiKey = apiKeyTarget();
           return { current: providers.chatTarget(), all: [...providers.chatTargets(), ...(live ? [live] : []), ...(apiKey ? [apiKey] : [])], live, byRoute: { live, api_key: apiKey } };
         },
-        boundary: new MemoryBoundary({ release: { api_key: apiKeyMemoryReleased } }),
+        boundary: new MemoryBoundary({ release: { api_key: apiKeyMemoryReleased, task: config.memoryRoutes.task } }),
+        // MEM-4a：受保護交辦的任務端（同意對象沿用目前任務引擎的 claude／chatgpt 同意；模擬引擎不帶記憶）與撤銷傳播。
+        tasks: { sealed: () => store.sealed && store.vaultStatus().failure === null, mode: () => runner.mode, target: () => providers.chatTarget(), submit: (input) => runner.submitProtected(input) },
+        onResultsWithdrawn: (taskIds) => runner.revokeMemory(taskIds),
         confirm: memoryOpts.confirm,
         identity: (): MemoryIdentityHooks | null => identity ? { candidate: () => identity.memoryCandidate(), people: () => identity.memoryPeople(), nameAllowed: () => camera.view().look_to_talk_greet_name } : null,
         afterOpen: memoryOpts.excludeFromBackup ? () => memoryOpts.excludeFromBackup!(memoryOpts.dir) : undefined,
         // 上次執行時記憶是否開著：加密檔外只留這一個布林值（不含內容），讓重啟後第一次打字就能取用記憶，
         // 而記憶沒開時查狀態、一般聊天都不碰 Keychain。
-        enabledHint: memoryEnabledHint(join(config.configDir, "memory-enabled.json")),
+        enabledHint: memoryEnabledHint(hintFile),
         onPresence: memoryOpts.onPresence,
         log,
         onChange: () => notify(),
@@ -309,7 +360,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const idStatus = identity?.status();
   // gallery 要到第一次開 session 才載入：這裡只記模型與鏡頭的狀態，不碰 Keychain。
   log(`家庭記憶：${memory ? (memory.settingsStatus().available ? "可用（第一次使用時才開啟加密檔）" : "此 Mac 無法加密保存，停用") : "瀏覽器版不可用"}`);
-  if (memory) log(`家庭記憶的路徑：ChatGPT 方案即時語音已放行；OpenAI API key 即時語音${apiKeyMemoryReleased ? "已放行（NOUS_MEMORY_ROUTES，Mac gate 尚未通過）" : "未放行（預設關閉）"}`);
+  if (memory) log(`家庭記憶的路徑：ChatGPT 方案即時語音已放行；OpenAI API key 即時語音${apiKeyMemoryReleased ? "已放行（NOUS_MEMORY_ROUTES，Mac gate 尚未通過）" : "未放行（預設關閉）"}；背景任務${config.memoryRoutes.task ? "已放行（NOUS_MEMORY_ROUTES，Mac gate 尚未通過）" : "未放行（預設關閉）"}`);
+  const vaultState = store.vaultStatus();
+  log(`任務保存：${options.tasks ? (vaultState.mode === "sealed" ? (vaultState.failure ? `加密（金鑰不可用：${vaultState.failure}；新任務內容只留在記憶體）` : "加密") : `明文（這次無法加密：${vaultState.failure ?? (vaultState.migration && !vaultState.migration.ok ? `搬遷失敗於 ${vaultState.migration.step}` : "原因不明")}）`) : "明文（瀏覽器版不加密）"}；明文備份 ${vaultState.backups.length} 個`);
   if (!testMode && (env.NOUS_TEST_DROP_STOP_REPORT === "1" || env.NOUS_TEST_RENDERER_IGNORE_REVOKE === "1")) log("警告：只限測試的旗標沒有生效（需要 NOUS_TEST_MODE=1）");
   if (hideRevokeFromPage) log("警告：NOUS_TEST_RENDERER_IGNORE_REVOKE=1（只限測試）：記憶撤銷不會送給頁面，只靠核心 hangup 停止，1.5 秒後強制靜音");
   if (dropStopReport) log("警告：NOUS_TEST_DROP_STOP_REPORT=1（只限測試）：即時語音的停播回報會被丟掉，用來驗證強制靜音");
@@ -320,11 +373,16 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     url: `http://localhost:${port}`,
     ...(identity ? { identity: { handle: (request: unknown, ctx: IdentityContext) => identity.handle(request, ctx), closeSessions: () => identity.closeSessions() } } : {}),
     ...(memory ? { memory: { handle: (request: unknown, ctx: { userInitiated?: boolean }) => memory.handle(request, ctx), closeSessions: () => memory.closeSessions(), suspendAll: () => memory.suspendAll() } } : {}),
+    ...(options.tasks ? { tasks: (() => {
+      const ipc = createTaskIpc({ store, runner, memory, confirmDeleteBackups: options.tasks.confirmDeleteBackups, log });
+      return { handle: (request: unknown, ctx?: { userInitiated?: boolean }) => ipc(request, ctx), closeSessions: () => ipc.closeSessions() };
+    })() } : {}),
     close: () =>
       new Promise<void>((resolve) => {
         // 先讓家人辨識進入關閉狀態：結束 session，等待中的原生確認回來後也不寫檔。
         identity?.shutdown();
         void memory?.shutdown();
+        vault?.close();
         server.closeAllConnections();
         server.close(() => resolve());
       }),

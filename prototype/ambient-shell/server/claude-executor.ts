@@ -1,6 +1,7 @@
 import { localize } from "./localization.ts";
 import { type Locale } from "../shared/i18n.mjs";
 import Anthropic from "@anthropic-ai/sdk";
+import type { ContextFact } from "./memory/retrieve.ts";
 import { parsePlan, PLAN_SCHEMA, planPrompt, stepPrompt, SYNTHESIS_TITLE, systemPrompt, WEB_SEARCH_UNAVAILABLE_GAP } from "./prompts.ts";
 import { ExecutionError, type ExecutionResult, type Executor, type Reporter } from "./runner.ts";
 import type { ChatCapable, ChatMessage } from "./chat.ts";
@@ -100,15 +101,15 @@ export class ClaudeExecutor implements Executor, ChatCapable {
     }
   }
 
-  async run(input: { title: string; locale?: Locale }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+  async run(input: { title: string; locale?: Locale; facts?: readonly ContextFact[] }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
     try {
-      return await this.execute(input.title, reporter, signal, input.locale);
+      return await this.execute(input.title, reporter, signal, input.locale, input.facts ?? []);
     } catch (err) {
       throw toExecutionError(err);
     }
   }
 
-  private async execute(title: string, reporter: Reporter, signal: AbortSignal, locale: Locale = "zh-TW"): Promise<ExecutionResult> {
+  private async execute(title: string, reporter: Reporter, signal: AbortSignal, locale: Locale = "zh-TW", facts: readonly ContextFact[] = []): Promise<ExecutionResult> {
     const model = await this.resolveModel();
     const served = new Set<string>();
     let webSearch = !!this.options.webSearchTool;
@@ -118,7 +119,7 @@ export class ClaudeExecutor implements Executor, ChatCapable {
       {
         model,
         max_tokens: 4000,
-        system: systemPrompt({ webSearch }, locale),
+        system: systemPrompt({ webSearch }, locale, facts),
         output_config: { effort: "low", format: { type: "json_schema", schema: PLAN_SCHEMA } },
         messages: [{ role: "user", content: planPrompt(title) }],
         ...this.extra(),
@@ -161,7 +162,7 @@ export class ClaudeExecutor implements Executor, ChatCapable {
             {
               model,
               max_tokens: isSynthesis ? 32000 : 16000,
-              system: systemPrompt({ webSearch: search }, locale),
+              system: systemPrompt({ webSearch: search }, locale, facts),
               output_config: { effort: "medium" },
               messages,
               ...(search ? { tools: [this.webSearchTool()] } : {}),

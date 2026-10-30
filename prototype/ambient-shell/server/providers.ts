@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { SCHEMA_VERSION, type ExecutorMode, type ProviderInfo, type SettingsView } from "../shared/types.ts";
 import type { ChatGPTAuth } from "./chatgpt-auth.ts";
 import type { ChatCapable, ChatMessage } from "./chat.ts";
-import type { ChatTarget } from "./memory/retrieve.ts";
+import type { ChatTarget, ContextFact } from "./memory/retrieve.ts";
 
 /** 記憶同意的帳號鍵：Claude 用 API key 的 HMAC 指紋前 16 碼（不保存 key 本身）。 */
 export function claudeAccountKey(apiKey: string): string {
@@ -109,11 +109,16 @@ export class ProviderManager implements Executor, ChatCapable {
     return { schema_version: SCHEMA_VERSION, provider: this.current, providers, chatgpt };
   }
 
-  run(input: { title: string; mode: ExecutorMode; locale?: Locale }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
+  run(input: { title: string; mode: ExecutorMode; locale?: Locale; facts?: readonly ContextFact[] }, reporter: Reporter, signal: AbortSignal): Promise<ExecutionResult> {
     const executor =
       input.mode === "claude" ? this.options.claude : input.mode === "chatgpt" ? this.options.chatgpt : this.options.mock;
     if (!executor) {
       return Promise.reject(new ExecutionError("這個任務指定的 Claude 引擎未設定（缺少 ANTHROPIC_API_KEY）。"));
+    }
+    // MEM-4a：模擬引擎不帶記憶。
+    if (input.mode === "mock") {
+      const { facts: _facts, ...plain } = input;
+      return executor.run(plain, reporter, signal);
     }
     return executor.run(input, reporter, signal);
   }

@@ -118,6 +118,8 @@ export type ChatEvent =
   | { type: "delegate"; title: string }
   /** 這一輪用了記憶：不自動交辦，改問使用者（title 是使用者原句）。 */
   | { type: "delegate_blocked"; title: string }
+  /** MEM-4a：核心已建立受保護交辦的任務（外殼；標題是使用者原句，畫面經 IPC 讀）。 */
+  | { type: "delegated"; task: Task; memory_used: number }
   /** 核心的固定句型：這次沒有保存或沒有用到記憶。 */
   | { type: "memory_notice"; message: string }
   /** 記憶被撤銷（換人、更正、忘記、關閉記憶）：回覆停止，這是結束事件。 */

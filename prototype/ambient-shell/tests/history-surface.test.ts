@@ -160,10 +160,11 @@ describe("history intent and entry points", () => {
   it("the macOS menu command opens it, and the menu item exists in the tray template", () => {
     const calls: string[] = [];
     const noop = () => {};
-    expect(runDesktopCommand("history", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview: noop, family: noop, memory: noop, history: () => calls.push("history") })).toBe(true);
+    expect(runDesktopCommand("history", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview: noop, family: noop, memory: noop, history: () => calls.push("history"), vault: noop })).toBe(true);
     expect(calls).toEqual(["history"]);
     const main = readFileSync(new URL("../desktop/main.mjs", import.meta.url), "utf8");
-    expect(main).toContain('{ label: "成果紀錄…", click: () => command("history") }');
+    expect(main).toContain('{ label: "成果紀錄…", click: openHistoryMenu }');
+    expect(main).toMatch(/function openHistoryMenu\(\) \{\n\s+historyClick\.mark\(Date\.now\(\)\);\n\s+command\("history"\);/);
     expect(main).toMatch(/shell\.openExternal\(`\$\{core\.url\}\/history/);
     const en = JSON.parse(readFileSync(new URL("../desktop/messages.en.json", import.meta.url), "utf8")) as Record<string, string>;
     expect(en["成果紀錄…"]).toBe("Results history…");
@@ -188,7 +189,7 @@ describe("history intent and entry points", () => {
   it("main.ts wires every entry point to a user request, and no model tool path opens it", () => {
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
     expect(main).toContain('openHistory: () => openHistory(userRequest())');
-    expect(main).toContain('history: () => openHistory(userRequest())');
+    expect(main).toContain('history: () => openHistory(userRequest(), "", true)');
     expect(main).toMatch(/case "history":\n\s+input\.value = "";\n\s+historyView\.open\(intent\.query\);\n\s+dispatch\(\{ type: "show\.history", request_id: requestId \}\);/);
     const tools = readFileSync(new URL("../src/realtime-tools.ts", import.meta.url), "utf8");
     expect(tools).not.toMatch(/show\.history|historyView|openHistory/);
@@ -341,5 +342,59 @@ describe("HistoryView rendering never turns data into HTML", () => {
     const text = (view.element as unknown as El).textContent;
     expect(text).toContain("無法搜尋成果紀錄：無法連到本機核心");
     expect(text).not.toContain("沒有符合的任務或成果。");
+  });
+});
+
+describe("MEM-4a: protected shells and withdrawn results on screen", () => {
+  const noop = () => {};
+  const baseActions = { cancel: noop, retry: noop, openArtifact: noop, showProgress: noop, dismiss: noop, openSettings: noop, ackWelcome: noop, selectProvider: noop, chatgptLogin: noop, chatgptCancel: noop, chatgptLogout: noop, updateCamera: noop, openCameraPreview: noop, updateVoice: noop, updateRealtime: noop, codexLogin: noop, codexCancel: noop, codexLogout: noop, openHistory: noop };
+
+  it("a withdrawn result shows the fixed text and a redo button; a revoked running task says why it stopped (both languages)", () => {
+    const redo = vi.fn();
+    const withdrawn = task({ task_id: "task_w", title: "規劃晚餐", withdrawn: true, artifact_id: null, steps: [] });
+    const revoked = task({ task_id: "task_r", title: "規劃午餐", status: "cancelled", cancel_reason: "memory_revoked", artifact_id: null, steps: [] });
+    const el = views.renderProgress([withdrawn, revoked], null, { ...baseActions, redo }) as unknown as El;
+    expect(el.textContent).toContain("這份成果用到已忘記的記憶，內容已移除");
+    expect(el.textContent).toContain("用到的記憶已被撤銷，任務已停止，沒有產生成果。");
+    expect(el.all().some((e) => e.tagName === "button" && e.textContent === "查看成果")).toBe(false);
+    el.all().find((e) => e.tagName === "button" && e.textContent === "重做")!.fire("click");
+    expect(redo).toHaveBeenCalledWith("task_w");
+    setLocale("en");
+    const english = views.renderProgress([withdrawn, revoked], null, { ...baseActions, redo }) as unknown as El;
+    expect(english.textContent).toContain("This result used memory that has since been forgotten, so its content was removed");
+    expect(english.textContent).toContain("The memory this task used was revoked, so the task stopped without producing a result.");
+  });
+
+  it("over HTTP (shells mode) a protected item shows only the placeholder in the current language, with no snippet", async () => {
+    const protectedPage: HistoryPage = { ...page, sources: [{ id: "tasks", protected: true }], items: [{ ...page.items[0]!, title: "受保護的任務，請在 App 內查看", protected: true }] };
+    const d = deps({ shells: true });
+    d.api.searchHistory.mockResolvedValue(protectedPage);
+    d.api.getHistory.mockResolvedValue({ task: task({ title: "受保護的任務，請在 App 內查看", protected: true, steps: [] }), artifact: null, source: "tasks", protected: true });
+    setLocale("en");
+    const view = new historyView.HistoryView(d);
+    view.open("");
+    await flush();
+    const root = view.element as unknown as El;
+    expect(root.textContent).toContain("Protected task — view it in the Nous app");
+    expect(root.textContent).not.toContain("香菜<script>");
+    root.all().find((el) => el.getAttribute("class") === "history-open")!.fire("click");
+    await flush();
+    expect(root.textContent).toContain("Protected task — view it in the Nous app");
+  });
+
+  it("a withdrawn detail (App, via IPC) keeps the user's sentence, says the content was removed, and offers redo", async () => {
+    const d = deps();
+    d.api.getHistory.mockResolvedValue({ task: task({ title: "規劃晚餐", withdrawn: true, artifact_id: null, steps: [] }), artifact: null, source: "tasks", protected: true });
+    const view = new historyView.HistoryView(d);
+    view.open("");
+    await flush();
+    (view.element as unknown as El).all().find((el) => el.getAttribute("class") === "history-open")!.fire("click");
+    await flush();
+    const root = view.element as unknown as El;
+    expect(root.textContent).toContain("規劃晚餐");
+    expect(root.textContent).toContain("這份成果用到已忘記的記憶，內容已移除");
+    root.all().find((e) => e.tagName === "button" && e.textContent === "重做")!.fire("click");
+    await flush();
+    expect(d.redo).toHaveBeenCalled();
   });
 });

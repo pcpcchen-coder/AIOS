@@ -26,6 +26,8 @@ const view = new HistoryView({
   },
   dismiss: null,
   header: () => languageSelector({ persist: false, hint: false }),
+  // MEM-4a：這一頁只經 HTTP；macOS App 加密保存的任務只有外殼（請在 App 內查看）。
+  shells: true,
 });
 document.getElementById("history-root")!.append(view.element);
 view.open(params.get("q") ?? "");

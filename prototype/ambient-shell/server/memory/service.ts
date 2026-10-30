@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import {
   CARD_ID,
   FACT_ID,
@@ -31,7 +31,8 @@ import { chatText, keyOf, parseMemoryText, topicOf, type ParsedSegment } from ".
 import { relevance, retrieve, type ChatTarget, type ContextFact } from "./retrieve.ts";
 import type { Locale } from "../../shared/i18n.mjs";
 import type { LiveMemoryReason } from "../../shared/realtime-route.ts";
-import { newStoreOperation, type MemoryData, type MemoryFact, type MemoryOutcome, type MemoryProfile, type MemorySnapshot, type MemoryStoreLike, type StoreOperation, type StoreResult } from "./store.ts";
+import { newStoreOperation, RESULT_LIMIT, type MemoryData, type MemoryFact, type MemoryOutcome, type MemoryProfile, type MemoryResult, type MemorySnapshot, type MemoryStoreLike, type StoreOperation, type StoreResult } from "./store.ts";
+import type { ExecutorMode, Task } from "../../shared/types.ts";
 
 // MemoryService：記憶的唯一規則入口（16 §9、§10）。擁有 profile、同意、來源票證、更新、檢索與撤銷；store 只管加密快照。
 // - 開啟時機（碰 Keychain 與建資料夾）：只有使用者說「記住…」、打開選單列「記憶…」，或上次執行時記憶是開著的
@@ -102,7 +103,34 @@ export interface MemoryServiceOptions {
   onChange?: () => void;
   /** 本次人物世代改變（換人、暫停、撤銷）：主程序推一個不含內容的通知給主視窗。 */
   onPresence?: () => void;
+  /**
+   * MEM-4a：受保護交辦的任務端（核心的 TaskRunner）。沒有提供時沒有受保護交辦（和 M15 一樣）。
+   * target：任務引擎的同意對象（沿用 claude／chatgpt 的同意，Q4-A）；模擬引擎不帶記憶。
+   */
+  tasks?: TaskPort;
+  /**
+   * MEM-4a 撤銷傳播：受保護成果的依賴被撤銷（忘記、更正、撤回同意、刪除人物、關閉記憶、記憶過期）。快照先寫入
+   * withdrawn，之後才呼叫；記憶檔開啟時也會為已撤銷的成果再呼叫一次（重啟後清掉中斷前沒刪完的成果檔）。
+   */
+  onResultsWithdrawn?: (taskIds: string[]) => void;
+  /** 只限測試：依賴索引的筆數上限（正式一律 RESULT_LIMIT）。 */
+  resultLimit?: number;
 }
+
+/** MEM-4a：受保護交辦需要的任務端介面（只在核心內）。 */
+export interface TaskPort {
+  /**
+   * 審查 M1：任務是否真的加密保存（TaskStore 在加密模式、而且金鑰沒有問題）。false（明文退回、金鑰不可用）時不做受保護交辦，
+   * 改出原句卡：用到記憶的成果不能落到明文或只在記憶體。
+   */
+  sealed(): boolean;
+  mode(): ExecutorMode;
+  target(): ChatTarget | null;
+  submit(input: { task_id: string; title: string; request_id: string; locale?: Locale; retry_of?: string; facts: ContextFact[]; target?: { provider: string; account: string } | null }): Task;
+}
+
+/** 受保護交辦的結果：task 是核心的完整任務（對外前要換外殼）；used 是帶了幾筆記憶。 */
+export interface ProtectedDelegation { task: Task; used: number }
 
 export interface MemoryContext {
   facts: ContextFact[];
@@ -116,6 +144,12 @@ export interface MemoryContext {
   notice: MemoryText | null;
   /** 這一輪或對話歷史用過記憶：交辦一律改成問使用者（delegate_blocked）。 */
   blockDelegation: boolean;
+  /**
+   * MEM-4a：受保護交辦（NOUS_MEMORY_ROUTES 含 task、記憶開著、這一輪是可信主視窗的打字）。標題一律是這一輪的使用者原句；
+   * 依原句重新檢索（8 筆、4 KB）並寫入依賴索引後才建立任務。沒有放行或不適用時為 null（照 M15：不交辦或出交辦卡）。
+   * 回 null＝這次沒能受保護交辦（呼叫端改出交辦卡）。
+   */
+  delegate: ((locale?: Locale) => Promise<ProtectedDelegation | null>) | null;
 }
 
 type StoreState = "unloaded" | "ready" | "key_unavailable" | "corrupt" | "locked" | "permissions" | "unavailable";
@@ -199,12 +233,30 @@ function clarified(seg: Extract<ParsedSegment, { op: "unclear" }>): Extract<Pars
 }
 
 function plainContext(notice: MemoryText | null, blockDelegation = false): MemoryContext {
-  return { facts: [], signal: null, deliver: (output) => { output(); return true; }, saved: false, notice, blockDelegation };
+  return { facts: [], signal: null, deliver: (output) => { output(); return true; }, saved: false, notice, blockDelegation, delegate: null };
 }
 
 /** 這些段落需要使用者明說「記住」（首次設定卡只為它們出現，也只有它們會在記憶未開啟時打開 store）。 */
 function explicitRemember(segments: readonly ParsedSegment[]): boolean {
   return segments.some(s => s.op === "remember" || s.op === "unclear");
+}
+
+/**
+ * MEM-4a：這次提交會撤回哪些受保護成果（回傳 taskId）。規則（Q3-A）：記憶關閉；人物被刪；任何一筆依賴被刪或版本變了
+ * （忘記、更正、過期）；依賴所屬範圍（人物或全家共用）對那個服務帳號的同意不再成立。換人、閒置不在其中。
+ */
+export function withdrawals(before: MemoryData, after: MemoryData): Set<string> {
+  const out = new Set<string>();
+  for (const r of after.results) {
+    if (r.state !== "active") continue;
+    const facts = r.deps.map(d => ({ dep: d, old: before.facts.find(f => f.id === d.factId), now: after.facts.find(f => f.id === d.factId) }));
+    const consented = (profileId: string | null) => after.consents.some(c => c.allowed && c.profileId === profileId && c.provider === r.target.provider && c.account === r.target.account);
+    if (!after.settings.enabled
+      || (r.subject !== null && !after.profiles.some(p => p.id === r.subject))
+      || facts.some(x => !x.now || x.now.revision !== x.dep.revision)
+      || facts.some(x => !consented((x.now ?? x.old)?.profileId ?? null))) out.add(r.taskId);
+  }
+  return out;
 }
 
 /** live 卡片的回條對應到要念的固定句。 */
@@ -289,6 +341,9 @@ export class MemoryService implements LiveMemoryService {
         this.storeState = "ready";
         this.log("memory: store 已開啟");
         this.setHint(this.snapshot().settings.enabled);
+        // MEM-4a：已撤回的受保護成果再確認一次已刪（撤銷提交後、刪檔前中斷的情況）。
+        const withdrawn = this.snapshot().results.filter(r => r.state === "withdrawn").map(r => r.taskId);
+        if (withdrawn.length) this.propagate(withdrawn);
         try { await this.options.afterOpen?.(); } catch { this.log("memory: 備份排除失敗"); }
       } catch (error) {
         const code = (error as { code?: unknown } | null)?.code;
@@ -398,6 +453,28 @@ export class MemoryService implements LiveMemoryService {
   private checkIdle(): void {
     const idle = this.options.idleMs ?? MEMORY_IDLE_MS;
     if (this.presence.state === "selected" && this.now() - this.presence.lastActive > idle) this.suspend("idle");
+    this.sweepExpired();
+  }
+
+  private sweeping = false;
+  /**
+   * 審查 minor 3：受保護成果依賴的記憶過期了（例如「今天有效」），不等下一次有人改記憶，就提交一次（只清過期與撤回），
+   * 讓執行中的任務停止、已完成的成果移除。每分鐘的計時器與每次操作都會檢查；沒有到期的依賴時什麼都不做。
+   */
+  private sweepExpired(): void {
+    if (this.sweeping || this.closed || this.storeState !== "ready" || !this.store) return;
+    let data: MemorySnapshot;
+    try { data = this.snapshot(); } catch { return; }
+    const now = this.now();
+    const due = data.results.some(r => r.state === "active" && r.deps.some(d => {
+      const fact = data.facts.find(f => f.id === d.factId);
+      return !fact || (fact.expiresAt !== null && Date.parse(fact.expiresAt) <= now);
+    }));
+    if (!due) return;
+    this.sweeping = true;
+    void this.exclusive(() => this.commit(JSON.stringify(["expire_sweep", now]), d => d, "unchanged"))
+      .catch(() => this.log("memory: 過期清除失敗"))
+      .finally(() => { this.sweeping = false; });
   }
 
   private touch(): void { this.checkIdle(); this.presence.lastActive = this.now(); }
@@ -739,7 +816,7 @@ export class MemoryService implements LiveMemoryService {
   private async commit(fingerprint: string | StoreOperation, plan: (data: MemoryData) => MemoryData, status: MemoryOutcome): Promise<{ result: StoreResult; operationId: string }> {
     const snap = this.snapshot();
     const operation = typeof fingerprint === "string" ? newStoreOperation(snap.revision, fingerprint, this.now()) : fingerprint;
-    const planned = plan(structuredClone({ settings: snap.settings, profiles: snap.profiles, facts: snap.facts, consents: snap.consents, tombstones: snap.tombstones }));
+    const planned = plan(structuredClone({ settings: snap.settings, profiles: snap.profiles, facts: snap.facts, consents: snap.consents, tombstones: snap.tombstones, results: snap.results }));
     const now = this.now();
     const expired = planned.facts.filter(f => f.expiresAt !== null && Date.parse(f.expiresAt) <= now);
     if (expired.length) {
@@ -747,17 +824,29 @@ export class MemoryService implements LiveMemoryService {
       planned.facts = planned.facts.filter(f => !ids.has(f.id));
       planned.tombstones = [...planned.tombstones.filter(t => !ids.has(t.id)), ...expired.map(f => ({ id: f.id, revision: snap.revision + 1 }))].slice(-10000);
     }
+    // MEM-4a：撤銷傳播在同一次提交裡算好（所有改資料的操作都經過這裡）：依賴的記憶被刪、被更正、人物被刪、
+    // 同意被撤回或記憶被關閉的成果改成 withdrawn（清掉 deps 與人物）。快照寫入成功後才刪成果檔。
+    const withdrawn = withdrawals(snap, planned);
+    if (withdrawn.size) planned.results = planned.results.map(r => withdrawn.has(r.taskId) && r.state === "active" ? { ...r, state: "withdrawn" as const, deps: [], subject: null } : r);
+    // 超過上限：先丟最舊的已撤回項目；沒有可丟的才丟最舊的有效項目，而且那筆成果一併撤回（審查 M4b），
+    // 不留下一份沒有依賴索引、撤銷傳播不到的成果。
+    while (planned.results.length > (this.options.resultLimit ?? RESULT_LIMIT)) {
+      const oldest = planned.results.findIndex(r => r.state === "withdrawn");
+      const [dropped] = planned.results.splice(oldest >= 0 ? oldest : 0, 1);
+      if (dropped && dropped.state === "active") withdrawn.add(dropped.taskId);
+    }
     if (planned.facts.length > MEMORY_FACT_MAX) return { result: { status: "conflict" }, operationId: operation.operationId };
     if (Buffer.byteLength(JSON.stringify({ ...snap, ...planned })) > SNAPSHOT_BUDGET * 0.98) return { result: { status: "unavailable" }, operationId: operation.operationId };
     const result = await this.store!.commit(operation, data => {
-      data.settings = planned.settings; data.profiles = planned.profiles; data.facts = planned.facts; data.consents = planned.consents; data.tombstones = planned.tombstones;
+      data.settings = planned.settings; data.profiles = planned.profiles; data.facts = planned.facts; data.consents = planned.consents; data.tombstones = planned.tombstones; data.results = planned.results;
       return status;
     });
     if (result.status === "unavailable") {
       this.storeState = "unavailable";
       this.replacePresence("unselected", { kind: "household" }, null, "unavailable");
     }
-    this.log(`memory: commit ${result.status}${expired.length ? `（清除過期 ${expired.length} 筆）` : ""}`);
+    this.log(`memory: commit ${result.status}${expired.length ? `（清除過期 ${expired.length} 筆）` : ""}${withdrawn.size && result.status !== "unavailable" && result.status !== "conflict" && result.status !== "receipt_expired" ? `（撤回受保護成果 ${withdrawn.size} 筆）` : ""}`);
+    if (withdrawn.size && (result.status === "saved" || result.status === "updated" || result.status === "forgotten" || result.status === "unchanged")) this.propagate([...withdrawn]);
     return { result, operationId: operation.operationId };
   }
 
@@ -1647,14 +1736,131 @@ export class MemoryService implements LiveMemoryService {
     const result = retrieve({ facts: data.facts, consents: data.consents, profileId, target: request.target, query: request.lastUser, now: this.now() });
     this.log(`memory: 檢索 ${result.facts.length} 筆（捨去 ${result.dropped}，未同意 ${result.blockedByConsent}）`);
     const notice = result.facts.length === 0 && result.blockedByConsent > 0 ? txt("這次沒有用到記憶：目前的服務或帳號尚未允許取用") : null;
-    if (result.facts.length === 0) return run({ ...plainContext(notice, tainted), saved: binding.saved });
+    // MEM-4a：受保護交辦（放行 task 路徑時）。標題是這一輪核心核對過的使用者原句（binding.text），不是模型的改寫。
+    const delegate = this.options.tasks && this.boundary.routeEnabled("task")
+      ? (locale?: Locale) => this.delegateProtected({ session: binding.session, epoch: binding.epoch, text: binding.text, requestId: request.requestId, via: "typed", ...(locale ? { locale } : {}) })
+      : null;
+    if (result.facts.length === 0) return run({ ...plainContext(notice, tainted), saved: binding.saved, delegate });
     this.historyTainted = true;
     try {
-      return await this.boundary.withContext(binding.session, async () => {}, (lease) => run({ facts: result.facts, signal: lease.signal, deliver: lease.deliver, saved: binding.saved, notice, blockDelegation: true }), "text");
+      return await this.boundary.withContext(binding.session, async () => {}, (lease) => run({ facts: result.facts, signal: lease.signal, deliver: lease.deliver, saved: binding.saved, notice, blockDelegation: true, delegate }), "text");
     } catch (error) {
       if ((error as Error)?.message === "inactive_session") return run(plainContext(txt("這次沒有用到記憶（本次人物已改變或請求已過期）"), true));
       throw error;
     }
+  }
+
+  // ─────────────── MEM-4a 受保護交辦與撤銷傳播 ───────────────
+
+  /** 撤回的成果交給任務端（停止執行中的、移除已完成的成果內容）。失敗只記 log（下次開啟記憶檔時再做一次）。 */
+  private propagate(taskIds: string[]): void {
+    try { this.options.onResultsWithdrawn?.(taskIds); } catch { this.log("memory: 撤回受保護成果時任務端失敗"); }
+  }
+
+  /**
+   * 受保護交辦（互斥區內，與所有改資料的操作同一把鎖）：放行、記憶開著、session 與世代沒變、來源票證核對通過後，
+   * 依原句檢索（本次人物＋全家共用、任務引擎的同意、8 筆、4 KB），先把依賴索引寫進快照再建立任務。
+   * 模擬引擎不帶記憶；沒有相關記憶時照樣建立任務（標題仍是原句，沒有依賴）。不能交辦時回 null。
+   */
+  private delegateProtected(args: { session: MemorySession; epoch: number; text: string; requestId: string; via: "typed" | "confirmation"; locale?: Locale; retryOf?: string }): Promise<ProtectedDelegation | null> {
+    return this.exclusive(async () => {
+      const tasks = this.options.tasks;
+      if (!tasks || this.closed || !this.boundary.routeEnabled("task")) return null;
+      if (!tasks.sealed()) { this.log("memory: 任務沒有加密保存，不做受保護交辦"); return null; }
+      if (this.storeState !== "ready" || !this.store) return null;
+      let data: MemorySnapshot;
+      try { data = this.snapshot(); } catch { return null; }
+      if (!data.settings.enabled) return null;
+      if (args.session !== this.presence.session || args.epoch !== this.presence.epoch || !this.boundary.active(args.session)) return null;
+      try {
+        const input = args.via === "typed" ? this.boundary.observeTypedInput(args.session, args.text) : this.boundary.observeConfirmation(args.session, args.text);
+        const ticket = this.boundary.issueDelegation(args.session, input, args.text);
+        this.boundary.consumeDelegation(args.session, ticket, args.text);
+      } catch {
+        this.log("memory: 受保護交辦的來源無法驗證");
+        return null;
+      }
+      const mode = tasks.mode();
+      const target = mode === "mock" ? null : tasks.target();
+      const profileId = this.currentProfileId();
+      const found = target ? retrieve({ facts: data.facts, consents: data.consents, profileId, target, query: args.text, now: this.now() }) : { facts: [], deps: [], dropped: 0, blockedByConsent: 0 };
+      const taskId = `task_${randomUUID()}`;
+      if (found.facts.length > 0 && target?.account) {
+        const entry: MemoryResult = { id: `res_${hex(8)}`, taskId, subject: profileId, deps: found.deps, target: { provider: target.provider, account: target.account }, createdAt: new Date(this.now()).toISOString(), state: "active" };
+        const { result } = await this.commit(JSON.stringify(["task", taskId, found.deps]), (d) => { d.results.push(entry); return d; }, "saved");
+        if (result.status !== "saved") {
+          this.log(`memory: 受保護交辦的依賴索引沒有寫入（${result.status}）`);
+          return null;
+        }
+      }
+      const task = tasks.submit({ task_id: taskId, title: args.text, request_id: args.requestId, facts: found.facts, target: target?.account ? { provider: target.provider, account: target.account } : null, ...(args.locale ? { locale: args.locale } : {}), ...(args.retryOf ? { retry_of: args.retryOf } : {}) });
+      this.log(`memory: 受保護交辦（帶 ${found.facts.length} 筆，未同意 ${found.blockedByConsent}）`);
+      return { task, used: found.facts.length };
+    });
+  }
+
+  /**
+   * 重做（可信主視窗的點擊；title 是核心保存的使用者原句，不是頁面送來的）：重新檢索目前的記憶，不沿用舊的依賴。
+   * 不能受保護交辦（沒放行、記憶關著或不可用）時回 null，呼叫端照一般重做（不帶記憶）。
+   */
+  async redoProtected(input: { title: string; requestId: string; retryOf: string; locale?: Locale }): Promise<ProtectedDelegation | null> {
+    if (!this.options.tasks || !this.boundary.routeEnabled("task") || this.closed) return null;
+    if (!(this.storeState === "ready" || (this.hint() && await this.ensureOpen()))) return null;
+    const p = this.presence;
+    return this.delegateProtected({ session: p.session, epoch: p.epoch, text: input.title, requestId: input.requestId, via: "confirmation", retryOf: input.retryOf, ...(input.locale ? { locale: input.locale } : {}) });
+  }
+
+  /**
+   * 模型提示能不能看到任務的真實標題（MEM-4a 保守規則）：記憶開著，而且這個服務帳號對本次人物或全家共用有記憶同意。
+   * 不開記憶檔（沒開過就是不行）。其他目標（即時語音、未同意的帳號）只看到外殼。
+   */
+  taskTitlesAllowed(target: ChatTarget | null): boolean {
+    if (!target?.account || this.closed || this.storeState !== "ready" || !this.store) return false;
+    try {
+      const data = this.snapshot();
+      if (!data.settings.enabled) return false;
+      const profileId = this.currentProfileId();
+      return data.consents.some(c => c.allowed && c.provider === target.provider && c.account === target.account && (c.profileId === null || c.profileId === profileId));
+    } catch { return false; }
+  }
+
+  /** 這條即時語音路徑的同意對象（live：codex；api_key：openai_realtime，放行時）。 */
+  routeTarget(route: VoiceRoute): ChatTarget | null {
+    return this.targetFor(route);
+  }
+
+  /**
+   * MEM-4a（George 2026-10-30，審查 minor 1）：給某個模型目標的任務清單裡，哪些任務可以放真實標題。
+   * 目標要有記憶同意（taskTitlesAllowed）；帶記憶的任務另外要：依賴索引記下的同意對象就是這個目標，而且人物是全家共用或本次人物。
+   * 不符合的一律外殼。記憶檔沒開或沒有同意時回 null（全部外殼）。
+   */
+  taskTitleFilter(target: ChatTarget | null): ((task: Pick<Task, "task_id" | "memory">) => boolean) | null {
+    if (!target?.account || !this.taskTitlesAllowed(target)) return null;
+    const index = new Map(this.snapshot().results.map(r => [r.taskId, r]));
+    const profileId = this.currentProfileId();
+    return (task) => {
+      if (task.memory !== true) return true;
+      const r = index.get(task.task_id);
+      return !!r && r.target.provider === target.provider && r.target.account === target.account && (r.subject === null || r.subject === profileId);
+    };
+  }
+
+  /**
+   * MEM-4a（George 2026-10-30 的 D2，審查 minor 7）：可信主視窗的任務清單、詳細與搜尋看得到哪些任務的真實內容。
+   * 沒有用到記憶的任務、全家共用或本次人物的帶記憶任務：可以。其他人物的帶記憶任務：只有從選單列「成果紀錄…」打開
+   * （點擊 10 秒內，full）才可以；否則顯示外殼。記憶檔開不了時，帶記憶的任務一律外殼。
+   */
+  async taskScope(full: boolean): Promise<(task: Pick<Task, "task_id" | "memory">) => boolean> {
+    if (full) return () => true;
+    const ready = this.storeState === "ready" || (this.hint() && await this.ensureOpen());
+    let index: Map<string, MemoryResult> | null = null;
+    try { if (ready) index = new Map(this.snapshot().results.map(r => [r.taskId, r])); } catch { index = null; }
+    const profileId = this.currentProfileId();
+    return (task) => {
+      if (task.memory !== true) return true;
+      const r = index?.get(task.task_id);
+      return !!r && (r.subject === null || r.subject === profileId);
+    };
   }
 
   async shutdown(): Promise<void> {

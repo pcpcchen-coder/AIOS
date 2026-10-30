@@ -14,9 +14,11 @@ export interface DesktopCommandHandlers {
   memory(): void;
   /** 選單列「成果紀錄…」（HIST-1）：打開成果紀錄 Surface。 */
   history(): void;
+  /** 選單列「刪除明文備份…」（MEM-4a）：顯示任務加密搬遷的明文備份提示（刪除前主程序另跳原生確認）。 */
+  vault(): void;
 }
 
-export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family", "memory", "history"] as const;
+export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family", "memory", "history", "vault"] as const;
 
 /** 認得的指令執行對應動作並回 true；不認得的不做任何事，回 false。 */
 export function runDesktopCommand(command: string, handlers: DesktopCommandHandlers): boolean {
@@ -44,6 +46,9 @@ export function runDesktopCommand(command: string, handlers: DesktopCommandHandl
       return true;
     case "history":
       handlers.history();
+      return true;
+    case "vault":
+      handlers.vault();
       return true;
     default:
       return false;
