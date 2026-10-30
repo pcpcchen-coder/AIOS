@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "claude/mem-3",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-10-30T06:17:21.276Z",
-  "updated_at": "2026-10-30T09:14:26.298Z",
-  "ended_at": null,
+  "updated_at": "2026-10-30T09:14:29.798Z",
+  "ended_at": "2026-10-30T09:14:29.797Z",
   "steps": [
     {
       "id": "how",
@@ -192,6 +192,13 @@
       "at": "2026-10-30T09:14:26.298Z",
       "type": "step_updated",
       "step_id": "pr",
+      "status": "passed",
+      "note": ""
+    },
+    {
+      "at": "2026-10-30T09:14:29.798Z",
+      "type": "run_finished",
+      "step_id": null,
       "status": "passed",
       "note": ""
     }
