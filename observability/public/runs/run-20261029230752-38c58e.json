@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-29T23:07:52.528Z",
-  "updated_at": "2026-10-30T00:17:19.484Z",
+  "updated_at": "2026-10-30T00:17:23.265Z",
   "ended_at": null,
   "steps": [
     {
@@ -50,8 +50,8 @@
     {
       "id": "verify",
       "title": "verify",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-30T00:17:23.264Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -147,6 +147,13 @@
       "step_id": "implement",
       "status": "passed",
       "note": "MEM-2 完成"
+    },
+    {
+      "at": "2026-10-30T00:17:23.265Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
