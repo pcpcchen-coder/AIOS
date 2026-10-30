@@ -2,6 +2,8 @@ import { t, msg, getLocale, onLocaleChange } from "./i18n.ts";
 // 「記憶」Surface（docs/16 MEM-1）：按需出現，visibility_reason 一律是 user_request（觸發它的打字或選單列點擊）。
 // 內容：首次設定（四個獨立選項）、澄清卡（保存／改記全家共用／取消）、建立或選擇人物、臉部候選「這次用 X 的偏好？」、
 // 全部忘記、「你記得我什麼？」清單（修改／忘記／釘選），以及從選單列「記憶…」打開的記憶管理。
+// MEM-2：即時語音的卡（SSE 只送卡片 ID，內容用 IPC card_view 取）：語音記住／更正／忘記的確認卡（也可以說確認詞）、
+// 臉部候選、挑選與查看卡，以及帶著記憶時的「要交辦這件事嗎？」（標題是使用者原句）。
 // - 記憶只經 macOS App 的 IPC（window.nousDesktop.memory）與核心往來；瀏覽器版明示不可用。
 // - 規則、人物、同意、票證與寫檔都在核心；這裡只顯示核心回的固定句型（t(message, ...values)），使用者的話與人物名照原樣。
 // - 不建立常駐側欄：收起就回電子腦；「本次人物」標籤只在輸入列與對話 Surface（src/main.ts）。
@@ -33,16 +35,22 @@ export interface MemoryViewDeps {
   resolved(view: MemoryTurnView, requestId: string): void;
   /** 管理畫面的單筆變更回條。 */
   changed(receipt: MemoryReceiptView, historyReset: boolean, presence: MemoryPresenceView | null): void;
+  /** MEM-2：即時語音的卡處理完（回條只顯示，不續送聊天）。 */
+  liveResolved?(view: MemoryTurnView): void;
 }
 
 export const MEMORY_EXPLANATION =
   "記憶只保存在這台 Mac（加密），內容是家中可使用的普通偏好，不是私密空間。取用時會把相關的幾筆送給你允許的模型服務；" +
   "沒有允許的服務不會收到。隨時可以修改、忘記或關閉；忘記不會刪除已送給模型服務的內容或系統備份。";
 export const MEMORY_BROWSER_UNAVAILABLE = "記憶：瀏覽器版不可用（只在 macOS App 提供）。";
+/** MEM-2：codex 同意的範圍（16 §4：新增服務要另外確認，不沿用 ChatGPT 的同意）。 */
+export const CODEX_CONSENT_NOTE = "「ChatGPT 方案即時語音」的同意同時涵蓋即時語音模型與它交辦用的 Codex（同一個 ChatGPT 帳號）；和上面的 ChatGPT 是分開的同意。";
 
 type Mode =
   | { kind: "idle" }
-  | { kind: "card"; card: MemoryCardView; requestId: string; chat: MemoryTurnView["chat"] }
+  | { kind: "card"; card: MemoryCardView; requestId: string; chat: MemoryTurnView["chat"]; origin?: "typed" | "live" }
+  /** MEM-2：即時語音帶著記憶時的交辦卡。 */
+  | { kind: "delegate"; title: string; run: () => void }
   | { kind: "manage"; subject: string | null; facts: MemoryFactView[]; token: string | null; people: { person_id: string; name: string; linked: boolean }[] | null; consents: { provider: string; account: string; allowed: boolean }[] }
   | { kind: "unavailable"; message: string };
 
@@ -87,6 +95,9 @@ export function presenceLabel(presence: MemoryPresenceView | null): string {
 }
 
 const CHOICE_LABEL: Record<ClarifyChoice, string> = { save: "保存", household: "改記全家共用", cancel: "取消" };
+/** MEM-2 語音卡的主要按鈕與對應的確認詞（也可以用說的）。 */
+const VOICE_ACTION_LABEL = { remember: "記住", correct: "更正", forget: "忘記" } as const;
+const VOICE_PHRASE = { remember: "確認記住", correct: "確認更正", forget: "確認忘記" } as const;
 
 function when(iso: string | null): string {
   if (!iso) return "";
@@ -136,6 +147,32 @@ export class MemoryView {
     this.mode = { kind: "manage", subject: null, facts: [], token: null, people: null, consents: [] };
     this.render();
     void this.call({ op: "list", manage: true, subject: null }, gen).then(res => this.applyList(res));
+  }
+
+  /** MEM-2：即時語音建立的卡（SSE 只帶卡片 ID）：經 IPC card_view 取內容再顯示。回傳是否顯示。 */
+  async showLiveCard(card: string): Promise<boolean> {
+    if (!this.deps.bridge) return false;
+    const gen = ++this.gen;
+    const res = await this.call({ op: "card_view", card }, gen);
+    if (!res || !res.ok || res.op !== "card_view") return false;
+    this.mode = { kind: "card", card: res.card, requestId: "live", chat: null, origin: res.origin };
+    this.notice = this.error = null;
+    this.editing = null;
+    this.render();
+    return true;
+  }
+
+  /** 正在顯示的是這張卡嗎（核心作廢卡片時用）。 */
+  showing(card: string): boolean {
+    return this.mode.kind === "card" && "card" in this.mode.card && this.mode.card.card === card;
+  }
+
+  /** MEM-2：即時語音帶著記憶時，交辦改成問使用者（標題是使用者原句，不是模型改寫的文字）。 */
+  showDelegate(title: string, run: () => void): void {
+    this.gen++;
+    this.mode = { kind: "delegate", title, run };
+    this.notice = this.error = null;
+    this.render();
   }
 
   close(): void {
@@ -190,7 +227,10 @@ export class MemoryView {
     this.busy = false;
     if (!res) return;
     if (!res.ok) { this.error = res.message; this.render(); return; }
-    if (res.op === "card_answer") this.deps.resolved(res, mode.requestId);
+    if (res.op === "card_answer") {
+      if (mode.origin === "live") this.deps.liveResolved?.(res);
+      else this.deps.resolved(res, mode.requestId);
+    }
     this.render();
   }
 
@@ -256,6 +296,7 @@ export class MemoryView {
     const mode = this.mode;
     if (mode.kind === "manage") return "記憶管理";
     if (mode.kind === "unavailable") return "記憶不可用";
+    if (mode.kind === "delegate") return "要交辦這件事嗎？";
     if (mode.kind !== "card") return "記憶";
     switch (mode.card.kind) {
       case "setup": return "開始使用記憶";
@@ -265,6 +306,7 @@ export class MemoryView {
       case "face_candidate": return "本次人物";
       case "pick": return "要改哪一筆？";
       case "inspect": return "你的記憶";
+      case "voice_confirm": return mode.card.action === "remember" ? "要記住這一句嗎？" : mode.card.action === "correct" ? "要更正這筆記憶嗎？" : "要忘記這筆記憶嗎？";
     }
   }
 
@@ -272,6 +314,11 @@ export class MemoryView {
     const mode = this.mode;
     if (mode.kind === "unavailable") return [h("p", { class: "error-text" }, t(mode.message)), h("p", { class: "muted small" }, t(MEMORY_EXPLANATION))];
     if (mode.kind === "manage") return this.manage(mode);
+    if (mode.kind === "delegate") {
+      return [h("p", {}, msg`要交辦這件事嗎？「${mode.title}」`),
+        h("p", { class: "muted small" }, t("這次通話用到了記憶，所以沒有自動交辦。不對的話請說出完整的要求。")),
+        h("div", { class: "actions" }, button("交辦", () => { mode.run(); this.deps.dismiss(); }, "btn--primary"), button("不用", () => this.deps.dismiss(), "btn--ghost"))];
+    }
     if (mode.kind !== "card") return [];
     const card = mode.card;
     const held = mode.chat && card.kind !== "inspect" ? h("p", { class: "muted small" }, msg`處理完這張卡片後會接著回答：${mode.chat.text}`) : null;
@@ -308,6 +355,18 @@ export class MemoryView {
         nodes.push(h("p", { class: "muted small" }, card.subject_name ? msg`${card.subject_name} 與全家共用的記憶` : t("全家共用的記憶（沒有選定本次人物）")),
           this.factList(card.facts, false));
         break;
+      case "voice_confirm": {
+        const who = card.subject_name ?? t("全家共用");
+        nodes.push(h("p", {}, msg`聽到你說：「${card.heard}」`),
+          card.action === "remember" ? h("p", {}, msg`要記住的是：「${card.value}」（${who}）`)
+            : card.action === "correct" ? h("p", {}, msg`要把「${card.target ?? ""}」更正成：「${card.value}」（${who}）`)
+              : h("p", {}, msg`要忘記：「${card.target ?? card.value}」（${who}）`),
+          card.replaces ? h("p", { class: "muted small" }, t("會取代原本的說法。")) : null,
+          h("p", { class: "muted small" }, msg`請核對聽到的內容。也可以在問句念完後 15 秒內說「${t(VOICE_PHRASE[card.action])}」。`),
+          h("div", { class: "actions" }, ...card.options.map(o => o === "confirm" ? button(VOICE_ACTION_LABEL[card.action], () => void this.answer("confirm"), "btn--primary", this.busy)
+            : o === "household" ? button("改記全家共用", () => void this.answer("household"), "", this.busy) : button("取消", () => void this.answer("cancel"), "btn--ghost", this.busy))));
+        break;
+      }
     }
     nodes.push(held);
     return nodes.filter((n): n is Node => !!n && typeof n !== "string");
@@ -336,7 +395,8 @@ export class MemoryView {
       h("label", { class: "family-check" }, enabled, t(" 啟用跨對話記憶（預設關閉）")),
       h("label", { class: "memory-field" }, t("記在誰名下："), select), name,
       allows.length ? h("div", { class: "memory-allow" }, h("p", {}, t("允許哪些模型服務帳號取得相關片段（未允許的只保存在本機）：")),
-        ...allows.map(a => h("label", { class: "family-check" }, a.box, ` ${a.target.label}`))) : h("p", { class: "muted small" }, t("目前沒有可用的模型服務帳號；記憶只保存在本機。")),
+        ...allows.map(a => h("label", { class: "family-check" }, a.box, ` ${t(a.target.label)}`))) : h("p", { class: "muted small" }, t("目前沒有可用的模型服務帳號；記憶只保存在本機。")),
+      allows.some(a => a.target.provider === "codex") ? h("p", { class: "muted small" }, t(CODEX_CONSENT_NOTE)) : null,
       allows.length ? h("p", { class: "muted small" }, t("第一次設定時，勾選的服務帳號也會一併允許取得全家共用的記憶；之後可在「記憶…」分開調整。")) : null,
       h("label", { class: "family-check" }, checkbox(false, true), t(" 自動提出記憶建議（首版未提供）")),
       h("p", { class: "muted small" }, t("沒有啟用或按取消時，你的問題照樣送出，但不會記住任何內容。")),
@@ -349,7 +409,7 @@ export class MemoryView {
     if (facts.length === 0) return h("p", { class: "muted" }, t("沒有記憶。Nous 不知道的事會照實說不知道。"));
     const ul = h("ul", { class: "memory-list" });
     for (const f of facts) {
-      const meta = [msg`來源：本人明示 · ${when(f.at)}`, f.expires ? msg`到 ${when(f.expires)} 為止` : "", f.subject === null && !managed ? t("全家共用") : ""].filter(Boolean).join(" · ");
+      const meta = [f.source === "voice_confirmed" ? msg`來源：語音確認 · ${when(f.at)}` : msg`來源：本人明示 · ${when(f.at)}`, f.expires ? msg`到 ${when(f.expires)} 為止` : "", f.subject === null && !managed ? t("全家共用") : ""].filter(Boolean).join(" · ");
       const row = h("li", { class: "memory-fact" }, h("div", { class: "memory-fact-text" }, h("strong", {}, f.text), h("span", { class: "muted small" }, meta)));
       if (f.pinned) row.append(h("span", { class: "chip" }, t("釘選")));
       if (this.editing === f.id) {
@@ -394,7 +454,8 @@ export class MemoryView {
       this.factList(mode.facts, true),
       h("div", { class: "actions" }, add, button("新增", () => void this.mutate({ op: "edit", id: null, subject: mode.subject, value: add.value }), "", this.busy)),
       h("div", { class: "memory-allow" }, h("p", {}, mode.subject ? msg`允許哪些服務帳號取得 ${profile?.name ?? ""} 的記憶片段：` : t("允許哪些服務帳號取得全家共用的記憶片段：")),
-        ...consentRows.map(r => h("label", { class: "family-check" }, r.box, ` ${r.target.label}`)),
+        ...consentRows.map(r => h("label", { class: "family-check" }, r.box, ` ${t(r.target.label)}`)),
+        consentRows.some(r => r.target.provider === "codex") ? h("p", { class: "muted small" }, t(CODEX_CONSENT_NOTE)) : h("span", {}),
         button("保存同意設定", saveConsent, "", this.busy)),
       profile ? h("div", { class: "actions" },
         people === null ? h("span", { class: "muted small" }, t("要連結家人辨識，請先打開一次「家人辨識…」。"))

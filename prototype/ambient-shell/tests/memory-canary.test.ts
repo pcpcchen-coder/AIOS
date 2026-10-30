@@ -13,7 +13,8 @@ import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
 import type { SettingsView } from "../shared/types.ts";
 import { realLockAvailable } from "./fixtures/memory-lock.ts";
-import { CLAUDE, enable, harness, req } from "./fixtures/memory-service.ts";
+import { CLAUDE, CODEX, enable, harness, req } from "./fixtures/memory-service.ts";
+import type { LiveCoreEvent } from "../shared/realtime-route.ts";
 
 // M14：明文掃描專用 canary。記憶目錄（快照、暫存、鎖）、TaskStore、log、全體 SSE、settings 與錯誤訊息都不能出現；
 // 只有「授權的當次模型 payload」（這裡是假引擎收到的 system）可以有，而且要經過同意。
@@ -104,6 +105,38 @@ describe.skipIf(!realLockAvailable)("M14 canary scan", () => {
     } finally {
       app.closeAllConnections();
       await new Promise<void>(r => app.close(() => r()));
+    }
+  });
+});
+
+describe.skipIf(!realLockAvailable)("MEM-2 canary: live voice cards", () => {
+  it("a heard canary reaches the page only through IPC card_view (and the consented model), never the SSE events, status or log", async () => {
+    const memoryDir = temp("nous-mem2-canary-");
+    const logs: string[] = [];
+    const h = harness({ dir: memoryDir, key: randomBytes(32), live: CODEX });
+    (h.service as unknown as { log: (l: string) => void }).log = (l) => logs.push(l);
+    try {
+      await enable(h, "George", [CODEX]);
+      const events: LiveCoreEvent[] = [];
+      const injected: string[] = [];
+      let resolve!: () => void;
+      const call = { closed: new Promise<void>((r) => (resolve = r)), active: true, inject: (_c: string, text: string) => void injected.push(text), emit: (e: LiveCoreEvent) => void events.push(e), revokeMemory: async () => resolve(), hold: () => {} };
+      const binding = h.service.openLive({ lookToTalk: false, rebuild: false, now: () => h.clock.now });
+      await binding.connect(async () => { binding.bind(call); return call; });
+      binding.onUserFinal(`記住，我喜歡${CANARY}`, h.clock.now);
+      await binding.idle();
+      const card = events.find((e): e is Extract<LiveCoreEvent, { kind: "memory_card" }> => e.kind === "memory_card")!;
+      const view = await h.call({ op: "card_view", card: card.card });
+      expect(JSON.stringify(view)).toContain(CANARY); // 可信主視窗經 IPC
+      expect(injected.join("\n")).toContain(CANARY); // 給模型的問句（使用者自己剛說的話）
+      expect(JSON.stringify(events)).not.toContain(CANARY);
+      expect(JSON.stringify(await h.call({ op: "status" }))).not.toContain(CANARY);
+      expect(JSON.stringify(h.service.settingsStatus())).not.toContain(CANARY);
+      expect(logs.join("\n")).not.toContain(CANARY);
+      expect(scanDir(memoryDir)).toEqual([]);
+      resolve();
+    } finally {
+      await h.close();
     }
   });
 });

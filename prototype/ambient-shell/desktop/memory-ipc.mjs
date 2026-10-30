@@ -6,7 +6,7 @@
 // 刪除人物記憶、全部忘記與連結家人辨識的原生確認由核心呼叫主程序的 confirm（頁面無法偽造）。
 
 /** 與 shared/memory.ts 的 MEMORY_OPS 相同（測試對照）。 */
-export const MEMORY_OPS = ["status", "setup", "turn", "card_answer", "select", "suspend", "list", "receipt", "edit", "forget", "pin", "profile_delete", "link_face", "profile_minor"];
+export const MEMORY_OPS = ["status", "setup", "turn", "card_answer", "card_view", "select", "suspend", "list", "receipt", "edit", "forget", "pin", "profile_delete", "link_face", "profile_minor"];
 
 const PROFILE = /^profile_[a-f0-9]{16}$/;
 const FACT = /^mem_[a-f0-9]{16}$/;
@@ -81,6 +81,10 @@ export function validateMemoryRequest(req) {
       }
       return { ok: true, request };
     }
+    case "card_view":
+      // MEM-2：SSE 只送卡片 ID；內容只經這個 op 給可信主視窗。
+      if (typeof req.card !== "string" || !CARD.test(req.card)) return bad("card is required");
+      return { ok: true, request: { op, card: req.card } };
     case "select": {
       if (req.profile !== null && !(typeof req.profile === "string" && PROFILE.test(req.profile))) return bad("profile must be a profile id or null");
       const request = { op, profile: req.profile };

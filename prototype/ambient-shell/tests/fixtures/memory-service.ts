@@ -19,6 +19,8 @@ export function fakeBox(key: Buffer = randomBytes(32), available = () => true): 
 
 export const CLAUDE: ChatTarget = { provider: "claude", account: "fp0000claude0001", label: "Claude" };
 export const CHATGPT: ChatTarget = { provider: "chatgpt", account: "fp000chatgpt0001", label: "ChatGPT（fixture@example.invalid）" };
+/** MEM-2：ChatGPT 方案即時語音（Codex 登入）的同意鍵（虛構帳號）。 */
+export const CODEX: ChatTarget = { provider: "codex", account: "fp0000000codex01", label: "ChatGPT 方案即時語音（Codex 登入）" };
 
 export interface Harness {
   service: MemoryService;
@@ -35,7 +37,7 @@ export interface Harness {
 let seq = 0;
 export const req = () => `req_fixture${String(++seq).padStart(6, "0")}`;
 
-export function harness(options: { dir: string; key: Buffer; clock?: { now: number }; confirm?: MemoryConfirmFn; identity?: MemoryIdentityHooks | null; store?: Partial<MemoryStoreOptions>; wrap?: (store: MemoryStoreLike) => MemoryStoreLike; available?: () => boolean; targets?: ChatTarget[]; onPresence?: () => void }): Harness {
+export function harness(options: { dir: string; key: Buffer; clock?: { now: number }; confirm?: MemoryConfirmFn; identity?: MemoryIdentityHooks | null; store?: Partial<MemoryStoreOptions>; wrap?: (store: MemoryStoreLike) => MemoryStoreLike; available?: () => boolean; targets?: ChatTarget[]; onPresence?: () => void; live?: ChatTarget | null }): Harness {
   const clock = options.clock ?? { now: Date.parse("2026-10-29T02:00:00Z") };
   const target = { current: CLAUDE as ChatTarget | null };
   const confirms: unknown[] = [];
@@ -48,7 +50,7 @@ export function harness(options: { dir: string; key: Buffer; clock?: { now: numb
       return options.wrap ? options.wrap(store) : store;
     },
     available: () => box.available(),
-    targets: () => ({ current: target.current, all: options.targets ?? [CLAUDE, CHATGPT] }),
+    targets: () => ({ current: target.current, all: [...(options.targets ?? [CLAUDE, CHATGPT]), ...(options.live ? [options.live] : [])], live: options.live ?? null }),
     confirm: options.confirm ?? (async (request) => { confirms.push(request); return true; }),
     identity: () => options.identity ?? null,
     // 開關提示：與記憶資料夾並排的一個檔案（正式 App 在 configDir），跨「重啟」保留。

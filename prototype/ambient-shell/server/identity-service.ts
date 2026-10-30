@@ -672,12 +672,13 @@ export class IdentityService {
    * LIVE_GREETING_PICKUP_MS 內才給，取一次就清掉；稱名在這之間被關掉時改挑一句不含名字的。找不到時回 null
    * （server/nous.ts 的 liveGreetingSource 改挑一句不含名字的）。回傳整段文字與那一句（逐字稿緩衝用來認出問候）。
    */
-  takeLiveGreeting(interaction: string, sessionId: string): { text: string; sentence: string } | null {
+  takeLiveGreeting(interaction: string, sessionId: string): { text: string; sentence: string; named: boolean } | null {
     const pending = this.pendingLive;
     this.pendingLive = null;
     if (!pending || pending.interaction !== interaction || pending.session_id !== sessionId || this.now() - pending.at > LIVE_GREETING_PICKUP_MS) return null;
-    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) return this.picker.plainLive(pending.locale);
-    return { text: pending.text, sentence: pending.sentence };
+    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) return { ...this.picker.plainLive(pending.locale), named: false };
+    // named：MEM-2 臉部候選的問句只有在問候已經稱名時才帶名字。
+    return { text: pending.text, sentence: pending.sentence, named: pending.named };
   }
 
   /** 等待原生確認之後：核心關閉、session 換掉或 gallery 已被改過就不寫。 */

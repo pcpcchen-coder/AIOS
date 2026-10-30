@@ -286,3 +286,46 @@ describe("RealtimeSessions", () => {
     }
   });
 });
+
+describe("MEM-2 RealtimeSessions: rebuild start and stop reports", () => {
+  it("a rebuild start uses live only (even with preference api_key), issues no interaction, and never offers the API key fallback", async () => {
+    const t = setup("api_key");
+    const d = t.sessions.start("sse_a", "look_to_talk", "zh-TW", true);
+    expect(d).toMatchObject({ ok: true, route: "live", interaction: null });
+    if (!d.ok) throw new Error("expected start");
+    t.live.fail = new RouteStartError("usage_limit", 429, unavailableText("usage_limit"), true);
+    await expect(t.sessions.call("v=0", d.session_id, d.owner)).rejects.toBeInstanceOf(RouteStartError);
+    expect(t.live.ctx).toMatchObject({ rebuild: true, lookToTalk: false });
+    t.live.ready = USAGE;
+    expect(t.sessions.start("sse_a", "user", "zh-TW", true)).toMatchObject({ ok: false, reasons: { live: "usage_limit" } });
+  });
+
+  it("only a memory-revoked session accepts a stop report (owner checked); a late host result is refused; force silence lifts on the report or the next call", async () => {
+    const muted: boolean[] = [];
+    const live = fakeRoute("live", "gpt-live-1-codex");
+    const sent: Record<string, unknown>[] = [];
+    const sessions = new RealtimeSessions({ routes: { live }, preference: () => "live", tasks: () => [], send: (_c, e) => (sent.push(e as unknown as Record<string, unknown>), true), audio: { setMuted: (m) => void muted.push(m) } });
+    const d = sessions.start("sse_a");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    const ctx = live.ctx!;
+    expect(sessions.stoppedReport(d.session_id, d.owner, { paused: true, peer_closed: true, tracks_ended: true, ms: 1 })).toBe(false);
+    ctx.emit({ kind: "closed", reason: "memory_revoked", message: "記憶已更新，對話已重新開始", rebuild: true });
+    // 停播結果出來之前（沒回報、也還沒逾時）：不開始新的（含重建）。
+    expect(sessions.start("sse_a", "user", "zh-TW", true)).toMatchObject({ ok: false, reasons: { live: "session_busy" } });
+    const waiting = ctx.stopped!(1_000);
+    expect(sessions.hostResult(d.session_id, d.owner, "hc_" + "0".repeat(32), { output: { ok: true } })).toBe(false);
+    expect(() => sessions.stoppedReport(d.session_id, "own_someone_else_00000000", { paused: true, peer_closed: true, tracks_ended: true, ms: 1 })).toThrow(SessionError);
+    expect(sessions.stoppedReport(d.session_id, d.owner, { paused: true, peer_closed: false, tracks_ended: true, ms: 7 })).toBe(false);
+    expect(sessions.stoppedReport(d.session_id, d.owner, { paused: true, peer_closed: true, tracks_ended: true, ms: 7 })).toBe(true);
+    expect(await waiting).toEqual({ paused: true, peer_closed: true, tracks_ended: true, ms: 7 });
+    // 停播未確認：強制靜音並送一則固定句給頁面；新通話開始時解除。
+    ctx.forceSilence!("即時語音停止未確認；這條路徑的記憶已停用");
+    expect(muted).toEqual([true]);
+    expect(sent.at(-1)).toMatchObject({ type: "realtime.live", session_id: d.session_id, event: { kind: "memory_notice" } });
+    const next = sessions.start("sse_a");
+    if (!next.ok) throw new Error("expected start");
+    await sessions.call("v=0", next.session_id, next.owner);
+    expect(muted).toEqual([true, false]);
+  });
+});

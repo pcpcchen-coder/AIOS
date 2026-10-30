@@ -4,6 +4,7 @@ import { RESULT_UNKNOWN_TEXT, SIDE_EFFECT_TOOLS, type HostToolName } from "../sh
 import type { Task } from "../shared/types.ts";
 import { CodexError, type CodexInputItem, type CodexResponses, type CodexToolSpec, type FunctionToolSpec } from "./codex-responses.ts";
 import { buildRealtimeTools, realtimeToolRules, taskLines, type RealtimeCapabilities } from "./realtime.ts";
+import { exactVoiceConfirm } from "./memory/live.ts";
 import { HOST_TIMEOUT_MS, HostGone, type ApprovalSnapshot, type ToolHost } from "./realtime-routes.ts";
 
 // gpt-live-1-codex 不能呼叫函式；它把使用者的請求用文字交辦（delegation.created）。
@@ -31,6 +32,11 @@ export interface DelegationRequest {
    */
   approval?: ApprovalSnapshot;
   at?: number;
+  /**
+   * MEM-2：觸發這次交辦的使用者原句（打字：打的字；語音：交辦送到之前 sideband 最近一則還沒對應過交辦的使用者 final 逐字稿）。
+   * 帶記憶的通話交辦被封鎖時，交辦卡的標題用它；找不到時是 null（不出卡、請使用者再說一次完整的要求）。
+   */
+  userText?: string | null;
 }
 
 /** 給 log 與驗證用。腦區只由頁面的執行器依實際執行的工具亮起。 */
@@ -95,6 +101,7 @@ export function buildCallerInstructions(caps: RealtimeCapabilities, tasks: Itera
     "外部服務（MCP）在這條路徑不能用；使用者要求時照實說，需要時請他到設定（macOS App：選單列「即時語音」）把路徑切換到 API key。",
     locale === "en" ? "Final response: one to three sentences in English, reporting only facts returned by tools. Do not mention tool names or JSON." : "最後一則訊息：一到三句繁體中文（台灣用語），只講工具回傳的事實；不要提工具名稱或 JSON。",
     "沒有呼叫工具就不能說做好了；工具失敗照實說；工具回傳 status 是 unknown 時只能說「結果不明，請確認」。",
+    ...(caps.memory ? ["保存、更正與忘記記憶由畫面確認卡或使用者說出的確認詞處理；你沒有寫入記憶的工具，不能說已記住或已忘記。"] : []),
     "needs_confirmation：說要對哪台設備做什麼，請使用者按畫面上的確認卡或說「確認執行」；你不能確認。",
     "一般聊天或不需要工具的問題，直接簡短回答，不要呼叫工具。",
     "使用者要結束對話時呼叫 end_conversation，最後一則訊息寫一句道別。",
@@ -122,8 +129,31 @@ export function approvalGuard(text: string, approval: ApprovalSnapshot, now: num
   return null;
 }
 
+/**
+ * MEM-2：這通 live 通話的記憶（server/memory/live.ts 的 LiveMemoryBinding 提供）。
+ * blocked：這通已經送過記憶，delegate_task 改成問使用者；recall：recall_memory（唯讀、經 lease.deliver）；
+ * delegateBlocked：通知頁面出「要交辦這件事嗎？」卡（標題是 sideband 最近一則使用者原句）。
+ */
+export interface LiveCallerMemory {
+  blocked(): boolean;
+  recall(query: string, signal: AbortSignal): Promise<Record<string, unknown>>;
+  /** title：觸發交辦的使用者原句；null 時不出卡。 */
+  delegateBlocked(title: string | null): void;
+}
+
+/** recall_memory 每次交辦最多呼叫幾次（每次都受 8 筆、4 KB 限制）。 */
+export const MAX_RECALLS = 2;
+
+/** 記憶確認詞的交辦：核心的語音確認已經處理（server/memory/live.ts），不交給 Codex，也不能由模型替使用者確認。 */
+export function memoryConfirmGuard(text: string): DelegationResult | null {
+  if (exactVoiceConfirm(text) === null) return null;
+  return { ok: true, channel: "speakable", text: "記憶的確認由 Nous 核心處理，結果會另外通知。", tools: [] };
+}
+
 export interface LiveToolCallerOptions {
   locale?: Locale;
+  /** MEM-2：只有 caps().memory 為 true 時才會用到。 */
+  memory?: LiveCallerMemory;
   responses: Pick<CodexResponses, "turn">;
   caps: () => RealtimeCapabilities;
   host: ToolHost;
@@ -148,7 +178,7 @@ export class LiveToolCaller {
    *    用量上限、登入失效照實說；工具逾時以工具自己的輸出交給模型（不會變成成功）。
    */
   async run(request: DelegationRequest, signal: AbortSignal): Promise<DelegationResult> {
-    const guarded = approvalGuard(request.text, request.approval ?? this.options.approval(), request.at ?? this.now());
+    const guarded = approvalGuard(request.text, request.approval ?? this.options.approval(), request.at ?? this.now()) ?? (this.options.memory ? memoryConfirmGuard(request.text) : null);
     if (guarded) return guarded;
     const budget = new AbortController();
     const timer = setTimeout(() => budget.abort(), DELEGATION_BUDGET_MS);
@@ -162,12 +192,14 @@ export class LiveToolCaller {
     /** 失敗的話；之前已經有確定的工具結果時，先說那些結果。 */
     const failed = (text: string) => (executed.length ? `已經執行：${done()}。不過${text}` : text);
     try {
-      const caps = this.options.caps();
+      const caps = { ...this.options.caps(), memory: !!this.options.memory && !!this.options.caps().memory };
+      const memory = caps.memory ? this.options.memory! : null;
       const instructions = buildCallerInstructions(caps, this.options.tasks(), new Date(this.now()), this.options.locale);
       const specs = liveCallerTools(caps, this.options.locale);
       const allowed = new Set(specs.map((s) => (s.type === "function" ? s.name : "")));
       const input: CodexInputItem[] = [{ role: "user", content: requestText(request) }];
       let hostCalls = 0;
+      let recalls = 0;
       let ended = false;
       for (let turn = 0; turn < CALLER_LIMITS.maxTurns; turn++) {
         const result = await untilAborted(this.options.responses.turn({ instructions, input, tools: specs, signal: combined }), combined);
@@ -180,7 +212,30 @@ export class LiveToolCaller {
         for (const call of result.calls) {
           let output: Record<string, unknown>;
           const name = call.name as HostToolName;
-          if (!HOST_TOOLS.includes(name) || !allowed.has(name)) {
+          if (call.name === "recall_memory" && memory && allowed.has("recall_memory")) {
+            // 核心工具（不經頁面）：唯讀，結果經 lease.deliver；撤銷後回 ok:false，不交付舊內容。
+            if (recalls >= MAX_RECALLS) output = { ok: false, error: `這次交辦查記憶的次數已達上限（${MAX_RECALLS} 次）。` };
+            else {
+              recalls++;
+              let query = "";
+              try {
+                const parsed = JSON.parse(call.arguments || "{}") as { query?: unknown };
+                query = typeof parsed.query === "string" ? parsed.query : "";
+              } catch {
+                // 參數不是 JSON：用空查詢（只有釘選的）
+              }
+              output = await untilAborted(memory.recall(query, combined), combined);
+              this.options.log?.(`即時語音（ChatGPT 方案）：recall_memory ${output.ok === false ? "沒有取用" : "完成"}`);
+            }
+          } else if (name === "delegate_task" && memory?.blocked() && allowed.has(name)) {
+            // 這通通話帶著記憶：交辦改成問使用者（16 §9、M15），不呼叫頁面、TaskStore 不新增。
+            const title = request.userText?.trim() || null;
+            memory.delegateBlocked(title);
+            output = title
+              ? { ok: false, status: "delegate_blocked", message: "這次通話用到記憶，交辦要使用者在畫面上按「交辦」；請使用者看畫面上的卡，不對的話請他說出完整的要求。" }
+              : { ok: false, status: "delegate_blocked", message: "這次通話用到記憶，不能自動交辦，畫面上也沒有交辦卡；請使用者用一句完整的話再說一次要交辦的工作。" };
+            this.options.log?.("即時語音（ChatGPT 方案）：交辦被封鎖（這通用到記憶），改成畫面上的交辦卡");
+          } else if (!HOST_TOOLS.includes(name) || !allowed.has(name)) {
             output = { ok: false, error: `這條路徑沒有這個工具：${call.name}` };
           } else if (hostCalls >= CALLER_LIMITS.maxHostCalls) {
             output = { ok: false, error: `這次交辦的工具呼叫已達上限（${CALLER_LIMITS.maxHostCalls} 次），沒有執行；請使用者再說一次。` };

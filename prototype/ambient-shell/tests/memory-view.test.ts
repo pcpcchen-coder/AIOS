@@ -127,3 +127,45 @@ describe("setup card cancel (Minor 4)", () => {
     expect(t.resolved).toHaveBeenCalledOnce();
   });
 });
+
+describe("MEM-2 live cards (DOM stand-in)", () => {
+  const C = "mc_0123456789abcdef01234567";
+  const voice: MemoryCardView = { kind: "voice_confirm", card: C, action: "remember", heard: "記住，我不喝咖啡", value: "不喝咖啡", subject_name: "George", target: null, options: ["confirm", "household", "cancel"], replaces: false };
+
+  it("fetches a live card by id over IPC and shows what was heard, in Chinese and English; answers go to liveResolved without chat", async () => {
+    const liveResolved = vi.fn();
+    const calls: MemoryRequest[] = [];
+    const view = new mod.MemoryView({
+      bridge: { memory: async (req) => { calls.push(req); return req.op === "card_view" ? { ok: true, op: "card_view", card: voice, origin: "live" } : { ok: true, op: "card_answer", ...turnView, chat: null, status } as MemoryResponse; } },
+      dismiss: vi.fn(), resolved: vi.fn(), changed: vi.fn(), liveResolved,
+    });
+    const el = view.element as unknown as El;
+    expect(await view.showLiveCard(C)).toBe(true);
+    expect(calls[0]).toEqual({ op: "card_view", card: C });
+    expect(view.showing(C)).toBe(true);
+    expect(el.textContent).toContain("聽到你說：「記住，我不喝咖啡」");
+    expect(el.textContent).toContain("要記住的是：「不喝咖啡」（George）");
+    expect(el.textContent).toContain("說「確認記住」");
+    expect(buttons(el).map(b => b.textContent)).toEqual(["記住", "改記全家共用", "取消", "收起"]);
+    setLocale("en");
+    expect(el.textContent).toContain("Heard you say: “記住，我不喝咖啡”");
+    expect(el.textContent).toContain("say “confirm remember”");
+    expect(buttons(el).map(b => b.textContent)).toEqual(["Remember", "Save for household instead", "Cancel", "Dismiss"]);
+    byText(el, "Remember").click();
+    await flush();
+    expect(calls[1]).toEqual({ op: "card_answer", card: C, choice: "confirm" });
+    expect(liveResolved).toHaveBeenCalledTimes(1);
+  });
+
+  it("the delegate card uses the user's own sentence and only delegates on a click", async () => {
+    const run = vi.fn();
+    const t = make(() => ({ ok: true, op: "status", ...status }));
+    t.view.showDelegate("幫我寫一份晚餐菜單報告", run);
+    expect(t.el.textContent).toContain("要交辦這件事嗎？「幫我寫一份晚餐菜單報告」");
+    expect(run).not.toHaveBeenCalled();
+    setLocale("en");
+    expect(t.el.textContent).toContain("Delegate this? “幫我寫一份晚餐菜單報告”");
+    byText(t.el, "Delegate").click();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+});

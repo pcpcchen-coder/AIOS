@@ -21,7 +21,8 @@ export interface MemoryFact {
   id: string; profileId: string | null; revision: number; kind: FactKind; topic: string; key: string; value: string;
   /** 首版只接受 household：家中可使用，不是私密空間（16 §3）。 */
   audience: "household";
-  source: { kind: "explicit"; turnId: string; at: string; excerpt: string };
+  /** explicit：打字或畫面點擊；voice_confirmed：MEM-2 即時語音的確認詞（George 2026-10-30）。 */
+  source: { kind: "explicit" | "voice_confirmed"; turnId: string; at: string; excerpt: string };
   validFrom: string; expiresAt: string | null; reviewAfter: string | null; pinned: boolean;
 }
 export interface MemoryConsent { profileId: string | null; provider: string; account: string; allowed: boolean }
@@ -80,7 +81,7 @@ function validBody(x: Record<string, unknown>, version: 1 | 2): boolean {
   const subject = (p: unknown) => p === null || (typeof p === "string" && ids.has(p));
   const factKeys = version === 1 ? ["id", "profileId", "revision", "topic", "key", "value", "source", "expiresAt"]
     : ["id", "profileId", "revision", "kind", "topic", "key", "value", "audience", "source", "validFrom", "expiresAt", "reviewAfter", "pinned"];
-  if (!Array.isArray(x.facts) || x.facts.length > ITEM_LIMIT || !x.facts.every(f => record(f) && keys(f, factKeys) && text(f.id, 100) && subject(f.profileId) && integer(f.revision) && f.revision > 0 && f.revision <= (x.revision as number) && text(f.topic, 80) && text(f.key, 100) && text(f.value, 512) && (f.expiresAt === null || date(f.expiresAt)) && record(f.source) && keys(f.source, ["kind", "turnId", "at", "excerpt"]) && f.source.kind === "explicit" && text(f.source.turnId, 100) && date(f.source.at) && text(f.source.excerpt, 240)
+  if (!Array.isArray(x.facts) || x.facts.length > ITEM_LIMIT || !x.facts.every(f => record(f) && keys(f, factKeys) && text(f.id, 100) && subject(f.profileId) && integer(f.revision) && f.revision > 0 && f.revision <= (x.revision as number) && text(f.topic, 80) && text(f.key, 100) && text(f.value, 512) && (f.expiresAt === null || date(f.expiresAt)) && record(f.source) && keys(f.source, ["kind", "turnId", "at", "excerpt"]) && (f.source.kind === "explicit" || f.source.kind === "voice_confirmed") && text(f.source.turnId, 100) && date(f.source.at) && text(f.source.excerpt, 240)
     && (version === 1 || ((FACT_KINDS as readonly unknown[]).includes(f.kind) && f.audience === "household" && date(f.validFrom) && (f.reviewAfter === null || date(f.reviewAfter)) && typeof f.pinned === "boolean"))) || !unique(x.facts)) return false;
   if (!Array.isArray(x.consents) || x.consents.length > ITEM_LIMIT || !x.consents.every(c => record(c) && keys(c, ["profileId", "provider", "account", "allowed"]) && subject(c.profileId) && text(c.provider, 100) && text(c.account, 200) && typeof c.allowed === "boolean")) return false;
   if (!Array.isArray(x.receipts) || x.receipts.length > MAX_RECEIPTS || !x.receipts.every(r => record(r) && keys(r, ["operationId", "digest", "status", "revision", "issuedAt"]) && operationTime(r.operationId) === r.issuedAt && typeof r.digest === "string" && /^[a-f0-9]{64}$/.test(r.digest) && ["saved", "updated", "forgotten", "unchanged"].includes(r.status as string) && integer(r.revision) && r.revision <= (x.revision as number) && integer(r.issuedAt)) || new Set(x.receipts.map(r => r.operationId)).size !== x.receipts.length) return false;

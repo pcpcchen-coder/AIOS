@@ -37,6 +37,9 @@ describe("memory IPC filter", () => {
     expect(validateMemoryRequest({ op: "setup", enabled: false, subject: { kind: "household" }, allow: [], token: T })).toEqual({ ok: true, request: { op: "setup", enabled: false, subject: { kind: "household" }, allow: [], token: T } });
     expect(validateMemoryRequest({ op: "forget", all: true, subject: null, token: T, id: F })).toEqual({ ok: true, request: { op: "forget", all: true, subject: null, token: T } });
     expect(validateMemoryRequest({ op: "profile_minor", profile: P, minor: true, token: T })).toEqual({ ok: true, request: { op: "profile_minor", profile: P, minor: true, token: T } });
+    // MEM-2：SSE 只送卡片 ID，內容只經 card_view；語音卡上的「記住／更正／忘記」是 confirm。
+    expect(validateMemoryRequest({ op: "card_view", card: C, text: "偷帶內容", token: T })).toEqual({ ok: true, request: { op: "card_view", card: C } });
+    expect(validateMemoryRequest({ op: "card_answer", card: C, choice: "confirm" })).toEqual({ ok: true, request: { op: "card_answer", card: C, choice: "confirm" } });
   });
 
   it.each([
@@ -46,6 +49,7 @@ describe("memory IPC filter", () => {
     { op: "suspend", reason: "select" }, { op: "edit", id: F, value: "x" }, { op: "forget", id: F, revision: 0 }, { op: "pin", id: F, revision: 1, pinned: "yes" },
     { op: "profile_delete", profile: P }, { op: "link_face", profile: P, person: "George", token: T }, { op: "receipt", operation_id: "not-a-uuid" },
     { op: "forget", all: true, subject: null }, { op: "profile_minor", profile: P, minor: "yes", token: T }, { op: "select", profile: P, card: "anything" },
+    { op: "card_view" }, { op: "card_view", card: "mc_short" }, { op: "card_view", card: 42 },
   ])("rejects %j", (req) => {
     expect(validateMemoryRequest(req).ok).toBe(false);
   });

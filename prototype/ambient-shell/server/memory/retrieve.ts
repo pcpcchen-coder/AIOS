@@ -13,7 +13,7 @@ export const CONTEXT_MAX_BYTES = 4096;
 
 export interface ContextFact {
   text: string;
-  source: "explicit";
+  source: "explicit" | "voice_confirmed";
   at: string;
   expires: string | null;
 }
@@ -111,7 +111,7 @@ export function retrieve(input: RetrievalInput): RetrievalResult {
   let bytes = 0;
   for (const { f } of [...pinned, ...rest]) {
     if (chosen.length >= CONTEXT_MAX_FACTS) break;
-    const fact: ContextFact = { text: f.value, source: "explicit", at: f.source.at, expires: f.expiresAt };
+    const fact: ContextFact = { text: f.value, source: f.source.kind, at: f.source.at, expires: f.expiresAt };
     const size = Buffer.byteLength(contextLine(fact)) + 1;
     // 超額就捨去整筆（不截斷「不要」這類否定語意），繼續看後面較短的。
     if (bytes + size > CONTEXT_MAX_BYTES) continue;
