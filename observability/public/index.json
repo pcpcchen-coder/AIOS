@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-30T12:53:22.900Z",
+  "updated_at": "2026-10-30T13:17:52.524Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261030123733-c166a3",
+      "title": "MEM-4a 任務成果加密與背景任務記憶",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-10-30T13:17:50.824Z",
+      "started_at": "2026-10-30T12:37:33.277Z",
+      "ended_at": null,
+      "branch": "",
+      "commit_sha": "",
+      "passed_steps": 4,
+      "total_steps": 8,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "aios-ci-investigation-41058706709-1",
@@ -17,21 +32,6 @@
       "passed_steps": 3,
       "total_steps": 3,
       "provenance": "Scripted CI investigation, not native pstack Agent"
-    },
-    {
-      "repo": "pcpcchen-coder/AIOS",
-      "run_id": "run-20261030123733-c166a3",
-      "title": "MEM-4a 任務成果加密與背景任務記憶",
-      "playbook": "feature",
-      "status": "running",
-      "updated_at": "2026-10-30T12:37:49.571Z",
-      "started_at": "2026-10-30T12:37:33.277Z",
-      "ended_at": null,
-      "branch": "",
-      "commit_sha": "",
-      "passed_steps": 3,
-      "total_steps": 8,
-      "provenance": "Agent self-reported"
     },
     {
       "repo": "pcpcchen-coder/AIOS",
