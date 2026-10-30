@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-30T12:37:33.277Z",
-  "updated_at": "2026-10-30T13:44:55.220Z",
+  "updated_at": "2026-10-30T13:45:03.777Z",
   "ended_at": null,
   "steps": [
     {
@@ -77,11 +77,16 @@
     {
       "id": "pr",
       "title": "pr",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
+      "status": "passed",
+      "started_at": "2026-10-30T13:45:03.776Z",
+      "ended_at": "2026-10-30T13:45:03.777Z",
       "note": "",
-      "evidence": []
+      "evidence": [
+        {
+          "label": "Evidence",
+          "url": "https://github.com/pcpcchen-coder/AIOS/pull/52"
+        }
+      ]
     }
   ],
   "events": [
@@ -154,6 +159,13 @@
       "step_id": "fix",
       "status": "passed",
       "note": "1542 passed"
+    },
+    {
+      "at": "2026-10-30T13:45:03.777Z",
+      "type": "step_updated",
+      "step_id": "pr",
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
