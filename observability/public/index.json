@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-30T13:45:08.883Z",
+  "updated_at": "2026-10-30T14:16:35.112Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261030141633-4d20b1",
+      "title": "MEM-4b 語音交辦自動帶記憶",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-10-30T14:16:33.492Z",
+      "started_at": "2026-10-30T14:16:33.492Z",
+      "ended_at": null,
+      "branch": "",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 8,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261030123733-c166a3",
