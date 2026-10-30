@@ -367,7 +367,10 @@ describe("IdentityService: availability", () => {
     const dir = join(root, "identity");
     const a = setup();
     await enroll(a, await open(a), "George", GEORGE);
-    const garbage = readFileSync(join(dir, GALLERY_FILE), "utf8").replace(/"ciphertext":"./, '"ciphertext":"A');
+    const original = readFileSync(join(dir, GALLERY_FILE), "utf8");
+    // Always change the first ciphertext character; a fixed "A" was a no-op 1 run in 64.
+    const garbage = original.replace(/"ciphertext":"(.)/, (_m, c: string) => `"ciphertext":"${c === "A" ? "B" : "A"}`);
+    expect(garbage).not.toBe(original);
     writeFileSync(join(dir, GALLERY_FILE), garbage);
     const b = setup({ box: a.box });
     const session = await open(b);
