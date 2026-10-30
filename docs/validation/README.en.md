@@ -38,3 +38,5 @@ Updated 2026-10-30 (added family memory MEM-2, MEM-3, and results history HIST-1
 “Real controller code” does not necessarily mean real devices and accounts. A “real browser” can also use fixtures at account, camera, or audio boundaries. Read each record's full limitations when assessing its evidence.
 
 See [implementation status](../Current_Implementation_Status.en.md) for the current overview and [feature assessment](../13_Feature_Expansion_Assessment_2026-10-24.en.md) for expansion proposals.
+
+On 2026-10-30, a [Mac acceptance runbook](mac-acceptance-runbook-2026-10-30.en.md) was also added. It consolidates the unexecuted Mac steps of HIST-1, MEM-1, ID-02, MEM-2, MEM-3, and WK-00 into one ordered checklist. It is a consolidation, not a validation result; each step's source record governs.
