@@ -6,6 +6,7 @@
 // - 查詢詞（queryTerms：中文二字片段、單一漢字、英文與數字詞）在 UTF-16 上是子字串比對：一個詞出現在欄位裡，它的每個相鄰二字
 //   片段（長度 1 的詞是那一個字）一定也在欄位裡。所以倒排表給的候選是「超集合」，再用 scoreFields 在候選的折疊欄位上逐筆精確比對：
 //   排序與命中和逐筆掃描完全相同。中文二字片段（最常見的查詢詞）本身就是索引鍵，候選就是精確的命中。
+// - 近義詞（F2）只擴充查詢：每個查詢詞的候選是原詞與近義詞候選的聯集；索引本身不變（不存近義詞、不寫檔）。
 // - 刪除、撤回（忘記、更正、撤回同意、刪除人物、關閉記憶）在 TaskStore 的同一段同步程式裡移除（remove 是 O(1)）：
 //   移除之後的任何查詢都不會再看到它。
 
@@ -98,12 +99,16 @@ export class ProtectedIndex {
   /**
    * 每筆候選最多可能命中幾個查詢詞（上限；精確值由 scoreFields 計算）。不可能命中任何詞的項目不在結果裡。
    * minHits：至少要命中幾個詞才可能算（有兩個以上的詞時要一半），低於的直接略過。
+   * synonyms（F2，順序和 terms 相同）：每個詞的近義詞；一筆含原詞或任何一個近義詞就是這個詞的候選，每個詞最多算一次。
+   * 近義詞同樣用二字片段查（英文近義詞的整詞規則由 scoreFields 精確核對；子字串的候選仍是超集合）。
    */
-  candidates(terms: readonly string[], minHits = 1): Map<string, number> {
+  candidates(terms: readonly string[], minHits = 1, synonyms: readonly (readonly string[])[] = []): Map<string, number> {
     const counts = new Map<number, number>();
-    for (const term of terms) {
-      for (const id of this.lookup(term)) counts.set(id, (counts.get(id) ?? 0) + 1);
-    }
+    terms.forEach((term, i) => {
+      const ids = new Set(this.lookup(term));
+      for (const alt of synonyms[i] ?? []) for (const id of this.lookup(alt)) ids.add(id);
+      for (const id of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    });
     const out = new Map<string, number>();
     for (const [id, count] of counts) {
       const doc = this.docs[id];

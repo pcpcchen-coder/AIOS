@@ -9,7 +9,7 @@ import { t, msg, onLocaleChange } from "./i18n.ts";
 
 import { artifactSections, button, h, raw, renderStep, type Child } from "./views.ts";
 import { TASK_STATUS_LABEL, formatCount } from "./format.ts";
-import { PROTECTED_TITLE, WITHDRAWN_TEXT, shellView } from "./protected-tasks.ts";
+import { PROTECTED_TITLE, WITHDRAWN_TEXT, mergeLiveTask, shellView, type LiveContent } from "./protected-tasks.ts";
 import { isDeletable, type HistoryDetail, type HistoryItem, type HistoryMatch, type HistoryPage, type HistoryQuery } from "../shared/history.ts";
 import type { ExecutorMode, Task, TaskStatus } from "../shared/types.ts";
 
@@ -21,8 +21,11 @@ export interface HistoryApi {
 
 export interface HistoryViewDeps {
   api: HistoryApi;
-  /** 原生確認（window.confirm：App 裡是 macOS 對話框）；回 true 才刪除。 */
-  confirm(message: string): boolean | Promise<boolean>;
+  /**
+   * 刪除前的確認；回 true 才刪除。App 裡是主程序的原生對話框（F4：按鈕「刪除／取消」依目前語言，subject.title 是要顯示的標題）；
+   * 瀏覽器裡是 window.confirm。
+   */
+  confirm(message: string, subject: { title: string }): boolean | Promise<boolean>;
   /** 每次使用者動作（刪除、重做）的請求 ID。 */
   requestId(): string;
   /** 重做：App 沿用重試（成功後換成進度畫面）；網頁送出後顯示說明。回傳要顯示的說明（null＝不顯示）。 */
@@ -79,7 +82,10 @@ function nodes(children: readonly Child[]): Node[] {
   return children.filter((c): c is Node => !!c && typeof c === "object" && !("raw" in c));
 }
 
-type DetailState = { taskId: string; data: HistoryDetail | null; error: string | null; busy: boolean };
+/** base：最後一次經 API／IPC 讀回的任務原樣（F3 審查 M1：SSE 的固定句不寫進這裡）。 */
+type DetailState = { taskId: string; data: HistoryDetail | null; base: Task | null; error: string | null; busy: boolean };
+
+const TERMINAL: ReadonlySet<Task["status"]> = new Set(["succeeded", "failed", "cancelled"]);
 
 export class HistoryView {
   readonly element: HTMLElement;
@@ -129,7 +135,7 @@ export class HistoryView {
    * 任務有變化（SSE task.updated，例如停止中 → 已停止）：更新清單裡那一筆的狀態；詳細頁開著時重讀，
    * 狀態、成果與「重做／刪除」按鈕才跟得上。
    */
-  taskUpdated(task: Task): void {
+  taskUpdated(task: Task, live?: LiveContent): void {
     let changed = false;
     this.items = this.items.map((item) => {
       if (item.task_id !== task.task_id) return item;
@@ -138,8 +144,21 @@ export class HistoryView {
     });
     const detail = this.detail;
     if (detail?.data && detail.taskId === task.task_id) {
-      if (detail.data.task.artifact_id === task.artifact_id) detail.data = { ...detail.data, task };
-      else void this.reloadDetail(task.task_id);
+      const prev = detail.data.task;
+      const base = detail.base ?? prev;
+      if (base.artifact_id === task.artifact_id) {
+        // F3：受保護任務的外殼更新不蓋掉 IPC 讀回的真實內容（base 保持原樣）。
+        detail.data = { ...detail.data, task: mergeLiveTask(base, task, live) };
+        // 需要真實內容的轉變就重讀一次：新規劃出步驟、結束（失敗或停止沒有成果，artifact_id 不變）、出現錯誤、
+        // 撤回或記憶被撤銷（審查 M1、M2）。
+        const reload = task.protected && (
+          task.steps.length > base.steps.length
+          || (TERMINAL.has(task.status) && !TERMINAL.has(prev.status))
+          || (task.error !== null && prev.error === null)
+          || (!!task.withdrawn && !prev.withdrawn)
+          || (task.cancel_reason === "memory_revoked" && prev.cancel_reason !== "memory_revoked"));
+        if (reload) void this.reloadDetail(task.task_id);
+      } else void this.reloadDetail(task.task_id);
       changed = true;
     }
     if (changed) this.render();
@@ -169,6 +188,7 @@ export class HistoryView {
       const data = await this.deps.api.getHistory(taskId);
       if (this.detail?.taskId !== taskId) return;
       this.detail.data = data;
+      this.detail.base = data.task;
       this.render();
     } catch {
       // 重讀失敗時保留目前的內容；使用者可以回到清單再打開。
@@ -203,13 +223,14 @@ export class HistoryView {
   }
 
   async openDetail(taskId: string): Promise<void> {
-    this.detail = { taskId, data: null, error: null, busy: false };
+    this.detail = { taskId, data: null, base: null, error: null, busy: false };
     this.notice = null;
     this.render();
     try {
       const data = await this.deps.api.getHistory(taskId);
       if (this.detail?.taskId !== taskId) return;
       this.detail.data = data;
+      this.detail.base = data.task;
     } catch (err) {
       if (this.detail?.taskId !== taskId) return;
       this.detail.error = msg`無法載入這筆紀錄：${t((err as Error).message)}`;
@@ -224,8 +245,9 @@ export class HistoryView {
 
   private async remove(task: Task): Promise<void> {
     if (!isDeletable(task)) return;
-    const ok = await this.deps.confirm(t("要永久刪除「{0}」這筆任務與它的成果嗎？刪除後無法復原。", task.title));
-    if (!ok || !this.detail) return;
+    const ok = await this.deps.confirm(t("要永久刪除「{0}」這筆任務與它的成果嗎？刪除後無法復原。", task.title), { title: task.title });
+    // 審查 minor 4：原生對話框開著時詳細頁可能已換成別的任務或回到清單；只有同一筆還開著才刪。
+    if (!ok || this.detail?.taskId !== task.task_id) return;
     this.detail.busy = true;
     this.render();
     try {

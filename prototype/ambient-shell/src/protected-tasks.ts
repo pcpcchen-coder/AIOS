@@ -27,6 +27,40 @@ export function shellView(task: Task): Task {
   };
 }
 
+/**
+ * HIST-1 Mac 驗收 F3：ProtectedTasks.display 的結果裡哪些欄位是真實內容（可信主視窗經 IPC 讀回的），哪些是固定句。
+ * 外殼帶 protected 旗標，光看任務本身分不出來，所以另外回報（審查 M1）。
+ */
+export interface LiveContent {
+  title: boolean;
+  /** 每一步的標題是不是真實內容（順序和 steps 相同）。 */
+  steps: boolean[];
+  /** 錯誤說明是真實內容，或沒有錯誤。 */
+  error: boolean;
+}
+
+/**
+ * HIST-1 Mac 驗收 F3：詳細頁已經從可信主視窗（IPC get）讀到真實內容後，SSE 的外殼更新（執行中的任務每一步都會送）
+ * 只能更新狀態、步驟狀態、時間與字數，不能把真實的標題、原始要求、步驟標題與錯誤換回固定句。
+ * - base 是詳細頁最後一次經 IPC 讀回的任務（呼叫端保留原樣，固定句永遠不會寫進 base；審查 M1）。
+ * - update 是 ProtectedTasks.display 的結果；live 說明它哪些欄位是真實內容（沒有時全部當成固定句）。
+ * - 撤回（withdrawn）或記憶被撤銷（cancel_reason memory_revoked）時照 update（外殼），不留任何真實的步驟或錯誤（審查 M2）；
+ *   呼叫端另外重讀。
+ * - base 本身是外殼（範圍外的任務、讀不到內容）或 update 不是受保護任務時照舊用 update。
+ */
+export function mergeLiveTask(base: Task, update: Task, live?: LiveContent): Task {
+  if ((update.withdrawn && !base.withdrawn) || update.cancel_reason === "memory_revoked") return update;
+  if (!update.protected || base.protected || base.task_id !== update.task_id) return update;
+  const { protected: _shell, ...rest } = update;
+  return {
+    ...rest,
+    title: base.title,
+    // 有真實內容就用 update 的（比較新）；否則用 base 的；詳細頁還沒有的新步驟用 display 給的（目前語言的固定句）。
+    steps: update.steps.map((s, i) => ({ ...s, title: live?.steps[i] ? s.title : base.steps[i]?.title ?? s.title })),
+    error: update.error === null ? null : live?.error ? update.error : base.error ?? update.error,
+  };
+}
+
 export class ProtectedTasks {
   private readonly cache = new Map<string, Task>();
   private readonly pending = new Set<string>();
@@ -78,6 +112,14 @@ export class ProtectedTasks {
       steps: task.steps.map((s, i) => ({ ...s, title: real.steps[i]?.title ?? t(PROTECTED_STEP) })),
       error: task.error === null ? null : real.error ?? t(PROTECTED_ERROR),
     };
+  }
+
+  /** display(task) 的哪些欄位是真實內容（F3 審查 M1；不是受保護任務時全部是）。快取裡是外殼（範圍外）時全部不是。 */
+  liveContent(task: Task): LiveContent {
+    if (!task.protected) return { title: true, steps: task.steps.map(() => true), error: true };
+    const real = this.cache.get(task.task_id);
+    if (!real || real.protected) return { title: false, steps: task.steps.map(() => false), error: task.error === null };
+    return { title: true, steps: task.steps.map((_, i) => real.steps[i]?.title !== undefined), error: task.error === null || (real.error ?? null) !== null };
   }
 
   /** 第一次（hello 之後）讀全部任務的真實內容。 */

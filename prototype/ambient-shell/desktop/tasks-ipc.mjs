@@ -61,3 +61,43 @@ export function validateTasksRequest(req) {
       return bad("unknown op");
   }
 }
+
+// HIST-1 Mac 驗收 F4：成果紀錄「刪除」的原生確認。window.confirm 在 Electron 裡的按鈕固定是系統的「Cancel／OK」，
+// 不能換成「取消／刪除」，所以改由主程序用 dialog.showMessageBox 問（按鈕經共用翻譯表）。頁面只送要顯示的標題；
+// 刪除本身仍走 HTTP（只有任務 ID）。主程序先檢查發送者（主視窗主框架、來自本機核心頁面），對話框按「取消」或關掉就不刪。
+
+const MAX_TITLE = 500;
+
+/** nous:confirm-delete 的形狀過濾：目前只有 kind task（成果紀錄的一筆任務）。多的欄位丟掉。 */
+export function validateConfirmDeleteRequest(req) {
+  const bad = (error) => ({ ok: false, error });
+  if (!req || typeof req !== "object" || Array.isArray(req)) return bad("request must be an object");
+  if (req.kind !== "task") return bad("unknown kind");
+  if (typeof req.title !== "string") return bad("title is required");
+  // 控制字元、雙向文字控制字元（U+200E、U+200F、U+202A–U+202E、U+2066–U+2069）與行／段分隔字元（U+2028、U+2029）
+  // 換成空白（對話框的文字不能被倒排或斷行偽裝）；去掉頭尾空白後是空的就拒絕；依碼位截斷（不切開 emoji 的代理對）。
+  const cleaned = req.title.replace(/[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069\u2028\u2029]+/g, " ").trim();
+  if (cleaned.length === 0) return bad("title is required");
+  const title = [...cleaned].slice(0, MAX_TITLE).join("");
+  return { ok: true, request: { kind: "task", title } };
+}
+
+/**
+ * 原生對話框的選項（中文原文；主程序的 showMessage 經 localizeDialog 依目前語言翻譯按鈕與文字）。
+ * 「刪除」在前、「取消」是預設與取消鍵（按 Esc 或關掉對話框都等於取消）。
+ */
+export function deleteTaskDialog(title, translate = (source, ...values) => values.reduce((text, value, i) => text.replace(`{${i}}`, value), source)) {
+  return {
+    type: "warning",
+    buttons: ["刪除", "取消"],
+    defaultId: 1,
+    cancelId: 1,
+    message: translate("要永久刪除「{0}」這筆任務與它的成果嗎？", title),
+    detail: translate("刪除後無法復原。"),
+  };
+}
+
+/** 對話框的回應：只有按了第一個按鈕（刪除）才是 true。 */
+export function deleteConfirmed(result) {
+  return !!result && result.response === 0;
+}
