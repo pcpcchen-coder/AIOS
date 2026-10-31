@@ -95,12 +95,14 @@ As in MEM-2 step 0: install BlackHole 2ch, create a Multi-Output Device in Audio
 
 Prerequisites: the App from §3.2, using the mock engine (`NOUS_PROVIDER=mock`).
 
+> Note (N1 from the 2026-10-31 Mac acceptance): the mock engine does not necessarily stay selected in the App. After the engine is switched to mock through the local API, typing one ordinary chat line in the App can make the App's `prepareConversation` switch the engine back to ChatGPT automatically (it does this when the engine was not chosen from the App menu), and tasks submitted or redone afterwards then really call the model. This behavior has not been changed. Before each submission, check the engine line (or `/api/settings`) to confirm it is still "Mock"; if it was switched back, record honestly which engine the task actually used.
+
 - [ ] 1. Submit 3–5 tasks, including one whose title contains Simplified Chinese ("准备晚饭") and one that fails or is stopped.
 - [ ] 2. The menu bar has "Results history…" and "Open results history in browser" (Chinese UI: 「成果紀錄…」 and 「在瀏覽器打開成果紀錄」). Open both and take screenshots; the browser URL is `http://127.0.0.1:<port>/history?lang=…` and search works.
 - [ ] 3. Type 「搜尋成果 晚飯」 (Traditional query for Simplified text), 「找之前關於晚餐的成果」, and 「成果紀錄」; matches are highlighted. 「看結果」 still opens only the most recent result.
 - [ ] 4. Say 「進度如何」; the "Search all results" button appears near "N earlier tasks not listed", and clicking it opens results history.
 - [ ] 5. The detail page shows the original request, engine, time, assumptions, capability gaps, and steps; "Redo" switches to the new task's progress.
-- [ ] 6. "Delete" shows a native macOS dialog; Cancel does not delete; after confirming, the task leaves the list and `grep` finds the title in neither JSON file under `data/`. Running tasks have no delete button.
+- [ ] 6. "Delete" shows a native macOS dialog whose buttons are "Delete" and "Cancel" (Chinese UI: 「刪除」 and 「取消」); Cancel does not delete; after confirming, the task leaves the list. With encrypted storage (MEM-4a), `data/` holds `tasks.json` (shells only, no titles), `sealed/` (one encrypted file `<id>.enc` per task and per result), and `plaintext-backup-*` (the plaintext backup from before migration, kept until the user confirms deletion), so a `grep` for the title cannot prove deletion. Instead confirm that neither `/api/tasks` nor `tasks.json` has that `task_id`, and that `sealed/` has neither `<task_id>.enc` nor its result's `<artifact_id>.enc`. Old task titles that were already in `plaintext-backup-*` before migration are outside the scope of this step. Running tasks have no delete button.
 - [ ] 7. Say or type 「收起」, or press Esc: only the view closes and running tasks continue.
 - [ ] 8. Latency: run `npx vitest run tests/history-search.test.ts tests/history-http.test.ts --reporter=verbose` and record the two `[history perf]` lines.
 - [ ] 9. Save screenshots in a new folder under `docs/validation/`.

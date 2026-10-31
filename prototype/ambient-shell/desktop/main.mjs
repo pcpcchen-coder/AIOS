@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, safeStorage, session, shell, Tray } from "electron";
 import { checkIdentitySender, MenuClickWindow, validateIdentityRequest } from "./identity-ipc.mjs";
 import { validateMemoryRequest } from "./memory-ipc.mjs";
-import { validateTasksRequest } from "./tasks-ipc.mjs";
+import { deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "./tasks-ipc.mjs";
 import { createMemorySecretBox } from "./memory-safe-storage.mjs";
 import { checkTrustedSender } from "./trusted-sender.mjs";
 import { radio, settingsMenu } from "./settings-menu.mjs";
@@ -879,6 +879,20 @@ ipcMain.handle("nous:tasks", async (event, request) => {
   if (!checked.ok) return { ok: false, code: "bad_request", message: checked.error };
   const userInitiated = checked.request.all === true ? historyClick.consume(Date.now()) : false;
   return core.tasks.handle(checked.request, { userInitiated });
+});
+
+// HIST-1 Mac 驗收 F4：成果紀錄刪除的原生確認（按鈕依目前語言：「刪除／取消」「Delete／Cancel」）。只接受主視窗主框架、
+// 來自本機核心頁面的請求；發送者不對、形狀不對或對話框失敗一律當成取消（不刪）。
+ipcMain.handle("nous:confirm-delete", async (event, request) => {
+  if (!core || !checkTrustedSender(event, win, core.url)) return { confirmed: false };
+  const checked = validateConfirmDeleteRequest(request);
+  if (!checked.ok) return { confirmed: false };
+  try {
+    const parent = win && !win.isDestroyed() ? win : undefined;
+    return { confirmed: deleteConfirmed(await showMessage(deleteTaskDialog(checked.request.title, t), parent)) };
+  } catch {
+    return { confirmed: false };
+  }
 });
 
 // 記憶：只接受主視窗主框架、來自本機核心頁面的請求；形狀過濾後交給核心（核心再完整驗證）。

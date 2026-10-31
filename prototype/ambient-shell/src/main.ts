@@ -89,6 +89,8 @@ interface DesktopBridge {
   tasks?(request: TasksRequest): Promise<TasksResponse>;
   /** MEM-4c 審查 M1：核心丟棄解密內容（只有原因，不含內容）。舊版 App 與瀏覽器版沒有這一項。 */
   onTasksPlaintextDropped?(listener: (reason: PlaintextDropReason) => void): () => void;
+  /** HIST-1 Mac 驗收 F4：成果紀錄刪除的原生確認（主程序的 dialog.showMessageBox，按鈕依目前語言）。舊版 App 與瀏覽器版沒有這一項。 */
+  confirmDelete?(request: { title: string }): Promise<{ confirmed: boolean }>;
 }
 declare global {
   interface Window {
@@ -1119,8 +1121,11 @@ const historyView = new HistoryView({
   api: protectedTasks.available
     ? { searchHistory: (query) => protectedTasks.search(query), getHistory: (taskId) => protectedTasks.detail(taskId), deleteHistory: (taskId, requestId) => api.deleteHistory(taskId, requestId) }
     : api,
-  // macOS App 裡 window.confirm 是原生對話框；瀏覽器裡是瀏覽器的確認框。
-  confirm: (message) => window.confirm(message),
+  // F4：macOS App 由主程序跳原生對話框（按鈕依目前語言：「刪除／取消」）；IPC 失敗當成取消（不刪）。
+  // 瀏覽器版沒有 IPC，用瀏覽器的確認框（按鈕文字由瀏覽器決定）。
+  confirm: (message, subject) => window.nousDesktop?.confirmDelete
+    ? window.nousDesktop.confirmDelete({ title: subject.title }).then((r) => r?.confirmed === true, () => false)
+    : window.confirm(message),
   requestId: userRequest,
   redo: async (task, requestId) => {
     // 沿用重試：建立新任務（retry_of 指向原任務），換成前景任務的進度。
@@ -1671,7 +1676,7 @@ function onServerEvent(event: ServerEvent): void {
   firePulses(prev, event.task);
   const wasForeground = shell.mode === "working" && shell.foreground_task_id === event.task.task_id;
   dispatch({ type: "task.updated", task: event.task });
-  historyView.taskUpdated(shown(event.task));
+  historyView.taskUpdated(shown(event.task), protectedTasks.liveContent(event.task));
   if (realtimeTaskIds.has(event.task.task_id) && !isActive(event.task)) {
     // 即時語音中交辦的任務結束：請模型用一句話轉告（不論是否還在前景）。MEM-4a：模型只拿到外殼。
     realtimeTaskIds.delete(event.task.task_id);

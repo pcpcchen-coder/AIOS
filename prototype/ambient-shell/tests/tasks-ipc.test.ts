@@ -3,15 +3,16 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { TASK_OPS as DESKTOP_OPS, validateTasksRequest } from "../desktop/tasks-ipc.mjs";
+import { TASK_OPS as DESKTOP_OPS, deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "../desktop/tasks-ipc.mjs";
+import { localizeDialog, setNativeLocale, t as nativeT } from "../desktop/localization.mjs";
 import { TASK_OPS } from "../shared/protected-tasks.ts";
 import { createTaskIpc } from "../server/task-ipc.ts";
 import { MockExecutor } from "../server/mock-executor.ts";
-import { TaskRunner } from "../server/runner.ts";
+import { TaskRunner, type ExecutionResult, type Executor, type Reporter } from "../server/runner.ts";
 import { SealedVault } from "../server/sealed-vault.ts";
 import { TaskStore } from "../server/store.ts";
 import { BACKUP_PREFIX } from "../server/task-migration.ts";
-import { ProtectedTasks, shellView, vaultNotice, WITHDRAWN_TEXT } from "../src/protected-tasks.ts";
+import { mergeLiveTask, ProtectedTasks, shellView, vaultNotice, WITHDRAWN_TEXT } from "../src/protected-tasks.ts";
 import type { Task } from "../shared/types.ts";
 import type { TasksResponse } from "../shared/protected-tasks.ts";
 import { CLAUDE, enable, fakeBox, harness, req } from "./fixtures/memory-service.ts";
@@ -60,6 +61,73 @@ describe("desktop/tasks-ipc.mjs shape filter", () => {
     expect(invoke).toHaveBeenCalledWith("nous:tasks", { op: "list" });
     const build = readFileSync(join(import.meta.dirname, "../desktop/scripts/build.mjs"), "utf8");
     expect(build).toContain('cpSync(join(desktop, "tasks-ipc.mjs"), join(out, "tasks-ipc.mjs"));');
+  });
+});
+
+describe("F4 (HIST-1 Mac): the delete confirmation is a localized native dialog from the main process", () => {
+  afterEach(() => setNativeLocale("zh-TW"));
+
+  it("filters the request to kind task and a display title; anything else is refused", () => {
+    expect(validateConfirmDeleteRequest({ kind: "task", title: "准备晚饭", task_id: "x", evil: 1 })).toEqual({ ok: true, request: { kind: "task", title: "准备晚饭" } });
+    expect(validateConfirmDeleteRequest({ kind: "task", title: "a\u0000b\nc" })).toEqual({ ok: true, request: { kind: "task", title: "a b c" } });
+    expect((validateConfirmDeleteRequest({ kind: "task", title: "長".repeat(900) }) as { request: { title: string } }).request.title).toHaveLength(500);
+    for (const bad of [null, [], { kind: "memory", title: "x" }, { kind: "task" }, { kind: "task", title: "" }, { kind: "task", title: 3 }, { kind: "task", title: "  \n\u202e\u2028 " }]) expect(validateConfirmDeleteRequest(bad).ok).toBe(false);
+    // 審查 minor 5：雙向控制字元與行／段分隔字元換成空白，頭尾去空白，依碼位截斷（不切開 emoji）。
+    expect(validateConfirmDeleteRequest({ kind: "task", title: " 晚餐\u202egpj.exe\u2066x\u2069\u200e\u200fy\u2028z\u2029w " })).toEqual({ ok: true, request: { kind: "task", title: "晚餐 gpj.exe x y z w" } });
+    const emoji = (validateConfirmDeleteRequest({ kind: "task", title: "😀".repeat(600) }) as { request: { title: string } }).request.title;
+    expect([...emoji]).toHaveLength(500);
+    expect(emoji).toBe("😀".repeat(500));
+  });
+
+  it("buttons are 刪除／取消 in Chinese and Delete／Cancel in English; cancel is the default and the Esc button", () => {
+    const zh = localizeDialog(deleteTaskDialog("准备晚饭", nativeT));
+    expect(zh.buttons).toEqual(["刪除", "取消"]);
+    expect(zh.message).toBe("要永久刪除「准备晚饭」這筆任務與它的成果嗎？");
+    expect(zh.detail).toBe("刪除後無法復原。");
+    expect([zh.defaultId, zh.cancelId]).toEqual([1, 1]);
+    setNativeLocale("en");
+    const en = localizeDialog(deleteTaskDialog("准备晚饭", nativeT));
+    expect(en.buttons).toEqual(["Delete", "Cancel"]);
+    expect(en.message).toBe("Permanently delete the task “准备晚饭” and its result?");
+    expect(en.detail).toBe("This cannot be undone.");
+    expect(JSON.stringify(en)).not.toMatch(/OK/);
+  });
+
+  it("only the Delete button confirms: Cancel, closing the dialog or a failure deletes nothing", () => {
+    expect(deleteConfirmed({ response: 0 })).toBe(true);
+    expect(deleteConfirmed({ response: 1 })).toBe(false);
+    expect(deleteConfirmed(undefined)).toBe(false);
+    expect(deleteConfirmed(null)).toBe(false);
+  });
+
+  it("main.mjs checks the trusted sender before showing it; preload sends only kind and title; main.ts no longer uses window.confirm in the App", () => {
+    const main = readFileSync(join(import.meta.dirname, "../desktop/main.mjs"), "utf8");
+    const handler = main.slice(main.indexOf('ipcMain.handle("nous:confirm-delete"'), main.indexOf('ipcMain.handle("nous:memory"'));
+    expect(handler).toMatch(/checkTrustedSender\(event, win, core\.url\)\) return \{ confirmed: false \}/);
+    expect(handler).toMatch(/validateConfirmDeleteRequest\(request\)/);
+    expect(handler).toMatch(/showMessage\(deleteTaskDialog\(checked\.request\.title, t\), parent\)/);
+    expect(handler).toMatch(/catch \{\s*return \{ confirmed: false \};/);
+    const preload = readFileSync(join(import.meta.dirname, "../desktop/preload.cjs"), "utf8");
+    const invoke = vi.fn();
+    let exposed: Record<string, (r: unknown) => unknown> = {};
+    new Function("require", "process", preload)(() => ({ contextBridge: { exposeInMainWorld: (_k: string, api: typeof exposed) => { exposed = api; } }, ipcRenderer: { invoke, send: vi.fn(), sendSync: vi.fn(() => "zh-TW"), on: vi.fn(), removeListener: vi.fn() } }), { argv: [] });
+    exposed.confirmDelete!({ title: "准备晚饭", task_id: "task_x", extra: true });
+    expect(invoke).toHaveBeenCalledWith("nous:confirm-delete", { kind: "task", title: "准备晚饭" });
+    const page = readFileSync(join(import.meta.dirname, "../src/main.ts"), "utf8");
+    const wiring = page.slice(page.indexOf("const historyView = new HistoryView("), page.indexOf("requestId: userRequest,"));
+    expect(wiring).toMatch(/window\.nousDesktop\?\.confirmDelete\s*\?\s*window\.nousDesktop\.confirmDelete\(\{ title: subject\.title \}\)\.then\(\(r\) => r\?\.confirmed === true, \(\) => false\)/);
+  });
+
+  it("every native confirmation in main.mjs has translated buttons (no English fallback like OK)", () => {
+    const main = readFileSync(join(import.meta.dirname, "../desktop/main.mjs"), "utf8");
+    const labels = [...main.matchAll(/buttons: \[([^\]]+)\]/g)].flatMap((m) => [...m[1]!.matchAll(/"([^"]+)"/g)].map((x) => x[1]!));
+    expect(labels.length).toBeGreaterThanOrEqual(10);
+    setNativeLocale("en");
+    for (const label of [...labels, ...deleteTaskDialog("x").buttons]) {
+      const en = nativeT(label);
+      expect(en, label).not.toBe(label);
+      expect(/\p{Script=Han}/u.test(en), label).toBe(false);
+    }
   });
 });
 
@@ -123,6 +191,47 @@ describe.skipIf(!realLockAvailable)("server/task-ipc.ts (trusted main window onl
     expect(store.publicList().every(t => !JSON.stringify(t).includes(CANARY))).toBe(true);
   });
 
+  it("F3 (HIST-1 Mac): a RUNNING protected task's real title and steps reach the trusted window over IPC; SSE, /api and model shells stay shells", async () => {
+    const { store, handle } = setup();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const executor: Executor = {
+      mode: "chatgpt",
+      async run(input: { title: string }, reporter: Reporter): Promise<ExecutionResult> {
+        reporter.planReady([{ title: `列出食材${CANARY}`, domain: "planning" }, { title: "寫出步驟", domain: "language" }], "fixture-model");
+        reporter.stepStarted(0);
+        await gate;
+        reporter.stepDone(0);
+        return { content: `成果：${input.title}`, assumptions: [], capability_gaps: [], status: "complete", model: "fixture-model" };
+      },
+    } as Executor;
+    const runner = new TaskRunner(store, executor, 1);
+    const sse: Task[] = [];
+    store.subscribe((t) => sse.push(t));
+    const created = runner.submit({ title: `准备晚饭${CANARY}`, request_id: "req_fixture0005" });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(store.publicGet(created.task_id)!.status).toBe("running");
+    const got = await handle({ op: "get", task_id: created.task_id }) as Extract<TasksResponse, { op: "get" }>;
+    expect(got.ok).toBe(true);
+    expect(got.task.protected).toBeUndefined();
+    expect(got.task.title).toBe(`准备晚饭${CANARY}`);
+    expect(got.task.steps.map((s) => s.title)).toEqual(expect.arrayContaining([`列出食材${CANARY}`, "寫出步驟"]));
+    expect(JSON.stringify(got.task)).not.toContain("受保護");
+    const list = await handle({ op: "list" }) as Extract<TasksResponse, { op: "list" }>;
+    expect(list.tasks.find((t) => t.task_id === created.task_id)!.title).toBe(`准备晚饭${CANARY}`);
+    // 對外的頻道（SSE、/api/tasks、/api/history 的來源）仍只有外殼。
+    expect(sse.length).toBeGreaterThan(0);
+    expect(JSON.stringify(sse)).not.toContain(CANARY);
+    expect(JSON.stringify(store.publicList())).not.toContain(CANARY);
+    expect(JSON.stringify(store.publicDocuments())).not.toContain(CANARY);
+    // 執行中的任務內容一直在核心記憶體（MEM-4c：丟棄只針對已結束的任務），鎖定後仍讀得到。
+    store.dropPlaintext("os_lock");
+    const again = await handle({ op: "get", task_id: created.task_id }) as Extract<TasksResponse, { op: "get" }>;
+    expect(again.task.title).toBe(`准备晚饭${CANARY}`);
+    release();
+    await runner.idle();
+  });
+
   it("the plaintext backup is kept until the user confirms deletion on screen (native confirm)", async () => {
     const { dataDir, handle, confirm } = setup(true);
     const status = await handle({ op: "status" }) as Extract<TasksResponse, { op: "status" }>;
@@ -178,6 +287,42 @@ describe("src/protected-tasks.ts (renderer)", () => {
     expect(shown.steps[0]).toMatchObject({ title: `步驟${CANARY}`, output_chars: 12 });
     expect(changed).toHaveBeenCalled();
     expect(p.display({ ...shell, protected: undefined, title: "一般" }).title).toBe("一般");
+  });
+
+  it("F3: mergeLiveTask keeps IPC content over shell updates, takes newer state, and leaves shells and plain tasks alone", () => {
+    const real = { ...shell, title: CANARY, steps: [{ ...shell.steps[0]!, title: `步驟${CANARY}` }], protected: undefined };
+    const update = { ...shell, status: "running" as const, steps: [{ ...shell.steps[0]!, status: "done" as const, output_chars: 40 }, { ...shell.steps[0]!, title: "下一步（display）" }], updated_at: "2026-10-30T00:00:09Z" };
+    const merged = mergeLiveTask(real, update);
+    expect(merged.protected).toBeUndefined();
+    expect(merged.title).toBe(CANARY);
+    expect(merged.steps.map((s) => [s.title, s.status, s.output_chars])).toEqual([[`步驟${CANARY}`, "done", 40], ["下一步（display）", "running", 12]]);
+    expect(merged.updated_at).toBe("2026-10-30T00:00:09Z");
+    expect(shellView(merged).title).toBe(CANARY); // 詳細頁的 shellView 不再換回固定句
+    expect(mergeLiveTask(shell, update)).toBe(update); // 詳細頁本身是外殼（範圍外）：照舊
+    const plain = { ...update, protected: undefined, title: "一般" };
+    expect(mergeLiveTask(real, plain)).toBe(plain);
+    expect(mergeLiveTask(real, { ...update, task_id: "task_other" }).title).toBe(shell.title);
+  });
+
+  it("F3 review M1/M2: liveContent reports which displayed fields are real; merge keeps base for placeholders and drops content on withdrawal", async () => {
+    const real = { ...shell, title: CANARY, steps: [{ ...shell.steps[0]!, title: `步驟${CANARY}` }], error: null, protected: undefined };
+    const bridge = vi.fn(async () => ({ ok: true as const, op: "get" as const, task: real, artifact: null }));
+    const p = new ProtectedTasks(bridge as never, () => {});
+    expect(p.liveContent(shell)).toEqual({ title: false, steps: [false], error: true });
+    p.want([shell]);
+    await new Promise((r) => setTimeout(r, 0));
+    const twoSteps = { ...shell, steps: [...shell.steps, { ...shell.steps[0]! }] };
+    expect(p.liveContent(twoSteps)).toEqual({ title: true, steps: [true, false], error: true });
+    expect(p.liveContent({ ...shell, error: "受保護的錯誤說明，請在 App 內查看" }).error).toBe(false); // 快取裡還沒有錯誤
+    expect(p.liveContent({ ...shell, protected: undefined })).toEqual({ title: true, steps: [true], error: true });
+    const failed = { ...shell, status: "failed" as const, error: "x" };
+    expect(mergeLiveTask(real, shellView(failed), { title: false, steps: [false], error: false }).error).toBe(shellView(failed).error); // base 沒有錯誤時只能顯示固定句
+    expect(mergeLiveTask({ ...real, error: "真實" }, shellView(failed), { title: false, steps: [false], error: false }).error).toBe("真實");
+    expect(mergeLiveTask(real, { ...failed, error: "較新的真實" }, { title: true, steps: [true], error: true }).error).toBe("較新的真實");
+    const withdrawn = shellView({ ...failed, withdrawn: true });
+    expect(mergeLiveTask(real, withdrawn)).toBe(withdrawn);
+    const revoked = shellView({ ...shell, status: "cancelling", cancel_reason: "memory_revoked" });
+    expect(mergeLiveTask(real, revoked)).toBe(revoked);
   });
 
   it("vaultNotice tells the truth for each state", () => {

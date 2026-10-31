@@ -7,7 +7,7 @@ import { SCHEMA_VERSION, type Artifact, type ExecutorMode, type Task } from "../
 import { isDomain } from "../shared/domain.ts";
 import { VaultError, type SealedVault, type VaultFailure } from "./sealed-vault.ts";
 import { hasPlaintext, migratePlaintext, plaintextBackups, deletePlaintextBackups, type MigrationResult, type MigrationStep } from "./task-migration.ts";
-import { forgetAllHistoryContent, forgetHistoryArtifact, listItem, passesFilters, prepareFields, scoreFields, scoreHistoryDocument, searchTermsOf, type HistoryDocument, type HistorySource } from "./history.ts";
+import { compareRanked, forgetAllHistoryContent, forgetHistoryArtifact, listItem, passesFilters, prepareFields, scoreFields, scoreHistoryDocument, searchTermsOf, type HistoryDocument, type HistorySource, type Ranked } from "./history.ts";
 import { ProtectedIndex, type IndexedField } from "./protected-index.ts";
 import { sortForProgress } from "../shared/progress.ts";
 import type { HistoryFilters, HistoryPage } from "../shared/history.ts";
@@ -633,10 +633,12 @@ export class TaskStore {
         sources,
       };
     }
-    const { terms, phrase } = searchTermsOf(filters.q);
+    const search = searchTermsOf(filters.q);
+    const { terms } = search;
     const index = this.ensureIndex(st);
-    const candidates = index.candidates(terms, terms.length >= 2 ? Math.ceil(terms.length / 2) : 1);
-    const scored: { task: Task; coverage: number; score: number; createdMs: number }[] = [];
+    // F2：每個查詢詞的候選含它的近義詞（同一個詞的原詞與近義詞只算一次命中）。
+    const candidates = index.candidates(terms, terms.length >= 2 ? Math.ceil(terms.length / 2) : 1, search.synonyms);
+    const scored: (Ranked & { task: Task; createdMs: number; taskId: string })[] = [];
     for (const t of records) {
       let fields: readonly IndexedField[];
       if (!visible(t)) fields = prepareFields(shellDoc(t), false);
@@ -645,13 +647,13 @@ export class TaskStore {
         fields = index.fields(t.task_id)!;
       } else fields = prepareFields(this.residentDoc(t), false);
       st.scored += 1;
-      const ranked = scoreFields(fields, terms, phrase);
-      if (ranked) scored.push({ task: t, ...ranked, createdMs: createdMs(t) });
+      const ranked = scoreFields(fields, search);
+      if (ranked) scored.push({ task: t, ...ranked, createdMs: createdMs(t), taskId: t.task_id });
     }
-    scored.sort((a, b) => b.coverage - a.coverage || b.score - a.score || b.createdMs - a.createdMs || a.task.task_id.localeCompare(b.task.task_id));
+    scored.sort(compareRanked);
     const items = scored.slice(filters.cursor, next).map((s) => {
       const doc = full(s.task);
-      return scoreHistoryDocument(doc, source, terms, phrase, false)?.item ?? listItem(doc, source, false);
+      return scoreHistoryDocument(doc, source, search, false)?.item ?? listItem(doc, source, false);
     });
     return { items, total: scored.length, next_cursor: next < scored.length ? String(next) : null, sources };
   }

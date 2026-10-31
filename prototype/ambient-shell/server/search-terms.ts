@@ -80,3 +80,88 @@ export function queryTerms(query: string): string[] {
   }
   return [...out];
 }
+
+/**
+ * 成果紀錄搜尋的近義詞（HIST-1 Mac 驗收 F2，George 2026-10-31 選擇支援近義詞）。保守、明確列出的小表，不做模糊比對：
+ * - 只擴充查詢詞（queryTerms 的結果），不改寫、不擴充保存的原文；折疊（foldForSearch）照舊，兩邊都折。
+ * - 同一組的詞互為近義詞。中文詞只放一或兩個字（查詢詞就是二字片段，兩字詞才對得上）。
+ * - 一個字的詞（「信」）只在單獨成段的「信」（整段漢字就是那一個字）時才擴充，而且永遠不拿來當其他詞的近義詞
+ *   （一個字太寬：「相信」也有「信」）。
+ * - 英文的整詞規則只用在近義詞（前後不是英文字母或數字），近義詞「plan」不會比對到「explanation」；複數等變化明確列出。
+ *   查詢的原詞照舊是子字串比對（原本的行為）。
+ * - 中文近義詞是子字串比對，可能跨詞界命中（中文沒有空白分詞）；已知的「離開會場」（開會）、「每日程式」（日程）、
+ *   「法規劃分」（規劃）用 SYNONYM_EXCLUDE 排除，其他跨詞界的情況仍可能出現（已知限制）。
+ * - 近義詞命中算命中（命中比例照算），但分數只有原詞的一半；排序在命中比例之後先比「原詞命中幾個」，再比分數，
+ *   所以命中比例相同時，原詞命中較多的一定排在前面。
+ * 「行程」（itinerary）和「計畫／規劃」（plan）意思不同，分成兩組，不互相擴充。
+ */
+export const SEARCH_SYNONYMS: readonly (readonly string[])[] = [
+  ["晚餐", "晚飯", "晚饭", "dinner", "dinners", "supper"],
+  ["午餐", "午飯", "午饭", "lunch", "lunches"],
+  ["早餐", "早飯", "早饭", "breakfast", "breakfasts"],
+  ["會議", "会议", "開會", "开会", "meeting", "meetings"],
+  ["計畫", "計劃", "计划", "規劃", "规划", "plan", "plans", "planning"],
+  ["行程", "日程", "itinerary", "itineraries"],
+  ["郵件", "邮件", "電郵", "电邮", "信件", "信", "email", "emails", "e-mail"],
+  ["報告", "报告", "report", "reports"],
+];
+
+/** 折疊後的詞 → 它所在的組（折疊後去重）。 */
+const SYNONYM_GROUPS: ReadonlyMap<string, readonly string[]> = (() => {
+  const map = new Map<string, string[]>();
+  for (const group of SEARCH_SYNONYMS) {
+    const folded = [...new Set(group.map((w) => foldForSearch(w.normalize("NFKC"))))];
+    for (const w of folded) map.set(w, folded);
+  }
+  return map;
+})();
+
+const LATIN_WORD_CHAR = /[\p{Script=Latin}\p{N}]/u;
+
+/**
+ * 中文近義詞的已知跨詞界誤命中：近義詞出現在這些上下文裡時不算（只影響近義詞；查詢的原詞照舊）。
+ * 鍵與上下文都已折疊。
+ */
+const SYNONYM_EXCLUDE: ReadonlyMap<string, readonly string[]> = new Map(
+  ([["開會", ["離開會"]], ["日程", ["每日程"]], ["規劃", ["法規劃"]]] as const).map(([alt, ctx]) => [foldForSearch(alt), ctx.map((c) => foldForSearch(c))]),
+);
+
+function excludedAt(folded: string, alt: string, at: number): boolean {
+  for (const ctx of SYNONYM_EXCLUDE.get(alt) ?? []) {
+    const k = ctx.indexOf(alt);
+    if (k >= 0 && at - k >= 0 && folded.startsWith(ctx, at - k)) return true;
+  }
+  return false;
+}
+
+/** 近義詞是英文詞時要整個詞相符；中文照子字串。 */
+function isLatinWord(term: string): boolean {
+  return /^[\p{Script=Latin}\p{N}]/u.test(term);
+}
+
+/**
+ * 每個查詢詞的近義詞（順序和 terms 相同；沒有近義詞的是空陣列）。已經包含原詞的近義詞不列（原詞命中就算到了，分數也較高）；
+ * 一個字的詞不當近義詞。
+ */
+export function synonymsFor(terms: readonly string[]): string[][] {
+  return terms.map((term) => {
+    const group = SYNONYM_GROUPS.get(term);
+    if (!group) return [];
+    return group.filter((alt) => alt !== term && [...alt].length > 1 && !alt.includes(term));
+  });
+}
+
+/** 近義詞 alt 在折疊後的文字裡從 from 起第一次出現的位置（英文要整個詞相符）；沒有回 -1。 */
+export function synonymIndexOf(folded: string, alt: string, from = 0): number {
+  const whole = isLatinWord(alt);
+  for (let at = folded.indexOf(alt, from); at >= 0; at = folded.indexOf(alt, at + 1)) {
+    if (!whole) {
+      if (!excludedAt(folded, alt, at)) return at;
+      continue;
+    }
+    const before = at > 0 ? folded[at - 1]! : "";
+    const after = folded[at + alt.length] ?? "";
+    if (!LATIN_WORD_CHAR.test(before) && !LATIN_WORD_CHAR.test(after)) return at;
+  }
+  return -1;
+}

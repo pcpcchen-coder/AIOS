@@ -1,10 +1,11 @@
 // HIST-1：成果紀錄的搜尋（一般任務與成果，明文）。
 // - 每次查詢都在記憶體內比對，不建立、不寫入任何搜尋索引；查詢文字不寫 log（呼叫端只記筆數）。
 // - 比對沿用記憶檢索的方式（server/search-terms.ts）：簡繁對照、中文二字片段、英文詞。
+// - 近義詞（F2，search-terms.ts 的 SEARCH_SYNONYMS）只擴充查詢詞，不改原文；近義詞命中的分數是原詞的一半。
 // - 來源可插拔（HistorySource）。MEM-4c：加密保存的任務（macOS App）改走 server/protected-index.ts 的 RAM 倒排索引，
 //   排序與片段沿用這裡的 prepareFields／scoreFields／scoreDocument（同一份程式，結果逐筆相同）；受保護內容不進 CONTENT_CACHE。
 
-import { foldForSearch, queryTerms } from "./search-terms.ts";
+import { foldForSearch, queryTerms, synonymIndexOf, synonymsFor } from "./search-terms.ts";
 import type { Artifact, ExecutorMode, Task, TaskStatus } from "../shared/types.ts";
 import type { HistoryFilters, HistoryItem, HistoryPage, HistoryRange, HistorySnippet } from "../shared/history.ts";
 import { HISTORY_MAX_LIMIT, HISTORY_PAGE_SIZE, HISTORY_SNIPPET_RADIUS } from "../shared/history.ts";
@@ -33,6 +34,17 @@ const MAX_QUERY_CHARS = 200;
 /** 欄位權重：標題（使用者原句）最重要，其次是成果內容與步驟。 */
 const WEIGHT = { title: 3, content: 2, step: 1, notes: 1 } as const;
 type Field = keyof typeof WEIGHT;
+/** 近義詞命中（F2）的分數是原詞的一半：同一個欄位裡，原詞命中一定排在近義詞前面。 */
+const SYNONYM_FACTOR = 0.5;
+
+/**
+ * 一次查詢（searchHistory 和 MEM-4c 的受保護搜尋共用）：查詢詞、每個詞的近義詞（順序相同；只擴充查詢，不動原文）與整句。
+ */
+export interface SearchQuery {
+  terms: string[];
+  synonyms: string[][];
+  phrase: string;
+}
 
 /** 解析 /api/history 的查詢參數；格式不對丟 HistoryQueryError（→ 400）。 */
 export function parseHistoryQuery(params: URLSearchParams): HistoryFilters & { cursor: number; limit: number } {
@@ -177,8 +189,8 @@ export function passesFilters(task: Task, filters: HistoryFilters): boolean {
   return true;
 }
 
-/** text 裡每個詞出現的位置（不重疊、依位置排序）。 */
-function findMatches(folded: string, terms: readonly string[]): { start: number; end: number }[] {
+/** text 裡每個詞（含近義詞）出現的位置（不重疊、依位置排序）。 */
+function findMatches(folded: string, terms: readonly string[], synonyms: readonly (readonly string[])[] = []): { start: number; end: number }[] {
   const hits: { start: number; end: number }[] = [];
   for (const term of terms) {
     let from = 0;
@@ -187,6 +199,12 @@ function findMatches(folded: string, terms: readonly string[]): { start: number;
       if (at < 0) break;
       hits.push({ start: at, end: at + term.length });
       from = at + term.length;
+    }
+  }
+  // 近義詞的命中也標示（F2）；英文近義詞只標整個詞。
+  for (const alts of synonyms) {
+    for (const alt of alts) {
+      for (let at = synonymIndexOf(folded, alt); at >= 0; at = synonymIndexOf(folded, alt, at + alt.length)) hits.push({ start: at, end: at + alt.length });
     }
   }
   hits.sort((a, b) => a.start - b.start || b.end - a.end);
@@ -221,20 +239,14 @@ export function makeSnippet(field: Field, text: string, matches: { start: number
   };
 }
 
-interface Scored {
-  item: HistoryItem;
-  coverage: number;
-  score: number;
-  createdMs: number;
-}
-
 /**
  * 在所有來源裡搜尋。沒有查詢詞時依交辦時間新到舊列出（只套篩選）。
- * 排序：命中的查詢詞比例 → 加權分數（標題 3、成果內容 2、步驟與註記 1；整句出現另外加分）→ 交辦時間新到舊 → task_id。
+ * 排序：命中的查詢詞比例 → 原詞命中數（近義詞命中不算）→ 加權分數（標題 3、成果內容 2、步驟與註記 1；近義詞一半；
+ * 整句出現另外加分）→ 交辦時間新到舊 → task_id。
  * 有兩個以上的查詢詞時，至少要命中一半才算（避免只命中一個二字片段的雜訊）。
  */
 export function searchHistory(sources: readonly HistorySource[], filters: HistoryFilters & { cursor: number; limit: number }): HistoryPage {
-  const { terms, phrase } = searchTermsOf(filters.q);
+  const query = searchTermsOf(filters.q);
   const hasQuery = filters.q.trim() !== "";
   const sourceList = sources.map((s) => ({ id: s.id, protected: s.protected }));
   const next = filters.cursor + filters.limit;
@@ -252,17 +264,19 @@ export function searchHistory(sources: readonly HistorySource[], filters: Histor
       sources: sourceList,
     };
   }
-  const scored: Scored[] = [];
+  // 先只用折疊後的欄位排序（scoreFields）；標示與片段只為這一頁產生（和 MEM-4c 的 store.ts 相同的做法）。
+  const scored: (Ranked & { p: Prepared; createdMs: number; taskId: string })[] = [];
   for (const source of sources) {
     for (const doc of source.documents()) {
       if (!passesFilters(doc.task, filters)) continue;
-      const result = scoreDocument(prepare(doc, source), terms, phrase);
-      if (result) scored.push({ ...result, createdMs: Date.parse(doc.task.created_at) || 0 });
+      const p = prepare(doc, source);
+      const ranked = scoreFields(p.fields, query);
+      if (ranked) scored.push({ ...ranked, p, createdMs: Date.parse(doc.task.created_at) || 0, taskId: doc.task.task_id });
     }
   }
-  scored.sort((a, b) => b.coverage - a.coverage || b.score - a.score || b.createdMs - a.createdMs || a.item.task_id.localeCompare(b.item.task_id));
+  scored.sort(compareRanked);
   return {
-    items: scored.slice(filters.cursor, next).map((s) => s.item),
+    items: scored.slice(filters.cursor, next).map((s) => scoreDocument(s.p, query)!.item),
     total: scored.length,
     next_cursor: next < scored.length ? String(next) : null,
     sources: sourceList,
@@ -290,50 +304,72 @@ export function listItem(doc: HistoryDocument, source: HistorySource, cache = tr
   return { ...baseItem(doc, source), score: 0, title_matches: [], snippet: content ? makeSnippet("content", content, []) : null };
 }
 
-/** 查詢詞與整句（searchHistory 和 MEM-4c 的受保護搜尋共用同一份計算）。 */
-export function searchTermsOf(q: string): { terms: string[]; phrase: string } {
-  return { terms: queryTerms(q), phrase: foldForSearch(q.normalize("NFKC")).replace(/\s+/g, " ").trim() };
+/** 查詢詞、近義詞與整句（searchHistory 和 MEM-4c 的受保護搜尋共用同一份計算）。 */
+export function searchTermsOf(q: string): SearchQuery {
+  const terms = queryTerms(q);
+  return { terms, synonyms: synonymsFor(terms), phrase: foldForSearch(q.normalize("NFKC")).replace(/\s+/g, " ").trim() };
 }
 
 /**
  * 只用折疊後的欄位計算排序用的命中比例與分數（不需要原文）。不算命中回 null。
  * MEM-4c 的倒排索引用它排序，片段則只為這一頁解密原文後再用 scoreDocument 產生，所以兩邊的結果逐筆相同。
+ * 每個查詢詞取最好的一個欄位：原詞命中得該欄位權重，只有近義詞命中得一半（F2）。近義詞命中也算進命中比例；
+ * exact 是有原詞命中的查詢詞數（排序時在分數之前）。
  */
-export function scoreFields(fields: readonly { field: Field; folded: string }[], terms: readonly string[], phrase: string): { coverage: number; score: number } | null {
+export function scoreFields(fields: readonly { field: Field; folded: string }[], query: SearchQuery): Ranked | null {
+  const { terms, synonyms, phrase } = query;
   if (terms.length === 0) return null;
   let score = 0;
   let hit = 0;
-  for (const term of terms) {
+  let exact = 0;
+  terms.forEach((term, i) => {
     let best = 0;
     for (const f of fields) if (WEIGHT[f.field] > best && f.folded.includes(term)) best = WEIGHT[f.field];
+    if (best > 0) exact += 1;
+    const alts = synonyms[i] ?? [];
+    if (alts.length > 0) {
+      for (const f of fields) {
+        const weight = WEIGHT[f.field] * SYNONYM_FACTOR;
+        if (weight > best && alts.some((alt) => synonymIndexOf(f.folded, alt) >= 0)) best = weight;
+      }
+    }
     if (best > 0) hit += 1;
     score += best;
-  }
+  });
   if (hit === 0) return null;
   const coverage = hit / terms.length;
   if (terms.length >= 2 && coverage < 0.5) return null;
   if (phrase.length >= 2) {
     for (const f of fields) if (f.folded.includes(phrase)) score += WEIGHT[f.field] * 2;
   }
-  return { coverage, score };
+  return { coverage, exact, score };
+}
+
+/** 排序用的命中比例、原詞命中數與分數。 */
+export interface Ranked { coverage: number; exact: number; score: number }
+
+/** 兩條搜尋路徑共用的排序：命中比例 → 原詞命中數（F2：原詞排在近義詞前面）→ 分數 → 交辦時間新到舊 → task_id。 */
+export function compareRanked(a: Ranked & { createdMs: number; taskId: string }, b: Ranked & { createdMs: number; taskId: string }): number {
+  return b.coverage - a.coverage || b.exact - a.exact || b.score - a.score || b.createdMs - a.createdMs || a.taskId.localeCompare(b.taskId);
 }
 
 /** 一筆紀錄的完整結果（含標題標示與片段）；cache=false 時不碰 CONTENT_CACHE。 */
-export function scoreHistoryDocument(doc: HistoryDocument, source: HistorySource, terms: readonly string[], phrase: string, cache = true): { coverage: number; score: number; item: HistoryItem } | null {
-  return scoreDocument(prepare(doc, source, cache), terms, phrase);
+export function scoreHistoryDocument(doc: HistoryDocument, source: HistorySource, query: SearchQuery, cache = true): (Ranked & { item: HistoryItem }) | null {
+  return scoreDocument(prepare(doc, source, cache), query);
 }
 
-function scoreDocument(p: Prepared, terms: readonly string[], phrase: string): { coverage: number; score: number; item: HistoryItem } | null {
-  const ranked = scoreFields(p.fields, terms, phrase);
+function scoreDocument(p: Prepared, query: SearchQuery): (Ranked & { item: HistoryItem }) | null {
+  const ranked = scoreFields(p.fields, query);
   if (!ranked) return null;
-  const { coverage, score } = ranked;
+  const { score } = ranked;
+  const { terms, synonyms } = query;
   const title = p.fields.find((f) => f.field === "title");
-  const titleMatches = title ? findMatches(title.folded, terms) : [];
+  const titleMatches = title ? findMatches(title.folded, terms, synonyms) : [];
   // 片段：成果內容優先，其次步驟、註記；都沒有命中（只命中標題）時給內容開頭。
   let snippet: HistorySnippet | null = null;
   for (const field of ["content", "step", "notes"] as const) {
     for (const f of p.fields.filter((x) => x.field === field)) {
-      const matches = findMatches(f.folded, terms);
+      const matches = findMatches(f.folded, terms, synonyms);
       if (matches.length > 0) {
         snippet = makeSnippet(field, f.text, matches);
         break;
@@ -345,5 +381,5 @@ function scoreDocument(p: Prepared, terms: readonly string[], phrase: string): {
     const content = p.fields.find((f) => f.field === "content");
     if (content) snippet = makeSnippet("content", content.text, []);
   }
-  return { coverage, score, item: { ...baseItem(p.doc, p.source), score, title_matches: titleMatches, snippet } };
+  return { ...ranked, item: { ...baseItem(p.doc, p.source), score, title_matches: titleMatches, snippet } };
 }

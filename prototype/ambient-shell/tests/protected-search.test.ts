@@ -289,6 +289,8 @@ describe.skipIf(!realLockAvailable)("MEM-4c RAM inverted index", () => {
       ["受保護的任務", {}], ["不存在的詞彙", {}], ["", {}], ["!!!", {}], ["a", {}], ["整理 假設", {}],
       ["晚餐", { status: "failed" }], ["budget", { mode: "claude" }], ["", { status: "cancelled" }], ["晚餐", { from: "2026-09-02", to: "2026-09-05" }],
       ["晚餐", { cursor: "20" }], ["幫我", { limit: 50, cursor: "50" }], ["", { cursor: "140" }],
+      // HIST-1 Mac 驗收 F2：近義詞（只擴充查詢）在索引與逐筆掃描上結果相同。
+      ["dinner", {}], ["晚饭", {}], ["plan", {}], ["dinner budget", {}], ["晚飯 規劃", { status: "succeeded" }],
     ];
     for (const phase of ["cold", "warm", "after drop"]) {
       if (phase === "after drop") store.dropPlaintext("os_lock");
@@ -301,7 +303,7 @@ describe.skipIf(!realLockAvailable)("MEM-4c RAM inverted index", () => {
     }
     exec.release!();
     await runner.idle();
-  });
+  }, 30_000); // 逐筆掃描每次都解密 160 筆；機器忙時（verify-aios 全套）可能超過預設的 5 秒。只是上限，不是時間斷言。
 
   it("delete and withdraw remove entries in the same synchronous step: a search that started before never returns them", async () => {
     const { dataDir, box, docs } = seed(20, { extra: (i) => (i === 4 || i === 5 ? CANARY : "") });
@@ -552,6 +554,9 @@ describe("MEM-4c ProtectedIndex (unit)", () => {
     expect([...index.candidates(["餐"]).keys()]).toEqual(["task_a"]);
     expect([...index.candidates(["😀"]).keys()]).toEqual(["task_a"]);
     expect([...index.candidates(["xyz"]).keys()]).toEqual([]);
+    // F2：近義詞的候選併入原詞（同一個詞只算一次）。
+    expect([...index.candidates(["計畫"], 1, [["規划", "plan"]]).keys()].sort()).toEqual(["task_a", "task_b"]);
+    expect(index.candidates(["計畫", "xyz"], 1, [["規划", "plan"], []]).get("task_a")).toBe(1);
     expect(index.candidates(["規劃", "plan"], 2).get("task_a")).toBe(2);
     expect(index.remove("task_a")).toBe(true);
     expect([...index.candidates(["規劃", "plan"]).keys()]).toEqual(["task_b"]);
@@ -713,7 +718,9 @@ describe.skipIf(!realLockAvailable)("MEM-4c independent review regressions (revi
   it("nit: randomized parity with the scan (NFKC fullwidth, astral/emoji, digits, repeated terms)", () => {
     const { store } = freshStore();
     const r = rng(4242);
-    const pieces = ["晚餐", "預算", "budget", "Budget", "ＢＵＤＧＥＴ", "２０２６", "2026", "😀", "𠀀字", "規划", "规劃", "A1", "x-ray", "café", "ｃａｆé", "表", "日本語", "plan", "PLAN"];
+    const pieces = ["晚餐", "預算", "budget", "Budget", "ＢＵＤＧＥＴ", "２０２６", "2026", "😀", "𠀀字", "規划", "规劃", "A1", "x-ray", "café", "ｃａｆé", "表", "日本語", "plan", "PLAN",
+      // F2 的近義詞與容易誤擴充的鄰近字（整詞規則、一個字的詞、簡繁）。
+      "晚飯", "晚饭", "dinner", "Dinners", "會議", "开会", "meeting", "explanation", "planet", "信", "相信", "郵件", "e-mail", "報告", "report"];
     const pick = () => pieces[Math.floor(r() * pieces.length)]!;
     for (let i = 0; i < 40; i++) {
       const t = store.create({ title: `${pick()}${pick()} ${pick()}`, request_id: req(), mode: (["claude", "chatgpt", "mock"] as const)[i % 3]! });

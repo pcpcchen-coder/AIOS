@@ -95,12 +95,14 @@ tail -f ~/Library/Application\ Support/Nous/nous.log
 
 前提：§3.2 的 App；用模擬引擎（`NOUS_PROVIDER=mock`）。
 
+> 注意（2026-10-31 Mac 驗收的 N1）：模擬引擎在 App 裡不一定一直維持。用本機 API 把引擎切成模擬後，只要在 App 裡打一句一般對話，App 的 `prepareConversation` 就可能把引擎自動切回 ChatGPT（引擎不是從 App 選單選的時候會這樣做），之後交辦或「重做」的任務會真的呼叫模型。這個行為尚未修改。驗收時每次交辦前先看引擎列（或 `/api/settings`）確認仍是「模擬」，若被切回就照實記下任務實際用的引擎。
+
 - [ ] 1. 交辦 3–5 件事，包含一件標題有簡體字（「准备晚饭」）、一件會失敗或被停止。
 - [ ] 2. 選單列有「成果紀錄…」與「在瀏覽器打開成果紀錄」（英文介面為「Results history…」「Open results history in browser」）；兩者都打開並截圖，瀏覽器網址是 `http://127.0.0.1:<port>/history?lang=…` 且能搜尋。
 - [ ] 3. 打字「搜尋成果 晚飯」（繁體查簡體）、「找之前關於晚餐的成果」、「成果紀錄」，命中處有標示；「看結果」仍只打開最近一份。
 - [ ] 4. 說「進度如何」，「搜尋全部成果」按鈕在「另有 N 個較早的任務未列出」附近，點了打開成果紀錄。
 - [ ] 5. 詳細頁有原始要求、引擎、時間、假設、能力缺口、步驟；「重做」後換成新任務進度。
-- [ ] 6. 「刪除」出現 macOS 原生對話框；取消不刪；確定後清單消失，`data/` 下兩個 JSON 檔用 `grep` 查不到該標題；執行中的任務沒有刪除按鈕。
+- [ ] 6. 「刪除」出現 macOS 原生對話框，按鈕是「刪除」「取消」（英文介面為「Delete」「Cancel」）；取消不刪；確定後清單消失。加密保存（MEM-4a）之後 `data/` 是 `tasks.json`（只有外殼，沒有標題）、`sealed/`（每筆任務與成果一個加密檔 `<id>.enc`）與 `plaintext-backup-*`（搬遷前的明文備份，等使用者確認刪除），所以用 `grep` 找標題不能證明已刪除：要確認 `/api/tasks` 與 `tasks.json` 都沒有那個 `task_id`，`sealed/` 裡也沒有 `<task_id>.enc` 與它成果的 `<artifact_id>.enc`。`plaintext-backup-*` 裡搬遷前就有的舊任務標題不在這一步的範圍。執行中的任務沒有刪除按鈕。
 - [ ] 7. 說或打「收起」、按 Esc：只關畫面，進行中的任務繼續。
 - [ ] 8. 延遲：`npx vitest run tests/history-search.test.ts tests/history-http.test.ts --reporter=verbose`，記下 `[history perf]` 兩行。
 - [ ] 9. 截圖存到 `docs/validation/` 下的新資料夾。
