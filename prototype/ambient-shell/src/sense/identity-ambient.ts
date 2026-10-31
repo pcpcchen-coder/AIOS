@@ -19,6 +19,12 @@ import type { ClientFrame, ClientState } from "./identity-client.ts";
 
 /** 互動開始後最多再取樣多久（語音連線很慢時不無限取樣；之後問候照常，只是不帶名字）。 */
 export const INTERACTION_SAMPLE_MAX_MS = 20_000;
+/**
+ * 面向短暫中斷（轉頭瞄一下、姿勢辨識閃一格）多久內不算轉開。George 2026-10-31 Mac 實測：互動中頭稍微一轉，
+ * 追蹤世代就重來、證據歸零，問候決策變成 not_eligible，約一半叫不出名字。在場、鏡頭 ok、近距離都還成立時，
+ * 連續不面向超過這段時間才換世代；離開、遠離、鏡頭停止仍立即換。換人不會被叫錯名字：核心只用最新、夠新的那一格。
+ */
+export const FACING_GRACE_MS = 800;
 /** API key 路徑的 instructions 最長多少字（核心組的固定格式約 150 字；超過就當成異常，改用「我在」）。 */
 const INSTRUCTIONS_MAX = 1_000;
 
@@ -87,6 +93,8 @@ export class AmbientIdentity {
   private interaction: Interaction | null = null;
   /** 上一次是否「在場＋鏡頭 ok」（記憶的追蹤中斷只看這個，不看面向或距離）。 */
   private presentOk = false;
+  /** 在 ok 之後開始不面向的時間（FACING_GRACE_MS 內仍算 ok）；面向回來或條件不成立時清掉。 */
+  private facingLostAt: number | null = null;
 
   constructor(private readonly deps: AmbientDeps) {}
 
@@ -101,7 +109,12 @@ export class AmbientIdentity {
 
   /** SenseController.onSense：每次事件與 tick 之後。 */
   update(snapshot: SenseSnapshot): void {
-    const ok = snapshot.sensor_ok && snapshot.present && snapshot.facing && isNear(snapshot.distance_m);
+    const steady = snapshot.sensor_ok && snapshot.present && isNear(snapshot.distance_m);
+    const now = this.deps.now();
+    if (!steady || snapshot.facing) this.facingLostAt = null;
+    else if (this.ok) this.facingLostAt ??= now;
+    const graced = steady && !snapshot.facing && this.facingLostAt !== null && now - this.facingLostAt < FACING_GRACE_MS;
+    const ok = steady && (snapshot.facing || graced);
     const presentOk = snapshot.sensor_ok && snapshot.present;
     if (this.presentOk && !presentOk) this.deps.onPresenceBreak?.("tracking_lost");
     this.presentOk = presentOk;

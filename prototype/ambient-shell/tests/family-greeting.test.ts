@@ -24,7 +24,7 @@ import {
 import { GreetingPicker } from "../server/greeting-picker.ts";
 import type { HostCall, LiveCoreEvent, LiveInputKind } from "../shared/realtime-route.ts";
 import { SenseController, type SenseTuning } from "../src/sense/controller.ts";
-import { AmbientIdentity, INTERACTION_SAMPLE_MAX_MS, isNear, type AmbientSampler } from "../src/sense/identity-ambient.ts";
+import { AmbientIdentity, FACING_GRACE_MS, INTERACTION_SAMPLE_MAX_MS, isNear, type AmbientSampler } from "../src/sense/identity-ambient.ts";
 import type { ClientFrame, ClientState } from "../src/sense/identity-client.ts";
 import { GREETING_SETTLE_MS, GreetingOnce, newInteractionId } from "../src/realtime-session.ts";
 import { RealtimeVoice, type RealtimeCallbacks, type RealtimeDeps } from "../src/realtime.ts";
@@ -707,6 +707,7 @@ describe("AmbientIdentity：與看著說話的 delay 同步辨識（頁面）", 
     const scenarios: [string, (p: Page) => Promise<void>][] = [
       ["turn away and back", async (p) => {
         await p.send({ type: "attention", facing: false });
+        await p.run(FACING_GRACE_MS + 200); // 轉開超過寬限才換世代
         await p.send({ type: "attention", facing: true });
         await p.run(800, GEORGE); // 新世代的證據很多，但互動綁的是舊世代
       }],
@@ -738,6 +739,20 @@ describe("AmbientIdentity：與看著說話的 delay 同步辨識（頁面）", 
       await act(p);
       expect(await p.greeting()!.take("api_key"), label).toMatch(PLAIN);
     }
+  });
+
+  it("Mac 2026-10-31：a glance away shorter than the grace keeps the track, so George is still greeted by name", async () => {
+    const p = await page();
+    await approach(p);
+    await p.run(1600, GEORGE);
+    expect(p.started).toHaveLength(1);
+    const track = p.ambient.track;
+    await p.send({ type: "attention", facing: false });
+    await p.run(500); // 短於 FACING_GRACE_MS
+    await p.send({ type: "attention", facing: true });
+    await p.run(800, GEORGE);
+    expect(p.ambient.track).toBe(track);
+    expect(await p.greeting()!.take("api_key")).toMatch(/George/);
   });
 
   it("換人：George walks away and Mary steps in → Mary is never greeted with George's name (and not with her own in George's interaction)", async () => {

@@ -121,11 +121,19 @@ export function isFacing(landmarks: readonly Landmark2[]): boolean {
   return Math.abs(ratio) <= FACING_MAX_YAW_RATIO;
 }
 
-/** 手腕是否高於同側肩膀（影像 y 較小）；停止手勢需要舉手，避免垂手時的誤觸。 */
+/**
+ * 手腕低於肩膀多少仍算舉手：肩寬的比例。手掌擺在臉前時手腕常在肩膀略下方
+ * （George 2026-10-31 Mac 實測：1 m 處手腕比肩膀低約 30 px），垂手、放在腿上則低很多。
+ */
+export const HAND_RAISED_SLACK = 0.25;
+
+/** 手腕是否舉到同側肩膀附近或更高（影像 y 較小）；停止手勢需要舉手，避免垂手時的誤觸。 */
 export function handRaised(landmarks: readonly Landmark2[], side: "left" | "right"): boolean {
   const wrist = landmarks[side === "left" ? POSE.leftWrist : POSE.rightWrist];
   const shoulder = landmarks[side === "left" ? POSE.leftShoulder : POSE.rightShoulder];
+  const other = landmarks[side === "left" ? POSE.rightShoulder : POSE.leftShoulder];
   if (!wrist || !shoulder) return false;
   if ((wrist.visibility ?? 1) < MIN_VISIBILITY || (shoulder.visibility ?? 1) < MIN_VISIBILITY) return false;
-  return wrist.y < shoulder.y;
+  const slack = other && (other.visibility ?? 1) >= MIN_VISIBILITY ? HAND_RAISED_SLACK * Math.abs(shoulder.x - other.x) : 0;
+  return wrist.y < shoulder.y + slack;
 }
