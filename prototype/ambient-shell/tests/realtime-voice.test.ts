@@ -883,3 +883,34 @@ describe("MEM-3 RealtimeVoice with the core seam", () => {
     expect(probe.hostResults).toEqual([{ callId: "hc_1", output: { ok: true, title: "寫週報", status: "running" } }]);
   });
 });
+
+// WK-01a：NOUS_WAKE=on 時麥克風是向 AudioFrontEnd 租來的複製品；停掉自己的 track 後要歸還（沒有提供時行為不變）。
+describe("RealtimeVoice releases a leased microphone (WK-01a)", () => {
+  it("calls releaseMicrophone once after stopping its own track on stop()", async () => {
+    const release = vi.fn();
+    const t = setup({ releaseMicrophone: release });
+    await t.voice.start();
+    expect(release).not.toHaveBeenCalled();
+    t.voice.stop();
+    expect(t.track.stop).toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+    // 只歸還自己的那一份（審查 M1）
+    expect((release.mock.calls[0]![0] as MediaStream).getTracks()).toEqual([t.track]);
+    t.voice.stop();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a microphone that arrives after the session was already stopped", async () => {
+    const release = vi.fn();
+    let resolve: (s: MediaStream) => void = () => {};
+    const late = { stop: vi.fn() };
+    const t = setup({ releaseMicrophone: release, getMicrophone: () => new Promise<MediaStream>((r) => (resolve = r)) });
+    const started = t.voice.start();
+    t.voice.stop();
+    resolve({ getAudioTracks: () => [late], getTracks: () => [late] } as unknown as MediaStream);
+    await started;
+    expect(late.stop).toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect((release.mock.calls[0]![0] as MediaStream).getTracks()).toEqual([late]);
+  });
+});

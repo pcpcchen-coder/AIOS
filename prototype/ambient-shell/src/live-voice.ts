@@ -14,7 +14,7 @@ import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 //  - 資料通道上的 delegation.created 一律忽略：核心的 sideband 才是交辦的擁有者。
 // 狀態只看裝置與真實事件：麥克風軌道＋peer 已連線＋session.started 才是「聆聽中」；遠端音量才是「回覆中」。
 
-export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "createPeer" | "playRemote"> {
+export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "releaseMicrophone" | "createPeer" | "playRemote"> {
   /** POST /api/realtime/call {sdp, session_id, owner}；核心提議改路徑時丟 FallbackOfferError。 */
   exchange(offerSdp: string): Promise<string>;
   input(kind: LiveInputKind, text: string): Promise<void>;
@@ -180,6 +180,7 @@ export class LiveVoice implements RealtimeSession {
       const mic = await this.deps.getMicrophone();
       if (generation !== this.generation) {
         for (const track of mic.getTracks()) track.stop();
+        this.deps.releaseMicrophone?.(mic);
         return;
       }
       this.mic = mic;
@@ -653,6 +654,7 @@ export class LiveVoice implements RealtimeSession {
     this.peer?.close();
     this.peer = null;
     for (const track of this.mic?.getTracks() ?? []) track.stop();
+    if (this.mic) this.deps.releaseMicrophone?.(this.mic);
     this.mic = null;
     this.stopLevel?.();
     this.stopLevel = null;

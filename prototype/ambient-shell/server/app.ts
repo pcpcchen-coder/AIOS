@@ -35,6 +35,8 @@ import {
 import { COMMANDS_PATH, commandsPageHeaders, renderCommandsPage } from "./commands-page.ts";
 import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity.ts";
 import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
+import { readVerifiedWakeRuntime, wakeRuntimePath } from "./wake-runtime.ts";
+import { parseWakePatch, WakePatchError, type WakePrefs, type WakePrefsPatch, type WakeRuntimeState } from "../shared/wake.ts";
 import { historyPageHeaders, pageHeaders } from "./page-headers.ts";
 import type { TaskRunner } from "./runner.ts";
 import { tasksForTarget, type TaskStore } from "./store.ts";
@@ -137,6 +139,13 @@ export interface AppOptions {
   /** 家人辨識模型與 onnxruntime wasm 的資料夾（只提供清單上的檔名）；未提供時 /face-runtime/ 一律 404。 */
   faceRuntimeDir?: string | null;
   /**
+   * WK-01a：常駐喚醒聆聽（只有 NOUS_WAKE=on 時提供，通常是 WakeSettingsStore 加上引擎核對結果）。未提供時沒有
+   * /api/settings/wake、settings 沒有 wake 欄位、/wake-runtime/ 一律 404，和加入喚醒程式之前相同。
+   */
+  wake?: WakeSettingsSource;
+  /** 喚醒引擎檔案的資料夾（只提供 shared/wake-runtime.json 清單上、雜湊相符的檔名；WK-01a 清單為空）。 */
+  wakeRuntimeDir?: string | null;
+  /**
    * 成果紀錄（HIST-1）額外的搜尋來源；一般任務（TaskStore）一律包含。MEM-4c 的受保護成果之後由這裡併入。
    */
   historySources?: HistorySource[];
@@ -162,6 +171,13 @@ export interface FaceTuningSource {
 export interface RealtimeSettingsSource {
   view(): RealtimePrefs;
   update(patch: RealtimePrefsPatch): RealtimePrefs;
+}
+
+/** 常駐喚醒聆聽偏好的來源（WakeSettingsStore）與引擎核對結果。 */
+export interface WakeSettingsSource {
+  view(): WakePrefs;
+  update(patch: WakePrefsPatch): WakePrefs;
+  runtime(): WakeRuntimeState;
 }
 
 /** 語音閒置秒數的來源。 */
@@ -217,6 +233,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         camera_preview_disabled_reason: cameraPreviewDisabledReason(camera),
         identity: options.identity?.status() ?? BROWSER_IDENTITY_STATUS,
         memory: options.memory?.settingsStatus() ?? BROWSER_MEMORY_STATUS,
+        ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
       };
     },
     select: (provider: ExecutorMode) => options.settings.select(provider),
@@ -263,8 +280,12 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         await handleApi(req, res, url.pathname, url.searchParams);
       } else if (url.pathname.startsWith("/face-runtime/")) {
         serveFaceRuntime(res, req.method ?? "GET", url.pathname, options.faceRuntimeDir);
+      } else if (url.pathname.startsWith("/wake-runtime/")) {
+        // 旗標關閉時一律 404（不落到 SPA fallback）；開啟時只給清單上、雜湊相符的檔案。
+        serveWakeRuntime(res, req.method ?? "GET", url.pathname, options.wake ? options.wakeRuntimeDir : null);
       } else {
-        serveStatic(res, url.pathname, options.distDir, !!options.camera?.view().enabled);
+        // 喚醒只有在引擎核對通過時才需要編譯 wasm（WK-01a 清單是空的，所以 CSP 和旗標關閉時相同）。
+        serveStatic(res, url.pathname, options.distDir, !!options.camera?.view().enabled, options.wake?.runtime() === "ok");
       }
     } catch (err) {
       const code = err instanceof HttpError ? err.status : 500;
@@ -335,6 +356,25 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         options.voice.update(patch);
       } catch (err) {
         throw new HttpError(500, `語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (options.wake && method === "POST" && path === "/api/settings/wake") {
+      let patch: WakePrefsPatch;
+      try {
+        patch = parseWakePatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof WakePatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      // 頁面（以及任何本機頁面腳本）只能記下麥克風或關掉；打開只能由 App 主程序在原生說明之後經 NousHandle.wake 做
+      // （ADR-0003 §2.3）。關掉一定安全，所以這裡照收。
+      if (patch.wake_listen === true) throw new HttpError(403, "常駐喚醒聆聽只能從 App 選單列打開");
+      try {
+        options.wake.update(patch);
+      } catch (err) {
+        // 寫檔失敗：記憶體沒有改（仍是保存前的值），回報真實原因，不顯示假成功。
+        throw new HttpError(500, `常駐喚醒聆聽設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
@@ -808,7 +848,7 @@ function sendJson(res: ServerResponse, status: number, value: unknown): void {
   res.end(JSON.stringify(value));
 }
 
-function serveStatic(res: ServerResponse, pathname: string, distDir: string | null, camera = false): void {
+function serveStatic(res: ServerResponse, pathname: string, distDir: string | null, camera = false, wake = false): void {
   if (!distDir || !existsSync(join(distDir, "index.html"))) {
     res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
     res.end("前端尚未建置：請用 npm start（會先 vite build），或開發時用 npm run dev:web。");
@@ -822,7 +862,7 @@ function serveStatic(res: ServerResponse, pathname: string, distDir: string | nu
   if (!existsSync(file) || statSync(file).isDirectory()) file = join(distDir, "index.html");
   const type = CONTENT_TYPES[extname(file)] ?? "application/octet-stream";
   const headers: Record<string, string> = { "Content-Type": type };
-  if (type.startsWith("text/html")) Object.assign(headers, file.endsWith(`${sep}history.html`) ? historyPageHeaders() : pageHeaders(camera), { "Cache-Control": "no-cache" });
+  if (type.startsWith("text/html")) Object.assign(headers, file.endsWith(`${sep}history.html`) ? historyPageHeaders() : pageHeaders(camera, wake), { "Cache-Control": "no-cache" });
   if (type.startsWith("text/javascript")) Object.assign(headers, scriptHeaders());
   res.writeHead(200, headers);
   res.end(readFileSync(file));
@@ -836,6 +876,21 @@ function serveFaceRuntime(res: ServerResponse, method: string, pathname: string,
   // 每次讀取都核對雜湊：啟動後才被換掉的檔案也不會送出去。
   const body = readVerifiedFaceRuntime(file);
   if (!body) throw new HttpError(503, "face runtime file failed verification");
+  const type = CONTENT_TYPES[extname(file)] ?? "application/octet-stream";
+  const headers: Record<string, string> = { "Content-Type": type, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" };
+  if (type.startsWith("text/javascript")) Object.assign(headers, scriptHeaders());
+  res.writeHead(200, headers);
+  res.end(method === "HEAD" ? undefined : body);
+}
+
+/** 喚醒引擎檔案：只給清單上的檔名，沒有 SPA fallback；不存在或旗標關閉 404，雜湊不符 503。 */
+function serveWakeRuntime(res: ServerResponse, method: string, pathname: string, dir: string | null | undefined): void {
+  if (!dir) throw new HttpError(404, "not found");
+  if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");
+  const file = wakeRuntimePath(dir, pathname);
+  if (!file || !existsSync(file)) throw new HttpError(404, "not found");
+  const body = readVerifiedWakeRuntime(file);
+  if (!body) throw new HttpError(503, "wake runtime file failed verification");
   const type = CONTENT_TYPES[extname(file)] ?? "application/octet-stream";
   const headers: Record<string, string> = { "Content-Type": type, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" };
   if (type.startsWith("text/javascript")) Object.assign(headers, scriptHeaders());

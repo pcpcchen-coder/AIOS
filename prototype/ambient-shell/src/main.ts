@@ -59,10 +59,13 @@ import {
   MAX_LISTED,
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
+import type { PowerEvent, WakeController } from "./audio/index.ts";
+import { WAKE_TEXT, type WakeReport, type WakeSettingsView } from "../shared/wake.ts";
 import {
   PushToTalk,
   VoiceConversation,
   hasVoiceConsent,
+  onSpeechActivity,
   saveVoiceConsent,
   speakText,
   speechSupported,
@@ -78,7 +81,7 @@ interface DesktopBridge {
   onLocaleChange?(listener: (locale: Locale) => void): () => void;
   openExternal(url: string): void;
   /** settings：設定的版本字串；變了 App 就重新讀取設定，選單列不會留著舊的「（目前）」。 */
-  reportState(state: { voice: string; activeTasks: number; settings: string; locale: Locale }): void;
+  reportState(state: { voice: string; activeTasks: number; settings: string; locale: Locale; wake?: WakeReport }): void;
   /** 家人辨識（只經 IPC 到 App 的核心；不走 HTTP）。舊版 App 沒有這一項。 */
   identity?(request: IdentityRequest): Promise<IdentityResponse>;
   /** 家庭記憶（docs/16 MEM-1；只經 IPC 到 App 的核心）。舊版 App 與瀏覽器版沒有這一項。 */
@@ -91,6 +94,8 @@ interface DesktopBridge {
   onTasksPlaintextDropped?(listener: (reason: PlaintextDropReason) => void): () => void;
   /** HIST-1 Mac 驗收 F4：成果紀錄刪除的原生確認（主程序的 dialog.showMessageBox，按鈕依目前語言）。舊版 App 與瀏覽器版沒有這一項。 */
   confirmDelete?(request: { title: string }): Promise<{ confirmed: boolean }>;
+  /** WK-01a：系統睡眠、醒來、鎖定、解鎖（只有列舉值）。舊版 App 與瀏覽器版沒有這一項。 */
+  onPower?(listener: (event: PowerEvent) => void): () => void;
 }
 declare global {
   interface Window {
@@ -173,6 +178,8 @@ const voice = new PushToTalk({
     void handleCommand(text, "speech");
   },
   onListeningChange: (listening) => {
+    // WK-01a：Web Speech 自己開擷取：開始前完全讓出常駐聆聽的麥克風，結束後重新取得。
+    wake?.webSpeech(listening || conversation.on);
     micIndicator.hidden = !listening;
     micButton.classList.toggle("recording", listening);
     micButton.setAttribute("aria-label", t(listening ? "停止收音" : "按下開始說話"));
@@ -247,6 +254,20 @@ const realtimeCallbacks: RealtimeCallbacks = {
 };
 /** 還沒開始過時是閒置物件，載入時讀 on／current 都安全。 */
 let realtime: RealtimeSession = idleSession();
+/**
+ * WK-01a 常駐喚醒聆聽：只有核心給了 settings.wake（NOUS_WAKE=on）才以動態 import 載入 src/audio/；旗標關閉時一直是 null，
+ * 頁面不載入任何音訊模組、不建立指示圖示、不回報喚醒狀態。
+ */
+let wake: WakeController | null = null;
+let wakeLoading = false;
+/** 載入時已經有一通即時語音（它用的是原本的 getMicrophone）：等它結束才開始常駐聆聽，避免同時有兩個來源。 */
+let wakeDeferred = false;
+/** 通話中核心關掉了旗標：等這通結束才結束常駐聆聽（不停掉通話正在用的複製品）。 */
+let wakeDisposePending = false;
+/** 第一次看到的 settings.wake（載入完成前保留）。 */
+let wakeInitial: WakeSettingsView | null = null;
+let wakeReport: WakeReport | null = null;
+let wakeIndicator: HTMLSpanElement | null = null;
 /** 這次工作階段的路徑、計費與擁有者憑證（只在這個頁面）。 */
 let realtimeTicket: SessionDecision | null = null;
 let realtimeStarting = false;
@@ -413,6 +434,15 @@ function makeRealtimeSession(decision: SessionDecision, greeting: GreetingOnce |
 
 /** 播放遠端聲音並記下播放元素（MEM-2 停播核對、靜音；MEM-3 起兩條路徑共用）。 */
 function trackedPlayRemote(stream: MediaStream): () => void {
+  // WK-01a：遠端播放期間丟掉喚醒偵測（自我觸發防護）；停止時剛好結束一次。
+  const guardOwner = wake;
+  guardOwner?.begin("playback");
+  let guarded = guardOwner !== null;
+  const endGuard = () => {
+    if (!guarded) return;
+    guarded = false;
+    guardOwner?.end("playback");
+  };
   const audio = new Audio();
   audio.autoplay = true;
   audio.srcObject = stream;
@@ -426,6 +456,7 @@ function trackedPlayRemote(stream: MediaStream): () => void {
     audio.srcObject = null;
     liveAudioPaused = audio.paused;
     if (liveAudio === audio) liveAudio = null;
+    endGuard();
   };
 }
 
@@ -457,6 +488,7 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
     });
     return new RealtimeVoice(realtimeCallbacks, {
       ...base,
+      ...wakeMicrophone(),
       playRemote: trackedPlayRemote,
       // F2／F10：連線中與問候送出前看本機麥克風音量（只比門檻，不保存聲音）。
       watchLevel: browserWatchLevel,
@@ -486,6 +518,7 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
     realtimeCallbacks,
     {
       getMicrophone: base.getMicrophone,
+      ...wakeMicrophone(),
       createPeer: base.createPeer,
       playRemote: trackedPlayRemote,
       exchange: base.exchange,
@@ -510,6 +543,16 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
     },
     { idleMs: idleTimeoutsMs(undefined).realtime, greeting, ...earlySpeechOption() },
   );
+}
+
+/**
+ * WK-01a：常駐喚醒聆聽載入後（NOUS_WAKE=on），兩條即時語音路徑改向 AudioFrontEnd 租用麥克風（來源的複製品），
+ * 結束時歸還。旗標關閉時回空物件：getMicrophone 維持 browserRealtimeDeps 原本的函式，行為和之前相同。
+ */
+function wakeMicrophone(): { getMicrophone?: () => Promise<MediaStream>; releaseMicrophone?: (stream: MediaStream) => void } {
+  const owner = wake;
+  if (!owner) return {};
+  return { getMicrophone: () => owner.lease(), releaseMicrophone: (stream) => owner.releaseLease(stream) };
 }
 
 /** F2／F10：核心設定的開口偵測門檻（NOUS_EARLY_SPEECH_RMS，核心已驗證範圍）；沒有時用頁面預設。 */
@@ -574,6 +617,97 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
   applyFacingTuning();
   // 設定或家人辨識狀態改變：看著說話時的同步辨識重新向核心確認（不中斷正在進行的取樣）。
   ambient.refresh();
+  syncWake(value.wake);
+}
+
+/** WK-01a：settings.wake 第一次出現時才載入 src/audio/（動態 import）；之後每次設定都交給控制器。 */
+function syncWake(view: WakeSettingsView | undefined): void {
+  if (!view) {
+    // 核心重新啟動後關掉了旗標：停止一切（收音、指示），回到旗標關閉的樣子。通話中就等它結束。
+    if (wake) {
+      if (realtime.on || realtimeStarting) wakeDisposePending = true;
+      else disposeWake();
+    }
+    return;
+  }
+  wakeDisposePending = false;
+  if (wake) {
+    if (!wakeDeferred) wake.applySettings(view);
+    return;
+  }
+  if (wakeLoading) return;
+  wakeLoading = true;
+  // 第一次看到的設定才代表「App 啟動時的偏好」：載入期間使用者在選單打開的，之後當成打開處理（不顯示恢復字幕）。
+  const initial = view;
+  void import("./audio/index.ts").then((module) => {
+    wakeLoading = false;
+    const latest = settings?.wake;
+    if (!latest || wake) return;
+    wake = module.createWakeController({
+      now: () => performance.now(),
+      runtime: () => settings?.wake?.runtime ?? "missing",
+      caption: (text, ...values) => showSubtitle(t(text, ...values.map((value) => t(value)))),
+      visible: () => document.visibilityState === "visible",
+      onVisible: (listener) => {
+        const handler = () => { if (document.visibilityState === "visible") listener(); };
+        document.addEventListener("visibilitychange", handler);
+        return () => document.removeEventListener("visibilitychange", handler);
+      },
+      state: (report) => {
+        wakeReport = report;
+        renderWakeIndicator();
+        render();
+      },
+      saveDeviceId: async (deviceId) => void (await api.updateWake({ device_id: deviceId })),
+      newId: () => newInteractionId(),
+    });
+    // 載入前已經開始的 Web Speech 或即時語音照實告訴它（不會在通話或 Web Speech 中途搶麥克風）。
+    if (voice.active || conversation.on) wake.webSpeech(true);
+    wakeInitial = initial;
+    if (realtime.on || realtimeStarting) wakeDeferred = true;
+    else applyWakeFirst(latest);
+    render();
+  }, () => {
+    wakeLoading = false;
+    showSubtitle(t(WAKE_TEXT.failed, t("無法開始本機收音")));
+  });
+}
+
+/** 控制器的第一次設定：先給啟動時看到的那一份（決定是不是自動恢復），之後有變再給最新的。 */
+function applyWakeFirst(latest: WakeSettingsView): void {
+  if (!wake) return;
+  const initial = wakeInitial ?? latest;
+  wakeInitial = null;
+  wake.applySettings(initial);
+  if (JSON.stringify(latest) !== JSON.stringify(initial)) wake.applySettings(latest);
+}
+
+function disposeWake(): void {
+  if (!wake) return;
+  wake.dispose();
+  wake = null;
+  wakeDeferred = false;
+  wakeDisposePending = false;
+  wakeReport = null;
+  wakeIndicator?.remove();
+  wakeIndicator = null;
+  render();
+}
+
+/** 電子腦上的最小本機聆聽圖示（17 §5.4）：只在 listening_local 顯示；不點亮聽覺區，也不改變腦區活動。 */
+function renderWakeIndicator(): void {
+  if (!wake) return;
+  if (!wakeIndicator) {
+    wakeIndicator = document.createElement("span");
+    wakeIndicator.className = "wake-indicator";
+    wakeIndicator.setAttribute("role", "status");
+    wakeIndicator.dataset.visibilityReason = "sensor_status";
+    document.body.append(wakeIndicator);
+  }
+  const listening = wakeReport?.state === "listening_local";
+  wakeIndicator.hidden = !listening;
+  wakeIndicator.setAttribute("aria-label", t(WAKE_TEXT.indicator));
+  wakeIndicator.title = t(WAKE_TEXT.indicator);
 }
 
 function chatGPTAvailable(): boolean {
@@ -708,6 +842,8 @@ async function refreshMemoryStatus(): Promise<void> {
 window.nousDesktop?.onMemoryChange?.(() => void refreshMemoryStatus());
 
 function closeConversation(): void {
+  // WK-01a：說「收起」或按收起時，喚醒提示音一併取消（不觸發）。收起只關畫面，不關常駐聆聽。
+  wake?.cancelEarcon();
   conversationEpoch++;
   session.dismiss();
   conversation.stop();
@@ -816,6 +952,8 @@ const VOICE_STATE_LABEL: Record<ConversationState, string> = {
 };
 
 function renderVoiceState(state: ConversationState): void {
+  // WK-01a：語音模式開著的整段期間（含句與句之間）都讓出常駐聆聽的麥克風。
+  wake?.webSpeech(state !== "off" || voice.active);
   voicePill.hidden = state === "off";
   voicePill.textContent = msg`${t(VOICE_STATE_LABEL[state])}（點此關閉）`;
   voicePill.dataset.state = state;
@@ -1006,6 +1144,8 @@ const sense = new SenseController({
     ambient.update(snapshot);
   },
   interruptSpeech: () => {
+    // WK-01a：喚醒提示音播放中張掌＝取消這次喚醒（不觸發）。
+    if (wake?.cancelEarcon()) return;
     // 即時語音還在連線（還沒打招呼）時舉手掌：直接結束這次語音，不再打招呼（ID-02 第 9 步）。
     if (realtime.current === "connecting" || (realtime.current === "off" && realtimeStarting)) stopRealtime();
     // F7：回覆中或等工具結果（思考中）時舉手掌＝停止回覆：這一輪晚到的結果不再念出；背景任務照常、對話不結束。
@@ -1380,6 +1520,18 @@ const REALTIME_STATE_LABEL: Record<Exclude<RealtimePhase, "off">, string> = {
 };
 
 function renderRealtimeState(phase: RealtimePhase): void {
+  // WK-01a：通話結束一定歸還麥克風（兩條路徑在 teardown 時已各自歸還自己的那一份；這裡是保險，
+  // 只在已經沒有任何進行中或開始中的通話時才歸還剩下的，不會停掉新通話的複製品）。
+  if (phase === "off" && !realtime.on && !realtimeStarting) {
+    wake?.releaseAllLeases();
+    if (wakeDisposePending) {
+      wakeDisposePending = false;
+      disposeWake();
+    } else if (wakeDeferred && wake && settings?.wake) {
+      wakeDeferred = false;
+      applyWakeFirst(settings.wake);
+    }
+  }
   if (phase === "listening") lookTimeline.mark("ready");
   else if (phase === "speaking") lookTimeline.mark("first_audio");
   // live 建立失敗、正在改用 API key 時（realtimeStarting）不結束：要記到 API key 路徑的就緒、問候決策與首音。
@@ -2084,6 +2236,8 @@ function reportDesktopState(): void {
     activeTasks: [...tasks.values()].filter(isActive).length,
     settings: `${pageLoadId}.${settingsRevision}`,
     locale: getLocale(),
+    // WK-01a：只有載入了常駐喚醒聆聽才帶（列舉值；preload 再過濾一次）。旗標關閉時與之前完全相同。
+    ...(wake && wakeReport ? { wake: wakeReport } : {}),
   };
   const key = JSON.stringify(state);
   if (key === reportedDesktopState) return;
@@ -2094,6 +2248,11 @@ function reportDesktopState(): void {
 // App 選單列的指令。
 window.addEventListener("nous:command", (event) => {
   const command = (event as CustomEvent<string>).detail;
+  // WK-01a：常駐喚醒聆聽的暫停、繼續與立即停止（主程序不打開視窗；只改收音）。
+  if (typeof command === "string" && command.startsWith("wake-")) {
+    wake?.command(command);
+    return;
+  }
   dismissFirstHint();
   runDesktopCommand(command, {
     voice: () => (realtime.on || conversation.on ? disableVoiceMode() : openConversation()),
@@ -2461,6 +2620,8 @@ window.addEventListener("keydown", (e) => {
   dismissFirstHint();
   if (e.key === "Escape") {
     e.preventDefault();
+    // WK-01a：喚醒提示音播放中按 Esc＝取消這次喚醒（不觸發），其他不動。
+    if (wake?.cancelEarcon()) return;
     if (realtime.current === "speaking") realtime.interrupt();
     // 即時語音中有畫面（進度、成果）開著時，Esc 只關畫面，對話繼續。
     else if (realtime.on && shell.surface !== null) dispatch({ type: "dismiss" });
@@ -2533,6 +2694,9 @@ render();
 
 applyStaticTranslations();
 window.nousDesktop?.onLocaleChange?.(setLocale);
+// WK-01a：系統電源事件（只有列舉值）交給常駐喚醒聆聽；念話期間告訴防護（避免 Nous 自己說出喚醒詞時觸發）。
+window.nousDesktop?.onPower?.((event) => wake?.power(event));
+onSpeechActivity((speaking) => (speaking ? wake?.begin("speech") : wake?.end("speech")));
 onLocaleChange(() => {
   const selected = getLocale();
   const revision = settingsRevision;
@@ -2549,5 +2713,6 @@ onLocaleChange(() => {
   micButton.setAttribute("aria-label", t(voice.active ? "停止收音" : "按下開始說話"));
   sensorIndicator.title = t("{0}（按一下顯示／收起鏡頭畫面）", t(sensorDetail));
   sensorIndicator.textContent = sensorState === "ok" ? t("鏡頭") : sensorState === "starting" ? t("鏡頭啟動中") : t("鏡頭：{0}", t(sensorDetail));
+  renderWakeIndicator();
   render();
 });

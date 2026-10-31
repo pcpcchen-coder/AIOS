@@ -1,0 +1,5 @@
+{
+  "comment": "常駐喚醒聆聽（WK-01a）的本機喚醒引擎檔案清單。WK-01a 刻意留空：自建 KWS wasm 與關鍵詞檔在 WK-01b 由 GitHub Actions 建置（固定 emsdk 與 sherpa-onnx v2.0.1），產物的 SHA-256 寫進這份清單後才會提供。清單是空的時候核心的 /wake-runtime/ 一律 404，頁面回報 runtime_missing，也不會開啟麥克風。",
+  "url_prefix": "/wake-runtime/",
+  "files": []
+}

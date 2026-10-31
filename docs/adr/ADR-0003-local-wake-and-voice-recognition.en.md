@@ -5,9 +5,9 @@
 <a id="adr-0003本機喚醒與聲音辨識"></a>
 # ADR-0003: Local wake word and voice recognition
 
-Status: **Draft (delivered with WK-00)**. No product feature is implemented. Date: 2026-10-29, Asia/Taipei. Basis: [plan 17, local wake word and family voice recognition](../17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.en.md) §11.2. Engineering evidence: [WK-00 spike validation](../validation/wk-00-spike-2026-10-29.en.md). Opening this ADR is an engineering-process decision, adopted directly with George notified (plan 17 §14, "notified separately"). It is not a pending decision.
+Status: **Draft (delivered with WK-00); partly implemented by WK-01a since 2026-10-31**: the always-on wake listening foundation (`AudioFrontEnd`, capture worker, preferences, automatic resume, self-trigger protection, earcon, flag `NOUS_WAKE` off by default) is implemented on branch `claude/wk-01`. **The real wake engine is not connected yet** (WK-01b); the product detector honestly reports `runtime_missing` and does not open the microphone. The Mac gate has not been run; see [WK-01a validation](../validation/wk-01a-2026-10-31.en.md). The §2.1 clauses are now written into ADR-0001. Gallery v2, `voice_probe`, and voice recognition are still unimplemented. Date: 2026-10-29, Asia/Taipei. Basis: [plan 17, local wake word and family voice recognition](../17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.en.md) §11.2. Engineering evidence: [WK-00 spike validation](../validation/wk-00-spike-2026-10-29.en.md). Opening this ADR is an engineering-process decision, adopted directly with George notified (plan 17 §14, "notified separately"). It is not a pending decision.
 
-This ADR only sets rules and boundaries. Product code, `AudioFrontEnd`, the KWS worker, gallery v2, and `voice_probe` do not exist yet. WK-00 delivers only a spike that is not wired into the product (`prototype/ambient-shell/spike/wake/`).
+This ADR only sets rules and boundaries. WK-00 delivers only a spike that is not wired into the product (`prototype/ambient-shell/spike/wake/`). Since 2026-10-31, WK-01a has added `AudioFrontEnd` and the wake worker (`src/audio/`, flag `NOUS_WAKE` off by default), but the worker has **no real KWS engine** (WK-01b); gallery v2 and `voice_probe` still do not exist.
 
 <a id="1-背景"></a>
 ## 1. Background
@@ -25,7 +25,7 @@ ADR-0001 covers the camera and face features and states that there is "no backgr
    - Voice recognition is **not** always on. It runs only inside a woken interaction (the wake segment and speech after the wake word until the connection is up), or during a call on the same stream branch when the user separately enables "recognize the speaker during calls" (plan 17 §10.3).
    - Face recognition keeps the ADR-0001 rules. Always-on audio capture does not make it always-on recognition.
 2. **Updates** the naming and cloud-disclosure text in [ADR-0001 §2.4](ADR-0001-local-family-recognition.en.md#24-雲端語音): a name may be chosen from the face, the voice, or both. Names reach the cloud only as in ADR-0001 §2.4.1 (only the short sentence composed by the core). Voice features, audio segments, and the family list are not uploaded.
-3. The text of ADR-0001 itself **will be edited in the implementation batches (WK-01/SP-01)**. This draft does not edit ADR-0001 first. Once this ADR is adopted and until ADR-0001 is rewritten, if the two ADRs conflict, this ADR governs always-on capture and voice, and ADR-0001 governs everything else. At the draft stage neither changes product behavior.
+3. The text of ADR-0001 itself **will be edited in the implementation batches (WK-01/SP-01)**. This draft does not edit ADR-0001 first. Once this ADR is adopted and until ADR-0001 is rewritten, if the two ADRs conflict, this ADR governs always-on capture and voice, and ADR-0001 governs everything else. At the draft stage neither changes product behavior. (2026-10-31: WK-01a has written items 1 and 2 into ADR-0001 §2.1.1 and §2.4.)
 
 <a id="22-喚醒事件無法由核心驗證"></a>
 ### 2.2 The core cannot verify wake events
@@ -38,6 +38,7 @@ KWS runs in the renderer, so a "wake word detected" message received by the core
 | Visibility | Reuse the existing live-voice indicator and billing explanation. Every `wake_word` call is entered in the F6 cost record (path, connected seconds, whether it ended automatically because no voice was heard, usage; missing data is marked "unknown") |
 | `voice_probe` | A new op that submits a voice feature, modeled on `ambient_probe`: no management session needed, but **the response contains no result** and a rejection gives no reason. At most 4 per second with at most one pending. Accepted only while always-on listening or "recognize the speaker during calls" is on and the family recognition management screen is closed |
 | `greeting` | Accepts only an interaction ID issued by the core at `/api/realtime/start` (source `wake_word`) that is unused, whose voice session actually connected and is still active, within 20 seconds of connecting, as with ID-02 `claimGreeting`. An ID invented by the page gets only a greeting without a name |
+| Switch (2026-10-31, WK-01a review) | “Always-on wake listening” can be turned on only by the App main process after the native explanation: the main process calls the core's `NousHandle.wake.setListen` directly in the same process, not over HTTP and with no preload API. `POST /api/settings/wake` always answers 403 to `wake_listen: true`; the page can only record the microphone that actually listened (`device_id`) or turn listening off (turning off is always safe). The browser version therefore cannot turn always-on listening on. `POST /api/settings/camera` has the same class of issue (page scripts can turn the camera on); it is tracked as a separate known item and not changed in this batch |
 
 <a id="23-殘餘風險如何擴大"></a>
 ### 2.3 How residual risk grows
@@ -136,4 +137,5 @@ Binary platforms checked: `linux-x64` (installed and actually run) and `darwin-a
 - Self-build the KWS wasm on the Mac with the upstream script and confirm in Electron 44.9.3 whether the AudioWorklet keeps running while the window is hidden.
 - In the cloud, synthetic positives scored 0/300 hits on the full candidates for an undetermined reason. Family testing must also run the alternative pronunciation 「哈囉努斯(hā-lóu)」 and the sub-word 「努斯」 to tell whether synthetic speech or the pronunciation units for 「哈囉」 are at fault; the wake word's pronunciation units are not written into the WK-01 keyword file until settled.
 - SP-00 speaker-model spike and license review.
-- During WK-01, write the §2.1 clauses of this ADR into ADR-0001 and create `tests/audio-privacy.test.ts`.
+- ~~During WK-01, write the §2.1 clauses of this ADR into ADR-0001 and create `tests/audio-privacy.test.ts`.~~ WK-01a completed both on 2026-10-31.
+- WK-01b: based on George's Mac WK-00 results, self-build the KWS wasm with GitHub Actions, write the hash manifest and keyword file, and make `SherpaWasmDetector` actually load (17 §14.1).

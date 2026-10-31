@@ -4,9 +4,9 @@
 
 # ADR-0003：本機喚醒與聲音辨識
 
-狀態：**草案（WK-00 交付）**，未實作產品功能。日期：2026-10-29，Asia/Taipei。依據：[17 本機喚醒詞與家人音色辨認規劃](../17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md) §11.2；工程證據：[WK-00 spike 驗證](../validation/wk-00-spike-2026-10-29.md)。另開本 ADR 屬工程流程決定，直接採用並通知 George（17 §14「另行通知」），不列為待決事項。
+狀態：**草案（WK-00 交付）；2026-10-31 起 WK-01a 部分實作**：常駐喚醒聆聽的底層（`AudioFrontEnd`、擷取 worker、偏好、自動恢復、自我觸發防護、提示音、旗標 `NOUS_WAKE` 預設關閉）已在分支 `claude/wk-01` 實作，**真正的喚醒引擎尚未接上**（WK-01b），產品偵測器照實回報 `runtime_missing`、不開麥克風；Mac gate 未執行，見 [WK-01a 驗證](../validation/wk-01a-2026-10-31.md)。§2.1 的條文已寫進 ADR-0001。gallery v2、`voice_probe` 與音色辨認仍未實作。日期：2026-10-29，Asia/Taipei。依據：[17 本機喚醒詞與家人音色辨認規劃](../17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md) §11.2；工程證據：[WK-00 spike 驗證](../validation/wk-00-spike-2026-10-29.md)。另開本 ADR 屬工程流程決定，直接採用並通知 George（17 §14「另行通知」），不列為待決事項。
 
-本 ADR 只定規則與邊界。產品程式、`AudioFrontEnd`、KWS worker、gallery v2 與 `voice_probe` 都還不存在；WK-00 只交付不接產品的 spike（`prototype/ambient-shell/spike/wake/`）。
+本 ADR 只定規則與邊界。WK-00 只交付不接產品的 spike（`prototype/ambient-shell/spike/wake/`）。2026-10-31 起，WK-01a 已加入 `AudioFrontEnd` 與喚醒 worker（`src/audio/`，旗標 `NOUS_WAKE` 預設關閉），但 worker 裡**沒有真正的 KWS 引擎**（WK-01b）；gallery v2 與 `voice_probe` 仍不存在。
 
 ## 1. 背景
 
@@ -21,7 +21,7 @@ ADR-0001 處理的是鏡頭與臉部特徵，且明定「沒有背景常駐辨�
    - 音色辨認**不是**常駐：只在已喚醒的互動內（喚醒片段、喚醒後到連線前的話語），或使用者另外開啟「通話中辨認說話者」時，在通話期間的同一串流分支上進行（17 §10.3）。
    - 臉部辨識維持 ADR-0001 的規則，不因常駐收音而變成常駐辨識。
 2. **更新** [ADR-0001 §2.4](ADR-0001-local-family-recognition.md#24-雲端語音) 的稱名與雲端揭露說明：稱名可能由臉、聲音或兩者共同決定；名字出現在雲端的範圍與 ADR-0001 §2.4.1 相同（只有核心組好的短句），聲音特徵、音訊片段與家人名單不上傳。
-3. ADR-0001 本身的文字**留到實作批次（WK-01／SP-01）再改**，本草案不先修改 ADR-0001。本 ADR 採用後、ADR-0001 改寫前，兩份 ADR 衝突時以本 ADR 對「常駐收音」與「聲音」的規定為準，其餘以 ADR-0001 為準；草案階段兩者都不改變產品行為。
+3. ADR-0001 本身的文字**留到實作批次（WK-01／SP-01）再改**，本草案不先修改 ADR-0001。（2026-10-31：WK-01a 已把第 1、2 點寫進 ADR-0001 §2.1.1 與 §2.4。）本 ADR 採用後、ADR-0001 改寫前，兩份 ADR 衝突時以本 ADR 對「常駐收音」與「聲音」的規定為準，其餘以 ADR-0001 為準；草案階段兩者都不改變產品行為。
 
 ### 2.2 喚醒事件無法由核心驗證
 
@@ -33,6 +33,7 @@ KWS 在 renderer 執行，核心收到的「偵測到喚醒詞」只是 renderer
 | 可見 | 沿用既有的即時語音指示與計費說明；每次 `wake_word` 通話記入 F6 費用紀錄（路徑、連線秒數、是否因無人聲自動結束、usage，缺資料標「未知」） |
 | `voice_probe` | 新 op，送出聲音特徵，比照 `ambient_probe`：不需要管理 session，但**回應不含任何結果**、被拒時不說原因；每秒最多 4 次、同時最多一個待處理；只在常駐聆聽或「通話中辨認說話者」開啟，且家人辨識管理畫面沒開時接受 |
 | `greeting` | 只接受核心在 `/api/realtime/start`（source 為 `wake_word`）發出、尚未使用、對應語音工作階段真的連上且仍在進行、連上後 20 秒內的互動 ID，比照 ID-02 的 `claimGreeting`；頁面自編的 ID 只得到不含名字的問候 |
+| 開關（2026-10-31，WK-01a 審查） | 「常駐喚醒聆聽」只能由 App 主程序在原生說明之後打開：主程序在同一個行程直接呼叫核心的 `NousHandle.wake.setListen`，不經 HTTP、也沒有 preload API。`POST /api/settings/wake` 收到 `wake_listen: true` 一律 403；頁面只能記下真的在聽的麥克風（`device_id`）或關掉（關掉一定安全）。瀏覽器版因此不能打開常駐聆聽。`POST /api/settings/camera` 有同一類問題（頁面腳本可以打開鏡頭），列為另一個已知事項，本批不改 |
 
 ### 2.3 殘餘風險如何擴大
 
@@ -123,4 +124,5 @@ ADR-0001 §2.4 的稱名說明在實作時補上「也可能依聲音認出」�
 - 在 Mac 上依上游腳本自建 KWS wasm，並在 Electron 44.9.3 確認視窗隱藏時 AudioWorklet 是否持續運作。
 - 雲端合成正例對完整候選詞 0/300 命中、原因未定；家人實測要同時跑替代念法「哈囉努斯(hā-lóu)」與子詞「努斯」，判斷是合成語音還是「哈囉」的發音單元，喚醒詞的發音單元定案前不進 WK-01 的關鍵詞檔。
 - SP-00 講者模型 spike 與授權查核。
-- WK-01 實作時把本 ADR 的 §2.1 條文寫進 ADR-0001，並建立 `tests/audio-privacy.test.ts`。
+- ~~WK-01 實作時把本 ADR 的 §2.1 條文寫進 ADR-0001，並建立 `tests/audio-privacy.test.ts`。~~ 2026-10-31 WK-01a 已完成這兩項。
+- WK-01b：依 George 的 Mac WK-00 結果，由 GitHub Actions 自建 KWS wasm、寫入雜湊清單與關鍵詞檔，`SherpaWasmDetector` 真正載入（17 §14.1）。

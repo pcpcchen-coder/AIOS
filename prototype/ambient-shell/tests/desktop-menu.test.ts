@@ -2,7 +2,10 @@
 // 與選單指令對到頁面動作（src/desktop-command.ts）。Electron 實際畫出的選單沒有在這裡執行。
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { settingsMenu, type MenuItemTemplate } from "../desktop/settings-menu.mjs";
+import { isWakeReport as menuIsWakeReport, settingsMenu, WAKE_MENU_TEXT, WAKE_REASON_LABEL as MENU_REASON_LABEL, WAKE_STATE_LABEL as MENU_STATE_LABEL, WAKE_STATE_REASONS as MENU_STATE_REASONS, type MenuItemTemplate } from "../desktop/settings-menu.mjs";
+import { setNativeLocale, t as nativeT } from "../desktop/localization.mjs";
+import { WAKE_COMMANDS } from "../src/audio/controller.ts";
+import { WAKE_REASON_LABEL, WAKE_STATE_LABEL, WAKE_STATE_REASONS, WAKE_TEXT, type WakeReport } from "../shared/wake.ts";
 import { DESKTOP_COMMANDS, runDesktopCommand } from "../src/desktop-command.ts";
 import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, VOICE_UNSAVED_REASON } from "../shared/seconds-menu.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
@@ -189,5 +192,116 @@ describe("runDesktopCommand", () => {
     const sources = ["desktop/main.mjs", "desktop/settings-menu.mjs"].map((p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8")).join("\n");
     const sent = [...new Set([...sources.matchAll(/command\("([^"]+)"\)/g)].map((m) => m[1]))].sort();
     expect(sent).toEqual([...DESKTOP_COMMANDS].sort());
+  });
+});
+
+// WK-01a 常駐喚醒聆聽（George 2026-10-31 D3：「通話中辨認說話者」先放停用的一列）。
+describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wake)", () => {
+  function wakeBuild(listen: boolean, report: WakeReport | null) {
+    const command = vi.fn();
+    const wakeCommand = vi.fn();
+    const setWakeListen = vi.fn();
+    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, runtime: "missing" as const } };
+    const items = settingsMenu(settings, { command, setMenuPref: vi.fn(), setWakeListen, wakeReport: report, wakeCommand });
+    const find = (label: string) => items.find((i) => i.label === label) as MenuItemTemplate;
+    return { items, find, command, wakeCommand, setWakeListen };
+  }
+
+  it("without settings.wake nothing is added (flag off)", () => {
+    const plain = build(view(enabledCamera));
+    expect(plain.labels).not.toContain("喚醒詞");
+    expect(JSON.stringify(plain.items)).not.toMatch(/喚醒|說話者/);
+  });
+
+  it("draws header, device-event status, the switch, pause, and the disabled 「通話中辨認說話者」 row last", () => {
+    const { items, find } = wakeBuild(true, { state: "listening_local", reason: null });
+    const start = items.findIndex((i) => i.label === "喚醒詞");
+    expect(items[start - 1]).toEqual({ type: "separator" });
+    expect(items.slice(start).map((i) => i.label)).toEqual(["喚醒詞", "喚醒聆聽：本機聆聽中", "常駐喚醒聆聽", "暫停聆聽（到這次結束）", "通話中辨認說話者"]);
+    expect(find("喚醒詞").enabled).toBe(false);
+    expect(find("喚醒聆聽：本機聆聽中").enabled).toBe(false);
+    expect(find("常駐喚醒聆聽")).toMatchObject({ type: "checkbox", checked: true, enabled: true });
+    const speaker = find("通話中辨認說話者");
+    expect(speaker).toEqual({ label: "通話中辨認說話者", type: "checkbox", checked: false, enabled: false, sublabel: "SP-02 之後才能使用" });
+    expect(speaker.click).toBeUndefined();
+  });
+
+  it("the switch asks the main process to write the opposite of the core's value; pause/resume go to the page without opening the window", () => {
+    const on = wakeBuild(true, { state: "listening_local", reason: null });
+    on.find("常駐喚醒聆聽").click!();
+    expect(on.setWakeListen).toHaveBeenCalledWith(false);
+    on.find("暫停聆聽（到這次結束）").click!();
+    expect(on.wakeCommand).toHaveBeenCalledWith("wake-pause");
+    expect(on.command).not.toHaveBeenCalled();
+    const paused = wakeBuild(true, { state: "paused", reason: "user_pause" });
+    expect(paused.find("喚醒聆聽：已暫停").sublabel).toBe("暫停到這次結束；App 重開後會自動恢復，要長期停止請關掉開關");
+    paused.find("繼續聆聽").click!();
+    expect(paused.wakeCommand).toHaveBeenCalledWith("wake-resume");
+    const off = wakeBuild(false, null);
+    off.find("常駐喚醒聆聽").click!();
+    expect(off.setWakeListen).toHaveBeenCalledWith(true);
+    expect(off.find("暫停聆聽（到這次結束）").enabled).toBe(false);
+    expect(off.find("喚醒聆聽：未開啟")).toBeDefined();
+  });
+
+  it("before the page reports, the status line does not claim a device state (「尚未回報」, or 「未開啟」 when off)", () => {
+    const on = wakeBuild(true, null);
+    expect(on.find("喚醒聆聽：尚未回報")).toBeDefined();
+    expect(on.items.some((i) => i.label === "喚醒聆聽：準備中")).toBe(false);
+    expect(on.find("暫停聆聽（到這次結束）").enabled).toBe(false);
+    expect(wakeBuild(false, null).find("喚醒聆聽：未開啟")).toBeDefined();
+  });
+
+  it("the status line shows errors honestly and ignores reports outside the allowlist", () => {
+    const err = wakeBuild(true, { state: "error", reason: "runtime_missing" });
+    expect(err.find("喚醒聆聽：無法使用").sublabel).toBe("喚醒引擎尚未安裝，沒有開啟麥克風");
+    expect(err.find("暫停聆聽（到這次結束）").enabled).toBe(false);
+    const forged = wakeBuild(true, { state: "listening_local", reason: "sleep" } as unknown as WakeReport);
+    expect(forged.items.some((i) => i.label === "喚醒聆聽：本機聆聽中")).toBe(false);
+    expect(menuIsWakeReport({ state: "listening_local", reason: null })).toBe(true);
+    expect(menuIsWakeReport({ state: "__proto__", reason: null })).toBe(false);
+  });
+
+  it("the menu's copies of states, reasons and text match shared/wake.ts", () => {
+    expect(MENU_STATE_REASONS).toEqual(WAKE_STATE_REASONS);
+    expect(MENU_STATE_LABEL).toEqual(WAKE_STATE_LABEL);
+    expect(MENU_REASON_LABEL).toEqual(WAKE_REASON_LABEL);
+    for (const key of ["group", "statusPrefix", "listen", "listenNote", "pause", "resume", "speaker", "speakerNote", "notReported"] as const) expect(WAKE_MENU_TEXT[key]).toBe(WAKE_TEXT[key]);
+  });
+
+  it("is fully translated in English, keeping 「哈囉努斯」 as is", () => {
+    setNativeLocale("en");
+    try {
+      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, runtime: "missing" as const } };
+      for (const report of [null, ...Object.entries(WAKE_STATE_REASONS).flatMap(([state, reasons]) => reasons.map((reason) => ({ state, reason }) as WakeReport))]) {
+        const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), wakeReport: report, translate: nativeT });
+        const start = items.findIndex((i) => i.label === "Wake word");
+        expect(start).toBeGreaterThan(0);
+        const texts = items.slice(start).flatMap((i) => [i.label, i.sublabel]).filter((x): x is string => typeof x === "string");
+        expect(texts.filter((x) => /\p{Script=Han}/u.test(x.replaceAll("哈囉努斯", "")))).toEqual([]);
+      }
+      const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), translate: nativeT });
+      expect(items.find((i) => i.label === "Recognise speaker during calls")).toMatchObject({ enabled: false, sublabel: "Available after SP-02" });
+      expect(items.find((i) => i.label === "Always-on wake listening")?.sublabel).toBe("Detects “哈囉努斯” only on this Mac");
+      for (const text of Object.values(WAKE_TEXT)) expect(nativeT(text), text).not.toBe(text);
+    } finally {
+      setNativeLocale("zh-TW");
+    }
+  });
+
+  it("every wake command the main program or the menu sends is one the page handles", () => {
+    const sources = ["desktop/main.mjs", "desktop/settings-menu.mjs"].map((p) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8")).join("\n");
+    // "wake-runtime" 是引擎資料夾名稱，不是指令
+    const sent = [...new Set([...sources.matchAll(/"(wake-[a-z]+)"/g)].map((m) => m[1]))].filter((c) => c !== "wake-runtime").sort();
+    expect(sent).toEqual([...WAKE_COMMANDS].sort());
+    // 打開前一定先顯示原生說明；關掉時先叫頁面停止收音再保存
+    const main = readFileSync(new URL("../desktop/main.mjs", import.meta.url), "utf8");
+    const handler = main.slice(main.indexOf("async function setWakeListen"), main.indexOf("function rebuildMenu"));
+    expect(handler.indexOf("showMessage(")).toBeGreaterThan(0);
+    // 審查 M2：開關只經同一行程的 core.wake（不經 HTTP），頁面腳本無法略過原生說明
+    expect(handler.indexOf("showMessage(")).toBeLessThan(handler.indexOf("core.wake.setListen(value)"));
+    expect(handler.indexOf('notifyPage("wake-off")')).toBeLessThan(handler.indexOf("core.wake.setListen(value)"));
+    expect(handler).toMatch(/defaultId: 1, cancelId: 1/);
+    expect(main).not.toMatch(/\/api\/settings\/wake/);
   });
 });
