@@ -6,6 +6,7 @@
 // - Web Speech（按下說話、語音模式）自己開擷取：開始時 webSpeech(true) 完全讓出（released），結束時 webSpeech(false) 在下一個
 //   macrotask 才重新取得；同一輪就來的租用（語音模式直接切到即時語音）會取消這次重新取得，不會同時有兩個 getUserMedia。
 // - 暫停（使用者，只到本次執行結束）、睡眠、鎖定：停止來源；醒來、解鎖依偏好自動恢復（exact deviceId，找不到就 device_missing）。
+// - WK-02 限速（rate_limited）：喚醒開始的通話超過每分鐘上限時暫停，時間到由控制器呼叫 resume("rate_limited") 自動恢復。
 // - track ended → error（device_ended），不改用其他麥克風，也不在背景重試；只有使用者或系統事件才會再試一次。
 // - 引擎檔案不在（runtime 不是 ok）時直接 error runtime_missing，**不開麥克風**。
 // 這個檔案只看得到 MediaStream 與事件，拿不到樣本；樣本只在 worklet 與 worker（tests/audio-privacy.test.ts 靜態檢查）。
@@ -57,7 +58,7 @@ export interface FrontEndEvents {
   listening(deviceId: string | null, how: StartHow): void;
 }
 
-type SystemPause = "sleep" | "lock";
+type SystemPause = "sleep" | "lock" | "rate_limited";
 
 export class AudioFrontEnd {
   private wanted = false;
@@ -121,11 +122,14 @@ export class AudioFrontEnd {
     this.sync("user_resume");
   }
 
-  /** 使用者「繼續聆聽」，或系統醒來（sleep）、解鎖（lock）。使用者暫停中時系統事件不恢復。 */
+  /**
+   * 使用者「繼續聆聽」，或系統醒來（sleep）、解鎖（lock）、限速時間到（rate_limited）。使用者暫停中時系統事件不恢復。
+   * 限速結束不算自動恢復（不顯示「已恢復」字幕，沿用上次的麥克風）。
+   */
   resume(reason: "user_pause" | SystemPause): void {
     if (reason === "user_pause") this.userPaused = false;
     else this.systemPause.delete(reason);
-    this.sync(reason === "user_pause" ? "user_resume" : "auto_resume");
+    this.sync(reason === "user_pause" || reason === "rate_limited" ? "user_resume" : "auto_resume");
   }
 
   /** Web Speech 開始（true：完全讓出麥克風）或結束（false：重新取得）。 */
@@ -235,6 +239,7 @@ export class AudioFrontEnd {
     if (this.userPaused) return { state: "paused", reason: "user_pause" };
     if (this.systemPause.has("lock")) return { state: "paused", reason: "lock" };
     if (this.systemPause.has("sleep")) return { state: "paused", reason: "sleep" };
+    if (this.systemPause.has("rate_limited")) return { state: "paused", reason: "rate_limited" };
     return null;
   }
 

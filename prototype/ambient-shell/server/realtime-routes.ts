@@ -34,6 +34,8 @@ import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { connectApiKey, type ApiKeyBridge } from "./apikey-call.ts";
 import type { LiveMemoryPort } from "./memory/live.ts";
 import { WEB_SEARCH_TIMEOUT_MS } from "./web-search.ts";
+import { WAKE_START_RATE } from "../shared/wake.ts";
+import type { PageEndReason, VoiceCostRecord, VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
 
 // George 要的接縫：一個小的 RealtimeRoute 介面，每條路徑一個模組
 // （ApiKeyRoute＝包住不改的 RealtimeBridge；server/live-route.ts＝Codex／gpt-live-1-codex），
@@ -263,12 +265,24 @@ export interface RealtimeSessionsOptions {
    * 用來量測只靠核心 hangup 時多久無聲，以及 1.5 秒後的強制靜音（Mac 第 12 步）。
    */
   hideRevokeFromPage?: boolean;
+  /** WK-02（F6）：每通工作階段結束時寫一筆費用紀錄（server/voice-cost-log.ts）；沒有時不記。 */
+  costLog?: {
+    record(record: VoiceCostRecord): void;
+    /** 改寫同一個 session_id 最後一筆（頁面的 no_voice／usage 晚於核心的結束才到時）。 */
+    amend?(record: VoiceCostRecord): void;
+  };
 }
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 
-/** 誰開始了這次即時語音（頁面報的；只決定要不要發互動 ID，不是授權）。 */
-export type RealtimeStartSource = "look_to_talk" | "user";
+/**
+ * 誰開始了這次即時語音（頁面報的；只決定要不要發互動 ID、問候是否需要「看著說話」設定與限速，不是授權）。
+ * wake_word（WK-02）：只有 NOUS_WAKE=on 時 /api/realtime/start 才會傳進來，旗標關閉時一律當成 user。
+ */
+export type RealtimeStartSource = VoiceStartSource;
+
+/** WK-02：喚醒開始的通話超過每分鐘上限時的拒絕原因（頁面暫停喚醒聆聽，時間到自動恢復）。 */
+export const WAKE_LIMITED_TEXT = "即時語音無法開始：一分鐘內已由喚醒開始 3 次通話，喚醒聆聽暫停，稍後自動恢復";
 
 /** 互動 ID 在工作階段真的連上之後多久內可以拿來做問候決策（ID-02）。 */
 export const GREETING_CLAIM_MS = 20_000;
@@ -279,6 +293,8 @@ export const GREETING_CLAIM_MS = 20_000;
  */
 interface Interaction {
   id: string;
+  /** 看著說話或喚醒（WK-02）：喚醒開始的問候不需要「看著說話」設定（IdentityService 依此放寬）。 */
+  source: "look_to_talk" | "wake_word";
   issuedAt: number;
   /** 真的連上的工作階段；null＝還沒連上。 */
   session: { id: string; route: RouteId; at: number; locale: Locale } | null;
@@ -290,8 +306,11 @@ interface Decision {
   id: string;
   owner: string;
   clientId: string | null;
-  /** 看著說話開始的互動 ID（核心發出）；改路徑時交給新的決定。 */
+  /** 看著說話或喚醒開始的互動 ID（核心發出）；改路徑時交給新的決定。 */
   interaction: string | null;
+  /** WK-02：開始方式與喚醒識別碼（費用紀錄用；改路徑時沿用）。 */
+  source: RealtimeStartSource;
+  wakeId: string | null;
   plan: Extract<StartPlan, { kind: "start" }>;
   route: RouteId;
   at: number;
@@ -339,7 +358,19 @@ interface VoiceSession {
   approval: ApprovalSnapshot & { openUntil: number | null };
   closed: boolean;
   locale: Locale;
+  /** F6 費用紀錄（WK-02）。 */
+  source: RealtimeStartSource;
+  wakeId: string | null;
+  startedAt: number;
+  connectedAt: number | null;
+  /** 頁面在 /api/realtime/end 說明的結束原因與 API key 路徑加總的 usage。 */
+  pageEnd: { reason: PageEndReason | null; usage: VoiceUsage | null } | null;
+  /** WK-02：這通綁的互動 ID（看著說話或喚醒；連線中也知道，wakeGreetingOpen 用）。 */
+  interaction: string | null;
 }
+
+/** WK-02：頁面的 no_voice／usage 比核心看到結束（closed）晚到時，多久內還可以補進同一筆費用紀錄。 */
+export const COST_AMEND_GRACE_MS = 15_000;
 
 /** 核心眼中的確認卡狀態：開著的卡過了自己的時限就算關了（不會永遠以為卡還開著）。 */
 export function effectiveApproval(state: ApprovalSnapshot & { openUntil: number | null }, now: number): ApprovalSnapshot {
@@ -365,6 +396,10 @@ export class RealtimeSessions {
   private readonly revoked = new Map<string, RevokedSession>();
   /** forceSilence 之後為 true：下一次頁面回報停播或新通話開始才解除。 */
   private muted = false;
+  /** WK-02：最近被接受的 wake_word 開始時間（滾動 WAKE_START_RATE.window_ms）。 */
+  private wakeStarts: number[] = [];
+  /** WK-02：最近結束的工作階段的費用紀錄（session_id → 擁有者、時間與那一筆），給晚到的 /api/realtime/end 補記。 */
+  private readonly recentCosts = new Map<string, { owner: string; at: number; record: VoiceCostRecord }>();
 
   constructor(private readonly options: RealtimeSessionsOptions) {
     this.now = options.now ?? Date.now;
@@ -421,8 +456,18 @@ export class RealtimeSessions {
    * POST /api/realtime/start。偏好只在這裡讀一次；之後改偏好只影響下一次開始。
    * clientId：開始的頁面的 SSE 串流；live 路徑一定要有（工具呼叫只送到這條串流）。
    */
-  start(clientId: string | null, source: RealtimeStartSource = "user", locale: Locale = "zh-TW", rebuild = false): StartDecision {
+  start(clientId: string | null, source: RealtimeStartSource = "user", locale: Locale = "zh-TW", rebuild = false, wakeId: string | null = null): StartDecision {
     this.sweep();
+    // WK-02：喚醒開始的通話每個滾動 60 秒最多 3 次（只算被接受的 wake_word 開始；其他來源不算）。
+    if (source === "wake_word" && !rebuild) {
+      const now = this.now();
+      this.wakeStarts = this.wakeStarts.filter((t) => now - t < WAKE_START_RATE.window_ms);
+      if (this.wakeStarts.length >= WAKE_START_RATE.per_minute) {
+        const retry = Math.max(1, this.wakeStarts[0]! + WAKE_START_RATE.window_ms - now);
+        this.options.log?.("即時語音：喚醒開始的通話超過每分鐘上限，這次不開始");
+        return { ok: false, message: WAKE_LIMITED_TEXT, reasons: {}, wake_limited: true, retry_after_ms: retry };
+      }
+    }
     if (this.live) {
       return { ok: false, message: `即時語音無法開始：${unavailableText("session_busy")}`, reasons: { live: "session_busy" } };
     }
@@ -454,16 +499,46 @@ export class RealtimeSessions {
     if (plan.route === "live" && !clientId) {
       return { ok: false, message: "即時語音無法開始：頁面沒有連上本機核心的事件串流，請重新整理後再試。", reasons: {} };
     }
-    const interaction = source === "look_to_talk" && !rebuild ? this.issueInteraction() : null;
-    const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale), rebuild);
+    const interaction = (source === "look_to_talk" || source === "wake_word") && !rebuild ? this.issueInteraction(source) : null;
+    const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale), rebuild, { source, wakeId: source === "wake_word" ? wakeId : null });
+    if (source === "wake_word" && !rebuild) this.wakeStarts.push(this.now());
     const model = this.options.routes[plan.route]!.describe().model;
     return { ok: true, session_id: decision.id, owner: decision.owner, route: plan.route, model, billing_line: billingLine(plan.route, model), notice: plan.notice, interaction };
   }
 
-  private issueInteraction(): string {
+  private issueInteraction(source: "look_to_talk" | "wake_word"): string {
     const id = `int_${randomBytes(8).toString("hex")}`;
-    this.interactions.set(id, { id, issuedAt: this.now(), session: null, used: false });
+    this.interactions.set(id, { id, source, issuedAt: this.now(), session: null, used: false });
     return id;
+  }
+
+  /**
+   * WK-02：有喚醒開始、還沒做過問候決策的互動（核心發出、還在有效時間內）。IdentityService 據此在那段時間接受
+   * 同步辨識的取樣，即使「看著說話」設定是關的；稱名仍要「打招呼時稱呼認出的家人」開著。
+   */
+  wakeGreetingOpen(): boolean {
+    this.sweep();
+    const now = this.now();
+    for (const it of this.interactions.values()) {
+      if (it.source !== "wake_word" || it.used) continue;
+      if (it.session) {
+        // 已連上：和 claimGreeting 同樣的時窗，而且工作階段還在。
+        const s = it.session;
+        const active = s.route === "api_key" ? this.ga?.id === s.id && !this.ga.closed : this.live?.id === s.id && !this.live.closed;
+        if (active && now - s.at <= GREETING_CLAIM_MS) return true;
+        continue;
+      }
+      // 還沒連上：只有開始的決定還在（頁面還沒送 offer）或正在連線時。
+      if ([...this.decisions.values()].some((d) => d.interaction === it.id)) return true;
+      if ([this.live, this.ga].some((s) => !!s && !s.closed && s.call === null && s.interaction === it.id)) return true;
+    }
+    return false;
+  }
+
+  /** 這個互動不會再問候（連線失敗而沒有改路徑、頁面在連線前放棄）。 */
+  private retire(interaction: string | null): void {
+    const it = interaction ? this.interactions.get(interaction) : undefined;
+    if (it) it.used = true;
   }
 
   /** 工作階段真的連上：記下互動 ID 屬於哪個工作階段、何時連上。 */
@@ -476,7 +551,7 @@ export class RealtimeSessions {
    * IdentityService 的問候決策呼叫（ID-02）：這個互動 ID 是核心發出、還沒用過、工作階段真的連上而且還在進行、
    * 連上後 GREETING_CLAIM_MS 內，才回傳它屬於哪個工作階段並標記已用；否則 null（不給名字）。一個 ID 只能成功一次。
    */
-  claimGreeting(id: string): { route: RouteId; session_id: string; locale?: Locale } | null {
+  claimGreeting(id: string): { route: RouteId; session_id: string; source: "look_to_talk" | "wake_word"; locale?: Locale } | null {
     this.sweep();
     const it = this.interactions.get(id);
     if (!it || it.used || !it.session) return null;
@@ -485,7 +560,7 @@ export class RealtimeSessions {
     const active = s.route === "api_key" ? this.ga?.id === s.id && !this.ga.closed : this.live?.id === s.id && !!this.live.call && !this.live.closed;
     if (!active) return null;
     it.used = true;
-    return { route: s.route, session_id: s.id, ...(s.locale === "en" ? { locale: "en" as const } : {}) };
+    return { route: s.route, session_id: s.id, source: it.source, ...(s.locale === "en" ? { locale: "en" as const } : {}) };
   }
 
   /** 帶記憶規則（有核心工具、核心旁路）的 API key 工作階段還在。 */
@@ -510,9 +585,19 @@ export class RealtimeSessions {
     session.call?.stopReply?.(turn);
   }
 
-  private decide(plan: Extract<StartPlan, { kind: "start" }>, route: RouteId, clientId: string | null, interaction: string | null = null, locale: Locale = "zh-TW", rebuild = false): Decision {
+  private decide(
+    plan: Extract<StartPlan, { kind: "start" }>,
+    route: RouteId,
+    clientId: string | null,
+    interaction: string | null = null,
+    locale: Locale = "zh-TW",
+    rebuild = false,
+    origin: { source: RealtimeStartSource; wakeId: string | null } = { source: "user", wakeId: null },
+  ): Decision {
     const decision: Decision = {
       rebuild,
+      source: origin.source,
+      wakeId: origin.wakeId,
       locale,
       id: `rt_${randomUUID().replaceAll("-", "")}`,
       owner: `own_${randomBytes(24).toString("base64url")}`,
@@ -544,6 +629,12 @@ export class RealtimeSessions {
       approval: { open: false, resolvedAt: null, openUntil: null },
       closed: false,
       locale: decision.locale,
+      source: decision.source,
+      wakeId: decision.wakeId,
+      startedAt: this.now(),
+      connectedAt: null,
+      pageEnd: null,
+      interaction: decision.interaction,
     };
   }
 
@@ -578,10 +669,12 @@ export class RealtimeSessions {
           throw new SessionError(409, "即時語音在連線期間就結束了（頁面離開），這次沒有開始。");
         }
         session.call = call;
+        session.connectedAt = this.now();
         this.connected(decision);
         return this.answer(call, session);
       } catch (err) {
-        this.finish(session);
+        this.finish(session, "connect_failed");
+        this.retire(decision.interaction);
         throw err;
       }
     }
@@ -598,15 +691,22 @@ export class RealtimeSessions {
         throw new SessionError(409, "即時語音在連線期間就結束了（頁面離開或控制連線中斷），這次沒有開始。");
       }
       session.call = call;
+      session.connectedAt = this.now();
       this.connected(decision);
       return this.answer(call, session);
     } catch (err) {
-      this.finish(session);
-      if (!(err instanceof RouteStartError)) throw err;
+      this.finish(session, "connect_failed");
+      if (!(err instanceof RouteStartError)) {
+        this.retire(decision.interaction);
+        throw err;
+      }
       const fallback = planFallback(decision.plan, err);
-      if (!fallback || !this.options.routes.api_key) throw err;
+      if (!fallback || !this.options.routes.api_key) {
+        this.retire(decision.interaction);
+        throw err;
+      }
       // 改路徑：同一個互動 ID（看著說話延續）；api_key 的記憶用 openai_realtime 同意鍵重新判斷，codex 的同意不帶過去。
-      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId, decision.interaction, decision.locale);
+      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId, decision.interaction, decision.locale, false, { source: decision.source, wakeId: decision.wakeId });
       const model = this.options.routes.api_key.describe().model;
       this.options.log?.(`即時語音：ChatGPT 方案路徑開始失敗（${err.reason}），改用 API key（這次依用量計費）`);
       throw new FallbackRequired({
@@ -694,12 +794,44 @@ export class RealtimeSessions {
     try { this.options.audio?.setMuted(false); } catch { /* 主視窗已不在 */ }
   }
 
-  /** POST /api/realtime/end。可重複呼叫。 */
-  async end(sessionId: string, owner: string): Promise<void> {
+  /**
+   * POST /api/realtime/end。可重複呼叫。info：頁面說明的結束原因（只有 no_voice）與 API key 路徑加總的 usage（費用紀錄用；
+   * live 路徑的 usage 頁面拿不到，一律記 unknown）。
+   */
+  async end(sessionId: string, owner: string, info: { reason?: PageEndReason | null; usage?: VoiceUsage | null } = {}): Promise<void> {
     const session = this.live?.id === sessionId ? this.live : this.ga?.id === sessionId ? this.ga : null;
-    if (!session) return;
+    if (!session) {
+      // 頁面在送 offer 之前就放棄（收起、Esc）：開始的決定作廢，它的互動不再問候。
+      const pending = this.decisions.get(sessionId);
+      if (pending) {
+        if (pending.owner !== owner) throw new SessionError(403, "不是開始這個即時語音的頁面。");
+        this.decisions.delete(sessionId);
+        this.retire(pending.interaction);
+        return;
+      }
+      // 核心已經先看到結束（例如 live 的 closed 比頁面的 /end 早到）：把頁面的 no_voice／usage 補進那一筆。
+      this.amendCost(sessionId, owner, info);
+      return;
+    }
     if (session.owner !== owner) throw new SessionError(403, "不是開始這個即時語音的頁面。");
+    session.pageEnd = { reason: info.reason ?? null, usage: session.route === "api_key" ? (info.usage ?? null) : null };
     await this.close(session, "ended");
+  }
+
+  private amendCost(sessionId: string, owner: string, info: { reason?: PageEndReason | null; usage?: VoiceUsage | null }): void {
+    const recent = this.recentCosts.get(sessionId);
+    if (!recent || recent.owner !== owner || this.now() - recent.at > COST_AMEND_GRACE_MS) return;
+    const record = recent.record;
+    const noVoice = info.reason === "no_voice" && !record.no_voice_auto_end;
+    const usage = record.route === "api_key" && record.usage === "unknown" && info.usage ? info.usage : null;
+    if (!noVoice && !usage) return;
+    const next: VoiceCostRecord = { ...record, ...(noVoice ? { end_reason: "no_voice", no_voice_auto_end: true } : {}), ...(usage ? { usage } : {}) };
+    recent.record = next;
+    try {
+      this.options.costLog?.amend?.(next);
+    } catch {
+      this.options.log?.("即時語音：費用紀錄寫入失敗");
+    }
   }
 
   /**
@@ -733,14 +865,17 @@ export class RealtimeSessions {
 
   private async close(session: VoiceSession, reason: "ended" | "page_gone"): Promise<void> {
     const call = session.call;
-    this.finish(session);
+    this.finish(session, reason);
     await call?.close(reason).catch(() => undefined);
   }
 
-  /** 結束狀態：拒絕所有等待中的工具呼叫，清掉工作階段。可重複呼叫。 */
-  private finish(session: VoiceSession): void {
+  /** 結束狀態：拒絕所有等待中的工具呼叫，清掉工作階段，寫一筆費用紀錄。可重複呼叫（只記一次）。 */
+  private finish(session: VoiceSession, reason = "ended"): void {
     if (session.closed) return;
     session.closed = true;
+    this.recordCost(session, reason);
+    // 通話結束：綁在這通的互動 ID 不能再問候（喚醒問候期間的放寬也隨之結束）。
+    for (const it of this.interactions.values()) if (it.session?.id === session.id) it.used = true;
     if (this.live === session) this.live = null;
     if (this.ga === session) this.ga = null;
     for (const pending of session.pendingHost.values()) {
@@ -748,6 +883,38 @@ export class RealtimeSessions {
       pending.reject(new HostGone());
     }
     session.pendingHost.clear();
+  }
+
+  /** F6 費用紀錄（WK-02）：沒有逐字稿與音訊；usage 只有 API key 路徑頁面回報的加總，費用一律 unknown。寫入失敗只記 log。 */
+  private recordCost(session: VoiceSession, reason: string): void {
+    const log = this.options.costLog;
+    if (!log) return;
+    const now = this.now();
+    const noVoice = session.pageEnd?.reason === "no_voice";
+    const model = session.call?.model ?? this.options.routes[session.route]?.describe().model ?? "";
+    try {
+      const record: VoiceCostRecord = {
+        v: 1,
+        session_id: session.id,
+        route: session.route,
+        model,
+        source: session.source,
+        wake_id: session.wakeId,
+        started_at: new Date(session.startedAt).toISOString(),
+        ended_at: new Date(now).toISOString(),
+        connected: session.connectedAt !== null,
+        connected_ms: session.connectedAt === null ? 0 : Math.max(0, Math.round(now - session.connectedAt)),
+        end_reason: noVoice ? "no_voice" : reason,
+        no_voice_auto_end: noVoice,
+        usage: session.route === "api_key" && session.pageEnd?.usage ? session.pageEnd.usage : "unknown",
+        cost: "unknown",
+      };
+      this.recentCosts.set(session.id, { owner: session.owner, at: now, record });
+      for (const [id, r] of this.recentCosts) if (now - r.at > COST_AMEND_GRACE_MS || this.recentCosts.size > 16) this.recentCosts.delete(id);
+      log.record(record);
+    } catch {
+      this.options.log?.("即時語音：費用紀錄寫入失敗");
+    }
   }
 
   private contextFor(session: VoiceSession, flags: { lookToTalk: boolean; rebuild: boolean }): SessionContext {
@@ -774,7 +941,7 @@ export class RealtimeSessions {
         if (event.kind === "closed") {
           this.options.log?.(`即時語音：${ROUTE_LOG_LABEL[session.route]}工作階段結束（${event.reason}）`);
           const call = session.call;
-          this.finish(session);
+          this.finish(session, event.reason);
           void call?.close(closeReasonForCall(event.reason)).catch(() => undefined);
         }
       },

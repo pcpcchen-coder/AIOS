@@ -63,6 +63,9 @@ import type { GalleryStore, GalleryVersions, StoredPerson } from "./identity-sto
 //   （docs/14 §3 的條件），從受管理人物檔案取名稱、以 speakableName 再驗一次，從 shared/sense.ts 的固定清單挑一句（依本機時段、避開上一次；例如「George，我在」「早安，George」「我在」）。
 //   稱名設定關閉、或還沒看過雲端稱名說明時一律不帶名字。API key 路徑回傳組好的 instructions；live 路徑把短句留在核心，
 //   綁定那個 live 工作階段，由 server/live-route.ts 取用（takeLiveGreeting）。
+// - WK-02（George 2026-10-31：喚醒後一律打招呼）：喚醒開始的互動（claimGreeting 回 source wake_word）不需要「看著說話」
+//   「看著說話時先打招呼」；稱名仍跟「打招呼時稱呼認出的家人」與其他條件（雲端稱名說明、證據）。喚醒開始、還沒決策的互動
+//   期間（wakeGreetingOpen），ambient_status／ambient_probe 同樣不需要那兩個設定。
 // - ambient_status／ambient_probe 被拒時不說原因（原因可能透露有沒有登記家人）。
 // - 身分只用於稱呼：GreetingDecision 不給任何授權流程使用。
 
@@ -117,7 +120,9 @@ export interface IdentityServiceOptions {
    * 核心發出的互動 ID 換成真的工作階段（RealtimeSessions.claimGreeting）：沒提供或回 null 時不稱名。
    * 成功一次之後同一個 ID 就不能再用。
    */
-  claimGreeting?: (interaction: string) => { route: GreetingRoute; session_id: string; locale?: Locale } | null;
+  claimGreeting?: (interaction: string) => { route: GreetingRoute; session_id: string; source?: "look_to_talk" | "wake_word"; locale?: Locale } | null;
+  /** WK-02：有喚醒開始、還沒決策的互動（RealtimeSessions.wakeGreetingOpen）；那段時間同步辨識不需要「看著說話」設定。 */
+  wakeGreetingOpen?: () => boolean;
   /**
    * MEM-3：API key 路徑的問候決策做出後通知（RealtimeSessions.greeted）：這次問候有沒有稱名。帶記憶的通話等問候那一輪
    * 結束後才問臉部候選（只有稱名過，問句才帶名字）。只有互動 ID 換得到真的工作階段時才呼叫。
@@ -541,10 +546,13 @@ export class IdentityService {
     return this.options.ambient?.() ?? { look_to_talk: false, look_to_talk_greet: false, look_to_talk_greet_name: false };
   }
 
-  /** 看著說話時同步辨識不能做的原因；null＝可以。不載入 gallery（不碰 Keychain）。 */
-  private ambientBlock(): string | null {
+  /**
+   * 看著說話時同步辨識不能做的原因；null＝可以。不載入 gallery（不碰 Keychain）。
+   * viaWake（WK-02）：喚醒開始的互動不需要「看著說話」「看著說話時先打招呼」；其他條件不變。
+   */
+  private ambientBlock(viaWake = false): string | null {
     const prefs = this.ambientPrefs();
-    if (!prefs.look_to_talk || !prefs.look_to_talk_greet) return "看著說話或打招呼關閉";
+    if (!viaWake && (!prefs.look_to_talk || !prefs.look_to_talk_greet)) return "看著說話或打招呼關閉";
     if (!prefs.look_to_talk_greet_name) return "稱名關閉";
     const st = this.status();
     if (!st.available) return st.disabled_reason ?? "家人辨識不可用";
@@ -556,7 +564,15 @@ export class IdentityService {
   }
 
   private ambientStatus(): IdentityResponse {
-    return { ok: true, op: "ambient_status", ready: this.ambientBlock() === null };
+    return { ok: true, op: "ambient_status", ready: this.ambientBlock(this.wakeOpen()) === null };
+  }
+
+  private wakeOpen(): boolean {
+    try {
+      return this.options.wakeGreetingOpen?.() === true;
+    } catch {
+      return false;
+    }
   }
 
   /** 取樣與問候決策各自限速（每秒 6 格；問候決策每秒 2 次、每分鐘 3 次，正常每次互動只有一次）。 */
@@ -579,7 +595,7 @@ export class IdentityService {
   private ambientProbe(req: Record<string, unknown>): IdentityResponse {
     this.ambientRate(this.ambientCalls, SESSION_RATE_PER_S);
     // 被拒時不說原因：「沒有可比對的家人」之類的原因會透露有沒有登記家人。
-    if (this.ambientBlock()) throw new RequestError("unavailable", AMBIENT_REFUSED);
+    if (this.ambientBlock(this.wakeOpen())) throw new RequestError("unavailable", AMBIENT_REFUSED);
     this.ensureLoaded();
     if (this.gallery !== "ready") throw new RequestError("unavailable", AMBIENT_REFUSED);
     this.requireModel(req);
@@ -626,7 +642,7 @@ export class IdentityService {
     // 互動 ID 必須換得到核心自己知道的、真的連上的工作階段（頁面自己編的 ID 不給名字）。
     const claim = this.options.claimGreeting?.(interaction) ?? null;
     const session = claim && claim.route === route ? claim : null;
-    const decision = this.decide(interaction, track, req.eligible, session !== null);
+    const decision = this.decide(interaction, track, req.eligible, session !== null, session?.source === "wake_word");
     const person = decision.person_id ? this.people.find((p) => p.person_id === decision.person_id) : undefined;
     const name = person ? speakableName(person.name) : null;
     // 從固定清單挑一句（依時段、避開上一次）；log 只記模板編號，不記句子。
@@ -652,7 +668,7 @@ export class IdentityService {
   }
 
   /** 建立 GreetingDecision（只在核心）。名稱驗證不過時改成不稱名。 */
-  private decide(interaction: string, track: number, eligible: boolean, claimed: boolean): GreetingDecision {
+  private decide(interaction: string, track: number, eligible: boolean, claimed: boolean, viaWake = false): GreetingDecision {
     const now = this.now();
     const base = { interaction_id: interaction, track_generation: track, gallery_version: this.versions.gallery_version, decided_at: now, calibrated: CALIBRATED };
     const last = this.ambient?.track === track ? this.ambient.evidence.frames.at(-1) : undefined;
@@ -661,7 +677,7 @@ export class IdentityService {
     if (!claimed) return plain("no_session");
     if (!this.options.store.namingNoticeSeen()) return plain("notice_unseen");
     if (!eligible) return plain("not_eligible");
-    if (this.ambientBlock()) return plain("unavailable");
+    if (this.ambientBlock(viaWake)) return plain("unavailable");
     const a = this.ambient;
     if (!a) return plain("no_evidence");
     if (a.track !== track) return plain("track_changed");

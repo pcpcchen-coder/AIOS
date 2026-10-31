@@ -140,12 +140,19 @@ export type StartDecision =
       /** auto 改用 API key 時要說出並顯示的計費通知。 */
       notice: string | null;
       /**
-       * 看著說話開始的互動 ID（ID-02）：只有 source 為 look_to_talk 時由核心發出，同一次互動改路徑時沿用。
+       * 看著說話或喚醒開始的互動 ID（ID-02；WK-02 起 source 為 look_to_talk 或 wake_word 時由核心發出），同一次互動改路徑時沿用。
        * 問候決策只接受核心發出、尚未使用、工作階段真的連上 20 秒內的 ID（RealtimeSessions.claimGreeting）。
        */
       interaction?: string | null;
     }
-  | { ok: false; message: string; reasons: Partial<Record<RouteId, UnavailableReason>> };
+  | {
+      ok: false;
+      message: string;
+      reasons: Partial<Record<RouteId, UnavailableReason>>;
+      /** WK-02：喚醒開始的通話超過每分鐘上限（WAKE_START_RATE）；頁面暫停喚醒聆聽 retry_after_ms 後自動恢復。 */
+      wake_limited?: true;
+      retry_after_ms?: number;
+    };
 
 /** POST /api/realtime/call 在 live 建立失敗、auto 可以改路徑時的 409 內容。 */
 export interface FallbackOffer {

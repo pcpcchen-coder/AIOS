@@ -158,7 +158,24 @@ it.skipIf(process.platform !== "darwin")("provides valid English and Traditional
     expect(Object.keys(descriptions).sort()).toEqual(["NSCameraUsageDescription", "NSMicrophoneUsageDescription"]);
     expect(/\p{Script=Han}/u.test(descriptions.NSMicrophoneUsageDescription)).toBe(language === "zh-Hant");
     expect(/\p{Script=Han}/u.test(descriptions.NSCameraUsageDescription)).toBe(language === "zh-Hant");
-    expect(descriptions.NSMicrophoneUsageDescription).toMatch(language === "en" ? /selected voice service/ : /選用的語音服務/);
+    expect(descriptions.NSMicrophoneUsageDescription).toMatch(language === "en" ? /selected voice service until the conversation ends/ : /選用的語音服務，直到對話結束/);
+    expect(descriptions.NSMicrophoneUsageDescription).toMatch(language === "en" ? /always-on wake listening, to detect "Hello Nous" on this Mac only; that audio stays in memory and is not saved or uploaded/ : /常駐喚醒聆聽，也只在這台 Mac 本機偵測「哈囉努斯」，偵測時的聲音只留在記憶體、不保存也不上傳/);
     expect(descriptions.NSCameraUsageDescription).toMatch(language === "en" ? /without saving or upload/ : /不保存也不上傳/);
   }
+});
+
+// WK-02：NSMicrophoneUsageDescription 說明常駐喚醒聆聽（任何平台都檢查文字；plutil 只在 macOS 上的測試）。
+it("the microphone permission text covers always-on wake listening in both languages and matches the packaged Info.plist", () => {
+  const strings = (language: string) => {
+    const text = readFileSync(new URL(`../desktop/assets/${language}.lproj/InfoPlist.strings`, import.meta.url), "utf8");
+    const match = /^"NSMicrophoneUsageDescription" = "((?:[^"\\]|\\.)*)";$/m.exec(text);
+    return match![1]!.replace(/\\"/g, '"');
+  };
+  const en = strings("en");
+  const zh = strings("zh-Hant");
+  expect(en).toBe('Nous uses the microphone for voice conversations and, if you turn on always-on wake listening, to detect "Hello Nous" on this Mac only; that audio stays in memory and is not saved or uploaded. After the wake word or when you start a conversation, audio is sent to your selected voice service until the conversation ends.');
+  expect(zh).toBe("Nous 使用麥克風進行語音對話；若開啟常駐喚醒聆聽，也只在這台 Mac 本機偵測「哈囉努斯」，偵測時的聲音只留在記憶體、不保存也不上傳。喚醒或開始對話後，音訊會傳送至你選用的語音服務，直到對話結束。");
+  expect(/\p{Script=Han}/u.test(en)).toBe(false);
+  const pkg = readFileSync(new URL("../desktop/scripts/package.mjs", import.meta.url), "utf8");
+  expect(pkg).toContain(`NSMicrophoneUsageDescription: '${en}',`);
 });

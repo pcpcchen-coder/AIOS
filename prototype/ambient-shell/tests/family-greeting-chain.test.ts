@@ -274,7 +274,7 @@ describe("RealtimeSessions.claimGreeting（假時鐘）", () => {
     if (!e.ok || !e.interaction) throw new Error("start");
     await s.call("v=0", e.session_id, e.owner);
     expect(s.claimGreeting("int_0123456789abcdef")).toBeNull(); // 核心沒發過
-    expect(s.claimGreeting(e.interaction)).toEqual({ route: "live", session_id: e.session_id });
+    expect(s.claimGreeting(e.interaction)).toEqual({ route: "live", session_id: e.session_id, source: "look_to_talk" });
     expect(s.claimGreeting(e.interaction)).toBeNull(); // 只能一次
     await s.end(e.session_id, e.owner);
 
@@ -292,6 +292,6 @@ describe("RealtimeSessions.claimGreeting（假時鐘）", () => {
     const err = (await s.call("v=0", d.session_id, d.owner).catch((e: unknown) => e)) as { offer: { fallback: { session_id: string; owner: string } } };
     expect(s.claimGreeting(d.interaction)).toBeNull(); // live 沒有連上
     await s.call("v=0", err.offer.fallback.session_id, err.offer.fallback.owner);
-    expect(s.claimGreeting(d.interaction)).toEqual({ route: "api_key", session_id: err.offer.fallback.session_id });
+    expect(s.claimGreeting(d.interaction)).toEqual({ route: "api_key", session_id: err.offer.fallback.session_id, source: "look_to_talk" });
   });
 });

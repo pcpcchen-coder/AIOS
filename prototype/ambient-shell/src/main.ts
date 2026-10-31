@@ -21,7 +21,7 @@ import {
   type RealtimePhase,
 } from "./realtime.ts";
 import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts";
-import { greetingFor, idleSession, newInteractionId, openRealtime, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
+import { greetingFor, idleSession, newInteractionId, openRealtime, wakeTriggerAction, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
 import type { CallAnswer, LiveCoreEvent, LiveMemoryReason, RealtimeServerEvent, RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
@@ -60,8 +60,9 @@ import {
   MAX_LISTED,
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
-import type { PowerEvent, WakeController } from "./audio/index.ts";
-import { WAKE_TEXT, type WakeReport, type WakeSettingsView } from "../shared/wake.ts";
+import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts";
+import { WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
+import type { PageEndReason } from "../shared/voice-cost.ts";
 import {
   PushToTalk,
   VoiceConversation,
@@ -277,6 +278,7 @@ const realtimeCallbacks: RealtimeCallbacks = {
   onToolActivity: (text) => showSubtitle(text),
   onClosed: (reason) => {
     realtimeCommands.reset();
+    wakeGreetingInteraction = null;
     ambient.endInteraction();
     endRealtimeTicket();
     sense.conversationEnded();
@@ -307,6 +309,16 @@ let realtimeStarting = false;
 let realtimeLocale: Locale = getLocale();
 /** 進行中的開始流程；stopRealtime 中止它，之後的 await 回來時不會再開麥克風。 */
 let realtimeStart: AbortController | null = null;
+/** WK-02：喚醒開始的通話的「沒人出聲就結束」計時（通話結束時停止）與它的麥克風音量來源（租到的那一份）。 */
+let wakeCall: WakeCallWatch | null = null;
+let wakeLevel: { stream: MediaStream; stop(): void } | null = null;
+/** WK-02：喚醒開始、問候還沒決定的互動（這段時間同步辨識不需要「看著說話」設定，稱名設定仍要開）。 */
+let wakeGreetingInteraction: string | null = null;
+/** WK-02：沒有即時語音同意時由喚醒打開的同意說明（同意後以 wake_word 開始）與上次因喚醒打開說明的時間（每個限速時窗最多一次）。 */
+let pendingWakeConsent: WakeTrigger | null = null;
+let wakeConsentAskedAt: number | null = null;
+/** WK-02（F6）：頁面說明的結束原因（session_id → no_voice），結束時交給核心的費用紀錄。 */
+const realtimeEndReasons = new Map<string, PageEndReason>();
 /** 這個頁面的 SSE 串流 ID（hello 帶來）；開始 ChatGPT 方案路徑時交給核心。 */
 let sseClientId: string | null = null;
 const liveListeners = new Set<(event: RealtimeServerEvent) => void>();
@@ -422,6 +434,7 @@ function noteConsentNotice(reason: LiveMemoryReason | null): void {
  */
 function onLiveRevoked(message: string, rebuild: boolean, accepted: boolean): void {
   liveMemory = null;
+  wakeGreetingInteraction = null;
   pendingDelegate = null;
   ambient.endInteraction();
   endRealtimeTicket();
@@ -445,11 +458,27 @@ function ticketOf(decision: SessionDecision): RealtimeTicket {
 function endRealtimeTicket(): void {
   const ticket = realtimeTicket;
   realtimeTicket = null;
-  if (ticket?.route === "api_key") void api.realtimeEnd(ticketOf(ticket)).catch(() => undefined);
+  // WK-02（F6）：結束原因（no_voice）與這通加總的 usage 交給核心的費用紀錄。
+  // F6 一律記錄（George 2026-10-31，不綁喚醒開關）：usage 不論旗標都送。
+  if (ticket?.route === "api_key") void api.realtimeEnd(ticketOf(ticket), { reason: takeEndReason(ticket.session_id), usage: realtime.usage ?? null }).catch(() => undefined);
   render();
 }
 
-function stopRealtime(): void {
+function takeEndReason(sessionId: string): PageEndReason | null {
+  const reason = realtimeEndReasons.get(sessionId) ?? null;
+  realtimeEndReasons.delete(sessionId);
+  return reason;
+}
+
+/** reason：WK-02 喚醒開始的通話沒人出聲而自動結束（no_voice，記入費用紀錄）。 */
+function stopRealtime(reason?: PageEndReason): void {
+  if (reason && realtimeTicket) {
+    realtimeEndReasons.set(realtimeTicket.session_id, reason);
+    if (realtimeEndReasons.size > 8) realtimeEndReasons.delete(realtimeEndReasons.keys().next().value!);
+  }
+  stopWakeCall();
+  // 通話在問候決定前就結束：同步辨識不再放寬（ambientEnabled）。
+  wakeGreetingInteraction = null;
   realtimeCommands.reset();
   ambient.endInteraction();
   realtimeStart?.abort();
@@ -559,7 +588,7 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
       input: async (kind, text) => void (await api.realtimeInput(ticket, kind, text)),
       hostResult: async (callId, output) => void (await api.realtimeHostResult(ticket, callId, output)),
       approval: async (report) => void (await api.realtimeApproval(ticket, report)),
-      end: async () => void (await api.realtimeEnd(ticket)),
+      end: async () => void (await api.realtimeEnd(ticket, { reason: takeEndReason(ticket.session_id) })),
       subscribe: (handlers) => subscribeSession(ticket.session_id, handlers),
       watchLevel: browserWatchLevel,
       setMuted: (muted) => {
@@ -586,7 +615,65 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
 function wakeMicrophone(): { getMicrophone?: () => Promise<MediaStream>; releaseMicrophone?: (stream: MediaStream) => void } {
   const owner = wake;
   if (!owner) return {};
-  return { getMicrophone: () => owner.lease(), releaseMicrophone: (stream) => owner.releaseLease(stream) };
+  return {
+    getMicrophone: async () => {
+      const stream = await owner.lease();
+      watchWakeLevel(stream);
+      return stream;
+    },
+    releaseMicrophone: (stream) => {
+      if (wakeLevel?.stream === stream) stopWakeLevel();
+      owner.releaseLease(stream);
+    },
+  };
+}
+
+/** WK-02：喚醒開始的通話期間，把租到的麥克風音量（只有 RMS 數字）交給「沒人出聲就結束」的計時。 */
+function watchWakeLevel(stream: MediaStream): void {
+  const watch = wakeCall;
+  if (!watch) return;
+  stopWakeLevel();
+  wakeLevel = { stream, stop: browserWatchLevel(stream, (rms) => watch.feed(rms)) };
+}
+
+function stopWakeLevel(): void {
+  const level = wakeLevel;
+  wakeLevel = null;
+  level?.stop();
+}
+
+function stopWakeCall(): void {
+  stopWakeLevel();
+  wakeCall?.stop();
+  wakeCall = null;
+}
+
+/**
+ * WK-02：喚醒觸發（提示音播完、沒取消、仍在本機聆聽）→ 開始 wake_word 即時語音。通話中、開始中或家人辨識畫面開著時忽略；
+ * 即時語音不能用時照實說原因。路徑、計費通知、改路徑與同意說明都沿用 startRealtime／openRealtime。
+ */
+function onWakeTrigger(trigger: WakeTrigger): void {
+  const now = performance.now();
+  const action = wakeTriggerAction({
+    callActive: realtime.on || realtimeStarting,
+    familyOpen: shell.surface?.kind === "family",
+    realtimeReady: realtimeReady(),
+    consent: hasVoiceConsent("realtime"),
+    consentAskedRecently: wakeConsentAskedAt !== null && now - wakeConsentAskedAt < WAKE_START_RATE.window_ms,
+  });
+  if (action === "ignore") return;
+  if (action === "ask_consent") {
+    // 同意說明：每個限速時窗最多因喚醒打開一次；使用者同意後以 wake_word 開始（問候與 5 秒計時照常）。
+    wakeConsentAskedAt = now;
+    pendingWakeConsent = trigger;
+    askConsent("realtime");
+    return;
+  }
+  if (action === "unavailable") {
+    showSubtitle(t(WAKE_TEXT.unavailable, t(realtimeSupported() ? (settings?.realtime?.detail ?? "未設定") : "這個環境不支援即時語音")));
+    return;
+  }
+  startRealtime("wake_word", { wake: trigger });
 }
 
 /** F2／F10：核心設定的開口偵測門檻（NOUS_EARLY_SPEECH_RMS，核心已驗證範圍）；沒有時用頁面預設。 */
@@ -695,6 +782,8 @@ function syncWake(view: WakeSettingsView | undefined): void {
       saveDeviceId: async (deviceId) => void (await api.updateWake({ device_id: deviceId })),
       newId: () => newInteractionId(),
     });
+    // WK-02：喚醒觸發開始 wake_word 即時語音（取代 WK-01a 預設的「聽到了」字幕）。
+    wake.setTriggerHandler(onWakeTrigger);
     // 載入前已經開始的 Web Speech 或即時語音照實告訴它（不會在通話或 Web Speech 中途搶麥克風）。
     if (voice.active || conversation.on) wake.webSpeech(true);
     wakeInitial = initial;
@@ -718,6 +807,7 @@ function applyWakeFirst(latest: WakeSettingsView): void {
 
 function disposeWake(): void {
   if (!wake) return;
+  stopWakeCall();
   wake.dispose();
   wake = null;
   wakeDeferred = false;
@@ -1137,7 +1227,9 @@ function createIdentityWorker(): WorkerLike {
 function ambientEnabled(): boolean {
   const cam = settings?.camera;
   const id = settings?.identity;
-  return !!window.nousDesktop?.identity && !!cam?.enabled && cam.active && cam.look_to_talk && cam.look_to_talk_greet && cam.look_to_talk_greet_name
+  // WK-02：喚醒開始、問候還沒決定的互動不需要「看著說話」「看著說話時先打招呼」（George 2026-10-31：喚醒後一律打招呼）。
+  const greets = (cam?.look_to_talk && cam.look_to_talk_greet) || wakeGreetingInteraction !== null;
+  return !!window.nousDesktop?.identity && !!cam?.enabled && cam.active && greets && cam.look_to_talk_greet_name
     && !!id?.available && !id.limited_reason && !blocksAutoTalk(shell.surface);
 }
 
@@ -1522,12 +1614,15 @@ function realtimeReady(): boolean {
 }
 
 /**
- * source：只有看著說話（鏡頭）開始的會打招呼（George 2026-10-23）；其他一律 user。
+ * source：看著說話（鏡頭）與喚醒詞（WK-02）開始的會打招呼（George 2026-10-23、2026-10-31）；其他一律 user。
  * rebuild：MEM-2 記憶撤銷後的自動重建（只走 live、不問候、保留「記憶已更新」字幕）。
+ * wake：WK-02 這次喚醒（wake_id 交給核心的費用紀錄；限速時暫停喚醒聆聽）。
  */
-function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean } = {}): void {
+function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean; wake?: WakeTrigger } = {}): void {
   if (realtime.on || realtimeStarting) return;
   if (!hasVoiceConsent("realtime")) {
+    // 不是喚醒開始的同意說明：同意後照舊以 user 開始。
+    pendingWakeConsent = null;
     askConsent("realtime");
     return;
   }
@@ -1551,6 +1646,12 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
   // 路徑的 instructions 會帶著組好的短句經過這裡）。同意說明延後的不會走到這裡（上面已 return）。
   const interaction = newInteractionId();
   let coreInteraction: string | null = null;
+  const viaWake = source === "wake_word";
+  const endWakeGreeting = () => {
+    if (wakeGreetingInteraction === interaction) wakeGreetingInteraction = null;
+  };
+  // WK-02：喚醒開始的通話一律打招呼（greetingFor 不讀「看著說話時先打招呼」）；同步辨識在問候決定前不需要「看著說話」設定。
+  if (viaWake && !rebuild) wakeGreetingInteraction = interaction;
   const greeting = rebuild ? null : greetingFor(source, () => (settings?.camera ?? DEFAULT_CAMERA_PREFS).look_to_talk_greet, {
     interaction,
     locale: realtimeLocale,
@@ -1559,24 +1660,47 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
       lookTimeline.mark("decided");
       return content;
     },
-    settled: () => ambient.endInteraction(interaction),
+    settled: () => {
+      endWakeGreeting();
+      ambient.endInteraction(interaction);
+    },
   });
   if (greeting) {
     ambient.beginInteraction(interaction, realtimeLocale);
     lookTimeline.mark("start");
   }
+  // WK-02：喚醒開始的通話第一次就緒後開始「沒人出聲就結束」的倒數（5 秒；Nous 說話時暫停）。
+  stopWakeCall();
+  if (viaWake && wake) {
+    wakeCall = wake.watchCall({
+      ...(typeof settings?.realtime?.early_speech_rms === "number" ? { rms: settings.realtime.early_speech_rms } : {}),
+      onTimeout: () => {
+        if (!realtime.on && !realtimeStarting) return;
+        stopRealtime("no_voice");
+        showSubtitle(t(WAKE_TEXT.noVoice));
+      },
+    });
+  }
   // 路徑在開麥克風前決定；auto 改用 API key 時先說出計費通知。
   void openRealtime({
     start: async () => {
-      const decision = await api.realtimeStart(sseClientId, source, realtimeLocale, rebuild);
+      const decision = await api.realtimeStart(sseClientId, source, realtimeLocale, rebuild, options.wake?.wake_id);
       coreInteraction = decision.ok ? (decision.interaction ?? null) : null;
+      // WK-02：核心已發出喚醒的互動 ID，重新問一次同步辨識能不能做（之前問的時候核心還不知道這次喚醒）。
+      if (viaWake && decision.ok) ambient.refresh();
+      // WK-02：喚醒開始的通話超過每分鐘上限：暫停喚醒聆聽，時間到自動恢復。
+      if (!decision.ok && decision.wake_limited) wake?.pauseFor("rate_limited", decision.retry_after_ms ?? WAKE_START_RATE.window_ms);
       return decision;
     },
     makeSession: (decision) => makeRealtimeSession(decision, greeting, rebuild),
     announce: announceRealtime,
     refused: (message) => {
+      endWakeGreeting();
+      stopWakeCall();
       ambient.endInteraction(interaction);
       showSubtitle(message);
+      // 喚醒開始的：只說原因（使用者沒有在打字，不打開輸入框）。
+      if (viaWake) return;
       dispatch({ type: "input.open" });
       showCommandError(message);
     },
@@ -1590,6 +1714,7 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     },
   }, start.signal)
     .catch((err: unknown) => {
+      endWakeGreeting();
       ambient.endInteraction(interaction);
       if (start.signal.aborted) return;
       const message = `無法開始即時語音：${err instanceof Error ? err.message : String(err)}`;
@@ -1619,7 +1744,10 @@ const REALTIME_STATE_LABEL: Record<Exclude<RealtimePhase, "off">, string> = {
 function renderRealtimeState(phase: RealtimePhase): void {
   // WK-01a：通話結束一定歸還麥克風（兩條路徑在 teardown 時已各自歸還自己的那一份；這裡是保險，
   // 只在已經沒有任何進行中或開始中的通話時才歸還剩下的，不會停掉新通話的複製品）。
+  // WK-02：喚醒開始的通話的「沒人出聲就結束」只看真的通話階段（改路徑時的 off 不算結束）。
+  if (phase !== "off") wakeCall?.phase(phase);
   if (phase === "off" && !realtime.on && !realtimeStarting) {
+    stopWakeCall();
     wake?.releaseAllLeases();
     if (wakeDisposePending) {
       wakeDisposePending = false;
@@ -1975,6 +2103,8 @@ function latestArtifactTask(): Task | undefined {
 }
 
 async function handleCommand(text: string, source: "typed" | "speech" = "typed"): Promise<void> {
+  // WK-02：喚醒開始的通話中使用者打字＝有人在，這通不再因為沒出聲而自動結束。
+  if (source === "typed") wakeCall?.disarm();
   if (handleCameraCommand(text)) {
     dispatch({ type: "input.close" });
     return;
@@ -2783,11 +2913,15 @@ voicePill.addEventListener("click", disableVoiceMode);
 $<HTMLButtonElement>("consent-yes").addEventListener("click", () => {
   saveVoiceConsent(pendingConsent);
   consentBox.hidden = true;
-  if (pendingConsent === "realtime") startRealtime("user");
+  const wakeTrigger = pendingWakeConsent;
+  pendingWakeConsent = null;
+  // WK-02：喚醒打開的同意說明：同意後以 wake_word 開始（問候、沉默 5 秒結束、限速照常）。
+  if (pendingConsent === "realtime") startRealtime(wakeTrigger ? "wake_word" : "user", wakeTrigger ? { wake: wakeTrigger } : {});
   else if (pendingConsent === "continuous") enableVoiceMode();
   else voice.start();
 });
 $<HTMLButtonElement>("consent-no").addEventListener("click", () => {
+  pendingWakeConsent = null;
   consentBox.hidden = true;
   input.focus();
 });

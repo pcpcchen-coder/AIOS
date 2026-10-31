@@ -37,7 +37,9 @@ import { COMMANDS_PATH, commandsPageHeaders, renderCommandsPage } from "./comman
 import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity.ts";
 import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
 import { readVerifiedWakeRuntime, wakeRuntimePath } from "./wake-runtime.ts";
-import { parseWakePatch, WakePatchError, type WakePrefs, type WakePrefsPatch, type WakeRuntimeState } from "../shared/wake.ts";
+import { parseWakePatch, WAKE_ID, WakePatchError, type WakePrefs, type WakePrefsPatch, type WakeRuntimeState } from "../shared/wake.ts";
+import { parsePageEndReason, parseVoiceUsage } from "../shared/voice-cost.ts";
+import { parseCostLimit, type VoiceCostLog } from "./voice-cost-log.ts";
 import { historyPageHeaders, pageHeaders } from "./page-headers.ts";
 import type { TaskRunner } from "./runner.ts";
 import { tasksForTarget, type TaskStore } from "./store.ts";
@@ -153,6 +155,11 @@ export interface AppOptions {
   /** 喚醒引擎檔案的資料夾（只提供 shared/wake-runtime.json 清單上、雜湊相符的檔名；WK-01a 清單為空）。 */
   wakeRuntimeDir?: string | null;
   /**
+   * WK-02（F6）：即時語音的費用紀錄（configDir/voice-cost.jsonl）。George 2026-10-31：一律記錄，不綁喚醒開關；
+   * 未提供時不記，GET /api/realtime/cost-records 回空清單。
+   */
+  voiceCostLog?: VoiceCostLog;
+  /**
    * 成果紀錄（HIST-1）額外的搜尋來源；一般任務（TaskStore）一律包含。MEM-4c 的受保護成果之後由這裡併入。
    */
   historySources?: HistorySource[];
@@ -222,6 +229,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         audio: options.realtimeAudio,
         dropStopReport: options.dropStopReport,
         hideRevokeFromPage: options.hideRevokeFromPage,
+        costLog: options.voiceCostLog,
       })
     : null;
   const tasksFor = (target: ChatTarget | null) => tasksForTarget(store, options.memory ?? null, target);
@@ -414,10 +422,13 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const body = await readJson(req);
       if (!sessions) throw new HttpError(409, "即時語音模式未啟用");
       const clientId = typeof body.client_id === "string" && CLIENT_ID.test(body.client_id) && clients.has(body.client_id) ? body.client_id : null;
-      // source 只決定要不要發看著說話的互動 ID（ID-02），不是授權；其他值都當成 user。
+      // source 只決定要不要發互動 ID（ID-02）、問候與限速，不是授權；其他值都當成 user。
+      // wake_word（WK-02）只有 NOUS_WAKE=on（options.wake 存在）時才接受，旗標關閉時當成 user（行為和之前相同）。
+      const source = body.source === "look_to_talk" ? "look_to_talk" : body.source === "wake_word" && options.wake ? "wake_word" : "user";
+      const wakeId = source === "wake_word" && typeof body.wake_id === "string" && WAKE_ID.test(body.wake_id) ? body.wake_id : null;
       const locale = normalizeLocale(req.headers["x-nous-locale"]);
       // rebuild：MEM-2 記憶撤銷後頁面自動重建（只走 live、不問候）；只是開始方式，不是授權。
-      const decision = sessions.start(clientId, body.source === "look_to_talk" ? "look_to_talk" : "user", locale, body.rebuild === true);
+      const decision = sessions.start(clientId, source, locale, body.rebuild === true, wakeId);
       return sendJson(res, 200, decision.ok
         ? { ...decision, billing_line: localize(decision.billing_line, locale), notice: decision.notice === null ? null : localize(decision.notice, locale) }
         : { ...decision, message: localize(decision.message, locale) });
@@ -521,12 +532,17 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const body = await readJson(req);
       const { sessionId, owner } = sessionAuth(body);
       try {
-        await sessions!.end(sessionId, owner);
+        // WK-02（F6，不綁喚醒開關）：可選的結束原因（只有 no_voice）與 API key 路徑加總的 usage（只取認得的數字欄位、截上限）。
+        await sessions!.end(sessionId, owner, { reason: parsePageEndReason(body.reason), usage: parseVoiceUsage(body.usage) });
       } catch (err) {
         if (err instanceof SessionError) throw new HttpError(err.status, err.message);
         throw err;
       }
       return sendJson(res, 200, { ok: true });
+    }
+    if (method === "GET" && path === "/api/realtime/cost-records") {
+      // WK-02（F6）：最近的費用紀錄（新的在前）；沒有逐字稿與音訊，費用一律 unknown。
+      return sendJson(res, 200, { records: options.voiceCostLog?.list(parseCostLimit(params.get("limit"))) ?? [] });
     }
     if (method === "POST" && path === "/api/realtime/web-search") {
       const body = await readJson(req);

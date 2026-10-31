@@ -7,6 +7,7 @@ import { browserEarcon } from "./earcon.ts";
 
 export { WAKE_COMMANDS, WakeController, type PowerEvent, type WakeHost, type WakeTriggerHandler } from "./controller.ts";
 export { NoVoiceWatchdog, NO_VOICE_TIMEOUT_MS } from "./no-voice.ts";
+export type { WakeCallWatch } from "./wake-call.ts";
 
 export function createWakeController(host: WakeHost): WakeController {
   return new WakeController(host, {

@@ -135,6 +135,22 @@ afterEach(() => {
 });
 
 describe("RealtimeVoice", () => {
+  it("WK-02 (F6): sums response.done usage for the cost record, keeps it after stop and resets it on the next start", async () => {
+    const t = setup();
+    await t.voice.start();
+    t.ch.emit({ type: "session.created" });
+    expect(t.voice.usage).toBeNull();
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.done", response: { status: "completed", usage: { total_tokens: 30, input_tokens: 20, output_tokens: 10, input_token_details: { audio_tokens: 15, text_tokens: 5, cached_tokens: 0 }, output_token_details: { audio_tokens: 8, text_tokens: 2 } } } });
+    t.ch.emit({ type: "response.created" });
+    t.ch.emit({ type: "response.done", response: { status: "completed", usage: { total_tokens: 5, input_tokens: 4, output_tokens: 1 } } });
+    expect(t.voice.usage).toMatchObject({ responses: 2, total_tokens: 35, input_tokens: 24, output_tokens: 11, input_audio_tokens: 15, output_audio_tokens: 8 });
+    t.voice.stop();
+    expect(t.voice.usage?.total_tokens).toBe(35);
+    await t.voice.start();
+    expect(t.voice.usage).toBeNull();
+  });
+
   it("connects through the local core: mic track + data channel, SDP offer exchanged for the answer", async () => {
     const t = setup();
     await t.voice.start();

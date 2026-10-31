@@ -68,7 +68,9 @@ interface Core {
   box: ReturnType<typeof fakeSecretBox>;
   dir: string;
   /** 替身：RealtimeSessions.claimGreeting（核心發出、真的連上的互動 ID → 工作階段）。取用一次就刪掉。 */
-  claims: Map<string, { route: "api_key" | "live"; session_id: string }>;
+  claims: Map<string, { route: "api_key" | "live"; session_id: string; source?: "look_to_talk" | "wake_word" }>;
+  /** 替身：RealtimeSessions.wakeGreetingOpen（WK-02）。 */
+  wake: { open: boolean };
 }
 
 let dirs = 0;
@@ -85,8 +87,10 @@ function core(box = fakeSecretBox(), dir = join(root, `identity-${++dirs}`)): Co
     return open(sealed);
   };
   const store = new GalleryStore({ dir, secretBox: box });
-  const claims = new Map<string, { route: "api_key" | "live"; session_id: string }>();
+  const claims = new Map<string, { route: "api_key" | "live"; session_id: string; source?: "look_to_talk" | "wake_word" }>();
+  const wake = { open: false };
   const svc = new IdentityService({
+    wakeGreetingOpen: () => wake.open,
     claimGreeting: (interaction) => {
       const claim = claims.get(interaction) ?? null;
       claims.delete(interaction);
@@ -101,7 +105,7 @@ function core(box = fakeSecretBox(), dir = join(root, `identity-${++dirs}`)): Co
     now: () => clock.now,
     log: (l) => log.push(l),
   });
-  return { svc, clock, prefs, camera, log, opens, store, box, dir, claims };
+  return { svc, clock, prefs, camera, log, opens, store, box, dir, claims, wake };
 }
 
 /** 經管理畫面登記（使用者從選單列打開；這裡以 userInitiated 代表），然後收起畫面。 */
@@ -142,9 +146,9 @@ const sid = (interaction: string) => `rt_${interaction.slice(4)}`;
 /**
  * 問候決策。預設先替這個互動 ID 登記一個「核心發出、真的連上」的工作階段（claim）；claim:false 模擬頁面自己編的 ID。
  */
-async function greet(c: Core, interaction: string, track: number, extra: { eligible?: boolean; route?: "api_key" | "live"; claim?: boolean } = {}): Promise<IdentityResponse> {
+async function greet(c: Core, interaction: string, track: number, extra: { eligible?: boolean; route?: "api_key" | "live"; claim?: boolean; source?: "look_to_talk" | "wake_word" } = {}): Promise<IdentityResponse> {
   const route = extra.route ?? "api_key";
-  if (extra.claim !== false) c.claims.set(interaction, { route, session_id: sid(interaction) });
+  if (extra.claim !== false) c.claims.set(interaction, { route, session_id: sid(interaction), ...(extra.source ? { source: extra.source } : {}) });
   return c.svc.handle({ op: "greeting", interaction, track, eligible: extra.eligible ?? true, route });
 }
 
@@ -458,6 +462,52 @@ describe("審查修正 #1：只有核心發出、真的連上的互動 ID 才可
     expect(await greet(c, id(5), 5)).toMatchObject({ ok: true });
     expect(await greet(c, id(6), 6)).toMatchObject({ ok: true });
     expect(await greet(c, id(7), 7)).toMatchObject({ ok: false, code: "rate_limited" }); // 同一秒第三次
+  });
+});
+
+describe("WK-02：喚醒開始的問候（George 2026-10-31：一律打招呼，稱名照「打招呼時稱呼認出的家人」）", () => {
+  it("with look_to_talk and look_to_talk_greet off, a wake claim still names George; sampling is accepted only while a wake greeting is open", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE]]);
+    c.prefs.look_to_talk = false;
+    c.prefs.look_to_talk_greet = false;
+    // 沒有喚醒中的互動：照舊拒絕
+    expect(await c.svc.handle({ op: "ambient_status" })).toMatchObject({ ok: true, ready: false });
+    expect(await frame(c, 1, GEORGE)).toMatchObject({ ok: false, code: "unavailable" });
+    // 核心發出喚醒互動、還沒決策：可以取樣
+    c.wake.open = true;
+    expect(await c.svc.handle({ op: "ambient_status" })).toMatchObject({ ok: true, ready: true });
+    await frames(c, 2, GEORGE, 3);
+    expect(text(await greet(c, id(1), 2, { source: "wake_word" }))).toMatch(NAMED);
+    // 同樣的設定下，看著說話開始的 claim 不稱名
+    c.clock.now += 61_000;
+    await frames(c, 3, GEORGE, 3);
+    expect(text(await greet(c, id(2), 3, { source: "look_to_talk" }))).toMatch(PLAIN);
+    expect(c.log.filter((l) => l.includes("問候決策")).map((l) => /（api_key，(\w+)，/.exec(l)?.[1])).toEqual(["ok", "unavailable"]);
+  });
+
+  it("naming off or the cloud naming notice not seen → no name even after a wake", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE]]);
+    c.prefs.look_to_talk = false;
+    c.wake.open = true;
+    c.prefs.look_to_talk_greet_name = false;
+    expect(await frame(c, 1, GEORGE)).toMatchObject({ ok: false, code: "unavailable" });
+    expect(text(await greet(c, id(1), 1, { source: "wake_word" }))).toMatch(PLAIN);
+    c.prefs.look_to_talk_greet_name = true;
+    rmSync(join(c.dir, "cloud-naming-notice.v1.json"));
+    c.clock.now += 61_000;
+    await frames(c, 2, GEORGE, 3);
+    expect(text(await greet(c, id(2), 2, { source: "wake_word" }))).toMatch(PLAIN);
+    expect(c.log.filter((l) => l.includes("問候決策")).map((l) => /（api_key，(\w+)，/.exec(l)?.[1])).toEqual(["naming_off", "notice_unseen"]);
+  });
+
+  it("a page-made ID claiming to be a wake (no core claim) gets no name", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE]]);
+    c.wake.open = true;
+    await frames(c, 1, GEORGE, 3);
+    expect(text(await greet(c, id(1), 1, { claim: false, source: "wake_word" }))).toMatch(PLAIN);
   });
 });
 

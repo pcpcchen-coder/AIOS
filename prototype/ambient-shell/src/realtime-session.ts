@@ -1,6 +1,7 @@
 import type { GreetingRoute } from "../shared/identity.ts";
 import type { FallbackOffer, RouteId, StartDecision } from "../shared/realtime-route.ts";
 import { plainGreetingInstructions } from "../shared/sense.ts";
+import type { VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
 import { getLocale, type Locale } from "./i18n.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimePhase, RealtimeVoice } from "./realtime.ts";
 import { whenTaiwanReady } from "./zh-tw.ts";
@@ -32,6 +33,8 @@ export interface RealtimeSession {
   readonly fallbackOffer?: FallbackOffer | null;
   /** 改路徑時：連線中打的、這個工作階段還沒送出的字（openRealtime 交給下一個工作階段）。 */
   readonly unsentText?: readonly string[];
+  /** WK-02（F6）：API key 路徑加總 response.done 的 usage（結束時交給核心的費用紀錄）；live 沒有。 */
+  readonly usage?: VoiceUsage | null;
 }
 
 // 編譯期檢查：API key 路徑的類別不用改就符合接縫。
@@ -39,8 +42,10 @@ export type GaFitsSeam = RealtimeVoice extends RealtimeSession ? true : never;
 const gaFits: GaFitsSeam = true;
 void gaFits;
 
-/** 誰開始了這次即時語音：只有看著說話（鏡頭）開始的會打招呼；按鈕、語音指令、打字、同意說明後開始的都是 user。 */
-export type RealtimeStartSource = "look_to_talk" | "user";
+/**
+ * 誰開始了這次即時語音：看著說話（鏡頭）與喚醒詞（WK-02）開始的會打招呼；按鈕、語音指令、打字、同意說明後開始的都是 user。
+ */
+export type RealtimeStartSource = VoiceStartSource;
 
 /**
  * 問候的生命週期（和辨識結果分開，docs/14 §3）：pending → deciding（向核心要問候決策）→ sent；
@@ -156,11 +161,29 @@ export class GreetingOnce {
 
 /**
  * 這次開始要不要打招呼：看著說話開始的一律建立 GreetingOnce，「看著說話時先打招呼」在要送出的那一刻（take()）才讀，
- * 所以連線中才在設定畫面或用語音打開也會打招呼、關掉就不打。其他開始方式回 null。
+ * 所以連線中才在設定畫面或用語音打開也會打招呼、關掉就不打。
+ * 喚醒開始的（WK-02，George 2026-10-31）一律打招呼，不看「看著說話時先打招呼」，也沒有另外的開關；改路徑時同一個物件，
+ * 所以一次喚醒最多一次招呼。其他開始方式回 null。
  */
 export function greetingFor(source: RealtimeStartSource, greetOn: () => boolean, options: GreetingOptions = {}): GreetingOnce | null {
+  if (source === "wake_word") return new GreetingOnce(() => true, options);
   if (source !== "look_to_talk") return null;
   return new GreetingOnce(greetOn, options);
+}
+
+/** WK-02：喚醒觸發時要做什麼（純函式，src/main.ts 的 onWakeTrigger 使用）。 */
+export type WakeTriggerAction = "ignore" | "unavailable" | "ask_consent" | "start";
+
+/**
+ * 通話進行中或開始中、家人辨識畫面開著：忽略（不打斷登記或試認）。即時語音不能用：照實說原因。
+ * 還沒有即時語音的同意：打開同意說明，但每個限速時窗（WAKE_START_RATE.window_ms）最多一次，其餘忽略。
+ * 其餘：開始 wake_word 通話。
+ */
+export function wakeTriggerAction(state: { callActive: boolean; familyOpen: boolean; realtimeReady: boolean; consent?: boolean; consentAskedRecently?: boolean }): WakeTriggerAction {
+  if (state.callActive || state.familyOpen) return "ignore";
+  if (!state.realtimeReady) return "unavailable";
+  if (state.consent === false) return state.consentAskedRecently ? "ignore" : "ask_consent";
+  return "start";
 }
 
 /** 還沒開始過的即時語音：main.ts 載入時讀 on／current 等都安全。 */

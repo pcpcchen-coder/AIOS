@@ -1,12 +1,25 @@
 // 常駐喚醒聆聽的控制器（WK-01a）：把 AudioFrontEnd、自我觸發防護、本機提示音與觸發接在一起，給 src/main.ts 使用。
 // WK-01 的終點：偵測 → 防護（播音、遠端播放、提示音期間與 3 秒去重）→ 本機提示音（可取消）→ 沒被取消才呼叫 onTrigger。
 // 預設的 onTrigger 只顯示字幕「聽到了」並回到聆聽，**不開通話**；WK-02 以 setTriggerHandler 接上 startRealtime("wake_word")。
+// WK-02 另外：subscribe（Companion activation=wake 的共用接口，只交付契約）、pauseFor（限速暫停、時間到自動恢復）、
+// watchCall（喚醒開始的通話沒人出聲就結束，src/audio/wake-call.ts）。
 // 時鐘、擷取、提示音都可注入；假偵測器只在 tests/fixtures/，測試見 tests/audio-front-end.test.ts。
 
-import { WAKE_REASON_LABEL, WAKE_TEXT, type WakeReason, type WakeReport, type WakeRuntimeState, type WakeSettingsView, type WakeTrigger } from "../../shared/wake.ts";
+import {
+  WAKE_REASON_LABEL,
+  WAKE_TEXT,
+  type WakeActivation,
+  type WakeActivationPort,
+  type WakeReason,
+  type WakeReport,
+  type WakeRuntimeState,
+  type WakeSettingsView,
+  type WakeTrigger,
+} from "../../shared/wake.ts";
 import type { EarconPlayback, EarconPlayer } from "./earcon.ts";
 import { AudioFrontEnd, type CaptureDeps, type MediaDevicesLike, type StartHow } from "./front-end.ts";
 import { WakeGuard, type GuardSource } from "./guard.ts";
+import { WakeCallWatch, type WakeCallOptions } from "./wake-call.ts";
 
 export type PowerEvent = "suspend" | "resume" | "lock" | "unlock";
 export type WakeCommand = "wake-off" | "wake-pause" | "wake-resume";
@@ -36,9 +49,11 @@ export interface WakeControllerDeps {
   mediaDevices: MediaDevicesLike | null;
   capture: CaptureDeps;
   earcon: EarconPlayer;
+  /** 單次計時器（預設 setTimeout）；回傳取消。限速暫停的自動恢復用，測試注入假的。 */
+  timer?(run: () => void, ms: number): () => void;
 }
 
-export class WakeController {
+export class WakeController implements WakeActivationPort {
   readonly frontEnd: AudioFrontEnd;
   readonly guard: WakeGuard;
   private settings: WakeSettingsView | null = null;
@@ -48,10 +63,13 @@ export class WakeController {
   private pendingResumeCaption: (() => void) | null = null;
   private lastErrorCaption: WakeReason | null = null;
   private trigger: WakeTriggerHandler;
+  private readonly subscribers = new Set<(activation: WakeActivation) => void>();
+  private cancelRateResume: (() => void) | null = null;
+  private rateToken: { cancel(): void } | null = null;
 
   constructor(
     private readonly host: WakeHost,
-    deps: WakeControllerDeps,
+    private readonly deps: WakeControllerDeps,
   ) {
     this.guard = new WakeGuard(host.now);
     this.trigger = () => host.caption(WAKE_TEXT.heard);
@@ -72,6 +90,43 @@ export class WakeController {
   /** WK-02：換成真正開通話的處理（startRealtime("wake_word")、限速、問候）。 */
   setTriggerHandler(handler: WakeTriggerHandler): void {
     this.trigger = handler;
+  }
+
+  /** Companion activation=wake 的共用接口（WK-02 只交付契約）：每次觸發通知一次，只有識別碼、時間與關鍵詞編號。 */
+  subscribe(listener: (activation: WakeActivation) => void): () => void {
+    this.subscribers.add(listener);
+    return () => this.subscribers.delete(listener);
+  }
+
+  /**
+   * WK-02 限速：喚醒開始的通話超過每分鐘上限（核心拒絕並給 retry_after_ms）。暫停聆聽（paused／rate_limited），
+   * ms 後自動恢復；再次呼叫時以新的時間為準。
+   */
+  pauseFor(reason: "rate_limited", ms: number): void {
+    this.cancelRateResume?.();
+    this.cancelRateResume = null;
+    this.rateToken = null;
+    this.cancelEarcon();
+    this.frontEnd.pause(reason);
+    const timer = this.deps.timer ?? ((run: () => void, delay: number) => {
+      const id = setTimeout(run, delay);
+      return () => clearTimeout(id);
+    });
+    // 以這次的 token 比對（不在計時器回呼裡讀還沒指定的 cancel；計時器同步執行也安全）。
+    const token = { cancel: () => {} };
+    this.rateToken = token;
+    token.cancel = timer(() => {
+      if (this.rateToken !== token) return;
+      this.rateToken = null;
+      this.cancelRateResume = null;
+      this.frontEnd.resume(reason);
+    }, Math.max(0, ms));
+    if (this.rateToken === token) this.cancelRateResume = () => token.cancel();
+  }
+
+  /** WK-02：喚醒開始的通話的「沒人出聲就結束」計時（src/audio/wake-call.ts）。 */
+  watchCall(options: Omit<WakeCallOptions, "now">): WakeCallWatch {
+    return new WakeCallWatch({ now: this.host.now, ...options });
   }
 
   /**
@@ -162,6 +217,10 @@ export class WakeController {
   }
 
   dispose(): void {
+    this.cancelRateResume?.();
+    this.cancelRateResume = null;
+    this.rateToken = null;
+    this.subscribers.clear();
     this.cancelEarcon();
     this.pendingResumeCaption?.();
     this.pendingResumeCaption = null;
@@ -221,6 +280,14 @@ export class WakeController {
     }
     // 取消、或提示音期間離開了聆聽（暫停、通話、睡眠）：不觸發。
     if (!played || this.frontEnd.current.state !== "listening_local") return;
-    this.trigger({ wake_id: this.host.newId(), detected_at: detectedAt, keyword_index: keyword });
+    const trigger: WakeTrigger = { wake_id: this.host.newId(), detected_at: detectedAt, keyword_index: keyword };
+    this.trigger(trigger);
+    for (const listener of [...this.subscribers]) {
+      try {
+        listener({ activation: "wake", ...trigger });
+      } catch {
+        // 訂閱者的錯誤不影響喚醒
+      }
+    }
   }
 }

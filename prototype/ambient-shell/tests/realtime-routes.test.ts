@@ -1,4 +1,19 @@
+import { mkdtempSync } from "node:fs";
+import type { Server } from "node:http";
+import { createServer as createNetServer, type AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { emptyVoiceUsage, VOICE_USAGE_CAP, type VoiceCostRecord } from "../shared/voice-cost.ts";
+import { WAKE_START_RATE } from "../shared/wake.ts";
+import { createApp } from "../server/app.ts";
+import { ChatGPTAuth } from "../server/chatgpt-auth.ts";
+import { ChatGPTExecutor } from "../server/chatgpt-executor.ts";
+import { MockExecutor } from "../server/mock-executor.ts";
+import { ProviderManager } from "../server/providers.ts";
+import { TaskRunner } from "../server/runner.ts";
+import { TaskStore } from "../server/store.ts";
+import type { VoiceCostLog } from "../server/voice-cost-log.ts";
 import { billingLine, RESULT_UNKNOWN_TEXT, unavailableText, type RoutePreference } from "../shared/realtime-route.ts";
 import type { RealtimeBaseInfo } from "../shared/types.ts";
 import {
@@ -14,6 +29,9 @@ import {
   type RealtimeRoute,
   type RouteCall,
   type SessionContext,
+  WAKE_LIMITED_TEXT,
+  COST_AMEND_GRACE_MS,
+  GREETING_CLAIM_MS,
 } from "../server/realtime-routes.ts";
 
 // 路徑選擇（純函式）與 RealtimeSessions（工作階段狀態、擁有者、頁面當工具執行器）。路徑都是假的（fixture）。
@@ -500,5 +518,265 @@ describe("MEM-3 review: one memory-carrying voice call at a time", () => {
     await t.sessions.call("v=0", a.session_id, a.owner);
     await t.sessions.call("v=0", b.session_id, b.owner);
     expect(t.key.closes).toEqual(["ended"]);
+  });
+});
+
+// ───────── WK-02：wake_word 開始來源、限速與費用紀錄（fixture 路徑、假時鐘） ─────────
+
+describe("WK-02 RealtimeSessions: wake_word source", () => {
+  function wakeSetup(pref: RoutePreference = "auto", liveFails = false) {
+    const clock = { now: 1_000_000 };
+    const live = fakeRoute("live", "gpt-live-1-codex");
+    const key = fakeRoute("api_key", "gpt-realtime");
+    if (liveFails) live.fail = new RouteStartError("usage_limit", 429, "額度已用完（fixture）", true);
+    const records: VoiceCostRecord[] = [];
+    const sessions = new RealtimeSessions({
+      routes: { live, api_key: key },
+      preference: () => pref,
+      tasks: () => [],
+      send: () => true,
+      now: () => clock.now,
+      costLog: { record: (r) => void records.push(r) },
+    });
+    return { clock, live, key, sessions, records };
+  }
+
+  it("issues an interaction ID for wake_word; claimGreeting reports the source; wakeGreetingOpen is true until the claim", async () => {
+    const t = wakeSetup("live");
+    const d = t.sessions.start("sse_a", "wake_word", "zh-TW", false, "int_00000000000000aa");
+    if (!d.ok || !d.interaction) throw new Error("expected an interaction");
+    expect(t.sessions.wakeGreetingOpen()).toBe(true);
+    await t.sessions.call("v=0", d.session_id, d.owner);
+    // 喚醒開始的通話：記憶的「看著說話」旗標照舊（有互動 ID 就是 true）
+    expect(t.live.ctx?.lookToTalk).toBe(true);
+    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "live", session_id: d.session_id, source: "wake_word" });
+    expect(t.sessions.wakeGreetingOpen()).toBe(false);
+    expect(t.sessions.claimGreeting(d.interaction)).toBeNull();
+    // 問候被跳過（沒有 claim）時，通話結束也結束放寬
+    await t.sessions.end(d.session_id, d.owner);
+    const skipped = t.sessions.start("sse_a", "wake_word");
+    if (!skipped.ok) throw new Error("start");
+    await t.sessions.call("v=0", skipped.session_id, skipped.owner);
+    expect(t.sessions.wakeGreetingOpen()).toBe(true);
+    await t.sessions.end(skipped.session_id, skipped.owner);
+    expect(t.sessions.wakeGreetingOpen()).toBe(false);
+    // 看著說話開始的互動不會讓 wakeGreetingOpen 成立
+    const l = t.sessions.start("sse_a", "look_to_talk");
+    if (!l.ok || !l.interaction) throw new Error("expected an interaction");
+    expect(t.sessions.wakeGreetingOpen()).toBe(false);
+    // user 沒有互動 ID
+    expect(t.sessions.start("sse_a", "user")).toMatchObject({ ok: true, interaction: null });
+  });
+
+  it("live → API key fallback keeps the wake interaction ID, its source and the wake_id (at most one greeting per wake)", async () => {
+    const t = wakeSetup("auto", true);
+    const d = t.sessions.start("sse_a", "wake_word", "zh-TW", false, "int_00000000000000bb");
+    if (!d.ok || !d.interaction) throw new Error("start");
+    const err = (await t.sessions.call("v=0", d.session_id, d.owner).catch((e: unknown) => e)) as FallbackRequired;
+    expect(err).toBeInstanceOf(FallbackRequired);
+    expect(t.sessions.claimGreeting(d.interaction)).toBeNull(); // live 沒有連上
+    const fb = err.offer.fallback!;
+    await t.sessions.call("v=0", fb.session_id, fb.owner);
+    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "api_key", session_id: fb.session_id, source: "wake_word" });
+    expect(t.sessions.claimGreeting(d.interaction)).toBeNull();
+    await t.sessions.end(fb.session_id, fb.owner);
+    // 費用紀錄：live 沒連上（connect_failed）、API key 那通，兩筆都帶同一個 wake_id
+    expect(t.records.map((r) => [r.route, r.end_reason, r.connected, r.source, r.wake_id])).toEqual([
+      ["live", "connect_failed", false, "wake_word", "int_00000000000000bb"],
+      ["api_key", "ended", true, "wake_word", "int_00000000000000bb"],
+    ]);
+  });
+
+  it("rate limit: the 4th accepted wake_word start within a rolling 60 s is refused with wake_limited and retry_after_ms; allowed again at 60 s", () => {
+    const t = wakeSetup("api_key");
+    for (let i = 0; i < 3; i++) {
+      expect(t.sessions.start("sse_a", "wake_word")).toMatchObject({ ok: true });
+      t.clock.now += 10_000;
+    }
+    // 第一次在 1_000_000，現在 1_030_000：還要 30 秒
+    const refused = t.sessions.start("sse_a", "wake_word");
+    expect(refused).toEqual({ ok: false, message: WAKE_LIMITED_TEXT, reasons: {}, wake_limited: true, retry_after_ms: 30_000 });
+    expect(WAKE_LIMITED_TEXT).toContain(`${WAKE_START_RATE.per_minute} 次`);
+    // 其他來源不算、也不被擋
+    expect(t.sessions.start("sse_a", "user")).toMatchObject({ ok: true });
+    expect(t.sessions.start("sse_a", "look_to_talk")).toMatchObject({ ok: true });
+    t.clock.now += 29_999;
+    expect(t.sessions.start("sse_a", "wake_word")).toMatchObject({ ok: false, wake_limited: true, retry_after_ms: 1 });
+    t.clock.now += 1; // 第一次滿 60 秒
+    expect(t.sessions.start("sse_a", "wake_word")).toMatchObject({ ok: true });
+    expect(t.sessions.start("sse_a", "wake_word")).toMatchObject({ ok: false, wake_limited: true });
+  });
+
+  it("refused wake starts (route unavailable) are not counted; other sources never count", () => {
+    const t = wakeSetup("api_key");
+    t.key.ready = NO_KEY;
+    for (let i = 0; i < 5; i++) expect(t.sessions.start("sse_a", "wake_word")).toMatchObject({ ok: false, reasons: { api_key: "no_api_key" } });
+    t.key.ready = READY;
+    for (let i = 0; i < 10; i++) expect(t.sessions.start("sse_a", "user")).toMatchObject({ ok: true });
+    for (let i = 0; i < 3; i++) expect(t.sessions.start("sse_a", "wake_word")).toMatchObject({ ok: true });
+    expect(t.sessions.start("sse_a", "wake_word")).toMatchObject({ ok: false, wake_limited: true });
+  });
+
+  it("F6 cost record: API key usage comes from the page, live is unknown; no_voice is recorded; cost is always unknown", async () => {
+    const t = wakeSetup("api_key");
+    const d = t.sessions.start("sse_a", "wake_word", "zh-TW", false, "int_00000000000000cc");
+    if (!d.ok) throw new Error("start");
+    await t.sessions.call("v=0", d.session_id, d.owner);
+    t.clock.now += 7_250;
+    const usage = { ...emptyVoiceUsage(), responses: 2, input_tokens: 120, output_tokens: 80, total_tokens: 200 };
+    await t.sessions.end(d.session_id, d.owner, { reason: "no_voice", usage });
+    await t.sessions.end(d.session_id, d.owner, { reason: "no_voice", usage }); // 重複結束不重複記
+    expect(t.records).toEqual([
+      {
+        v: 1,
+        session_id: d.session_id,
+        route: "api_key",
+        model: "gpt-realtime",
+        source: "wake_word",
+        wake_id: "int_00000000000000cc",
+        started_at: new Date(1_000_000).toISOString(),
+        ended_at: new Date(1_007_250).toISOString(),
+        connected: true,
+        connected_ms: 7_250,
+        end_reason: "no_voice",
+        no_voice_auto_end: true,
+        usage,
+        cost: "unknown",
+      },
+    ]);
+    const u = wakeSetup("live");
+    const e = u.sessions.start("sse_a", "user", "zh-TW", false, "int_00000000000000dd");
+    if (!e.ok) throw new Error("start");
+    await u.sessions.call("v=0", e.session_id, e.owner);
+    await u.sessions.end(e.session_id, e.owner, { usage });
+    expect(u.records).toMatchObject([{ route: "live", source: "user", wake_id: null, usage: "unknown", no_voice_auto_end: false, end_reason: "ended", cost: "unknown" }]);
+    // 紀錄裡沒有逐字稿、音訊或名字這類欄位
+    expect(Object.keys(u.records[0]!).sort()).toEqual(["connected", "connected_ms", "cost", "end_reason", "ended_at", "model", "no_voice_auto_end", "route", "session_id", "source", "started_at", "usage", "v", "wake_id"]);
+  });
+
+  it("wakeGreetingOpen only while the start is pending/connecting or connected within GREETING_CLAIM_MS; never after a page abort or a failed connect without fallback", async () => {
+    const t = wakeSetup("live");
+    const d = t.sessions.start("sse_a", "wake_word");
+    if (!d.ok) throw new Error("start");
+    expect(t.sessions.wakeGreetingOpen()).toBe(true); // 開始的決定還在
+    await t.sessions.end(d.session_id, d.owner); // 頁面在送 offer 前放棄
+    expect(t.sessions.wakeGreetingOpen()).toBe(false);
+    await expect(t.sessions.call("v=0", d.session_id, d.owner)).rejects.toBeInstanceOf(SessionError);
+
+    const e = t.sessions.start("sse_a", "wake_word");
+    if (!e.ok || !e.interaction) throw new Error("start");
+    await t.sessions.call("v=0", e.session_id, e.owner);
+    t.clock.now += GREETING_CLAIM_MS + 1;
+    expect(t.sessions.wakeGreetingOpen()).toBe(false); // 連上超過 20 秒
+    await t.sessions.end(e.session_id, e.owner);
+
+    const f = wakeSetup("live");
+    f.live.fail = new RouteStartError("model_rejected", 400, "model（fixture）", false);
+    const g = f.sessions.start("sse_a", "wake_word");
+    if (!g.ok) throw new Error("start");
+    await expect(f.sessions.call("v=0", g.session_id, g.owner)).rejects.toBeInstanceOf(RouteStartError);
+    expect(f.sessions.wakeGreetingOpen()).toBe(false); // 連線失敗、沒有改路徑
+  });
+
+  it("a live no_voice end that arrives after the core already saw closed amends the same record", async () => {
+    const t = wakeSetup("live");
+    const amended: VoiceCostRecord[] = [];
+    (t.sessions as unknown as { options: { costLog: { amend(r: VoiceCostRecord): void } } }).options.costLog.amend = (r) => void amended.push(r);
+    const d = t.sessions.start("sse_a", "wake_word", "zh-TW", false, "int_00000000000000ab");
+    if (!d.ok) throw new Error("start");
+    await t.sessions.call("v=0", d.session_id, d.owner);
+    t.live.ctx!.emit({ kind: "closed", reason: "connection_lost", message: "斷線" } as never);
+    expect(t.records).toMatchObject([{ end_reason: "connection_lost", no_voice_auto_end: false }]);
+    await t.sessions.end(d.session_id, "own_wrongwrongwrongwrongwrong", { reason: "no_voice" }); // 別人的憑證：不改
+    expect(amended).toEqual([]);
+    await t.sessions.end(d.session_id, d.owner, { reason: "no_voice" });
+    expect(amended).toMatchObject([{ session_id: d.session_id, end_reason: "no_voice", no_voice_auto_end: true, usage: "unknown", wake_id: "int_00000000000000ab" }]);
+    await t.sessions.end(d.session_id, d.owner, { reason: "no_voice" }); // 只補一次
+    expect(amended).toHaveLength(1);
+    // 超過補記時限就不改
+    const u = wakeSetup("live");
+    const late: VoiceCostRecord[] = [];
+    (u.sessions as unknown as { options: { costLog: { amend(r: VoiceCostRecord): void } } }).options.costLog.amend = (r) => void late.push(r);
+    const e = u.sessions.start("sse_a", "wake_word");
+    if (!e.ok) throw new Error("start");
+    await u.sessions.call("v=0", e.session_id, e.owner);
+    u.live.ctx!.emit({ kind: "closed", reason: "connection_lost", message: "斷線" } as never);
+    u.clock.now += COST_AMEND_GRACE_MS + 1;
+    await u.sessions.end(e.session_id, e.owner, { reason: "no_voice" });
+    expect(late).toEqual([]);
+  });
+
+  it("a page that goes away and a live closed event are recorded with the core's own reason", async () => {
+    const t = wakeSetup("live");
+    const d = t.sessions.start("sse_a", "user");
+    if (!d.ok) throw new Error("start");
+    await t.sessions.call("v=0", d.session_id, d.owner);
+    t.sessions.clientClosed("sse_a");
+    const e = t.sessions.start("sse_b", "user");
+    if (!e.ok) throw new Error("start");
+    await t.sessions.call("v=0", e.session_id, e.owner);
+    t.live.ctx!.emit({ kind: "closed", reason: "expired", message: "到期" } as never);
+    expect(t.records.map((r) => r.end_reason)).toEqual(["page_gone", "expired"]);
+  });
+});
+
+describe("WK-02 POST /api/realtime/start: wake_word only with NOUS_WAKE on", () => {
+  const servers: Server[] = [];
+  afterEach(async () => {
+    await Promise.all(servers.splice(0).map((s) => new Promise<void>((r) => s.close(() => r()))));
+  });
+
+  async function app(wakeOn: boolean) {
+    const store = new TaskStore(null);
+    const dir = mkdtempSync(join(tmpdir(), "nous-wake-start-"));
+    const auth = new ChatGPTAuth({ dir, callbackPort: 0, onChange: () => {} });
+    const providers = new ProviderManager({ claude: null, chatgpt: new ChatGPTExecutor(auth, { model: null }), mock: new MockExecutor(1), auth, dir, preferred: "mock", onChange: () => {} });
+    const runner = new TaskRunner(store, providers);
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const records: VoiceCostRecord[] = [];
+    const costLog = { record: (r: VoiceCostRecord) => void records.push(r), list: () => records.slice().reverse() } as unknown as VoiceCostLog;
+    const wake = { view: () => ({ wake_listen: true, device_id: null }), update: () => ({ wake_listen: true, device_id: null }), runtime: () => "missing" as const };
+    const probe = createNetServer();
+    await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
+    const port = (probe.address() as AddressInfo).port;
+    await new Promise((r) => probe.close(r));
+    const server = createApp({ store, runner, settings: providers, auth, chat: providers, realtimeRoutes: { api_key: key }, voiceCostLog: costLog, ...(wakeOn ? { wake } : {}), port, devPort: 5173, distDir: null });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
+    const base = `http://localhost:${port}`;
+    const post = async (path: string, body: unknown) => (await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json() as Promise<Record<string, unknown>>;
+    return { base, post, records };
+  }
+
+  it("flag off: wake_word is treated as user (no interaction ID, no rate limit, wake_id ignored); F6 cost records still cover every call (George 2026-10-31: always on)", async () => {
+    const a = await app(false);
+    for (let i = 0; i < 5; i++) {
+      const d = await a.post("/api/realtime/start", { source: "wake_word", wake_id: "int_00000000000000ee" });
+      expect(d).toMatchObject({ ok: true, interaction: null });
+      await a.post("/api/realtime/call", { sdp: "v=0 offer", session_id: d.session_id, owner: d.owner });
+      await a.post("/api/realtime/end", { session_id: d.session_id, owner: d.owner, reason: "no_voice", usage: { input_tokens: 5 } });
+    }
+    expect(a.records).toHaveLength(5);
+    expect(a.records.every((r) => r.source === "user" && r.wake_id === null && r.end_reason === "no_voice")).toBe(true);
+    expect(a.records[0]!.usage).toMatchObject({ input_tokens: 5 });
+    expect((await fetch(`${a.base}/api/realtime/cost-records`)).status).toBe(200);
+  });
+
+  it("flag on: wake_word gets an interaction ID and the 4th start in a minute is refused; a bad wake_id is dropped", async () => {
+    const a = await app(true);
+    const first = await a.post("/api/realtime/start", { source: "wake_word", wake_id: "not a wake id" });
+    expect(first).toMatchObject({ ok: true, interaction: expect.stringMatching(/^int_[0-9a-f]{16}$/) });
+    await a.post("/api/realtime/call", { sdp: "v=0 offer", session_id: first.session_id, owner: first.owner });
+    // /end：不認得的原因與欄位丟掉，usage 只取認得的數字並截上限
+    await a.post("/api/realtime/end", { session_id: first.session_id, owner: first.owner, reason: "hacked", usage: { input_tokens: 5, output_tokens: 1e12, transcript: "秘密", total_tokens: -1 } });
+    expect(a.records).toHaveLength(1);
+    expect(a.records[0]).toMatchObject({ source: "wake_word", wake_id: null, end_reason: "ended", no_voice_auto_end: false, usage: { input_tokens: 5, output_tokens: VOICE_USAGE_CAP, total_tokens: 0, responses: 0 } });
+    expect(JSON.stringify(a.records[0])).not.toContain("秘密");
+    await a.post("/api/realtime/start", { source: "wake_word" });
+    await a.post("/api/realtime/start", { source: "wake_word" });
+    const fourth = await a.post("/api/realtime/start", { source: "wake_word" });
+    expect(fourth).toMatchObject({ ok: false, wake_limited: true, retry_after_ms: expect.any(Number) });
+    const records = (await (await fetch(`${a.base}/api/realtime/cost-records?limit=5`)).json()) as { records: unknown[] };
+    expect(records.records).toHaveLength(1);
   });
 });
