@@ -1,5 +1,5 @@
 import type { HomeControlResult } from "../shared/home.ts";
-import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type HostCall, type LiveCoreEvent, type StopEvidence } from "../shared/realtime-route.ts";
+import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type HostCall, type LiveCoreEvent, type StopEvidence, type StopReplyTurn } from "../shared/realtime-route.ts";
 import type { HomeControlArgs } from "./api.ts";
 import { CONNECTING_SPEECH_HINT, EARLY_SPEECH_RMS, EarlySpeech, earlySpeechLogLine } from "./early-speech.ts";
 import { GREETING_SETTLE_MS, type GreetingOnce } from "./realtime-session.ts";
@@ -25,7 +25,15 @@ export type RealtimePhase = "off" | "connecting" | "listening" | "hearing" | "th
 export interface RealtimeCallbacks {
   onPhase(phase: RealtimePhase): void;
   onUserTranscript(text: string): void;
+  /**
+   * HIST-1 Mac F1：使用者自己的 final 逐字稿（onUserTranscript 之後、同一則事件）。回傳 true＝Nous 已在本機執行畫面指令
+   * （src/voice-command.ts），這一輪的模型回答要不出聲：API key 路徑取消回應（同手掌停止），ChatGPT 方案路徑把播放靜音到下一輪。
+   * 助理逐字稿、未完成的逐字稿不會進來。沒有提供時行為和之前相同。
+   */
+  onLocalCommand?(text: string): boolean;
   onAssistantTranscript(text: string): void;
+  /** HIST-1 Mac F1（審查 M3）：助理說到一半的文字片段（只給本機指令的回音判斷；不顯示）。 */
+  onAssistantPartial?(text: string): void;
   /** 模型決定交辦工作；回傳的內容會交還給模型，讓它用一句話告訴使用者。 */
   onDelegate(title: string): Promise<Record<string, unknown>>;
   onGetTasks(): Promise<Record<string, unknown>>;
@@ -97,7 +105,8 @@ export interface RealtimeCoreDeps {
   /** 說出結束原因（瀏覽器語音合成）。 */
   speak(text: string): void;
   /** F7：POST /api/realtime/stop-reply：手掌停止，核心旁路上這一輪還沒回來的工具結果不再請模型念出。 */
-  stopReply?(): Promise<void>;
+  /** turn：HIST-1 Mac F1 的本機畫面指令，只有這一輪（審查 M1）；沒有時是手掌停止。 */
+  stopReply?(turn?: StopReplyTurn): Promise<void>;
   /** 記憶事件（狀態、卡片 ID、固定句提示、交辦封鎖）交給主程式顯示；內容由主程式經 IPC 取得。 */
   memoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void;
   /** 停播並回報之後：顯示原因、清掉字幕與卡片；rebuild 而且核心採用了回報時主程式開一通新的（只一次）。 */
@@ -196,6 +205,16 @@ export class RealtimeVoice {
    * response.created 一建立就取消。使用者再開口、打字或系統通知時解除。
    */
   private cancelNextCreated = false;
+  /** HIST-1 Mac F1：這一輪是本機畫面指令（到下一輪為止）：被取消的回應的助理逐字稿不顯示。 */
+  private localCommandTurn = false;
+  /** HIST-1 Mac F1（審查 M1）：這一輪的回應還沒建立：下一個沒有核心標記的 response.created 一建立就取消（只它一個）。 */
+  private localCancelNext = false;
+  /** 下指令時頁面自己已經送出、還沒建立的請求（例如之前各輪工具的接續回應）：它建立時不取消，取消再下一個。 */
+  private localSkipOwn = false;
+  /** HIST-1 Mac F1（審查 minor 3）：這一輪（使用者開口、打字或通知之後）已經建立過沒有核心標記的回應。 */
+  private turnResponseSeen = false;
+  /** HIST-1 Mac F1（審查 M1）：最近一個回應建立之前，之前各輪的工具還要不要請模型接著說（取消這一輪的回應時還原）。 */
+  private carried = { functions: false, mcp: false };
   /** F1（審查 minor 6）：問候那一輪的 response.create 的 event_id 與指示；上游拒絕新參數時只退回一次。 */
   private greetRequest: { eventId: string; instructions: string } | null = null;
   private greetSeq = 0;
@@ -380,6 +399,40 @@ export class RealtimeVoice {
     void this.deps.core?.stopReply?.().catch(() => undefined);
   }
 
+  /**
+   * HIST-1 Mac F1：使用者說的是本機畫面指令（已由主程式執行）。重用手掌停止（stopReply）：取消這一輪已建立的回應、
+   * 還沒建立的（伺服器 VAD 正要回答）一建立就取消，這一輪的工具結果只交回、不念出；核心旁路也一樣（POST stop-reply）。
+   * 逐字稿在模型已經念完之後才到時，已經念出的部分無法收回（殘餘風險，見 docs/validation/history-hist1-mac-2026-10-31.md）。
+   */
+  private quietLocalCommand(): void {
+    if (!this.capturing) return;
+    this.localCommandTurn = true;
+    const current = this.turnResponseSeen ? this.currentResponse : null;
+    if (this.turnResponseSeen && !current) {
+      // 審查 minor 3：這一輪的回應已經結束（逐字稿晚到）：只開畫面，不取消之後的任何回應。
+      console.info("[realtime] 本機畫面指令：這一輪的回應已經結束，只打開畫面");
+      return;
+    }
+    // 審查 M1：只停這一輪的回應，不是手掌停止：不加 replyEpoch、不清掉之前各輪的工具（它們回來時照常請模型念出）。
+    // 這一輪沒有 response_id 的工具呼叫（之後才到）也算這一輪的。
+    this.quietTurn = true;
+    if (current) {
+      this.stoppedResponses.add(current);
+      while (this.stoppedResponses.size > 64) this.stoppedResponses.delete(this.stoppedResponses.values().next().value!);
+      // 這個回應建立時清掉了之前各輪的「要接著說」：它被取消，不會涵蓋那些結果，還原。
+      this.functionsCalled = this.carried.functions;
+      this.mcpCalled = this.carried.mcp;
+      this.send({ type: "response.cancel", response_id: current });
+      this.send({ type: "output_audio_buffer.clear" });
+    } else {
+      this.localCancelNext = true;
+      this.localSkipOwn = this.awaitingCreated;
+    }
+    if (this.phase === "speaking" || this.phase === "thinking") this.setPhase("listening");
+    console.info("[realtime] 本機畫面指令：這一輪不請模型回答");
+    void this.deps.core?.stopReply?.({ scope: "turn", response_id: current }).catch(() => undefined);
+  }
+
   /** 打字輸入：當成使用者這一輪說的話送出。連線中打的先排隊，session.created 之後送出。打字一律取消還沒送出的招呼。 */
   sendText(text: string): void {
     this.skipGreeting();
@@ -417,6 +470,10 @@ export class RealtimeVoice {
   private newTurn(): void {
     this.quietTurn = false;
     this.cancelNextCreated = false;
+    this.localCommandTurn = false;
+    this.localCancelNext = false;
+    this.localSkipOwn = false;
+    this.turnResponseSeen = false;
   }
 
   private sendNotice(text: string): void {
@@ -494,7 +551,10 @@ export class RealtimeVoice {
         break;
       case "conversation.item.input_audio_transcription.completed":
         if (typeof event.transcript === "string" && event.transcript.trim()) {
-          this.callbacks.onUserTranscript(event.transcript.trim());
+          const transcript = event.transcript.trim();
+          this.callbacks.onUserTranscript(transcript);
+          // HIST-1 Mac F1：本機已執行畫面指令：這一輪不讓模型回答（伺服器 VAD 已建立或正要建立的回應一併取消）。
+          if (this.callbacks.onLocalCommand?.(transcript)) this.quietLocalCommand();
           this.checkApproval(event.transcript);
         }
         break;
@@ -502,8 +562,25 @@ export class RealtimeVoice {
         const response = event.response as { id?: unknown; metadata?: { nous_trigger?: unknown } | null } | undefined;
         const id = typeof response?.id === "string" ? response.id : null;
         this.currentResponse = id;
+        const untagged = typeof response?.metadata?.nous_trigger !== "string";
+        if (untagged) this.turnResponseSeen = true;
+        // HIST-1 Mac F1（審查 M1）：本機畫面指令那一輪還沒建立的回應：一建立就取消。它不會涵蓋之前各輪的工具結果，
+        // 所以「要接著說」不清掉（那些結果回來時照常請模型念出）。
+        if (this.localCancelNext && untagged && this.localSkipOwn) {
+          // 頁面自己先送出的請求（之前各輪的接續）：照常，不取消。
+          this.localSkipOwn = false;
+        } else if (this.localCancelNext && untagged) {
+          this.localCancelNext = false;
+          if (id) this.stoppedResponses.add(id);
+          this.send({ type: "response.cancel", ...(id ? { response_id: id } : {}) });
+          this.send({ type: "output_audio_buffer.clear" });
+          this.responding = true;
+          this.awaitingCreated = false;
+          break;
+        }
+        this.carried = { functions: this.functionsCalled, mcp: this.mcpCalled };
         // F7：停止時還沒建立的那一個（沒有核心標記；核心自己的接續回應由核心處理）：一建立就取消，它的工具結果也不念。
-        if (this.cancelNextCreated && typeof response?.metadata?.nous_trigger !== "string") {
+        if (this.cancelNextCreated && untagged) {
           this.cancelNextCreated = false;
           if (id) this.stoppedResponses.add(id);
           this.send({ type: "response.cancel", ...(id ? { response_id: id } : {}) });
@@ -527,7 +604,12 @@ export class RealtimeVoice {
         if (this.phase === "speaking") this.setPhase(this.responding ? "thinking" : "listening");
         if (this.endRequested && !this.responding) this.close("對話已結束。");
         break;
+      case "response.output_audio_transcript.delta":
+        if (typeof event.delta === "string" && event.delta) this.callbacks.onAssistantPartial?.(event.delta);
+        break;
       case "response.output_audio_transcript.done":
+        // HIST-1 Mac F1：本機指令那一輪被取消的回應（取消前已產生的半句）不顯示字幕。
+        if (this.localCommandTurn && this.isStopped(typeof event.response_id === "string" ? event.response_id : null)) break;
         if (typeof event.transcript === "string" && event.transcript.trim()) this.callbacks.onAssistantTranscript(event.transcript.trim());
         break;
       case "response.function_call_arguments.done": {

@@ -29,6 +29,7 @@ import { activityDescription, collectRegionActivity, type RegionActivity } from 
 import { formatCount } from "./format.ts";
 import { homeControlLine, homeStatusLine } from "../shared/home.ts";
 import { classify, settingsReply } from "./intent.ts";
+import { RealtimeLocalCommands } from "./voice-command.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
@@ -225,14 +226,39 @@ let pendingConsent: ConsentKind = "push";
 // 與 OpenAI API key（gpt-realtime）。路徑在開始時由本機核心決定（/api/realtime/start），之後不中途換。
 /** 即時語音中交辦的任務：完成時請模型用語音轉告。 */
 const realtimeTaskIds = new Set<string>();
+/**
+ * HIST-1 Mac F1：即時語音中使用者自己說的畫面指令（「進度如何」「看結果」「搜尋成果 晚餐」「收起」），和打字一樣在本機打開或關掉畫面：
+ * 每一則逐字稿事件用 userRequest() 登記一個真實的請求 id（user_request）。只開關畫面，不停止任務、不結束通話。
+ */
+const realtimeCommands = new RealtimeLocalCommands({
+  userRequest,
+  dispatch,
+  openHistory: (requestId, query) => openHistory(requestId, query),
+  latestArtifact: () => {
+    const task = latestArtifactTask();
+    return task?.artifact_id ? { task_id: task.task_id, artifact_id: task.artifact_id } : null;
+  },
+  // 確認卡開著時換畫面＝拒絕：進度、成果、成果紀錄交給模型（「收起」仍和 Esc 一樣關掉並拒絕）。
+  confirmOpen: () => shell.surface?.kind === "confirm",
+});
 /** 兩條路徑共用的 callbacks（工具、字幕、確認卡、腦區光脈衝都在這裡）：只建一次。 */
 const realtimeCallbacks: RealtimeCallbacks = {
-  onPhase: renderRealtimeState,
+  onPhase: (phase) => {
+    // HIST-1 Mac F1（審查 M3）：播放與開口的時間給本機指令的回音判斷。
+    realtimeCommands.notePhase(phase);
+    renderRealtimeState(phase);
+  },
   onUserTranscript: (text) => {
     showTranscript("user", text);
     handleCameraCommand(text);
   },
-  onAssistantTranscript: (text) => showTranscript("assistant", text),
+  // 鏡頭指令照舊（本機照做、這句話仍送到 AI）；其他只有整句是明確的畫面指令、而且不是剛才助理念的話（回音）才在本機執行。
+  onLocalCommand: (text) => matchCameraCommand(text) === null && realtimeCommands.handle(text) !== null,
+  onAssistantPartial: (text) => realtimeCommands.noteAssistantPartial(text),
+  onAssistantTranscript: (text) => {
+    realtimeCommands.noteAssistant(text);
+    showTranscript("assistant", text);
+  },
   onDelegate: delegateFromRealtime,
   // MEM-4a：App 裡由核心依這條路徑的記憶同意給真實標題或外殼（George 2026-10-30）；瀏覽器版照舊。
   onGetTasks: async () => ({ ok: true, tasks: protectedTasks.available ? taskSummary(await protectedTasks.voiceTasks(realtimeTicket?.route === "live" ? "live" : "api_key")) : taskSummary() }),
@@ -244,6 +270,7 @@ const realtimeCallbacks: RealtimeCallbacks = {
   onApprovalResolved: closeApproval,
   onToolActivity: (text) => showSubtitle(text),
   onClosed: (reason) => {
+    realtimeCommands.reset();
     ambient.endInteraction();
     endRealtimeTicket();
     sense.conversationEnded();
@@ -417,6 +444,7 @@ function endRealtimeTicket(): void {
 }
 
 function stopRealtime(): void {
+  realtimeCommands.reset();
   ambient.endInteraction();
   realtimeStart?.abort();
   realtimeStart = null;

@@ -370,6 +370,31 @@ describe.skipIf(!realLockAvailable)("MEM-3 core tools on the sideband", () => {
     expect(t.conn.received.filter((e) => e.type === "response.create")).toEqual([]);
   });
 
+  it("HIST-1 F1 review M1：a turn-scoped stop (spoken local command) silences only that turn's response; an earlier turn's late delegate_task is still spoken", async () => {
+    const h = await unpinned();
+    const t = await startCall(h);
+    ga.speechStarted(t.conn);
+    t.conn.send({ type: "response.created", response: { id: "resp_1" } });
+    t.conn.send({ type: "response.function_call_arguments.done", name: "delegate_task", call_id: "call_1", response_id: "resp_1", arguments: JSON.stringify({ title: "寫週報" }) });
+    t.conn.send({ type: "response.done", response: { id: "resp_1", status: "completed" } });
+    await until(() => t.probe.hostCalls.length === 1);
+    // 下一輪：使用者說「进度如何」，頁面取消這一輪的 resp_2 並回報 scope turn。
+    ga.speechStarted(t.conn);
+    t.conn.send({ type: "response.created", response: { id: "resp_2" } });
+    t.conn.send({ type: "response.function_call_arguments.done", name: "delegate_task", call_id: "call_2", response_id: "resp_2", arguments: JSON.stringify({ title: "查進度" }) });
+    await until(() => t.probe.hostCalls.length === 2);
+    t.call.stopReply!({ scope: "turn", response_id: "resp_2" });
+    t.conn.send({ type: "response.done", response: { id: "resp_2", status: "cancelled" } });
+    // 這一輪的結果：只交回、不念。
+    t.probe.hostCalls[1]!.resolve({ ok: true, status: "queued" });
+    await t.conn.waitFor((e) => e.type === "conversation.item.create" && (e.item as { call_id?: string }).call_id === "call_2");
+    await new Promise((r) => setTimeout(r, 40));
+    expect(t.conn.received.filter((e) => e.type === "response.create")).toEqual([]);
+    // 之前那一輪的結果：照常請模型念出。
+    t.probe.hostCalls[0]!.resolve({ ok: true, status: "queued" });
+    await until(() => t.conn.received.filter((e) => e.type === "response.create").length === 1);
+  });
+
   it("F7 review minor 3：a system notice after the stop is a new response; its core tool result is spoken", async () => {
     const h = await unpinned();
     const t = await startCall(h);

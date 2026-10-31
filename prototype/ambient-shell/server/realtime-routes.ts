@@ -23,6 +23,7 @@ import {
   type RoutePreference,
   type StartDecision,
   type StopEvidence,
+  type StopReplyTurn,
   LIVE_STOP_REPORT_MS,
   type UnavailableReason,
   type CallAnswer,
@@ -111,7 +112,7 @@ export interface RouteCall {
    * F7（ID-02 Mac 2026-10-31）：頁面回報手掌停止（停止回覆）：這一輪還沒回來的工具／交辦結果不再請模型念出
    * （只交回當背景）。不中止工具、不取消背景任務、不結束通話。
    */
-  stopReply?(): void;
+  stopReply?(turn?: StopReplyTurn): void;
 }
 
 /** live 路徑上頁面 → 模型的輸入；sideband 是唯一寫給模型的管道。 */
@@ -504,9 +505,9 @@ export class RealtimeSessions {
   }
 
   /** F7：POST /api/realtime/stop-reply：手掌停止（停止回覆）。兩條路徑都收；沒有核心控制面的通話沒有事要做。 */
-  stopReply(sessionId: string, owner: string): void {
+  stopReply(sessionId: string, owner: string, turn?: StopReplyTurn): void {
     const session = this.owned(sessionId, owner);
-    session.call?.stopReply?.();
+    session.call?.stopReply?.(turn);
   }
 
   private decide(plan: Extract<StartPlan, { kind: "start" }>, route: RouteId, clientId: string | null, interaction: string | null = null, locale: Locale = "zh-TW", rebuild = false): Decision {

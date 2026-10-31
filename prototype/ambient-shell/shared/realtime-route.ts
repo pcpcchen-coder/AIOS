@@ -212,6 +212,18 @@ export interface CallAnswer {
 export const LIVE_STOP_REPORT_MS = 1_500;
 
 /** 頁面停播後的核對結果（POST /api/realtime/stopped）：只有布林值與毫秒數，沒有任何內容。 */
+/**
+ * HIST-1 Mac F1（審查 M1）：本機畫面指令只讓「這一則逐字稿的那一輪」不出聲，不是手掌停止（之前各輪還沒回來的結果照常念）。
+ * response_id：頁面取消的那個回應；null＝這一輪的回應還沒建立（下一個沒有核心標記的回應才算）。只有 API key 路徑用得到它。
+ */
+export interface StopReplyTurn {
+  scope: "turn";
+  response_id: string | null;
+}
+
+/** POST /api/realtime/stop-reply 的 response_id：上游的回應 ID 形狀（只用來對照，不轉出）。 */
+export const STOP_REPLY_RESPONSE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
 export interface StopEvidence {
   paused: boolean;
   peer_closed: boolean;

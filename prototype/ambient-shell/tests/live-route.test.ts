@@ -598,6 +598,38 @@ describe("ID-02 Mac fixes on the live wire (fixture sideband)", () => {
     expect(appended(conn, "delegation.context.append").at(-1)).toEqual(["speakable", "查到了：查台北天氣"]);
   });
 
+  it("HIST-1 F1 review M1 (NOUS_PALM_QUIET_DELEGATION on)：a turn-scoped stop only quiets that turn's delegation; an earlier turn's result is still speakable", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = await setup({
+      runner: async (req) => {
+        if (req.id === "del_1") await gate;
+        return { ok: true, channel: "speakable", text: `查到了：${req.text}`, tools: [] };
+      },
+      palmQuiet: true,
+    });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "session.started", session: {} });
+    conn.send({ type: "input_audio_buffer.speech_started" });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "新竹天氣如何", id: "u1" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_1", content: [{ type: "input_text", text: "查新竹天氣" }] } });
+    while (t.delegations.length < 1) await later();
+    // 下一輪：「进度如何」是本機指令，頁面回報 scope turn。
+    conn.send({ type: "input_audio_buffer.speech_started" });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "进度如何", id: "u2" } });
+    // 頁面是在收到這一則逐字稿之後才回報（核心已經看過它）。
+    while (!t.events.some((e) => e.kind === "transcript" && e.text === "进度如何" && e.final)) await later();
+    call.stopReply!({ scope: "turn", response_id: null });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_2", content: [{ type: "input_text", text: "查進度" }] } });
+    release();
+    await conn.waitFor((e) => e.type === "delegation.context.append" && e.delegation_item_id === "del_2");
+    const appends = conn.received.filter((e) => e.type === "delegation.context.append").map((e) => [e.delegation_item_id, e.channel]);
+    expect(appends).toContainEqual(["del_1", "speakable"]);
+    expect(appends).toContainEqual(["del_2", "commentary"]);
+  });
+
   it("F7 (NOUS_PALM_QUIET_DELEGATION on)：the abort signal handed to the delegation is not aborted by a palm stop (background work keeps running)", async () => {
     let seen: AbortSignal | null = null;
     let release!: () => void;
