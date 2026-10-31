@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-30T18:09:37.013Z",
+  "updated_at": "2026-10-31T06:53:31.849Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261031065329-9354a0",
+      "title": "WK-01 本機喚醒詞基礎",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-10-31T06:53:29.953Z",
+      "started_at": "2026-10-31T06:53:29.952Z",
+      "ended_at": null,
+      "branch": "",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 8,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261030171921-c09a4d",
