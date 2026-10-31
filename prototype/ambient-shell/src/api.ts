@@ -85,6 +85,8 @@ export const api = {
   /** MEM-2：記憶撤銷後停播並核對的證據（只有布林值與毫秒數）。 */
   /** MEM-3：API key 路徑的頁面在資料通道收到播放結束（沒有內容、沒有時間戳）。 */
   realtimePlayback: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/playback", { ...ticket }),
+  /** F7：手掌停止（停止回覆）：核心把這一輪還沒回來的工具結果改成不念出（任務照常）。 */
+  realtimeStopReply: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/stop-reply", { ...ticket }),
   realtimeStopped: (ticket: RealtimeTicket, evidence: StopEvidence) => call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/stopped", { ...ticket, evidence }),
   /** 路徑偏好與 ChatGPT 方案路徑的聲音；下一次開始才生效。 */
   updateRealtime: (patch: RealtimePrefsPatch) => call<SettingsView>("POST", "/api/settings/realtime", patch),

@@ -139,6 +139,7 @@
   "這是帳號與登入；鏡頭、秒數與引擎在選單列的 Nous 圖示裡。": "This is Accounts and sign-in. Camera, timeouts, and engines are in the Nous menu bar.",
   "結束對話": "End conversation",
   "已靜音這段回覆": "This reply is muted",
+  "還在連線，請稍後再說一次": "Still connecting — please say it again",
   "{0}（{1}沒有在時限內回報）": "{0} ({1} did not report before the deadline)",
   "家電指令": "Home command",
   "交辦工作": "Delegated work",

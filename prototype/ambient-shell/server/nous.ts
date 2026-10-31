@@ -222,6 +222,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
     // 看著說話的問候（ID-02）：頁面只帶互動 ID，短句由家人辨識的核心決策組成；瀏覽器版（沒有 identity）一律「我在」。
     greeting: liveGreetingSource(() => identity, greetings),
+    palmQuietDelegation: config.palmQuietDelegation,
     log,
   });
   // MEM-3：API key 即時語音的記憶（核心旁路，server/apikey-call.ts）。放行旗標（NOUS_MEMORY_ROUTES）沒開時 binding 一律 route_off，
@@ -354,6 +355,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     camera,
     faceTuning,
     voice,
+    ...(config.earlySpeechRms !== null ? { earlySpeechRms: config.earlySpeechRms } : {}),
     identity: identity ?? undefined,
     memory: memory ?? undefined,
     faceRuntimeDir,

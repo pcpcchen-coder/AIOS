@@ -159,6 +159,8 @@ export interface RealtimeBaseInfo {
   home?: boolean;
   /** 可用與否的說明，例如「未設定 OPENAI_API_KEY」。 */
   detail: string;
+  /** F2／F10：本機開口偵測的 RMS 門檻（NOUS_EARLY_SPEECH_RMS）；沒有設定時不帶，頁面用預設值。 */
+  early_speech_rms?: number;
 }
 
 /**

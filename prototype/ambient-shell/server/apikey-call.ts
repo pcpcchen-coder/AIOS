@@ -93,6 +93,19 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
   /** 問候（頁面送出）之後才問臉部候選：armed＝核心知道要問候了；inflight＝問候那一輪已開始。 */
   private greeting: { named: boolean; phase: "armed" | "inflight" } | null = null;
   private readonly unhandled = new Set<string>();
+  /** F7：使用者的第幾輪（旁路的 speech_started、打字或通知項目各算一輪）；沒有 response_id 的工具呼叫才用它判斷。 */
+  private turn = 0;
+  /** F7：停止回覆時的輪次；沒有 response_id 時，這一輪與之前的工具結果只交回、不念（用「≤」，見 LiveCall.quietThrough）。 */
+  private quietThrough = -1;
+  /**
+   * F7：停止回覆時已經建立的回應（以及停止後、使用者下一句之前才建立、沒有核心標記的那一個：頁面會取消它）。
+   * 工具結果依觸發它的 response_id 判斷要不要念，不受停止前後開口的先後影響；停止之後的通知、使用者的下一句是新的回應，照常念。
+   */
+  private readonly quietResponses = new Set<string>();
+  /** 停止回覆之後，下一個沒有核心標記的 response.created 也算被停止的（頁面在那之前已送出的請求，頁面會取消它）。 */
+  private quietNext = false;
+  /** 停止回覆時已送出、還沒建立的核心接續回應（core_tag）：建立時由核心取消，它的工具結果也不念。 */
+  private readonly quietTags = new Set<string>();
 
   constructor(
     readonly answerSdp: string,
@@ -143,6 +156,8 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
         }
         break;
       case "speech_started":
+        this.turn++;
+        this.quietNext = false;
         this.memory.onUserSpeechStart(this.ctx.now());
         break;
       case "user_final":
@@ -164,6 +179,8 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
         // typed／system：頁面打字、通知或背景資料，不是語音，不解析成記憶指令（和 MEM-2 打字不解析一致）。
         // 打字之後，之前的語音原句不再是「觸發交辦的那一句」：交辦卡不顯示過時的原句。
         if (event.source === "typed") {
+          this.turn++;
+          this.quietNext = false;
           this.lastUserFinal = null;
           // MEM-4b：打字之後，之前的語音原句都不能再當交辦原句；接著的回應不是語音觸發。
           this.lastInput = { kind: "typed" };
@@ -174,6 +191,13 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
         if (event.phase === "created") {
           this.responding = true;
           this.noteTrigger(event.response_id, event.core_tag);
+          if (this.quietNext && event.core_tag === null) {
+            this.quietNext = false;
+            if (event.response_id) this.quietResponses.add(event.response_id);
+          } else if (event.core_tag !== null && this.quietTags.delete(event.core_tag)) {
+            if (event.response_id) this.quietResponses.add(event.response_id);
+            this.send({ type: "response.cancel", ...(event.response_id ? { response_id: event.response_id } : {}) });
+          }
           if (this.greeting?.phase === "armed") this.greeting.phase = "inflight";
         } else {
           this.responding = false;
@@ -234,6 +258,9 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
   /** 核心處理的工具（recall_memory、delegate_task）：結果經旁路交回，再請模型接著說。 */
   private async coreTool(name: CoreToolName, callId: string, rawArgs: string, responseId: string | null = null): Promise<void> {
     const arrivedAt = this.ctx.now();
+    const turn = this.turn;
+    /** F7：觸發這個工具的回應在停止回覆時已經存在（或是被頁面取消的那一個）。沒有 response_id 時退回輪次。 */
+    const quiet = () => (responseId ? this.quietResponses.has(responseId) : turn <= this.quietThrough);
     /** MEM-4b：觸發這個回應的使用者項目（沒有 response_id 或找不到時 null：沒有可信的語音）。 */
     const trigger = responseId ? this.triggers.get(responseId) ?? null : null;
     let args: Record<string, unknown> = {};
@@ -288,7 +315,31 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
     }
     if (this.ended || this.revoked) return;
     this.send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: callId, output: JSON.stringify(output) } });
+    // F7：這一輪被手掌停止了：結果只交回模型當背景，不請模型接著念（交辦的任務照常執行）。
+    if (quiet()) {
+      this.deps.log?.(`即時語音（API key）：停止回覆之後才回來的 ${name} 結果，只交回、不念出`);
+      return;
+    }
     this.enqueueSpeak({ response: null, trigger });
+  }
+
+  /**
+   * F7：頁面回報手掌停止（停止回覆；頁面同時送 response.cancel）。這一輪還沒回來的核心工具結果之後只交回、不念出；
+   * 已經排隊、還沒送出的工具接續回應丟掉。核心自己的固定句（記憶確認）不在此列；工具與交辦的任務都不中止。
+   */
+  stopReply(): void {
+    if (this.ended || this.revoked) return;
+    this.quietThrough = this.turn;
+    this.quietNext = true;
+    // 已經送出、還沒建立的工具接續回應：建立時取消（頁面的 response.cancel 可能早於它到達上游）。
+    if (this.awaiting && this.awaiting.response === null && this.awaiting.eventId) this.quietTags.add(this.awaiting.eventId);
+    for (const id of this.triggers.keys()) this.quietResponses.add(id);
+    while (this.quietResponses.size > 128) this.quietResponses.delete(this.quietResponses.values().next().value!);
+    const before = this.speakQueue.length;
+    const kept = this.speakQueue.filter((speak) => speak.response !== null);
+    this.speakQueue.length = 0;
+    this.speakQueue.push(...kept);
+    this.deps.log?.(`即時語音（API key）：停止回覆（丟掉 ${before - kept.length} 個排隊中的接續回應）`);
   }
 
   /** 一個回應請求：上游還在回應時排隊，這一輪結束再送（一次一個）。 */

@@ -62,3 +62,50 @@
 ## 結論
 
 ID-02 這一輪**還不能放行**：API key 路徑有改句（F1）；兩條路徑「先開口」都會漏掉連線中說的話（F2），ChatGPT 方案路徑也不會因先開口而取消招呼（F10）；第 2、4、5、7 步還沒做。ChatGPT 方案路徑在校正後稱名穩定（4/4），開場句都在清單內，關閉稱名也正常。手掌停止與轉頭重置已修正並合併。F11（語音收進旁人對話）是新的隱私疑慮，要另外評估。下一輪要補的：需要第二個人的第 2、4、5 步；第 7 步刪除 George（先徵得同意）；API key 路徑的第 1 步重測；兩條路徑的手掌停止補足 10＋10 次。
+
+## Mac 發現修正
+
+這一節是驗收之後的修正（分支 `claude/id02-mac-fixes`，以 `c5ecf0d` 為基礎），處理 F1、F2、F7、F10。上面的結果表維持原樣，不改寫。下面的證據都是 fixture 測試（假的 WebRTC、假的 sideband、假的麥克風音量），只證明「什麼時候送出或不送出哪個事件」；模型有沒有照做、門檻在 George 家中合不合適，都要在 Mac 上重測才算數。
+
+| 發現 | 根本原因 | 採用的修正 | 離線證據 |
+|---|---|---|---|
+| F1 API key 路徑改句、加字 | 問候用 `response.create` 的 `instructions` 送出；這會取代這一輪的 session 指示，gpt-realtime-mini 把它當成使用者的請求，先回「好的，我明白了，我會照您說的來：」或改說別句 | 核心改送嚴格版指示 `strictGreetingInstructions`（`shared/sense.ts`）：明講「這一輪不是使用者的請求，不需要回應、也不需要確認收到」、「你說出的全部內容就是「」裡那一句」、點名禁止「好的」「我明白了」「我會照您說的來」與開場白、「不要換成別的句子；說完這一句就停」。頁面送出的 `response.create` 另外加上 `output_modalities: ["audio"]` 與 `tool_choice: "none"`（`greetingResponse`，`src/realtime.ts`），讓這一輪只有那一句；這個請求帶 `event_id`（`greet_…`），上游如果回錯誤、`param` 指向 `response.output_modalities` 或 `response.tool_choice`，頁面只退回一次、只帶 `instructions` 重送，並在 DevTools 警告一次。ChatGPT 方案路徑沒有看到改句，送出的文字不變（仍是一段 ≤500 bytes 的 `session.context.append`） | `tests/id02-mac-fixes.test.ts` 的請求快照（完整的 `response.create` 內容）與參數被拒絕時退回一次的測試；`tests/family-greeting.test.ts` 核心決策回傳嚴格版 |
+| F2「連線中」說的話漏掉 | 麥克風在連線開始時已經取得，但 WebRTC 接通前聲音送不到伺服器，伺服器沒有 `speech_started` 也沒有逐字稿，所以照常打招呼 | **本機音量偵測**（`src/early-speech.ts`）：連線中本機麥克風音量（AnalyserNode RMS）連續 300 ms 超過 0.03，就取消這次招呼，字幕顯示「還在連線，請稍後再說一次」（英文介面：「Still connecting — please say it again」，在共用翻譯表 `src/messages.en.json`）。不代為猜內容，也不重送那段話。兩條路徑都一樣。門檻可以用 `NOUS_EARLY_SPEECH_RMS`（0.005–0.3，超出範圍時核心啟動就報錯）覆寫；觸發時 DevTools 印一行 `[early-speech] detected phase=connecting|pre-greeting peak_rms=…`，只有事件、階段與峰值 RMS，沒有聲音 | `tests/id02-mac-fixes.test.ts`：連線中說話 → 招呼取消、提示一次、資料通道沒有任何使用者項目；安靜時照常打招呼；招呼送出後停止偵測（回音不會取消任何東西）；偵測器只留數字狀態，原始碼沒有保存、記錄或送出聲音的呼叫 |
+| F10 ChatGPT 方案路徑先開口仍打招呼 | API key 路徑用 `input_audio_buffer.speech_started` 取消招呼；ChatGPT 方案路徑的頁面只看使用者逐字稿（比較晚到），資料通道上的 `speech_started` 被忽略；核心收到頁面的問候請求時也不檢查使用者是否已經開口 | 三道：(1) 頁面處理資料通道的 `speech_started`（`src/live-voice.ts`）；(2) 核心的 sideband 看到 `speech_started` 或使用者逐字稿（含未完成的）之後，頁面才送來的問候一律不送，涵蓋「頁面已決定、POST 還在路上」的競態（`server/live-route.ts`，log「使用者先開口，略過問候」）；(3) F2 的本機音量偵測延續到問候送出前，涵蓋就緒後約 0.6 秒內、上游還沒有事件的競態（這時不提示，因為聲音已經送到伺服器） | `tests/id02-mac-fixes.test.ts`（資料通道 `speech_started`、0.6 秒內的本機偵測、決策進行中開口）；`tests/live-route.test.ts`（sideband 的 `speech_started` 與未完成逐字稿之後不送問候） |
+| F7 手掌停止後，查詢結果晚點仍會念出 | 手掌只靜音（ChatGPT 方案）或取消（API key）正在播的那一輪；工具結果回來後，頁面（API key）或核心（帶記憶的 API key 旁路、ChatGPT 方案的交辦）照常請模型接著說 | 手掌停止改成「停止回覆」：`RealtimeSession.stopReply()`，在「回覆中」或「思考中」舉手都會觸發（`src/main.ts`）。API key 頁面送 `response.cancel`＋清掉播放緩衝；這一輪（含取消前已在路上的工具呼叫）的工具結果仍以 `function_call_output` 交回模型當背景，但不再 `response.create`。頁面依事件的 `response_id` 判斷工具屬於哪個回應：停止時已建立的回應（以及停止時還沒建立、之後第一個沒有核心標記的回應，建立時就取消）的工具結果都不念；沒有 `response_id` 時才退回輪次。使用者開口、打字、系統通知或說出確認卡的回答都是新的一輪。新增 `POST /api/realtime/stop-reply`：API key 核心旁路同樣依 `response_id` 判斷（停止時已建立的回應、停止後第一個沒有核心標記的回應；停止時已送出但還沒建立的核心接續回應，建立時由核心取消），沒有 `response_id` 時用「≤ 停止時的輪次」，只交回、不請模型念（`server/apikey-call.ts`）。ChatGPT 方案路徑**預設只靜音**（見下面的開關），開了 `NOUS_PALM_QUIET_DELEGATION=on` 才把「到停止時為止的每一輪」的交辦結果改用 `commentary`（不念）送回（`server/live-route.ts`）。沿用 MEM-2／MEM-3 撤銷時「晚到的結果丟掉」的作法，但**不中止工具、不取消背景任務、不結束對話**；之後的系統通知（例如任務完成）與下一輪照常念 | `tests/id02-mac-fixes.test.ts`（API key 頁面：取消、晚到的結果只交回、交辦的任務照常建立、通知與下一輪照常）；`tests/live-route.test.ts`（開關打開時：交辦結果改成 commentary、交辦的中止訊號沒有被觸發、下一輪恢復 speakable、審查的競態回歸測試；開關關閉時：照常 speakable）；`tests/memory-apikey.test.ts`（核心旁路的晚到結果沒有 `response.create`、停止前先開口的競態、停止後的通知照常念、還沒建立的核心接續回應被取消）；`tests/id02-mac-fixes.test.ts` 另有：還沒建立的回應建立時取消、被取消回應晚到的工具呼叫、確認卡回答算新的一輪；`tests/realtime-routes.test.ts`（只有擁有者頁面能呼叫、工作階段不結束） |
+
+### F2 為什麼不緩衝聲音
+
+評估過先錄下「連線中」的聲音、接通後再補送，沒有採用：
+
+- WebRTC 的麥克風軌道不能補送過去的聲音；ChatGPT 方案路徑（frameless）也沒有可以補送音訊的事件。
+- API key 路徑理論上可以用 `input_audio_buffer.append` 補送，但要在頁面記憶體裡保存幾秒原始音訊、再經資料通道送出，多一個保存原始聲音的地方，兩條路徑行為也會不一致；和伺服器 VAD 的先後與回音處理都沒有辦法離線驗證。
+- 本機音量偵測只比較一個數字，不保存、不轉送、不寫檔，也不進 log 或 trace，符合「原始音訊不得寫檔、進 trace 或外傳」的紅線，而且兩條路徑相同。代價是使用者要再說一次，畫面會照實說明。
+
+門檻（RMS 0.03、連續 300 ms）是估計值，沒有校準；F3 的環境雜音或電視聲也可能超過它，讓招呼被取消。需要時用 `NOUS_EARLY_SPEECH_RMS` 調整，並記錄觸發時 log 的峰值 RMS。
+
+### F7 在 ChatGPT 方案路徑的開關與風險
+
+- 開關：`NOUS_PALM_QUIET_DELEGATION`（`on`、`1`、`true` 才打開），**預設關閉**。關閉時手掌停止在 ChatGPT 方案路徑只把本機播放靜音到這一輪結束，交辦照常以 speakable 結束，查詢結果仍可能在之後念出（F7 在這條路徑還沒有修好，要等 Mac 驗證）。API key 路徑不受這個開關影響：那裡由核心與頁面控制 `response.create`，可以只交回結果、不請模型念。
+- 和 2026-10-23 結論的衝突：[ChatGPT 方案即時語音驗證紀錄](live-voice-2026-10-23.md) 第 5 點的結論是每個交辦都以 speakable 的 `delegation.context.append` 結束；OpenClaw 的 `runDelegation` 成功與失敗都送 speakable，原始碼裡沒有只送 commentary 就結束交辦的例子。開關打開時，被停止那一輪的交辦只以 commentary 結束，這是沒有驗證過的用法。
+- 風險：上游可能把那個交辦當成還沒完成；模型可能一直等、上游逾時後說出別的話；下一輪可能卡住不回應。所以預設維持保守的舊行為。
+- 輪次用「≤」：停止時的輪次與之前每一輪的交辦結果都不念。審查發現使用者舉手時說「停」、「我查一下」的回音或雜音，可能在 stop-reply 送到之前就讓輪次加一，用「＝」會讓舊的結果照念、新的一輪反而被靜音。每次 `speech_started` 都算新的一輪，助理回話之後使用者再開口也一定是新的一輪，沒有結尾的雜音逐字稿不會把輪次卡住。
+- MEM-4b 受保護交辦（API key 核心旁路）：被停止那一輪的交辦結果（例如交辦卡的說明）不念出，但畫面上的交辦卡照常留著，使用者仍可以在畫面上處理。
+
+### 已知限制
+
+- ChatGPT 方案的資料通道或 sideband 會不會送 `input_audio_buffer.speech_started` 仍未證實（`shared/frameless.ts` 的註解）；沒有時靠未完成逐字稿與本機音量偵測。
+- `delegation.context.append` 用 `commentary` 時模型會不會真的不念，只有 Mac 上能確認。
+- `response.create` 帶 `output_modalities` 與 `tool_choice: "none"` 是 OpenAI Realtime GA 的參數，離線沒有真的送到 OpenAI；如果被拒絕，DevTools 會出現 `[realtime]` 的錯誤，而且那次不會打招呼。
+- Esc 的打斷沒有改，仍只停掉正在念的那一段；只有手掌停止會丟掉這一輪晚到的工具結果。
+- ChatGPT 方案路徑的 F7 預設沒有修好（只靜音）；要打開 `NOUS_PALM_QUIET_DELEGATION` 並在 Mac 上通過第 5 步，才可以改預設。
+- 核心略過問候時，會把核心已經挑好的開場句取走丟掉，不留到之後。
+
+### Mac 上要重跑的步驟
+
+1. **第 1 步，API key 路徑，10 次**（F1）：逐次記錄實際說出的句子。10 次都一字不差（只允許標點差異）才算通過；同時看 DevTools 有沒有 `[realtime]` 錯誤（F1 新增的參數被拒絕）。
+2. **第 3 步，兩條路徑，各 5 次以上「連線中」開口**（F2）：預期不打招呼、字幕出現「還在連線，請稍後再說一次」，就緒後再說一次能正常回答。英文介面至少做 1 次，確認字幕是英文。
+3. **第 3 步，ChatGPT 方案路徑，各 5 次以上「語音就緒後約 0.6 秒內」開口**（F10）：預期不打招呼；`nous.log` 可能出現「使用者先開口，略過問候」。API key 路徑做 2 次對照。
+4. **第 1 步的安靜對照，兩條路徑各 5 次**（F2／F10 的誤判）：不說話時要照常打招呼；記錄雜音讓招呼被取消的次數。另外**開著電視**各做 3 次，記錄招呼被取消的次數與 `[early-speech]` 那一行的峰值 RMS（需要時調整 `NOUS_EARLY_SPEECH_RMS`）。
+5. **第 9 步，兩條路徑，各 5 次以上「我查一下」之後舉手掌**（F7）：API key 路徑用預設設定；ChatGPT 方案路徑先用預設（只靜音，記錄結果是否仍被念出），再設 `NOUS_PALM_QUIET_DELEGATION=on` 重開 App 做一輪。預期查詢結果不再念出；同一輪交辦的任務照常出現在進度並完成；任務完成的通知照常轉告。每次停止後 **30 秒內再問一次**，確認通話正常回應、沒有卡住，也沒有在逾時後冒出別的話（ChatGPT 方案路徑開了開關時特別要看）。再各做 3 次**舉手的同時說「停」**（審查的競態），確認舊的結果不念、下一句照常回答；以及各 2 次**停止之後收到任務完成的通知**，確認通知照常轉告。順便補足手冊要求的手掌停止 10＋10 次。
+6. 第 8 步的時序可以順便記錄，確認互動啟動、語音就緒與首音沒有變慢（這批修正不應該改變它們）。

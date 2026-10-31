@@ -1,6 +1,7 @@
 import { parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
 import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind, type StopEvidence } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimeCallbacks, RealtimeDeps, RealtimePhase } from "./realtime.ts";
+import { CONNECTING_SPEECH_HINT, EARLY_SPEECH_RMS, EarlySpeech, earlySpeechLogLine } from "./early-speech.ts";
 import type { GreetingOnce, RealtimeSession } from "./realtime-session.ts";
 import { FallbackOfferError, GREETING_SETTLE_MS } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
@@ -23,8 +24,13 @@ export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "createPe
   end(): Promise<void>;
   /** 只收這個工作階段的 SSE realtime.host／realtime.live。回傳取消訂閱。 */
   subscribe(handlers: { host(call: HostCall): void; core(event: LiveCoreEvent): void }): () => void;
-  /** 遠端音量（AnalyserNode RMS），「回覆中」的證據。回傳停止。 */
+  /**
+   * 音量（AnalyserNode RMS）：遠端是「回覆中」的證據；F2／F10 起也用來看本機麥克風在連線中與問候送出前是不是有人開口
+   * （只比較門檻，不保存、不轉送聲音）。回傳停止。
+   */
   watchLevel(stream: MediaStream, onLevel: (rms: number) => void): () => void;
+  /** F7：POST /api/realtime/stop-reply：手掌停止，核心把這一輪還沒回來的交辦結果改成不念出的背景（任務照常）。 */
+  stopReply?(): Promise<void>;
   /** Esc：這條路徑沒有 response.cancel，只能把本機播放靜音到下一輪。 */
   setMuted(muted: boolean): void;
   /** 說出結束原因（瀏覽器語音合成）。 */
@@ -98,6 +104,9 @@ export class LiveVoice implements RealtimeSession {
   private greetTimer: ReturnType<typeof setTimeout> | null = null;
   /** 連線中（進入聆聽之前）打的字：連上後合併成一則送出。 */
   private queuedText: string[] = [];
+  /** F2／F10：本機麥克風音量的監看（連線中與問候送出前）。 */
+  private stopMicLevel: (() => void) | null = null;
+  private readonly earlySpeechRms: number;
   fallbackOffer: FallbackOffer | null = null;
   /** 改路徑時還沒送出的連線中打字（openRealtime 交給 API key 的工作階段）。 */
   unsentText: readonly string[] = [];
@@ -105,9 +114,10 @@ export class LiveVoice implements RealtimeSession {
   constructor(
     private readonly callbacks: RealtimeCallbacks,
     private readonly deps: LiveDeps,
-    options: { idleMs: number; approvalMs?: number; greeting?: GreetingOnce | null },
+    options: { idleMs: number; approvalMs?: number; greeting?: GreetingOnce | null; earlySpeechRms?: number },
   ) {
     this.idleMs = options.idleMs;
+    this.earlySpeechRms = options.earlySpeechRms ?? EARLY_SPEECH_RMS;
     this.greeting = options.greeting ?? null;
     this.approvals = new ApprovalQueue(
       callbacks,
@@ -173,6 +183,7 @@ export class LiveVoice implements RealtimeSession {
         return;
       }
       this.mic = mic;
+      this.watchEarlySpeech(mic, generation);
       this.evidence.mic = mic.getAudioTracks().some((t) => (t as { readyState?: string }).readyState !== "ended");
       this.unsubscribe = this.deps.subscribe({
         host: (call) => {
@@ -256,6 +267,17 @@ export class LiveVoice implements RealtimeSession {
     this.callbacks.onToolActivity("已靜音這段回覆");
     this.speaking = false;
     this.setPhase(this.delegations.size ? "thinking" : "listening");
+  }
+
+  /**
+   * F7：手掌停止（停止回覆）。這條路徑沒有 response.cancel：正在念就和 Esc 一樣把本機播放靜音到這一輪結束；
+   * 另外請核心把這一輪還沒回來的交辦結果改成不念出的背景（commentary），所以「我查一下」之後的查詢結果不會再念出。
+   * 交辦本身不中止：背景任務照常建立、照常執行；之後的系統通知照常。
+   */
+  stopReply(): void {
+    if (!this.capturing) return;
+    if (this.phase === "speaking") this.interrupt();
+    void this.deps.stopReply?.().catch(() => undefined);
   }
 
   /** 打字：先比對確認卡（打「確認執行」照樣有效），再交給核心（核心當成請求處理）。連線中打的先排隊，進入聆聽後送出。打字一律取消還沒送出的招呼。 */
@@ -394,6 +416,12 @@ export class LiveVoice implements RealtimeSession {
         break;
       case "transcript":
         this.transcript("channel", event.role, event.text, event.final, event.item_id);
+        break;
+      case "speech.started":
+        // F10：上游的開口事件（資料通道有送時）：和 API key 路徑的 speech_started 一樣，這次不打招呼。
+        this.skipGreeting();
+        this.resetIdle();
+        if (this.phase === "listening") this.setPhase("hearing");
         break;
       case "audio.cleared":
         if (this.speaking) {
@@ -560,6 +588,34 @@ export class LiveVoice implements RealtimeSession {
     }
   }
 
+  /**
+   * F2／F10：取得麥克風之後看本機音量，直到進入聆聽而且問候不會再送出為止（src/early-speech.ts）。
+   * 連線中偵測到開口：取消招呼並提示「還在連線，請稍後再說一次」；就緒之後、問候送出前：只取消招呼。
+   */
+  private watchEarlySpeech(mic: MediaStream, generation: number): void {
+    const detector = new EarlySpeech(Date.now, this.earlySpeechRms);
+    this.stopMicLevel = this.deps.watchLevel(mic, (rms) => {
+      if (generation !== this.generation) return;
+      const connecting = this.phase === "connecting";
+      if (!connecting && !this.greeting?.open) {
+        this.stopEarlySpeech();
+        return;
+      }
+      if (!detector.feed(rms)) return;
+      // 只記事件、階段與峰值 RMS（Mac 重測看誤判用），沒有聲音。
+      console.info(earlySpeechLogLine(connecting ? "connecting" : "pre-greeting", detector.peak));
+      this.skipGreeting();
+      if (connecting) this.callbacks.onToolActivity(CONNECTING_SPEECH_HINT);
+      this.stopEarlySpeech();
+    });
+  }
+
+  private stopEarlySpeech(): void {
+    const stop = this.stopMicLevel;
+    this.stopMicLevel = null;
+    stop?.();
+  }
+
   private resetIdle(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
@@ -590,6 +646,7 @@ export class LiveVoice implements RealtimeSession {
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.cancelGreetTimer();
+    this.stopEarlySpeech();
     this.queuedText = [];
     this.channel?.close();
     this.channel = null;
@@ -649,6 +706,8 @@ export function browserWatchLevel(stream: MediaStream, onLevel: (rms: number) =>
   const AudioCtx = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
   if (!AudioCtx) return () => {};
   const ctx = new AudioCtx();
+  // 有些情況（沒有使用者手勢、背景視窗）AudioContext 一開始是 suspended，量不到音量：明確 resume。
+  void ctx.resume().catch(() => {});
   const source = ctx.createMediaStreamSource(stream);
   const analyser = ctx.createAnalyser();
   analyser.fftSize = 1024;

@@ -329,6 +329,78 @@ describe.skipIf(!realLockAvailable)("MEM-3 core tools on the sideband", () => {
     expect(JSON.parse((output.item as { output: string }).output)).toEqual({ ok: true, status: "queued" });
   });
 
+  it("F7 (ID-02 Mac)：after a palm stop the core hands this turn's late delegate_task result back without response.create; the task still runs; the next turn speaks", async () => {
+    const h = await unpinned();
+    const t = await startCall(h);
+    ga.speechStarted(t.conn);
+    ga.functionCall(t.conn, "delegate_task", { title: "寫週報" });
+    await until(() => t.probe.hostCalls.length === 1);
+    t.call.stopReply!();
+    // 工作照常交辦：核心等待的 host call 沒有被中止，頁面交回後核心收下結果。
+    t.probe.hostCalls[0]!.resolve({ ok: true, status: "queued" });
+    const output = await t.conn.waitFor((e) => e.type === "conversation.item.create" && (e.item as { type?: string }).type === "function_call_output");
+    expect(JSON.parse((output.item as { output: string }).output)).toEqual({ ok: true, status: "queued" });
+    await new Promise((r) => setTimeout(r, 40));
+    expect(t.conn.received.filter((e) => e.type === "response.create")).toEqual([]);
+    expect(t.logs.some((line) => line.includes("停止回覆之後才回來"))).toBe(true);
+    expect(t.probe.events.some((e) => e.kind === "closed")).toBe(false);
+
+    // 使用者再開口：新的一輪的工具結果照常請模型接著說。
+    ga.speechStarted(t.conn);
+    ga.functionCall(t.conn, "delegate_task", { title: "整理照片" }, "call_second");
+    await until(() => t.probe.hostCalls.length === 2);
+    t.probe.hostCalls[1]!.resolve({ ok: true, status: "queued" });
+    await until(() => t.conn.received.filter((e) => e.type === "response.create").length === 1);
+  });
+
+  it("F7 review race (regression)：a speech_started (「停」, echo, noise) before the stop-reply POST does not un-silence the stopped response; attribution is by response_id", async () => {
+    const h = await unpinned();
+    const t = await startCall(h);
+    ga.speechStarted(t.conn);
+    t.conn.send({ type: "response.created", response: { id: "resp_1" } });
+    t.conn.send({ type: "response.function_call_arguments.done", name: "delegate_task", call_id: "call_1", response_id: "resp_1", arguments: JSON.stringify({ title: "寫週報" }) });
+    await until(() => t.probe.hostCalls.length === 1);
+    ga.speechStarted(t.conn); // 舉手同時說「停」：輪次先加一
+    await new Promise((r) => setTimeout(r, 20));
+    t.call.stopReply!();
+    t.conn.send({ type: "response.done", response: { id: "resp_1", status: "cancelled" } });
+    t.probe.hostCalls[0]!.resolve({ ok: true, status: "queued" });
+    await t.conn.waitFor((e) => e.type === "conversation.item.create" && (e.item as { type?: string }).type === "function_call_output");
+    await new Promise((r) => setTimeout(r, 40));
+    expect(t.conn.received.filter((e) => e.type === "response.create")).toEqual([]);
+  });
+
+  it("F7 review minor 3：a system notice after the stop is a new response; its core tool result is spoken", async () => {
+    const h = await unpinned();
+    const t = await startCall(h);
+    t.conn.send({ type: "response.created", response: { id: "resp_old" } });
+    t.call.stopReply!();
+    t.conn.send({ type: "response.done", response: { id: "resp_old", status: "cancelled" } });
+    ga.typed(t.conn, "（系統通知）任務完成了");
+    t.conn.send({ type: "response.created", response: { id: "resp_notice" } });
+    t.conn.send({ type: "response.function_call_arguments.done", name: "delegate_task", call_id: "call_n", response_id: "resp_notice", arguments: JSON.stringify({ title: "下一步" }) });
+    await until(() => t.probe.hostCalls.length === 1);
+    t.conn.send({ type: "response.done", response: { id: "resp_notice", status: "completed" } });
+    t.probe.hostCalls[0]!.resolve({ ok: true, status: "queued" });
+    await until(() => t.conn.received.filter((e) => e.type === "response.create").length === 1);
+  });
+
+  it("F7：a core continuation already sent but not yet created at the stop is cancelled by the core when it is created", async () => {
+    const h = await unpinned();
+    const t = await startCall(h);
+    server.autoRespond = false;
+    t.conn.send({ type: "response.created", response: { id: "resp_a" } });
+    t.conn.send({ type: "response.function_call_arguments.done", name: "delegate_task", call_id: "call_a", response_id: "resp_a", arguments: JSON.stringify({ title: "寫週報" }) });
+    t.conn.send({ type: "response.done", response: { id: "resp_a", status: "completed" } });
+    await until(() => t.probe.hostCalls.length === 1);
+    t.probe.hostCalls[0]!.resolve({ ok: true, status: "queued" });
+    const create = await t.conn.waitFor((e) => e.type === "response.create");
+    t.call.stopReply!();
+    t.conn.send({ type: "response.created", response: { id: "resp_cont", metadata: { nous_trigger: create.event_id } } });
+    await t.conn.waitFor((e) => e.type === "response.cancel");
+    expect(t.conn.received.find((e) => e.type === "response.cancel")).toMatchObject({ response_id: "resp_cont" });
+  });
+
   it("other tools on the sideband are left to the page (not answered by the core)", async () => {
     const h = await unpinned();
     const t = await startCall(h);

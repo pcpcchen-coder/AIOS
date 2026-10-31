@@ -17,6 +17,11 @@ export interface RealtimeSession {
   start(): Promise<void>;
   stop(): void;
   interrupt(): void;
+  /**
+   * F7（ID-02 Mac 2026-10-31）：手掌停止＝「停止回覆」：停掉正在念（或正在產生）的回覆，這一輪還沒回來的工具結果
+   * 與接續回應都不再念出（結果仍交回模型當背景）。不取消背景任務、不結束對話。
+   */
+  stopReply(): void;
   sendText(text: string): void;
   addContext(text: string): void;
   notify(text: string): void;
@@ -108,6 +113,11 @@ export class GreetingOnce {
     return this.value;
   }
 
+  /** 還可能送出（pending 或 deciding）：本機開口偵測只在這段時間有用。 */
+  get open(): boolean {
+    return this.value === "pending" || this.value === "deciding";
+  }
+
   /** 還沒打過、沒被取消、設定還開著：向核心要內容並標記已送出；否則 null。 */
   async take(route: GreetingRoute): Promise<string | null> {
     if (this.value !== "pending") return null;
@@ -163,6 +173,7 @@ export function idleSession(): RealtimeSession {
     start: async () => {},
     stop: () => {},
     interrupt: () => {},
+    stopReply: () => {},
     sendText: () => {},
     addContext: () => {},
     notify: () => {},

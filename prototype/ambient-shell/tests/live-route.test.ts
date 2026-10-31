@@ -32,7 +32,7 @@ function answer(headers: Record<string, string> = { Location: "/v1/realtime/call
   return new Response("v=0 live-answer", { status: 201, headers });
 }
 
-async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string, sessionId: string) => LiveGreeting | null; memory?: (ctx: SessionContext) => LiveMemoryPort | null; ctx?: Partial<SessionContext> } = {}) {
+async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest, signal: AbortSignal) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string, sessionId: string) => LiveGreeting | null; memory?: (ctx: SessionContext) => LiveMemoryPort | null; ctx?: Partial<SessionContext>; palmQuiet?: boolean } = {}) {
   sideband = await startFakeSideband();
   const dir = mkdtempSync(join(tmpdir(), "nous-live-"));
   const creds = writeCredentials(dir);
@@ -41,9 +41,9 @@ async function setup(options: { model?: string | null; handler?: (req: Recorded)
   const events: LiveCoreEvent[] = [];
   const delegations: DelegationRequest[] = [];
   const runner: DelegationRunner = {
-    run: async (req) => {
+    run: async (req, signal) => {
       delegations.push(req);
-      return options.runner ? options.runner(req) : { ok: true, channel: "speakable", text: `結果：${req.text}`, tools: [] };
+      return options.runner ? options.runner(req, signal) : { ok: true, channel: "speakable", text: `結果：${req.text}`, tools: [] };
     },
   };
   let outstanding = 0;
@@ -69,6 +69,7 @@ async function setup(options: { model?: string | null; handler?: (req: Recorded)
     sleep: async () => {},
     ...(options.greeting ? { greeting: options.greeting } : {}),
     ...(options.memory ? { memory: options.memory } : {}),
+    ...(options.palmQuiet ? { palmQuietDelegation: true } : {}),
   });
   return { route, ctx, events, requests, delegations, creds, setOutstanding: (n: number) => (outstanding = n) };
 }
@@ -528,6 +529,160 @@ describe.skipIf(!realLockAvailable)("MEM-2 memory on the live wire (fixture side
     conn.send({ type: "session.started", session: {} });
     const first = await conn.waitFor((e) => e.type === "session.context.append");
     expect(first).toMatchObject({ channel: "speakable", content: [{ type: "input_text", text: "（記憶確認）「好，已經更新了。」" }] });
+  });
+});
+
+describe("ID-02 Mac fixes on the live wire (fixture sideband)", () => {
+  const appended = (conn: { received: Record<string, unknown>[] }, type: string) => conn.received.filter((e) => e.type === type).map((e) => [e.channel, (e.content as { text: string }[])[0].text]);
+  const later = () => new Promise((r) => setTimeout(r, 40));
+
+  it("F10：once the sideband saw the user start speaking (speech_started), a greeting the page sends afterwards is dropped — also the in-flight POST race", async () => {
+    const t = await setup({ greeting: () => ({ text: liveGreetingText("George，我在"), sentence: "George，我在" }) });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "session.started", session: {} });
+    conn.send({ type: "input_audio_buffer.speech_started" });
+    await later();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    call.control!.input("greeting", "int_0123456789abcdef");
+    call.control!.input("notice", "之後的通知");
+    await conn.waitFor((e) => e.type === "session.context.append");
+    expect(appended(conn, "session.context.append")).toEqual([["speakable", "（系統通知）之後的通知"]]);
+  });
+
+  it("F10：a user partial transcript counts the same (the sideband may not send speech_started)", async () => {
+    const t = await setup();
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "input_transcript.added", item: { id: "u1", text: "幫我" } });
+    await later();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    call.control!.input("notice", "x");
+    await conn.waitFor((e) => e.type === "session.context.append");
+    expect(appended(conn, "session.context.append")).toEqual([["speakable", "（系統通知）x"]]);
+  });
+
+  it("F7 (NOUS_PALM_QUIET_DELEGATION on)：after a palm stop, this turn's late delegation result goes back as silent commentary; the delegation is not aborted; the next turn speaks again", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = await setup({
+      runner: async (req) => {
+        if (req.id === "del_1") await gate;
+        return { ok: true, channel: "speakable", text: `查到了：${req.text}`, tools: [] };
+      },
+      palmQuiet: true,
+    });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    const realRun = t.delegations;
+    conn.send({ type: "session.started", session: {} });
+    conn.send({ type: "input_audio_buffer.speech_started" });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "新竹天氣如何", id: "u1" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_1", content: [{ type: "input_text", text: "查新竹天氣" }] } });
+    while (realRun.length < 1) await later();
+    call.stopReply!();
+    release();
+    await conn.waitFor((e) => e.type === "delegation.context.append");
+    expect(appended(conn, "delegation.context.append")).toEqual([["commentary", "查到了：查新竹天氣"]]);
+    expect(t.events).toContainEqual({ kind: "delegation", id: "del_1", state: "finished" }); // 頁面照常清掉「思考中」
+    expect(t.events.some((e) => e.kind === "closed")).toBe(false); // 通話不結束
+
+    // 使用者再開口：新的一輪照常念。
+    conn.send({ type: "input_transcript.added", item: { id: "u2", text: "那台北" } });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "那台北呢", id: "u2" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_2", content: [{ type: "input_text", text: "查台北天氣" }] } });
+    await conn.waitFor((e) => e.type === "delegation.context.append" && e.delegation_item_id === "del_2");
+    expect(appended(conn, "delegation.context.append").at(-1)).toEqual(["speakable", "查到了：查台北天氣"]);
+  });
+
+  it("F7 (NOUS_PALM_QUIET_DELEGATION on)：the abort signal handed to the delegation is not aborted by a palm stop (background work keeps running)", async () => {
+    let seen: AbortSignal | null = null;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = await setup({
+      runner: async (_req, signal) => {
+        seen = signal;
+        await gate;
+        return { ok: true, channel: "speakable", text: "已交辦", tools: [] };
+      },
+      palmQuiet: true,
+    });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_task", content: [{ type: "input_text", text: "整理週報" }] } });
+    while (!seen) await later();
+    call.stopReply!();
+    expect((seen as AbortSignal | null)?.aborted).toBe(false);
+    release();
+    const append = await conn.waitFor((e) => e.type === "delegation.context.append");
+    expect(append).toMatchObject({ channel: "commentary" });
+  });
+
+  it("F7 review race (regression)：speech_started (the user saying 「停」, the echo of 「我查一下」 or noise) arrives before the stop-reply POST — the old result is still silent", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = await setup({
+      runner: async (req) => {
+        if (req.id === "del_1") await gate;
+        return { ok: true, channel: "speakable", text: `查到了：${req.text}`, tools: [] };
+      },
+      palmQuiet: true,
+    });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "session.started", session: {} });
+    conn.send({ type: "input_audio_buffer.speech_started" });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "新竹天氣如何", id: "u1" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_1", content: [{ type: "input_text", text: "查新竹天氣" }] } });
+    while (t.delegations.length < 1) await later();
+    conn.send({ type: "input_audio_buffer.speech_started" }); // 舉手同時說「停」或回音：輪次先加一
+    conn.send({ type: "input_transcript.added", item: { id: "u_stop", text: "停" } });
+    await later();
+    call.stopReply!();
+    release();
+    await conn.waitFor((e) => e.type === "delegation.context.append");
+    expect(appended(conn, "delegation.context.append")).toEqual([["commentary", "查到了：查新竹天氣"]]);
+    // 「停」那一句沒有結尾也不會卡住：下一段話（speech_started）是新的一輪，照常念。
+    conn.send({ type: "input_audio_buffer.speech_started" });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "那台北呢", id: "u2" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_2", content: [{ type: "input_text", text: "查台北天氣" }] } });
+    await conn.waitFor((e) => e.type === "delegation.context.append" && e.delegation_item_id === "del_2");
+    expect(appended(conn, "delegation.context.append").at(-1)).toEqual(["speakable", "查到了：查台北天氣"]);
+  });
+
+  it("F7 default (switch off, conservative until the Mac check)：a palm stop only mutes on the page; the delegation still ends with speakable", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const t = await setup({ runner: async (req) => { await gate; return { ok: true, channel: "speakable", text: `查到了：${req.text}`, tools: [] }; } });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_1", content: [{ type: "input_text", text: "查新竹天氣" }] } });
+    while (t.delegations.length < 1) await later();
+    call.stopReply!();
+    release();
+    await conn.waitFor((e) => e.type === "delegation.context.append");
+    expect(appended(conn, "delegation.context.append")).toEqual([["speakable", "查到了：查新竹天氣"]]);
+  });
+
+  it("nit：a greeting skipped because the user spoke first still takes (releases) the core's picked sentence", async () => {
+    const taken: string[] = [];
+    const t = await setup({ greeting: (id) => (taken.push(id), { text: liveGreetingText("George，我在"), sentence: "George，我在" }) });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "input_audio_buffer.speech_started" });
+    await later();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    expect(taken).toEqual(["int_0123456789abcdef"]);
+    call.control!.input("notice", "x");
+    await conn.waitFor((e) => e.type === "session.context.append");
+    expect(appended(conn, "session.context.append")).toEqual([["speakable", "（系統通知）x"]]);
   });
 });
 

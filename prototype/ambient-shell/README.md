@@ -245,6 +245,7 @@ Claude 與 ChatGPT 背景任務使用同一套提示詞（`server/prompts.ts`）
 - 誠實規則：「聆聽中」要麥克風軌道、peer 已連線、收到 `session.started`；「回覆中」看遠端音量。家電指令照中控回讀說話；有副作用的工具（家電、交辦）沒有在時限內回報時只說「結果不明，請確認」，不說失敗。確認卡只由按鈕或你說出的「確認執行／取消」決定，Codex 那邊不能替你確認。控制連線斷線、登入失效或時間到時直接結束並說出原因，不改路徑。
 - 這條路徑沒有：遠端 MCP（請切換到 API key 路徑）、取消回覆的指令（Esc 只把這段回覆靜音）。一個核心同時只能有一個 ChatGPT 方案即時語音；開始它的頁面重新整理或關閉時立刻結束，重新整理後可以馬上再開始。
 - 聲音：`arbor、breeze、cove（預設）、ember、juniper、maple、sol、spruce、vale`，在設定畫面（瀏覽器版）或 macOS App 選單列切換（`NOUS_LIVE_VOICE` 是預設值）。`NOUS_LIVE_MODEL`（顯示用預設 `gpt-live-1-codex`，設定了才送出）、`NOUS_LIVE_AGENT_MODEL`（交辦時的 Codex 模型；未設定時查 Codex 模型清單）。
+- 手掌停止（ID-02 F7）：這條路徑預設只把這段回覆靜音，交辦結果照常念出；`NOUS_PALM_QUIET_DELEGATION=on` 會把被停止那一輪的交辦結果改用 commentary（不念）送回，這種結束交辦的方式沒有在上游驗證過，Mac 驗證前不要打開。兩條路徑在連線中與問候送出前都用本機麥克風音量判斷使用者是否已開口（`NOUS_EARLY_SPEECH_RMS`，0.005–0.3，未校準）。見 [ID-02 Mac 發現修正](../../docs/validation/family-id-02-mac-2026-10-31.md#mac-發現修正)。
 - 這是 OpenAI 未公開文件的介面，實作參考 OpenClaw。自動化測試使用假端點、sideband 與頁面。另有 2026-10-23 家中 Mac 測試：`nous.log` 記錄真實 Codex 登入、建立通話、sideband 與語音交辦；客廳溫度查詢修正模型清單版本後只有 George 口頭回報成功。其他端到端步驟與計費證據尚未完成，不能標為整條路徑驗收通過。證據與門檻見 [即時語音驗證 §4](../../docs/validation/live-voice-2026-10-23.md#4-真實結果george-家中測試)。
 
 **OpenAI API key 路徑（gpt-realtime）** 和之前一樣（預設 `gpt-realtime`，可用 `NOUS_REALTIME_MODEL`、`NOUS_REALTIME_VOICE` 調整）：

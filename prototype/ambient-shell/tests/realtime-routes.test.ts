@@ -343,14 +343,14 @@ describe("MEM-3 RealtimeSessions: the API key route uses the same session, revoc
   /** api_key 的假通話：記下 greetingDecided／playback（ApiKeyCall 的掛鉤）。 */
   function keyWithHooks() {
     const t = setup("api_key");
-    const hooks = { greeted: [] as boolean[], playback: 0 };
+    const hooks = { greeted: [] as boolean[], playback: 0, stopReply: 0 };
     t.key.connect = async (_sdp, ctx) => {
       t.key.ctx = ctx;
       if (t.key.fail) throw t.key.fail;
       return {
         route: "api_key", answerSdp: "v=0 answer", model: "gpt-realtime", control: null,
         coreTools: ["recall_memory", "delegate_task"], memoryStatus: () => ({ used: 2, reason: null }),
-        greetingDecided: (named) => void hooks.greeted.push(named), playback: () => void hooks.playback++,
+        greetingDecided: (named) => void hooks.greeted.push(named), playback: () => void hooks.playback++, stopReply: () => void hooks.stopReply++,
         close: async (reason) => void t.key.closes.push(reason),
       };
     };
@@ -371,8 +371,13 @@ describe("MEM-3 RealtimeSessions: the API key route uses the same session, revoc
     expect(await pending).toEqual({ ok: true });
     t.sessions.greeted(d.session_id, true);
     t.sessions.playback(d.session_id, d.owner);
-    expect(t.hooks).toEqual({ greeted: [true], playback: 1 });
+    expect(t.hooks).toEqual({ greeted: [true], playback: 1, stopReply: 0 });
     expect(() => t.sessions.playback(d.session_id, "own_someone_else_00000000")).toThrow(SessionError);
+    // F7：手掌停止（停止回覆）只交給擁有者頁面的通話；不結束工作階段。
+    t.sessions.stopReply(d.session_id, d.owner);
+    expect(t.hooks.stopReply).toBe(1);
+    expect(() => t.sessions.stopReply(d.session_id, "own_someone_else_00000000")).toThrow(SessionError);
+    expect(t.key.closes).toEqual([]);
     // API key 路徑的輸入走資料通道，不經核心。
     expect(() => t.sessions.input(d.session_id, d.owner, "notice", "x")).toThrow(SessionError);
   });

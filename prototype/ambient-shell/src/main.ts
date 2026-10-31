@@ -458,6 +458,8 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
     return new RealtimeVoice(realtimeCallbacks, {
       ...base,
       playRemote: trackedPlayRemote,
+      // F2／F10：連線中與問候送出前看本機麥克風音量（只比門檻，不保存聲音）。
+      watchLevel: browserWatchLevel,
       core: {
         subscribe: (handlers) => subscribeSession(ticket.session_id, handlers),
         hostResult: async (callId, output) => void (await api.realtimeHostResult(ticket, callId, output)),
@@ -472,11 +474,12 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
           try { globalThis.speechSynthesis?.cancel(); } catch { /* 沒有語音合成 */ }
         },
         speak: (text) => void speakText(text, { locale: realtimeLocale }).catch(() => undefined),
+        stopReply: async () => void (await api.realtimeStopReply(ticket)),
         memoryEvent: onLiveMemoryEvent,
         revoked: onLiveRevoked,
         coreTools: () => realtimeCoreTools,
       },
-    }, { idleMs: idleTimeoutsMs(undefined).realtime, greeting, rebuild, rebuildLine: t("好，已經更新了。") });
+    }, { idleMs: idleTimeoutsMs(undefined).realtime, greeting, rebuild, rebuildLine: t("好，已經更新了。"), ...earlySpeechOption() });
   }
   const base = browserRealtimeDeps(async (sdp) => (await api.realtimeCall(sdp, ticket)).sdp);
   return new LiveVoice(
@@ -496,6 +499,7 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
         if (liveAudio) liveAudio.muted = muted;
       },
       speak: (text) => void speakText(text, { locale: realtimeLocale }).catch(() => undefined),
+      stopReply: async () => void (await api.realtimeStopReply(ticket)),
       stopped: async (evidence) => (await api.realtimeStopped(ticket, evidence)).accepted,
       audioPaused: () => liveAudioPaused && (!liveAudio || liveAudio.paused),
       cancelSpeech: () => {
@@ -504,8 +508,14 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
       memoryEvent: onLiveMemoryEvent,
       revoked: onLiveRevoked,
     },
-    { idleMs: idleTimeoutsMs(undefined).realtime, greeting },
+    { idleMs: idleTimeoutsMs(undefined).realtime, greeting, ...earlySpeechOption() },
   );
+}
+
+/** F2／F10：核心設定的開口偵測門檻（NOUS_EARLY_SPEECH_RMS，核心已驗證範圍）；沒有時用頁面預設。 */
+function earlySpeechOption(): { earlySpeechRms?: number } {
+  const rms = settings?.realtime?.early_speech_rms;
+  return typeof rms === "number" && Number.isFinite(rms) ? { earlySpeechRms: rms } : {};
 }
 
 /** 說出並顯示計費通知；語音合成卡住時最多等 8 秒，再開麥克風。 */
@@ -998,7 +1008,8 @@ const sense = new SenseController({
   interruptSpeech: () => {
     // 即時語音還在連線（還沒打招呼）時舉手掌：直接結束這次語音，不再打招呼（ID-02 第 9 步）。
     if (realtime.current === "connecting" || (realtime.current === "off" && realtimeStarting)) stopRealtime();
-    else if (realtime.current === "speaking") realtime.interrupt();
+    // F7：回覆中或等工具結果（思考中）時舉手掌＝停止回覆：這一輪晚到的結果不再念出；背景任務照常、對話不結束。
+    else if (realtime.current === "speaking" || realtime.current === "thinking") realtime.stopReply();
     else if (conversation.current === "speaking") conversation.interrupt();
   },
   onLeave: () => {

@@ -36,7 +36,7 @@ import {
   type MemoryUnlinkResult,
   type QualityReason,
 } from "../shared/identity.ts";
-import { greetingInstructions, liveGreetingText } from "../shared/sense.ts";
+import { liveGreetingText, strictGreetingInstructions } from "../shared/sense.ts";
 import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
 import type { GalleryStore, GalleryVersions, StoredPerson } from "./identity-store.ts";
@@ -645,7 +645,7 @@ export class IdentityService {
       if (session) {
         try { this.options.apiKeyGreeted?.(session.session_id, name !== null); } catch { /* 通知失敗不影響問候 */ }
       }
-      return { ok: true, op: "greeting", text: greetingInstructions(sentence, locale) };
+      return { ok: true, op: "greeting", text: strictGreetingInstructions(sentence, locale) };
     }
     this.pendingLive = session ? { locale, interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence, locale), sentence, at: this.now() } : null;
     return { ok: true, op: "greeting", text: null };
