@@ -149,13 +149,13 @@ OPENAI_API_KEY=sk-...
 
 **目前還不會偵測「哈囉努斯」**：喚醒引擎要到 WK-01b 才提供，所以打開後狀態會寫「無法使用：喚醒引擎尚未安裝，沒有開啟麥克風」，不會開麥克風。沒有設定 `NOUS_WAKE` 時一切和之前相同。詳見 [WK-01a 驗證](../../docs/validation/wk-01a-2026-10-31.md)。
 
-**安裝喚醒引擎（WK-01b 準備批次，目前會照實失敗）**：引擎檔案只由下面的指令安裝，App 執行時從不下載。
+**安裝喚醒引擎（WK-01b 準備批次；引擎仍不可用）**：引擎檔案只由下面的指令安裝，App 執行時從不下載。
 
 ```bash
 npm run wake:setup -- --product
 ```
 
-它從 GitHub Release 下載 GitHub Actions 建出的 KWS wasm 與 JS，以及 WK-00 已釘住的兩個 KWS 模型壓縮檔，逐一以 `shared/wake-runtime.json` 核對 SHA-256，全部通過才安裝到 `wake-runtime/`（macOS 另外複製到 `~/Library/Application Support/Nous/wake-runtime/`，就是 App 核心提供 `/wake-runtime/` 的資料夾）。任何一項不符或缺雜湊就以非 0 結束，一個檔案都不安裝。**目前清單還是 `pending_first_build`**：wasm 的雜湊要等第一次 CI 建置寫進清單，關鍵詞與門檻也還在等 George 的 Mac 數字，所以這個指令現在會在下載前就失敗，App 仍顯示「喚醒引擎尚未安裝」。已用 `gh release download` 或瀏覽器先下載時，可加 `--from <資料夾>`；`--dest <資料夾>` 改安裝位置。詳見 [WK-01b 準備批次驗證](../../docs/validation/wk-01b-prep-2026-10-31.md)。
+它從 GitHub Release 下載 GitHub Actions 建出的 KWS wasm 與 JS，以及 WK-00 已釘住的兩個 KWS 模型壓縮檔，逐一以 `shared/wake-runtime.json` 核對 SHA-256，全部通過才安裝到 `wake-runtime/`（macOS 另外複製到 `~/Library/Application Support/Nous/wake-runtime/`，就是 App 核心提供 `/wake-runtime/` 的資料夾）。任何一項不符或缺雜湊就以非 0 結束，一個檔案都不安裝。**2026-10-31 起清單是 `built`**：wasm 與 JS 的雜湊已從 release `wake-runtime-2.0.1-5961b4196003` 寫進清單，所以這個指令會下載並核對；但關鍵詞與門檻還在等 George 的 Mac 數字（`keywords_pending`），即使安裝成功，App 仍顯示「喚醒引擎尚未安裝」，也不會開麥克風。已用 `gh release download` 或瀏覽器先下載時，可加 `--from <資料夾>`；`--dest <資料夾>` 改安裝位置。詳見 [WK-01b 準備批次驗證](../../docs/validation/wk-01b-prep-2026-10-31.md)。
 
 ### 武陵居中控（選填）
 

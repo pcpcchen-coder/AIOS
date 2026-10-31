@@ -3,7 +3,7 @@ import { KWS_FS_PATHS, kwsConfig, SherpaWasmDetector, WakeDetectorError } from "
 import { createRuntimeNet, LOCKED_GLOBALS, NetworkLockedError, type WakeRuntimeNet } from "../src/audio/runtime-net.ts";
 import { WakeWorkerCore } from "../src/audio/worker-core.ts";
 import { WAKE_RUNTIME } from "../server/wake-runtime.ts";
-import { WAKE_RELEASE_FILES, wakeKeywordsText, type WakeRuntimeManifest, type WakeWorkerOut } from "../shared/wake.ts";
+import { WAKE_RELEASE_FILES, wakeKeywordsText, wakeRuntimeBlockers, type WakeRuntimeManifest, type WakeWorkerOut } from "../shared/wake.ts";
 import type { KwsWasmFactoryOptions } from "../src/audio/detector.ts";
 import { builtTestManifest, engineControls, FAKE_BYTES, fakeGlue, fakeScope, sha256, upstreamApiModule, type FakeEngineControls, type FakeKwsModule, type FakeScope } from "./fixtures/wake-wasm.ts";
 
@@ -50,8 +50,9 @@ function expectLocked(r: Rig): void {
   for (const key of LOCKED_GLOBALS) expect(() => (r.scope as unknown as Record<string, () => unknown>)[key]!(), key).toThrow(NetworkLockedError);
 }
 
-describe("SherpaWasmDetector with the shipped manifest (pending_first_build)", () => {
-  it("reports runtime_missing without touching the network, and locks the network anyway", async () => {
+describe("SherpaWasmDetector with the shipped manifest (built, keywords pending)", () => {
+  it("reports runtime_missing (keywords pending) without touching the network, and locks the network anyway", async () => {
+    expect(wakeRuntimeBlockers(WAKE_RUNTIME)).toEqual(["keywords_pending"]);
     const scope = fakeScope();
     const net = createRuntimeNet(scope, WAKE_RUNTIME.url_prefix, WAKE_RUNTIME.files.map((f) => f.name), async () => {
       throw new Error("must not import");
@@ -68,6 +69,22 @@ describe("SherpaWasmDetector with the shipped manifest (pending_first_build)", (
     await core.init(48_000);
     core.audio(new Float32Array(480));
     expect(out).toEqual([{ type: "load_error", reason: "runtime_missing" }]);
+  });
+
+  it("a pending_first_build manifest (constructed: no release hashes) also reports runtime_missing without touching the network", async () => {
+    const pending = structuredClone(WAKE_RUNTIME);
+    pending.status = "pending_first_build";
+    pending.build.release_tag = null;
+    pending.build.config_sha256 = null;
+    for (const f of pending.files) if (f.source === "release") f.sha256 = "";
+    expect(wakeRuntimeBlockers(pending)).toEqual(["pending_first_build", "hash_missing", "keywords_pending"]);
+    const scope = fakeScope();
+    const net = createRuntimeNet(scope, pending.url_prefix, pending.files.map((f) => f.name), async () => {
+      throw new Error("must not import");
+    });
+    await expect(new SherpaWasmDetector(pending, net).load()).rejects.toMatchObject({ reason: "runtime_missing" });
+    expect(scope.requests).toEqual([]);
+    expect(net.locked).toBe(true);
   });
 });
 

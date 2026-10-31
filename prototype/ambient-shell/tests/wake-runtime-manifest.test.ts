@@ -9,10 +9,29 @@ import { validateWakeRuntimeManifest, WAKE_RELEASE_FILES, wakeRuntimeBlockers, t
 import models from "../spike/wake/models.json" with { type: "json" };
 import { builtTestManifest, FAKE_BYTES, sha256 } from "./fixtures/wake-wasm.ts";
 
-// WK-01b 準備批次：shared/wake-runtime.json 的格式、pending_first_build 標記的效果，以及 npm run wake:setup -- --product 的核對
-// （下載以注入的 fetchBytes 代替，不連網）。
+// WK-01b 準備批次：shared/wake-runtime.json 的格式、pending_first_build 與 built 標記的效果，以及 npm run wake:setup -- --product 的核對
+// （下載以注入的 fetchBytes 代替，不連網）。2026-10-31 起出貨的清單是 built（release wake-runtime-2.0.1-5961b4196003，
+// run 41206217255），關鍵詞仍是 pending_owner_numbers，所以引擎仍回報 missing（只剩 keywords_pending）。
+// pending_first_build 的情況改以 pendingManifest() 明確建構來測。
 
 const app = join(import.meta.dirname, "..");
+/** 2026-10-31 release（GitHub Actions run 41206217255，main bf76595）三個 release 檔的 SHA-256，與 PR 建置 run 41188249061 相同。 */
+const RELEASE_TAG = "wake-runtime-2.0.1-5961b4196003";
+const CONFIG_SHA256 = "5961b4196003b5d06967f045c81ee8c98f48b763d1d8c4c446cf8182291461fd";
+const RELEASE_SHA256: Record<string, string> = {
+  "sherpa-onnx-wasm-kws-main.mjs": "31342b5316cb03aabf43696d8166f74c8acfc86301bba70c44859d4a584aa136",
+  "sherpa-onnx-wasm-kws-main.wasm": "116728205719c761bd8d301cae6745957dd86cd5a6a7b4ab63e6424ccec76aca",
+  "sherpa-onnx-kws.mjs": "bd10d04c191f9db1e12884fa7f41c6a1aea5b50becddda94eee799fef6d2acc8",
+};
+/** 第一次 CI 建置之前的清單狀態（以出貨的清單明確建構，不依賴出貨檔本身）。 */
+function pendingManifest(): WakeRuntimeManifest {
+  const m = structuredClone(WAKE_RUNTIME);
+  m.status = "pending_first_build";
+  m.build.release_tag = null;
+  m.build.config_sha256 = null;
+  for (const f of m.files) if (f.source === "release") f.sha256 = "";
+  return m;
+}
 let root: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "nous-wake-manifest-"));
@@ -20,14 +39,19 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("shared/wake-runtime.json schema", () => {
-  it("the shipped manifest is valid, pending_first_build, with empty release hashes (no invented hashes) and empty keywords", () => {
+  it("the shipped manifest is valid and built from the 2026-10-31 release (real release hashes, tag carries the config hash prefix) with empty keywords", () => {
     expect(validateWakeRuntimeManifest(WAKE_RUNTIME)).toEqual([]);
-    expect(WAKE_RUNTIME.status).toBe("pending_first_build");
-    expect(WAKE_RUNTIME.build.release_tag).toBeNull();
-    expect(WAKE_RUNTIME.build.config_sha256).toBeNull();
+    expect(WAKE_RUNTIME.status).toBe("built");
+    expect(WAKE_RUNTIME.build.release_repo).toBe("pcpcchen-coder/AIOS");
+    expect(WAKE_RUNTIME.build.release_tag).toBe(RELEASE_TAG);
+    expect(WAKE_RUNTIME.build.config_sha256).toBe(CONFIG_SHA256);
+    // tag 的尾碼是建置設定雜湊的前 12 碼
+    expect(WAKE_RUNTIME.build.release_tag).toBe(`wake-runtime-${WAKE_RUNTIME.build.sherpa_onnx_version}-${CONFIG_SHA256.slice(0, 12)}`);
     const release = WAKE_RUNTIME.files.filter((f) => f.source === "release");
     expect(release.map((f) => f.name).sort()).toEqual(Object.values(WAKE_RELEASE_FILES).sort());
-    expect(release.map((f) => f.sha256)).toEqual(["", "", ""]);
+    expect(Object.fromEntries(release.map((f) => [f.name, f.sha256]))).toEqual(RELEASE_SHA256);
+    // 不是測試替身的雜湊
+    for (const f of release) expect(f.sha256, f.name).not.toBe(sha256(FAKE_BYTES[f.name]!));
     expect(WAKE_RUNTIME.keywords).toEqual({ status: "pending_owner_numbers", model: null, keywords_score: null, keywords_threshold: null, entries: [] });
   });
 
@@ -53,14 +77,22 @@ describe("shared/wake-runtime.json schema", () => {
   });
 
   it("rejects invented or malformed states", () => {
-    const bad = (edit: (m: WakeRuntimeManifest) => void): string[] => {
-      const m = structuredClone(WAKE_RUNTIME);
+    const pending = pendingManifest();
+    expect(validateWakeRuntimeManifest(pending)).toEqual([]);
+    const bad = (edit: (m: WakeRuntimeManifest) => void, base: WakeRuntimeManifest = pending): string[] => {
+      const m = structuredClone(base);
       edit(m);
       return validateWakeRuntimeManifest(m);
     };
-    // pending 時 release 檔不得有雜湊；built 時一定要有
+    // pending 時 release 檔不得有雜湊、不得有 release_tag／config_sha256；built 時一定要有雜湊
     expect(bad((m) => (m.files[0]!.sha256 = "a".repeat(64)))).not.toEqual([]);
     expect(bad((m) => (m.status = "built"))).not.toEqual([]);
+    expect(bad((m) => (m.build.release_tag = RELEASE_TAG))).not.toEqual([]);
+    expect(bad((m) => (m.build.config_sha256 = CONFIG_SHA256))).not.toEqual([]);
+    expect(bad((m) => (m.status = "pending_first_build"), WAKE_RUNTIME)).not.toEqual([]);
+    expect(bad((m) => (m.files[0]!.sha256 = ""), WAKE_RUNTIME)).not.toEqual([]);
+    expect(bad((m) => (m.files[1]!.sha256 = "not-a-hash"), WAKE_RUNTIME)).not.toEqual([]);
+    expect(bad((m) => ((m as { status: string }).status = "released"), WAKE_RUNTIME)).not.toEqual([]);
     expect(bad((m) => (m.keywords.entries = [{ id: "X", tokens: "a", boost: null, threshold: null }]))).not.toEqual([]);
     expect(bad((m) => (m.files[3]!.sha256 = ""))).not.toEqual([]);
     expect(bad((m) => (m.files[3]!.name = "../x.onnx"))).not.toEqual([]);
@@ -80,10 +112,12 @@ describe("shared/wake-runtime.json schema", () => {
     expect(validateWakeRuntimeManifest(m)).not.toEqual([]);
   });
 
-  it("while pending_first_build is present the runtime is not ok (server: missing; worker: runtime_missing)", () => {
-    expect(wakeRuntimeBlockers(WAKE_RUNTIME)).toEqual(["pending_first_build", "hash_missing", "keywords_pending"]);
-    expect(checkWakeRuntime(root).state).toBe("missing");
-    expect(checkWakeRuntime(null).state).toBe("missing");
+  it("the shipped built manifest is still not ok while keywords are pending (only keywords_pending); pending_first_build is never ok", () => {
+    expect(wakeRuntimeBlockers(WAKE_RUNTIME)).toEqual(["keywords_pending"]);
+    expect(checkWakeRuntime(root)).toEqual({ state: "missing", problems: ["keywords_pending"] });
+    expect(checkWakeRuntime(null)).toEqual({ state: "missing", problems: ["keywords_pending"] });
+    // 第一次建置之前的狀態：三個阻擋理由
+    expect(wakeRuntimeBlockers(pendingManifest())).toEqual(["pending_first_build", "hash_missing", "keywords_pending"]);
     // 即使雜湊與關鍵詞都設好，只要還標著 pending_first_build 就不是 ok（格式也不合法）
     const m = builtTestManifest();
     m.status = "pending_first_build";
@@ -121,10 +155,41 @@ describe("npm run wake:setup -- --product (verification; downloads replaced by a
     return new Map(members.map((m) => [m, Buffer.from(FAKE_BYTES[files.find((f) => f.member === m)!.name]!)]));
   };
 
-  it("fails closed before any download while the manifest is pending_first_build (missing hashes)", async () => {
+  it("fails closed before any download when the manifest is pending_first_build (constructed; missing hashes)", async () => {
     const src = source();
-    await expect(verifyProduct({ manifest: WAKE_RUNTIME, models, fetchBytes: src.fetchBytes, extract })).rejects.toThrow(/pending_first_build[\s\S]*missing hash: sherpa-onnx-wasm-kws-main\.mjs/);
+    await expect(verifyProduct({ manifest: pendingManifest(), models, fetchBytes: src.fetchBytes, extract })).rejects.toThrow(/pending_first_build[\s\S]*missing hash: sherpa-onnx-wasm-kws-main\.mjs/);
     expect(src.requested).toEqual([]);
+  });
+
+  it("with the shipped manifest it downloads from the real release tag and rejects bytes that do not match the release hashes (nothing to install)", async () => {
+    const src = source();
+    const run = verifyProduct({ manifest: WAKE_RUNTIME, models, fetchBytes: src.fetchBytes, extract });
+    await expect(run).rejects.toThrow(/mismatch: sherpa-onnx-wasm-kws-main\.mjs/);
+    await expect(run).rejects.toThrow(/mismatch: sherpa-onnx-wasm-kws-main\.wasm/);
+    await expect(run).rejects.toThrow(/mismatch: sherpa-onnx-kws\.mjs/);
+    await expect(run).rejects.toThrow(new RegExp(`expected ${RELEASE_SHA256["sherpa-onnx-wasm-kws-main.wasm"]}`));
+    // 注入的模型壓縮檔也不是真的壓縮檔
+    await expect(run).rejects.toThrow(/archive SHA-256 mismatch/);
+    expect(src.requested.filter((u) => u.includes("/releases/download/wake-runtime-")).sort()).toEqual(
+      Object.values(WAKE_RELEASE_FILES).map((n) => `https://github.com/pcpcchen-coder/AIOS/releases/download/${RELEASE_TAG}/${n}`).sort(),
+    );
+  });
+
+  it("keywords pending does not stop setup (the script checks only the build and hashes); the installed folder still reports missing with only keywords_pending", async () => {
+    // 出貨的清單，release 雜湊換成測試替身的雜湊（真的 release 位元組不在測試裡）；keywords 仍是 pending_owner_numbers
+    const m = structuredClone(WAKE_RUNTIME);
+    for (const f of m.files) f.sha256 = sha256(FAKE_BYTES[f.name]!);
+    expect(m.keywords.status).toBe("pending_owner_numbers");
+    expect(validateWakeRuntimeManifest(m)).toEqual([]);
+    const src = source();
+    const verified = await verifyProduct({ manifest: m, models: testModels(), fetchBytes: src.fetchBytes, extract });
+    expect([...verified.keys()].sort()).toEqual(m.files.map((f) => f.name).sort());
+    expect(src.requested.filter((u) => u.includes("/releases/download/wake-runtime-")).map((u) => u.split("/").at(-2))).toEqual([RELEASE_TAG, RELEASE_TAG, RELEASE_TAG]);
+    const dest = join(root, "wake-runtime");
+    installVerified(verified, [dest]);
+    expect(readdirSync(dest).sort()).toEqual(m.files.map((f) => f.name).sort());
+    // 檔案都對，但關鍵詞未定：引擎仍不可用
+    expect(checkWakeRuntime(dest, m.files, wakeRuntimeBlockers(m))).toEqual({ state: "missing", problems: ["keywords_pending"] });
   });
 
   it("fails on any single missing hash, and on any manifest format error, before downloading", async () => {

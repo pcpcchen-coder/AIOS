@@ -1,7 +1,7 @@
 {
-  "comment": "常駐喚醒聆聽的本機引擎清單（WK-01b 準備批次，schema_version 1）。release 檔（wasm 與 JS）由 .github/workflows/wake-wasm.yml 以固定的 emsdk 與 sherpa-onnx v2.0.1 建置；第一次 CI 建置之前雜湊是空字串、status 是 pending_first_build，引擎一律回報 missing／runtime_missing，也不會開啟麥克風。模型檔沿用 WK-00 釘住的壓縮檔與雜湊（spike/wake/models.json）。關鍵詞與門檻等 George 在 Mac 的 WK-00 每人 5 次試跑數字（docs/17 §14.1 D1），在那之前 keywords 是空的佔位（pending_owner_numbers）。只由 npm run wake:setup -- --product 安裝；App 執行時不下載。",
+  "comment": "常駐喚醒聆聽的本機引擎清單（WK-01b 準備批次，schema_version 1）。release 檔（wasm 與 JS）由 .github/workflows/wake-wasm.yml 以固定的 emsdk 與 sherpa-onnx v2.0.1 建置；2026-10-31 第一次 main 建置已發布 release wake-runtime-2.0.1-5961b4196003（run 41206217255），三個 release 檔的雜湊與 PR 建置一致，status 改為 built。模型檔沿用 WK-00 釘住的壓縮檔與雜湊（spike/wake/models.json）。關鍵詞與門檻等 George 在 Mac 的 WK-00 每人 5 次試跑數字（docs/17 §14.1 D1），在那之前 keywords 是空的佔位（pending_owner_numbers）。只由 npm run wake:setup -- --product 安裝；App 執行時不下載。",
   "schema_version": 1,
-  "status": "pending_first_build",
+  "status": "built",
   "url_prefix": "/wake-runtime/",
   "build": {
     "workflow": ".github/workflows/wake-wasm.yml",
@@ -11,29 +11,29 @@
     "emsdk_version": "4.0.23",
     "emsdk_commit": "c0bb220cb6e6f4e0fabb6f6db9efd53390ef5e56",
     "release_repo": "pcpcchen-coder/AIOS",
-    "release_tag": null,
-    "config_sha256": null
+    "release_tag": "wake-runtime-2.0.1-5961b4196003",
+    "config_sha256": "5961b4196003b5d06967f045c81ee8c98f48b763d1d8c4c446cf8182291461fd"
   },
   "files": [
     {
       "name": "sherpa-onnx-wasm-kws-main.mjs",
       "role": "runtime",
       "source": "release",
-      "sha256": "",
+      "sha256": "31342b5316cb03aabf43696d8166f74c8acfc86301bba70c44859d4a584aa136",
       "license": "Apache-2.0（sherpa-onnx v2.0.1；Emscripten 產生的載入程式，Emscripten 為 MIT／UIUC）"
     },
     {
       "name": "sherpa-onnx-wasm-kws-main.wasm",
       "role": "runtime",
       "source": "release",
-      "sha256": "",
+      "sha256": "116728205719c761bd8d301cae6745957dd86cd5a6a7b4ab63e6424ccec76aca",
       "license": "Apache-2.0（sherpa-onnx v2.0.1，只建 KWS、TTS 關閉）；內含 onnxruntime MIT、kaldi-native-fbank／kaldi-decoder／openfst／simple-sentencepiece Apache-2.0、json／utf8proc MIT（ADR-0003 §3）"
     },
     {
       "name": "sherpa-onnx-kws.mjs",
       "role": "runtime",
       "source": "release",
-      "sha256": "",
+      "sha256": "bd10d04c191f9db1e12884fa7f41c6a1aea5b50becddda94eee799fef6d2acc8",
       "license": "Apache-2.0（sherpa-onnx v2.0.1 wasm/kws/sherpa-onnx-kws.js，加上一行 ES module export）"
     },
     {
