@@ -351,11 +351,25 @@
       "translationSha256": "a1c5efe60b3f5f0ce284bd299ae9faa0c5f8b837c955caae0e8dbcd80de884fd"
     },
     {
+      "source": "docs/validation/family-id-02-mac-2026-10-31.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/family-id-02-mac-2026-10-31.en.md",
+      "sourceSha256": "544f120c1b6b788fe27ff283aafe57c79eef6b3ec4de65fbc6bb71c7b68f572d",
+      "translationSha256": "062eae7d38b70d69c62a3e354ab420ee2e1a1c93b971f75f87f0a1e35a7e245e"
+    },
+    {
       "source": "docs/validation/history-hist1-2026-10-30.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/history-hist1-2026-10-30.en.md",
       "sourceSha256": "e7960dbf2b22c16badd136d6fafa795e7f80e3eab49eebbf1380a7b0380d9dc5",
       "translationSha256": "61e9911ebb1c156b1bfcfecca320ce1c4f70c2db79382bc015204f695ed6047c"
+    },
+    {
+      "source": "docs/validation/history-hist1-mac-2026-10-31.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/history-hist1-mac-2026-10-31.en.md",
+      "sourceSha256": "f84ec91ee853ce9972b4a68f70ac318026c070adef871996c1288f9a8e4927b5",
+      "translationSha256": "3dd75a355548ee0f16dbe88c1d21632639c69e05be98c7d3a4ee1c183d639d0e"
     },
     {
       "source": "docs/validation/implementation-review-2026-10-24.md",
