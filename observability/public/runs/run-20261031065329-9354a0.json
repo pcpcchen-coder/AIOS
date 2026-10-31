@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-31T06:53:29.952Z",
-  "updated_at": "2026-10-31T07:01:21.242Z",
+  "updated_at": "2026-10-31T07:01:24.994Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-31T07:01:24.993Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -118,6 +118,13 @@
       "type": "step_updated",
       "step_id": "architect",
       "status": "passed",
+      "note": ""
+    },
+    {
+      "at": "2026-10-31T07:01:24.994Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
       "note": ""
     }
   ],
