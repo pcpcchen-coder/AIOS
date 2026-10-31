@@ -25,6 +25,11 @@ Every new or updated project document must provide complete Traditional Chinese 
 
 The current implementation is `prototype/ambient-shell`: Node HTTP and SSE, framework-free TypeScript / Vite, Electron, and JSON persistence. Claude uses the Anthropic Messages SDK. The implementation has not migrated to Python, Tauri, or the full Agent SDK. Camera head-facing and gesture code exists, but this is not eye-tracking calibration. Claude leads core development and ChatGPT / Codex leads the Quest direction. This division must not restrict runtime model providers.
 
+<a id="現階段優先順序2026-10-31-使用者要求"></a>
+## Current priority (owner requirement, 2026-10-31)
+
+The system is used only at home for now: **convenience and features come first**, and permission and security hardening is deferred. Pick feature work for the next batch; do not add extra permission or security hardening on your own (for example the general Action Gate / F1, or tightening the main window URL check) unless the owner asks. The product boundaries below still apply.
+
 <a id="產品紅線違反即不合格"></a>
 ## Product boundaries (violations fail acceptance)
 
