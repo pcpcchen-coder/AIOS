@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-31T12:09:27.581Z",
+  "updated_at": "2026-10-31T12:09:31.524Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,12 +9,12 @@
       "title": "Camera enable only via App main process",
       "playbook": "bug-fix",
       "status": "running",
-      "updated_at": "2026-10-31T12:09:25.622Z",
+      "updated_at": "2026-10-31T12:09:29.873Z",
       "started_at": "2026-10-31T11:49:56.051Z",
       "ended_at": null,
       "branch": "",
       "commit_sha": "",
-      "passed_steps": 4,
+      "passed_steps": 5,
       "total_steps": 8,
       "provenance": "Agent self-reported"
     },

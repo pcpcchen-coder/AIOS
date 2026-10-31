@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-31T11:49:56.051Z",
-  "updated_at": "2026-10-31T12:09:25.622Z",
+  "updated_at": "2026-10-31T12:09:29.873Z",
   "ended_at": null,
   "steps": [
     {
@@ -50,10 +50,10 @@
     {
       "id": "verify",
       "title": "verify",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-31T12:09:29.873Z",
+      "ended_at": "2026-10-31T12:09:29.873Z",
+      "note": "typecheck ok; vitest 2033 passed; build ok; verify-aios PASS",
       "evidence": []
     },
     {
@@ -119,6 +119,13 @@
       "step_id": "implement",
       "status": "passed",
       "note": "HTTP 403 strict mode, IPC native dialog, video permission gate"
+    },
+    {
+      "at": "2026-10-31T12:09:29.873Z",
+      "type": "step_updated",
+      "step_id": "verify",
+      "status": "passed",
+      "note": "typecheck ok; vitest 2033 passed; build ok; verify-aios PASS"
     }
   ],
   "provenance": "Agent self-reported"
