@@ -159,13 +159,13 @@ After you add `NOUS_WAKE=on` to `.env` and restart, the macOS App's menu bar “
 
 **It does not detect 「哈囉努斯」 yet**: the wake engine arrives in WK-01b, so after you turn it on the state reads “Unavailable: The wake engine is not installed yet; the microphone was not opened”, and the microphone stays closed. Without `NOUS_WAKE`, everything behaves as before. See [WK-01a validation](../../docs/validation/wk-01a-2026-10-31.en.md).
 
-**Installing the wake engine (WK-01b preparatory batch; it currently fails honestly)**: the engine files are installed only by the command below. The App never downloads them at runtime.
+**Installing the wake engine (WK-01b preparatory batch; the engine is still unavailable)**: the engine files are installed only by the command below. The App never downloads them at runtime.
 
 ```bash
 npm run wake:setup -- --product
 ```
 
-It downloads the KWS wasm and JS built by GitHub Actions from the GitHub Release, plus the two KWS model archives already pinned in WK-00, checks every SHA-256 against `shared/wake-runtime.json`, and installs into `wake-runtime/` only when everything passes (on macOS it also copies to `~/Library/Application Support/Nous/wake-runtime/`, the folder the App core serves as `/wake-runtime/`). Any mismatch or missing hash exits non-zero and installs nothing. **The manifest is still `pending_first_build`**: the wasm hashes come from the first CI build, and the keywords and threshold still wait for George's Mac numbers, so the command currently fails before downloading anything and the App still shows “The wake engine is not installed yet”. If you already downloaded the files with `gh release download` or a browser, add `--from <folder>`; `--dest <folder>` changes the install location. See [WK-01b preparatory batch validation](../../docs/validation/wk-01b-prep-2026-10-31.en.md).
+It downloads the KWS wasm and JS built by GitHub Actions from the GitHub Release, plus the two KWS model archives already pinned in WK-00, checks every SHA-256 against `shared/wake-runtime.json`, and installs into `wake-runtime/` only when everything passes (on macOS it also copies to `~/Library/Application Support/Nous/wake-runtime/`, the folder the App core serves as `/wake-runtime/`). Any mismatch or missing hash exits non-zero and installs nothing. **Since 2026-10-31 the manifest is `built`**: the wasm and JS hashes from the release `wake-runtime-2.0.1-5961b4196003` are in the manifest, so the command downloads and verifies the files; but the keywords and threshold still wait for George's Mac numbers (`keywords_pending`), so even after a successful install the App still shows “The wake engine is not installed yet” and does not open the microphone. If you already downloaded the files with `gh release download` or a browser, add `--from <folder>`; `--dest <folder>` changes the install location. See [WK-01b preparatory batch validation](../../docs/validation/wk-01b-prep-2026-10-31.en.md).
 
 <a id="武陵居中控選填"></a>
 ### Wuling home controller (optional)

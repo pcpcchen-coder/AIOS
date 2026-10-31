@@ -88,13 +88,14 @@ describe("WakeSettingsStore: wake.json fails closed", () => {
   });
 });
 
-describe("wake runtime manifest (D2: pending_first_build in WK-01b prep, hash-verified like face-runtime)", () => {
-  it("the shipped list is pending_first_build, so the runtime is missing and nothing is served (schema details: tests/wake-runtime-manifest.test.ts)", () => {
+describe("wake runtime manifest (D2: built from the 2026-10-31 release, keywords pending; hash-verified like face-runtime)", () => {
+  it("the shipped list is built but keywords are pending, so the runtime is missing (only keywords_pending) and unverified bytes are never served (schema details: tests/wake-runtime-manifest.test.ts)", () => {
     expect(WAKE_RUNTIME_FILES.length).toBeGreaterThan(0);
-    expect(checkWakeRuntime(root)).toEqual({ state: "missing", problems: ["pending_first_build", "hash_missing", "keywords_pending"] });
+    expect(checkWakeRuntime(root)).toEqual({ state: "missing", problems: ["keywords_pending"] });
     expect(wakeRuntimePath(root, "/wake-runtime/anything.wasm")).toBeNull();
-    // 有列出但還沒有雜湊的 release 檔也不提供
-    expect(wakeRuntimePath(root, "/wake-runtime/sherpa-onnx-wasm-kws-main.wasm")).toBeNull();
+    // release 檔現在有雜湊，所以路徑對得上清單；但內容不符雜湊就不提供（伺服器另外以 runtime 狀態把關，見 NOUS_WAKE=on 的 404 測試）
+    expect(wakeRuntimePath(root, "/wake-runtime/sherpa-onnx-wasm-kws-main.wasm")).toBe(join(root, "sherpa-onnx-wasm-kws-main.wasm"));
+    expect(readVerifiedWakeRuntime(join(root, "sherpa-onnx-wasm-kws-main.wasm"))).toBeNull();
     writeFileSync(join(root, "sherpa-onnx-wasm-kws-main.wasm"), "unverified");
     expect(readVerifiedWakeRuntime(join(root, "sherpa-onnx-wasm-kws-main.wasm"))).toBeNull();
   });
@@ -183,7 +184,7 @@ describe("NOUS_WAKE=on", () => {
     await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
     try {
       const get = async (name: string) => (await fetch(`http://localhost:${port}/wake-runtime/${name}`)).status;
-      expect(checkWakeRuntime(runtimeDir).state).toBe("missing"); // pending_first_build
+      expect(checkWakeRuntime(runtimeDir)).toEqual({ state: "missing", problems: ["keywords_pending"] }); // 關鍵詞等 George 的數字
       expect(await get(model.name)).toBe(404);
       for (const f of WAKE_RUNTIME_FILES) expect(await get(f.name), f.name).toBe(404);
       // 對照：runtime 是 ok 時同一個檔案會走到雜湊核對（不符 → 503），證明 404 來自 runtime 的閘門
@@ -229,7 +230,7 @@ describe("NOUS_WAKE=on", () => {
     const off = (await (await post({ wake_listen: false })).json()) as SettingsView;
     expect(off.wake).toEqual({ wake_listen: false, device_id: null, runtime: "missing" });
     expect(existsSync(join(root, "config", "wake.json"))).toBe(true);
-    // 引擎清單仍是 pending_first_build：資料夾裡的檔案也不提供
+    // 引擎清單是 built 但關鍵詞未定（runtime missing）：資料夾裡的檔案也不提供
     expect((await fetch(`${handle.url}/wake-runtime/engine.wasm`)).status).toBe(404);
     expect((await fetch(`${handle.url}/wake-runtime/`)).status).toBe(404);
   });

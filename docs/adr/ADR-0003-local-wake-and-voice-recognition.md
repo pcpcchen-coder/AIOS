@@ -126,4 +126,4 @@ ADR-0001 §2.4 的稱名說明在實作時補上「也可能依聲音認出」�
 - SP-00 講者模型 spike 與授權查核。
 - ~~WK-01 實作時把本 ADR 的 §2.1 條文寫進 ADR-0001，並建立 `tests/audio-privacy.test.ts`。~~ 2026-10-31 WK-01a 已完成這兩項。
 - ~~WK-02：`wake_word` 啟動來源、限速、問候、無人聲自動結束、F6 費用紀錄。~~ 2026-10-31 已實作（[驗證](../validation/wk-02-2026-10-31.md)），Mac 上要等 WK-01b 才能真的觸發。
-- WK-01b：依 George 的 Mac WK-00 結果，由 GitHub Actions 自建 KWS wasm、寫入雜湊清單與關鍵詞檔，`SherpaWasmDetector` 真正載入（17 §14.1）。2026-10-31 已做準備部分（workflow、`wake:setup -- --product`、清單格式、載入路徑）；剩下第一次 CI 建置的雜湊、關鍵詞與門檻、Mac 上的實際載入與偵測。
+- WK-01b：依 George 的 Mac WK-00 結果，由 GitHub Actions 自建 KWS wasm、寫入雜湊清單與關鍵詞檔，`SherpaWasmDetector` 真正載入（17 §14.1）。2026-10-31 已做準備部分（workflow、`wake:setup -- --product`、清單格式、載入路徑）；第一次 CI 建置的雜湊已於 2026-10-31 寫入清單（release `wake-runtime-2.0.1-5961b4196003`）；剩下關鍵詞與門檻、Mac 上的實際載入與偵測。
