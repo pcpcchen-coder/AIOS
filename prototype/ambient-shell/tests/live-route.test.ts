@@ -522,6 +522,28 @@ describe.skipIf(!realLockAvailable)("MEM-2 memory on the live wire (fixture side
     await expect.poll(() => t2.events.find((e) => e.kind === "memory")).toMatchObject({ kind: "memory", used: 0, reason: "route_disabled" });
   });
 
+  it("台灣繁體：a Simplified user transcript reaches memory parsing as Taiwan Traditional (zh); the en UI passes it unchanged", async () => {
+    for (const locale of ["zh-TW", "en"] as const) {
+      const h = await memoryWith(null);
+      const heard: string[] = [];
+      const t = await setup({
+        ctx: { locale },
+        memory: (ctx) => {
+          const memory = port(h)(ctx);
+          const original = memory.onUserFinal.bind(memory);
+          memory.onUserFinal = (text, at, itemId) => { heard.push(text); original(text, at, itemId); };
+          return memory;
+        },
+      });
+      calls.push(await t.route.connect("v=0 offer", t.ctx));
+      const conn = await sideband!.next();
+      conn.send({ type: "session.started", session: {} });
+      conn.send({ type: "turn.done", turn: { role: "user", transcript: "记住，我喜欢红色", id: "u1" } });
+      await expect.poll(() => heard.length).toBe(1);
+      expect(heard).toEqual([locale === "en" ? "记住，我喜欢红色" : "記住，我喜歡紅色"]);
+    }
+  });
+
   it("a rebuilt call speaks only the fixed, content-free sentence first", async () => {
     const t = await setup({ ctx: { rebuild: true } });
     calls.push(await t.route.connect("v=0 offer", t.ctx));
@@ -619,8 +641,8 @@ describe("ID-02 Mac fixes on the live wire (fixture sideband)", () => {
     // 下一輪：「进度如何」是本機指令，頁面回報 scope turn。
     conn.send({ type: "input_audio_buffer.speech_started" });
     conn.send({ type: "turn.done", turn: { role: "user", transcript: "进度如何", id: "u2" } });
-    // 頁面是在收到這一則逐字稿之後才回報（核心已經看過它）。
-    while (!t.events.some((e) => e.kind === "transcript" && e.text === "进度如何" && e.final)) await later();
+    // 頁面是在收到這一則逐字稿之後才回報（核心已經看過它）。核心轉成台灣繁體之後才轉給頁面（2026-10-31）。
+    while (!t.events.some((e) => e.kind === "transcript" && e.text === "進度如何" && e.final)) await later();
     call.stopReply!({ scope: "turn", response_id: null });
     conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "del_2", content: [{ type: "input_text", text: "查進度" }] } });
     release();
@@ -762,5 +784,46 @@ describe("MEM-2 review fixes on the live wire (fixture sideband)", () => {
     const sent = await conn.waitFor((e) => e.type === "delegation.context.append");
     expect(sent).toMatchObject({ delegation_item_id: "d1", content: [{ text: "結果：查天氣" }] });
     expect(t.events.filter((e) => e.kind === "hold")).toEqual([{ kind: "hold", active: true }, { kind: "hold", active: false }]);
+  });
+});
+
+describe("台灣繁體 transcripts on the live route (core sideband)", () => {
+  it("zh: subtitles, the transcript ring sent to Codex, the delegation text and the heard utterance are Taiwan Traditional; the greeting/echo comparison still matches", async () => {
+    const t = await setup({ greeting: () => ({ text: liveGreetingText("歡迎回來，George"), sentence: "歡迎回來，George" }) });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    await conn.waitFor((e) => e.type === "session.context.append");
+    // 模型用簡體念出開場：轉換後仍認得是開場（兩邊都是繁體再比對）。
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: "欢迎回来，George！", id: "a1" } });
+    conn.send({ type: "input_transcript.added", item: { id: "u1", text: "帮我" } });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "帮我写一份晚饭菜单报告", id: "u1" } });
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: "好，我来准备。", id: "a2" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "d1", content: [{ type: "input_text", text: "写一份晚饭菜单报告" }] } });
+    await conn.waitFor((e) => e.type === "delegation.context.append");
+    const transcripts = t.events.filter((e) => e.kind === "transcript").map((e) => (e as { text: string }).text);
+    expect(transcripts).toEqual(["歡迎回來，George！", "幫我", "幫我寫一份晚飯菜單報告", "好，我來準備。"]);
+    const req = t.delegations.at(-1)!;
+    expect(req.text).toBe("寫一份晚飯菜單報告");
+    expect(req.userText).toBe("幫我寫一份晚飯菜單報告");
+    expect(req.transcript.map((x) => [x.role, x.text, x.greeting ?? false])).toEqual([
+      ["assistant", "歡迎回來，George！", true],
+      ["user", "幫我寫一份晚飯菜單報告", false],
+      ["assistant", "好，我來準備。", false],
+    ]);
+    expect(requestText(req)).toContain("使用者：幫我寫一份晚飯菜單報告");
+  });
+
+  it("en: everything passes through unchanged", async () => {
+    const t = await setup({ ctx: { locale: "en" } });
+    calls.push(await t.route.connect("v=0", t.ctx));
+    const conn = await sideband!.next();
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "帮我写报告", id: "u1" } });
+    conn.send({ type: "delegation.created", item: { type: "delegation", target: "client", id: "d1", content: [{ type: "input_text", text: "写报告" }] } });
+    await conn.waitFor((e) => e.type === "delegation.context.append");
+    expect(t.events).toContainEqual({ kind: "transcript", role: "user", text: "帮我写报告", final: true, item_id: "u1" });
+    expect(t.delegations.at(-1)!.text).toBe("写报告");
+    expect(t.delegations.at(-1)!.userText).toBe("帮我写报告");
   });
 });

@@ -5,6 +5,7 @@ import type { HomeControlResult } from "../shared/home.ts";
 import { LiveVoice, orphanStopReport, SPEAKING_OFF_MS, SPEAKING_ON_MS, SPEAKING_RMS, type LiveDeps } from "../src/live-voice.ts";
 import { FallbackOfferError, openRealtime, type RealtimeSession } from "../src/realtime-session.ts";
 import type { ApprovalOutcome, ApprovalRequest, HomeResult, RealtimePhase } from "../src/realtime.ts";
+import { preloadTaiwan } from "../src/zh-tw.ts";
 
 // ChatGPT 方案路徑的頁面模組：假的 WebRTC（資料通道送 frameless 事件）、假的核心（SSE 事件與 POST），
 // 不需要麥克風、喇叭或網路。全部是 fixture。
@@ -181,6 +182,19 @@ describe("LiveVoice state comes from device evidence and real events", () => {
     t.core({ kind: "transcript", role: "user", text: "客廳燈打開", final: true, item_id: "u1" });
     t.core({ kind: "transcript", role: "assistant", text: "好，我請中控處理", final: true, item_id: null });
     t.peer.channel.emit({ type: "turn.done", turn: { role: "assistant", transcript: "好，我請中控處理" } });
+    expect(t.user).toEqual(["客廳燈打開"]);
+    expect(t.assistant).toEqual(["好，我請中控處理"]);
+  });
+
+  it("台灣繁體：the data channel's Simplified copy and the core's converted copy are one event; subtitles get Taiwan Traditional", async () => {
+    await preloadTaiwan();
+    const t = setup();
+    await t.live();
+    // 資料通道是上游原樣（簡體），核心那份已經轉過（繁體），都沒有 item_id：轉換後比對，仍配對成同一個事件。
+    t.peer.channel.emit({ type: "turn.done", turn: { role: "user", transcript: "客厅灯打开" } });
+    t.core({ kind: "transcript", role: "user", text: "客廳燈打開", final: true, item_id: null });
+    t.core({ kind: "transcript", role: "assistant", text: "好，我請中控處理", final: true, item_id: null });
+    t.peer.channel.emit({ type: "turn.done", turn: { role: "assistant", transcript: "好，我请中控处理" } });
     expect(t.user).toEqual(["客廳燈打開"]);
     expect(t.assistant).toEqual(["好，我請中控處理"]);
   });

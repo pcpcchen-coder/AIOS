@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ApiKeyCall } from "../server/apikey-call.ts";
 import { RouteStartError } from "../server/realtime-routes.ts";
-import { voicePersonaRules } from "../server/realtime.ts";
+import { voicePersonaRules, ZH_TW_TRANSCRIPTION_PROMPT } from "../server/realtime.ts";
 import { loadConfig } from "../server/config.ts";
 import { claudeAccountKey, openaiRealtimeAccountKey, openaiRealtimeTarget } from "../server/providers.ts";
 import { CORE_TOOLS } from "../shared/realtime-route.ts";
@@ -61,17 +61,21 @@ async function george(extra: Partial<Parameters<typeof harness>[0]> = {}, allow 
 
 /**
  * 基準快照：MEM-2 之前（658b97a）的 RealtimeBridge 送出的請求，事先產生、存成檔案（不由這次修改過的 bridge 產生）。
- * 比對時把 instructions 的日期換成 <DATE>。之後唯一刻意的改變是 F11 的身分、旁人對話與繁體規則（voicePersonaRules），
- * 接在語言那一行之後；這裡把它們插進快照，其他部分仍要一個位元組都不差。
+ * 比對時把 instructions 的日期換成 <DATE>。之後刻意的改變只有兩個，這裡把它們插進快照，其他部分仍要一個位元組都不差：
+ *  1. F11 的身分、旁人對話與繁體規則（voicePersonaRules），接在語言那一行之後。
+ *  2. 台灣繁體逐字稿（2026-10-31，HIST-1 F1／ID-02 F3）：中文介面的 audio.input.transcription 在 language 之後多一個
+ *     prompt（ZH_TW_TRANSCRIPTION_PROMPT），請 gpt-4o-mini-transcribe 用台灣繁體；快照都是 zh-TW，英文介面不帶（另有測試）。
  */
 async function baseline(options: { mcp?: typeof MCP } = {}) {
   const requests = (STORED.requests as Record<string, { body: string }[]>)[options.mcp ? "mcp" : "plain"]!;
   return requests.map((request) => {
     if (!request.body.startsWith("{")) return request;
-    const body = JSON.parse(request.body) as { session: { instructions: string } };
+    const body = JSON.parse(request.body) as { session: { instructions: string; audio: { input: { transcription: Record<string, string> } } } };
     const lines = body.session.instructions.split("\n");
     lines.splice(lines.findIndex((line) => line.startsWith("一律用繁體中文")) + 1, 0, ...voicePersonaRules("zh-TW"));
     body.session.instructions = lines.join("\n");
+    expect(body.session.audio.input.transcription).toEqual({ model: "gpt-4o-mini-transcribe", language: "zh" });
+    body.session.audio.input.transcription = { ...body.session.audio.input.transcription, prompt: ZH_TW_TRANSCRIPTION_PROMPT };
     return { ...request, body: JSON.stringify(body) };
   });
 }

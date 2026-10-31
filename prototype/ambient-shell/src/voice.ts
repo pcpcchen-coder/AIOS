@@ -7,6 +7,7 @@ import {
   stripEcho,
   takeSentences,
 } from "./echo.ts";
+import { preloadTaiwan, taiwanReady, taiwanText, whenTaiwanReady } from "./zh-tw.ts";
 
 // 語音輸入：按下說話（PushToTalk）與連續語音對話模式（VoiceConversation）。
 // 使用瀏覽器內建的 Web Speech API：Chrome／Edge 會把音訊送到瀏覽器供應商的雲端辨識，
@@ -110,7 +111,10 @@ export class PushToTalk {
     const Ctor = recognitionCtor();
     if (!Ctor || this.recognition) return;
     const r = new Ctor();
-    r.lang = getLocale() === "en" ? "en-US" : "zh-TW";
+    // 語言在開始收音時固定：辨識語言與台灣繁體轉換用同一個。
+    const locale = getLocale();
+    if (locale !== "en") void preloadTaiwan();
+    r.lang = locale === "en" ? "en-US" : "zh-TW";
     r.interimResults = true;
     r.continuous = false;
     r.maxAlternatives = 1;
@@ -127,7 +131,8 @@ export class PushToTalk {
         if (res.isFinal) finalText += res[0].transcript;
         else interim += res[0].transcript;
       }
-      this.callbacks.onInterim(finalText + interim);
+      // Chrome 的 zh-TW 辨識偶爾仍給簡體：累積的整段一起轉成台灣繁體（詞組不會被切開；英文介面原樣）。
+      this.callbacks.onInterim(taiwanText(finalText + interim, locale));
     };
     r.onerror = (e) => {
       if (this.recognition !== r) return;
@@ -141,7 +146,11 @@ export class PushToTalk {
       this.setCapture(false);
       this.recognition = null;
       this.callbacks.onListeningChange(false);
-      if (!this.discard && finalText.trim()) this.callbacks.onFinal(finalText.trim());
+      if (this.discard || !finalText.trim()) return;
+      const emit = () => { if (!this.discard) this.callbacks.onFinal(taiwanText(finalText, locale).trim()); };
+      // 轉換器還沒載好（頁面剛開）：最多等 1 秒再交出，讓這一句也是台灣繁體；平常已載好，照舊立刻交出。
+      if (locale === "en" || taiwanReady()) emit();
+      else void whenTaiwanReady(1000, locale).then(emit);
     };
     this.recognition = r;
     this.callbacks.onListeningChange(true);
@@ -310,7 +319,7 @@ export class VoiceConversation {
       },
       onSentence: (sentence) => {
         if (this.reply !== reply) return;
-        this.spoken = `${this.spoken}${sentence}`.slice(-400);
+        this.spoken = `${this.spoken}${taiwanText(sentence, this.speechLocale)}`.slice(-400);
         this.callbacks.onSentenceSpoken?.();
       },
       onFinish: () => {
@@ -376,11 +385,12 @@ export class VoiceConversation {
       let interim = "";
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const res = e.results[i];
-        const text = res[0].transcript;
         if (!res.isFinal) {
-          interim += text;
+          interim += res[0].transcript;
           continue;
         }
+        // 轉成台灣繁體之後才做回音比對（念出的內容也轉過，見 onSentence）。
+        const text = taiwanText(res[0].transcript, this.speechLocale);
         this.resetIdle();
         this.networkErrors = 0;
         const bargeSpoken = this.bargeSpoken;
@@ -393,6 +403,8 @@ export class VoiceConversation {
         }
       }
       if (!interim) return;
+      // 未完成的片段累積成一段再轉（詞組不會被切開）。
+      interim = taiwanText(interim, this.speechLocale);
       this.resetIdle();
       const barge = isStopWord(interim) || (normalizeSpeech(interim).length >= 2 && !isLikelyEcho(interim, this.spoken));
       if (this.reply && barge) {

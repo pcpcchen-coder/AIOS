@@ -4,6 +4,9 @@ import type { HomeControlArgs } from "./api.ts";
 import { CONNECTING_SPEECH_HINT, EARLY_SPEECH_RMS, EarlySpeech, earlySpeechLogLine } from "./early-speech.ts";
 import { GREETING_SETTLE_MS, type GreetingOnce } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
+import { getLocale } from "./i18n.ts";
+import { taiwanText } from "./zh-tw.ts";
+import { isPromptEcho } from "../shared/zh-tw.ts";
 
 // 即時語音模式（OpenAI Realtime）：像 ChatGPT 語音模式，語音直接對語音。
 // 麥克風音訊經 WebRTC 串流到 OpenAI，由伺服器端 VAD 判斷你何時說完；你一開口，
@@ -157,6 +160,8 @@ export class RealtimeVoice {
   private responding = false;
   private notices: string[] = [];
   private generation = 0;
+  /** 逐字稿轉台灣繁體用的語言：開始這次通話時固定（中途切換介面語言不影響這通）。 */
+  private transcriptLocale: string = getLocale();
   /** 模型呼叫了 end_conversation：念完道別就結束。 */
   private endRequested = false;
   private endTimer: ReturnType<typeof setTimeout> | null = null;
@@ -302,6 +307,7 @@ export class RealtimeVoice {
   async start(): Promise<void> {
     if (this.on) return;
     const generation = ++this.generation;
+    this.transcriptLocale = getLocale();
     this.setPhase("connecting");
     try {
       const mic = await this.deps.getMicrophone();
@@ -551,11 +557,15 @@ export class RealtimeVoice {
         break;
       case "conversation.item.input_audio_transcription.completed":
         if (typeof event.transcript === "string" && event.transcript.trim()) {
-          const transcript = event.transcript.trim();
+          // 中文介面：簡體逐字稿轉成台灣繁體（字幕、本機指令、確認卡比對都用轉換後的）。
+          const heard = taiwanText(event.transcript, this.transcriptLocale);
+          // 雜音時上游把語音辨識的 prompt 當逐字稿吐回來：不是使用者說的話，丟掉。
+          if (isPromptEcho(heard)) break;
+          const transcript = heard.trim();
           this.callbacks.onUserTranscript(transcript);
           // HIST-1 Mac F1：本機已執行畫面指令：這一輪不讓模型回答（伺服器 VAD 已建立或正要建立的回應一併取消）。
           if (this.callbacks.onLocalCommand?.(transcript)) this.quietLocalCommand();
-          this.checkApproval(event.transcript);
+          this.checkApproval(heard);
         }
         break;
       case "response.created": {
@@ -605,12 +615,13 @@ export class RealtimeVoice {
         if (this.endRequested && !this.responding) this.close("對話已結束。");
         break;
       case "response.output_audio_transcript.delta":
+        // 原文交出：AssistantEcho 累積之後整段轉台灣繁體再比對（src/voice-command.ts）。
         if (typeof event.delta === "string" && event.delta) this.callbacks.onAssistantPartial?.(event.delta);
         break;
       case "response.output_audio_transcript.done":
         // HIST-1 Mac F1：本機指令那一輪被取消的回應（取消前已產生的半句）不顯示字幕。
         if (this.localCommandTurn && this.isStopped(typeof event.response_id === "string" ? event.response_id : null)) break;
-        if (typeof event.transcript === "string" && event.transcript.trim()) this.callbacks.onAssistantTranscript(event.transcript.trim());
+        if (typeof event.transcript === "string" && event.transcript.trim()) this.callbacks.onAssistantTranscript(taiwanText(event.transcript.trim(), this.transcriptLocale));
         break;
       case "response.function_call_arguments.done": {
         const name = String(event.name ?? "");

@@ -494,6 +494,19 @@ describe.skipIf(!realLockAvailable)("MEM-4b API key: committed → response.crea
     expect(JSON.stringify(t.probe.events)).not.toContain("晚餐");
   });
 
+  it("台灣繁體：a Simplified ASR transcript becomes the Taiwan Traditional task title (the heard utterance)", async () => {
+    const env = setup();
+    await george(env, { allow: [CLAUDE, OPENAI_RT] });
+    const t = await startCall(env);
+    ga.user(t.conn, "帮我规划一周晚饭", "item_s1");
+    await settle(t.binding);
+    t.conn.send({ type: "response.created", response: { id: "resp_s1" } });
+    t.conn.send({ type: "response.function_call_arguments.done", name: "delegate_task", call_id: "c1", response_id: "resp_s1", arguments: JSON.stringify({ title: "规划一周晚饭" }) });
+    expect(await output(t.conn)).toMatchObject({ ok: true, status: "delegated" });
+    await env.runner.idle();
+    expect(env.exec.inputs.map(i => i.title)).toEqual(["幫我規劃一週晚飯"]);
+  });
+
   it("the transcript may arrive after the function call (within grace)", async () => {
     const env = setup();
     await george(env, { allow: [CLAUDE, OPENAI_RT] });

@@ -6,6 +6,7 @@ import { classify } from "../src/intent.ts";
 import { LiveVoice, LOCAL_COMMAND_DRAIN_MS, LOCAL_COMMAND_QUIET_MS, type LiveDeps } from "../src/live-voice.ts";
 import { evaluateSurface } from "../src/presentation-policy.ts";
 import { RealtimeVoice, type HomeResult, type RealtimeCallbacks, type RealtimePhase } from "../src/realtime.ts";
+import { preloadTaiwan } from "../src/zh-tw.ts";
 import { matchCameraCommand } from "../src/sense/controller.ts";
 import { initialShell, reduceShell, type ShellEvent, type ShellState } from "../src/shell-state.ts";
 import { AssistantEcho, foldVoice, matchVoiceCommand, NO_RESULT_NOTICE, RealtimeLocalCommands } from "../src/voice-command.ts";
@@ -197,16 +198,18 @@ describe("API key route: spoken local commands open views like typed input, and 
     expect(none.h.allowed()).toBe(true);
   });
 
-  it("「搜尋成果 晚餐」 opens results history with the query; a simplified transcript keeps its own characters", async () => {
+  it("「搜尋成果 晚餐」 opens results history with the query; a simplified transcript is searched in Taiwan Traditional", async () => {
+    await preloadTaiwan();
     const t = await apiKeyRoute();
     t.userSays("搜尋成果 晚餐");
     expect(t.h.shell.surface).toMatchObject({ kind: "history", visibility_reason: "user_request" });
     expect(t.h.historyQueries).toEqual(["晚餐"]);
     expect(t.h.allowed()).toBe(true);
+    // 台灣繁體逐字稿（2026-10-31）：語音辨識的簡體在進入頁面時就轉成台灣繁體，查詢詞是「晚飯」（搜尋照樣折疊，找得到「晚饭」）。
     t.userSays("搜索成果 晚饭", "resp_2");
-    expect(t.h.historyQueries).toEqual(["晚餐", "晚饭"]);
+    expect(t.h.historyQueries).toEqual(["晚餐", "晚飯"]);
     t.userSays("成果纪录", "resp_3");
-    expect(t.h.historyQueries).toEqual(["晚餐", "晚饭", ""]);
+    expect(t.h.historyQueries).toEqual(["晚餐", "晚飯", ""]);
     expect(t.cancels()).toHaveLength(3);
   });
 

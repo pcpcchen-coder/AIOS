@@ -5,6 +5,8 @@ import { delegatePolicy, MAX_RECALLS, type LiveCallPort, type LiveMemoryPort, ty
 import { APIKEY_TIMEOUTS_MS, type RealtimeBridge } from "./realtime.ts";
 import { RouteStartError, type RouteCall, type SessionContext } from "./realtime-routes.ts";
 import type { SidebandSocket } from "./sideband.ts";
+import { taiwanTranscript, warmTaiwan } from "../shared/zh-tw-opencc.ts";
+import { convertsLocale, isPromptEcho } from "../shared/zh-tw.ts";
 
 // MEM-3：OpenAI API key 即時語音的記憶（docs/validation/memory-mem3-2026-10-30.md）。
 // 核心從 /realtime/calls 回應的 Location 取 call ID，用 API key 開旁路（wss://api.openai.com/v1/realtime?call_id=…），
@@ -117,6 +119,8 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
     private readonly deps: ApiKeyCallDeps,
   ) {
     this.closed = new Promise<void>((resolve) => (this.resolveClosed = resolve));
+    // 中文：先建好台灣繁體轉換的字典（約 0.15 秒），第一則逐字稿不必等。
+    if (convertsLocale(ctx.locale)) setImmediate(warmTaiwan).unref?.();
     socket.addEventListener("message", (event) => {
       if (this.ended || this.revoked) return;
       let raw: unknown;
@@ -166,14 +170,23 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
           this.noteUnhandled({ type: "transcription.completed（未提交的項目，略過）" });
           break;
         }
-        if (event.text.trim()) {
-          this.lastUserFinal = { text: event.text.trim(), used: false };
-          this.recalls = 0;
-          this.memory.onUserFinal(event.text, this.ctx.now(), event.item_id);
+        {
+          // 簡體逐字稿先轉成台灣繁體（中文介面才轉）：記憶解析、交辦原句與回音比對都用轉換後的文字。
+          const heard = taiwanTranscript(event.text, this.ctx.locale);
+          // 雜音時上游把語音辨識的 prompt 當逐字稿吐回來：不是使用者說的話，丟掉（log 不記內容）。
+          if (isPromptEcho(heard)) {
+            this.noteUnhandled({ type: "transcription.completed（語音辨識提示的回音，略過）" });
+            break;
+          }
+          if (heard.trim()) {
+            this.lastUserFinal = { text: heard.trim(), used: false };
+            this.recalls = 0;
+            this.memory.onUserFinal(heard, this.ctx.now(), event.item_id);
+          }
         }
         break;
       case "assistant_final":
-        if (event.text.trim()) this.memory.onAssistantFinal(event.text, this.ctx.now());
+        if (event.text.trim()) this.memory.onAssistantFinal(taiwanTranscript(event.text, this.ctx.locale), this.ctx.now());
         break;
       case "item_added":
         // typed／system：頁面打字、通知或背景資料，不是語音，不解析成記憶指令（和 MEM-2 打字不解析一致）。
