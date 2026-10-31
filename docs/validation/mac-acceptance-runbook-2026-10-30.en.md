@@ -24,7 +24,7 @@ Rules:
 | 3 | Family name greeting ID-02 | [ID-02 §5](family-id-02-2026-10-25.en.md#5-georges-pending-mac-tests) steps 1–10 | On both voice routes, the opening line actually heard is from the list, with no added words and no guessed names | Camera; at least one enrolled family member; one stranger or unenrolled person | Medium |
 | 4 | ChatGPT-plan voice memory MEM-2 | [MEM-2 §4](memory-mem2-2026-10-30.en.md#4-mac-test-steps-all-unexecuted-no-pass-may-be-claimed) steps 0–11 | **Step 5 recording proves no late old audio after revocation** | Recording rig (§3); a second playback device; Codex sign-in | Long |
 | 5 | API key voice memory MEM-3 | [MEM-3 §5](memory-mem3-2026-10-30.en.md#5-mac-test-steps-none-run-must-not-be-claimed-as-passed) steps 0–15 | **Wire probes P1 and P2 hold**, and the step 5 recording as in MEM-2 | Same as MEM-2; a real `OPENAI_API_KEY` (billed) | Long |
-| 6 | Wake word spike WK-00 | [WK-00 §7](wk-00-spike-2026-10-29.en.md#7-mac-test-steps-for-george) steps 1–6 | Family positives produce hits; TV negatives run for at least 8 hours | `sox`; family members; TV running overnight | Long (includes 8 unattended hours) |
+| 6 | Wake word spike WK-00 | §9 (Hello Nous since 2026-10-31; steps 1–2 and George's trial done) | Family positives produce hits; TV negatives run for at least 8 hours | `sox`; family members; TV running overnight | Long (includes 8 unattended hours) |
 | 7 (added 2026-10-30) | Voice delegation with memory MEM-4b | [MEM-4b §5](memory-mem4b-2026-10-30.en.md#5-mac-gate-none-of-it-has-been-run-it-cannot-be-claimed-as-passed) steps 1–11 | Calibrate the ASR grace and similarity threshold; on the API key route committed / item_id / response_id match; record short-affirmative and TV bindings honestly | Same as MEM-2/MEM-3; tasks stored encrypted; `NOUS_MEMORY_ROUTES` includes `task` | Medium |
 | 8 (added 2026-10-30) | Protected-result search and plaintext lifecycle MEM-4c | [MEM-4c §5](memory-mem4c-2026-10-30.en.md#5-mac-gate-none-executed-no-pass-may-be-claimed) steps 1–12 | The log shows a drop on a real lock, sleep, idle, memory off, and App quit; the latency of the first and second search after unlocking is recorded honestly; on a Keychain denial the screen shows the error honestly, not an empty result; the page is also cleared after a lock | Tasks stored encrypted (MEM-4a); some fictional protected tasks; 500 / 2000 tasks if possible | Short to medium |
 | 9 (added 2026-10-30) | Memory suggestions and family collaboration MEM-5a | [MEM-5a §6](memory-mem5a-2026-10-30.en.md#6-mac-gate-none-executed-no-pass-may-be-claimed) steps 1–8 | The real screen of the one-line suggestion under the reply (Chinese and English); saving only on "Remember" and still there after a restart; one week of real counts recorded honestly; an older App reading version 4 disables memory and leaves the file unchanged | `suggest` in `NOUS_MEMORY_ROUTES`; fictional people George and Amy; an older App built from main `7fc7d09` (step 7) | Short (step 6 takes a week) |
@@ -249,16 +249,20 @@ Main release criteria: the real screen of step 2 and "saved only on a click"; th
 
 ## 9. Batch 6: WK-00 wake word spike
 
-Use the commands in [WK-00 §7](wk-00-spike-2026-10-29.en.md#7-mac-test-steps-for-george); this section only lists the order and the points to watch.
+**Progress on 2026-10-31:** George's trial is done, the wake word is now the English **Hello Nous**, and the App can be woken ([WK-00 Mac trial](wk-00-mac-2026-10-31.en.md)). The Chinese 「哈囉努斯」 is no longer tested. The remaining steps use a Hello Nous keyword file:
 
-- [ ] 1. Install: `npm ci`, `npm run wake:setup`, `brew install sox`; allow microphone access for Terminal.
-- [ ] 2. Check microphone and CPU: say 「哈囉努斯」 several times; each detection prints one JSON line.
-- [ ] 3. Family positives: **do a 5-trial dry run per person first** (cloud synthetic positives hit 0/300, cause undetermined), then 30 trials per person; one round quiet and one with the TV on, one round per model; also run the two diagnostic rounds 「哈囉努斯(hā-lóu)」 and the subword 「努斯」. Use codes (A, B, C) for `--person`, never names.
-- [ ] 4. TV negatives: run under `caffeinate -i` for at least 8 hours, counting only and not recording; if false alarms are frequent, note on paper roughly what was being said. Run the other model on another day.
-- [ ] 5. Alongside the camera pipeline: record CPU with Nous idle for 10 minutes, then run `listen` at the same time for another 10 minutes, doing a few palm stops meanwhile.
-- [ ] 6. (Optional) Build the browser wasm yourself.
+```bash
+printf '%s\n' "HH AH0 L OW1 N OW1 S :1.5 #0.15 @HELLO_NOUS_OW" "HH AH0 L OW1 N AW1 S :1.5 #0.15 @HELLO_NOUS_AW" "HH AH0 L OW1 N UW1 S :1.5 #0.15 @HELLO_NOUS_UW" > "$TMPDIR/hello-nous.txt"
+```
 
-Fill the numbers into the record table in WK-00 §7. By design audio is not written to files, and reports go to `$TMPDIR/aios-wake-spike/` outside the repository.
+- [x] 1. Install: `npm ci`, `npm run wake:setup`, `brew install sox`; allow microphone access for Terminal.
+- [x] 2. Check microphone and CPU (2026-10-31).
+- [ ] 3. Family positives (W5): the simplest way is to test inside the App. Turn on always-on wake listening; each person stands side-on, not facing the screen (so look-to-talk does not open a call first), and says Hello Nous naturally 30 times, at least 20 seconds apart (at most 3 per minute). Count successes as the lines with `source` `wake_word` in `~/.config/nous/voice-cost.jsonl`. One round quiet and one with the TV on. Record codes (A, B, C), never names. George has only done the trial; other family members have not started.
+- [ ] 4. TV negatives (W6): `caffeinate -i sh -c 'rec -q --buffer 3200 -t raw -r 16000 -e signed -b 16 -c 1 - | npm run wake:spike -- listen --mode tv --hours 8 --program "News" --model zh-en-3M --keywords-file "$TMPDIR/hello-nous.txt"'`, counting only and not recording; if false alarms are frequent, note on paper roughly what was being said (especially English programmes and conversation containing "hello"). Several `listen` processes at once overwrite each other's reports (WK-00 Mac F1), so run one at a time. Events show the engine-default threshold, not the keyword file's (F2).
+- [ ] 5. Alongside the camera pipeline: record CPU for 10 minutes with Nous idle and always-on wake listening on, then 10 minutes with listening off for comparison, doing a few palm stops meanwhile.
+- [ ] 6. (Optional) Build the browser wasm yourself — no longer needed; GitHub Actions builds it (WK-01b).
+
+Make cues obvious: when family members must speak on cue, a sound (for example a chime each time) is more reliable than one line of terminal text (WK-00 Mac F3). Fill the numbers into the [WK-00 Mac trial](wk-00-mac-2026-10-31.en.md) or a new record. By design audio is not written to files, and reports go to `$TMPDIR/aios-wake-spike/` outside the repository.
 
 ## 10. Steps that can be combined
 

@@ -319,7 +319,7 @@ export function isWakeWorkerOut(value: unknown): value is WakeWorkerOut {
 
 // ───────────── 介面文字（共用翻譯表） ─────────────
 
-export const WAKE_WORD_TEXT = "哈囉努斯";
+export const WAKE_WORD_TEXT = "Hello Nous";
 
 export const WAKE_STATE_LABEL: { readonly [S in WakeState]: string } = {
   off: "未開啟",
@@ -355,20 +355,20 @@ export const WAKE_TEXT = {
   group: "喚醒詞",
   statusPrefix: "喚醒聆聽",
   listen: "常駐喚醒聆聽",
-  listenNote: "只在這台 Mac 本機偵測「哈囉努斯」",
+  listenNote: "只在這台 Mac 本機偵測「Hello Nous」",
   pause: "暫停聆聽（到這次結束）",
   resume: "繼續聆聽",
   speaker: "通話中辨認說話者",
   speakerNote: "SP-02 之後才能使用",
   heard: "聽到了",
-  resumed: "已恢復常駐喚醒聆聽（只在本機偵測「哈囉努斯」）",
+  resumed: "已恢復常駐喚醒聆聽（只在本機偵測「Hello Nous」）",
   failed: "常駐喚醒聆聽沒有開啟：{0}",
   stopped: "常駐喚醒聆聽已停止：{0}",
   notReported: "尚未回報",
   indicator: "本機聆聽喚醒詞中",
   dialogMessage: "要開啟常駐喚醒聆聽嗎？",
   dialogDetail:
-    "開啟後麥克風會常駐開著，只在這台 Mac 本機偵測「哈囉努斯」。沒有喚醒時的聲音只留在記憶體中約 2 秒，不寫檔、不進紀錄、不上傳。App 重開與睡眠回來後會自動恢復，直到你關掉這個開關；「暫停聆聽」只到這次結束。",
+    "開啟後麥克風會常駐開著，只在這台 Mac 本機偵測「Hello Nous」。沒有喚醒時的聲音只留在記憶體中約 2 秒，不寫檔、不進紀錄、不上傳。App 重開與睡眠回來後會自動恢復，直到你關掉這個開關；「暫停聆聽」只到這次結束。",
   dialogRuntimeMissing: "目前還沒有安裝喚醒引擎：開啟後會顯示「無法使用」，不會開啟麥克風。",
   dialogEnable: "開啟",
   dialogCancel: "取消",

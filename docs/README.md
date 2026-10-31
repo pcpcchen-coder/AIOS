@@ -4,7 +4,7 @@
 
 # Nous 文件索引
 
-更新日期：2026-10-31，HIST-1 與 ID-02 有了 Mac 實機紀錄（見[驗證紀錄索引](validation/README.md)），MEM-0～MEM-5b 與 HIST-1 都已合併到 main，現況以[目前實作與驗證](Current_Implementation_Status.md)為準。2026-10-30 加入家庭記憶 MEM-2（ChatGPT 方案即時語音）與 MEM-3（OpenAI API key 即時語音，記憶預設關閉）雲端驗證入口（Mac gate 都未執行）。2026-10-29 加入本機喚醒詞與家人音色辨認規劃（未實作），同日加入 WK-00 喚醒詞 spike 驗證與 ADR-0003 草案，以及已合併到 main 的家庭記憶 MEM-1 雲端驗證入口（Mac gate 未執行）；2026-10-26 加入家庭記憶設計與 MEM-0 隔離驗證入口。產品方向是「電子腦待機 → 語音提出需求 → 實際工作 → 按需成果 → 指向並追問」。目前已有 Node／TypeScript／Electron 原型，正式 G0–G3 驗收狀態仍需逐項證據。
+更新日期：2026-11-01，喚醒詞改為英文 Hello Nous、App 內可喚醒（[WK-00 Mac 試跑](validation/wk-00-mac-2026-10-31.md)）。2026-10-31，HIST-1 與 ID-02 有了 Mac 實機紀錄（見[驗證紀錄索引](validation/README.md)），MEM-0～MEM-5b 與 HIST-1 都已合併到 main，現況以[目前實作與驗證](Current_Implementation_Status.md)為準。2026-10-30 加入家庭記憶 MEM-2（ChatGPT 方案即時語音）與 MEM-3（OpenAI API key 即時語音，記憶預設關閉）雲端驗證入口（Mac gate 都未執行）。2026-10-29 加入本機喚醒詞與家人音色辨認規劃（未實作），同日加入 WK-00 喚醒詞 spike 驗證與 ADR-0003 草案，以及已合併到 main 的家庭記憶 MEM-1 雲端驗證入口（Mac gate 未執行）；2026-10-26 加入家庭記憶設計與 MEM-0 隔離驗證入口。產品方向是「電子腦待機 → 語音提出需求 → 實際工作 → 按需成果 → 指向並追問」。目前已有 Node／TypeScript／Electron 原型，正式 G0–G3 驗收狀態仍需逐項證據。
 
 ## 先讀目前狀態，再讀產品規則
 
@@ -18,7 +18,7 @@
 | [16 Nous 家庭記憶層設計](16_Nous_Memory_Layer_Design_2026-10-26.md) | 設計契約，MEM-0 已有[隔離基礎驗證](validation/memory-mem0-2026-10-26.md)；MEM-1（桌面版一般文字聊天的人物、明示保存／更正／忘記與 Claude／ChatGPT 取用）程式與雲端測試完成，見 [MEM-1 驗證](validation/memory-mem1-2026-10-29.md)；MEM-2（ChatGPT 方案即時語音的取用、用說的確認記住／更正／忘記、撤銷與重建）程式與雲端測試完成，見 [MEM-2 驗證](validation/memory-mem2-2026-10-30.md)；MEM-3（OpenAI API key 即時語音的同一套記憶規則、核心旁路、兩道停止與跨路徑一致性，記憶預設關閉）程式與雲端測試完成，見 [MEM-3 驗證](validation/memory-mem3-2026-10-30.md)；三者 Mac gate 都未執行。MEM-4 拆成 HIST-1（一般任務的成果紀錄，程式與雲端測試完成，見 [HIST-1 驗證](validation/history-hist1-2026-10-30.md)；[Mac 實機紀錄](validation/history-hist1-mac-2026-10-31.md)主要放行條件成立，修正待重驗）、MEM-4a（macOS App 加密全部任務、背景任務自動帶記憶（預設關閉）與撤銷傳播，程式與雲端測試完成，見 [MEM-4a 驗證](validation/memory-mem4a-2026-10-30.md)，Mac gate 未執行）與 MEM-4c（受保護成果的 RAM 倒排索引與記憶體明文生命週期，程式與雲端測試完成，見 [MEM-4c 驗證](validation/memory-mem4c-2026-10-30.md)，Mac gate 未執行）。MEM-4b（語音交辦帶記憶）、MEM-5a（記憶建議）、MEM-5b（工作決定）也已合併、預設關閉，Mac gate 未執行，見[驗證紀錄索引](validation/README.md) |
 | [ADR-0002 家庭記憶（草案）](adr/ADR-0002-nous-family-memory.md) | 加密快照與 SQLite 的比較；首版家庭共用普通偏好、雲端同意、背景任務與私密記憶邊界 |
 | [ADR-0003 本機喚醒與聲音辨識（草案）](adr/ADR-0003-local-wake-and-voice-recognition.md) | WK-00 交付的草案：取代 ADR-0001 的「沒有背景常駐辨識」、喚醒事件無法由核心驗證的對策、殘餘風險、gallery v2、sherpa-onnx 鎖 2.0.x（1.13.8 靜態連結 GPL 的 espeak-ng）與授權查核表；產品未實作 |
-| [17 本機喚醒詞與家人音色辨認](17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md) | **規劃，未實作**（2026-10-29）：喚醒詞候選與推薦、引擎與講者模型的授權比較、常駐本機聆聽的隱私與收音指示、聲音註冊、臉聲融合、便利性限制不是授權、與 16 對齊的記憶人物規則；George 2026-10-29 已決定 9 項（含重開後自動恢復常駐聆聽、校準後可只憑聲音稱名問候） |
+| [17 本機喚醒詞與家人音色辨認](17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md) | **喚醒詞已實作（旗標預設關閉），聲音辨認仍是規劃**（2026-10-29；2026-10-31 喚醒詞改為 Hello Nous）：喚醒詞候選與推薦、引擎與講者模型的授權比較、常駐本機聆聽的隱私與收音指示、聲音註冊、臉聲融合、便利性限制不是授權、與 16 對齊的記憶人物規則；George 2026-10-29 已決定 9 項（含重開後自動恢復常駐聆聽、校準後可只憑聲音稱名問候） |
 | [06 電子腦、語音與視線體驗](06_Ambient_Voice_Gaze_Experience.md) | 產品規則、呈現政策與行為要求；目標架構須與現況分開 |
 | [07 開發與驗收計畫](07_Ambient_Implementation_and_Acceptance.md) | 正式契約、gate、驗收方法；規劃目錄不是現存程式目錄 |
 | [10 遠距 UI](10_Distance_UI_18inch_2026-10.md) | 18 吋與遠距畫面規格，距離縮放已有原型實作，實機可讀性待驗 |

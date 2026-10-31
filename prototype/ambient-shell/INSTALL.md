@@ -143,19 +143,25 @@ OPENAI_API_KEY=sk-...
 
 以上畫面與設定還沒在實機鏡頭上驗證過。
 
-### 常駐喚醒聆聽（選填，WK-01a，尚無喚醒引擎）
+### 常駐喚醒聆聽「Hello Nous」（選填，預設關閉）
 
-在 `.env` 加上 `NOUS_WAKE=on` 並重新啟動後，macOS App 的選單列「鏡頭與語音設定」最後會多一段「喚醒詞」：「常駐喚醒聆聽」開關（預設關閉，打開前會先跳出說明）、目前狀態、「暫停聆聽（到這次結束）」，以及停用的「通話中辨認說話者」（SP-02 之後才能使用）。
+說「**Hello Nous**」就能叫醒 Nous，不用看著螢幕或按按鈕。偵測只在這台 Mac 上做，聲音只在記憶體裡停留約 2 秒，不寫檔、不上傳；叫醒之後，聲音才會送到你選的語音服務，直到通話結束。
 
-**目前還不會偵測「哈囉努斯」**：喚醒引擎要到 WK-01b 才提供，所以打開後狀態會寫「無法使用：喚醒引擎尚未安裝，沒有開啟麥克風」，不會開麥克風。沒有設定 `NOUS_WAKE` 時一切和之前相同。詳見 [WK-01a 驗證](../../docs/validation/wk-01a-2026-10-31.md)。
+1. **安裝喚醒引擎**（一次即可；App 執行時從不下載）：
 
-**安裝喚醒引擎（WK-01b 準備批次；引擎仍不可用）**：引擎檔案只由下面的指令安裝，App 執行時從不下載。
+   ```bash
+   npm run wake:setup -- --product
+   ```
 
-```bash
-npm run wake:setup -- --product
-```
+   它從 GitHub Release 下載 GitHub Actions 建出的 KWS wasm 與 JS，以及兩個已釘住雜湊的 KWS 模型（約 70 MB），逐一以 `shared/wake-runtime.json` 核對 SHA-256，全部通過才安裝到 `wake-runtime/`（macOS 另外複製到 `~/Library/Application Support/Nous/wake-runtime/`，就是 App 核心提供 `/wake-runtime/` 的資料夾）。任何一項不符或缺雜湊就以非 0 結束，一個檔案都不安裝。已用 `gh release download` 或瀏覽器先下載時，可加 `--from <資料夾>`；`--dest <資料夾>` 改安裝位置。
 
-它從 GitHub Release 下載 GitHub Actions 建出的 KWS wasm 與 JS，以及 WK-00 已釘住的兩個 KWS 模型壓縮檔，逐一以 `shared/wake-runtime.json` 核對 SHA-256，全部通過才安裝到 `wake-runtime/`（macOS 另外複製到 `~/Library/Application Support/Nous/wake-runtime/`，就是 App 核心提供 `/wake-runtime/` 的資料夾）。任何一項不符或缺雜湊就以非 0 結束，一個檔案都不安裝。**2026-10-31 起清單是 `built`**：wasm 與 JS 的雜湊已從 release `wake-runtime-2.0.1-5961b4196003` 寫進清單，所以這個指令會下載並核對；但關鍵詞與門檻還在等 George 的 Mac 數字（`keywords_pending`），即使安裝成功，App 仍顯示「喚醒引擎尚未安裝」，也不會開麥克風。已用 `gh release download` 或瀏覽器先下載時，可加 `--from <資料夾>`；`--dest <資料夾>` 改安裝位置。詳見 [WK-01b 準備批次驗證](../../docs/validation/wk-01b-prep-2026-10-31.md)。
+2. **打開功能旗標**：在 `.env` 加上 `NOUS_WAKE=on`（macOS App 是選單列「編輯 API key 與進階設定（.env）…」，存檔後核心自動重新啟動）。沒有設定 `NOUS_WAKE` 時一切和之前相同。
+
+3. **打開常駐聆聽**：選單列「鏡頭與語音設定」最後一段「喚醒詞」，勾選「常駐喚醒聆聽」（打開前會先跳出說明）。狀態列會顯示「喚醒聆聽：本機聆聽中」，電子腦旁邊也會出現小小的聆聽圖示。
+
+叫醒之後：先播提示音，Nous 打招呼並開始即時語音（稱名照「打招呼時稱呼認出的家人」的設定）；沒有人說話約 5 秒就自動結束。每個滾動 60 秒最多由喚醒開始 3 次通話，超過時暫停聆聽、時間到自動恢復。即時語音、按下說話或語音模式使用中時，喚醒偵測會暫停，結束後自動恢復；所以坐在螢幕前時，常常是「看著說話」先開了通話。「暫停聆聽（到這次結束）」可以暫時停用。
+
+**目前的數字與限制**（[WK-00 Mac 試跑](../../docs/validation/wk-00-mac-2026-10-31.md)）：喚醒詞是英文 Hello Nous（zh-en-3M 模型，Nous 念成 nose、nows 或 noose 都可以），提升分數 1.5、門檻 0.15。George 的聲音在命令列即時測試 7/10、App 內 4/4，只說「Hello」不會觸發。中文「哈囉努斯」目前的模型認不出來，已不使用。其他家人的念法與 8 小時電視誤觸發還沒測；若平常常被誤叫醒或很難叫醒，請記下來，之後依數字調整門檻。
 
 ### 武陵居中控（選填）
 

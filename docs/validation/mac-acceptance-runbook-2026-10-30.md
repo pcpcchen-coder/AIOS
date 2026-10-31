@@ -24,7 +24,7 @@
 | 3 | 家人稱名問候 ID-02 | [ID-02 §5](family-id-02-2026-10-25.md#5-待-george-在-mac-上實測) 第 1–10 步 | 兩條語音路徑實際聽到的開場句都在清單內、沒加字、沒猜名 | 鏡頭；至少一位登記的家人；另一位陌生人或未登記的人 | 中 |
 | 4 | ChatGPT 方案語音記憶 MEM-2 | [MEM-2 §4](memory-mem2-2026-10-30.md#4-mac-實測步驟全部未執行不能宣稱通過) 第 0–11 步 | **第 5 步錄音證明撤銷後沒有晚到的舊聲音** | 錄音設備（§3）；第二台播放裝置；Codex 登入 | 長 |
 | 5 | API key 語音記憶 MEM-3 | [MEM-3 §5](memory-mem3-2026-10-30.md#5-mac-實測步驟全部未執行不能宣稱通過) 第 0–15 步 | **線路探測 P1、P2 成立**，且第 5 步錄音同 MEM-2 | 同 MEM-2；真 `OPENAI_API_KEY`（會計費） | 長 |
-| 6 | 喚醒詞 spike WK-00 | [WK-00 §7](wk-00-spike-2026-10-29.md#7-給-george-的-mac-實測步驟) 第 1–6 步 | 家人正例有命中、電視負例至少 8 小時 | `sox`；家人；電視開著過夜 | 長（含 8 小時無人值守） |
+| 6 | 喚醒詞 spike WK-00 | §9（2026-10-31 起改用 Hello Nous；第 1、2 步與 George 試跑已完成） | 家人正例有命中、電視負例至少 8 小時 | `sox`；家人；電視開著過夜 | 長（含 8 小時無人值守） |
 | 7（2026-10-30 補充） | 語音交辦帶記憶 MEM-4b | [MEM-4b §5](memory-mem4b-2026-10-30.md#5-mac-gate全部未執行不能宣稱通過) 第 1–11 步 | 校正 ASR grace 與相似度門檻；API key 的 committed／item_id／response_id 對得上；短肯定與電視的綁定照實記錄 | 同 MEM-2／MEM-3；任務已加密保存；`NOUS_MEMORY_ROUTES` 含 `task` | 中 |
 | 8（2026-10-30 補充） | 受保護成果的搜尋與明文生命週期 MEM-4c | [MEM-4c §5](memory-mem4c-2026-10-30.md#5-mac-gate全部未執行不能宣稱通過) 第 1–12 步 | 真鎖定、睡眠、閒置、關閉記憶、結束 App 時 log 出現丟棄；解鎖後第一次與第二次搜尋的延遲照實記錄；Keychain 拒絕時畫面照實顯示錯誤、不是空結果；鎖定後畫面也清掉 | 任務已加密保存（MEM-4a）；一些虛構的受保護任務；可以的話準備 500／2000 筆 | 短到中 |
 | 9（2026-10-30 補充） | 記憶建議與家庭協同 MEM-5a | [MEM-5a §6](memory-mem5a-2026-10-30.md#6-mac-gate全部未執行不能宣稱通過) 第 1–8 步 | 回覆下方單行建議的實際畫面（中英）；按「記住」才保存、重啟後仍在；一週的實際計數照實記錄；舊版 App 讀到 version 4 時停用記憶而且檔案不變 | `NOUS_MEMORY_ROUTES` 含 `suggest`；虛構人物 George 與 Amy；main `7fc7d09` 建的舊版 App（第 7 步） | 短（第 6 步要一週） |
@@ -249,16 +249,20 @@ tail -f ~/Library/Application\ Support/Nous/nous.log
 
 ## 9. 批次 6：WK-00 喚醒詞 spike
 
-照 [WK-00 §7](wk-00-spike-2026-10-29.md#7-給-george-的-mac-實測步驟) 的指令做；這裡只列順序與要注意的地方。
+**2026-10-31 進度**：George 的試跑已完成，喚醒詞改為英文 **Hello Nous**，App 內已可喚醒（[WK-00 Mac 試跑](wk-00-mac-2026-10-31.md)）。中文「哈囉努斯」不再測。剩下的步驟改用 Hello Nous 的關鍵詞檔：
 
-- [ ] 1. 安裝：`npm ci`、`npm run wake:setup`、`brew install sox`；允許終端機的麥克風權限。
-- [ ] 2. 確認麥克風與 CPU：說幾次「哈囉努斯」，每次偵測印一行 JSON。
-- [ ] 3. 家人正例：**先每人試跑 5 次**（雲端合成正例 0/300 命中、原因未定），再每人 30 次；安靜與電視開著各一輪、兩個模型各一輪；另跑「哈囉努斯(hā-lóu)」與子詞「努斯」兩輪診斷。`--person` 只填代號（A、B、C），不填名字。
-- [ ] 4. 電視負例：`caffeinate -i` 跑至少 8 小時，只計數不錄音；誤報多時在紙上記下當時大概在說什麼。另一個模型另一天再跑。
-- [ ] 5. 與鏡頭管線同時：Nous 待機 10 分鐘記 CPU，同時跑 `listen` 再記 10 分鐘，期間做幾次張掌停止。
-- [ ] 6. （可選）自建瀏覽器 wasm。
+```bash
+printf '%s\n' "HH AH0 L OW1 N OW1 S :1.5 #0.15 @HELLO_NOUS_OW" "HH AH0 L OW1 N AW1 S :1.5 #0.15 @HELLO_NOUS_AW" "HH AH0 L OW1 N UW1 S :1.5 #0.15 @HELLO_NOUS_UW" > "$TMPDIR/hello-nous.txt"
+```
 
-數字填進 WK-00 §7 的記錄表格。音訊依設計不寫檔，報告寫到 repo 外的 `$TMPDIR/aios-wake-spike/`。
+- [x] 1. 安裝：`npm ci`、`npm run wake:setup`、`brew install sox`；允許終端機的麥克風權限。
+- [x] 2. 確認麥克風與 CPU（2026-10-31）。
+- [ ] 3. 家人正例（W5）：最省事的做法是直接在 App 裡測——打開常駐喚醒聆聽，每人側身、不看螢幕（避免「看著說話」先開通話），自然地說 30 次 Hello Nous，每次間隔 20 秒以上（每分鐘最多 3 次）；成功次數看 `~/.config/nous/voice-cost.jsonl` 裡 `source` 是 `wake_word` 的筆數。安靜與電視開著各一輪。只記代號（A、B、C），不記名字。George 只做了試跑，其他家人還沒做。
+- [ ] 4. 電視負例（W6）：`caffeinate -i sh -c 'rec -q --buffer 3200 -t raw -r 16000 -e signed -b 16 -c 1 - | npm run wake:spike -- listen --mode tv --hours 8 --program "新聞台" --model zh-en-3M --keywords-file "$TMPDIR/hello-nous.txt"'`，只計數不錄音；誤報多時在紙上記下當時大概在說什麼（特別是英文節目與含 hello 的對話）。同時跑多個 `listen` 時報告檔名會互相覆蓋（WK-00 Mac F1），一次只跑一個。事件裡的門檻顯示引擎預設值，不是關鍵詞檔的值（F2）。
+- [ ] 5. 與鏡頭管線同時：Nous 待機、常駐喚醒聆聽開著 10 分鐘記 CPU，再關掉聆聽記 10 分鐘對照，期間做幾次張掌停止。
+- [ ] 6. （可選）自建瀏覽器 wasm——已由 GitHub Actions 建置（WK-01b），不需要。
+
+提示要明顯：要家人照提示說話時，用聲音提示（例如每次「叮」一聲）比終端機裡的一行字可靠（WK-00 Mac F3）。數字填進 [WK-00 Mac 試跑](wk-00-mac-2026-10-31.md) 或新的紀錄。音訊依設計不寫檔，報告寫到 repo 外的 `$TMPDIR/aios-wake-spike/`。
 
 ## 10. 可以合併做的步驟
 

@@ -27,8 +27,8 @@
       "source": "README.md",
       "sourceLanguage": "zh-TW",
       "translation": "README.en.md",
-      "sourceSha256": "36815e2f2cbe4818e7a7e12849acdfdcc00361db21564d22ba390b72c9c1e467",
-      "translationSha256": "890788f303b4cceb99f5f78bddc1407e57242e8e36f32bcdaebc827294690ee0"
+      "sourceSha256": "681d4ffe9d438c8a94e413c74d38672510fd7af0a6c86e6c9f83756f9f99d378",
+      "translationSha256": "66db9082a08d77a1c92d621f0adca3d5c2fe98c988ea8730b5d60eb398d86b09"
     },
     {
       "source": "SETUP.md",
@@ -146,8 +146,8 @@
       "source": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.en.md",
-      "sourceSha256": "06a797f63391a8d69ef95a48f0285320d710294d1cadf87e29a129c40d317031",
-      "translationSha256": "8b9d6c751ab2d2afbdf66934f691ddf8e248406658ebbc1b01b5170e3ead9070"
+      "sourceSha256": "a3318048b66b9abad2775a71454641ce6bb57a2db0b63de5e28447bc70c6e381",
+      "translationSha256": "6169b7018b7965b641960d85f046a0053b3d0374a4f1567658ae2d2e14917a65"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -158,15 +158,15 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "32b39c4c75654ae1f388af9db3ebd4aa9c4a8082fb632cf1b4bed409c6cb4f04",
-      "translationSha256": "18ba6b27fe5e1a929570b59b5dd85f5142af7e5f1f43b86f35b096b9fa588be7"
+      "sourceSha256": "786b0a0e76e41b116c2943d48640b471845ce46ae56e1a19225e6f02d673dc4d",
+      "translationSha256": "a3b4897c7e6851958e180d159bd4111f86d9085995d954d6c6374f508fc172b0"
     },
     {
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "793be1b6fbc52559e0958f0dbad322469cdff18b890c76844cb8fd9f0f11cf74",
-      "translationSha256": "be65e805f221dcdfbb40da5838f0f5a1818fcc2bbca7290e393245396dcb08ac"
+      "sourceSha256": "566b2092f54d3b7e48ef3f70e40a794dad832bd75ce91ec75cb7f83433579be2",
+      "translationSha256": "fd131361c143010cb1fe887094a16eecb2b6531aa39f8f3fd23b17ee4b803c46"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
@@ -186,8 +186,8 @@
       "source": "docs/adr/ADR-0003-local-wake-and-voice-recognition.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/adr/ADR-0003-local-wake-and-voice-recognition.en.md",
-      "sourceSha256": "fba46fbac8397ba757387d25d6746bd310547c8ee0f1feeda98cd8cb36fd4198",
-      "translationSha256": "c808bd0a997c0081d74e02b63b104a629f35a8d9b31a3f7450d9227ffcb320ec"
+      "sourceSha256": "8309bb1ac7ec36d673db870e331dbd0985517a40015de1660526fe3368b20e89",
+      "translationSha256": "1a28cd3bd812a63b4798c05e86b4eafded6bf9463a64072ced4510d610f471b4"
     },
     {
       "source": "docs/development/brain-regions.md",
@@ -228,8 +228,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "a5edac205ad42fc66caf5996a138b2bee114b714c7cc24853395724360e636b9",
-      "translationSha256": "34c253e4bd747287b0b945079e5ccebff3ee91c08db010c42c529e1840a0141a"
+      "sourceSha256": "65c8fe65986fe6a363678af27892b13771e6836920d4bc436c409753e7ba2485",
+      "translationSha256": "fe2eceb96aacc5786c581c36d3d84886e1f9aea4e29647226ea1ff1fc4adc4de"
     },
     {
       "source": "docs/validation/bilingual-2026-10-26.md",
@@ -403,8 +403,8 @@
       "source": "docs/validation/mac-acceptance-runbook-2026-10-30.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/mac-acceptance-runbook-2026-10-30.en.md",
-      "sourceSha256": "ef1606edc18fd519094a226d4e274b0a76aca85bba22645dfdb010d3d2137341",
-      "translationSha256": "1d4cf030af4354b0a47ef6455de1800d9104b3a1f21187d8ffe9a6260620b6b3"
+      "sourceSha256": "0b8a8519e08a18d60e9006ef23570ca0ad2ecb802a960695aa30231f1524d889",
+      "translationSha256": "f02f6e7f9e6798309791a98676a0ea0dd33531888dd41989c28c4f525303bcaf"
     },
     {
       "source": "docs/validation/memory-mem0-2026-10-26.md",
@@ -543,29 +543,29 @@
       "source": "docs/validation/wk-02-2026-10-31.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/wk-02-2026-10-31.en.md",
-      "sourceSha256": "79ce25d5ccb0525e8e14b0b6d2f387b808e20833abdc3d8ec882b11efa887718",
-      "translationSha256": "4e39eb346c5669ea00da52553e4f1cc4224528230dc26ad49379a602f370b972"
+      "sourceSha256": "203feaa49395e319a001a350c197caef60faffdbdcae9c8d9cd2b4ea4163b2d7",
+      "translationSha256": "03a397e46ce0c233a0472b0e5c607b9491fd8d46b20a1c1b573245956fe56595"
     },
     {
       "source": "prototype/ambient-shell/INSTALL.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/INSTALL.en.md",
-      "sourceSha256": "0a8554a625a95485e05a1d00963d23b1f869cb10b078d7f74bfda299d0de161e",
-      "translationSha256": "8eb50568d702c39ab1115efe1932c8435b73c15c24db18833875a75c7f54ae0b"
+      "sourceSha256": "9de23a29f57de371fd0579ffca5559e9646db45ae51931726882a36c868307b7",
+      "translationSha256": "a43bbe4384238af8757280c1aeb2bca860ffe5a104eb14502cc691c17db04455"
     },
     {
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "bce9d89cb3e0ae8eb6987d4ec5d01a99d0f7566e2fda2a7f203ed654c78653c5",
-      "translationSha256": "cf9a30b7b9e0c5141a69379fb6f7bb8e9538443523d807c8f01e8b67f1453dba"
+      "sourceSha256": "03b1e8a05030825a5b697cac37a264a0722dec0f33dc77e4ef4ef35037bcdf36",
+      "translationSha256": "a340d8e57b1d911974ece1c415a8dc1e065453abc3867407a5354e90df1e2b95"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/desktop/README.en.md",
-      "sourceSha256": "4f87ba7daf9fc759ffa4f9fc886987977e0f146cc0f71169fb120654b7728e4d",
-      "translationSha256": "07242b8cda9b82c87b00bce75ce1ce225882f83344b4264783f20b2addde3d90"
+      "sourceSha256": "ec057e9ea7b1522fc7c27a952d2ab3b65f48aa38c5df16f5931e9b36e9e84a5a",
+      "translationSha256": "ea5a53e3abd2ef00ad8a741aefe8a4db669ca3d8b03103e647fabb4277e400a5"
     }
   ]
 }
