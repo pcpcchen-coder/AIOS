@@ -53,6 +53,56 @@ export function meanLuma(rgba: ArrayLike<number>, width: number, height: number,
 }
 
 /**
+ * 一張臉的量測值（「校正人臉辨識」用；不含座標、關鍵點或像素）。yaw、pitch、roll 的定義與 assessQuality 相同。
+ * edge：臉框碰到畫面哪一邊（臉超出畫面時提示鏡頭往哪調）；沒碰到為 null。
+ */
+export interface FaceMetrics {
+  face_px: number;
+  score: number;
+  /** |鼻尖在兩眼連線上的位置 − 0.5|；兩眼太近（側臉）時為 1。 */
+  yaw: number;
+  /** 鼻尖在「兩眼中點 → 兩嘴角中點」線段上的位置；無法計算時為 -1。 */
+  pitch: number;
+  roll_deg: number;
+  luma: number;
+  edge: "top" | "bottom" | "left" | "right" | null;
+}
+
+/** 一張臉的量測（純函式）。 */
+export function faceMetrics(face: YuNetFace, frameW: number, frameH: number, luma: (box: FaceBox) => number): FaceMetrics {
+  const { box, landmarks, score } = face;
+  const edge = box.y < 0 ? "top" : box.y + box.height > frameH ? "bottom" : box.x < 0 ? "left" : box.x + box.width > frameW ? "right" : null;
+  // OpenCV 順序：右眼、左眼（以被拍者為準）、鼻尖、右嘴角、左嘴角。
+  const [eyeR, eyeL, nose, mouthR, mouthL] = landmarks;
+  const eyeDx = eyeL.x - eyeR.x;
+  const eyeDy = eyeL.y - eyeR.y;
+  const eyeDist = Math.hypot(eyeDx, eyeDy);
+  // 鼻尖投影到兩眼連線上的位置：0＝右眼、1＝左眼。
+  const yaw = eyeDist < 1 ? 1 : Math.abs(((nose.x - eyeR.x) * eyeDx + (nose.y - eyeR.y) * eyeDy) / (eyeDist * eyeDist) - 0.5);
+  const eyeMid = { x: (eyeR.x + eyeL.x) / 2, y: (eyeR.y + eyeL.y) / 2 };
+  const mouthMid = { x: (mouthR.x + mouthL.x) / 2, y: (mouthR.y + mouthL.y) / 2 };
+  const vx = mouthMid.x - eyeMid.x;
+  const vy = mouthMid.y - eyeMid.y;
+  const vlen2 = vx * vx + vy * vy;
+  const pitch = vlen2 < 1 ? -1 : ((nose.x - eyeMid.x) * vx + (nose.y - eyeMid.y) * vy) / vlen2;
+  const roll_deg = Math.abs((Math.atan2(eyeDy, eyeDx) * 180) / Math.PI);
+  return { face_px: box.width, score, yaw, pitch, roll_deg, luma: edge === null ? luma(box) : 0, edge };
+}
+
+/** 一張臉的量測值是否合格（純函式）；順序：大小、在畫面內、分數、正面、抬低頭、傾斜、亮度。 */
+export function judgeMetrics(m: FaceMetrics, opts: QualityOptions = QUALITY_DEFAULTS): QualityReason {
+  if (m.face_px < opts.min_face_px) return "too_small";
+  if (m.edge !== null) return "out_of_frame";
+  if (m.score < opts.min_score) return "low_score";
+  if (m.yaw > opts.max_yaw_offset) return "not_frontal";
+  if (m.pitch < opts.pitch_range[0] || m.pitch > opts.pitch_range[1]) return "not_frontal";
+  if (m.roll_deg > opts.max_roll_deg) return "tilted";
+  if (m.luma < opts.luma_range[0]) return "too_dark";
+  if (m.luma > opts.luma_range[1]) return "too_bright";
+  return "ok";
+}
+
+/**
  * 一個畫格的品質判定。多張臉一律 multi_face（不挑最大或最近的臉）；之後依序檢查大小、是否在畫面內、分數、
  * 正面程度、傾斜與亮度。luma 由呼叫端用 meanLuma 算（測試可直接給數字）。
  */
@@ -62,37 +112,13 @@ export function assessQuality(
   frameH: number,
   luma: (box: FaceBox) => number,
   opts: QualityOptions = QUALITY_DEFAULTS,
-): QualityResult {
+): QualityResult & { metrics?: FaceMetrics } {
   if (faces.length === 0) return { reason: "no_face" };
   if (faces.length > 1) return { reason: "multi_face" };
   const face = faces[0]!;
-  const { box, landmarks, score } = face;
-  if (box.width < opts.min_face_px) return { reason: "too_small" };
-  if (box.x < 0 || box.y < 0 || box.x + box.width > frameW || box.y + box.height > frameH) return { reason: "out_of_frame" };
-  if (score < opts.min_score) return { reason: "low_score" };
-  // OpenCV 順序：右眼、左眼（以被拍者為準）、鼻尖、右嘴角、左嘴角。
-  const [eyeR, eyeL, nose, mouthR, mouthL] = landmarks;
-  const eyeDx = eyeL.x - eyeR.x;
-  const eyeDy = eyeL.y - eyeR.y;
-  const eyeDist = Math.hypot(eyeDx, eyeDy);
-  if (eyeDist < 1) return { reason: "not_frontal" };
-  // 鼻尖投影到兩眼連線上的位置：0＝右眼、1＝左眼。
-  const along = ((nose.x - eyeR.x) * eyeDx + (nose.y - eyeR.y) * eyeDy) / (eyeDist * eyeDist);
-  if (Math.abs(along - 0.5) > opts.max_yaw_offset) return { reason: "not_frontal" };
-  const eyeMid = { x: (eyeR.x + eyeL.x) / 2, y: (eyeR.y + eyeL.y) / 2 };
-  const mouthMid = { x: (mouthR.x + mouthL.x) / 2, y: (mouthR.y + mouthL.y) / 2 };
-  const vx = mouthMid.x - eyeMid.x;
-  const vy = mouthMid.y - eyeMid.y;
-  const vlen2 = vx * vx + vy * vy;
-  if (vlen2 < 1) return { reason: "not_frontal" };
-  const down = ((nose.x - eyeMid.x) * vx + (nose.y - eyeMid.y) * vy) / vlen2;
-  if (down < opts.pitch_range[0] || down > opts.pitch_range[1]) return { reason: "not_frontal" };
-  const roll = Math.abs((Math.atan2(eyeDy, eyeDx) * 180) / Math.PI);
-  if (roll > opts.max_roll_deg) return { reason: "tilted" };
-  const l = luma(box);
-  if (l < opts.luma_range[0]) return { reason: "too_dark" };
-  if (l > opts.luma_range[1]) return { reason: "too_bright" };
-  return { reason: "ok", face };
+  const metrics = faceMetrics(face, frameW, frameH, luma);
+  const reason = judgeMetrics(metrics, opts);
+  return reason === "ok" ? { reason, face, metrics } : { reason, metrics };
 }
 
 /** 給畫面的中文說明。 */

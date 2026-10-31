@@ -143,9 +143,9 @@ describe("Electron wiring (static)", () => {
     expect(handler).toMatch(/validateIdentityRequest\(request\)/);
     expect(handler).toMatch(/op === "open_session" \? familyClick\.consume\(Date\.now\(\)\) : false/);
     expect(handler.indexOf("checkIdentitySender")).toBeLessThan(handler.indexOf("core.identity.handle"));
-    // 點擊只在選單列的「家人辨識…」記錄
+    // 點擊只在選單列的「家人辨識…」與「校正人臉辨識…」（同一個 openFamily）記錄，記下之後才交給頁面
     expect([...main.matchAll(/familyClick\.mark\(/g)]).toHaveLength(1);
-    expect(main).toMatch(/function openFamily\(\) \{\n {2}familyClick\.mark\(Date\.now\(\)\);\n {2}command\("family"\);/);
+    expect(main).toMatch(/function openFamily\(mode\) \{\n {2}familyClick\.mark\(Date\.now\(\)\);\n {2}if \(mode === "calibrate"\) command\("family-calibrate"\);\n {2}else command\("family"\);/);
   });
 
   it("safeStorage is only offered on macOS and never with the basic_text backend; confirm requires the parent checkbox for a minor", () => {

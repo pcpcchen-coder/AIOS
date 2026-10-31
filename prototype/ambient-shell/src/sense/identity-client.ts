@@ -8,7 +8,8 @@
 
 import manifest from "../../shared/face-runtime.json" with { type: "json" };
 import type { FaceModelVersion, QualityReason } from "../../shared/identity.ts";
-import type { FaceRuntimeAssets, WorkerRequest, WorkerResponse } from "./identity-protocol.ts";
+import type { FaceMetrics } from "./face/quality.ts";
+import type { FaceRuntimeAssets, FrameOptions, WorkerRequest, WorkerResponse } from "./identity-protocol.ts";
 
 export const SAMPLE_INTERVAL_MS = 250;
 export const POLL_MS = 50;
@@ -33,6 +34,8 @@ export interface ClientFrame {
   face_count: number;
   quality: QualityReason;
   feature?: Float32Array;
+  /** 只在 frameOptions 要求 metrics 時才有（「校正人臉辨識」）。 */
+  metrics?: FaceMetrics;
 }
 
 export type ClientState =
@@ -56,6 +59,8 @@ export interface IdentityClientOptions {
    */
   generation?: () => number;
   clearInterval?: (handle: unknown) => void;
+  /** 每一格送進 worker 的選項（品質門檻、是否回傳量測值）；每次取樣都重新讀，校正值改了立即生效。 */
+  frameOptions?: () => FrameOptions;
 }
 
 export const FACE_RUNTIME_ASSETS: FaceRuntimeAssets = {
@@ -166,7 +171,8 @@ export class IdentityClient {
       return;
     }
     this.inFlightGen = gen;
-    this.worker.postMessage({ type: "frame", gen, bitmap }, [bitmap]);
+    const options = this.options.frameOptions?.();
+    this.worker.postMessage({ type: "frame", gen, bitmap, ...(options ? { options } : {}) }, [bitmap]);
   }
 
   private receive(msg: WorkerResponse): void {
@@ -189,6 +195,6 @@ export class IdentityClient {
       msg.feature?.fill(0);
       return;
     }
-    this.options.onFrame({ gen: msg.gen, t: this.now(), face_count: msg.face_count, quality: msg.quality, ...(msg.feature ? { feature: msg.feature } : {}) });
+    this.options.onFrame({ gen: msg.gen, t: this.now(), face_count: msg.face_count, quality: msg.quality, ...(msg.feature ? { feature: msg.feature } : {}), ...(msg.metrics ? { metrics: msg.metrics } : {}) });
   }
 }

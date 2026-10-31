@@ -1164,6 +1164,19 @@ body[data-camera-preview="open"] .subtitle {
   margin: 8px 0;
 }
 
+/* 校正人臉辨識（George 2026-10-31）：左邊步驟、右邊鏡頭畫面；窄視窗時上下排。 */
+.calibration-layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
+.calibration-main { flex: 1 1 280px; min-width: 0; }
+.calibration-camera { margin: 0; flex: 0 0 auto; }
+.calibration-preview { display: block; width: 320px; max-width: 100%; aspect-ratio: 16 / 9; border-radius: 10px; background: #05080f; border: 1px solid rgba(255, 255, 255, 0.12); }
+.calibration-camera figcaption { margin-top: 4px; }
+.calibration-results, .calibration-summary { margin-top: 16px; }
+.calibration-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.calibration-table th, .calibration-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+.calibration-table th { font-weight: 600; opacity: 0.75; }
+.calibration-table tr.calibration-changed td { color: var(--cyan, #5ce1ff); }
+.calibration-advice { margin: 10px 0 0; padding-left: 20px; font-size: 14px; line-height: 1.6; }
+
 .language-settings label { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .language-settings select { color: var(--text, #e8eaf0); background: #141b2b; border: 1px solid #39445a; border-radius: 8px; padding: 7px 10px; font: inherit; }
 .language-settings select:focus-visible { outline: 2px solid #8aa4ff; outline-offset: 3px; }

@@ -331,9 +331,10 @@ function openHistoryInBrowser() {
 /** 選單列「家人辨識…」的點擊時間：10 秒內頁面才能開管理 session（語音或頁面腳本不能自己開）。 */
 const familyClick = new MenuClickWindow();
 
-function openFamily() {
+function openFamily(mode) {
   familyClick.mark(Date.now());
-  command("family");
+  if (mode === "calibrate") command("family-calibrate");
+  else command("family");
 }
 
 async function api(path, body) {

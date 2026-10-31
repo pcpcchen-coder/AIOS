@@ -55,6 +55,15 @@ export interface AmbientDeps {
    * 讓記憶暫停本次人物（只降權）。只是轉頭、看鍵盤不算。未提供時不通知。
    */
   onPresenceBreak?(reason: "tracking_lost" | "multi_face"): void;
+  /** 人臉辨識校正值（近距離範圍與轉頭寬限）；未提供時用預設（AMBIENT_NEAR_M、FACING_GRACE_MS）。每次都重新讀。 */
+  tuning?(): AmbientTuning | undefined;
+}
+
+/** identity-ambient 用到的校正值。 */
+export interface AmbientTuning {
+  near_min_m: number;
+  near_max_m: number;
+  facing_grace_ms: number;
 }
 
 /** 核心對同步辨識的回答（ambient_status）；unknown＝還沒問過。重新確認期間保留上一次的答案，不中斷取樣。 */
@@ -68,9 +77,9 @@ interface Interaction {
   startedAt: number;
 }
 
-/** 距離在近距離範圍內；未知（null）不算。 */
-export function isNear(distance: number | null): boolean {
-  return distance !== null && distance >= AMBIENT_NEAR_M.min && distance <= AMBIENT_NEAR_M.max;
+/** 距離在近距離範圍內（預設 AMBIENT_NEAR_M，校正後用校正值）；未知（null）不算。 */
+export function isNear(distance: number | null, range: { min: number; max: number } = AMBIENT_NEAR_M): boolean {
+  return distance !== null && distance >= range.min && distance <= range.max;
 }
 
 export class AmbientIdentity {
@@ -109,11 +118,13 @@ export class AmbientIdentity {
 
   /** SenseController.onSense：每次事件與 tick 之後。 */
   update(snapshot: SenseSnapshot): void {
-    const steady = snapshot.sensor_ok && snapshot.present && isNear(snapshot.distance_m);
+    const tuning = this.deps.tuning?.();
+    const steady = snapshot.sensor_ok && snapshot.present && isNear(snapshot.distance_m, tuning ? { min: tuning.near_min_m, max: tuning.near_max_m } : AMBIENT_NEAR_M);
+    const grace = tuning?.facing_grace_ms ?? FACING_GRACE_MS;
     const now = this.deps.now();
     if (!steady || snapshot.facing) this.facingLostAt = null;
     else if (this.ok) this.facingLostAt ??= now;
-    const graced = steady && !snapshot.facing && this.facingLostAt !== null && now - this.facingLostAt < FACING_GRACE_MS;
+    const graced = steady && !snapshot.facing && this.facingLostAt !== null && now - this.facingLostAt < grace;
     const ok = steady && (snapshot.facing || graced);
     const presentOk = snapshot.sensor_ok && snapshot.present;
     if (this.presentOk && !presentOk) this.deps.onPresenceBreak?.("tracking_lost");

@@ -1,3 +1,4 @@
+import type { FaceTuningView } from "./face-tuning.ts";
 import type { Locale } from "./i18n.mjs";
 import type { CameraSettings } from "./sense.ts";
 import type { MenuPrefSetting } from "./seconds-menu.ts";
@@ -137,6 +138,8 @@ export interface SettingsView {
    */
   seconds?: MenuPrefSetting[];
   /** 選單列「顯示鏡頭畫面」不能用的原因（cameraPreviewDisabledReason）；null＝可以用。未提供時選單不畫這一項。 */
+  /** 人臉辨識校正值（shared/face-tuning.ts）；只在鏡頭啟用時提供。 */
+  face_tuning?: FaceTuningView;
   camera_preview_disabled_reason?: string | null;
   /** 家人辨識的可用狀態與人數（不含姓名與 person_id）；身分資料只走 macOS App 的 IPC。未提供時選單不畫「家人辨識…」。 */
   identity?: IdentityStatus;

@@ -52,6 +52,13 @@ export class PrefsFile<P> {
     return next;
   }
 
+  /** 整份換掉（還原預設時傳 {}）：一樣先寫檔，成功後才改記憶體。 */
+  replace(next: Partial<P>): Partial<P> {
+    this.write({ schema_version: this.options.version, prefs: next });
+    this.current = { ...next };
+    return this.current;
+  }
+
   /**
    * 每個鍵分開驗證：不認得或不合法的鍵丟掉並記 log，其餘照用（壞掉一個鍵不會把其他保存的值一起丟掉）。
    * 檔案存在卻讀不懂（無法讀取、不是 JSON、版本不符、沒有 prefs 物件）時套用 failClosed。

@@ -160,7 +160,7 @@ describe("history intent and entry points", () => {
   it("the macOS menu command opens it, and the menu item exists in the tray template", () => {
     const calls: string[] = [];
     const noop = () => {};
-    expect(runDesktopCommand("history", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview: noop, family: noop, memory: noop, history: () => calls.push("history"), vault: noop })).toBe(true);
+    expect(runDesktopCommand("history", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview: noop, family: noop, familyCalibrate: noop, memory: noop, history: () => calls.push("history"), vault: noop })).toBe(true);
     expect(calls).toEqual(["history"]);
     const main = readFileSync(new URL("../desktop/main.mjs", import.meta.url), "utf8");
     expect(main).toContain('{ label: "成果紀錄…", click: openHistoryMenu }');

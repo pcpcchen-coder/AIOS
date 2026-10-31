@@ -6,7 +6,7 @@ import { evaluateSurface } from "../src/presentation-policy.ts";
 import { blocksAutoTalk, initialShell, reduceShell, type ShellEvent } from "../src/shell-state.ts";
 import { ENROLL_MIN_INTERVAL_MS, ENROLL_PROMPTS, ENROLL_TARGET, EnrollmentCollector } from "../src/family-enroll.ts";
 import { IdentityClient, type ClientFrame, type ClientState, type WorkerLike } from "../src/sense/identity-client.ts";
-import type { WorkerRequest, WorkerResponse } from "../src/sense/identity-protocol.ts";
+import type { FrameOptions, WorkerRequest, WorkerResponse } from "../src/sense/identity-protocol.ts";
 import { assessQuality, meanLuma, QUALITY_DEFAULTS } from "../src/sense/face/quality.ts";
 import type { YuNetFace } from "../src/sense/face/yunet.ts";
 import { ENROLL_MAX_SAMPLES, ENROLL_MIN_SAMPLES } from "../shared/identity.ts";
@@ -129,7 +129,7 @@ class FakeWorker implements WorkerLike {
 }
 
 describe("IdentityClient", () => {
-  function setup(sample: () => Promise<ImageBitmap | null> = async () => ({ close: vi.fn() }) as unknown as ImageBitmap) {
+  function setup(sample: () => Promise<ImageBitmap | null> = async () => ({ close: vi.fn() }) as unknown as ImageBitmap, frameOptions?: () => FrameOptions) {
     const workers: FakeWorker[] = [];
     const frames: ClientFrame[] = [];
     const states: ClientState[] = [];
@@ -145,6 +145,7 @@ describe("IdentityClient", () => {
       onFrame: (fr) => frames.push(fr),
       onState: (s) => states.push(s),
       now: () => clock.now,
+      ...(frameOptions ? { frameOptions } : {}),
       setInterval: (fn) => {
         tick = fn;
         return 1;
@@ -162,6 +163,22 @@ describe("IdentityClient", () => {
     return { client, workers, frames, states, step, clock, ticking: () => tick !== null };
   }
   const model = { detector: "d", recognizer: "r", align: "a", preproc: "p" };
+
+  it("face calibration: per-frame options reach the worker (read again for every frame) and metrics come back with the frame", async () => {
+    let minFace = 100;
+    const t = setup(undefined, () => ({ quality: { min_face_px: minFace }, metrics: true }));
+    t.client.start();
+    const w = t.workers[0]!;
+    w.reply({ type: "ready", model, load_ms: 10 });
+    await t.step();
+    expect(w.frames()[0]!.options).toEqual({ quality: { min_face_px: 100 }, metrics: true });
+    const metrics = { face_px: 90, score: 0.9, yaw: 0.1, pitch: 0.5, roll_deg: 1, luma: 120, edge: null };
+    w.reply({ type: "result", gen: w.frames()[0]!.gen, face_count: 1, quality: "too_small", ms: 5, metrics });
+    expect(t.frames[0]).toMatchObject({ quality: "too_small", metrics });
+    minFace = 80;
+    await t.step(250);
+    expect(w.frames()[1]!.options).toEqual({ quality: { min_face_px: 80 }, metrics: true });
+  });
 
   it("loads models first, then sends at most one frame at a time (≤4 Hz), transferring the bitmap", async () => {
     const t = setup();

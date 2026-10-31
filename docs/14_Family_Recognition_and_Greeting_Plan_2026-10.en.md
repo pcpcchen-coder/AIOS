@@ -122,6 +122,26 @@ Stereo distance lacks actual calibration and cannot be treated as a precise secu
 A 0.5-second facing setting may leave insufficient naming evidence. Start normally anyway. A 5-second setting provides more existing sampling time without expanding data retention. Preload models after feature enablement. Background inference must not block the existing 80 ms sensing loop.
 
 <a id="5-登記保存與資料範圍"></a>
+### 4.1 Face recognition calibration (2026-10-31)
+
+During the ID-02 Mac test George found that names were usually spoken while seated (about 0.8–1.0 m), while standing (about 1.3–1.7 m) no frame found a face at all, because the camera was angled for the seated position and the face left the top of the frame. When the camera is moved or tilted, the starting values above must change with it, so this became a feature of its own, "Calibrate face recognition".
+
+- **Entry**: menu bar "Camera and voice settings → Calibrate face recognition…", or the "Calibrate face recognition" button in the Family recognition view. It shares the family recognition management session (it can only open within 10 seconds of the menu-bar click).
+- **Flow**: go to three places in turn (where you usually sit, where you stand to talk, the farthest place you still talk from; each can be skipped) and face the screen for about 6 seconds at each. The view shows the camera image, distance, facing and the quality reason of each frame; when family members are enrolled, a trial reports "recognised / not recognised" (never who or a score).
+- **Result**: for each place, the distance, face-seen, good-quality and facing ratios with advice (for example "Your face often goes above the top of the frame: tilt the camera up a little"), plus a suggested set of values. They are saved only when the user presses "Apply"; "Restore defaults" is also available.
+- **Adjustable values and ranges** (`shared/face-tuning.ts`, saved in configDir `face-tuning.json`, HTTP `POST /api/settings/camera-tuning`):
+
+| Setting | Default | Range | Effect |
+|---|---|---|---|
+| Nearest / farthest recognition distance | 0.6 / 1.5 m | 0.3–1.5 / 0.8–2.5 m, at least 0.3 m apart | Near range for ambient recognition (`AMBIENT_NEAR_M`) |
+| Facing-the-screen tolerance | 0.2 | 0.1–0.35 | Facing detection; also affects look-to-talk |
+| Grace for brief glances away | 800 ms | 0–3000 ms | How long the face may turn away during an interaction without resetting recognition |
+| Minimum face size | 100 px | 60–160 px | Quality limit for look-to-talk (enrolment still uses 100 px) |
+| Turned-face tolerance | 0.2 | 0.1–0.3 | Quality limit for look-to-talk (enrolment still uses 0.2) |
+
+- **Unchanged boundaries**: the matching threshold (`MATCH_THRESHOLDS`) and evidence rules are not calibrated; enrolment keeps the default quality limits. Measurements are numbers only (face width, angles, brightness, which frame edge the face touches, distance, facing or not) — no images, coordinates, landmarks or scores — kept in memory only and discarded when the view closes. The worker returns these measurements only when calibration asks for them.
+- **How suggestions are computed** (`src/face-calibration.ts`, using only places where a face was seen): the distance range covers the nearest usable place minus 0.15 m to the farthest usable place plus 0.25 m; the minimum face size is the 20th percentile of face width × 0.9 (at most 100 px); the turned-face tolerance is the 80th percentile of yaw + 0.03 (at least 0.2); a low facing ratio while present loosens facing detection and the glance grace.
+
 ## 5. Enrollment, storage, and data scope
 
 Explicitly start enrollment from unlocked, administrable local settings, choose a name, and provide multiple-angle samples. Saying “I am George” to the camera alone must not overwrite an existing person. Plan for 2–5 family members initially. Unenrolled people remain unknown.
