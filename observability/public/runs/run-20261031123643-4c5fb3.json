@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-31T12:36:43.021Z",
-  "updated_at": "2026-10-31T12:36:53.708Z",
+  "updated_at": "2026-10-31T12:36:57.610Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-31T12:36:57.609Z",
+      "ended_at": "2026-10-31T12:36:57.610Z",
+      "note": "WK-02 plan + George decisions",
       "evidence": []
     },
     {
@@ -103,6 +103,13 @@
       "at": "2026-10-31T12:36:53.708Z",
       "type": "step_updated",
       "step_id": "checkpoint",
+      "status": "passed",
+      "note": "WK-02 plan + George decisions"
+    },
+    {
+      "at": "2026-10-31T12:36:57.610Z",
+      "type": "step_updated",
+      "step_id": "architect",
       "status": "passed",
       "note": "WK-02 plan + George decisions"
     }
