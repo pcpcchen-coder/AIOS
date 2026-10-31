@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-10-31T13:27:01.417Z",
+  "updated_at": "2026-10-31T13:27:10.088Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
@@ -9,12 +9,12 @@
       "title": "WK-02 wake word starts voice call",
       "playbook": "feature",
       "status": "running",
-      "updated_at": "2026-10-31T13:26:59.687Z",
+      "updated_at": "2026-10-31T13:27:08.449Z",
       "started_at": "2026-10-31T12:36:43.021Z",
       "ended_at": null,
       "branch": "",
       "commit_sha": "",
-      "passed_steps": 7,
+      "passed_steps": 8,
       "total_steps": 8,
       "provenance": "Agent self-reported"
     },
