@@ -8,16 +8,16 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-31T11:49:56.051Z",
-  "updated_at": "2026-10-31T11:49:56.052Z",
+  "updated_at": "2026-10-31T11:50:05.100Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-31T11:50:05.099Z",
+      "ended_at": "2026-10-31T11:50:05.100Z",
+      "note": "camera enable main-only design: HTTP active:true 403, App native dialog via IPC",
       "evidence": []
     },
     {
@@ -91,6 +91,13 @@
       "step_id": null,
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-31T11:50:05.100Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "passed",
+      "note": "camera enable main-only design: HTTP active:true 403, App native dialog via IPC"
     }
   ],
   "provenance": "Agent self-reported"
