@@ -269,7 +269,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     for (const key of ["group", "statusPrefix", "listen", "listenNote", "pause", "resume", "speaker", "speakerNote", "notReported"] as const) expect(WAKE_MENU_TEXT[key]).toBe(WAKE_TEXT[key]);
   });
 
-  it("is fully translated in English, keeping 「哈囉努斯」 as is", () => {
+  it("is fully translated in English (the wake word Hello Nous is English already)", () => {
     setNativeLocale("en");
     try {
       const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, runtime: "missing" as const } };
@@ -278,11 +278,11 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
         const start = items.findIndex((i) => i.label === "Wake word");
         expect(start).toBeGreaterThan(0);
         const texts = items.slice(start).flatMap((i) => [i.label, i.sublabel]).filter((x): x is string => typeof x === "string");
-        expect(texts.filter((x) => /\p{Script=Han}/u.test(x.replaceAll("哈囉努斯", "")))).toEqual([]);
+        expect(texts.filter((x) => /\p{Script=Han}/u.test(x))).toEqual([]);
       }
       const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), translate: nativeT });
       expect(items.find((i) => i.label === "Recognise speaker during calls")).toMatchObject({ enabled: false, sublabel: "Available after SP-02" });
-      expect(items.find((i) => i.label === "Always-on wake listening")?.sublabel).toBe("Detects “哈囉努斯” only on this Mac");
+      expect(items.find((i) => i.label === "Always-on wake listening")?.sublabel).toBe("Detects “Hello Nous” only on this Mac");
       for (const text of Object.values(WAKE_TEXT)) expect(nativeT(text), text).not.toBe(text);
     } finally {
       setNativeLocale("zh-TW");

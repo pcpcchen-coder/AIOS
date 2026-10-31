@@ -701,7 +701,7 @@ async function confirmCameraEnable() {
 async function setWakeListen(value) {
   if (value) {
     const runtimeMissing = settings?.wake?.runtime !== "ok";
-    const detail = [t("開啟後麥克風會常駐開著，只在這台 Mac 本機偵測「哈囉努斯」。沒有喚醒時的聲音只留在記憶體中約 2 秒，不寫檔、不進紀錄、不上傳。App 重開與睡眠回來後會自動恢復，直到你關掉這個開關；「暫停聆聽」只到這次結束。")];
+    const detail = [t("開啟後麥克風會常駐開著，只在這台 Mac 本機偵測「Hello Nous」。沒有喚醒時的聲音只留在記憶體中約 2 秒，不寫檔、不進紀錄、不上傳。App 重開與睡眠回來後會自動恢復，直到你關掉這個開關；「暫停聆聽」只到這次結束。")];
     if (runtimeMissing) detail.push(t("目前還沒有安裝喚醒引擎：開啟後會顯示「無法使用」，不會開啟麥克風。"));
     let response = 1;
     try {

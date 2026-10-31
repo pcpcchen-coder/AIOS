@@ -153,21 +153,26 @@ A camera status dot appears in the lower-right corner. Facing the display for ab
 These views and settings have not been verified with the physical camera.
 
 <a id="常駐喚醒聆聽選填wk-01a尚無喚醒引擎"></a>
-### Always-on wake listening (optional, WK-01a, no wake engine yet)
+### Always-on wake listening: "Hello Nous" (optional, off by default)
 
-After you add `NOUS_WAKE=on` to `.env` and restart, the macOS App's menu bar “Camera and voice settings” gains a final “Wake word” section: the “Always-on wake listening” switch (off by default; an explanation appears before it turns on), the current state, “Pause listening (until this session ends)”, and a disabled “Recognise speaker during calls” row (available after SP-02).
+Say "**Hello Nous**" to wake Nous without looking at the screen or pressing anything. Detection runs only on this Mac; audio stays in memory for about 2 seconds and is never written to disk or uploaded. Only after a wake is audio sent to your chosen voice service, until the call ends.
 
-**It does not detect 「哈囉努斯」 yet**: the wake engine arrives in WK-01b, so after you turn it on the state reads “Unavailable: The wake engine is not installed yet; the microphone was not opened”, and the microphone stays closed. Without `NOUS_WAKE`, everything behaves as before. See [WK-01a validation](../../docs/validation/wk-01a-2026-10-31.en.md).
+1. **Install the wake engine** (once; the App never downloads it at runtime):
 
-**Installing the wake engine (WK-01b preparatory batch; the engine is still unavailable)**: the engine files are installed only by the command below. The App never downloads them at runtime.
+   ```bash
+   npm run wake:setup -- --product
+   ```
 
-```bash
-npm run wake:setup -- --product
-```
+   It downloads the KWS wasm and JS built by GitHub Actions from the GitHub Release, plus the two hash-pinned KWS models (about 70 MB), checks every SHA-256 against `shared/wake-runtime.json`, and installs into `wake-runtime/` only when everything passes (on macOS it also copies to `~/Library/Application Support/Nous/wake-runtime/`, the folder the App core serves as `/wake-runtime/`). Any mismatch or missing hash exits non-zero and installs nothing. If you already downloaded the files with `gh release download` or a browser, add `--from <folder>`; `--dest <folder>` changes the install location.
 
-It downloads the KWS wasm and JS built by GitHub Actions from the GitHub Release, plus the two KWS model archives already pinned in WK-00, checks every SHA-256 against `shared/wake-runtime.json`, and installs into `wake-runtime/` only when everything passes (on macOS it also copies to `~/Library/Application Support/Nous/wake-runtime/`, the folder the App core serves as `/wake-runtime/`). Any mismatch or missing hash exits non-zero and installs nothing. **Since 2026-10-31 the manifest is `built`**: the wasm and JS hashes from the release `wake-runtime-2.0.1-5961b4196003` are in the manifest, so the command downloads and verifies the files; but the keywords and threshold still wait for George's Mac numbers (`keywords_pending`), so even after a successful install the App still shows “The wake engine is not installed yet” and does not open the microphone. If you already downloaded the files with `gh release download` or a browser, add `--from <folder>`; `--dest <folder>` changes the install location. See [WK-01b preparatory batch validation](../../docs/validation/wk-01b-prep-2026-10-31.en.md).
+2. **Turn on the feature flag**: add `NOUS_WAKE=on` to `.env` (in the macOS App use the menu bar's "Edit API keys and advanced settings (.env)…"; the core restarts after you save). Without `NOUS_WAKE`, everything behaves as before.
 
-<a id="武陵居中控選填"></a>
+3. **Turn on always-on listening**: in the menu bar's "Camera and voice settings", last section "Wake word", tick "Always-on wake listening" (an explanation appears first). The status reads "Wake listening: Listening on this Mac" and a small listening icon appears next to the brain.
+
+After a wake: an earcon plays, Nous greets you and starts a realtime voice call (naming follows "Greet recognised family members by name"); with no speech for about 5 seconds the call ends by itself. At most 3 calls per rolling 60 seconds may start from a wake; beyond that listening pauses and resumes automatically. Wake detection pauses while realtime voice, push-to-talk or voice mode is in use and resumes afterwards, so when you sit in front of the screen, look-to-talk often opens the call first. "Pause listening (until this session ends)" turns it off for now.
+
+**Current numbers and limits** ([WK-00 Mac trial](../../docs/validation/wk-00-mac-2026-10-31.en.md)): the wake word is the English Hello Nous (zh-en-3M model; "Nous" may sound like nose, nows or noose), boost 1.5, threshold 0.15. George's voice hit 7/10 live on the command line and 4/4 in the App, and "Hello" alone did not trigger. The current models cannot recognise the Chinese 「哈囉努斯」, so it is no longer used. Other family members and the 8-hour TV false-wake test are not done yet; if it wakes by mistake or is hard to wake, note it so the threshold can be tuned from the numbers.
+
 ### Wuling home controller (optional)
 
 Realtime voice can query home sensors and devices, for example living-room temperature, study CO₂, or main-light connectivity. It can also control one device, such as turning off a light, setting a desk lamp to 60%, or color temperature to 3000K. Configure realtime voice above first.

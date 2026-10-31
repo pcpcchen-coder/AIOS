@@ -1,2 +1,2 @@
-"NSMicrophoneUsageDescription" = "Nous 使用麥克風進行語音對話；若開啟常駐喚醒聆聽，也只在這台 Mac 本機偵測「哈囉努斯」，偵測時的聲音只留在記憶體、不保存也不上傳。喚醒或開始對話後，音訊會傳送至你選用的語音服務，直到對話結束。";
+"NSMicrophoneUsageDescription" = "Nous 使用麥克風進行語音對話；若開啟常駐喚醒聆聽，也只在這台 Mac 本機偵測「Hello Nous」，偵測時的聲音只留在記憶體、不保存也不上傳。喚醒或開始對話後，音訊會傳送至你選用的語音服務，直到對話結束。";
 "NSCameraUsageDescription" = "Nous 使用鏡頭判斷在場、頭向、手勢、名目距離及選用的家人辨識；影像只在這台 Mac 處理，不保存也不上傳。";

@@ -66,7 +66,7 @@ export const WAKE_MENU_TEXT = {
   group: "喚醒詞",
   statusPrefix: "喚醒聆聽",
   listen: "常駐喚醒聆聽",
-  listenNote: "只在這台 Mac 本機偵測「哈囉努斯」",
+  listenNote: "只在這台 Mac 本機偵測「Hello Nous」",
   pause: "暫停聆聽（到這次結束）",
   resume: "繼續聆聽",
   speaker: "通話中辨認說話者",
