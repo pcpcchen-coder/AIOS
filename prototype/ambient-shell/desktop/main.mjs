@@ -9,7 +9,7 @@ import { validateMemoryRequest } from "./memory-ipc.mjs";
 import { deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "./tasks-ipc.mjs";
 import { createMemorySecretBox } from "./memory-safe-storage.mjs";
 import { checkTrustedSender } from "./trusted-sender.mjs";
-import { radio, settingsMenu } from "./settings-menu.mjs";
+import { isWakeReport, radio, settingsMenu } from "./settings-menu.mjs";
 import { isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "./localization.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -34,6 +34,11 @@ const faceRuntimeDir = join(userData, "face-runtime");
  * 注意：settings 回報 available 時會呼叫 safeStorage.isEncryptionAvailable()；它會不會觸發 Keychain 詢問列在 Mac gate。
  */
 const memoryDir = join(userData, "memory");
+/**
+ * WK-01a 常駐喚醒聆聽的引擎檔案（只有 NOUS_WAKE=on 時核心才看）。WK-01b 由 GitHub Actions 建置後安裝到這裡，不在 App 包裡；
+ * WK-01a 的清單是空的，所以核心一律回報 runtime missing，頁面不會開麥克風。
+ */
+const wakeRuntimeDir = join(userData, "wake-runtime");
 
 const REALTIME_MODELS = [
   { id: "gpt-realtime", label: "gpt-realtime（品質最好）" },
@@ -149,6 +154,7 @@ async function startCore() {
       confirm: confirmIdentity,
       modelDir: faceRuntimeDir,
     },
+    wakeRuntimeDir,
     memory: {
       dir: memoryDir,
       secretBox,
@@ -503,15 +509,26 @@ function loadCommands() {
 /** 把選單動作交給網頁（開始語音、看進度…）。 */
 function command(name) {
   showWindow();
+  notifyPage(name);
+}
+
+/** 和 command 相同，但不打開視窗（常駐喚醒聆聽的暫停、繼續與立即停止：只改收音，不跳出畫面）。 */
+function notifyPage(name) {
+  if (!win || win.isDestroyed()) return;
   win.webContents
     .executeJavaScript(`window.dispatchEvent(new CustomEvent("nous:command", { detail: ${JSON.stringify(name)} }))`)
     .catch(() => {});
 }
 
+/** 系統電源事件交給頁面（只送列舉值）：睡眠、鎖定時停止常駐喚醒聆聽，醒來、解鎖時依偏好自動恢復（docs/17 §5.8）。 */
+function notifyPower(event) {
+  if (win && !win.isDestroyed()) win.webContents.send("nous:power", event);
+}
+
 // ───────────── 選單列圖示 ─────────────
 
 let tray = null;
-let pageState = { voice: "off", activeTasks: 0 };
+let pageState = { voice: "off", activeTasks: 0, wake: null };
 let settings = null;
 let settingsReadGeneration = 0;
 
@@ -549,7 +566,7 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily, translate: t });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, wakeReport: pageState.wake, wakeCommand: notifyPage, translate: t });
 }
 
 /** 即時語音用的 Codex 登入：核心開好回呼（1455，被占用時 1457，再不行改裝置代碼），系統瀏覽器開登入頁。 */
@@ -578,6 +595,39 @@ async function setMenuPref(row, value) {
     return;
   }
   rebuildMenu();
+}
+
+/**
+ * 選單列「常駐喚醒聆聽」。每次由關到開都先顯示原生說明（App 重開與睡眠回來會自動恢復、聲音只在本機記憶體），按「開啟」才保存。
+ * 關掉時先叫頁面立即停止收音，再保存；保存失敗時收音仍然是停的，並顯示保存失敗（docs/17 §5.5）。
+ */
+async function setWakeListen(value) {
+  if (value) {
+    const runtimeMissing = settings?.wake?.runtime !== "ok";
+    const detail = [t("開啟後麥克風會常駐開著，只在這台 Mac 本機偵測「哈囉努斯」。沒有喚醒時的聲音只留在記憶體中約 2 秒，不寫檔、不進紀錄、不上傳。App 重開與睡眠回來後會自動恢復，直到你關掉這個開關；「暫停聆聽」只到這次結束。")];
+    if (runtimeMissing) detail.push(t("目前還沒有安裝喚醒引擎：開啟後會顯示「無法使用」，不會開啟麥克風。"));
+    let response = 1;
+    try {
+      const parent = win && !win.isDestroyed() ? win : undefined;
+      ({ response } = await showMessage({ type: "question", buttons: ["開啟", "取消"], defaultId: 1, cancelId: 1, message: "要開啟常駐喚醒聆聽嗎？", detail: detail.join("\n\n") }, parent));
+    } catch {
+      response = 1;
+    }
+    if (response !== 0) {
+      rebuildMenu();
+      return;
+    }
+  } else {
+    notifyPage("wake-off");
+  }
+  // 開關只經主程序與核心之間的同一行程呼叫（core.wake），不經 HTTP：頁面腳本無法略過上面的原生說明自己打開。
+  try {
+    if (!core?.wake) throw new Error(t("常駐喚醒聆聽不可用"));
+    core.wake.setListen(value);
+  } catch (err) {
+    showError("常駐喚醒聆聽沒有保存", String(err.message ?? err));
+  }
+  await refreshSettings();
 }
 
 function rebuildMenu() {
@@ -851,7 +901,7 @@ ipcMain.on("nous:get-locale", (event) => {
 ipcMain.on("nous:state", (event, state) => {
   if (!trustedLocaleSender(event, win, core?.url) || !state || typeof state !== "object") return;
   if (isLocale(state.locale)) setLocale(state.locale, { notify: false });
-  pageState = { voice: String(state.voice ?? "off"), activeTasks: Number(state.activeTasks) || 0 };
+  pageState = { voice: String(state.voice ?? "off"), activeTasks: Number(state.activeTasks) || 0, wake: isWakeReport(state.wake) ? { state: state.wake.state, reason: state.wake.reason ?? null } : null };
   const revision = String(state.settings ?? "");
   if (revision && revision !== reportedSettings) {
     reportedSettings = revision;
@@ -991,6 +1041,12 @@ app.whenReady().then(async () => {
     else notifyPlaintextDropped("os_lock");
   });
   powerMonitor.on("suspend", () => (core?.tasks ? core.tasks.dropPlaintext("suspend") : notifyPlaintextDropped("suspend")));
+  // WK-01a 常駐喚醒聆聽：電源事件只轉成列舉值交給頁面（鎖定、睡眠時停止收音；醒來、解鎖時要不要恢復由頁面依偏好、
+  // 本次是否暫停與裝置事件決定）。和上面的處理器分開登記，既有行為不變。
+  powerMonitor.on("lock-screen", () => notifyPower("lock"));
+  powerMonitor.on("suspend", () => notifyPower("suspend"));
+  powerMonitor.on("resume", () => notifyPower("resume"));
+  powerMonitor.on("unlock-screen", () => notifyPower("unlock"));
 
   tray = new Tray(trayImage(false));
   setTimeout(() => log(`選單列圖示位置：${JSON.stringify(tray.getBounds())}`), 3000);

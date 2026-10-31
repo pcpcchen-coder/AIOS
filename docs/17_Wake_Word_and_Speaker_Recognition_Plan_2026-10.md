@@ -6,6 +6,8 @@
 
 日期：2026-10-29，Asia/Taipei。狀態：**規劃，未實作**；同日依獨立審查修訂，並依 George 同日的 9 項決定（§14）更新。本文件沒有新增任何喚醒、常駐收音或音色辨認程式，沒有錄音、沒有建立家人聲音資料，也沒有通過任何實機 gate。程式查核基準：AIOS main `876eeaaf7697cf4a3847e0687430c536f4a1d9a7`。外部版本、授權與模型卡於 2026-10-29 查核，來源列在 §15。
 
+**2026-10-31 更新（WK-01a）**：依 George 同日的決定（§14.1），WK-01 拆成 WK-01a 與 WK-01b。WK-01a 已在分支 `claude/wk-01`（基於 main `9778b41`，尚未提交與合併）加入常駐喚醒聆聽的底層：`AudioFrontEnd`、AudioWorklet → worker 的擷取、2 秒環形緩衝、偏好與自動恢復、自我觸發防護、本機提示音、選單列與電子腦指示、功能旗標 `NOUS_WAKE`（預設關閉）。**真正的喚醒引擎還沒有接上**：產品裡的偵測器照實回報 `runtime_missing`，不會開麥克風、也不會偵測；Mac gate 未執行。驗證見 [WK-01a 驗證](validation/wk-01a-2026-10-31.md)。本文件其餘內容仍是規劃。
+
 入口見 [文件索引](README.md) 與 [目前實作狀態](Current_Implementation_Status.md)。本規劃延伸 [14 家人辨識與稱名問候](14_Family_Recognition_and_Greeting_Plan_2026-10.md)、[ADR-0001](adr/ADR-0001-local-family-recognition.md)、[15 Companion Mode](15_Companion_Mode_Spec_2026-10-24.md) 與 [16 家庭記憶層](16_Nous_Memory_Layer_Design_2026-10-26.md)，不取代它們。
 
 ## 1. George 的需求與本文件的回答
@@ -29,7 +31,7 @@ George 於 2026-10-29 提出四項需求。下表是本文件的回答摘要，�
 
 ## 2. 現況核對：目前沒有喚醒或常駐收音
 
-以下依 `876eeaa` 的程式核對。
+以下依 `876eeaa` 的程式核對。2026-10-31 註：WK-01a 之後行號已變動（基準 `9778b41` 加上 WK-01a）：API key 路徑在 `src/realtime.ts:288` 呼叫 `getMicrophone()`，live 路徑在 `src/live-voice.ts:180`；`browserRealtimeDeps().getMicrophone` 在 `src/realtime.ts:891`，live 經 `src/main.ts:520` 的 `base.getMicrophone` 取用。`NOUS_WAKE=on` 時，`src/main.ts:552` 的 `wakeMicrophone()` 改為向 `AudioFrontEnd` 租用（§10.3）。下表保留 `876eeaa` 當時的內容。
 
 | 項目 | 程式現況 | 對本規劃的影響 |
 |---|---|---|
@@ -207,6 +209,7 @@ George 2026-10-29 要求：認出聲音是誰之後，要稱呼名字打招呼�
 - App 自己提供兩處指示：選單列「鏡頭與語音設定」顯示「喚醒聆聽：本機聆聽中／通話中／已暫停／無法使用」；電子腦畫面保留一個最小的本機聆聽圖示（06 的 `ambient` 狀態已預留「如有啟用喚醒麥克風則保留最小指示」）。
 - 常駐聆聽**不點亮聽覺區**。聽覺區仍只依真實對話主題亮起（CLAUDE.md 腦區要求）。喚醒成功、開始收音時，才依既有語音狀態顯示聆聽。
 - 指示文字與無障礙標籤使用共用翻譯表，同時提供繁中與英文。
+- WK-01a 實作（2026-10-31）：選單列「鏡頭與語音設定」最後一段「喚醒詞」顯示「喚醒聆聽：本機聆聽中／準備中／通話中／已暫停／已讓出麥克風／無法使用／未開啟」與原因，狀態只來自頁面回報的裝置事件；電子腦下方的小麥克風圖示只在 `listening_local` 顯示，不改變腦區活動。
 
 ### 5.5 關閉方式
 
@@ -307,6 +310,7 @@ Nous 目前是家用、未販售的原型。George 2026-10-29 決定**接受並�
 
 - 「常駐喚醒聆聽」：控制麥克風是否常駐開著做本機喚醒偵測。
 - 「通話中辨認說話者」：控制已喚醒的通話期間，是否從同一串流分支做逐句音色辨認。關閉時連線後的聲音一律 `unavailable`（`switch_off`），融合結果退回只看臉（ID-02 行為）。看著說話也適用這個開關。喚醒片段與連線前的話不受這個開關影響（§4.4）。
+- 依 George 2026-10-31 的決定（§14.1 D3），WK-01a 先在選單列放一列**停用**的「通話中辨認說話者」勾選框（英文介面為 “Recognise speaker during calls”），說明寫「SP-02 之後才能使用」；不能按、沒有任何作用，SP-02 才啟用。
 
 ### 7.3 臉聲融合規則
 
@@ -443,7 +447,7 @@ log 寫「便利性限制：未通過（原因 minor／unknown）」，不寫「
 本規劃選定一種模型：**`AudioFrontEnd` 是 renderer 內唯一呼叫 `getUserMedia` 取得麥克風的模組**。其他元件不是另一個擁有者，而是向它租用或登記為消費者。
 
 - 來源串流以即時語音目前的約束開啟：`{ echoCancellation: true, noiseSuppression: true, autoGainControl: true }`，避免同一裝置兩種約束互相影響。KWS 與講者特徵在這組處理下的表現由 WK-00、SP-00 量測。
-- **即時語音改為租用**：`src/realtime.ts:548` 的 `browserRealtimeDeps().getMicrophone` 改成 `audioFrontEnd.lease("realtime")`，回傳 `new MediaStream([sourceTrack.clone()])`。API key 路徑（`src/realtime.ts:185`）與 live 路徑（`src/live-voice.ts:155`，經 `src/main.ts:258` 的 `base.getMicrophone`）都呼叫這個函式，所以兩路一起改。通話結束時兩路照舊對自己的 track 呼叫 `stop()`，停的是複製品，不是來源。
+- **即時語音改為租用**：`browserRealtimeDeps().getMicrophone`（原 `src/realtime.ts:548`，WK-01a 後為 `src/realtime.ts:891`）在 `NOUS_WAKE=on` 時由 `src/main.ts:552` 的 `wakeMicrophone()` 換成 `AudioFrontEnd.lease()`，回傳來源串流的複製品（`MediaStream.clone()`）。API key 路徑（原 `src/realtime.ts:185`，現 `:288`）與 live 路徑（原 `src/live-voice.ts:155`，現 `:180`，經 `src/main.ts:520` 的 `base.getMicrophone`）都呼叫這個函式，所以兩路一起改。通話結束時兩路照舊對自己的 track 呼叫 `stop()`，停的是複製品，不是來源；之後再以自己那一份串流呼叫新增的可選 `RealtimeDeps.releaseMicrophone(stream)`，只歸還那一份（兩路各兩處；過時的工作階段不會停掉新通話的複製品）。通話階段變成 off、而且已經沒有任何進行中或開始中的通話時，頁面再保險歸還剩下的。旗標關閉時 `getMicrophone` 維持原本的函式。
 - **常駐聆聽關閉時**：租用時才開來源串流，最後一個租用結束就停止來源，行為等同今天。
 - **常駐聆聽開啟時**：通話期間 KWS 暫停（`in_call`），來源串流不關；若「通話中辨認說話者」開著，講者 worker 繼續作為消費者取樣。§9.2 的逐句聲音檢查依賴這個前提。
 - **Web Speech 模式**：按下說話與連續語音會自己開擷取，而 `SpeechRecognition.start(audioTrack)` 在 MDN 仍標為實驗性、可用性有限（[MDN](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition/start)）。所以這兩個模式啟動時，`AudioFrontEnd` 完全停止來源（`released`），這段期間沒有喚醒，也沒有音色辨認。
@@ -518,8 +522,8 @@ ADR-0003 草案（WK-00 交付）必須包含：
 | `shared/wake.ts`，新增 | 喚醒偏好、兩個開關、狀態（§5.1）、`WakeEvent` 型別 |
 | `shared/identity.ts` | `VoiceObservation`、融合結果、`GreetingDecision` 的來源欄位（臉、聲音或兩者）、`calibrated_keyword`／`calibrated_utterance` |
 | `src/audio/front-end.ts`，新增 | 唯一的 `getUserMedia`、`lease()`、AudioWorklet、2 秒環形緩衝、消費者登記、讓出與恢復 |
-| `src/realtime.ts`（`browserRealtimeDeps().getMicrophone`，第 548 行）、`src/main.ts`（第 258 行） | 改向 `AudioFrontEnd` 租用；`src/realtime.ts:185`、`src/live-voice.ts:155` 的呼叫端不變 |
-| `src/audio/kws-worker.ts`、`speaker-worker.ts`，新增 | wasm 推論；只輸出事件與特徵向量；禁網路與本機儲存 |
+| `src/realtime.ts`（`browserRealtimeDeps().getMicrophone`，原第 548 行、WK-01a 後第 891 行）、`src/main.ts`（原第 258 行、WK-01a 後第 520 行與 `wakeMicrophone()`） | 改向 `AudioFrontEnd` 租用；`src/realtime.ts`、`src/live-voice.ts` 的呼叫端不變，只在停掉自己的 track 後呼叫 `releaseMicrophone` |
+| `src/audio/wake-worker.ts`（WK-01a；檔名不含引擎名稱，原規劃為 `kws-worker.ts`）、`speaker-worker.ts`（SP-01） | wasm 推論；只輸出事件與特徵向量；禁網路與本機儲存 |
 | `src/main.ts`、`src/realtime-session.ts` | 自動恢復與一次性恢復字幕、本機提示音、`startRealtime("wake_word")`、互動綁定、通話期間暫停 KWS、無人聲自動結束 |
 | `server/realtime-routes.ts` | `RealtimeStartSource` 加 `wake_word`，對它發出互動 ID；`wake_word` 每分鐘限速；`claimGreeting` 接受 `wake_word` |
 | `server/identity-service.ts`、`identity-store.ts` | 聲音 gallery、比對、融合、`voice_probe` 限速、v2 格式遷移、刪除輪換 |
@@ -603,8 +607,9 @@ ADR-0003 草案（WK-00 交付）必須包含：
 | 批次 | 交付與放行條件 | 估計 |
 |---|---|---:|
 | WK-00 | 不接產品的 spike：sherpa-onnx 1.13.8 與 2.0.x 的 Node 與 wasm KWS、兩個模型、2–3 個候選詞；CPU、記憶體、喚醒詞實際長度；電視負例的每小時誤報。負例**只計數、不錄音**，代價是誤報無法事後重播分析，只能記下時間與當時播放的節目名稱；ADR-0003 草案 | 1.5–2.5 人日 |
-| WK-01 | `AudioFrontEnd` 與 `getMicrophone` 改為租用、偏好與真實狀態、App 重開與睡眠回來的自動恢復與一次性恢復字幕、選單列兩個開關與指示、2 秒環形緩衝、KWS worker、讓出與恢復、自我觸發防護、本機提示音、無人聲自動結束、音訊隱私靜態測試 | 2.5–3.5 人日 |
-| WK-02 | `wake_word` 啟動來源與限速、`claimGreeting` 擴充、兩條語音路徑的問候與 fallback、F6 費用紀錄欄位、Companion `activation=wake` 共用接口、`NSMicrophoneUsageDescription` 改寫 | 1–2 人日 |
+| WK-01a | （2026-10-31 依 §14.1 拆出，已實作、Mac 未驗）`AudioFrontEnd` 與 `getMicrophone` 改為租用、偏好與真實狀態、App 重開與睡眠回來的自動恢復與一次性恢復字幕、選單列開關與指示（「通話中辨認說話者」先放停用列）、2 秒環形緩衝、偵測器介面與 worker、讓出與恢復、自我觸發防護、本機提示音、無人聲計時器（只交付、不接通話）、音訊隱私靜態測試、功能旗標 `NOUS_WAKE`；產品偵測器照實回報 `runtime_missing` | 2.5–3.5 人日（WK-01a 與 WK-01b 合計，同原 WK-01；不另拆估計） |
+| WK-01b | 等 George 的 Mac WK-00 結果：GitHub Actions 自建 KWS wasm（固定 emsdk 與 sherpa-onnx v2.0.1）、產物雜湊寫進 `shared/wake-runtime.json`、關鍵詞檔（發音單元定案後）、`SherpaWasmDetector` 真正載入與偵測 | 含於上列 |
+| WK-02 | `wake_word` 啟動來源與限速、`claimGreeting` 擴充、兩條語音路徑的問候與 fallback、**無人聲自動結束的接線**（WK-01a 已交付 `NoVoiceWatchdog`）、F6 費用紀錄欄位、Companion `activation=wake` 共用接口、`NSMicrophoneUsageDescription` 改寫 | 1–2 人日 |
 | WK-03 | Mac 實機：W1–W12，含至少 8 小時電視負例與家人喚醒測試 | 2–3 人日 |
 | SP-00 | 講者模型 spike：CAM++ 與一個備選在 Node 與瀏覽器的特徵一致性與耗時；瀏覽器沒有現成講者 API，含 `onnxruntime-web`＋自寫 fbank 備案的風險緩衝；1–3 秒片段的分數分布（以自願者或公開測試資料） | 1.5–2.5 人日 |
 | SP-01 | 「加入聲音」登記、gallery v2 遷移、加密保存、刪除與輪換、刪除時的記憶選項、IPC 白名單與 `voice_probe` 限速；含 wasm 整合的風險緩衝 | 2.5–3.5 人日 |
@@ -638,6 +643,16 @@ George 於 2026-10-29 決定以下 9 項。③ 與 ④ 與原本的建議預設�
 | ⑨ | 刪除家人時的記憶 | 成人預設不一併刪記憶；未成年或已搬出的家人預設一併刪除；刪除前顯示筆數 | 相同 | SP-01 |
 
 另行通知（不需決定）：另開 ADR-0003 屬工程流程，直接採用（§11.2）。
+
+### 14.1 2026-10-31 的分批決定（WK-01）
+
+George 於 2026-10-31 決定以下三項；都只影響交付順序，不改變 §14 的九項決定。
+
+| # | 事項 | 決定 |
+|---|---|---|
+| D1 | WK-01 分批 | 先做 WK-01a（底層、偵測器介面與接線；產品偵測器在沒有引擎時照實回報 `runtime_missing`，不假裝偵測；假偵測器只在測試）。WK-01b（真引擎）等 George 在 Mac 完成 WK-00 每人 5 次的試跑結果 |
+| D2 | wasm 建置 | 由 GitHub Actions 建置（固定 emsdk 與 sherpa-onnx v2.0.1，產物雜湊寫進清單），在 WK-01b 做。WK-01a 只定義 `shared/wake-runtime.json`（清單為空），核心的 `/wake-runtime/` 只提供清單上、雜湊相符的檔案，比照 face-runtime。方案 A 失敗時的退路先試主執行緒 wasm，方案 B 是最後手段並另開 ADR |
+| D3 | 「通話中辨認說話者」 | 現在先放一列**停用**的選單項（不能按、沒有作用），標明 SP-02 才啟用 |
 
 ## 15. 查核來源
 
@@ -681,3 +696,5 @@ George 於 2026-10-29 決定以下 9 項。③ 與 ④ 與原本的建議預設�
 - [Apple：Mac 的控制中心與隱私指示燈](https://support.apple.com/guide/mac-help/mchl50f94f8f)
 
 本次交付界線：只讀取程式、查核外部資料並產出規劃文件、導覽更新與 15 的交互引用。沒有修改產品程式、沒有開啟麥克風、沒有下載或執行任何模型，也沒有建立家人資料。
+
+2026-10-31 的更新只改本文件的狀態說明、§2 行號註記、§5.4、§7.2、§10.3、§12、§13.4 與新增的 §14.1，對應 WK-01a 的程式（見 [WK-01a 驗證](validation/wk-01a-2026-10-31.md)）。

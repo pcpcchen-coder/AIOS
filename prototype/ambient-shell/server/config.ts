@@ -74,6 +74,11 @@ export interface Config {
   /** 武陵居中控（docs/12）：SMARTHOME_URL、SMARTHOME_TOKEN；權杖只留在本機核心。 */
   smarthomeUrl: string | null;
   smarthomeToken: string | null;
+  /**
+   * WK-01a：常駐喚醒聆聽的功能旗標（NOUS_WAKE=on，預設關閉）。關閉時沒有 /api/settings/wake、settings 沒有 wake 欄位、
+   * /wake-runtime/ 一律 404、頁面不載入 src/audio；開啟只代表「可以在選單列打開」，偏好預設仍是關閉（docs/17 §5.1）。
+   */
+  wake: boolean;
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -128,6 +133,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     claudeWebSearchTool: env.NOUS_CLAUDE_WEB_SEARCH?.trim() || "web_search_20250305",
     smarthomeUrl: parseHttpUrl(env.SMARTHOME_URL, "SMARTHOME_URL"),
     smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
+    wake: (env.NOUS_WAKE ?? "off").trim().toLowerCase() === "on",
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",

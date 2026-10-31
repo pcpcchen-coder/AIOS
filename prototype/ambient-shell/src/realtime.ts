@@ -59,6 +59,11 @@ export type ApprovalRequest =
 /** 可替換的瀏覽器能力，方便在測試中模擬。 */
 export interface RealtimeDeps {
   getMicrophone(): Promise<MediaStream>;
+  /**
+   * WK-01a：麥克風是向 AudioFrontEnd 租用的（NOUS_WAKE=on）時，停掉自己的 track 之後以**自己那一份**串流呼叫，
+   * 只歸還這一份（過時的工作階段不會停掉新通話的複製品）。沒有提供時（旗標關閉、測試）行為和之前相同。可重複呼叫。
+   */
+  releaseMicrophone?(stream: MediaStream): void;
   createPeer(): RTCPeerConnection;
   playRemote(stream: MediaStream): () => void;
   /** 把 SDP offer 交給本機核心，取回 OpenAI 的 SDP answer。 */
@@ -283,6 +288,7 @@ export class RealtimeVoice {
       const mic = await this.deps.getMicrophone();
       if (generation !== this.generation) {
         for (const track of mic.getTracks()) track.stop();
+        this.deps.releaseMicrophone?.(mic);
         return;
       }
       this.mic = mic;
@@ -843,6 +849,7 @@ export class RealtimeVoice {
     this.peer?.close();
     this.peer = null;
     for (const track of this.mic?.getTracks() ?? []) track.stop();
+    if (this.mic) this.deps.releaseMicrophone?.(this.mic);
     this.mic = null;
     this.stopAudio?.();
     this.stopAudio = null;

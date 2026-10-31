@@ -546,6 +546,18 @@ class Reply implements ReplyHandle {
   }
 }
 
+/** WK-01a：念話開始與結束的通知（常駐喚醒聆聽在念話期間與之後 1.5 秒丟掉偵測，避免自我觸發）。只有布林值。 */
+const speechListeners = new Set<(speaking: boolean) => void>();
+export function onSpeechActivity(listener: (speaking: boolean) => void): () => void {
+  speechListeners.add(listener);
+  return () => speechListeners.delete(listener);
+}
+function notifySpeech(speaking: boolean): void {
+  for (const listener of [...speechListeners]) {
+    try { listener(speaking); } catch { /* 通知失敗不影響念話 */ }
+  }
+}
+
 /** 以瀏覽器 TTS 念出短句；部分瀏覽器不觸發 onend，所以加上依長度估算的逾時保護。 */
 export function speakText(text: string, options: { cancelOthers?: boolean; onStart?: () => void; signal?: AbortSignal; locale?: Locale } = {}): Promise<void> {
   const synth = typeof speechSynthesis === "undefined" ? null : speechSynthesis;
@@ -557,9 +569,11 @@ export function speakText(text: string, options: { cancelOthers?: boolean; onSta
     const voice = synth.getVoices().find((v) => v.lang === u.lang) ?? synth.getVoices().find((v) => v.lang.toLowerCase().startsWith(locale === "en" ? "en" : "zh"));
     if (voice) u.voice = voice;
     let done = false;
+    notifySpeech(true);
     const finish = () => {
       if (done) return;
       done = true;
+      notifySpeech(false);
       clearTimeout(guard);
       options.signal?.removeEventListener("abort", cancel);
       resolve();

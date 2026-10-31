@@ -7,6 +7,8 @@
 
 Date: 2026-10-29, Asia/Taipei. Status: **planned, unimplemented**; revised the same day after an independent review and updated with George's nine decisions of the same day (§14). This document adds no wake, always-on capture, or voice recognition code. It made no recordings, created no family voice data, and passed no hardware gate. Code review baseline: AIOS main `876eeaaf7697cf4a3847e0687430c536f4a1d9a7`. External versions, licenses, and model cards were checked on 2026-10-29; sources are in §15.
 
+**2026-10-31 update (WK-01a):** Following George's decisions of the same day (§14.1), WK-01 is split into WK-01a and WK-01b. WK-01a has added the always-on wake listening foundation on branch `claude/wk-01` (based on main `9778b41`, not yet committed or merged): `AudioFrontEnd`, AudioWorklet → worker capture, the 2-second ring buffer, preferences and automatic resume, self-trigger protection, the local earcon, menu bar and brain indicators, and the feature flag `NOUS_WAKE` (off by default). **The real wake engine is not connected yet:** the product detector honestly reports `runtime_missing`, never opens the microphone, and never detects; the Mac gate has not been run. See [WK-01a validation](validation/wk-01a-2026-10-31.en.md). The rest of this document is still a plan.
+
 Entry points are the [document index](README.en.md) and [current implementation status](Current_Implementation_Status.en.md). This plan extends [14 Family recognition and named greetings](14_Family_Recognition_and_Greeting_Plan_2026-10.en.md), [ADR-0001](adr/ADR-0001-local-family-recognition.en.md), [15 Companion Mode](15_Companion_Mode_Spec_2026-10-24.en.md), and [16 Family memory layer](16_Nous_Memory_Layer_Design_2026-10-26.en.md). It does not replace them.
 
 <a id="1-george-的需求與本文件的回答"></a>
@@ -32,7 +34,7 @@ The product boundaries of this document are:
 <a id="2-現況核對目前沒有喚醒或常駐收音"></a>
 ## 2. Current state: no wake or always-on capture exists
 
-The following was checked against code at `876eeaa`.
+The following was checked against code at `876eeaa`. Note of 2026-10-31: line numbers moved after WK-01a (baseline `9778b41` plus WK-01a). The API key route calls `getMicrophone()` at `src/realtime.ts:288` and the live route at `src/live-voice.ts:180`; `browserRealtimeDeps().getMicrophone` is at `src/realtime.ts:891`, and live reaches it through `base.getMicrophone` at `src/main.ts:520`. With `NOUS_WAKE=on`, `wakeMicrophone()` at `src/main.ts:552` switches to leasing from `AudioFrontEnd` (§10.3). The table below keeps the content as of `876eeaa`.
 
 | Item | Current code | Impact on this plan |
 |---|---|---|
@@ -224,6 +226,7 @@ Why 2 seconds: the buffer must cover a wake word of up to about 1.2 seconds plus
 - The App provides two indicators: the menu bar “Camera and voice settings” shows “Wake listening: listening locally / in call / paused / unavailable”; the brain screen keeps a minimal local-listening icon (06's `ambient` state already reserves “keep a minimal indicator if a wake microphone is enabled”).
 - Always-on listening **does not light the auditory region**. The auditory region still lights only from real conversation topics (the CLAUDE.md brain requirement). Only after a successful wake, when capture starts, does the existing voice state show listening.
 - Indicator text and accessible labels use the shared localization catalog in both Traditional Chinese and English.
+- WK-01a implementation (2026-10-31): the last section of the menu bar “Camera and voice settings”, “Wake word”, shows “Wake listening: Listening locally / Starting / In a call / Paused / Microphone handed over / Unavailable / Off” with the reason, and the state comes only from device events reported by the page; the small microphone icon below the brain shows only in `listening_local` and does not change region activity.
 
 <a id="55-關閉方式"></a>
 ### 5.5 How to turn it off
@@ -334,6 +337,7 @@ Two separate switches (decided in §14 ⑧; “Recognize speaker during calls”
 
 - “Always-on wake listening”: controls whether the microphone stays open for local wake detection.
 - “Recognize speaker during calls”: controls whether, during an already-woken call, a branch of the same stream feeds per-utterance voice recognition. When off, post-connection voice is always `unavailable` (`switch_off`), and fusion falls back to face only (ID-02 behavior). Look-to-talk also follows this switch. The wake segment and pre-connection speech are not affected by this switch (§4.4).
+- Per George's decision of 2026-10-31 (§14.1 D3), WK-01a already places a **disabled** 「通話中辨認說話者」 checkbox in the menu bar (English UI label “Recognise speaker during calls”) with the note “Available after SP-02”; it cannot be clicked and does nothing until SP-02 enables it.
 
 <a id="73-臉聲融合規則"></a>
 ### 7.3 Face-voice fusion rules
@@ -483,7 +487,7 @@ Consistent with ADR-0001's deletion and key rotation:
 This plan picks one model: **`AudioFrontEnd` is the only module in the renderer that calls `getUserMedia` for the microphone**. Other components are not additional owners; they lease from it or register as consumers.
 
 - The source stream opens with live voice's current constraints, `{ echoCancellation: true, noiseSuppression: true, autoGainControl: true }`, so two constraint sets never compete on one device. WK-00 and SP-00 measure KWS and speaker embeddings under this processing.
-- **Live voice leases instead**: `browserRealtimeDeps().getMicrophone` at `src/realtime.ts:548` becomes `audioFrontEnd.lease("realtime")`, returning `new MediaStream([sourceTrack.clone()])`. The API key route (`src/realtime.ts:185`) and the live route (`src/live-voice.ts:155`, through `base.getMicrophone` at `src/main.ts:258`) both call this function, so both routes change together. At call end both routes still call `stop()` on their own track, which stops the clone, not the source.
+- **Live voice leases instead**: with `NOUS_WAKE=on`, `browserRealtimeDeps().getMicrophone` (formerly `src/realtime.ts:548`, `src/realtime.ts:891` after WK-01a) is replaced by `AudioFrontEnd.lease()` through `wakeMicrophone()` at `src/main.ts:552`, which returns a clone of the source stream (`MediaStream.clone()`). The API key route (formerly `src/realtime.ts:185`, now `:288`) and the live route (formerly `src/live-voice.ts:155`, now `:180`, through `base.getMicrophone` at `src/main.ts:520`) both call this function, so both routes change together. At call end both routes still call `stop()` on their own track, which stops the clone, not the source, and then call the new optional `RealtimeDeps.releaseMicrophone(stream)` with their own stream, returning only that lease (two sites per route; a stale session never stops a newer call's clone). When the call phase becomes off and no call is active or starting, the page returns any remaining leases as a safeguard. With the flag off, `getMicrophone` stays the original function.
 - **With always-on listening off**: the source opens only when leased and stops when the last lease ends, the same behavior as today.
 - **With always-on listening on**: KWS pauses during calls (`in_call`), and the source stays open; if “Recognize speaker during calls” is on, the speaker worker keeps sampling as a consumer. The per-utterance voice check in §9.2 depends on this premise.
 - **Web Speech modes**: push-to-talk and continuous voice open their own capture, and `SpeechRecognition.start(audioTrack)` is still marked experimental with limited availability on MDN ([MDN](https://developer.mozilla.org/en-US/docs/Web/API/SpeechRecognition/start)). So when these modes start, `AudioFrontEnd` stops the source completely (`released`); there is no wake and no voice recognition during that time.
@@ -564,8 +568,8 @@ These are proposals that extend the existing prototype, without rewriting the co
 | `shared/wake.ts`, new | Wake preferences, both switches, states (§5.1), `WakeEvent` type |
 | `shared/identity.ts` | `VoiceObservation`, fusion result, source field on `GreetingDecision` (face, voice, or both), `calibrated_keyword` / `calibrated_utterance` |
 | `src/audio/front-end.ts`, new | The single `getUserMedia`, `lease()`, AudioWorklet, 2-second ring buffer, consumer registration, release and resume |
-| `src/realtime.ts` (`browserRealtimeDeps().getMicrophone`, line 548), `src/main.ts` (line 258) | Lease from `AudioFrontEnd` instead; callers at `src/realtime.ts:185` and `src/live-voice.ts:155` stay unchanged |
-| `src/audio/kws-worker.ts`, `speaker-worker.ts`, new | wasm inference; output only events and feature vectors; no network or local storage |
+| `src/realtime.ts` (`browserRealtimeDeps().getMicrophone`, formerly line 548, line 891 after WK-01a), `src/main.ts` (formerly line 258, line 520 and `wakeMicrophone()` after WK-01a) | Lease from `AudioFrontEnd` instead; callers in `src/realtime.ts` and `src/live-voice.ts` stay unchanged except that they call `releaseMicrophone` after stopping their own track |
+| `src/audio/wake-worker.ts` (WK-01a; the file name does not name the engine, originally planned as `kws-worker.ts`), `speaker-worker.ts` (SP-01) | wasm inference; output only events and feature vectors; no network or local storage |
 | `src/main.ts`, `src/realtime-session.ts` | Automatic resume and the one-time resume subtitle, local earcon, `startRealtime("wake_word")`, interaction binding, pause KWS during calls, end automatically without speech |
 | `server/realtime-routes.ts` | Add `wake_word` to `RealtimeStartSource` and issue interaction IDs for it; rate-limit `wake_word` per minute; let `claimGreeting` accept `wake_word` |
 | `server/identity-service.ts`, `identity-store.ts` | Voice gallery, matching, fusion, `voice_probe` rate limits, v2 format migration, deletion rotation |
@@ -654,8 +658,9 @@ Engineering estimates assume one engineer familiar with the repo working with AI
 | Batch | Deliverable and release condition | Estimate |
 |---|---|---:|
 | WK-00 | Spike disconnected from the product: Node and wasm KWS with sherpa-onnx 1.13.8 and 2.0.x, both models, 2–3 candidate words; CPU, memory, actual wake-word length; false accepts per hour on TV negatives. Negatives are **counted only, not recorded**; the cost is that false accepts cannot be replayed for later analysis, only logged with the time and the program playing; ADR-0003 draft | 1.5–2.5 person-days |
-| WK-01 | `AudioFrontEnd` and `getMicrophone` changed to leasing, preferences and actual state, automatic resume after App reopen and sleep with a one-time resume subtitle, both menu bar switches and indicators, 2-second ring buffer, KWS worker, release and resume, self-trigger protection, local earcon, automatic end without speech, static audio privacy tests | 2.5–3.5 person-days |
-| WK-02 | `wake_word` start source and rate limit, `claimGreeting` extension, greeting and fallback on both voice routes, F6 cost record fields, shared interface for Companion `activation=wake`, rewritten `NSMicrophoneUsageDescription` | 1–2 person-days |
+| WK-01a | (split out on 2026-10-31 per §14.1; implemented, not verified on the Mac) `AudioFrontEnd` and `getMicrophone` changed to leasing, preferences and actual state, automatic resume after App reopen and sleep with a one-time resume subtitle, menu bar switch and indicators (the “Recognize speaker during calls” row present but disabled), 2-second ring buffer, detector interface and worker, release and resume, self-trigger protection, local earcon, no-voice timer (delivered, not wired into calls), static audio privacy tests, feature flag `NOUS_WAKE`; the product detector honestly reports `runtime_missing` | 2.5–3.5 person-days (WK-01a and WK-01b together, same as the original WK-01; not estimated separately) |
+| WK-01b | Waits for George's Mac WK-00 results: KWS wasm self-built by GitHub Actions (pinned emsdk and sherpa-onnx v2.0.1), artifact hashes written to `shared/wake-runtime.json`, keyword file (after the pronunciation units are settled), `SherpaWasmDetector` actually loading and detecting | Included above |
+| WK-02 | `wake_word` start source and rate limit, `claimGreeting` extension, greeting and fallback on both voice routes, **wiring of automatic end without speech** (WK-01a already delivers `NoVoiceWatchdog`), F6 cost record fields, shared interface for Companion `activation=wake`, rewritten `NSMicrophoneUsageDescription` | 1–2 person-days |
 | WK-03 | Mac hardware: W1–W12, including at least 8 hours of TV negatives and family wake tests | 2–3 person-days |
 | SP-00 | Speaker model spike: feature parity and latency for CAM++ and one backup in Node and the browser; the browser has no ready speaker API, so this includes a risk buffer for the `onnxruntime-web` + hand-written fbank fallback; 1–3 second score distributions (with volunteers or public test data) | 1.5–2.5 person-days |
 | SP-01 | “Add voice” enrollment, gallery v2 migration, encrypted storage, deletion and rotation, memory option on deletion, IPC allowlist and `voice_probe` rate limits; includes a risk buffer for wasm integration | 2.5–3.5 person-days |
@@ -690,6 +695,17 @@ George decided the following nine items on 2026-10-29. Items ③ and ④ differ 
 | ⑨ | Memory when deleting a family member | Adults: memory not deleted by default; minors or members who moved out: deleted by default; show the count before deletion | Same | SP-01 |
 
 Notice only (no decision needed): opening ADR-0003 is an engineering-process matter and is adopted directly (§11.2).
+
+<a id="141-2026-10-31-的分批決定wk-01"></a>
+### 14.1 Batching decisions of 2026-10-31 (WK-01)
+
+George decided the following three items on 2026-10-31. They affect only the delivery order and do not change the nine decisions in §14.
+
+| # | Item | Decision |
+|---|---|---|
+| D1 | Splitting WK-01 | Do WK-01a first (foundation, detector interface and wiring; without an engine the product detector honestly reports `runtime_missing` and does not pretend to detect; the fake detector exists only in tests). WK-01b (the real engine) waits for George's Mac WK-00 trial results (5 attempts per person) |
+| D2 | Building the wasm | Built by GitHub Actions (pinned emsdk and sherpa-onnx v2.0.1, artifact hashes written to the manifest) in WK-01b. WK-01a only defines `shared/wake-runtime.json` (empty list), and the core's `/wake-runtime/` serves only listed files whose hashes match, as face-runtime does. If option A fails, the first fallback is main-thread wasm; option B is a last resort and needs a separate ADR |
+| D3 | “Recognize speaker during calls” | Add the menu row now, **disabled** (not clickable, no effect), labelled as available after SP-02 |
 
 <a id="15-查核來源"></a>
 ## 15. Sources checked
@@ -734,3 +750,5 @@ Browser and system:
 - [Apple: Control Center and privacy indicators on Mac](https://support.apple.com/guide/mac-help/mchl50f94f8f)
 
 Delivery boundary: this batch only read code, checked external sources, and produced the planning document, navigation updates, and the cross-reference in 15. It did not change product code, open a microphone, download or run any model, or create family data.
+
+The 2026-10-31 update changes only this document's status note, the §2 line-number note, §5.4, §7.2, §10.3, §12, §13.4, and the new §14.1, matching the WK-01a code (see [WK-01a validation](validation/wk-01a-2026-10-31.en.md)).

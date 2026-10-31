@@ -4,7 +4,7 @@
 
 # ADR-0001：本機家人辨識的資料生命週期與 runtime
 
-狀態：**草案（Proposed）**；George 已於 2026-10-25 決定 §9 大部分項目，偵測器已定案（YuNet 2023mar 640），SFace 訓練資料風險仍待決。日期：2026-10-24，2026-10-25 依 ID-01 實作修訂 §2.1、§2.2、§10，同日依 ID-02 修訂 §2.1.1、§2.4、§6、§9 並新增 §11。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00、ID-01、ID-02。
+狀態：**草案（Proposed）**；George 已於 2026-10-25 決定 §9 大部分項目，偵測器已定案（YuNet 2023mar 640），SFace 訓練資料風險仍待決。日期：2026-10-24，2026-10-25 依 ID-01 實作修訂 §2.1、§2.2、§10，同日依 ID-02 修訂 §2.1.1、§2.4、§6、§9 並新增 §11。2026-10-31 依 [ADR-0003 §2.1](ADR-0003-local-wake-and-voice-recognition.md#21-取代與更新-adr-0001-的條文) 在 WK-01a 改寫 §2.1.1 的「沒有背景常駐辨識」與 §2.4 的稱名說明。批次：[14 規劃](../14_Family_Recognition_and_Greeting_Plan_2026-10.md) 的 ID-00、ID-01、ID-02。
 
 ID-00 是不接進產品流程的 runtime spike（`prototype/ambient-shell/spike/face/`，量測見 [驗證紀錄](../validation/family-id-00-spike-2026-10-24.md)）。ID-01（2026-10-25，分支 `claude/family-id-01`）實作了登記、刪除、加密保存、本機辨識（只在選單列打開的「家人辨識」畫面內）與品質、失效狀態，只有雲端驗證，**沒有 Mac 實機結果、門檻未校準、沒有稱名問候**，見 [ID-01 驗證紀錄](../validation/family-id-01-2026-10-25.md)。George 於 2026-10-25 在 Mac 實測 ID-01：登記與試認順利、手掌停止正常（實測紀錄由 George 口頭回報，repo 內沒有數字）。ID-02（2026-10-25，分支 `claude/family-id-02`）接上看著說話：面向等待期間同步辨識、互動綁定、核心從固定清單挑一句開場（例如「George，我在」「早安，George」「我在」），兩條語音路徑都由核心決定內容；**只有雲端 fixture 驗證，門檻仍未校準，實際音訊（14 I12）待 Mac**，見 [ID-02 驗證紀錄](../validation/family-id-02-2026-10-25.md)與 §11。
 
@@ -67,7 +67,7 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 - **薄 IPC**：preload 只多一個 `nousDesktop.identity(request)`（`ipcRenderer.invoke("nous:identity")`）。主程序的處理器先檢查 `event.sender === win.webContents`、`event.senderFrame === sender.mainFrame`、frame 網址以核心網址開頭，再以純函式 `desktop/identity-ipc.mjs` 過濾 op 白名單與欄位形狀（多的欄位丟掉），然後交給核心。語意驗證（特徵正規化、名稱、人數、一致性）由核心負責。
 - **管理 session**：只有使用者在選單列點「家人辨識…」後 10 秒內，主視窗本機核心的頁面才能開（主程序記錄點擊時間，`open_session` 時一次性消耗）；沒點選單時語音或頁面腳本自己開會被拒（`not_user_initiated`）。一次只有一個 session；畫面收起、閒置 10 分鐘、開滿 15 分鐘、主視窗 `did-navigate`（含重新載入）或 `render-process-gone`（主程序呼叫 `closeSessions`）、核心關閉（`shutdown`）都會失效。probe、登記、刪除都要有效 session，每個 session 每秒最多 6 次請求。
 - **核心重啟與並行**：核心關閉時先進入關閉狀態，等待中的原生確認回來後一律不寫；會改資料的操作（登記、刪除、清除）同時只能有一個，避免疊出多個對話框或用到過期的去重資料；寫入前核對磁碟上的 `gallery_version` 與記憶體相同，不同就拒絕（`stale_gallery`），不拿舊資料覆蓋。
-- **沒有背景常駐辨識**：ID-01 的辨識只在「家人辨識」畫面內的「試認」與登記取樣時運作。ID-02 另外加了看著說話時的同步辨識（§11）：只在既有 `look_to_talk` 的面向停留期間，以及互動開始後到問候決策之前取樣；離開在場、轉開、離開近距離或關鏡頭就停止。核心另以 `ambient_probe`、`ambient_status`、`greeting` 三個 op 接受（不需要管理 session），條件是「看著說話」「看著說話時先打招呼」「打招呼時稱呼認出的家人」三個設定都開、鏡頭開、模型雜湊相符、管理畫面沒開；`greeting` 另外要核心自己發出、綁定真的連上的語音工作階段的互動 ID（§2.4.1）。
+- **常駐收音與辨識（2026-10-31 依 ADR-0003 §2.1 改寫，WK-01a）**：原本「沒有背景常駐辨識」一條由 ADR-0003 取代。常駐喚醒偵測是背景常駐**收音**，只在 renderer 本機偵測喚醒詞，未喚醒音訊只在 `AudioFrontEnd` 的 2 秒環形緩衝與 worker 記憶體（[17 §5.2](../17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md#52-音訊只在記憶體)），預設關閉，`NOUS_WAKE=on` 才可在選單列打開。音色辨認**不是**常駐：只在已喚醒的互動內，或使用者另外開啟「通話中辨認說話者」時，在通話期間的同一串流分支上進行（SP-02 之前這個開關是停用的）。**臉部辨識沒有背景常駐**，維持下面的規則，不因常駐收音而改變：ID-01 的辨識只在「家人辨識」畫面內的「試認」與登記取樣時運作。ID-02 另外加了看著說話時的同步辨識（§11）：只在既有 `look_to_talk` 的面向停留期間，以及互動開始後到問候決策之前取樣；離開在場、轉開、離開近距離或關鏡頭就停止。核心另以 `ambient_probe`、`ambient_status`、`greeting` 三個 op 接受（不需要管理 session），條件是「看著說話」「看著說話時先打招呼」「打招呼時稱呼認出的家人」三個設定都開、鏡頭開、模型雜湊相符、管理畫面沒開；`greeting` 另外要核心自己發出、綁定真的連上的語音工作階段的互動 ID（§2.4.1）。
 - **比對在核心**：回應不含相似度分數。每位家人的分數取該人各樣本 cosine 的最大值；最高分 ≥ `match` 且領先第二名 ≥ `margin` 才算這一格指向此人，分數接近是 ambiguous，低於門檻是 unknown。只比對模型與前處理版本（detector／recognizer／align／preproc）都相符的家人，不符的標 `needs_reenroll`。之後再經證據規則（`shared/identity.ts` 的 `decideIdentity`）：同一取樣世代內至少 3 格、跨至少 500 ms、全部指向同一人，最新一格不超過 1 秒；**「不認得」與「兩位分不清」也要同樣的證據才回，之前一律是中性的 collecting**，單一格不能拿來探測某張臉是否已登記（審查 2026-10-25）；相鄰兩格斷開超過 500 ms，或世代、`epoch`、`gallery_version` 改變就清空；多張臉一律 ambiguous，不挑最大的臉；品質不足是 unavailable。
 - 威脅面照實保留：
   - 管理 session（ID-01）：renderer 內任何程式（含生成 UI 若越界）在 session 內都能呼叫 probe；拿一張臉連續送 3 格以上，仍可從穩定結果推測它是否已登記。對策是 session 只能由使用者點選單列開啟、時長上限、限速、回應不含分數、gallery 相關結果要累積證據才回、重複登記只回「可能已登記」不回是哪一位。
@@ -121,6 +121,8 @@ IdentityObservation { state: matched | unknown | ambiguous | unavailable,
 - 2026-10-25 George 決定採 `safeStorage`，不加 Keychain 原生模組（§9）。
 
 ### 2.4 雲端語音
+
+- **聲音參與稱名（2026-10-31 依 ADR-0003 §2.1 第 2 點補上）**：稱名可能由臉、聲音或兩者共同決定（聲音要等 SP-02、SP-03；WK-01a 沒有任何聲音辨識）。名字出現在雲端的範圍與 §2.4.1 相同，只有核心組好的短句；聲音特徵、音訊片段與家人名單不上傳。稱名說明在聲音辨識實作時補上「也可能依聲音認出」。
 
 - **問候本身**只送一句短句，例如「George，我在」；不上傳影像、特徵、相似度或其他家人的名單。但名字一旦被念出來，就和對話的其他內容一樣會出現在雲端：模型自己的逐字稿、ChatGPT 方案路徑交辦給 Codex 的請求（附最近的逐字稿，§2.4.1），也可能被模型寫進任務標題（見下表）。所以不能說「雲端只收到短句」。
 - **揭露與同意（獨立審查 2026-10-25）**：「家人辨識」畫面的資料說明與登記同意都寫明「開啟稱名時，名字會以短句送到雲端語音供應商（ChatGPT 方案或 OpenAI API key），可以在設定關掉」。另有一次性說明：核心以 `identity/cloud-naming-notice.v1.json`（只有版本與時間，不含姓名，不加密，0600）記錄「已看過」；登記時勾選同意並保存、或在家人辨識畫面按「我知道了」（`ack_naming`，需要管理 session）才寫入。**沒看過就不稱名**（原因 `notice_unseen`），只說「我在」。ID-01 時已登記、還沒看過說明的家人，打開家人辨識畫面會看到這段與「我知道了」。

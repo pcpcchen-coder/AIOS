@@ -1,10 +1,27 @@
-// 只開放六個動作給網頁（另有幾個不含內容的通知）：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示、家人辨識、記憶、加密任務的請求，
+// 只開放六個動作給網頁（另有幾個不含內容的通知；WK-01a 加上只有列舉值的電源事件）：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示、家人辨識、記憶、加密任務的請求，
 // 與成果紀錄刪除的原生確認。
 // identity 與 memory 只是傳輸：發送者、op 白名單與形狀在主程序檢查（desktop/identity-ipc.mjs、desktop/memory-ipc.mjs），
 // 資料、比對與記憶規則在核心（ADR-0001 §2.1、docs/16 §9）。
 const { contextBridge, ipcRenderer } = require("electron");
 
 const validLocale = (value) => value === "zh-TW" || value === "en";
+// WK-01a 常駐喚醒聆聽：回報與電源事件只傳列舉值（同 shared/wake.ts 的 WAKE_STATE_REASONS；tests/audio-privacy.test.ts 核對兩邊一致）。
+// 不經這裡傳任何音訊、樣本、裝置名稱或 deviceId。
+const WAKE_STATE_REASONS = {
+  off: [null, "pref_off"],
+  armed: ["starting", "auto_resume"],
+  listening_local: [null],
+  paused: ["user_pause", "sleep", "lock"],
+  in_call: ["realtime"],
+  released: ["web_speech"],
+  error: ["permission_denied", "device_missing", "device_ended", "runtime_missing", "runtime_load_failed", "audio_failed", "unsupported"],
+};
+const POWER_EVENTS = ["suspend", "resume", "lock", "unlock"];
+const wakeReport = (wake) => {
+  const state = typeof wake?.state === "string" && Object.hasOwn(WAKE_STATE_REASONS, wake.state) ? wake.state : null;
+  const reason = wake?.reason ?? null;
+  return state && WAKE_STATE_REASONS[state].includes(reason) ? { wake: { state, reason } } : {};
+};
 const argumentLocale = process.argv.find((argument) => argument.startsWith("--nous-locale="))?.slice("--nous-locale=".length);
 const storedLocale = ipcRenderer.sendSync("nous:get-locale");
 
@@ -23,7 +40,15 @@ contextBridge.exposeInMainWorld("nousDesktop", {
       activeTasks: Number(state?.activeTasks) || 0,
       settings: String(state?.settings ?? "").slice(0, 64),
       ...(validLocale(state?.locale) ? { locale: state.locale } : {}),
+      ...wakeReport(state?.wake),
     }),
+  // WK-01a：系統睡眠、醒來、鎖定、解鎖（只有列舉值）。
+  onPower: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, kind) => { if (POWER_EVENTS.includes(kind)) callback(kind); };
+    ipcRenderer.on("nous:power", listener);
+    return () => ipcRenderer.removeListener("nous:power", listener);
+  },
   identity: (request) => ipcRenderer.invoke("nous:identity", request),
   memory: (request) => ipcRenderer.invoke("nous:memory", request),
   // MEM-4a：加密保存的任務（真實標題、成果、App 內搜尋、重做、刪除明文備份）只經這個通道給主視窗。

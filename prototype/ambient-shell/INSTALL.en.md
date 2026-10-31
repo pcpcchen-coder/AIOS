@@ -152,6 +152,13 @@ A camera status dot appears in the lower-right corner. Facing the display for ab
 
 These views and settings have not been verified with the physical camera.
 
+<a id="常駐喚醒聆聽選填wk-01a尚無喚醒引擎"></a>
+### Always-on wake listening (optional, WK-01a, no wake engine yet)
+
+After you add `NOUS_WAKE=on` to `.env` and restart, the macOS App's menu bar “Camera and voice settings” gains a final “Wake word” section: the “Always-on wake listening” switch (off by default; an explanation appears before it turns on), the current state, “Pause listening (until this session ends)”, and a disabled “Recognise speaker during calls” row (available after SP-02).
+
+**It does not detect 「哈囉努斯」 yet**: the wake engine arrives in WK-01b, so after you turn it on the state reads “Unavailable: The wake engine is not installed yet; the microphone was not opened”, and the microphone stays closed. Without `NOUS_WAKE`, everything behaves as before. See [WK-01a validation](../../docs/validation/wk-01a-2026-10-31.en.md).
+
 <a id="武陵居中控選填"></a>
 ### Wuling home controller (optional)
 

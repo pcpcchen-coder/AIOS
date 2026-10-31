@@ -1031,6 +1031,35 @@ body[data-facing="yes"] #brain {
 .sensor-indicator[data-state="error"]::before { background: var(--red); }
 
 /*
+ * WK-01a 常駐喚醒聆聽的最小本機聆聽圖示（docs/17 §5.4）：只在 listening_local 顯示，貼在電子腦下方中央。
+ * 只是一個小麥克風形狀，不是腦區、不發光、不連動聽覺區（聽覺區仍只依真實對話主題亮起）。
+ */
+.wake-indicator {
+  position: fixed;
+  left: 50%;
+  bottom: 56px;
+  z-index: 30;
+  width: 10px;
+  height: 16px;
+  transform: translateX(-50%);
+  border: 2px solid var(--muted);
+  border-radius: 6px;
+  opacity: 0.75;
+  pointer-events: none;
+}
+.wake-indicator::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -7px;
+  width: 2px;
+  height: 5px;
+  transform: translateX(-50%);
+  background: var(--muted);
+}
+.wake-indicator[hidden] { display: none; }
+
+/*
  * 鏡頭畫面：在指示點正上方、貼齊右緣，兩格上下排列，在距離縮放之外。
  * 打開時字幕寬度上限改為 40vw（縮放 1.5 倍後右緣約在 80vw），預覽寬度 16vw + 邊距，兩者不重疊。
  */

@@ -40,7 +40,7 @@ class FakePeer {
 const NEEDS_CONFIRM: HomeControlResult = { ok: true, status: "needs_confirmation", confirm_id: "home_c1", device: "書房燈", room: "書房", action: "關閉", expires_in_s: 90, message: "需要確認（fixture）" } as unknown as HomeControlResult;
 const CONFIRMED: HomeResult = { ok: true, status: "confirmed", device: "書房燈", room: "書房", action: "關閉", message: "設備回讀已確認（fixture）" } as HomeResult;
 
-function setup(options: { control?: () => HomeResult; exchange?: () => Promise<string>; approvalFails?: number } = {}) {
+function setup(options: { control?: () => HomeResult; exchange?: () => Promise<string>; approvalFails?: number; releaseMicrophone?: () => void } = {}) {
   vi.useFakeTimers();
   const peer = new FakePeer();
   const track = { stop: vi.fn(), readyState: "live" };
@@ -67,6 +67,7 @@ function setup(options: { control?: () => HomeResult; exchange?: () => Promise<s
     createPeer: () => peer as unknown as RTCPeerConnection,
     playRemote: () => () => {},
     exchange: options.exchange ?? (async () => "v=0 live-answer"),
+    ...(options.releaseMicrophone ? { releaseMicrophone: options.releaseMicrophone } : {}),
     input: async (kind, text) => void inputs.push({ kind, text }),
     hostResult: async (id, output) => {
       log.push(`result:${id}`);
@@ -627,5 +628,19 @@ describe("MEM-2: openRealtime rebuild", () => {
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
     expect(main).toContain("const greeting = rebuild ? null : greetingFor(");
     expect(main).toContain("api.realtimeStart(sseClientId, source, realtimeLocale, rebuild)");
+  });
+});
+
+// WK-01a：租來的麥克風在 teardown 停掉自己的 track 後歸還一次。
+describe("LiveVoice releases a leased microphone (WK-01a)", () => {
+  it("calls releaseMicrophone once after stopping its track", async () => {
+    const release = vi.fn();
+    const t = setup({ releaseMicrophone: release });
+    await t.voice.start();
+    expect(release).not.toHaveBeenCalled();
+    t.voice.stop();
+    expect(t.track.stop).toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+    expect((release.mock.calls[0]![0] as MediaStream).getTracks()).toEqual([t.track]);
   });
 });

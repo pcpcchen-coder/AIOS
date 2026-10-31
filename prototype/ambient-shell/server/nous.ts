@@ -27,6 +27,8 @@ import { HomeBridge } from "./home-bridge.ts";
 import { TaskRunner } from "./runner.ts";
 import { memoryTaskViews, TaskStore, type PlaintextDropReason } from "./store.ts";
 import { checkFaceRuntime, FACE_MODEL_VERSION } from "./face-runtime.ts";
+import { checkWakeRuntime } from "./wake-runtime.ts";
+import { WakeSettingsStore } from "./wake-settings.ts";
 import { GalleryStore, type SecretBox } from "./identity-store.ts";
 import { IdentityService, type ConfirmFn, type IdentityContext, type IdentityMemoryLink } from "./identity-service.ts";
 import type { IdentityResponse } from "../shared/identity.ts";
@@ -69,6 +71,11 @@ export interface NousOptions {
    * 也不搬遷。
    */
   tasks?: TasksInjection;
+  /**
+   * WK-01a：喚醒引擎檔案的資料夾（App：userData/wake-runtime）。只有 NOUS_WAKE=on 時使用；WK-01a 的清單是空的，
+   * 所以一律回報 runtime missing，頁面不開麥克風。
+   */
+  wakeRuntimeDir?: string | null;
 }
 
 export interface TasksInjection {
@@ -135,6 +142,11 @@ export interface NousHandle {
     /** OS 鎖定（powerMonitor lock-screen）：暫停本次人物。 */
     suspendAll(): void;
   };
+  /**
+   * WK-01a：只有 NOUS_WAKE=on 時存在。「常駐喚醒聆聽」的開關只由 App 主程序在原生說明之後呼叫（同一個行程，不經 HTTP、
+   * 不經 preload），頁面拿不到；頁面經 HTTP 只能記下麥克風或關掉（ADR-0003 §2.3）。寫檔失敗時丟錯、設定不變。
+   */
+  wake?: { setListen(value: boolean): void };
 }
 
 const LABEL = { claude: "Claude", chatgpt: "ChatGPT（Sign in with ChatGPT）", mock: "模擬（mock）" } as const;
@@ -236,6 +248,13 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const camera = new CameraSettingsStore({ base: config.camera, dir: config.configDir, onChange: () => notify(), log });
   const voice = new VoiceSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   const faceTuning = new FaceTuningStore({ dir: config.configDir, onChange: () => notify(), log });
+  // WK-01a：NOUS_WAKE=on 才建立喚醒偏好（wake.json）與核對引擎；關閉時完全不碰這兩樣，settings 與之前相同。
+  const wakeRuntime = config.wake ? checkWakeRuntime(options.wakeRuntimeDir ?? null) : null;
+  if (wakeRuntime && wakeRuntime.state !== "ok") log(`喚醒引擎：${wakeRuntime.state}（${wakeRuntime.problems.join("、") || "清單沒有檔案或未設定資料夾"}）`);
+  const wakeStore = config.wake ? new WakeSettingsStore({ dir: config.configDir, onChange: () => notify(), log }) : null;
+  const wake = wakeStore && wakeRuntime
+    ? { view: () => wakeStore.view(), update: (patch: Parameters<WakeSettingsStore["update"]>[0]) => wakeStore.update(patch), runtime: () => wakeRuntime.state }
+    : undefined;
   // MEM-4a：macOS App 加密保存全部任務（金鑰不可用或鎖被占用時 vault 為 null，TaskStore 照實處理並記 log）。
   let vault: SealedVault | null = null;
   let vaultFailure: VaultFailure | null = null;
@@ -359,6 +378,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     identity: identity ?? undefined,
     memory: memory ?? undefined,
     faceRuntimeDir,
+    ...(wake ? { wake, wakeRuntimeDir: wakeRuntime?.state === "ok" ? (options.wakeRuntimeDir ?? null) : null } : {}),
     port,
     devPort: config.devPort,
     distDir: options.distDir,
@@ -403,6 +423,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     url: `http://localhost:${port}`,
     ...(identity ? { identity: { handle: (request: unknown, ctx: IdentityContext) => identity.handle(request, ctx), closeSessions: () => identity.closeSessions() } } : {}),
     ...(memory ? { memory: { handle: (request: unknown, ctx: { userInitiated?: boolean }) => memory.handle(request, ctx), closeSessions: () => memory.closeSessions(), suspendAll: () => memory.suspendAll() } } : {}),
+    ...(wakeStore ? { wake: { setListen: (value: boolean) => void wakeStore.update({ wake_listen: value }) } } : {}),
     ...(options.tasks ? { tasks: (() => {
       const ipc = createTaskIpc({ store, runner, memory, confirmDeleteBackups: options.tasks.confirmDeleteBackups, log });
       // MEM-4c：dropPlaintext＝OS 鎖定與睡眠（desktop/main.mjs 的 powerMonitor）時丟棄解密內容。

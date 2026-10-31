@@ -1,0 +1,298 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`NOUS_WAKE off is byte-identical to the pre-wake build > page headers (camera off and on) 1`] = `"{"Content-Security-Policy":"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","Permissions-Policy":"camera=(), microphone=(self), geolocation=()"}"`;
+
+exports[`NOUS_WAKE off is byte-identical to the pre-wake build > page headers (camera off and on) 2`] = `"{"Content-Security-Policy":"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'","X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","Permissions-Policy":"camera=(self), microphone=(self), geolocation=()"}"`;
+
+exports[`NOUS_WAKE off is byte-identical to the pre-wake build > served page headers, /api/settings and the settings menu 1`] = `"{"content-security-policy":"default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'","permissions-policy":"camera=(self), microphone=(self), geolocation=()","x-content-type-options":"nosniff","referrer-policy":"no-referrer"}"`;
+
+exports[`NOUS_WAKE off is byte-identical to the pre-wake build > served page headers, /api/settings and the settings menu 2`] = `"{"schema_version":"proto-0.1","provider":"mock","providers":[{"id":"claude","label":"Claude","available":false,"detail":"未設定 ANTHROPIC_API_KEY"},{"id":"chatgpt","label":"ChatGPT","available":false,"detail":"尚未登入"},{"id":"mock","label":"模擬","available":true,"detail":"不呼叫任何模型，只展示流程"}],"chatgpt":{"signed_in":false,"email":null,"plan_usage":false,"needs_reauth":false,"welcome_ack":false,"pending_login":false,"last_error":null},"realtime":{"available":false,"model":"gpt-realtime","web_search":false,"mcp":[],"detail":"ChatGPT 方案路徑尚未登入（設定 → 即時語音 → 用 ChatGPT 方案登入）；未設定 OPENAI_API_KEY","preference":"auto","route":null,"billing":null,"billing_line":null,"routes":[{"id":"live","available":false,"reason":"not_logged_in","billing_line":"ChatGPT 方案（Codex 額度）· gpt-live-1-codex","model":"gpt-live-1-codex","voice":"cove","voices":["arbor","breeze","cove","ember","juniper","maple","sol","spruce","vale"],"tools":"上網查詢（Codex 額度）、交辦工作；MCP 在 ChatGPT 方案路徑不可用","detail":"ChatGPT 方案路徑尚未登入（設定 → 即時語音 → 用 ChatGPT 方案登入）"},{"id":"api_key","available":false,"reason":"no_api_key","billing_line":"OpenAI API key 計費 · gpt-realtime","model":"gpt-realtime","voice":"marin","voices":[],"tools":"交辦工作","detail":"未設定 OPENAI_API_KEY（在 .env 填入後重新啟動）"}],"live_account":{"signed_in":false,"email":null,"plan":null,"needs_reauth":false,"pending":null,"last_error":null},"active":null},"camera":{"enabled":true,"label":"CCB Camera","left_first":true,"screen_width_mm":398,"screen_offset_mm":140,"active":true,"look_to_talk":true,"look_to_talk_s":1.5,"look_to_talk_cooldown_s":10,"look_to_talk_greet":true,"look_to_talk_greet_name":true,"stop_gesture":true,"brain_zoom_max":2},"face_tuning":{"near_min_m":0.6,"near_max_m":1.5,"facing_yaw_ratio":0.2,"facing_grace_ms":800,"min_face_px":100,"max_yaw_offset":0.2,"customized":false,"calibrated_at":null},"voice":{"voice_idle_s":90,"realtime_idle_s":120},"seconds":[{"key":"active","kind":"bool","group":"camera","group_label":"鏡頭與手勢","label":"鏡頭","value":true,"value_label":"開","disabled_reason":null,"note":"實際狀態看右下角指示點","write_path":"/api/settings/camera"},{"key":"look_to_talk","kind":"bool","group":"camera","group_label":"鏡頭與手勢","label":"看著說話","value":true,"value_label":"開","disabled_reason":null,"note":"面向螢幕後自動開始即時語音；需要即時語音（目前不可用）","write_path":"/api/settings/camera"},{"key":"look_to_talk_s","kind":"seconds","group":"camera","group_label":"鏡頭與手勢","label":"面向螢幕幾秒後開始對話","value":1.5,"value_label":"1.5 秒","options":[{"value":1,"label":"1 秒","checked":false},{"value":1.5,"label":"1.5 秒（預設）","checked":true},{"value":2,"label":"2 秒","checked":false},{"value":3,"label":"3 秒","checked":false}],"disabled_reason":null,"note":"從開始面向螢幕算起；系統約每 0.2 秒檢查一次","write_path":"/api/settings/camera"},{"key":"look_to_talk_cooldown_s","kind":"seconds","group":"camera","group_label":"鏡頭與手勢","label":"對話結束後暫停","value":10,"value_label":"10 秒","options":[{"value":5,"label":"5 秒","checked":false},{"value":10,"label":"10 秒（預設）","checked":true},{"value":15,"label":"15 秒","checked":false},{"value":20,"label":"20 秒","checked":false},{"value":30,"label":"30 秒","checked":false},{"value":60,"label":"1 分鐘","checked":false}],"disabled_reason":null,"note":"這段時間內不再自動開始，避免說完再見又被打開","write_path":"/api/settings/camera"},{"key":"look_to_talk_greet","kind":"bool","group":"camera","group_label":"鏡頭與手勢","label":"看著說話時先打招呼","value":true,"value_label":"開","disabled_reason":null,"note":"看著說話開始的對話，連上後 Nous 先說「我在」；你先開口就不打招呼","write_path":"/api/settings/camera"},{"key":"look_to_talk_greet_name","kind":"bool","group":"camera","group_label":"鏡頭與手勢","label":"打招呼時稱呼認出的家人","value":true,"value_label":"開","disabled_reason":null,"note":"只在 macOS App：認出已登記的家人時說「名字，我在」，名字會送到雲端語音；關掉只說「我在」（門檻未校準）","write_path":"/api/settings/camera"},{"key":"stop_gesture","kind":"bool","group":"camera","group_label":"鏡頭與手勢","label":"手掌停止播報","value":true,"value_label":"開","disabled_reason":null,"note":"舉起張開的手掌停止 Nous 說話（不取消任務）","write_path":"/api/settings/camera"},{"key":"brain_zoom_max","kind":"factor","group":"camera","group_label":"鏡頭與手勢","label":"靠近時電子腦放大倍率","value":2,"value_label":"2 倍","options":[{"value":1,"label":"1 倍","checked":false},{"value":1.5,"label":"1.5 倍","checked":false},{"value":2,"label":"2 倍（預設）","checked":true},{"value":2.5,"label":"2.5 倍","checked":false},{"value":3,"label":"3 倍","checked":false}],"disabled_reason":null,"note":"站到 0.6 m 以內放大到這個倍率，2.5 m 以外不放大；1 倍＝不放大，字級不受影響","write_path":"/api/settings/camera"},{"key":"voice_idle_s","kind":"seconds","group":"voice","group_label":"語音","label":"語音模式閒置多久自動關閉","value":90,"value_label":"1 分 30 秒","options":[{"value":30,"label":"30 秒","checked":false},{"value":60,"label":"1 分鐘","checked":false},{"value":90,"label":"1 分 30 秒（預設）","checked":true},{"value":120,"label":"2 分鐘","checked":false},{"value":180,"label":"3 分鐘","checked":false},{"value":300,"label":"5 分鐘","checked":false}],"disabled_reason":null,"note":"從最後一次聽到你說話或 Nous 念完算起；等回覆與念回覆時不算","write_path":"/api/settings/voice"},{"key":"realtime_idle_s","kind":"seconds","group":"voice","group_label":"語音","label":"即時語音閒置多久自動結束","value":120,"value_label":"2 分鐘","options":[{"value":60,"label":"1 分鐘","checked":false},{"value":120,"label":"2 分鐘（預設）","checked":true},{"value":180,"label":"3 分鐘","checked":false},{"value":300,"label":"5 分鐘","checked":false},{"value":600,"label":"10 分鐘","checked":false}],"disabled_reason":null,"note":"即時語音目前不可用（ChatGPT 方案路徑尚未登入（設定 → 即時語音 → 用 ChatGPT 方案登入）；未設定 OPENAI_API_KEY）","write_path":"/api/settings/voice"}],"camera_preview_disabled_reason":null,"identity":{"available":false,"disabled_reason":"瀏覽器版不可用（只在 macOS App 提供）","limited_reason":null},"memory":{"available":false,"enabled":false}}"`;
+
+exports[`NOUS_WAKE off is byte-identical to the pre-wake build > served page headers, /api/settings and the settings menu 3`] = `
+"[
+ {
+  "label": "鏡頭與手勢",
+  "enabled": false
+ },
+ {
+  "label": "鏡頭",
+  "type": "checkbox",
+  "checked": true,
+  "enabled": true,
+  "sublabel": "實際狀態看右下角指示點"
+ },
+ {
+  "label": "看著說話",
+  "type": "checkbox",
+  "checked": true,
+  "enabled": true,
+  "sublabel": "面向螢幕後自動開始即時語音；需要即時語音（目前不可用）"
+ },
+ {
+  "label": "面向螢幕幾秒後開始對話：1.5 秒",
+  "sublabel": "從開始面向螢幕算起；系統約每 0.2 秒檢查一次",
+  "submenu": [
+   {
+    "label": "1 秒",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "1.5 秒（預設）",
+    "type": "radio",
+    "checked": true,
+    "enabled": true
+   },
+   {
+    "label": "2 秒",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "3 秒",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "label": "從開始面向螢幕算起；系統約每 0.2 秒檢查一次",
+    "enabled": false
+   }
+  ]
+ },
+ {
+  "label": "對話結束後暫停：10 秒",
+  "sublabel": "這段時間內不再自動開始，避免說完再見又被打開",
+  "submenu": [
+   {
+    "label": "5 秒",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "10 秒（預設）",
+    "type": "radio",
+    "checked": true,
+    "enabled": true
+   },
+   {
+    "label": "15 秒",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "20 秒",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "30 秒",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "1 分鐘",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "label": "這段時間內不再自動開始，避免說完再見又被打開",
+    "enabled": false
+   }
+  ]
+ },
+ {
+  "label": "看著說話時先打招呼",
+  "type": "checkbox",
+  "checked": true,
+  "enabled": true,
+  "sublabel": "看著說話開始的對話，連上後 Nous 先說「我在」；你先開口就不打招呼"
+ },
+ {
+  "label": "打招呼時稱呼認出的家人",
+  "type": "checkbox",
+  "checked": true,
+  "enabled": true,
+  "sublabel": "只在 macOS App：認出已登記的家人時說「名字，我在」，名字會送到雲端語音；關掉只說「我在」（門檻未校準）"
+ },
+ {
+  "label": "手掌停止播報",
+  "type": "checkbox",
+  "checked": true,
+  "enabled": true,
+  "sublabel": "舉起張開的手掌停止 Nous 說話（不取消任務）"
+ },
+ {
+  "label": "靠近時電子腦放大倍率：2 倍",
+  "sublabel": "站到 0.6 m 以內放大到這個倍率，2.5 m 以外不放大；1 倍＝不放大，字級不受影響",
+  "submenu": [
+   {
+    "label": "1 倍",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "1.5 倍",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "2 倍（預設）",
+    "type": "radio",
+    "checked": true,
+    "enabled": true
+   },
+   {
+    "label": "2.5 倍",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "3 倍",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "label": "站到 0.6 m 以內放大到這個倍率，2.5 m 以外不放大；1 倍＝不放大，字級不受影響",
+    "enabled": false
+   }
+  ]
+ },
+ {
+  "label": "顯示鏡頭畫面",
+  "enabled": true
+ },
+ {
+  "label": "家人辨識…",
+  "sublabel": "瀏覽器版不可用（只在 macOS App 提供）",
+  "enabled": false
+ },
+ {
+  "label": "校正人臉辨識…",
+  "enabled": false
+ },
+ {
+  "label": "家人辨識：瀏覽器版不可用（只在 macOS App 提供）",
+  "enabled": false
+ },
+ {
+  "type": "separator"
+ },
+ {
+  "label": "語音",
+  "enabled": false
+ },
+ {
+  "label": "語音模式閒置多久自動關閉：1 分 30 秒",
+  "sublabel": "從最後一次聽到你說話或 Nous 念完算起；等回覆與念回覆時不算",
+  "submenu": [
+   {
+    "label": "30 秒",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "1 分鐘",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "1 分 30 秒（預設）",
+    "type": "radio",
+    "checked": true,
+    "enabled": true
+   },
+   {
+    "label": "2 分鐘",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "3 分鐘",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "5 分鐘",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "label": "從最後一次聽到你說話或 Nous 念完算起；等回覆與念回覆時不算",
+    "enabled": false
+   }
+  ]
+ },
+ {
+  "label": "即時語音閒置多久自動結束：2 分鐘",
+  "sublabel": "即時語音目前不可用（ChatGPT 方案路徑尚未登入（設定 → 即時語音 → 用 ChatGPT 方案登入）；未設定 OPENAI_API_KEY）",
+  "submenu": [
+   {
+    "label": "1 分鐘",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "2 分鐘（預設）",
+    "type": "radio",
+    "checked": true,
+    "enabled": true
+   },
+   {
+    "label": "3 分鐘",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "5 分鐘",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "label": "10 分鐘",
+    "type": "radio",
+    "checked": false,
+    "enabled": true
+   },
+   {
+    "type": "separator"
+   },
+   {
+    "label": "即時語音目前不可用（ChatGPT 方案路徑尚未登入（設定 → 即時語音 → 用 ChatGPT 方案登入）；未設定 OPENAI_API_KEY）",
+    "enabled": false
+   }
+  ]
+ }
+]"
+`;
