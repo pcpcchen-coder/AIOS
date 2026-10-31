@@ -12,3 +12,14 @@ export function checkTrustedSender(event, win, coreUrl) {
   // 以 core.url 加上 "/" 比對，避免 http://localhost:8787 被 http://localhost:87870 冒充。
   return url === coreUrl || url.startsWith(`${coreUrl}/`);
 }
+
+// 網址是否和本機核心同一個 origin（協定、主機、埠完全相同）。用 URL 解析後比較 origin，不用字首比對：
+// 字首比對會讓 http://localhost:5173 也接受 http://localhost:51730。解析失敗一律 false。
+export function sameOrigin(url, coreUrl) {
+  if (typeof url !== "string" || typeof coreUrl !== "string" || !url || !coreUrl) return false;
+  try {
+    return new URL(url).origin === new URL(coreUrl).origin;
+  } catch {
+    return false;
+  }
+}

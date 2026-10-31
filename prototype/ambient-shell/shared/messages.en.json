@@ -195,5 +195,6 @@
   "常駐喚醒聆聽已停止：{0}": "Always-on wake listening stopped: {0}",
   "尚未回報": "Not reported yet",
   "常駐喚醒聆聽只能從 App 選單列打開": "Always-on wake listening can be turned on only from the App menu bar",
+  "鏡頭只能從 App 打開": "The camera can be turned on only from the App",
   "常駐喚醒聆聽不可用": "Always-on wake listening is unavailable"
 }

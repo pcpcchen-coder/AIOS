@@ -4,3 +4,4 @@ export function checkTrustedSender(
   win: { webContents: unknown; isDestroyed?(): boolean } | null | undefined,
   coreUrl: string | null | undefined,
 ): boolean;
+export function sameOrigin(url: string | null | undefined, coreUrl: string | null | undefined): boolean;

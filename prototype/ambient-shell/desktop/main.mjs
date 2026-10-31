@@ -8,7 +8,7 @@ import { checkIdentitySender, MenuClickWindow, validateIdentityRequest } from ".
 import { validateMemoryRequest } from "./memory-ipc.mjs";
 import { deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "./tasks-ipc.mjs";
 import { createMemorySecretBox } from "./memory-safe-storage.mjs";
-import { checkTrustedSender } from "./trusted-sender.mjs";
+import { checkTrustedSender, sameOrigin } from "./trusted-sender.mjs";
 import { isWakeReport, radio, settingsMenu } from "./settings-menu.mjs";
 import { isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "./localization.mjs";
 
@@ -155,6 +155,8 @@ async function startCore() {
       modelDir: faceRuntimeDir,
     },
     wakeRuntimeDir,
+    // 鏡頭只能由主程序在原生說明之後打開（setCameraActive）；頁面經 HTTP 送 active: true 會被核心拒絕（403）。
+    cameraEnable: "main_process",
     memory: {
       dir: memoryDir,
       secretBox,
@@ -586,6 +588,11 @@ async function codexLogin() {
 
 /** 送出後直接套用回應（不等 15 秒的輪詢）；失敗時說明真實原因，並重新讀取實際保存的值（checkbox 不會停在沒保存的狀態）。 */
 async function setMenuPref(row, value) {
+  // 鏡頭的「打開」不經 HTTP（核心一律回 403）：先顯示原生說明，按「開啟」才由同一行程的 core.camera 保存。
+  if (row.write_path === "/api/settings/camera" && row.key === "active" && value === true) {
+    await setCameraActive(true);
+    return;
+  }
   try {
     settings = await api(row.write_path, { [row.key]: value });
   } catch (err) {
@@ -595,6 +602,96 @@ async function setMenuPref(row, value) {
     return;
   }
   rebuildMenu();
+}
+
+/**
+ * 原生對話框的父視窗：只有主視窗還在而且看得見時才用（變成視窗上的 sheet）；否則用 App 層級的對話框。
+ * 隱藏視窗上的 sheet 使用者看不到也按不到，會讓等待中的開關（例如共用的 cameraEnabling）一直卡住。
+ */
+function dialogParent() {
+  return win && !win.isDestroyed() && win.isVisible() ? win : undefined;
+}
+
+/**
+ * 頁面的 media 權限請求要不要鏡頭影像：mediaTypes 有 "video"，或沒有／看不懂（fail closed，當成要影像）。
+ * 只要麥克風（["audio"]）時不受鏡頭開關影響。
+ */
+function wantsVideo(details) {
+  const types = details?.mediaTypes;
+  return !Array.isArray(types) || types.length === 0 || types.some((type) => type !== "audio");
+}
+
+/**
+ * 鏡頭影像只在核心的鏡頭設定此刻是開（.env 啟用而且使用者打開）時才給頁面：每次直接問核心的 store，不用輪詢來的 settings。
+ * 這樣頁面腳本即使略過 HTTP 與原生說明直接呼叫 getUserMedia({ video })，鏡頭關著時也拿不到影像。
+ */
+function cameraAllowed() {
+  try {
+    return core?.camera?.isActive() === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 打開或關掉鏡頭（選單列「鏡頭」與頁面的 nous:camera-enable）。打開前一定顯示原生說明（影像只在這台 Mac 本機處理、
+ * 不保存不上傳、右下角圓點是實際狀態），按「開啟」才經同一行程的 core.camera 保存；頁面腳本經 HTTP 打不開（核心回 403）。
+ * 關掉一定安全，照原本的路徑（POST /api/settings/camera）。回傳 { ok } 或 { ok: false, reason, message? }。
+ * fromPage：請求來自頁面（nous:camera-enable）時，錯誤只回給頁面顯示，不另跳原生錯誤框（避免同一個錯誤報兩次）；
+ * 選單列打開時照常跳原生錯誤框。
+ */
+async function setCameraActive(value, { fromPage = false } = {}) {
+  if (!value) {
+    try {
+      settings = await api("/api/settings/camera", { active: false });
+      rebuildMenu();
+      return { ok: true };
+    } catch (err) {
+      const message = String(err.message ?? err);
+      showError(`「${t("鏡頭")}」沒有保存`, message);
+      await refreshSettings();
+      return { ok: false, reason: "error", message };
+    }
+  }
+  if (!core?.camera || settings?.camera?.enabled === false) return { ok: false, reason: "unavailable" };
+  // 說明對話框還開著時再收到請求（例如頁面連按）：共用同一個對話框與結果，不疊第二個。
+  // 錯誤框由每個呼叫端自己決定（選單列跳、頁面不跳），所以共用的結果裡不跳錯誤框。
+  cameraEnabling ??= confirmCameraEnable().finally(() => { cameraEnabling = null; });
+  const result = await cameraEnabling;
+  if (!result.ok && result.reason === "error" && !fromPage) showError("鏡頭沒有打開", result.message);
+  return result;
+}
+
+let cameraEnabling = null;
+async function confirmCameraEnable() {
+  let response = 1;
+  try {
+    ({ response } = await showMessage({
+      type: "question",
+      buttons: ["開啟", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "要打開鏡頭嗎？",
+      detail: "鏡頭影像只在這台 Mac 本機處理，不保存、不上傳。畫面右下角的圓點顯示鏡頭的實際狀態；隨時可以在選單列或說「關掉鏡頭」關閉。",
+    }, dialogParent()));
+  } catch {
+    response = 1;
+  }
+  if (response !== 0) {
+    rebuildMenu();
+    return { ok: false, reason: "cancelled" };
+  }
+  try {
+    core.camera.setActive(true);
+  } catch (err) {
+    const message = String(err.message ?? err);
+    await refreshSettings();
+    return { ok: false, reason: "error", message };
+  }
+  await refreshSettings();
+  // 告訴頁面「使用者剛在原生說明之後明確打開」：頁面撤銷先前「關掉但沒保存」留下的本機關閉（src/main.ts 的 cameraEnabledByApp）。
+  notifyPage("camera-enabled");
+  return { ok: true };
 }
 
 /**
@@ -608,8 +705,7 @@ async function setWakeListen(value) {
     if (runtimeMissing) detail.push(t("目前還沒有安裝喚醒引擎：開啟後會顯示「無法使用」，不會開啟麥克風。"));
     let response = 1;
     try {
-      const parent = win && !win.isDestroyed() ? win : undefined;
-      ({ response } = await showMessage({ type: "question", buttons: ["開啟", "取消"], defaultId: 1, cancelId: 1, message: "要開啟常駐喚醒聆聽嗎？", detail: detail.join("\n\n") }, parent));
+      ({ response } = await showMessage({ type: "question", buttons: ["開啟", "取消"], defaultId: 1, cancelId: 1, message: "要開啟常駐喚醒聆聽嗎？", detail: detail.join("\n\n") }, dialogParent()));
     } catch {
       response = 1;
     }
@@ -922,6 +1018,17 @@ ipcMain.handle("nous:identity", async (event, request) => {
   return core.identity.handle(checked.request, { userInitiated });
 });
 
+// 頁面要打開鏡頭（設定畫面的開關、說或打「打開鏡頭」）：只接受主視窗主框架、來自本機核心頁面的請求；不收任何參數。
+// 一律先顯示主程序的原生說明，使用者按「開啟」才保存（頁面腳本無法略過；HTTP 的 active: true 是 403）。
+ipcMain.handle("nous:camera-enable", async (event) => {
+  if (!core?.camera || !checkTrustedSender(event, win, core.url)) return { ok: false, reason: "unavailable" };
+  try {
+    return await setCameraActive(true, { fromPage: true });
+  } catch (err) {
+    return { ok: false, reason: "error", message: String(err?.message ?? err) };
+  }
+});
+
 // MEM-4a 加密任務：只接受主視窗主框架、來自本機核心頁面的請求；形狀過濾後交給核心（核心再完整驗證）。
 ipcMain.handle("nous:tasks", async (event, request) => {
   if (!core?.tasks || !checkTrustedSender(event, win, core.url)) return { ok: false, code: "unavailable", message: t("加密任務不可用") };
@@ -1025,10 +1132,13 @@ app.whenReady().then(async () => {
   }
 
   // 麥克風與鏡頭（media）只開放給本機核心的頁面；鏡頭需 NOUS_CAMERA=on，影像只在本機處理。
-  const allowMedia = (url) => Boolean(core && url?.startsWith(core.url));
+  // 只給本機核心同一個 origin 的頁面（完全相同的協定、主機、埠；不用字首比對）。
+  const allowMedia = (url) => Boolean(core && sameOrigin(url, core.url));
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-    callback(permission === "media" && allowMedia(details.requestingUrl));
+    callback(permission === "media" && allowMedia(details.requestingUrl) && (!wantsVideo(details) || cameraAllowed()));
   });
+  // 權限檢查（navigator.permissions.query、enumerateDevices 的裝置名稱）不會自己打開鏡頭；真正取得影像的 getUserMedia
+  // 一律經上面的權限請求處理器，所以這裡維持原樣。
   session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => permission === "media" && allowMedia(`${origin}/`));
 
   rebuildAppMenu();

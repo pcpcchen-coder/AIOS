@@ -126,6 +126,12 @@ export interface AppOptions {
   home?: HomeBridge;
   /** 雙目鏡頭設定（docs/11，通常是 CameraSettingsStore）；未提供或未啟用時頁面不允許使用鏡頭。 */
   camera?: CameraSettingsSource;
+  /**
+   * 誰能打開鏡頭（由啟動核心的一方決定）。"main_process"（macOS App）：POST /api/settings/camera 的 active: true 回 403，
+   * 只有 App 主程序在原生說明之後經 NousHandle.camera 打開，settings.camera 帶 enable_via: "app"。
+   * "http"（預設；終端機／瀏覽器版）：頁面可以經 HTTP 打開，和以前相同，由瀏覽器自己的鏡頭權限提示與畫面指示點把關。
+   */
+  cameraEnable?: "main_process" | "http";
   /** 語音閒置秒數（通常是 VoiceSettingsStore）；未提供時用預設值且不能修改。 */
   voice?: VoiceSettingsSource;
   /** 人臉辨識校正值（FaceTuningStore）；只在鏡頭啟用時提供。 */
@@ -219,10 +225,12 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       })
     : null;
   const tasksFor = (target: ChatTarget | null) => tasksForTarget(store, options.memory ?? null, target);
+  const cameraEnableStrict = options.cameraEnable === "main_process";
   const settings = {
     view: (): SettingsView => {
       const live = sessions?.info();
-      const camera = options.camera?.view();
+      const cameraView = options.camera?.view();
+      const camera = cameraView && cameraEnableStrict ? { ...cameraView, enable_via: "app" as const } : cameraView;
       const voice = options.voice?.view() ?? DEFAULT_VOICE_PREFS;
       return {
         ...options.settings.view(),
@@ -321,6 +329,10 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         if (err instanceof CameraPatchError) throw new HttpError(400, err.message);
         throw err;
       }
+      // App（cameraEnable: "main_process"）：頁面（以及任何本機頁面腳本）只能關掉鏡頭或改其他設定；打開只能由 App 主程序
+      // 在原生說明之後經 NousHandle.camera 做（同 /api/settings/wake 的 wake_listen）。整個請求拒絕，什麼都不保存。
+      // 關掉一定安全，所以照收。終端機／瀏覽器版（"http"）照舊可以打開。
+      if (cameraEnableStrict && patch.active === true) throw new HttpError(403, "鏡頭只能從 App 打開");
       // update 會呼叫 onChange（→ notifySettings），這裡不重複廣播。
       try {
         options.camera.update(patch);

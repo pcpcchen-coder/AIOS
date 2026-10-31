@@ -69,6 +69,8 @@ Realtime voice tools still involve renderer dispatch and invocation. A live sess
 
 The core binds only to `127.0.0.1`, with local-only Host / Origin checks. Quest's localhost means Quest itself. Remote access needs a separately designed authenticated HTTPS device endpoint rather than loosening current guards.
 
+Camera switch (2026-10-31, branch `claude/camera-enable-main-only`, not yet merged): the macOS App starts the core in strict mode, `POST /api/settings/camera` answers 403 to `active: true`, and only the main process turns the camera on after a native explanation, and while the camera setting is off the main process also refuses camera video to the page's `getUserMedia`; by the user's decision the terminal / browser version can still turn it on from the page, so a page script can still turn the camera on, guarded only by the browser permission prompt. Linux automated tests only; the manual Mac check has not been run; see [validation](validation/camera-enable-main-only-2026-10-31.en.md).
+
 Presentation Policy currently permits only verifiable `user_request` and `action_confirmation`. Subscribed reminders, automatic background surfaces, and a permanent spatial task wall are unsupported. Gaze selects only and does not authorize an action.
 
 OpenClaw supplies references for some voice protocols, constants, and implementation approaches. There is no Gateway or agent-run adapter. Model new workers separately from model providers.

@@ -76,6 +76,11 @@ export interface NousOptions {
    * 所以一律回報 runtime missing，頁面不開麥克風。
    */
   wakeRuntimeDir?: string | null;
+  /**
+   * 誰能打開鏡頭：macOS App 傳 "main_process"（HTTP 的 active: true 回 403，只有主程序經 NousHandle.camera 在原生說明之後打開）；
+   * 未提供或 "http"（終端機／瀏覽器版）時頁面照舊可以經 HTTP 打開，由瀏覽器的鏡頭權限提示與畫面指示點把關。
+   */
+  cameraEnable?: "main_process" | "http";
 }
 
 export interface TasksInjection {
@@ -147,6 +152,19 @@ export interface NousHandle {
    * 不經 preload），頁面拿不到；頁面經 HTTP 只能記下麥克風或關掉（ADR-0003 §2.3）。寫檔失敗時丟錯、設定不變。
    */
   wake?: { setListen(value: boolean): void };
+  /**
+   * 鏡頭「開關」：App（cameraEnable: "main_process"）由主程序在原生說明之後呼叫（同一個行程，不經 HTTP）；這時頁面經 HTTP
+   * 只能關掉或改其他鏡頭設定（POST /api/settings/camera 收到 active: true 一律 403）。先寫 camera.json 再通知 settings；
+   * 寫檔失敗時丟錯、設定不變。
+   */
+  camera?: {
+    setActive(value: boolean): void;
+    /**
+     * 鏡頭現在是否允許運作：.env 啟用（NOUS_CAMERA=on）而且使用者設定為開。每次直接讀 store（不是主程序輪詢來的 settings，
+     * 那可能過時）。App 主程序的權限處理器只在這裡是 true 時才把鏡頭（video）權限給頁面。
+     */
+    isActive(): boolean;
+  };
 }
 
 const LABEL = { claude: "Claude", chatgpt: "ChatGPT（Sign in with ChatGPT）", mock: "模擬（mock）" } as const;
@@ -355,6 +373,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
       })
     : null;
   const server = createApp({
+    cameraEnable: options.cameraEnable ?? "http",
     store,
     runner,
     settings: providers,
@@ -424,6 +443,13 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     ...(identity ? { identity: { handle: (request: unknown, ctx: IdentityContext) => identity.handle(request, ctx), closeSessions: () => identity.closeSessions() } } : {}),
     ...(memory ? { memory: { handle: (request: unknown, ctx: { userInitiated?: boolean }) => memory.handle(request, ctx), closeSessions: () => memory.closeSessions(), suspendAll: () => memory.suspendAll() } } : {}),
     ...(wakeStore ? { wake: { setListen: (value: boolean) => void wakeStore.update({ wake_listen: value }) } } : {}),
+    camera: {
+      setActive: (value: boolean) => void camera.update({ active: value }),
+      isActive: () => {
+        const view = camera.view();
+        return view.enabled && view.active;
+      },
+    },
     ...(options.tasks ? { tasks: (() => {
       const ipc = createTaskIpc({ store, runner, memory, confirmDeleteBackups: options.tasks.confirmDeleteBackups, log });
       // MEM-4c：dropPlaintext＝OS 鎖定與睡眠（desktop/main.mjs 的 powerMonitor）時丟棄解密內容。

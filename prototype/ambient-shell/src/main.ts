@@ -97,7 +97,13 @@ interface DesktopBridge {
   confirmDelete?(request: { title: string }): Promise<{ confirmed: boolean }>;
   /** WK-01a：系統睡眠、醒來、鎖定、解鎖（只有列舉值）。舊版 App 與瀏覽器版沒有這一項。 */
   onPower?(listener: (event: PowerEvent) => void): () => void;
+  /**
+   * 打開鏡頭：主程序先顯示原生說明，使用者按「開啟」才由核心保存（HTTP 的 active: true 是 403）。不帶參數。
+   * 舊版 App 與瀏覽器版沒有這一項。
+   */
+  cameraEnable?(): Promise<CameraEnableResult>;
 }
+type CameraEnableResult = { ok: true } | { ok: false; reason: "cancelled" | "unavailable" | "error"; message?: string };
 declare global {
   interface Window {
     nousDesktop?: DesktopBridge;
@@ -1032,6 +1038,20 @@ let sensorState: SensorState = "off";
 let cameraOffPending = false;
 /** 上次啟動失敗：不在每次 hello／settings.updated 重試；使用者再次開啟或 active 改變時才重試。 */
 let cameraFailed = false;
+/** 這個視窗送出、還沒有回應的「關掉」POST 數（cameraEnabledByApp 不在這時撤銷 cameraOffPending）。 */
+let cameraOffInFlight = 0;
+
+/**
+ * App 主程序剛在原生說明之後保存了 active: true（選單列或頁面的請求，nous:command "camera-enabled"）。
+ * 規則：使用者明確打開，撤銷這個視窗先前「關掉但沒保存」留下的 cameraOffPending——只有核心的設定推送分不出這件事
+ * （關掉沒保存時核心本來就是開，打開不會讓值改變）。但這個視窗的「關掉」還在送出中時不撤銷：那個關掉晚於核心保存，
+ * 以它落到核心的結果為準（成功時核心變關、applySettings 清掉；失敗時維持本機關閉）。
+ */
+function cameraEnabledByApp(): void {
+  if (cameraOffInFlight === 0) cameraOffPending = false;
+  cameraFailed = false;
+  syncCamera();
+}
 
 // 鏡頭畫面：使用者要求才出現（user_request），不保存，重新整理後一定是收起。與 sensorIndicator 一樣是 ShellState 之外的覆蓋層。
 const PREVIEW_W = 256;
@@ -1402,7 +1422,20 @@ async function startCamera(): Promise<void> {
  * 「關掉」先在本機釋放鏡頭再送出，不等網路。回傳失敗說明；成功時為 null。
  */
 async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null> {
-  if (patch.active === false) cameraOffPending = true;
+  if (patch.active === true && settings?.camera?.enable_via === "app") {
+    // App：打開不經 HTTP（核心回 403）。其他鍵照常保存，鏡頭交給 App 主程序的原生說明。
+    const { active: _active, ...rest } = patch;
+    if (Object.keys(rest).length > 0) {
+      const error = await updateCameraPrefs(rest);
+      if (error) return error;
+    }
+    return enableCamera();
+  }
+  // 終端機／瀏覽器版：照舊經 HTTP 打開，由瀏覽器自己的鏡頭權限提示與右下角指示點把關。
+  if (patch.active === false) {
+    cameraOffPending = true;
+    cameraOffInFlight++;
+  }
   if (patch.active === true) {
     cameraOffPending = false;
     cameraFailed = false;
@@ -1417,7 +1450,43 @@ async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null
     return patch.active === false
       ? `鏡頭已在這個視窗關閉，但沒有保存（${(err as Error).message}）；重新整理或重新啟動後，會依上次保存的設定決定是否開啟。`
       : `鏡頭設定沒有保存：${(err as Error).message}`;
+  } finally {
+    if (patch.active === false) cameraOffInFlight--;
   }
+}
+
+/**
+ * App 打開鏡頭（settings.camera.enable_via === "app"）：主程序顯示原生說明，使用者按「開啟」後核心才保存 active: true。
+ * 在核心保存之前不在本機啟動鏡頭：syncCamera 只看核心回報的設定，取消時什麼都不變。
+ */
+async function enableCamera(): Promise<string | null> {
+  if (settings?.camera?.active && !cameraOffPending) {
+    // 已經是開：不必再問，只在上次啟動失敗時重試。
+    cameraFailed = false;
+    syncCamera();
+    return null;
+  }
+  const desktop = window.nousDesktop;
+  if (!desktop?.cameraEnable) return "這個版本的 App 不能從頁面打開鏡頭；請用選單列打開";
+  let result: CameraEnableResult;
+  try {
+    result = await desktop.cameraEnable();
+  } catch (err) {
+    result = { ok: false, reason: "error", message: (err as Error).message };
+  }
+  if (!result?.ok) {
+    if (result?.reason === "cancelled") return "已取消開啟鏡頭";
+    if (result?.reason === "unavailable") return "鏡頭不能打開：App 的鏡頭功能不可用";
+    return result?.message ? `鏡頭沒有打開：${result.message}` : "鏡頭沒有打開";
+  }
+  cameraEnabledByApp();
+  try {
+    applySettings(await api.getSettings());
+    render();
+  } catch {
+    // 讀不到設定時等核心的 settings.updated（核心已保存，會推送）。
+  }
+  return null;
 }
 
 /** 語音閒置秒數（設定畫面的 −／+）。回傳失敗說明；成功時為 null。 */
@@ -2279,6 +2348,11 @@ window.addEventListener("nous:command", (event) => {
   // WK-01a：常駐喚醒聆聽的暫停、繼續與立即停止（主程序不打開視窗；只改收音）。
   if (typeof command === "string" && command.startsWith("wake-")) {
     wake?.command(command);
+    return;
+  }
+  // 鏡頭剛由 App 主程序在原生說明之後打開（不打開視窗、不收起提示）。
+  if (command === "camera-enabled") {
+    cameraEnabledByApp();
     return;
   }
   dismissFirstHint();

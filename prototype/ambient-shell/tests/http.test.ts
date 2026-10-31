@@ -68,7 +68,7 @@ async function start(
   realtime?: RealtimeBridge,
   webSearch?: WebSearch,
   home?: HomeBridge,
-  camera?: { env: NodeJS.ProcessEnv; dir?: string },
+  camera?: { env: NodeJS.ProcessEnv; dir?: string; enable?: "main_process" | "http" },
   voice?: { dir?: string },
   faceTuning = false,
 ) {
@@ -102,6 +102,7 @@ async function start(
     webSearch,
     home,
     camera: cameraStore,
+    ...(camera?.enable ? { cameraEnable: camera.enable } : {}),
     voice: voiceStore,
     faceTuning: faceTuningStore,
     port,
@@ -114,7 +115,7 @@ async function start(
   const base = `http://localhost:${port}`;
   const post = (path: string, body: unknown) =>
     fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  return { base, post, runner, store, dir };
+  return { base, post, runner, store, dir, cameraStore };
 }
 
 describe("HTTP API", () => {
@@ -453,6 +454,50 @@ describe("HTTP API", () => {
     const again = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on", NOUS_LOOK_TO_TALK: "off" }, dir });
     const after = (await (await fetch(`${again.base}/api/settings`)).json()) as SettingsView;
     expect(after.camera).toMatchObject({ active: false, look_to_talk_s: 2.5, look_to_talk: false, stop_gesture: true });
+  });
+
+  it("終端機／瀏覽器版（預設 cameraEnable: http）：頁面照舊可以經 HTTP 打開鏡頭，settings 不帶 enable_via", async () => {
+    const { base, post } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" } });
+    expect((await post("/api/settings/camera", { active: false })).status).toBe(200);
+    const on = await post("/api/settings/camera", { active: true, look_to_talk: false });
+    expect(on.status).toBe(200);
+    expect(((await on.json()) as SettingsView).camera).toMatchObject({ active: true, look_to_talk: false });
+    const view = (await (await fetch(`${base}/api/settings`)).json()) as SettingsView;
+    expect(view.camera).not.toHaveProperty("enable_via");
+  });
+
+  it("App（cameraEnable: main_process）：鏡頭只能從 App 打開，POST active:true 一律 403、整個請求不保存；關掉與其他設定照常", async () => {
+    const { base, post, dir, cameraStore } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" }, enable: "main_process" });
+    expect(((await (await fetch(`${base}/api/settings`)).json()) as SettingsView).camera?.enable_via).toBe("app");
+    const file = join(dir, "camera.json");
+    expect((await post("/api/settings/camera", { active: false })).status).toBe(200);
+    const saved = readFileSync(file, "utf8");
+    expect(JSON.parse(saved).prefs).toEqual({ active: false });
+
+    const denied = await post("/api/settings/camera", { active: true });
+    expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { error: string }).error).toBe("鏡頭只能從 App 打開");
+    const english = await fetch(`${base}/api/settings/camera`, { method: "POST", headers: { "Content-Type": "application/json", "X-Nous-Locale": "en" }, body: JSON.stringify({ active: true }) });
+    expect(english.status).toBe(403);
+    expect(((await english.json()) as { error: string }).error).toBe("The camera can be turned on only from the App");
+    // 混在其他鍵裡也整個拒絕：look_to_talk 不保存
+    expect((await post("/api/settings/camera", { active: true, look_to_talk: false })).status).toBe(403);
+    expect(readFileSync(file, "utf8")).toBe(saved);
+    let view = (await (await fetch(`${base}/api/settings`)).json()) as SettingsView;
+    expect(view.camera).toMatchObject({ active: false, look_to_talk: true });
+    // 驗證仍先於 403：不合法的值是 400
+    expect((await post("/api/settings/camera", { active: "yes" })).status).toBe(400);
+
+    // 其他鍵與關掉照常
+    expect((await post("/api/settings/camera", { look_to_talk: false })).status).toBe(200);
+    expect((await post("/api/settings/camera", { active: false })).status).toBe(200);
+    view = (await (await fetch(`${base}/api/settings`)).json()) as SettingsView;
+    expect(view.camera).toMatchObject({ active: false, look_to_talk: false, enable_via: "app" });
+    expect(JSON.parse(readFileSync(file, "utf8")).prefs).toEqual({ active: false, look_to_talk: false });
+    // 打開只由主程序經 NousHandle.camera（同一個 store）；這裡直接呼叫 store 代替
+    cameraStore!.update({ active: true });
+    view = (await (await fetch(`${base}/api/settings`)).json()) as SettingsView;
+    expect(view.camera).toMatchObject({ active: true, enable_via: "app" });
   });
 
   it("鏡頭設定寫檔失敗：回 500 與可讀原因，記憶體與畫面不變", async () => {

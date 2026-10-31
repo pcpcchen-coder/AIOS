@@ -64,6 +64,8 @@ AIOS 已有可執行的 Nous 桌面原型。先使用或延伸 [`prototype/ambie
 
 核心只綁 `127.0.0.1`，Host／Origin 只允許本機。Quest 的 localhost 是 Quest 自己；對外連線需要另外設計有認證的 HTTPS 裝置入口，不直接放寬既有防護。
 
+鏡頭開關（2026-10-31，分支 `claude/camera-enable-main-only`，尚未合併）：macOS App 以嚴格模式啟動核心，`POST /api/settings/camera` 收到 `active: true` 回 403，鏡頭只由主程序在原生說明之後打開，鏡頭設定關著時主程序也不把鏡頭影像權限給頁面的 `getUserMedia`；終端機／瀏覽器版依使用者決定照舊可以從頁面打開，頁面腳本仍可打開鏡頭、只靠瀏覽器權限提示把關。只有 Linux 自動測試，Mac 手動核對未執行，見[驗證](validation/camera-enable-main-only-2026-10-31.md)。
+
 Presentation Policy 目前只允許可核對的 `user_request` 與 `action_confirmation`。訂閱提醒、自動背景浮現、永久空間任務牆尚未支援。注視只選定，不能視為當次操作授權。
 
 OpenClaw 是部分語音協議、常數與實作做法的參考來源，沒有 Gateway 或 agent run adapter。新 worker 應和模型 provider 分開建模。
