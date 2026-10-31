@@ -166,5 +166,8 @@
   "限制：刪除只移除檔案，不是安全抹除；在此之前的 Time Machine 備份或 APFS 本機快照可能仍保有明文的 tasks.json 與 artifacts.json，Nous 無法刪除那些快照。": "Limitation: deletion only removes the files; it is not a secure wipe. Earlier Time Machine backups or local APFS snapshots may still contain the plaintext tasks.json and artifacts.json. Nous cannot delete those snapshots.",
   "加密任務不可用": "Encrypted tasks are unavailable",
   "刪除明文備份…": "Delete plaintext backup…",
-  "校正人臉辨識…": "Calibrate face recognition…"
+  "校正人臉辨識…": "Calibrate face recognition…",
+  "刪除": "Delete",
+  "要永久刪除「{0}」這筆任務與它的成果嗎？": "Permanently delete the task “{0}” and its result?",
+  "刪除後無法復原。": "This cannot be undone."
 }

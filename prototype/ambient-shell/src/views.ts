@@ -233,7 +233,8 @@ function charsText(step: TaskStep): string {
  */
 export function progressStructureKey(tasks: Iterable<Task>): string {
   return [...tasks]
-    .map((t) => `${t.task_id}:${t.status}:${t.plan_ready}:${t.steps.map((s) => s.status).join(",")}:${t.artifact_id ?? ""}`)
+    // F3：標題與步驟標題也在鍵裡：受保護任務的真實內容（IPC）晚於外殼到達時，進度卡才會重畫，不會一直停在固定句。
+    .map((t) => JSON.stringify([t.task_id, t.status, t.plan_ready, t.steps.map((s) => [s.status, s.title]), t.artifact_id ?? "", t.title]))
     .sort()
     .join("|");
 }

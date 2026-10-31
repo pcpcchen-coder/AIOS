@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { HistoryQueryError, makeSnippet, markdownToPlain, parseHistoryQuery, searchHistory, type HistoryDocument, type HistorySource } from "../server/history.ts";
-import { bigrams, foldForSearch, queryTerms, words } from "../server/search-terms.ts";
+import { bigrams, foldForSearch, queryTerms, SEARCH_SYNONYMS, synonymIndexOf, synonymsFor, words } from "../server/search-terms.ts";
+import { matchHistory } from "../src/intent.ts";
 import { relevance } from "../server/memory/retrieve.ts";
 import { parseMemoryText, toTraditional } from "../server/memory/parse.ts";
 import { HISTORY_PAGE_SIZE, HISTORY_SNIPPET_RADIUS } from "../shared/history.ts";
@@ -82,7 +83,9 @@ describe("searchHistory matching", () => {
   ];
 
   it("matches Traditional text with a Simplified query and vice versa", () => {
-    expect(search(docs, { q: "晚饭" }).items).toEqual([]); // 晚飯 不在內容裡
+    // 晚飯 不在內容裡；HIST-1 Mac 驗收 F2 之後它是「晚餐」的近義詞，所以找到的是寫「晚餐」的兩筆（不是簡繁對照找到的）。
+    expect(search(docs, { q: "晚饭" }).items.map((i) => i.title).sort()).toEqual(["失敗的任務：晚餐訂位", "規劃這週晚餐菜單"]);
+    expect(search(docs, { q: "宵夜" }).items).toEqual([]);
     expect(search(docs, { q: "日本旅行计划" }).items.map((i) => i.title)).toEqual(["寫一份日本旅行計劃"]);
     const simplified = [doc("准备晚饭", "买菜：葱、蒜")];
     expect(search(simplified, { q: "晚飯" }).items.map((i) => i.title)).toEqual(["准备晚饭"]);
@@ -169,6 +172,106 @@ describe("searchHistory matching", () => {
     expect(snippet.text.startsWith("\uDE00")).toBe(false);
     expect(/[\uD800-\uDBFF]$/.test(snippet.text)).toBe(false);
     expect(snippet.text.slice(snippet.matches[0]!.start, snippet.matches[0]!.end)).toBe("目標");
+  });
+});
+
+describe("HIST-1 Mac finding F2: curated synonyms expand the query only", () => {
+  const dinner = doc("准备晚饭", "买菜：葱、蒜，六点开饭");
+  const exact = doc("規劃晚餐", "週末的晚餐菜單");
+  const unrelated = [
+    doc("晚上的會議筆記", "討論預算"), // 晚、會議：不是晚餐
+    doc("相信自己", "寫給自己的一封信"), // 「信」不當其他詞的近義詞
+    doc("Explain the explanation", "an explanatory planet note"), // plan 只比對整個英文詞
+    doc("吃飯", "家常菜"),
+  ];
+  const all = [dinner, exact, ...unrelated];
+  const titles = (q: string, docs: HistoryDocument[] = all) => search(docs, { q }).items.map((i) => i.title);
+
+  it("「找之前關於晚餐的成果」 extracts 晚餐 and finds 「准备晚饭」 (Simplified 晚饭 = synonym 晚飯)", () => {
+    const q = matchHistory("找之前關於晚餐的成果");
+    expect(q).toBe("晚餐");
+    expect(titles(q!)).toContain("准备晚饭");
+    const hit = search(all, { q: q! }).items.find((i) => i.title === "准备晚饭")!;
+    // 近義詞命中也標示：標題的「晚饭」、片段沒有命中時給內容開頭。
+    expect(hit.title_matches).toEqual([{ start: 2, end: 4 }]);
+  });
+
+  it("English dinner finds 晚餐 and 晚飯; Chinese 晚餐 finds English dinner; snippets mark the synonym", () => {
+    expect(titles("dinner").sort()).toEqual(["准备晚饭", "規劃晚餐"]);
+    const en = doc("Plan the family dinner", "Shopping list for dinner: rice");
+    const page = search([en], { q: "晚餐" });
+    expect(page.items.map((i) => i.title)).toEqual(["Plan the family dinner"]);
+    expect(page.items[0]!.title_matches).toEqual([{ start: 16, end: 22 }]);
+    const snippet = page.items[0]!.snippet!;
+    expect(snippet.matches.map((m) => snippet.text.slice(m.start, m.end))).toEqual(["dinner"]);
+    const zhSnippet = search([doc("一般標題", "今天的晚飯吃麵")], { q: "晚餐" }).items[0]!.snippet!;
+    expect(zhSnippet.matches.map((m) => zhSnippet.text.slice(m.start, m.end))).toEqual(["晚飯"]);
+  });
+
+  it("an exact match outranks a synonym match in the same field", () => {
+    expect(titles("晚餐", [dinner, exact])).toEqual(["規劃晚餐", "准备晚饭"]);
+    // 時間較新的近義詞命中仍排在原詞命中後面。
+    const newer = doc("晚饭吃什么", "x", { created: "2026-10-30T10:00:00.000Z" });
+    const older = doc("晚餐吃什麼", "x", { created: "2026-10-01T10:00:00.000Z" });
+    expect(titles("晚餐", [newer, older])).toEqual(["晚餐吃什麼", "晚饭吃什么"]);
+    const [a, b] = search([newer, older], { q: "晚餐" }).items;
+    expect(a!.score).toBeGreaterThan(b!.score);
+  });
+
+  it("review minor 1: across fields, more exact terms outrank synonym hits even with a higher weighted score", () => {
+    const exactInStep = doc("整理預算", "x", { steps: ["晚餐清單"], created: "2026-10-01T10:00:00.000Z" });
+    const synonymInTitle = doc("晚飯預算", "x", { created: "2026-10-30T10:00:00.000Z" });
+    expect(titles("晚餐 預算", [synonymInTitle, exactInStep])).toEqual(["整理預算", "晚飯預算"]);
+    const contentExact = doc("一般", "今天的晚餐");
+    const titleSynonym = doc("晚飯", "x");
+    expect(titles("晚餐", [titleSynonym, contentExact])).toEqual(["一般", "晚飯"]);
+  });
+
+  it("review minor 3: known cross-word Chinese synonym hits are excluded (synonyms only)", () => {
+    const docs = [doc("我們離開會場後去吃飯", "x"), doc("每日程式更新", "x"), doc("依法規劃分責任", "x")];
+    expect(titles("會議", docs)).toEqual([]);
+    expect(titles("行程", docs)).toEqual([]);
+    expect(titles("計畫", docs)).toEqual([]);
+    expect(titles("會議", [doc("明天開會", "x")])).toEqual(["明天開會"]);
+    expect(synonymIndexOf("離開會場後開會", "開會")).toBe(5);
+    // 原詞照舊是子字串比對（不受排除影響）。
+    expect(titles("開會", docs)).toEqual(["我們離開會場後去吃飯"]);
+  });
+
+  it("does not expand unrelated words (晚, 飯, 會, 信 inside 相信, plan inside explanation)", () => {
+    expect(titles("晚餐")).not.toContain("晚上的會議筆記");
+    expect(titles("晚餐")).not.toContain("吃飯");
+    expect(titles("郵件")).toEqual([]);
+    // 原詞照舊是子字串比對（explanation 裡的 plan，原本就會找到）；近義詞「規劃」排在後面。
+    expect(titles("plan")).toEqual(["Explain the explanation", "規劃晚餐"]);
+    expect(titles("規劃")).toEqual(["規劃晚餐"]); // 近義詞 plan 不比對 explanation／planet
+    expect(titles("香菜")).toEqual([]);
+    expect(synonymsFor(["晚上", "飯", "會", "相信", "菜單", "budget"])).toEqual([[], [], [], [], [], []]);
+  });
+
+  it("the table is small, explicit, and Chinese entries are one or two characters; one-character words are never alternates", () => {
+    expect(SEARCH_SYNONYMS.length).toBeLessThanOrEqual(12);
+    for (const group of SEARCH_SYNONYMS) {
+      for (const w of group) {
+        if (/\p{Script=Han}/u.test(w)) expect([...w].length, w).toBeLessThanOrEqual(2);
+        else expect(w, w).toMatch(/^[a-z][a-z-]*$/);
+      }
+    }
+    expect(synonymsFor(["信"])[0]).toEqual(expect.arrayContaining(["郵件", "email"]));
+    expect(synonymsFor(["郵件"])[0]).not.toContain("信");
+    expect(synonymsFor(["dinner"])[0]).toEqual(["晚餐", "晚飯", "supper"]); // dinners 已含原詞，不列
+    expect(synonymsFor(["行程"])[0]).not.toContain("plan"); // 行程和計畫分組
+    expect(synonymIndexOf("an explanation", "plan")).toBe(-1);
+    expect(synonymIndexOf("my plan.", "plan")).toBe(3);
+    expect(synonymIndexOf("晚餐plan", "plan")).toBe(2);
+  });
+
+  it("only the query is expanded: stored text, folding and the query terms themselves are unchanged", () => {
+    expect(queryTerms("晚餐")).toEqual(["晚餐"]);
+    expect(foldForSearch("晚饭")).toBe("晚飯");
+    const before = JSON.stringify(dinner);
+    search([dinner], { q: "dinner" });
+    expect(JSON.stringify(dinner)).toBe(before);
   });
 });
 

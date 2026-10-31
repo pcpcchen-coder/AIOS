@@ -83,7 +83,7 @@ function deps(overrides: Partial<Omit<import("../src/history-view.ts").HistoryVi
     getHistory: vi.fn(async (_taskId: string): Promise<HistoryDetail> => ({ task: task(), artifact, source: "tasks", protected: false })),
     deleteHistory: vi.fn(async (_taskId: string, _requestId: string): Promise<unknown> => ({ ok: true })),
   };
-  return { confirm: vi.fn((_message: string) => true), requestId: () => "req_click000001", redo: vi.fn(async () => null), dismiss: vi.fn(), ...overrides, api };
+  return { confirm: vi.fn((_message: string, _subject?: { title: string }) => true), requestId: () => "req_click000001", redo: vi.fn(async () => null), dismiss: vi.fn(), ...overrides, api };
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -236,7 +236,7 @@ describe("HistoryView rendering never turns data into HTML", () => {
   });
 
   it("delete asks for native confirmation first; cancel keeps the task, confirm sends confirm with a request id", async () => {
-    const confirm = vi.fn((_message: string) => false);
+    const confirm = vi.fn((_message: string, _subject?: { title: string }) => false);
     const d = deps({ confirm });
     const view = new historyView.HistoryView(d);
     view.open("");
@@ -245,7 +245,7 @@ describe("HistoryView rendering never turns data into HTML", () => {
     const del = () => (view.element as unknown as El).all().find((el) => el.tagName === "button" && el.textContent === "刪除")!;
     del().fire("click");
     await flush();
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining(XSS_TITLE));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining(XSS_TITLE), { title: XSS_TITLE });
     expect(d.api.deleteHistory).not.toHaveBeenCalled();
     confirm.mockReturnValue(true);
     del().fire("click");
@@ -253,6 +253,42 @@ describe("HistoryView rendering never turns data into HTML", () => {
     expect(d.api.deleteHistory).toHaveBeenCalledWith("task_xss", "req_click000001");
     expect((view.element as unknown as El).textContent).toContain("已刪除這筆任務與它的成果。");
     expect((view.element as unknown as El).textContent).not.toContain(XSS_TITLE);
+  });
+
+  it("F4: an async native confirmation (App IPC) that resolves to cancel deletes nothing; delete only after it resolves true", async () => {
+    let answer!: (ok: boolean) => void;
+    const confirm = vi.fn((_message: string, _subject?: { title: string }) => new Promise<boolean>((r) => { answer = r; }));
+    const d = deps({ confirm });
+    const view = new historyView.HistoryView(d);
+    await view.openDetail("task_xss");
+    const del = () => (view.element as unknown as El).all().find((el) => el.tagName === "button" && el.textContent === "刪除")!;
+    del().fire("click");
+    await flush();
+    expect(confirm).toHaveBeenCalledWith(expect.any(String), { title: XSS_TITLE });
+    expect(d.api.deleteHistory).not.toHaveBeenCalled();
+    answer(false);
+    await flush();
+    expect(d.api.deleteHistory).not.toHaveBeenCalled();
+    del().fire("click");
+    await flush();
+    answer(true);
+    await flush();
+    expect(d.api.deleteHistory).toHaveBeenCalledWith("task_xss", "req_click000001");
+  });
+
+  it("F4 review minor 4: if the detail changed while the native dialog was open, nothing is deleted", async () => {
+    let answer!: (ok: boolean) => void;
+    const confirm = vi.fn((_message: string, _subject?: { title: string }) => new Promise<boolean>((r) => { answer = r; }));
+    const d = deps({ confirm });
+    const view = new historyView.HistoryView(d);
+    await view.openDetail("task_xss");
+    (view.element as unknown as El).all().find((el) => el.tagName === "button" && el.textContent === "刪除")!.fire("click");
+    await flush();
+    d.api.getHistory.mockResolvedValueOnce({ task: task({ task_id: "task_other" }), artifact, source: "tasks", protected: false });
+    await view.openDetail("task_other");
+    answer(true);
+    await flush();
+    expect(d.api.deleteHistory).not.toHaveBeenCalled();
   });
 
   it("a running task has no redo or delete button; dismiss only calls the dismiss callback", async () => {
@@ -321,6 +357,90 @@ describe("HistoryView rendering never turns data into HTML", () => {
     view.taskUpdated(task());
     await flush();
     expect(d.api.getHistory).toHaveBeenCalledTimes(2);
+  });
+
+  it("F3 (HIST-1 Mac): a running protected task keeps its real title, request and steps while shell updates arrive", async () => {
+    const d = deps();
+    const step = (title: string, status: "done" | "running" | "pending") => ({ title, status, started_at: null, finished_at: null, output_chars: null });
+    // 可信主視窗經 IPC 讀回的真實內容（沒有 protected 旗標）。
+    const real = task({ task_id: "task_run", title: "准备晚饭", status: "running", artifact_id: null, finished_at: null, steps: [step("列出食材", "done"), step("寫出步驟", "running")] });
+    d.api.getHistory.mockResolvedValue({ task: real, artifact: null, source: "tasks", protected: true });
+    const view = new historyView.HistoryView(d);
+    await view.openDetail("task_run");
+    const root = () => view.element as unknown as El;
+    // SSE 的外殼（display 還沒有真實內容時就是固定句）：步驟狀態往前走。
+    const shell: Task = { ...real, protected: true, title: "受保護的任務，請在 App 內查看", steps: [step("受保護的步驟", "done"), step("受保護的步驟", "done")], updated_at: "2026-10-30T01:06:00.000Z" };
+    view.taskUpdated(shell);
+    expect(root().textContent).toContain("准备晚饭");
+    expect(root().textContent).toContain("列出食材");
+    expect(root().textContent).toContain("寫出步驟");
+    expect(root().textContent).not.toContain("受保護");
+    expect(d.api.getHistory).toHaveBeenCalledTimes(1);
+    // 新規劃出步驟時重讀一次（真實的步驟標題）；重讀前新步驟先顯示固定句，舊的仍是真實標題。
+    view.taskUpdated({ ...shell, steps: [...shell.steps, step("受保護的步驟", "running")] });
+    expect(root().textContent).toContain("准备晚饭");
+    expect(d.api.getHistory).toHaveBeenCalledTimes(2);
+    // 範圍外（IPC 只給外殼）的任務照舊顯示目前語言的固定句。
+    d.api.getHistory.mockResolvedValue({ task: shell, artifact: null, source: "tasks", protected: true });
+    await view.openDetail("task_run");
+    view.taskUpdated(shell);
+    expect(root().textContent).toContain("受保護的任務，請在 App 內查看");
+  });
+
+  it("F3 review M1: running → failed with no result reloads the detail; the placeholder error never sticks", async () => {
+    const d = deps();
+    const step = (title: string, status: "done" | "running" | "failed") => ({ title, status, started_at: null, finished_at: null, output_chars: null });
+    const real = task({ task_id: "task_err", title: "准备晚饭", status: "running", artifact_id: null, finished_at: null, error: null, steps: [step("列出食材", "running")] });
+    d.api.getHistory.mockResolvedValueOnce({ task: real, artifact: null, source: "tasks", protected: true });
+    const view = new historyView.HistoryView(d);
+    await view.openDetail("task_err");
+    const root = () => view.element as unknown as El;
+    // SSE：失敗（artifact_id 仍是 null）；畫面這邊還沒有真實的錯誤（display 給固定句）。
+    const failedReal = { ...real, status: "failed" as const, error: "API 逾時（真實錯誤）", steps: [step("列出食材", "failed")] };
+    d.api.getHistory.mockResolvedValueOnce({ task: failedReal, artifact: null, source: "tasks", protected: true });
+    const shell: Task = { ...real, protected: true, status: "failed", title: "受保護的任務，請在 App 內查看", error: "受保護的錯誤說明，請在 App 內查看", steps: [step("受保護的步驟", "failed")] };
+    view.taskUpdated(shell, { title: false, steps: [false], error: false });
+    expect(d.api.getHistory).toHaveBeenCalledTimes(2);
+    await flush();
+    expect(root().textContent).toContain("API 逾時（真實錯誤）");
+    // 之後再來的外殼更新（例如時間）不會把固定句寫回去。
+    view.taskUpdated({ ...shell, updated_at: "2026-10-30T02:00:00.000Z" }, { title: false, steps: [false], error: false });
+    expect(root().textContent).toContain("API 逾時（真實錯誤）");
+    expect(root().textContent).not.toContain("受保護的錯誤說明");
+    // display 已有真實錯誤（live.error）時用比較新的那一份。
+    view.taskUpdated({ ...shell, error: "新的真實錯誤" }, { title: true, steps: [true], error: true });
+    expect(root().textContent).toContain("新的真實錯誤");
+  });
+
+  it("F3 review M2: a withdrawal or a memory revocation drops the real steps and error at once and reloads", async () => {
+    const step = (title: string, status: "done" | "running" | "failed") => ({ title, status, started_at: null, finished_at: null, output_chars: null });
+    for (const kind of ["withdrawn", "memory_revoked"] as const) {
+      const d = deps();
+      const real = kind === "withdrawn"
+        ? task({ task_id: "task_wd", title: "幫小明規劃晚餐", status: "failed", artifact_id: null, error: "真實錯誤（記憶）", steps: [step("查小明過敏（記憶）", "failed")] })
+        : task({ task_id: "task_wd", title: "幫小明規劃晚餐", status: "running", artifact_id: null, finished_at: null, steps: [step("查小明過敏（記憶）", "running")] });
+      d.api.getHistory.mockResolvedValueOnce({ task: real, artifact: null, source: "tasks", protected: true });
+      const view = new historyView.HistoryView(d);
+      await view.openDetail("task_wd");
+      const root = () => view.element as unknown as El;
+      expect(root().textContent).toContain("查小明過敏（記憶）");
+      d.api.getHistory.mockImplementation(() => new Promise(() => {})); // 重讀還沒回來時也不能露出
+      const shell: Task = kind === "withdrawn"
+        ? { ...real, protected: true, withdrawn: true, title: "受保護的任務，請在 App 內查看", error: "受保護的錯誤說明，請在 App 內查看", steps: [step("受保護的步驟", "failed")] }
+        : { ...real, protected: true, status: "cancelling", cancel_reason: "memory_revoked", title: "受保護的任務，請在 App 內查看", steps: [step("受保護的步驟", "running")] };
+      // 畫面的快取還是舊的真實內容（display 給的是真實步驟），撤回時一律照外殼。
+      view.taskUpdated({ ...shell, steps: real.steps.map((x, i) => ({ ...x, status: shell.steps[i]!.status })) as Task["steps"], error: shell.error === null ? null : real.error }, { title: true, steps: [true], error: true });
+      expect(root().textContent, kind).not.toContain("查小明過敏（記憶）");
+      expect(root().textContent, kind).not.toContain("真實錯誤（記憶）");
+      expect(d.api.getHistory, kind).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it("F3: the progress card key changes when the real title arrives, so the card is redrawn instead of keeping the placeholder", () => {
+    const shell = { ...task({ status: "running", artifact_id: null }), protected: true, title: "受保護的任務，請在 App 內查看" };
+    const real = { ...shell, title: "准备晚饭", steps: shell.steps.map((s) => ({ ...s, title: "列出食材" })) };
+    expect(views.progressStructureKey([shell])).not.toBe(views.progressStructureKey([real]));
+    expect(views.progressStructureKey([real])).toBe(views.progressStructureKey([{ ...real }]));
   });
 
   it("re-translates its own aria-label and has a back button at the top of the detail view", async () => {
