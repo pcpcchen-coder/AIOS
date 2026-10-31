@@ -1,0 +1,136 @@
+name: Wake KWS wasm build
+
+# WK-01b（docs/17 §14.1 D2、docs/validation/wk-01b-prep-2026-10-31.md）：以固定的 emsdk 與 sherpa-onnx v2.0.1 自建
+# KWS 瀏覽器 wasm（只建 KWS，TTS 關閉），檢查產物不含 GPL espeak-ng／piper，並印出 SHA-256 清單。
+# - pull_request：只建置、檢查、上傳 workflow artifact、把清單寫進 job summary；不發布任何東西。
+# - workflow_dispatch 且在 main：另外建立 GitHub Release wake-runtime-<sherpa 版本>-<設定雜湊前 12 碼>；已存在就失敗，不覆蓋。
+# 雜湊要由人審閱後寫進 prototype/ambient-shell/shared/wake-runtime.json（另一個 PR）；這個 workflow 不改 repo 內容。
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/wake-wasm.yml
+      - prototype/ambient-shell/scripts/build-wake-wasm.sh
+      - prototype/ambient-shell/scripts/wake-wasm.mjs
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wake-wasm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build sherpa-onnx KWS wasm (emsdk pinned, KWS only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      manifest_sha256: ${{ steps.manifest.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Release name from the build configuration
+        id: tag
+        run: echo "tag=$(node prototype/ambient-shell/scripts/wake-wasm.mjs tag)" >> "$GITHUB_OUTPUT"
+
+      - name: Build (pinned emsdk and sherpa-onnx; includes the GPL espeak-ng/piper check)
+        run: bash prototype/ambient-shell/scripts/build-wake-wasm.sh "$RUNNER_TEMP/wake-build" "$RUNNER_TEMP/wake-out"
+
+      - name: License check (fails on GPL espeak-ng or piper files or symbols)
+        run: node prototype/ambient-shell/scripts/wake-wasm.mjs license-check "$RUNNER_TEMP/wake-build/sherpa-onnx/build-wasm-simd-kws" "$RUNNER_TEMP/wake-out"
+
+      - name: SHA-256 manifest to the job summary
+        id: manifest
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          node prototype/ambient-shell/scripts/wake-wasm.mjs manifest "$RUNNER_TEMP/wake-out" > "$RUNNER_TEMP/wake-runtime-manifest.json"
+          echo "sha256=$(sha256sum "$RUNNER_TEMP/wake-runtime-manifest.json" | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Wake runtime build: $TAG"
+            echo
+            echo "Not published on pull_request. Review, then copy the hashes into prototype/ambient-shell/shared/wake-runtime.json."
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/wake-runtime-manifest.json"
+            echo '```'
+            echo
+            echo "SHA-256 of wake-runtime-manifest.json: \`$(sha256sum "$RUNNER_TEMP/wake-runtime-manifest.json" | cut -d ' ' -f 1)\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cp "$RUNNER_TEMP/wake-runtime-manifest.json" "$RUNNER_TEMP/wake-out/wake-runtime-manifest.json"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.tag.outputs.tag }}
+          path: ${{ runner.temp }}/wake-out/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Publish GitHub Release (workflow_dispatch on main only)
+    needs: build
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.tag }}
+          path: wake-runtime
+
+      - name: Verify the artifact against the build job's manifest hash and the manifest
+        working-directory: wake-runtime
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          MANIFEST_SHA256: ${{ needs.build.outputs.manifest_sha256 }}
+        run: |
+          set -euo pipefail
+          echo "$MANIFEST_SHA256  wake-runtime-manifest.json" | sha256sum -c -
+          node -e '
+            const fs = require("fs"), crypto = require("crypto");
+            const m = JSON.parse(fs.readFileSync("wake-runtime-manifest.json", "utf8"));
+            const listed = [...m.files, ...m.release_only].map((f) => f.name).sort();
+            const present = fs.readdirSync(".").filter((n) => n !== "wake-runtime-manifest.json").sort();
+            if (JSON.stringify(listed) !== JSON.stringify(present)) { console.error(`unexpected files: ${present}`); process.exit(1); }
+            for (const f of [...m.files, ...m.release_only]) {
+              const got = crypto.createHash("sha256").update(fs.readFileSync(f.name)).digest("hex");
+              if (got !== f.sha256) { console.error(`hash mismatch: ${f.name}`); process.exit(1); }
+            }
+            if (m.release_tag !== process.env.TAG) { console.error("tag mismatch"); process.exit(1); }
+          '
+
+      - name: Create the release (fails if it already exists; releases are immutable)
+        working-directory: wake-runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+          FILES=(sherpa-onnx-wasm-kws-main.mjs sherpa-onnx-wasm-kws-main.wasm sherpa-onnx-kws.mjs LICENSE.sherpa-onnx.txt wake-runtime-manifest.json)
+          {
+            echo "Self-built sherpa-onnx KWS browser wasm for the Nous wake worker (WK-01b)."
+            echo "KWS only, TTS off; no espeak-ng or piper. Built from commit $GITHUB_SHA by run $GITHUB_RUN_ID."
+            echo "Install with: npm run wake:setup -- --product (verifies every SHA-256 against shared/wake-runtime.json)."
+          } > notes.md
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists. Releases are immutable: nothing was changed. A person must compare the existing release's wake-runtime-manifest.json with this build and resolve it (for example delete the release only if nothing references it, or change the build configuration)." | tee -a "$GITHUB_STEP_SUMMARY" >&2
+            exit 1
+          fi
+          gh release create "$TAG" "${FILES[@]}" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
+          echo "Created release $TAG." >> "$GITHUB_STEP_SUMMARY"

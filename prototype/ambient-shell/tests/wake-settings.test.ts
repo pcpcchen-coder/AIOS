@@ -88,11 +88,15 @@ describe("WakeSettingsStore: wake.json fails closed", () => {
   });
 });
 
-describe("wake runtime manifest (D2: empty in WK-01a, hash-verified like face-runtime)", () => {
-  it("the shipped list is empty, so the runtime is missing and nothing is served", () => {
-    expect(WAKE_RUNTIME_FILES).toEqual([]);
-    expect(checkWakeRuntime(root)).toEqual({ state: "missing", problems: [] });
+describe("wake runtime manifest (D2: pending_first_build in WK-01b prep, hash-verified like face-runtime)", () => {
+  it("the shipped list is pending_first_build, so the runtime is missing and nothing is served (schema details: tests/wake-runtime-manifest.test.ts)", () => {
+    expect(WAKE_RUNTIME_FILES.length).toBeGreaterThan(0);
+    expect(checkWakeRuntime(root)).toEqual({ state: "missing", problems: ["pending_first_build", "hash_missing", "keywords_pending"] });
     expect(wakeRuntimePath(root, "/wake-runtime/anything.wasm")).toBeNull();
+    // 有列出但還沒有雜湊的 release 檔也不提供
+    expect(wakeRuntimePath(root, "/wake-runtime/sherpa-onnx-wasm-kws-main.wasm")).toBeNull();
+    writeFileSync(join(root, "sherpa-onnx-wasm-kws-main.wasm"), "unverified");
+    expect(readVerifiedWakeRuntime(join(root, "sherpa-onnx-wasm-kws-main.wasm"))).toBeNull();
   });
 
   it("serves only listed files whose SHA-256 matches", () => {
@@ -159,6 +163,37 @@ describe("NOUS_WAKE=on", () => {
     }
   });
 
+  it("/wake-runtime/ is 404 for every file (model files with pinned hashes included) unless the runtime is ok", async () => {
+    const dist = join(root, "dist-app");
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(join(dist, "index.html"), "<!doctype html><title>Nous</title>");
+    const runtimeDir = join(root, "wake-runtime");
+    mkdirSync(runtimeDir, { recursive: true });
+    // 模型檔已有雜湊（WK-00 釘住）；內容不符，所以如果真的走到提供那一步會是 503，而不是 404
+    const model = WAKE_RUNTIME_FILES.find((f) => f.role === "model")!;
+    expect(model.sha256).toMatch(/^[0-9a-f]{64}$/);
+    writeFileSync(join(runtimeDir, model.name), "not the model");
+    const port = await freePort();
+    const store = new TaskStore(null);
+    const auth = new ChatGPTAuth({ dir: root, callbackPort: 0, onChange: () => {} });
+    const providers = new ProviderManager({ claude: null, chatgpt: new ChatGPTExecutor(auth, { model: null }), mock: new MockExecutor(5), auth, dir: root, preferred: "mock", onChange: () => {} });
+    let runtime: "ok" | "missing" = "missing";
+    const wake = { view: () => ({ wake_listen: false, device_id: null }), update: () => ({ wake_listen: false, device_id: null }), runtime: () => runtime };
+    const server = createApp({ store, runner: new TaskRunner(store, providers), settings: providers, auth, chat: providers, port, devPort: 5173, distDir: dist, wake, wakeRuntimeDir: runtimeDir });
+    await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
+    try {
+      const get = async (name: string) => (await fetch(`http://localhost:${port}/wake-runtime/${name}`)).status;
+      expect(checkWakeRuntime(runtimeDir).state).toBe("missing"); // pending_first_build
+      expect(await get(model.name)).toBe(404);
+      for (const f of WAKE_RUNTIME_FILES) expect(await get(f.name), f.name).toBe(404);
+      // 對照：runtime 是 ok 時同一個檔案會走到雜湊核對（不符 → 503），證明 404 來自 runtime 的閘門
+      runtime = "ok";
+      expect(await get(model.name)).toBe(503);
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
+  });
+
   it("CSP adds only 'wasm-unsafe-eval' (like the camera); the microphone policy is unchanged", () => {
     expect(pageHeaders(false, true)).toEqual({ ...pageHeaders(false), "Content-Security-Policy": pageHeaders(true)["Content-Security-Policy"] });
     expect(pageHeaders(false, true)["Permissions-Policy"]).toBe(pageHeaders(false)["Permissions-Policy"]);
@@ -194,7 +229,7 @@ describe("NOUS_WAKE=on", () => {
     const off = (await (await post({ wake_listen: false })).json()) as SettingsView;
     expect(off.wake).toEqual({ wake_listen: false, device_id: null, runtime: "missing" });
     expect(existsSync(join(root, "config", "wake.json"))).toBe(true);
-    // 引擎清單是空的：資料夾裡的檔案也不提供
+    // 引擎清單仍是 pending_first_build：資料夾裡的檔案也不提供
     expect((await fetch(`${handle.url}/wake-runtime/engine.wasm`)).status).toBe(404);
     expect((await fetch(`${handle.url}/wake-runtime/`)).status).toBe(404);
   });
