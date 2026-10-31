@@ -169,5 +169,8 @@
   "校正人臉辨識…": "Calibrate face recognition…",
   "刪除": "Delete",
   "要永久刪除「{0}」這筆任務與它的成果嗎？": "Permanently delete the task “{0}” and its result?",
-  "刪除後無法復原。": "This cannot be undone."
+  "刪除後無法復原。": "This cannot be undone.",
+  "要打開鏡頭嗎？": "Turn on the camera?",
+  "鏡頭影像只在這台 Mac 本機處理，不保存、不上傳。畫面右下角的圓點顯示鏡頭的實際狀態；隨時可以在選單列或說「關掉鏡頭」關閉。": "Camera images are processed only on this Mac. They are never saved or uploaded. The dot at the bottom-right of the screen shows the camera's real state. You can turn it off at any time from the menu bar or by saying “turn off the camera”.",
+  "鏡頭沒有打開": "The camera was not turned on"
 }

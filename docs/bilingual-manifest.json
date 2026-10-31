@@ -158,8 +158,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "c31d10d252ae298f9bb084c87e476897bc2b14a836b81c1f671e8a5fb83e744e",
-      "translationSha256": "18b294625d8127781a714211a23c75d88b80e1c792c01974cac658c930d250a8"
+      "sourceSha256": "908952de432b803991a5533e44cd3de74d26aec9ffd983b055d1af4e332b067e",
+      "translationSha256": "7a10aa86acf9cc739f46bf5aaaf3b5feb0df5a52d0f927731e09c84fcd0750f0"
     },
     {
       "source": "docs/README.md",
@@ -186,8 +186,8 @@
       "source": "docs/adr/ADR-0003-local-wake-and-voice-recognition.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/adr/ADR-0003-local-wake-and-voice-recognition.en.md",
-      "sourceSha256": "5c0779f5c3ef3ac6fb585064ce380939f5ab501e2f596d42d09b216fbf4b2f8d",
-      "translationSha256": "39b239cc3a860a54678c1ee87b5896fcd2db798db0dbc22dac4190ab0eb0bbb2"
+      "sourceSha256": "17c2dfde68a0ba39bc51b0fb4399bfedd1151116513d9898d6a7d0191b62780b",
+      "translationSha256": "4379d6b13ebb681da82e9c453aee9346ce47bde196ef56956874750587a56eef"
     },
     {
       "source": "docs/development/brain-regions.md",
@@ -228,8 +228,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "0e8f513e6c289bc485c28e7f167c25b8af19c1a1a59f29e46e91c862c401c63a",
-      "translationSha256": "a779e42bec7ecddf45c37804ef31888f7b8e9443fd94d098bb35ee78c1762347"
+      "sourceSha256": "69738e824dd9272e727d18c0e3b93338cd9f0d15186f9808e576193c72896a5d",
+      "translationSha256": "93ac8787e27a98b156f76bd2c6cc254e82b67e8a0e14e453f308df00fb8395b7"
     },
     {
       "source": "docs/validation/bilingual-2026-10-26.md",
@@ -258,6 +258,13 @@
       "translation": "docs/validation/brain-regions-2026-10-20.en.md",
       "sourceSha256": "95eef9f81c59320b87f49ff48752de96c9b373dc8368166cb0c49631840e69f2",
       "translationSha256": "cb0c81a39f7a2f05961f02b4b5194766e0e8bceb35cef9f668ce926ec3855bba"
+    },
+    {
+      "source": "docs/validation/camera-enable-main-only-2026-10-31.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/camera-enable-main-only-2026-10-31.en.md",
+      "sourceSha256": "f42146b11fe48641fba01963b66cad23f0c35252041ee8fad20d175dc5ad7644",
+      "translationSha256": "261cc6664b5dbc2b457fcfe068a362d20c4eb1070b008dcc075b3eb5a2ff1c79"
     },
     {
       "source": "docs/validation/camera-preview-2026-10-21.md",
@@ -515,8 +522,8 @@
       "source": "docs/validation/wk-01a-2026-10-31.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/wk-01a-2026-10-31.en.md",
-      "sourceSha256": "b809b643ad0fea14da26fca09e5282a44f05d48efc895fb4428ac705a40757bb",
-      "translationSha256": "ad6eae2965ef20a83623721568354bf3d885c19269fc2328a616d418578b2c6f"
+      "sourceSha256": "e6b8f963689bebb556f5f0026ef1dc39f89be75287dd580ed95382dff8745f60",
+      "translationSha256": "e1637a8732b010ea916234a31e45dc87b53762af2f3b5f27b919d816a44c6645"
     },
     {
       "source": "docs/validation/wk-01b-prep-2026-10-31.md",

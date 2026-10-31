@@ -33,7 +33,7 @@ KWS 在 renderer 執行，核心收到的「偵測到喚醒詞」只是 renderer
 | 可見 | 沿用既有的即時語音指示與計費說明；每次 `wake_word` 通話記入 F6 費用紀錄（路徑、連線秒數、是否因無人聲自動結束、usage，缺資料標「未知」） |
 | `voice_probe` | 新 op，送出聲音特徵，比照 `ambient_probe`：不需要管理 session，但**回應不含任何結果**、被拒時不說原因；每秒最多 4 次、同時最多一個待處理；只在常駐聆聽或「通話中辨認說話者」開啟，且家人辨識管理畫面沒開時接受 |
 | `greeting` | 只接受核心在 `/api/realtime/start`（source 為 `wake_word`）發出、尚未使用、對應語音工作階段真的連上且仍在進行、連上後 20 秒內的互動 ID，比照 ID-02 的 `claimGreeting`；頁面自編的 ID 只得到不含名字的問候 |
-| 開關（2026-10-31，WK-01a 審查） | 「常駐喚醒聆聽」只能由 App 主程序在原生說明之後打開：主程序在同一個行程直接呼叫核心的 `NousHandle.wake.setListen`，不經 HTTP、也沒有 preload API。`POST /api/settings/wake` 收到 `wake_listen: true` 一律 403；頁面只能記下真的在聽的麥克風（`device_id`）或關掉（關掉一定安全）。瀏覽器版因此不能打開常駐聆聽。`POST /api/settings/camera` 有同一類問題（頁面腳本可以打開鏡頭），列為另一個已知事項，本批不改 |
+| 開關（2026-10-31，WK-01a 審查） | 「常駐喚醒聆聽」只能由 App 主程序在原生說明之後打開：主程序在同一個行程直接呼叫核心的 `NousHandle.wake.setListen`，不經 HTTP、也沒有 preload API。`POST /api/settings/wake` 收到 `wake_listen: true` 一律 403；頁面只能記下真的在聽的麥克風（`device_id`）或關掉（關掉一定安全）。瀏覽器版因此不能打開常駐聆聽。`POST /api/settings/camera` 有同一類問題（頁面腳本可以打開鏡頭），列為另一個已知事項，本批不改；2026-10-31 另批修正：App 裡只有主程序能在原生說明之後打開鏡頭，瀏覽器版依使用者決定照舊可以從頁面打開（[驗證](../validation/camera-enable-main-only-2026-10-31.md)） |
 
 ### 2.3 殘餘風險如何擴大
 

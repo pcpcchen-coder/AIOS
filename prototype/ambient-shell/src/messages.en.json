@@ -727,5 +727,10 @@
   "頭常是歪的：坐正一點，或確認鏡頭沒有裝歪": "Your head is often tilted: sit upright, or check the camera is mounted level",
   "臉常碰到畫面邊緣：調整鏡頭方向，讓你在畫面中間": "Your face often touches the frame edge: aim the camera so you are in the middle",
   "常被判定沒有面向螢幕：可放寬「面向螢幕的寬鬆度」": "Often judged as not facing the screen: loosen “Facing-the-screen tolerance”",
-  "看得清楚卻認不出：光線或樣子和登記時差很多，可以重新登記": "Seen clearly but not recognised: lighting or appearance differ a lot from enrolment; consider enrolling again"
+  "看得清楚卻認不出：光線或樣子和登記時差很多，可以重新登記": "Seen clearly but not recognised: lighting or appearance differ a lot from enrolment; consider enrolling again",
+  "這個版本的 App 不能從頁面打開鏡頭；請用選單列打開": "This version of the App cannot turn on the camera from the page; use the menu bar",
+  "已取消開啟鏡頭": "Turning on the camera was cancelled",
+  "鏡頭不能打開：App 的鏡頭功能不可用": "The camera cannot be turned on: the App's camera feature is unavailable",
+  "鏡頭沒有打開：{0}": "The camera was not turned on: {0}",
+  "鏡頭沒有打開": "The camera was not turned on"
 }

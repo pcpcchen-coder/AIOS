@@ -130,7 +130,11 @@ export interface SettingsView {
   /** 即時語音模式（OpenAI Realtime）；未提供時視為不可用。 */
   realtime?: RealtimeInfo;
   /** 雙目鏡頭設定（docs/11）；未提供時不使用鏡頭。 */
-  camera?: CameraSettings;
+  /**
+   * enable_via：誰能打開鏡頭。"app"＝只有 App 主程序在原生說明之後（POST /api/settings/camera 的 active: true 回 403，
+   * 頁面經 nousDesktop.cameraEnable 請主程序問）；沒有這個欄位＝頁面可以經 HTTP 打開（終端機／瀏覽器版，和以前相同）。
+   */
+  camera?: CameraSettings & { enable_via?: "app" | "page" };
   /** 語音閒置秒數（voice.json）；本機核心一定提供，未提供時用 DEFAULT_VOICE_PREFS。 */
   voice?: VoicePrefs;
   /**
