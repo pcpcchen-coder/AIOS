@@ -187,6 +187,15 @@ describe("SenseProcessor", () => {
     expect(run(lowered).filter((e) => e.type === "gesture")).toHaveLength(0);
   });
 
+  it("Mac 2026-10-31: a raised hand at 0.6 palm, or a palm in front of the face just below the shoulder, still stops", () => {
+    const raisedWeak = Array.from({ length: 15 }, (_, i) => ({ t: i * 80, p: person({ raiseRight: true }), palm: 0.6 }));
+    expect(run(raisedWeak).filter((e) => e.type === "gesture")).toHaveLength(1);
+    const face = Array.from({ length: 15 }, (_, i) => ({ t: i * 80, p: person({ wrist: { x: 120, y: 40, z: 1900 } }), palm: 0.7 }));
+    expect(run(face).filter((e) => e.type === "gesture")).toHaveLength(1);
+    const tooWeak = Array.from({ length: 15 }, (_, i) => ({ t: i * 80, p: person({ raiseRight: true }), palm: 0.5 }));
+    expect(run(tooWeak).filter((e) => e.type === "gesture")).toHaveLength(0);
+  });
+
   it("events never carry image data or coordinates", () => {
     const frames = Array.from({ length: 20 }, (_, i) => ({ t: i * 80, p: person({ raiseRight: true }), palm: 0.9 }));
     for (const e of run(frames)) {

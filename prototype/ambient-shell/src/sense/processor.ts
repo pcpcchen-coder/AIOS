@@ -28,7 +28,11 @@ export interface FrameDetections {
   openPalm: number | null;
 }
 
-export const OPEN_PALM_MIN_SCORE = 0.7;
+/**
+ * 張開手掌的最低分數。George 2026-10-31 Mac 實測：1 m 處手舉高時 Open_Palm 只有 0.60–0.68、
+ * 手掌擺在臉前 0.70–0.72，原本的 0.7 讓舉高的手幾乎都不算；垂手時沒有分數（null）。
+ */
+export const OPEN_PALM_MIN_SCORE = 0.55;
 const MIN_VISIBILITY = 0.5;
 
 export class SenseProcessor {

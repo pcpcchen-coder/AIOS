@@ -977,7 +977,9 @@ const sense = new SenseController({
   // 同步辨識只讀感知狀態，決定取樣與追蹤世代；看著說話的計時不看它。
   onSense: (snapshot) => ambient.update(snapshot),
   interruptSpeech: () => {
-    if (realtime.current === "speaking") realtime.interrupt();
+    // 即時語音還在連線（還沒打招呼）時舉手掌：直接結束這次語音，不再打招呼（ID-02 第 9 步）。
+    if (realtime.current === "connecting" || (realtime.current === "off" && realtimeStarting)) stopRealtime();
+    else if (realtime.current === "speaking") realtime.interrupt();
     else if (conversation.current === "speaking") conversation.interrupt();
   },
   onLeave: () => {
