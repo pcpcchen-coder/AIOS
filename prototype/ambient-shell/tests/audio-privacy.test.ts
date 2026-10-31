@@ -184,7 +184,7 @@ describe("audio privacy (static)", () => {
   it("every postMessage in src/audio is on a fixed allowlist: the worker posts only events, the worklet sends samples only to the worker port", () => {
     // 審查 m4：逐一列出每個 postMessage（含 port 與 worker），新增任何一個都要在這裡說明。
     const ALLOWED: Record<string, string[]> = {
-      "capture-worklet.ts": ["this.out.postMessage(this.buf, [this.buf.buffer]);"],
+      "capture-worklet.ts": ["this.out.postMessage(full, [full.buffer]);"],
       "capture.ts": [
         'node?.port.postMessage({ type: "stop" });',
         'w.postMessage({ type: "clear" });',

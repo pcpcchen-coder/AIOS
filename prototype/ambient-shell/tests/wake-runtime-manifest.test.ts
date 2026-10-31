@@ -11,8 +11,8 @@ import { builtTestManifest, FAKE_BYTES, sha256 } from "./fixtures/wake-wasm.ts";
 
 // WK-01b 準備批次：shared/wake-runtime.json 的格式、pending_first_build 與 built 標記的效果，以及 npm run wake:setup -- --product 的核對
 // （下載以注入的 fetchBytes 代替，不連網）。2026-10-31 起出貨的清單是 built（release wake-runtime-2.0.1-5961b4196003，
-// run 41206217255），關鍵詞仍是 pending_owner_numbers，所以引擎仍回報 missing（只剩 keywords_pending）。
-// pending_first_build 的情況改以 pendingManifest() 明確建構來測。
+// run 41206217255）；關鍵詞依 George 的 WK-00 Mac 試跑設定為 Hello Nous（configured），檔案都在且雜湊相符時引擎才是 ok。
+// pending_first_build 與關鍵詞未定的情況改以 pendingManifest()、pendingKeywords() 明確建構來測。
 
 const app = join(import.meta.dirname, "..");
 /** 2026-10-31 release（GitHub Actions run 41206217255，main bf76595）三個 release 檔的 SHA-256，與 PR 建置 run 41188249061 相同。 */
@@ -23,9 +23,15 @@ const RELEASE_SHA256: Record<string, string> = {
   "sherpa-onnx-wasm-kws-main.wasm": "116728205719c761bd8d301cae6745957dd86cd5a6a7b4ab63e6424ccec76aca",
   "sherpa-onnx-kws.mjs": "bd10d04c191f9db1e12884fa7f41c6a1aea5b50becddda94eee799fef6d2acc8",
 };
+/** 出貨的清單，但關鍵詞還在等 George 的數字（2026-10-31 WK-00 之前的狀態）。 */
+function pendingKeywords(): WakeRuntimeManifest {
+  const m = structuredClone(WAKE_RUNTIME);
+  m.keywords = { status: "pending_owner_numbers", model: null, keywords_score: null, keywords_threshold: null, entries: [] };
+  return m;
+}
 /** 第一次 CI 建置之前的清單狀態（以出貨的清單明確建構，不依賴出貨檔本身）。 */
 function pendingManifest(): WakeRuntimeManifest {
-  const m = structuredClone(WAKE_RUNTIME);
+  const m = pendingKeywords();
   m.status = "pending_first_build";
   m.build.release_tag = null;
   m.build.config_sha256 = null;
@@ -39,7 +45,7 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("shared/wake-runtime.json schema", () => {
-  it("the shipped manifest is valid and built from the 2026-10-31 release (real release hashes, tag carries the config hash prefix) with empty keywords", () => {
+  it("the shipped manifest is valid and built from the 2026-10-31 release (real release hashes, tag carries the config hash prefix) with the Hello Nous keywords", () => {
     expect(validateWakeRuntimeManifest(WAKE_RUNTIME)).toEqual([]);
     expect(WAKE_RUNTIME.status).toBe("built");
     expect(WAKE_RUNTIME.build.release_repo).toBe("pcpcchen-coder/AIOS");
@@ -52,7 +58,20 @@ describe("shared/wake-runtime.json schema", () => {
     expect(Object.fromEntries(release.map((f) => [f.name, f.sha256]))).toEqual(RELEASE_SHA256);
     // 不是測試替身的雜湊
     for (const f of release) expect(f.sha256, f.name).not.toBe(sha256(FAKE_BYTES[f.name]!));
-    expect(WAKE_RUNTIME.keywords).toEqual({ status: "pending_owner_numbers", model: null, keywords_score: null, keywords_threshold: null, entries: [] });
+    // WK-00 Mac（docs/validation/wk-00-mac-2026-10-31.md）：英文 Hello Nous，zh-en-3M 的 ARPAbet；Nous 收 nose／nows／noose 三種念法
+    expect(WAKE_RUNTIME.keywords).toEqual({
+      status: "configured",
+      model: "zh-en-3M",
+      keywords_score: 1.5,
+      keywords_threshold: 0.15,
+      entries: [
+        { id: "HELLO_NOUS_OW", tokens: "HH AH0 L OW1 N OW1 S", boost: null, threshold: null },
+        { id: "HELLO_NOUS_AW", tokens: "HH AH0 L OW1 N AW1 S", boost: null, threshold: null },
+        { id: "HELLO_NOUS_UW", tokens: "HH AH0 L OW1 N UW1 S", boost: null, threshold: null },
+      ],
+    });
+    // 每個發音單元都在 zh-en-3M 的 tokens.txt（WK-00 spike 的模型資料夾不進 git，所以以 ARPAbet 的格式檢查代替）
+    for (const e of WAKE_RUNTIME.keywords.entries) for (const t of e.tokens.split(" ")) expect(t, e.id).toMatch(/^[A-Z]{1,2}[0-2]?$/);
   });
 
   it("model files reuse the WK-00 pinned archives and hashes (spike/wake/models.json), int8 encoder/joiner + decoder + tokens for both models", () => {
@@ -112,10 +131,13 @@ describe("shared/wake-runtime.json schema", () => {
     expect(validateWakeRuntimeManifest(m)).not.toEqual([]);
   });
 
-  it("the shipped built manifest is still not ok while keywords are pending (only keywords_pending); pending_first_build is never ok", () => {
-    expect(wakeRuntimeBlockers(WAKE_RUNTIME)).toEqual(["keywords_pending"]);
-    expect(checkWakeRuntime(root)).toEqual({ state: "missing", problems: ["keywords_pending"] });
-    expect(checkWakeRuntime(null)).toEqual({ state: "missing", problems: ["keywords_pending"] });
+  it("the shipped manifest has no blockers, so the runtime depends only on the files; keywords pending or pending_first_build are never ok", () => {
+    expect(wakeRuntimeBlockers(WAKE_RUNTIME)).toEqual([]);
+    // 沒有設定資料夾、或資料夾是空的：仍不可用（不是 ok）
+    expect(checkWakeRuntime(null)).toEqual({ state: "not_configured", problems: [] });
+    expect(checkWakeRuntime(root)).toEqual({ state: "missing", problems: WAKE_RUNTIME.files.map((f) => f.name) });
+    // 關鍵詞未定：只有 keywords_pending
+    expect(wakeRuntimeBlockers(pendingKeywords())).toEqual(["keywords_pending"]);
     // 第一次建置之前的狀態：三個阻擋理由
     expect(wakeRuntimeBlockers(pendingManifest())).toEqual(["pending_first_build", "hash_missing", "keywords_pending"]);
     // 即使雜湊與關鍵詞都設好，只要還標著 pending_first_build 就不是 ok（格式也不合法）
@@ -175,11 +197,10 @@ describe("npm run wake:setup -- --product (verification; downloads replaced by a
     );
   });
 
-  it("keywords pending does not stop setup (the script checks only the build and hashes); the installed folder still reports missing with only keywords_pending", async () => {
-    // 出貨的清單，release 雜湊換成測試替身的雜湊（真的 release 位元組不在測試裡）；keywords 仍是 pending_owner_numbers
-    const m = structuredClone(WAKE_RUNTIME);
+  it("keywords pending does not stop setup (the script checks only the build and hashes); the installed folder then reports missing with only keywords_pending, and ok with the shipped keywords", async () => {
+    // 關鍵詞未定的清單，release 雜湊換成測試替身的雜湊（真的 release 位元組不在測試裡）
+    const m = pendingKeywords();
     for (const f of m.files) f.sha256 = sha256(FAKE_BYTES[f.name]!);
-    expect(m.keywords.status).toBe("pending_owner_numbers");
     expect(validateWakeRuntimeManifest(m)).toEqual([]);
     const src = source();
     const verified = await verifyProduct({ manifest: m, models: testModels(), fetchBytes: src.fetchBytes, extract });
@@ -190,6 +211,9 @@ describe("npm run wake:setup -- --product (verification; downloads replaced by a
     expect(readdirSync(dest).sort()).toEqual(m.files.map((f) => f.name).sort());
     // 檔案都對，但關鍵詞未定：引擎仍不可用
     expect(checkWakeRuntime(dest, m.files, wakeRuntimeBlockers(m))).toEqual({ state: "missing", problems: ["keywords_pending"] });
+    // 同樣的檔案配上出貨的關鍵詞：ok
+    const shipped = { ...structuredClone(WAKE_RUNTIME), files: m.files };
+    expect(checkWakeRuntime(dest, shipped.files, wakeRuntimeBlockers(shipped))).toEqual({ state: "ok", problems: [] });
   });
 
   it("fails on any single missing hash, and on any manifest format error, before downloading", async () => {

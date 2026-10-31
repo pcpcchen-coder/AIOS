@@ -703,7 +703,7 @@ George decided the following three items on 2026-10-31. They affect only the del
 
 | # | Item | Decision |
 |---|---|---|
-| D1 | Splitting WK-01 | Do WK-01a first (foundation, detector interface and wiring; without an engine the product detector honestly reports `runtime_missing` and does not pretend to detect; the fake detector exists only in tests). WK-01b (the real engine) waits for George's Mac WK-00 trial results (5 attempts per person) |
+| D1 | Splitting WK-01 | Do WK-01a first (foundation, detector interface and wiring; without an engine the product detector honestly reports `runtime_missing` and does not pretend to detect; the fake detector exists only in tests). WK-01b (the real engine) waits for George's Mac WK-00 trial results (5 attempts per person). (George's 2026-10-31 trial: neither model recognised "哈囉努斯", so the wake word changed to the English Hello Nous, zh-en-3M, boost 1.5, threshold 0.15; see [WK-00 Mac trial](validation/wk-00-mac-2026-10-31.en.md); other family members and the TV negative still to do) |
 | D2 | Building the wasm | Built by GitHub Actions (pinned emsdk and sherpa-onnx v2.0.1, artifact hashes written to the manifest) in WK-01b. WK-01a only defines `shared/wake-runtime.json` (empty list), and the core's `/wake-runtime/` serves only listed files whose hashes match, as face-runtime does. If option A fails, the first fallback is main-thread wasm; option B is a last resort and needs a separate ADR |
 | D3 | “Recognize speaker during calls” | Add the menu row now, **disabled** (not clickable, no effect), labelled as available after SP-02 |
 

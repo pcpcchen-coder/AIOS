@@ -50,14 +50,22 @@ function expectLocked(r: Rig): void {
   for (const key of LOCKED_GLOBALS) expect(() => (r.scope as unknown as Record<string, () => unknown>)[key]!(), key).toThrow(NetworkLockedError);
 }
 
-describe("SherpaWasmDetector with the shipped manifest (built, keywords pending)", () => {
+/** 出貨的清單，但關鍵詞還在等 George 的數字（2026-10-31 WK-00 之前的狀態；出貨的清單已設定 Hello Nous）。 */
+function pendingKeywords(): WakeRuntimeManifest {
+  const m = structuredClone(WAKE_RUNTIME);
+  m.keywords = { status: "pending_owner_numbers", model: null, keywords_score: null, keywords_threshold: null, entries: [] };
+  return m;
+}
+
+describe("SherpaWasmDetector with a blocked manifest (built but keywords pending, or pending_first_build)", () => {
   it("reports runtime_missing (keywords pending) without touching the network, and locks the network anyway", async () => {
-    expect(wakeRuntimeBlockers(WAKE_RUNTIME)).toEqual(["keywords_pending"]);
+    const pending = pendingKeywords();
+    expect(wakeRuntimeBlockers(pending)).toEqual(["keywords_pending"]);
     const scope = fakeScope();
-    const net = createRuntimeNet(scope, WAKE_RUNTIME.url_prefix, WAKE_RUNTIME.files.map((f) => f.name), async () => {
+    const net = createRuntimeNet(scope, pending.url_prefix, pending.files.map((f) => f.name), async () => {
       throw new Error("must not import");
     });
-    await expect(new SherpaWasmDetector(WAKE_RUNTIME, net).load()).rejects.toMatchObject({ reason: "runtime_missing" });
+    await expect(new SherpaWasmDetector(pending, net).load()).rejects.toMatchObject({ reason: "runtime_missing" });
     expect(scope.requests).toEqual([]);
     expect(net.locked).toBe(true);
     await expect(net.bytes(WAKE_RELEASE_FILES.wasm)).rejects.toBeInstanceOf(NetworkLockedError);
@@ -65,14 +73,14 @@ describe("SherpaWasmDetector with the shipped manifest (built, keywords pending)
 
   it("the worker core turns that into load_error runtime_missing and never says started", async () => {
     const out: WakeWorkerOut[] = [];
-    const core = new WakeWorkerCore(new SherpaWasmDetector(WAKE_RUNTIME, null), (m) => out.push(m));
+    const core = new WakeWorkerCore(new SherpaWasmDetector(pendingKeywords(), null), (m) => out.push(m));
     await core.init(48_000);
     core.audio(new Float32Array(480));
     expect(out).toEqual([{ type: "load_error", reason: "runtime_missing" }]);
   });
 
   it("a pending_first_build manifest (constructed: no release hashes) also reports runtime_missing without touching the network", async () => {
-    const pending = structuredClone(WAKE_RUNTIME);
+    const pending = pendingKeywords();
     pending.status = "pending_first_build";
     pending.build.release_tag = null;
     pending.build.config_sha256 = null;
@@ -125,6 +133,11 @@ describe("SherpaWasmDetector load (fake wasm module, test manifest)", () => {
     expect(seen.keywordsThreshold).toBeCloseTo(0.3, 6);
     expect(seen).toMatchObject({ sampleRate: 16_000, featureDim: 80, numThreads: 1, provider: "cpu", maxActivePaths: 4, numTrailingBlanks: 1, ...{ encoder: KWS_FS_PATHS.encoder, decoder: KWS_FS_PATHS.decoder, joiner: KWS_FS_PATHS.joiner, tokens: KWS_FS_PATHS.tokens } });
     expect(kwsConfig(builtTestManifest()).modelConfig.debug).toBe(0);
+    // 出貨的清單（WK-00 Mac：Hello Nous 三種 Nous 念法，提升分數 1.5、門檻 0.15）
+    const shipped = kwsConfig(WAKE_RUNTIME);
+    expect(shipped.keywordsBuf).toBe("HH AH0 L OW1 N OW1 S @HELLO_NOUS_OW\nHH AH0 L OW1 N AW1 S @HELLO_NOUS_AW\nHH AH0 L OW1 N UW1 S @HELLO_NOUS_UW\n");
+    expect(shipped.keywordsScore).toBe(1.5);
+    expect(shipped.keywordsThreshold).toBe(0.15);
   });
 
   it("maps engine results to keyword_index only, ignores unknown keywords, resets after a hit and zero-fills the sample copy in the wasm heap", async () => {
