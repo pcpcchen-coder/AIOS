@@ -158,15 +158,15 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "5df5706bec15938a3259e1933701b6c3388a86866e5b17561c08f8da856177bb",
-      "translationSha256": "777387fbc9035ca70bcc7fb6ecc41c9f3eb53562ce833840c40bffc4f1ae69ae"
+      "sourceSha256": "6d281d1c371d2884f07633d953369f24b0e2e0edf27da914ecec139c04e882ac",
+      "translationSha256": "7ebcb15445df094cd666dac693d2ff50d65cf34a7a41cb39ae0c3b9cebf96f4f"
     },
     {
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "fa32342db026d4bb808a506504c9f1b4b6c0ebd51a8e385ad0a16a2571b8134f",
-      "translationSha256": "7bd5bbc99a9d26be19afc55ce8e959c486ca35c39d9f1b1176b7f35d4d6c5a78"
+      "sourceSha256": "793be1b6fbc52559e0958f0dbad322469cdff18b890c76844cb8fd9f0f11cf74",
+      "translationSha256": "be65e805f221dcdfbb40da5838f0f5a1818fcc2bbca7290e393245396dcb08ac"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
@@ -228,8 +228,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "d7f042719ea26923fdd9113627c3ad70ce6fdae72a70bb9eab1b407aecdbe3f6",
-      "translationSha256": "597ab9dccdd229cc9afb575bd3a7eca0a299945f232c19d472f377a1ab3ead97"
+      "sourceSha256": "36ade57c3cabb4e5a1a65b3975309a878f907ef96743b669fd364642bb883454",
+      "translationSha256": "ee58faf176adece9d2947da130f7f1fe6ff919f0e8225259757cdadeadc339c2"
     },
     {
       "source": "docs/validation/bilingual-2026-10-26.md",
