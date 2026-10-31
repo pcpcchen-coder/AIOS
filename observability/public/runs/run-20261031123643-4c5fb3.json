@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-31T12:36:43.021Z",
-  "updated_at": "2026-10-31T12:36:57.610Z",
+  "updated_at": "2026-10-31T13:10:38.211Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-31T13:10:38.210Z",
+      "ended_at": "2026-10-31T13:10:38.211Z",
+      "note": "WK-02 implemented",
       "evidence": []
     },
     {
@@ -112,6 +112,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "WK-02 plan + George decisions"
+    },
+    {
+      "at": "2026-10-31T13:10:38.211Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "WK-02 implemented"
     }
   ],
   "provenance": "Agent self-reported"
