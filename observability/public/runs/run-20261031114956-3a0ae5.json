@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-31T11:49:56.051Z",
-  "updated_at": "2026-10-31T11:50:09.224Z",
+  "updated_at": "2026-10-31T11:50:14.193Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-31T11:50:14.192Z",
+      "ended_at": "2026-10-31T11:50:14.192Z",
+      "note": "camera enable main-only design: HTTP active:true 403, App native dialog via IPC",
       "evidence": []
     },
     {
@@ -103,6 +103,13 @@
       "at": "2026-10-31T11:50:09.224Z",
       "type": "step_updated",
       "step_id": "checkpoint",
+      "status": "passed",
+      "note": "camera enable main-only design: HTTP active:true 403, App native dialog via IPC"
+    },
+    {
+      "at": "2026-10-31T11:50:14.192Z",
+      "type": "step_updated",
+      "step_id": "architect",
       "status": "passed",
       "note": "camera enable main-only design: HTTP active:true 403, App native dialog via IPC"
     }
