@@ -18,6 +18,11 @@ export interface BrainVisualState {
   progress: number | null;
   /** Independent task, topic and actual audio owners determine sustained region focus. */
   activity?: readonly RegionActivity[];
+  /**
+   * 即時語音的連線狀態：connecting 時外圈琥珀色虛線慢轉（還不能說話）；live 時整顆腦依腦區上色、外圈換成薄荷綠
+   * （George 2026-10-31：只有右上角的字不夠明顯，不知道何時該說話）。沒有即時語音時為 off 或省略。
+   */
+  voice?: "off" | "connecting" | "live";
 }
 
 interface Node3 {
@@ -175,6 +180,9 @@ export class Brain {
   private state: BrainVisualState = { conversation: "idle", listening: false, working: false, layout: "center", progress: null };
   private energy = 0.35;
   private listenLevel = 0;
+  /** 即時語音接通的程度 0–1（緩動），與連線中的程度。 */
+  private liveLevel = 0;
+  private connectLevel = 0;
   private yaw = 0;
   private swing = 0;
   private time = 0;
@@ -521,6 +529,8 @@ export class Brain {
     const targetEnergy = Math.max(this.state.working ? 0.8 : 0, phaseEnergy);
     this.energy += (targetEnergy - this.energy) * Math.min(1, dt * 2.5);
     this.listenLevel += ((this.state.listening ? 1 : 0) - this.listenLevel) * Math.min(1, dt * 6);
+    this.liveLevel += ((this.state.voice === "live" ? 1 : 0) - this.liveLevel) * (reduced ? 1 : Math.min(1, dt * 3));
+    this.connectLevel += ((this.state.voice === "connecting" ? 1 : 0) - this.connectLevel) * (reduced ? 1 : Math.min(1, dt * 4));
     // 左右緩慢擺動（而非整圈旋轉），讓兩個半球與中間的縱裂保持可見。
     if (!reduced) this.swing += dt * (0.12 + 0.35 * this.energy);
     this.yaw = YAW_BASE + YAW_SWING * Math.sin(this.swing);
@@ -567,8 +577,8 @@ export class Brain {
 
     // 中心光暈
     const glow = ctx.createRadialGradient(this.cx, this.cy, 0, this.cx, this.cy, R * 1.9);
-    glow.addColorStop(0, rgba(this.tinted(VIOLET), 0.16 * bright));
-    glow.addColorStop(0.45, rgba(this.tinted(CYAN), 0.06 * bright));
+    glow.addColorStop(0, rgba(this.tinted(mix(VIOLET, MINT, 0.6 * this.liveLevel)), (0.16 + 0.14 * this.liveLevel) * bright));
+    glow.addColorStop(0.45, rgba(this.tinted(mix(CYAN, MINT, 0.5 * this.liveLevel)), (0.06 + 0.08 * this.liveLevel) * bright));
     glow.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = glow;
     ctx.fillRect(this.cx - R * 2, this.cy - R * 2, R * 4, R * 4);
@@ -622,7 +632,7 @@ export class Brain {
     ctx.lineWidth = 0.7;
     buckets.forEach((edges, b) => {
       const z = -0.9 + b * 0.6;
-      ctx.strokeStyle = rgba(this.tinted(CYAN), this.depthAlpha(z) * 0.4 * bright);
+      ctx.strokeStyle = rgba(this.tinted(mix(CYAN, MINT, 0.45 * this.liveLevel)), this.depthAlpha(z) * (0.4 + 0.15 * this.liveLevel) * bright);
       ctx.beginPath();
       for (const [i, j] of edges) {
         ctx.moveTo(p[i * 3], p[i * 3 + 1]);
@@ -640,6 +650,8 @@ export class Brain {
       const a = this.depthAlpha(z) * bright;
       const node = this.nodes[i];
       let color: RGB = node.inner ? VIOLET : (GROUP_COLOR[node.group] ?? mix(CYAN, VIOLET, (node.x + 1) / 2));
+      // 即時語音接通：各腦區亮出自己的顏色，一眼看得出「腦子活起來了」。
+      if (node.region && this.liveLevel > 0.01) color = mix(color, REGION_COLOR[node.region], 0.9 * this.liveLevel);
       const act = node.region ? this.activation[node.region] : 0;
       if (act > 0.01) color = mix(color, REGION_COLOR[node.region!], Math.min(1, act * 1.1));
       ctx.fillStyle = rgba(this.tinted(color), Math.min(1, a));
@@ -696,12 +708,28 @@ export class Brain {
 
   private drawRings(R: number): void {
     const { ctx } = this;
-    // 聆聽光環
-    if (this.listenLevel > 0.01) {
-      ctx.strokeStyle = rgba(CYAN, 0.45 * this.listenLevel);
+    const reduced = this.reducedMotion.matches;
+    // 即時語音連線中：琥珀色虛線慢轉，表示還在接通、先別說話。
+    if (this.connectLevel > 0.01) {
+      ctx.save();
+      ctx.strokeStyle = rgba(AMBER, 0.6 * this.connectLevel);
       ctx.lineWidth = 2;
-      ctx.shadowColor = rgba(CYAN, 0.8 * this.listenLevel);
-      ctx.shadowBlur = 18;
+      ctx.setLineDash([R * 0.12, R * 0.08]);
+      ctx.lineDashOffset = reduced ? 0 : -this.time * R * 0.4;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, R * 1.32, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // 聆聽光環；即時語音接通後換成較粗、會呼吸的薄荷綠，表示可以說話了。
+    if (this.listenLevel > 0.01 || this.liveLevel > 0.01) {
+      const level = Math.max(this.listenLevel, this.liveLevel);
+      const color = mix(CYAN, MINT, this.liveLevel);
+      const beat = reduced ? 1 : 0.8 + 0.2 * Math.sin(this.time * 3);
+      ctx.strokeStyle = rgba(color, (0.45 + 0.35 * this.liveLevel) * level * beat);
+      ctx.lineWidth = 2 + 2 * this.liveLevel;
+      ctx.shadowColor = rgba(color, 0.8 * level);
+      ctx.shadowBlur = 18 + 14 * this.liveLevel;
       ctx.beginPath();
       ctx.arc(this.cx, this.cy, R * 1.32, 0, Math.PI * 2);
       ctx.stroke();

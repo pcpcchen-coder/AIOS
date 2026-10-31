@@ -937,6 +937,21 @@ function ambientEnabled(): boolean {
     && !!id?.available && !id.limited_reason && !blocksAutoTalk(shell.surface);
 }
 
+/**
+ * 字級與內容面板的距離縮放（docs/10 §2：遠一點放大）；電子腦只有頂端縮略圖跟著它。
+ * 畫面（進度、成果、設定…）開著時固定不動，收起後才套用最新距離（George 2026-10-31：選單跟著距離一直縮放、
+ * 跳動到很難操作）；沒有畫面時，變化不到 0.1 不改，避免距離的小抖動讓字幕跟著跳。
+ */
+let distanceScaleWanted = 1;
+let distanceScaleShown = 1;
+function applyDistanceScale(): void {
+  if (shell.surface !== null || distanceScaleWanted === distanceScaleShown) return;
+  if (Math.abs(distanceScaleWanted - distanceScaleShown) < 0.1 && distanceScaleWanted !== 1) return;
+  distanceScaleShown = distanceScaleWanted;
+  document.documentElement.style.setProperty("--distance-scale", String(distanceScaleShown));
+  brain.setDistanceScale(distanceScaleShown);
+}
+
 /** 看著說話問候的時序（只有相對毫秒，印到 DevTools console；Mac 實測用）。 */
 const lookTimeline = new LookTimeline(() => performance.now(), (line) => console.info(line));
 
@@ -973,9 +988,8 @@ const sense = new SenseController({
     closePreview();
   },
   setScale: (scale) => {
-    // 字級與內容面板（docs/10 §2：遠一點放大）；電子腦只有頂端縮略圖跟著它。
-    document.documentElement.style.setProperty("--distance-scale", String(scale));
-    brain.setDistanceScale(scale);
+    distanceScaleWanted = scale;
+    applyDistanceScale();
   },
   // 待機的電子腦靠近時放大（設定「靠近時電子腦放大倍率」）。
   setBrainZoom: (factor) => {
@@ -1976,6 +1990,7 @@ function render(): void {
     listening: voice.capturing || conversation.capturing || realtime.capturing,
     working: [...tasks.values()].some(isActive),
     layout: shell.surface ? "top" : "center",
+    voice: live === "connecting" || (live === "off" && realtimeStarting) ? "connecting" : live === "off" ? "off" : "live",
     progress:
       shell.mode === "working" && fgProgress?.total ? fgProgress.done / fgProgress.total : null,
   });
@@ -1996,6 +2011,7 @@ function render(): void {
   reportDesktopState();
   renderCaption(fg);
   renderSurface();
+  applyDistanceScale();
 }
 
 let reportedDesktopState = "";
