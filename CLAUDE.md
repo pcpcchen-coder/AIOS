@@ -22,6 +22,10 @@
 
 目前程式是 `prototype/ambient-shell` 的 Node HTTP＋SSE、無框架 TypeScript／Vite、Electron 與 JSON 保存。Claude 使用 Anthropic Messages SDK，尚未遷移 Python、Tauri 或完整 Agent SDK。鏡頭已有頭向與手勢實作，但不是眼動校正。開發分工以 Claude 為核心主力、ChatGPT／Codex 為 Quest 端方向；不得由此限制執行時模型供應商。
 
+## 現階段優先順序（2026-10-31 使用者要求）
+
+系統目前只在家裡使用：**功能便利性優先**，權限與安全強化往後擺。挑下一批時先選功能；不主動加做額外的權限或安全防護（例如通用 Action Gate／F1、主視窗網址比對收緊），除非使用者要求。下方「產品紅線」仍必須遵守。
+
 ## 產品紅線（違反即不合格）
 
 - 不建立 App launcher、App 圖示、常駐側欄、首頁 Dashboard、預設聊天主頁。
