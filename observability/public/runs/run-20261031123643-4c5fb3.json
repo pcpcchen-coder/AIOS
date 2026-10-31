@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-10-31T12:36:43.021Z",
-  "updated_at": "2026-10-31T13:27:08.449Z",
-  "ended_at": null,
+  "updated_at": "2026-10-31T13:27:12.215Z",
+  "ended_at": "2026-10-31T13:27:12.215Z",
   "steps": [
     {
       "id": "how",
@@ -150,6 +150,13 @@
       "at": "2026-10-31T13:27:08.449Z",
       "type": "step_updated",
       "step_id": "pr",
+      "status": "passed",
+      "note": ""
+    },
+    {
+      "at": "2026-10-31T13:27:12.215Z",
+      "type": "run_finished",
+      "step_id": null,
       "status": "passed",
       "note": ""
     }
