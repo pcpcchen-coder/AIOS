@@ -71,7 +71,7 @@ describe("audio privacy (static)", () => {
 
   it("src/audio has the expected modules and no file name mentions the engine (kws)", () => {
     expect(audioFiles.map((f) => relative(audio, f)).sort()).toEqual(
-      ["capture-worklet.ts", "capture.ts", "controller.ts", "detector.ts", "earcon.ts", "front-end.ts", "guard.ts", "index.ts", "no-voice.ts", "resample.ts", "ring.ts", "runtime-net.ts", "wake-worker.ts", "worker-core.ts"].sort(),
+      ["capture-worklet.ts", "capture.ts", "controller.ts", "detector.ts", "earcon.ts", "front-end.ts", "guard.ts", "index.ts", "no-voice.ts", "resample.ts", "ring.ts", "runtime-net.ts", "wake-call.ts", "wake-worker.ts", "worker-core.ts"].sort(),
     );
     expect(audioFiles.filter((f) => /kws|sherpa/i.test(relative(audio, f)))).toEqual([]);
   });
@@ -247,8 +247,12 @@ describe("audio privacy (static)", () => {
     // 旗標關閉時 getMicrophone 是 browserRealtimeDeps 原本的函式：wakeMicrophone() 在沒有控制器時回空物件
     expect(main).toMatch(/const owner = wake;\s*if \(!owner\) return \{\};/);
     // 審查 M1／m9：保險的歸還只在沒有任何進行中或開始中的通話時；旗標在通話中關掉時等通話結束才結束常駐聆聽
-    expect(main).toMatch(/if \(phase === "off" && !realtime\.on && !realtimeStarting\) \{\s*wake\?\.releaseAllLeases\(\);/);
-    expect(main).toMatch(/releaseMicrophone: \(stream\) => owner\.releaseLease\(stream\)/);
+    // WK-02：先停掉「沒人出聲就結束」的計時再歸還。
+    expect(main).toMatch(/if \(phase === "off" && !realtime\.on && !realtimeStarting\) \{\s*stopWakeCall\(\);\s*wake\?\.releaseAllLeases\(\);/);
+    expect(main).toMatch(/releaseMicrophone: \(stream\) => \{\s*if \(wakeLevel\?\.stream === stream\) stopWakeLevel\(\);\s*owner\.releaseLease\(stream\);\s*\}/);
+    // WK-02：喚醒開始的通話只把租到那一份的 RMS 數字交給計時（browserWatchLevel，不保存樣本）。
+    expect(main).toMatch(/const stream = await owner\.lease\(\);\s*watchWakeLevel\(stream\);\s*return stream;/);
+    expect(main).toMatch(/stop: browserWatchLevel\(stream, \(rms\) => watch\.feed\(rms\)\)/);
     expect(main).not.toMatch(/releaseLease\(\)/);
     expect(main).toMatch(/if \(realtime\.on \|\| realtimeStarting\) wakeDisposePending = true;\s*else disposeWake\(\);/);
     // 喚醒的狀態不點亮聽覺區：區域活動的收音來源仍只有三種語音模式

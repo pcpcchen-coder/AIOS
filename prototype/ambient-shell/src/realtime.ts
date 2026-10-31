@@ -7,6 +7,7 @@ import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 import { getLocale } from "./i18n.ts";
 import { taiwanText } from "./zh-tw.ts";
 import { isPromptEcho } from "../shared/zh-tw.ts";
+import { addResponseUsage, emptyVoiceUsage, type VoiceUsage } from "../shared/voice-cost.ts";
 
 // 即時語音模式（OpenAI Realtime）：像 ChatGPT 語音模式，語音直接對語音。
 // 麥克風音訊經 WebRTC 串流到 OpenAI，由伺服器端 VAD 判斷你何時說完；你一開口，
@@ -160,6 +161,8 @@ export class RealtimeVoice {
   private responding = false;
   private notices: string[] = [];
   private generation = 0;
+  /** WK-02（F6）：這次通話 response.done 的 usage 加總（只有數字；start() 時歸零，結束後保留給費用紀錄）。 */
+  private usageTotal: VoiceUsage | null = null;
   /** 逐字稿轉台灣繁體用的語言：開始這次通話時固定（中途切換介面語言不影響這通）。 */
   private transcriptLocale: string = getLocale();
   /** 模型呼叫了 end_conversation：念完道別就結束。 */
@@ -295,6 +298,11 @@ export class RealtimeVoice {
     return this.phase !== "off";
   }
 
+  /** WK-02（F6）：已收到的 usage 加總；還沒有任何 response.done 時為 null。 */
+  get usage(): VoiceUsage | null {
+    return this.usageTotal;
+  }
+
   /** 麥克風正在把聲音送出（連線完成後）。 */
   get capturing(): boolean {
     return this.on && this.phase !== "connecting";
@@ -307,6 +315,7 @@ export class RealtimeVoice {
   async start(): Promise<void> {
     if (this.on) return;
     const generation = ++this.generation;
+    this.usageTotal = null;
     this.transcriptLocale = getLocale();
     this.setPhase("connecting");
     try {
@@ -659,6 +668,7 @@ export class RealtimeVoice {
         break;
       }
       case "response.done":
+        this.usageTotal = addResponseUsage(this.usageTotal ?? emptyVoiceUsage(), (event.response as { usage?: unknown } | undefined)?.usage);
         this.responding = false;
         this.currentResponse = null;
         this.resetIdle();

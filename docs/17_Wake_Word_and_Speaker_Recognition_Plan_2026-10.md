@@ -6,7 +6,7 @@
 
 日期：2026-10-29，Asia/Taipei。狀態：**規劃，未實作**；同日依獨立審查修訂，並依 George 同日的 9 項決定（§14）更新。本文件沒有新增任何喚醒、常駐收音或音色辨認程式，沒有錄音、沒有建立家人聲音資料，也沒有通過任何實機 gate。程式查核基準：AIOS main `876eeaaf7697cf4a3847e0687430c536f4a1d9a7`。外部版本、授權與模型卡於 2026-10-29 查核，來源列在 §15。
 
-**2026-10-31 更新（WK-01a）**：依 George 同日的決定（§14.1），WK-01 拆成 WK-01a 與 WK-01b。WK-01a 已在分支 `claude/wk-01`（基於 main `9778b41`，尚未提交與合併）加入常駐喚醒聆聽的底層：`AudioFrontEnd`、AudioWorklet → worker 的擷取、2 秒環形緩衝、偏好與自動恢復、自我觸發防護、本機提示音、選單列與電子腦指示、功能旗標 `NOUS_WAKE`（預設關閉）。**真正的喚醒引擎還沒有接上**：產品裡的偵測器照實回報 `runtime_missing`，不會開麥克風、也不會偵測；Mac gate 未執行。驗證見 [WK-01a 驗證](validation/wk-01a-2026-10-31.md)。同日另做 WK-01b 的準備部分（自建 wasm 的 GitHub Actions workflow、`wake:setup -- --product`、清單格式與 worker 載入路徑；workflow 尚未執行、不能偵測），見 [WK-01b 準備批次驗證](validation/wk-01b-prep-2026-10-31.md)。本文件其餘內容仍是規劃。
+**2026-10-31 更新（WK-01a）**：依 George 同日的決定（§14.1），WK-01 拆成 WK-01a 與 WK-01b。WK-01a 已在分支 `claude/wk-01`（基於 main `9778b41`，尚未提交與合併）加入常駐喚醒聆聽的底層：`AudioFrontEnd`、AudioWorklet → worker 的擷取、2 秒環形緩衝、偏好與自動恢復、自我觸發防護、本機提示音、選單列與電子腦指示、功能旗標 `NOUS_WAKE`（預設關閉）。**真正的喚醒引擎還沒有接上**：產品裡的偵測器照實回報 `runtime_missing`，不會開麥克風、也不會偵測；Mac gate 未執行。驗證見 [WK-01a 驗證](validation/wk-01a-2026-10-31.md)。同日另做 WK-01b 的準備部分（自建 wasm 的 GitHub Actions workflow、`wake:setup -- --product`、清單格式與 worker 載入路徑；workflow 尚未執行、不能偵測），見 [WK-01b 準備批次驗證](validation/wk-01b-prep-2026-10-31.md)。同日再做 WK-02（分支 `claude/wk-02`，基於 main `40d92fb`，尚未提交與合併）：`wake_word` 開始來源、每分鐘 3 次限速（時間到自動恢復）、喚醒後一律問候、沉默 5 秒自動結束、F6 費用紀錄、Companion `activation=wake` 契約與 `NSMicrophoneUsageDescription` 改寫；因為還沒有引擎，產品不會觸發，只有 fixture 測試，見 [WK-02 驗證](validation/wk-02-2026-10-31.md)。本文件其餘內容仍是規劃。
 
 入口見 [文件索引](README.md) 與 [目前實作狀態](Current_Implementation_Status.md)。本規劃延伸 [14 家人辨識與稱名問候](14_Family_Recognition_and_Greeting_Plan_2026-10.md)、[ADR-0001](adr/ADR-0001-local-family-recognition.md)、[15 Companion Mode](15_Companion_Mode_Spec_2026-10-24.md) 與 [16 家庭記憶層](16_Nous_Memory_Layer_Design_2026-10-26.md)，不取代它們。
 
@@ -609,7 +609,7 @@ ADR-0003 草案（WK-00 交付）必須包含：
 | WK-00 | 不接產品的 spike：sherpa-onnx 1.13.8 與 2.0.x 的 Node 與 wasm KWS、兩個模型、2–3 個候選詞；CPU、記憶體、喚醒詞實際長度；電視負例的每小時誤報。負例**只計數、不錄音**，代價是誤報無法事後重播分析，只能記下時間與當時播放的節目名稱；ADR-0003 草案 | 1.5–2.5 人日 |
 | WK-01a | （2026-10-31 依 §14.1 拆出，已實作、Mac 未驗）`AudioFrontEnd` 與 `getMicrophone` 改為租用、偏好與真實狀態、App 重開與睡眠回來的自動恢復與一次性恢復字幕、選單列開關與指示（「通話中辨認說話者」先放停用列）、2 秒環形緩衝、偵測器介面與 worker、讓出與恢復、自我觸發防護、本機提示音、無人聲計時器（只交付、不接通話）、音訊隱私靜態測試、功能旗標 `NOUS_WAKE`；產品偵測器照實回報 `runtime_missing` | 2.5–3.5 人日（WK-01a 與 WK-01b 合計，同原 WK-01；不另拆估計） |
 | WK-01b | 等 George 的 Mac WK-00 結果：GitHub Actions 自建 KWS wasm（固定 emsdk 與 sherpa-onnx v2.0.1）、產物雜湊寫進 `shared/wake-runtime.json`、關鍵詞檔（發音單元定案後）、`SherpaWasmDetector` 真正載入與偵測。（2026-10-31 先做**準備部分**：workflow `.github/workflows/wake-wasm.yml`（emsdk 4.0.23、只建 KWS、GPL espeak-ng／piper 檢查、pull_request 不發布）、`npm run wake:setup -- --product`、清單格式（release 雜湊空白並標 `pending_first_build`、關鍵詞為空的佔位）、worker 真的載入路徑與 worker 網路關閉（import 第三方 module 之前就關閉網路全域）；**workflow 尚未執行、不能偵測**，見 [WK-01b 準備批次驗證](validation/wk-01b-prep-2026-10-31.md)。剩下：第一次 CI 建置的雜湊、George 的數字定案關鍵詞與門檻、Mac 上真的偵測） | 含於上列 |
-| WK-02 | `wake_word` 啟動來源與限速、`claimGreeting` 擴充、兩條語音路徑的問候與 fallback、**無人聲自動結束的接線**（WK-01a 已交付 `NoVoiceWatchdog`）、F6 費用紀錄欄位、Companion `activation=wake` 共用接口、`NSMicrophoneUsageDescription` 改寫 | 1–2 人日 |
+| WK-02 | `wake_word` 啟動來源與限速、`claimGreeting` 擴充、兩條語音路徑的問候與 fallback、**無人聲自動結束的接線**（WK-01a 已交付 `NoVoiceWatchdog`）、F6 費用紀錄欄位、Companion `activation=wake` 共用接口、`NSMicrophoneUsageDescription` 改寫。（2026-10-31 已實作、Mac 未驗，依 George 同日決定：喚醒後一律問候、每分鐘 3 次超過時暫停並自動恢復、沉默 5 秒結束；費用紀錄記錄所有通話、不綁喚醒開關（旗標關閉時唯一刻意的不同）；引擎未接上前產品不會觸發，見 [WK-02 驗證](validation/wk-02-2026-10-31.md)） | 1–2 人日 |
 | WK-03 | Mac 實機：W1–W12，含至少 8 小時電視負例與家人喚醒測試 | 2–3 人日 |
 | SP-00 | 講者模型 spike：CAM++ 與一個備選在 Node 與瀏覽器的特徵一致性與耗時；瀏覽器沒有現成講者 API，含 `onnxruntime-web`＋自寫 fbank 備案的風險緩衝；1–3 秒片段的分數分布（以自願者或公開測試資料） | 1.5–2.5 人日 |
 | SP-01 | 「加入聲音」登記、gallery v2 遷移、加密保存、刪除與輪換、刪除時的記憶選項、IPC 白名單與 `voice_probe` 限速；含 wasm 整合的風險緩衝 | 2.5–3.5 人日 |
@@ -697,4 +697,4 @@ George 於 2026-10-31 決定以下三項；都只影響交付順序，不改變 
 
 本次交付界線：只讀取程式、查核外部資料並產出規劃文件、導覽更新與 15 的交互引用。沒有修改產品程式、沒有開啟麥克風、沒有下載或執行任何模型，也沒有建立家人資料。
 
-2026-10-31 的更新只改本文件的狀態說明、§2 行號註記、§5.4、§7.2、§10.3、§12、§13.4 與新增的 §14.1，對應 WK-01a 的程式（見 [WK-01a 驗證](validation/wk-01a-2026-10-31.md)）。
+2026-10-31 的更新只改本文件的狀態說明、§2 行號註記、§5.4、§7.2、§10.3、§12、§13.4 與新增的 §14.1，對應 WK-01a 的程式（見 [WK-01a 驗證](validation/wk-01a-2026-10-31.md)）；同日 WK-02 只改狀態說明與 §13.4 的 WK-02 列（見 [WK-02 驗證](validation/wk-02-2026-10-31.md)）。

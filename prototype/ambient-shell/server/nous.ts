@@ -20,6 +20,7 @@ import { CodexAuth } from "./codex-auth.ts";
 import { CodexResponses, type CodexModelCache } from "./codex-responses.ts";
 import { LiveRoute, type LiveGreeting } from "./live-route.ts";
 import { GreetingPicker } from "./greeting-picker.ts";
+import { VoiceCostLog } from "./voice-cost-log.ts";
 import { CALLER_LIMITS, LiveToolCaller } from "./live-tool-caller.ts";
 import { RealtimeSettingsStore } from "./realtime-settings.ts";
 import { WEB_SEARCH_TIMEOUT_MS, WebSearch } from "./web-search.ts";
@@ -327,6 +328,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         model: FACE_MODEL_VERSION,
         // 問候決策只接受 /api/realtime/start 發出、真的連上的互動 ID（server 在下面建立，呼叫時已存在）。
         claimGreeting: greetingClaims(() => server.realtimeSessions),
+        // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）。
+        wakeGreetingOpen: () => server.realtimeSessions?.wakeGreetingOpen() ?? false,
         // MEM-3：API key 路徑的問候決策（有沒有稱名）交給那通的旁路，問候結束後才問臉部候選。
         apiKeyGreeted: (sessionId, named) => server.realtimeSessions?.greeted(sessionId, named),
         picker: greetings,
@@ -397,6 +400,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     identity: identity ?? undefined,
     memory: memory ?? undefined,
     faceRuntimeDir,
+    // WK-02（F6）：每通即時語音的費用紀錄（configDir/voice-cost.jsonl，最近 500 筆，0600）。George 2026-10-31：
+    // 一律記錄，不綁喚醒開關（NOUS_WAKE 關閉時也記；這是旗標關閉「逐位元組相同」唯一刻意的例外）。
+    voiceCostLog: new VoiceCostLog({ dir: config.configDir, log }),
     ...(wake ? { wake, wakeRuntimeDir: wakeRuntime?.state === "ok" ? (options.wakeRuntimeDir ?? null) : null } : {}),
     port,
     devPort: config.devPort,
@@ -479,7 +485,7 @@ export function liveGreetingSource(identity: () => IdentityService | null, picke
 }
 
 /** IdentityService 的 claimGreeting：把核心發出的互動 ID 換成真的連上的工作階段（RealtimeSessions.claimGreeting）。 */
-export function greetingClaims(sessions: () => RealtimeSessions | null): (interaction: string) => { route: RouteId; session_id: string; locale?: Locale } | null {
+export function greetingClaims(sessions: () => RealtimeSessions | null): (interaction: string) => { route: RouteId; session_id: string; source: "look_to_talk" | "wake_word"; locale?: Locale } | null {
   return (interaction) => sessions()?.claimGreeting(interaction) ?? null;
 }
 

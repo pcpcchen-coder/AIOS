@@ -13,6 +13,7 @@ export const WAKE_REASONS = [
   "user_pause",
   "sleep",
   "lock",
+  "rate_limited",
   "realtime",
   "web_speech",
   "permission_denied",
@@ -30,7 +31,7 @@ export const WAKE_STATE_REASONS: { readonly [S in WakeState]: readonly (WakeReas
   off: [null, "pref_off"],
   armed: ["starting", "auto_resume"],
   listening_local: [null],
-  paused: ["user_pause", "sleep", "lock"],
+  paused: ["user_pause", "sleep", "lock", "rate_limited"],
   in_call: ["realtime"],
   released: ["web_speech"],
   error: ["permission_denied", "device_missing", "device_ended", "runtime_missing", "runtime_load_failed", "audio_failed", "unsupported"],
@@ -266,6 +267,33 @@ export interface WakeTrigger {
   keyword_index: number;
 }
 
+// ───────────── WK-02：喚醒開始的通話（限速、Companion 的共用接口） ─────────────
+
+/**
+ * 由喚醒開始的即時語音通話，每個滾動 60 秒最多 3 次（docs/17 §5.7 第 4 點；George 2026-10-31：超過時暫停聆聽、時間到自動恢復）。
+ * 核心（RealtimeSessions.start）只計算被接受的 wake_word 開始；其他來源不算。
+ */
+export const WAKE_START_RATE = { per_minute: 3, window_ms: 60_000 } as const;
+
+/**
+ * Companion Mode 的 activation=wake 共用接口（docs/17 §10.4、15 §3.1；WK-02 只交付契約）。
+ * 每次喚醒觸發（提示音播完、沒有取消、仍在 listening_local）通知一次；只有識別碼、時間與關鍵詞編號，不含音訊或文字。
+ */
+export interface WakeActivation {
+  activation: "wake";
+  wake_id: string;
+  detected_at: number;
+  keyword_index: number;
+}
+
+export interface WakeActivationPort {
+  /** 訂閱喚醒觸發；回傳取消訂閱。 */
+  subscribe(listener: (activation: WakeActivation) => void): () => void;
+}
+
+/** 頁面送到核心的 wake_id 格式（只接受這種；核心不拿它當成喚醒真的發生的證據）。 */
+export const WAKE_ID = /^int_[0-9a-f]{16}$/;
+
 // ───────────── worker 協定：worker 只送出事件，不送出任何樣本（started／detected／load_error／closed） ─────────────
 
 export type WakeWorkerOut =
@@ -310,6 +338,7 @@ export const WAKE_REASON_LABEL: { readonly [R in WakeReason]: string } = {
   user_pause: "暫停到這次結束；App 重開後會自動恢復，要長期停止請關掉開關",
   sleep: "系統睡眠中",
   lock: "螢幕已鎖定",
+  rate_limited: "一分鐘內已由喚醒開始 3 次通話，暫停到一分鐘後自動恢復",
   realtime: "即時語音使用中，喚醒偵測暫停",
   web_speech: "按下說話或語音模式使用中，喚醒偵測暫停",
   permission_denied: "麥克風權限被拒，常駐聆聽沒有開啟",
@@ -344,4 +373,8 @@ export const WAKE_TEXT = {
   dialogEnable: "開啟",
   dialogCancel: "取消",
   notSaved: "常駐喚醒聆聽沒有保存",
+  /** WK-02：喚醒開始的通話在使用者沒出聲 5 秒後自動結束。 */
+  noVoice: "沒有聽到聲音，已結束通話，回到喚醒聆聽",
+  /** WK-02：喚醒時即時語音不能用（{0} 是原因）。 */
+  unavailable: "即時語音目前不可用（{0}）",
 } as const;

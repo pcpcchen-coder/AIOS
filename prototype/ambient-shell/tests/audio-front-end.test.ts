@@ -364,10 +364,25 @@ function controller(runtime: WakeRuntimeState = "ok") {
     saveDeviceId: async (id) => void saved.push(id),
     newId: () => `wake_${++ids}`,
   };
-  const c = new WakeController(host, { mediaDevices: media, capture, earcon });
+  const timers: { run: () => void; at: number; cancelled: boolean }[] = [];
+  const timer = (run: () => void, ms: number) => {
+    const entry = { run, at: clock.t + ms, cancelled: false };
+    timers.push(entry);
+    return () => (entry.cancelled = true);
+  };
+  const c = new WakeController(host, { mediaDevices: media, capture, earcon, timer });
   const view = (listen: boolean, device: string | null = null): WakeSettingsView => ({ wake_listen: listen, device_id: device, runtime });
   return {
-    c, clock, media, capture, earcon, captions, saved, reports, view,
+    c, clock, media, capture, earcon, captions, saved, reports, view, timers,
+    /** 推進假時鐘並執行到期、沒被取消的計時器。 */
+    advance(ms: number) {
+      clock.advance(ms);
+      for (const t of timers.splice(0)) {
+        if (t.cancelled) continue;
+        if (t.at <= clock.t) t.run();
+        else timers.push(t);
+      }
+    },
     setVisible(v: boolean) {
       visible = v;
       if (v) for (const l of [...visibleListeners]) l();
@@ -529,5 +544,115 @@ describe("WakeController: guard → earcon → trigger (WK-01 end point)", () =>
     await flush();
     expect(h.c.state.state).toBe("armed");
     expect(h.c.command("voice")).toBe(false);
+  });
+});
+
+describe("WakeController: WK-02 hooks (subscribers, rate-limit pause, calls)", () => {
+  it("Companion activation=wake: subscribers get each trigger once (ids, time and keyword only) and can unsubscribe", async () => {
+    const h = controller();
+    await h.listen();
+    const handler = vi.fn();
+    h.c.setTriggerHandler(handler);
+    const got: unknown[] = [];
+    const off = h.c.subscribe((a) => got.push(a));
+    h.c.subscribe(() => {
+      throw new Error("a broken subscriber does not break wake");
+    });
+    h.capture.last!.events.detected(1);
+    h.earcon.plays[0]!.finish();
+    await flush();
+    expect(handler).toHaveBeenCalledExactlyOnceWith({ wake_id: "wake_1", detected_at: 0, keyword_index: 1 });
+    expect(got).toEqual([{ activation: "wake", wake_id: "wake_1", detected_at: 0, keyword_index: 1 }]);
+    off();
+    h.clock.advance(3000);
+    h.capture.last!.events.detected(0);
+    h.earcon.plays[1]!.finish();
+    await flush();
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(got).toHaveLength(1);
+  });
+
+  it("pauseFor(rate_limited) stops capture, reports paused/rate_limited and resumes listening by itself when the time is up", async () => {
+    const h = controller();
+    await h.listen();
+    h.c.pauseFor("rate_limited", 30_000);
+    expect(h.c.state).toEqual({ state: "paused", reason: "rate_limited" });
+    expect(h.media.liveTracks()).toEqual([]);
+    h.advance(29_999);
+    expect(h.c.state.state).toBe("paused");
+    h.advance(1);
+    await flush();
+    expect(h.c.state.state).toBe("armed");
+    h.capture.last!.events.started();
+    expect(h.c.state).toEqual({ state: "listening_local", reason: null });
+    // 同一支麥克風（exact deviceId），也不顯示「已恢復」字幕（不是自動恢復）
+    expect(h.media.calls.at(-1)).toMatchObject({ audio: { deviceId: { exact: "mic-a" } } });
+    expect(h.captions).not.toContain("已恢復常駐喚醒聆聽（只在本機偵測「哈囉努斯」）");
+  });
+
+  it("a user pause during the rate-limit pause wins; a new pauseFor replaces the old timer; dispose cancels it", async () => {
+    const h = controller();
+    await h.listen();
+    h.c.pauseFor("rate_limited", 10_000);
+    h.c.command("wake-pause");
+    h.advance(10_000);
+    await flush();
+    expect(h.c.state).toEqual({ state: "paused", reason: "user_pause" });
+    h.c.command("wake-resume");
+    await flush();
+    h.capture.last!.events.started();
+    h.c.pauseFor("rate_limited", 10_000);
+    h.advance(5_000);
+    h.c.pauseFor("rate_limited", 10_000);
+    h.advance(5_000);
+    await flush();
+    expect(h.c.state.reason).toBe("rate_limited");
+    h.c.dispose();
+    h.advance(10_000);
+    expect(h.c.state.state).toBe("off");
+  });
+
+  it("pauseFor with a timer that fires synchronously still resumes (no read of an unassigned cancel)", async () => {
+    const clock = new FakeClock();
+    const media = new FakeMediaDevices();
+    const capture = new FakeCapture();
+    const host: WakeHost = {
+      now: clock.now, runtime: () => "ok", caption: () => {}, visible: () => true, onVisible: () => () => {}, state: () => {}, saveDeviceId: async () => {}, newId: () => "w",
+    };
+    const c = new WakeController(host, { mediaDevices: media, capture, earcon: new FakeEarcon(), timer: (run) => { run(); return () => {}; } });
+    c.applySettings({ wake_listen: false, device_id: null, runtime: "ok" });
+    c.applySettings({ wake_listen: true, device_id: null, runtime: "ok" });
+    await flush();
+    capture.last!.events.started();
+    expect(() => c.pauseFor("rate_limited", 0)).not.toThrow();
+    await flush();
+    expect(c.state.state).toBe("armed");
+  });
+
+  it("no trigger while a call holds the microphone (in_call): detections are dropped", async () => {
+    const h = controller();
+    await h.listen();
+    const handler = vi.fn();
+    h.c.setTriggerHandler(handler);
+    const stream = await h.c.lease();
+    expect(h.c.state.state).toBe("in_call");
+    h.capture.graphs[0]!.events.detected(0);
+    await flush();
+    expect(h.earcon.plays).toHaveLength(0);
+    expect(handler).not.toHaveBeenCalled();
+    h.c.releaseLease(stream);
+    await flush();
+    h.capture.last!.events.started();
+    expect(h.c.state.state).toBe("listening_local");
+  });
+
+  it("watchCall uses the host clock", () => {
+    const h = controller();
+    const onTimeout = vi.fn();
+    const w = h.c.watchCall({ every: () => () => {}, onTimeout });
+    w.phase("listening");
+    h.clock.advance(5_000);
+    w.check();
+    expect(onTimeout).toHaveBeenCalledTimes(1);
   });
 });

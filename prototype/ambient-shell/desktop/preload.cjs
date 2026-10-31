@@ -11,7 +11,7 @@ const WAKE_STATE_REASONS = {
   off: [null, "pref_off"],
   armed: ["starting", "auto_resume"],
   listening_local: [null],
-  paused: ["user_pause", "sleep", "lock"],
+  paused: ["user_pause", "sleep", "lock", "rate_limited"],
   in_call: ["realtime"],
   released: ["web_speech"],
   error: ["permission_denied", "device_missing", "device_ended", "runtime_missing", "runtime_load_failed", "audio_failed", "unsupported"],

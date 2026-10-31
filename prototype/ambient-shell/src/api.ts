@@ -4,6 +4,7 @@ import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { WakePrefsPatch } from "../shared/wake.ts";
+import type { PageEndReason, VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
 import { historySearchPath, type HistoryDetail, type HistoryPage, type HistoryQuery } from "../shared/history.ts";
 import type { ApprovalReport, CallAnswer, FallbackOffer, LiveInputKind, RealtimePrefsPatch, StartDecision, StopEvidence, StopReplyTurn } from "../shared/realtime-route.ts";
@@ -65,8 +66,14 @@ export const api = {
   chatgptWelcomeAck: () => call<SettingsView>("POST", "/api/auth/chatgpt/welcome-ack", {}),
   /** 即時語音：開麥克風前先決定路徑（client_id：這個頁面的 SSE 串流）。 */
   /** rebuild：MEM-2 記憶撤銷後自動重建（只走 live、不問候）。 */
-  realtimeStart: (clientId: string | null, source: "look_to_talk" | "user" = "user", locale?: Locale, rebuild = false) =>
-    call<StartDecision>("POST", "/api/realtime/start", { ...(clientId ? { client_id: clientId } : {}), ...(source === "look_to_talk" ? { source } : {}), ...(rebuild ? { rebuild: true } : {}) }, locale),
+  /** WK-02：source 為 look_to_talk 或 wake_word 時才送出；wake_word 另帶這次喚醒的 wake_id（費用紀錄用）。 */
+  realtimeStart: (clientId: string | null, source: VoiceStartSource = "user", locale?: Locale, rebuild = false, wakeId?: string) =>
+    call<StartDecision>("POST", "/api/realtime/start", {
+      ...(clientId ? { client_id: clientId } : {}),
+      ...(source === "look_to_talk" || source === "wake_word" ? { source } : {}),
+      ...(source === "wake_word" && wakeId ? { wake_id: wakeId } : {}),
+      ...(rebuild ? { rebuild: true } : {}),
+    }, locale),
   /**
    * 即時語音：把 WebRTC SDP offer 交給本機核心，由它代為建立連線（API key 或 ChatGPT 方案）。
    * 沒有 ticket 是原本的 API key 呼叫。核心提議改路徑（409 ＋ fallback）時丟 FallbackOfferError。
@@ -84,7 +91,9 @@ export const api = {
   realtimeApproval: (ticket: RealtimeTicket, report: ApprovalReport) => call<{ ok: true }>("POST", "/api/realtime/approval", { ...ticket, ...report }),
   realtimeHostResult: (ticket: RealtimeTicket, callId: string, output: Record<string, unknown>) =>
     call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/host-result", { ...ticket, call_id: callId, output }),
-  realtimeEnd: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/end", { ...ticket }),
+  /** WK-02（F6）：可選的結束原因（no_voice）與 API key 路徑加總的 usage（核心的費用紀錄）。 */
+  realtimeEnd: (ticket: RealtimeTicket, end: { reason?: PageEndReason | null; usage?: VoiceUsage | null } = {}) =>
+    call<{ ok: true }>("POST", "/api/realtime/end", { ...ticket, ...(end.reason ? { reason: end.reason } : {}), ...(end.usage ? { usage: end.usage } : {}) }),
   /** MEM-2：記憶撤銷後停播並核對的證據（只有布林值與毫秒數）。 */
   /** MEM-3：API key 路徑的頁面在資料通道收到播放結束（沒有內容、沒有時間戳）。 */
   realtimePlayback: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/playback", { ...ticket }),
