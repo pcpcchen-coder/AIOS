@@ -1,5 +1,135 @@
 {
-  "comment": "常駐喚醒聆聽（WK-01a）的本機喚醒引擎檔案清單。WK-01a 刻意留空：自建 KWS wasm 與關鍵詞檔在 WK-01b 由 GitHub Actions 建置（固定 emsdk 與 sherpa-onnx v2.0.1），產物的 SHA-256 寫進這份清單後才會提供。清單是空的時候核心的 /wake-runtime/ 一律 404，頁面回報 runtime_missing，也不會開啟麥克風。",
+  "comment": "常駐喚醒聆聽的本機引擎清單（WK-01b 準備批次，schema_version 1）。release 檔（wasm 與 JS）由 .github/workflows/wake-wasm.yml 以固定的 emsdk 與 sherpa-onnx v2.0.1 建置；第一次 CI 建置之前雜湊是空字串、status 是 pending_first_build，引擎一律回報 missing／runtime_missing，也不會開啟麥克風。模型檔沿用 WK-00 釘住的壓縮檔與雜湊（spike/wake/models.json）。關鍵詞與門檻等 George 在 Mac 的 WK-00 每人 5 次試跑數字（docs/17 §14.1 D1），在那之前 keywords 是空的佔位（pending_owner_numbers）。只由 npm run wake:setup -- --product 安裝；App 執行時不下載。",
+  "schema_version": 1,
+  "status": "pending_first_build",
   "url_prefix": "/wake-runtime/",
-  "files": []
+  "build": {
+    "workflow": ".github/workflows/wake-wasm.yml",
+    "script": "prototype/ambient-shell/scripts/build-wake-wasm.sh",
+    "sherpa_onnx_version": "2.0.1",
+    "sherpa_onnx_commit": "af2d8d81dbfa61c4cea4c568da78f3982edca005",
+    "emsdk_version": "4.0.23",
+    "emsdk_commit": "c0bb220cb6e6f4e0fabb6f6db9efd53390ef5e56",
+    "release_repo": "pcpcchen-coder/AIOS",
+    "release_tag": null,
+    "config_sha256": null
+  },
+  "files": [
+    {
+      "name": "sherpa-onnx-wasm-kws-main.mjs",
+      "role": "runtime",
+      "source": "release",
+      "sha256": "",
+      "license": "Apache-2.0（sherpa-onnx v2.0.1；Emscripten 產生的載入程式，Emscripten 為 MIT／UIUC）"
+    },
+    {
+      "name": "sherpa-onnx-wasm-kws-main.wasm",
+      "role": "runtime",
+      "source": "release",
+      "sha256": "",
+      "license": "Apache-2.0（sherpa-onnx v2.0.1，只建 KWS、TTS 關閉）；內含 onnxruntime MIT、kaldi-native-fbank／kaldi-decoder／openfst／simple-sentencepiece Apache-2.0、json／utf8proc MIT（ADR-0003 §3）"
+    },
+    {
+      "name": "sherpa-onnx-kws.mjs",
+      "role": "runtime",
+      "source": "release",
+      "sha256": "",
+      "license": "Apache-2.0（sherpa-onnx v2.0.1 wasm/kws/sherpa-onnx-kws.js，加上一行 ES module export）"
+    },
+    {
+      "name": "wenetspeech-3.3M.encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+      "role": "model",
+      "source": "model_archive",
+      "sha256": "dd784973fc9d2fabb3b800d6dcd20fc3b0ca84f8e2415afe54b032878e447f4d",
+      "model": "wenetspeech-3.3M",
+      "member": "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+      "license": "model card: Apache License 2.0; training data WenetSpeech L (license terms contradictory, see docs/17 §6.2)"
+    },
+    {
+      "name": "wenetspeech-3.3M.decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
+      "role": "model",
+      "source": "model_archive",
+      "sha256": "fb581d6734511676e246e0dff2fea01b31b0913176cb3ca64576dbab0a177774",
+      "model": "wenetspeech-3.3M",
+      "member": "decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
+      "license": "model card: Apache License 2.0; training data WenetSpeech L (license terms contradictory, see docs/17 §6.2)"
+    },
+    {
+      "name": "wenetspeech-3.3M.joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+      "role": "model",
+      "source": "model_archive",
+      "sha256": "f79760052b87239e325f0567c752ad3130b30d92effb847d4307743c20c59a24",
+      "model": "wenetspeech-3.3M",
+      "member": "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+      "license": "model card: Apache License 2.0; training data WenetSpeech L (license terms contradictory, see docs/17 §6.2)"
+    },
+    {
+      "name": "wenetspeech-3.3M.tokens.txt",
+      "role": "model",
+      "source": "model_archive",
+      "sha256": "72316508d9119696145abc6f1f8cdc46287535c34e5ce7e595f845cb1499cf2e",
+      "model": "wenetspeech-3.3M",
+      "member": "tokens.txt",
+      "license": "model card: Apache License 2.0; training data WenetSpeech L (license terms contradictory, see docs/17 §6.2)"
+    },
+    {
+      "name": "zh-en-3M.encoder-epoch-13-avg-2-chunk-16-left-64.int8.onnx",
+      "role": "model",
+      "source": "model_archive",
+      "sha256": "408bbd740838c42d5bf6d1c5b80b3c88b616c7860b92d980328b5b068c76ae48",
+      "model": "zh-en-3M",
+      "member": "encoder-epoch-13-avg-2-chunk-16-left-64.int8.onnx",
+      "license": "no license file or training-data statement in the archive (see docs/17 §6.2)"
+    },
+    {
+      "name": "zh-en-3M.decoder-epoch-13-avg-2-chunk-16-left-64.onnx",
+      "role": "model",
+      "source": "model_archive",
+      "sha256": "63a22dd60f40fff082ac3e09afa507f6787da36df76ded2fbe145fa233e22c21",
+      "model": "zh-en-3M",
+      "member": "decoder-epoch-13-avg-2-chunk-16-left-64.onnx",
+      "license": "no license file or training-data statement in the archive (see docs/17 §6.2)"
+    },
+    {
+      "name": "zh-en-3M.joiner-epoch-13-avg-2-chunk-16-left-64.int8.onnx",
+      "role": "model",
+      "source": "model_archive",
+      "sha256": "190d4067b4cc20b72a42a1916e69d92052000fb7051a427ebb1bc72a69207dc1",
+      "model": "zh-en-3M",
+      "member": "joiner-epoch-13-avg-2-chunk-16-left-64.int8.onnx",
+      "license": "no license file or training-data statement in the archive (see docs/17 §6.2)"
+    },
+    {
+      "name": "zh-en-3M.tokens.txt",
+      "role": "model",
+      "source": "model_archive",
+      "sha256": "2d3f32311f9b692b964da3c90e830258d3e78e013cb0c992dbfb15cd5a1a71b0",
+      "model": "zh-en-3M",
+      "member": "tokens.txt",
+      "license": "no license file or training-data statement in the archive (see docs/17 §6.2)"
+    }
+  ],
+  "models": [
+    {
+      "id": "wenetspeech-3.3M",
+      "encoder": "wenetspeech-3.3M.encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+      "decoder": "wenetspeech-3.3M.decoder-epoch-12-avg-2-chunk-16-left-64.onnx",
+      "joiner": "wenetspeech-3.3M.joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+      "tokens": "wenetspeech-3.3M.tokens.txt"
+    },
+    {
+      "id": "zh-en-3M",
+      "encoder": "zh-en-3M.encoder-epoch-13-avg-2-chunk-16-left-64.int8.onnx",
+      "decoder": "zh-en-3M.decoder-epoch-13-avg-2-chunk-16-left-64.onnx",
+      "joiner": "zh-en-3M.joiner-epoch-13-avg-2-chunk-16-left-64.int8.onnx",
+      "tokens": "zh-en-3M.tokens.txt"
+    }
+  ],
+  "keywords": {
+    "status": "pending_owner_numbers",
+    "model": null,
+    "keywords_score": null,
+    "keywords_threshold": null,
+    "entries": []
+  }
 }

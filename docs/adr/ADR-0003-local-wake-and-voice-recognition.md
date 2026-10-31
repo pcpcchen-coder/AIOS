@@ -4,7 +4,7 @@
 
 # ADR-0003：本機喚醒與聲音辨識
 
-狀態：**草案（WK-00 交付）；2026-10-31 起 WK-01a 部分實作**：常駐喚醒聆聽的底層（`AudioFrontEnd`、擷取 worker、偏好、自動恢復、自我觸發防護、提示音、旗標 `NOUS_WAKE` 預設關閉）已在分支 `claude/wk-01` 實作，**真正的喚醒引擎尚未接上**（WK-01b），產品偵測器照實回報 `runtime_missing`、不開麥克風；Mac gate 未執行，見 [WK-01a 驗證](../validation/wk-01a-2026-10-31.md)。§2.1 的條文已寫進 ADR-0001。gallery v2、`voice_probe` 與音色辨認仍未實作。日期：2026-10-29，Asia/Taipei。依據：[17 本機喚醒詞與家人音色辨認規劃](../17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md) §11.2；工程證據：[WK-00 spike 驗證](../validation/wk-00-spike-2026-10-29.md)。另開本 ADR 屬工程流程決定，直接採用並通知 George（17 §14「另行通知」），不列為待決事項。
+狀態：**草案（WK-00 交付）；2026-10-31 起 WK-01a 部分實作**：常駐喚醒聆聽的底層（`AudioFrontEnd`、擷取 worker、偏好、自動恢復、自我觸發防護、提示音、旗標 `NOUS_WAKE` 預設關閉）已在分支 `claude/wk-01` 實作，**真正的喚醒引擎尚未接上**（WK-01b），產品偵測器照實回報 `runtime_missing`、不開麥克風；Mac gate 未執行，見 [WK-01a 驗證](../validation/wk-01a-2026-10-31.md)。2026-10-31 另做 **WK-01b 準備部分**：自建 KWS wasm 的 GitHub Actions workflow（固定 emsdk 4.0.23 與 sherpa-onnx v2.0.1、只建 KWS、GPL espeak-ng／piper 檢查）、`npm run wake:setup -- --product`、清單格式，以及 worker 真的載入路徑（同源 `/wake-runtime/`、雜湊核對、`keywordsBuf`；讀完位元組、import 任何第三方 module 之前就關閉 worker 的網路全域，import 完再禁止 import()）；**workflow 尚未執行**，清單仍是 `pending_first_build`、關鍵詞為空，所以仍照實回報 `runtime_missing`，見 [WK-01b 準備批次驗證](../validation/wk-01b-prep-2026-10-31.md)。§2.1 的條文已寫進 ADR-0001。gallery v2、`voice_probe` 與音色辨認仍未實作。日期：2026-10-29，Asia/Taipei。依據：[17 本機喚醒詞與家人音色辨認規劃](../17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md) §11.2；工程證據：[WK-00 spike 驗證](../validation/wk-00-spike-2026-10-29.md)。另開本 ADR 屬工程流程決定，直接採用並通知 George（17 §14「另行通知」），不列為待決事項。
 
 本 ADR 只定規則與邊界。WK-00 只交付不接產品的 spike（`prototype/ambient-shell/spike/wake/`）。2026-10-31 起，WK-01a 已加入 `AudioFrontEnd` 與喚醒 worker（`src/audio/`，旗標 `NOUS_WAKE` 預設關閉），但 worker 裡**沒有真正的 KWS 引擎**（WK-01b）；gallery v2 與 `voice_probe` 仍不存在。
 
@@ -125,4 +125,4 @@ ADR-0001 §2.4 的稱名說明在實作時補上「也可能依聲音認出」�
 - 雲端合成正例對完整候選詞 0/300 命中、原因未定；家人實測要同時跑替代念法「哈囉努斯(hā-lóu)」與子詞「努斯」，判斷是合成語音還是「哈囉」的發音單元，喚醒詞的發音單元定案前不進 WK-01 的關鍵詞檔。
 - SP-00 講者模型 spike 與授權查核。
 - ~~WK-01 實作時把本 ADR 的 §2.1 條文寫進 ADR-0001，並建立 `tests/audio-privacy.test.ts`。~~ 2026-10-31 WK-01a 已完成這兩項。
-- WK-01b：依 George 的 Mac WK-00 結果，由 GitHub Actions 自建 KWS wasm、寫入雜湊清單與關鍵詞檔，`SherpaWasmDetector` 真正載入（17 §14.1）。
+- WK-01b：依 George 的 Mac WK-00 結果，由 GitHub Actions 自建 KWS wasm、寫入雜湊清單與關鍵詞檔，`SherpaWasmDetector` 真正載入（17 §14.1）。2026-10-31 已做準備部分（workflow、`wake:setup -- --product`、清單格式、載入路徑）；剩下第一次 CI 建置的雜湊、關鍵詞與門檻、Mac 上的實際載入與偵測。

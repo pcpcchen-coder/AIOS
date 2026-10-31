@@ -88,6 +88,165 @@ export function parseWakePatch(input: unknown): WakePrefsPatch {
   return patch;
 }
 
+// ───────────── 引擎清單（shared/wake-runtime.json，WK-01b 的格式） ─────────────
+// 清單是唯一的設定來源：核心（server/wake-runtime.ts）用它核對與提供檔案，worker（src/audio/detector.ts）用它核對雜湊與
+// 產生關鍵詞（keywordsBuf），scripts/wake-setup.mjs --product 用它下載與安裝。這裡只有型別與純函式。
+
+/** release：GitHub Actions 建出的 wasm 與 JS（.github/workflows/wake-wasm.yml）；model_archive：WK-00 已釘住的 KWS 模型壓縮檔。 */
+export interface WakeRuntimeFileEntry {
+  /** 安裝後的檔名（/wake-runtime/<name>；不含子資料夾）。 */
+  name: string;
+  role: "runtime" | "model";
+  source: "release" | "model_archive";
+  /** 小寫 64 位十六進位；第一次 CI 建置之前 release 檔是空字串（不得自行填寫）。 */
+  sha256: string;
+  /** model_archive：哪一個模型（spike/wake/models.json 的 id）與壓縮檔內的檔名。 */
+  model?: string;
+  member?: string;
+  license: string;
+}
+
+export interface WakeRuntimeModel {
+  id: string;
+  encoder: string;
+  decoder: string;
+  joiner: string;
+  tokens: string;
+}
+
+/** 一個關鍵詞：發音單元（以空白分開）與可選的提升分數（:）、觸發門檻（#）。id 是 `@` 之後的字串。 */
+export interface WakeKeywordEntry {
+  id: string;
+  tokens: string;
+  boost: number | null;
+  threshold: number | null;
+}
+
+export interface WakeKeywordConfig {
+  /** pending_owner_numbers：等 George 在 Mac 的 WK-00 每人 5 次試跑數字（17 §14.1 D1），在那之前沒有關鍵詞。 */
+  status: "pending_owner_numbers" | "configured";
+  model: string | null;
+  keywords_score: number | null;
+  keywords_threshold: number | null;
+  entries: WakeKeywordEntry[];
+}
+
+export interface WakeRuntimeManifest {
+  schema_version: 1;
+  /** pending_first_build：release 檔的雜湊要等第一次 CI 建置；有這個標記時引擎一律不可用。 */
+  status: "pending_first_build" | "built";
+  url_prefix: string;
+  build: {
+    workflow: string;
+    script: string;
+    sherpa_onnx_version: string;
+    sherpa_onnx_commit: string;
+    emsdk_version: string;
+    emsdk_commit: string;
+    release_repo: string;
+    release_tag: string | null;
+    config_sha256: string | null;
+  };
+  files: WakeRuntimeFileEntry[];
+  models: WakeRuntimeModel[];
+  keywords: WakeKeywordConfig;
+}
+
+/** 三個 release 檔的固定檔名（建置腳本產出、worker 載入）。 */
+export const WAKE_RELEASE_FILES = {
+  glue: "sherpa-onnx-wasm-kws-main.mjs",
+  wasm: "sherpa-onnx-wasm-kws-main.wasm",
+  api: "sherpa-onnx-kws.mjs",
+} as const;
+
+const SHA256 = /^[0-9a-f]{64}$/;
+const FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const KEYWORD_ID = /^[A-Z][A-Z0-9_]{0,31}$/;
+/** 發音單元：不含空白與 sherpa-onnx 關鍵詞檔的保留字元（: # @ 換行）。 */
+const KEYWORD_TOKEN = /^[^\s:#@]{1,16}$/u;
+
+/** 清單格式檢查；回傳錯誤清單（空的才算格式正確）。不檢查檔案是否存在。 */
+export function validateWakeRuntimeManifest(value: unknown): string[] {
+  const errors: string[] = [];
+  const m = value as Partial<WakeRuntimeManifest> | null;
+  if (!m || typeof m !== "object") return ["manifest must be an object"];
+  if (m.schema_version !== 1) errors.push("schema_version must be 1");
+  if (m.status !== "pending_first_build" && m.status !== "built") errors.push("status must be pending_first_build or built");
+  if (m.url_prefix !== "/wake-runtime/") errors.push("url_prefix must be /wake-runtime/");
+  const b = m.build;
+  if (!b || typeof b !== "object") errors.push("build is required");
+  else {
+    if (!/^[0-9a-f]{40}$/.test(b.sherpa_onnx_commit ?? "")) errors.push("build.sherpa_onnx_commit must be a full commit SHA");
+    if (!/^[0-9a-f]{40}$/.test(b.emsdk_commit ?? "")) errors.push("build.emsdk_commit must be a full commit SHA");
+    if (!/^\d+\.\d+\.\d+$/.test(b.sherpa_onnx_version ?? "") || !/^\d+\.\d+\.\d+$/.test(b.emsdk_version ?? "")) errors.push("build versions must be exact x.y.z");
+    if (m.status === "built" && !(b.release_tag && SHA256.test(b.config_sha256 ?? ""))) errors.push("built manifests need build.release_tag and build.config_sha256");
+    if (m.status === "pending_first_build" && (b.release_tag !== null || b.config_sha256 !== null)) errors.push("pending manifests keep build.release_tag and build.config_sha256 null");
+  }
+  const files = Array.isArray(m.files) ? m.files : [];
+  if (!Array.isArray(m.files)) errors.push("files must be an array");
+  const names = new Set<string>();
+  for (const f of files) {
+    if (!FILE_NAME.test(f?.name ?? "")) errors.push(`bad file name: ${String(f?.name)}`);
+    if (names.has(f.name)) errors.push(`duplicate file: ${f.name}`);
+    names.add(f.name);
+    if (f.role !== "runtime" && f.role !== "model") errors.push(`${f.name}: bad role`);
+    if (f.source === "release") {
+      if (m.status === "pending_first_build" ? f.sha256 !== "" : !SHA256.test(f.sha256)) errors.push(`${f.name}: release hash must be empty while pending_first_build and a SHA-256 after`);
+    } else if (f.source === "model_archive") {
+      if (!SHA256.test(f.sha256)) errors.push(`${f.name}: model files need a SHA-256`);
+      if (!f.model || !f.member) errors.push(`${f.name}: model files need model and member`);
+    } else errors.push(`${f.name}: bad source`);
+    if (typeof f.license !== "string" || !f.license) errors.push(`${f.name}: license is required`);
+  }
+  for (const name of Object.values(WAKE_RELEASE_FILES)) if (!files.some((f) => f.name === name && f.source === "release")) errors.push(`missing release file ${name}`);
+  const models = Array.isArray(m.models) ? m.models : [];
+  for (const model of models) {
+    for (const key of ["encoder", "decoder", "joiner", "tokens"] as const) {
+      const f = files.find((x) => x.name === model[key]);
+      if (!f || f.source !== "model_archive" || f.model !== model.id) errors.push(`model ${model.id}: ${key} is not a listed file of that model`);
+    }
+  }
+  const k = m.keywords;
+  if (!k || typeof k !== "object") errors.push("keywords is required");
+  else if (k.status === "pending_owner_numbers") {
+    if (k.model !== null || k.keywords_score !== null || k.keywords_threshold !== null || !Array.isArray(k.entries) || k.entries.length !== 0) errors.push("pending keywords must be empty (model, score, threshold null; entries [])");
+  } else if (k.status === "configured") {
+    if (!models.some((x) => x.id === k.model)) errors.push("keywords.model must be a listed model");
+    if (!(typeof k.keywords_score === "number" && k.keywords_score > 0 && k.keywords_score <= 10)) errors.push("keywords_score must be in (0, 10]");
+    if (!(typeof k.keywords_threshold === "number" && k.keywords_threshold > 0 && k.keywords_threshold < 1)) errors.push("keywords_threshold must be in (0, 1)");
+    if (!Array.isArray(k.entries) || k.entries.length === 0 || k.entries.length > 64) errors.push("keywords.entries must have 1-64 entries");
+    const ids = new Set<string>();
+    for (const e of k.entries ?? []) {
+      if (!KEYWORD_ID.test(e.id) || ids.has(e.id)) errors.push(`bad or duplicate keyword id: ${e.id}`);
+      ids.add(e.id);
+      const tokens = typeof e.tokens === "string" ? e.tokens.split(" ") : [];
+      if (tokens.length === 0 || !tokens.every((t) => KEYWORD_TOKEN.test(t))) errors.push(`${e.id}: tokens must be space-separated units without : # @`);
+      if (e.boost !== null && !(typeof e.boost === "number" && e.boost > 0 && e.boost <= 10)) errors.push(`${e.id}: boost must be null or in (0, 10]`);
+      if (e.threshold !== null && !(typeof e.threshold === "number" && e.threshold > 0 && e.threshold < 1)) errors.push(`${e.id}: threshold must be null or in (0, 1)`);
+    }
+  } else errors.push("keywords.status must be pending_owner_numbers or configured");
+  return errors;
+}
+
+/**
+ * 引擎還不能用的理由（空陣列才可能可用；可用與否還要看檔案是否在、雜湊是否相符）。
+ * pending_first_build、release 檔沒有雜湊、關鍵詞還在等 George 的數字，都會讓核心回報 missing、worker 回報 runtime_missing。
+ */
+export function wakeRuntimeBlockers(m: WakeRuntimeManifest): string[] {
+  const errors = validateWakeRuntimeManifest(m);
+  if (errors.length > 0) return ["manifest_invalid"];
+  const blockers: string[] = [];
+  if (m.status === "pending_first_build") blockers.push("pending_first_build");
+  if (m.files.some((f) => !SHA256.test(f.sha256))) blockers.push("hash_missing");
+  if (m.keywords.status !== "configured") blockers.push("keywords_pending");
+  return blockers;
+}
+
+/** 關鍵詞設定 → sherpa-onnx 關鍵詞檔內容（keywordsBuf）；一行一個：發音單元 [:提升分數] [#門檻] @id。 */
+export function wakeKeywordsText(k: WakeKeywordConfig): string {
+  return k.entries.map((e) => [e.tokens, e.boost === null ? null : `:${e.boost}`, e.threshold === null ? null : `#${e.threshold}`, `@${e.id}`].filter(Boolean).join(" ")).join("\n") + "\n";
+}
+
 /** 喚醒引擎檔案（shared/wake-runtime.json）的核對結果；WK-01a 清單是空的，所以一律是 missing。 */
 export type WakeRuntimeState = "ok" | "missing" | "hash_mismatch" | "not_configured";
 
