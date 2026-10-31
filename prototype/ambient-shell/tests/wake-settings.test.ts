@@ -88,10 +88,10 @@ describe("WakeSettingsStore: wake.json fails closed", () => {
   });
 });
 
-describe("wake runtime manifest (D2: built from the 2026-10-31 release, keywords pending; hash-verified like face-runtime)", () => {
-  it("the shipped list is built but keywords are pending, so the runtime is missing (only keywords_pending) and unverified bytes are never served (schema details: tests/wake-runtime-manifest.test.ts)", () => {
+describe("wake runtime manifest (D2: built from the 2026-10-31 release, Hello Nous keywords; hash-verified like face-runtime)", () => {
+  it("the shipped list is built and configured, so an empty folder is missing every file and unverified bytes are never served (schema details: tests/wake-runtime-manifest.test.ts)", () => {
     expect(WAKE_RUNTIME_FILES.length).toBeGreaterThan(0);
-    expect(checkWakeRuntime(root)).toEqual({ state: "missing", problems: ["keywords_pending"] });
+    expect(checkWakeRuntime(root)).toEqual({ state: "missing", problems: WAKE_RUNTIME_FILES.map((f) => f.name) });
     expect(wakeRuntimePath(root, "/wake-runtime/anything.wasm")).toBeNull();
     // release 檔現在有雜湊，所以路徑對得上清單；但內容不符雜湊就不提供（伺服器另外以 runtime 狀態把關，見 NOUS_WAKE=on 的 404 測試）
     expect(wakeRuntimePath(root, "/wake-runtime/sherpa-onnx-wasm-kws-main.wasm")).toBe(join(root, "sherpa-onnx-wasm-kws-main.wasm"));
@@ -184,7 +184,7 @@ describe("NOUS_WAKE=on", () => {
     await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
     try {
       const get = async (name: string) => (await fetch(`http://localhost:${port}/wake-runtime/${name}`)).status;
-      expect(checkWakeRuntime(runtimeDir)).toEqual({ state: "missing", problems: ["keywords_pending"] }); // 關鍵詞等 George 的數字
+      expect(checkWakeRuntime(runtimeDir).state).toBe("hash_mismatch"); // 模型檔內容不符；其他檔案不在
       expect(await get(model.name)).toBe(404);
       for (const f of WAKE_RUNTIME_FILES) expect(await get(f.name), f.name).toBe(404);
       // 對照：runtime 是 ok 時同一個檔案會走到雜湊核對（不符 → 503），證明 404 來自 runtime 的閘門

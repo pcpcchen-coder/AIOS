@@ -146,8 +146,8 @@
       "source": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.en.md",
-      "sourceSha256": "856b8e2df48e36869075fae7d0d3965b9c697ee933167ea161e12538b4e83f41",
-      "translationSha256": "301681f1eccef94156b96a81a24e7eed888111214a4ab55cd1c87b86245a91d9"
+      "sourceSha256": "06a797f63391a8d69ef95a48f0285320d710294d1cadf87e29a129c40d317031",
+      "translationSha256": "8b9d6c751ab2d2afbdf66934f691ddf8e248406658ebbc1b01b5170e3ead9070"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -510,6 +510,13 @@
       "translation": "docs/validation/smarthome-h1b-2026-10-22.en.md",
       "sourceSha256": "13156bda096c1b77cda722ce5f2570caaba95b29cf10fb1cda68c69f6ac65d1f",
       "translationSha256": "cc173a59d6616db315aff18f448ec9d4a990d1199a42d8f3177fc1a89609b6a2"
+    },
+    {
+      "source": "docs/validation/wk-00-mac-2026-10-31.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/wk-00-mac-2026-10-31.en.md",
+      "sourceSha256": "75d2b499cf6752dff0d4ea35cee4d716f87b73b5b8601e8c56577956f5275600",
+      "translationSha256": "afaef02aa529764b3e82e65a256e597ef6ffc8f2dd3137eb0e1f1f7b5a0c3330"
     },
     {
       "source": "docs/validation/wk-00-spike-2026-10-29.md",

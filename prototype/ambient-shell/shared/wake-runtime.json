@@ -1,5 +1,5 @@
 {
-  "comment": "常駐喚醒聆聽的本機引擎清單（WK-01b 準備批次，schema_version 1）。release 檔（wasm 與 JS）由 .github/workflows/wake-wasm.yml 以固定的 emsdk 與 sherpa-onnx v2.0.1 建置；2026-10-31 第一次 main 建置已發布 release wake-runtime-2.0.1-5961b4196003（run 41206217255），三個 release 檔的雜湊與 PR 建置一致，status 改為 built。模型檔沿用 WK-00 釘住的壓縮檔與雜湊（spike/wake/models.json）。關鍵詞與門檻等 George 在 Mac 的 WK-00 每人 5 次試跑數字（docs/17 §14.1 D1），在那之前 keywords 是空的佔位（pending_owner_numbers）。只由 npm run wake:setup -- --product 安裝；App 執行時不下載。",
+  "comment": "常駐喚醒聆聽的本機引擎清單（WK-01b 準備批次，schema_version 1）。release 檔（wasm 與 JS）由 .github/workflows/wake-wasm.yml 以固定的 emsdk 與 sherpa-onnx v2.0.1 建置；2026-10-31 第一次 main 建置已發布 release wake-runtime-2.0.1-5961b4196003（run 41206217255），三個 release 檔的雜湊與 PR 建置一致，status 改為 built。模型檔沿用 WK-00 釘住的壓縮檔與雜湊（spike/wake/models.json）。關鍵詞依 George 2026-10-31 在 Mac 的 WK-00 試跑（docs/validation/wk-00-mac-2026-10-31.md）：中文「哈囉努斯」兩個模型都幾乎認不出，George 決定改用英文 Hello Nous；zh-en-3M 的 ARPAbet，Nous 收 nose／nows／noose 三種念法（任何一行命中都算喚醒），提升分數 1.5、門檻 0.15。只由 npm run wake:setup -- --product 安裝；App 執行時不下載。",
   "schema_version": 1,
   "status": "built",
   "url_prefix": "/wake-runtime/",
@@ -126,10 +126,14 @@
     }
   ],
   "keywords": {
-    "status": "pending_owner_numbers",
-    "model": null,
-    "keywords_score": null,
-    "keywords_threshold": null,
-    "entries": []
+    "status": "configured",
+    "model": "zh-en-3M",
+    "keywords_score": 1.5,
+    "keywords_threshold": 0.15,
+    "entries": [
+      { "id": "HELLO_NOUS_OW", "tokens": "HH AH0 L OW1 N OW1 S", "boost": null, "threshold": null },
+      { "id": "HELLO_NOUS_AW", "tokens": "HH AH0 L OW1 N AW1 S", "boost": null, "threshold": null },
+      { "id": "HELLO_NOUS_UW", "tokens": "HH AH0 L OW1 N UW1 S", "boost": null, "threshold": null }
+    ]
   }
 }
