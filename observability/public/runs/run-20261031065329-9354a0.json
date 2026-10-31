@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-31T06:53:29.952Z",
-  "updated_at": "2026-10-31T07:40:20.476Z",
+  "updated_at": "2026-10-31T07:40:24.565Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,8 +59,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-10-31T07:40:24.565Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -139,6 +139,13 @@
       "type": "step_updated",
       "step_id": "verify",
       "status": "passed",
+      "note": ""
+    },
+    {
+      "at": "2026-10-31T07:40:24.565Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
       "note": ""
     }
   ],
