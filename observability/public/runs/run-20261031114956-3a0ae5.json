@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-31T11:49:56.051Z",
-  "updated_at": "2026-10-31T11:50:14.193Z",
+  "updated_at": "2026-10-31T12:09:25.622Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-31T12:09:25.621Z",
+      "ended_at": "2026-10-31T12:09:25.621Z",
+      "note": "HTTP 403 strict mode, IPC native dialog, video permission gate",
       "evidence": []
     },
     {
@@ -112,6 +112,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "camera enable main-only design: HTTP active:true 403, App native dialog via IPC"
+    },
+    {
+      "at": "2026-10-31T12:09:25.622Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "HTTP 403 strict mode, IPC native dialog, video permission gate"
     }
   ],
   "provenance": "Agent self-reported"
