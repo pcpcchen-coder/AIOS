@@ -6,13 +6,14 @@
 
 2026-10-26 新增：[中英文文件與 App／網頁驗證](bilingual-2026-10-26.md)，涵蓋文件同步、介面切換與保存、對話語言及隔離 mock 畫面測試。
 
-更新日期：2026-10-31（加入 HIST-1 與 ID-02 的 Mac 實機紀錄）。2026-10-30 加入家庭記憶 MEM-2、MEM-3、MEM-4a、MEM-4b、MEM-4c、MEM-5a、MEM-5b 與成果紀錄 HIST-1；這些批次都已合併到 main，Mac gate 未執行。2026-10-29 加入 WK-00 喚醒詞 spike 與家庭記憶 MEM-1。本目錄保留每次驗證的原始日期、方法與限制。舊紀錄不因新文件更新而升格為實機通過；後續結果以新增紀錄或明確補記呈現。
+更新日期：2026-10-31（加入 HIST-1 與 ID-02 的 Mac 實機紀錄，以及喚醒引擎 WK-01b 準備批次）。2026-10-30 加入家庭記憶 MEM-2、MEM-3、MEM-4a、MEM-4b、MEM-4c、MEM-5a、MEM-5b 與成果紀錄 HIST-1；這些批次都已合併到 main，Mac gate 未執行。2026-10-29 加入 WK-00 喚醒詞 spike 與家庭記憶 MEM-1。本目錄保留每次驗證的原始日期、方法與限制。舊紀錄不因新文件更新而升格為實機通過；後續結果以新增紀錄或明確補記呈現。
 
 | 紀錄 | 證據範圍與限制 |
 |---|---|
 | [成果紀錄 HIST-1：Mac 實機](history-hist1-mac-2026-10-31.md) | 2026-10-31，Mac mini、App `9c67e65`、ad-hoc 簽章、mock 引擎：主要放行條件成立（選單、Surface、`/history`、原生刪除對話框、收起不取消）；第 3b 步不通過（「晚餐」找不到「晚饭」），另有 F1（即時語音接走本機指令）、F3、F4 與 N1；F2（3b）、F3、F4 已在 PR #61 修正，只有 Linux 自動測試，待 Mac 重驗；F1、N1 與「14 筆／15 筆」差異未處理 |
 | [家人辨識 ID-02：Mac 實機](family-id-02-mac-2026-10-31.md) | 2026-10-31，部分完成、未放行：ChatGPT 方案校正後稱名 4/4、稱名關閉兩路通過、兩路時序；API key 改句（F1）、兩路先開口（F2、F10）不通過；手掌停止次數不足；需要第二個人的第 2、4、5 步與第 7 步未做。測試中的修正已合併（PR #57、#58），F11 只加強指示（PR #60），F1、F2、F7、F10 的修正（PR #62）只有 fixture，待 Mac 重驗；F3、F8、F11 未解 |
 | [喚醒詞 WK-00 spike](wk-00-spike-2026-10-29.md) | sherpa-onnx 1.13.8／2.0.1 的 Node 與 Node wasm KWS、兩個模型、三個候選詞在雲端容器的 CPU、記憶體、即時率與公開語料每小時誤報；TTS 合成正例 0/300 命中，原因未定（合成語音或「哈囉」的發音單元），0 誤報與 0 命中同時出現，不能解讀成誤報低；瀏覽器 wasm 未自建；Mac 客廳的家人正例與電視負例待測 |
+| [喚醒引擎 WK-01b 準備批次](wk-01b-prep-2026-10-31.md) | GitHub Actions 建置 sherpa-onnx v2.0.1 KWS wasm 的 workflow（emsdk 4.0.23、只建 KWS、GPL espeak-ng／piper 檢查、pull_request 不發布）、`wake:setup -- --product`、清單格式、worker 真的載入路徑與 worker 網路關閉（在 import 任何第三方 module 之前就關閉網路全域）；**workflow 尚未執行**，清單仍是 `pending_first_build`，關鍵詞與門檻等 George 的 Mac 數字；fixture（假 wasm 模組）的雲端測試，不證明偵測可用 |
 | [常駐喚醒聆聽 WK-01a](wk-01a-2026-10-31.md) | `AudioFrontEnd`、擷取 worker、偏好與自動恢復、自我觸發防護、提示音、選單列「喚醒詞」段（「通話中辨認說話者」為停用列），旗標 `NOUS_WAKE` 預設關閉、關閉時逐位元組相同；**沒有喚醒引擎**，偵測器照實回報 `runtime_missing`、不開麥克風；fixture 與假時鐘的雲端測試；Mac gate 未執行 |
 | [成果紀錄 HIST-1](history-hist1-2026-10-30.md) | 2026-10-30：一般任務與成果的成果紀錄（`GET /api/history` 記憶體內搜尋、篩選、分頁、片段標示；App 內按需 Surface 與獨立網頁 `/history`；經原生確認的刪除、沿用重試的重做）；Linux 上的單元、HTTP、假 DOM 與 Vite 建置測試，500 筆合成任務的延遲；審查時另有雲端 headless Chromium 的操作與截圖（截圖不在 repo），Mac 驗證未執行；加密與受保護成果在 MEM-4a、MEM-4c |
 | [家庭記憶 MEM-2](memory-mem2-2026-10-30.md) | 2026-10-30：ChatGPT 方案即時語音的記憶（新通話只帶釘選、codex 獨立同意、`recall_memory`、用說的確認記住／更正／忘記與殘餘風險、撤銷、停播回報與強制靜音、重建、交辦封鎖）；Linux 上真 AES-GCM、假 sideband、真 HTTP／SSE 與 FakePeer 的測試與 canary；主要放行條件（錄音證明沒有晚到的舊聲音）與 Mac 第 0–11 步全部未執行 |

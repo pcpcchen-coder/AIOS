@@ -6,6 +6,9 @@ import { WAKE_STATE_REASONS } from "../shared/wake.ts";
 // WK-01a 常駐喚醒聆聽的隱私邊界（靜態，仿 tests/camera-privacy.test.ts；docs/17 §5.2、§12、ADR-0003 §2.3 第 3 點）。
 // 紅線：未喚醒音訊不得寫檔、進 trace 或外傳。這是字面掃描：間接呼叫抓不到，執行期另由 AudioRing.toJSON、
 // isWakeWorkerOut 與 tests/wake-logic.test.ts 的 worker 協定測試擋住。
+// WK-01b 準備批次的唯一放寬：worker 載入引擎時經 src/audio/runtime-net.ts 讀同源 /wake-runtime/ 的清單檔案。
+// 那個檔案的每一行網路用法都逐字釘在 RUNTIME_NET_LINES；執行期的行為（只接受清單檔名、載入後關閉網路）在
+// tests/wake-runtime-loader.test.ts。
 
 const app = join(import.meta.dirname, "..");
 const src = join(app, "src");
@@ -46,12 +49,29 @@ const AUDIO_FORBIDDEN = new RegExp(
   ].join("|"),
 );
 
+/**
+ * runtime-net.ts 裡允許出現網路字樣的每一行（逐字）。只有一個真正的呼叫點（scope.fetch.bind），其他是型別宣告與
+ * lockGlobals() 要覆蓋的全域名稱清單。新增或修改任何一行都要在這裡說明。
+ */
+const RUNTIME_NET_LINES = [
+  'fetch: (input: string, init?: { credentials?: "omit" | "same-origin"; redirect?: "error"; cache?: "no-store" }) => Promise<{ ok: boolean; status: number; arrayBuffer(): Promise<ArrayBuffer> }>;',
+  "XMLHttpRequest?: unknown;",
+  "WebSocket?: unknown;",
+  "EventSource?: unknown;",
+  "WebTransport?: unknown;",
+  "caches?: unknown;",
+  'export const LOCKED_GLOBALS = ["fetch", "XMLHttpRequest", "WebSocket", "EventSource", "WebTransport", "importScripts", "Worker", "SharedWorker", "caches"] as const;',
+  "const load = scope.fetch.bind(scope);",
+];
+/** runtime-net.ts 裡允許出現 importScripts（動態程式規則）的行：型別宣告與要覆蓋的清單。 */
+const RUNTIME_NET_DYNAMIC_LINES = ["importScripts?: unknown;", RUNTIME_NET_LINES[6]!];
+
 describe("audio privacy (static)", () => {
   const audioFiles = files(audio);
 
   it("src/audio has the expected modules and no file name mentions the engine (kws)", () => {
     expect(audioFiles.map((f) => relative(audio, f)).sort()).toEqual(
-      ["capture-worklet.ts", "capture.ts", "controller.ts", "detector.ts", "earcon.ts", "front-end.ts", "guard.ts", "index.ts", "no-voice.ts", "resample.ts", "ring.ts", "wake-worker.ts", "worker-core.ts"].sort(),
+      ["capture-worklet.ts", "capture.ts", "controller.ts", "detector.ts", "earcon.ts", "front-end.ts", "guard.ts", "index.ts", "no-voice.ts", "resample.ts", "ring.ts", "runtime-net.ts", "wake-worker.ts", "worker-core.ts"].sort(),
     );
     expect(audioFiles.filter((f) => /kws|sherpa/i.test(relative(audio, f)))).toEqual([]);
   });
@@ -76,13 +96,57 @@ describe("audio privacy (static)", () => {
     expect(callers.filter((c) => ![join("audio", "front-end.ts"), "realtime.ts", join("sense", "pipeline.ts")].includes(c.file))).toEqual([]);
   });
 
-  it("src/audio never records, exports, uploads, stores, logs or talks to IPC", () => {
+  it("src/audio never records, exports, uploads, stores, logs or talks to IPC; the only network lines are the pinned ones in runtime-net.ts", () => {
     const hits = audioFiles.flatMap((file) =>
       codeLines(file)
         .filter(({ line }) => AUDIO_FORBIDDEN.test(line))
-        .map(({ line, n }) => `${relative(audio, file)}:${n}: ${line.trim()}`),
+        .map(({ line }) => ({ file: relative(audio, file), line: line.trim() })),
     );
-    expect(hits).toEqual([]);
+    expect(hits.filter((h) => h.file !== "runtime-net.ts")).toEqual([]);
+    expect(hits.filter((h) => h.file === "runtime-net.ts").map((h) => h.line)).toEqual(RUNTIME_NET_LINES);
+    // 唯一的呼叫點只用在 bytes()，而且之前一定先經過 pathOf（已關閉就丟錯、只接受清單檔名、只拼同源前綴）
+    const net = readFileSync(join(audio, "runtime-net.ts"), "utf8");
+    // `load` 只出現在定義與 `await load(pathOf(` 這一種用法（不能被傳出去或另外呼叫）
+    const uses = [...net.matchAll(/\bload\b.{0,12}/g)].map((m) => m[0]);
+    expect(uses).toEqual(["load = scope.fet", "load(pathOf(name"]);
+    expect([...net.matchAll(/await load\(pathOf\(/g)]).toHaveLength(1);
+    expect(net).toMatch(/const res = await load\(pathOf\(name, globalsLocked\), \{ credentials: "same-origin", redirect: "error", cache: "no-store" \}\);/);
+    expect(net).toMatch(/const pathOf = \(name: string, closed: boolean\): string => \{\s*if \(closed\) throw new NetworkLockedError\(\);\s*if \(!allowed\.has\(name\)\) throw new Error\("not a listed wake runtime file"\);\s*return `\$\{prefix\}\$\{name\}`;\s*\};/);
+    expect(net).toMatch(/if \(prefix !== "\/wake-runtime\/"\) throw/);
+  });
+
+  it("the worker has exactly one other network path (import() in runtime-net.ts, listed names only), and the network is locked before third-party init and after load", () => {
+    const dynamicImports = audioFiles.flatMap((file) =>
+      codeLines(file)
+        .filter(({ line }) => /\bimport\s*\(/.test(line))
+        .map(({ line }) => `${relative(audio, file)}: ${line.trim()}`),
+    );
+    expect(dynamicImports).toEqual(["runtime-net.ts: importer: (path: string) => Promise<unknown> = (path) => import(/* @vite-ignore */ path),"]);
+    const net = readFileSync(join(audio, "runtime-net.ts"), "utf8");
+    expect(net).toMatch(/module\(name\) \{\s*return importer\(pathOf\(name, importsLocked\)\);\s*\}/);
+    // lockGlobals() 覆蓋 LOCKED_GLOBALS（含 Worker、SharedWorker、caches），定義成不可寫、不可重設
+    expect(net).toMatch(/for \(const key of LOCKED_GLOBALS\) Object\.defineProperty\(scope, key, \{ value: blocked, writable: false, configurable: false, enumerable: false \}\);/);
+    // 只有 wake-worker.ts 建立 runtime-net，用清單的前綴與檔名
+    const creators = audioFiles.filter((f) => /createRuntimeNet\(/.test(readFileSync(f, "utf8"))).map((f) => relative(audio, f)).sort();
+    expect(creators).toEqual(["runtime-net.ts", "wake-worker.ts"]);
+    expect(readFileSync(join(audio, "wake-worker.ts"), "utf8")).toMatch(/const net = createRuntimeNet\(scope, runtime\.url_prefix, runtime\.files\.map\(\(f\) => f\.name\)\);/);
+    // 偵測器：清單未就緒時不連網就 lock；載入時先讀完、核對雜湊，然後 lockGlobals 才 import()（第三方 module 的頂層程式執行時
+    // 網路全域已關閉），import 完 lockImports，之後才執行 Emscripten 初始化；finally 再 lock 一次
+    const detector = readFileSync(join(audio, "detector.ts"), "utf8");
+    const load = detector.slice(detector.indexOf("async load(): Promise<void> {"), detector.lastIndexOf("accept(samples: Float32Array)"));
+    expect(load.indexOf("wakeRuntimeBlockers(this.manifest)")).toBeLessThan(load.indexOf("net.bytes("));
+    expect(load.indexOf("net.sha256(bytes)")).toBeGreaterThan(load.indexOf("net.bytes("));
+    const globalsAt = load.indexOf("net.lockGlobals();");
+    const importsAt = load.indexOf("net.lockImports();");
+    expect(globalsAt).toBeGreaterThan(load.lastIndexOf("await verified("));
+    expect(globalsAt).toBeLessThan(load.indexOf("net.module("));
+    expect(load.lastIndexOf("net.module(")).toBeLessThan(importsAt);
+    expect(importsAt).toBeLessThan(load.indexOf("glue.default("));
+    expect([...load.matchAll(/net\.bytes\(/g)]).toHaveLength(1); // 只在 verified() 裡
+    expect(load).toMatch(/\} finally \{\s*net\.lock\(\);\s*\}/);
+    // 其他 src/audio 模組不呼叫 bytes()／module()
+    const callers = audioFiles.filter((f) => /\bnet\.(bytes|module)\(/.test(readFileSync(f, "utf8"))).map((f) => relative(audio, f));
+    expect(callers).toEqual(["detector.ts"]);
   });
 
   it("flags the patterns it is meant to catch", () => {
@@ -128,7 +192,7 @@ describe("audio privacy (static)", () => {
         'worker.postMessage({ type: "init", sampleRate: ctx.sampleRate }, [channel.port2]);',
         'node.port.postMessage({ type: "port" }, [channel.port1]);',
       ],
-      "wake-worker.ts": ["postMessage(message: WakeWorkerOut): void;", "core = new WakeWorkerCore(new SherpaWasmDetector({ prefix: manifest.url_prefix, files }), (out) => scope.postMessage(out));", "scope.postMessage(closed);"],
+      "wake-worker.ts": ["postMessage(message: WakeWorkerOut): void;", "core = new WakeWorkerCore(new SherpaWasmDetector(runtime, net), (out) => scope.postMessage(out));", "scope.postMessage(closed);"],
     };
     const found: Record<string, string[]> = {};
     for (const file of audioFiles) {
@@ -148,16 +212,20 @@ describe("audio privacy (static)", () => {
   });
 
   it("src/audio has no indirect global access or dynamic code, and new URL only points at the wake worker", () => {
-    const DYNAMIC = /\bself\.|\bglobalThis\s*\[|\bReflect\.|\beval\s*\(|\bnew\s+Function\b|\bimportScripts\b|\bwindow\s*\[/;
+    const DYNAMIC = /\bself\.|\bscope\s*\[|\bglobalThis\s*\[|\bReflect\.|\beval\s*\(|\bnew\s+Function\b|\bimportScripts\b|\bwindow\s*\[/;
     // worker／worklet 的進入點以 self 取得自己的範圍；只允許 `self as unknown as Scope` 這一種寫法
     const SELF_ALLOWED = new Set(["wake-worker.ts"]);
     const hits = audioFiles.flatMap((file) =>
       codeLines(file)
         .filter(({ line }) => DYNAMIC.test(line) || (/\bself\b/.test(line) && !(SELF_ALLOWED.has(relative(audio, file)) && /const scope = self as unknown as Scope;/.test(line))))
+        .filter(({ line }) => !(relative(audio, file) === "runtime-net.ts" && RUNTIME_NET_DYNAMIC_LINES.includes(line.trim())))
         .map(({ line, n }) => `${relative(audio, file)}:${n}: ${line.trim()}`),
     );
     expect(hits).toEqual([]);
-    for (const sample of ["self.postMessage(x)", "globalThis['fetch'](u)", "Reflect.get(window, 'fetch')", "eval('x')", "new Function('return fetch')", "importScripts('x.js')", "window['fetch'](u)"]) {
+    // 例外的那兩行確實存在（不是空的放行）
+    const netLines = codeLines(join(audio, "runtime-net.ts")).map(({ line }) => line.trim());
+    for (const line of RUNTIME_NET_DYNAMIC_LINES) expect(netLines).toContain(line);
+    for (const sample of ["self.postMessage(x)", "globalThis['fetch'](u)", "Reflect.get(window, 'fetch')", "eval('x')", "new Function('return fetch')", "importScripts('x.js')", "window['fetch'](u)", "scope['fetch'](u)", "scope [key] = f"]) {
       expect(DYNAMIC.test(sample), sample).toBe(true);
     }
     const urls = audioFiles.flatMap((file) => [...readFileSync(file, "utf8").matchAll(/new URL\(([^)]*)\)/g)].map((m) => `${relative(audio, file)}: ${m[1]}`));

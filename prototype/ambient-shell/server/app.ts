@@ -282,8 +282,9 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } else if (url.pathname.startsWith("/face-runtime/")) {
         serveFaceRuntime(res, req.method ?? "GET", url.pathname, options.faceRuntimeDir);
       } else if (url.pathname.startsWith("/wake-runtime/")) {
-        // 旗標關閉時一律 404（不落到 SPA fallback）；開啟時只給清單上、雜湊相符的檔案。
-        serveWakeRuntime(res, req.method ?? "GET", url.pathname, options.wake ? options.wakeRuntimeDir : null);
+        // 旗標關閉、或引擎核對不是 ok（例如清單仍是 pending_first_build）時一律 404，模型檔也一樣（不落到 SPA fallback）；
+        // ok 時只給清單上、雜湊相符的檔案。
+        serveWakeRuntime(res, req.method ?? "GET", url.pathname, options.wake?.runtime() === "ok" ? options.wakeRuntimeDir : null);
       } else {
         // 喚醒只有在引擎核對通過時才需要編譯 wasm（WK-01a 清單是空的，所以 CSP 和旗標關閉時相同）。
         serveStatic(res, url.pathname, options.distDir, !!options.camera?.view().enabled, options.wake?.runtime() === "ok");
@@ -887,7 +888,7 @@ function serveFaceRuntime(res: ServerResponse, method: string, pathname: string,
   res.end(method === "HEAD" ? undefined : body);
 }
 
-/** 喚醒引擎檔案：只給清單上的檔名，沒有 SPA fallback；不存在或旗標關閉 404，雜湊不符 503。 */
+/** 喚醒引擎檔案：只給清單上的檔名，沒有 SPA fallback；不存在、旗標關閉或引擎不是 ok 時 404，雜湊不符 503。 */
 function serveWakeRuntime(res: ServerResponse, method: string, pathname: string, dir: string | null | undefined): void {
   if (!dir) throw new HttpError(404, "not found");
   if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");

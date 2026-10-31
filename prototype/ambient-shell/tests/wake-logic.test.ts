@@ -5,6 +5,7 @@ import { NO_VOICE_TIMEOUT_MS, NoVoiceWatchdog } from "../src/audio/no-voice.ts";
 import { StreamResampler } from "../src/audio/resample.ts";
 import { AudioRing } from "../src/audio/ring.ts";
 import { WakeWorkerCore } from "../src/audio/worker-core.ts";
+import { WAKE_RUNTIME } from "../server/wake-runtime.ts";
 import { isWakeReport, isWakeWorkerOut, parseWakePatch, WAKE_REASONS, WAKE_STATE_REASONS, WAKE_STATES, WakePatchError, type WakeWorkerOut } from "../shared/wake.ts";
 import { FakeClock, FakeDetector, flush } from "./fixtures/wake.ts";
 
@@ -199,10 +200,11 @@ describe("wake worker protocol: only events leave the worker", () => {
     expect(detector.chunks).toBe(4);
   });
 
-  it("the product detector (SherpaWasmDetector) honestly reports runtime_missing in WK-01a and never detects", async () => {
-    await expect(new SherpaWasmDetector({ prefix: "/wake-runtime/", files: [] }).load()).rejects.toMatchObject({ reason: "runtime_missing" });
-    await expect(new SherpaWasmDetector({ prefix: "/wake-runtime/", files: ["x.wasm"] }).load()).rejects.toBeInstanceOf(WakeDetectorError);
-    expect(new SherpaWasmDetector({ prefix: "/wake-runtime/", files: [] }).accept()).toBeNull();
+  it("the product detector (SherpaWasmDetector) honestly reports runtime_missing with the shipped manifest and never detects", async () => {
+    // 載入、雜湊、網路關閉與事件對應的完整測試在 tests/wake-runtime-loader.test.ts
+    await expect(new SherpaWasmDetector(WAKE_RUNTIME, null).load()).rejects.toMatchObject({ reason: "runtime_missing" });
+    await expect(new SherpaWasmDetector(WAKE_RUNTIME, null).load()).rejects.toBeInstanceOf(WakeDetectorError);
+    expect(new SherpaWasmDetector(WAKE_RUNTIME, null).accept(new Float32Array(160))).toBeNull();
     await flush();
   });
 });
