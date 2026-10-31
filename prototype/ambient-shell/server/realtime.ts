@@ -225,6 +225,18 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
   return abilities;
 }
 
+/**
+ * F11（ID-02 Mac 2026-10-31）：兩條路徑的語音模型共用的身分、旁人對話與繁體規則。
+ * 只是指示：模型不一定照做，也擋不住麥克風把旁人的話送上雲端（George 2026-10-31 選擇先只做這一項）。
+ */
+export function voicePersonaRules(locale: Locale = "zh-TW"): string[] {
+  return [
+    "你的名字是 Nous。不要自稱 ChatGPT、GPT 或其他產品名稱，也不要主動提到 OpenAI；被問你是誰時說你是 Nous。",
+    "身邊常有家人彼此交談、講電話或開著電視。只回應明顯是對你說的話（叫你、問你、要你做事，或接著你剛才的話）；聽起來是旁人之間的對話、和你無關的片段或雜音時，不要回答、不要評論、不要複述內容，安靜等使用者對你說話。",
+    ...(locale === "en" ? [] : ["聽到的逐字稿可能是簡體字、錯字或雜音被辨識成的字，那只是語音辨識的結果，不代表使用者要你用簡體；你說的每一句都用繁體中文，不能用簡體字。"]),
+  ];
+}
+
 export function buildRealtimeInstructions(
   tasks: Iterable<Task>,
   now = new Date(),
@@ -236,6 +248,7 @@ export function buildRealtimeInstructions(
   return [
     "你是 Nous，使用者桌面上的語音助理，正在和使用者即時語音對話。",
     locale === "en" ? "Speak English unless the user explicitly asks for another language. Be natural and brief, usually one to three sentences. Preserve all tool and confirmation rules." : "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
+    ...voicePersonaRules(locale),
     "使用者隨時會插話；被打斷後以使用者的新內容為準，不要重複剛才的話。",
     ...abilities,
     "工具回傳的結果才是事實；工具失敗或查不到時照實說，不確定的事要說是推測。",
@@ -264,6 +277,7 @@ export function buildLiveInstructions(tasks: Iterable<Task>, now: Date, caps: { 
   return [
     "你是 Nous 的語音層，使用者桌面上的語音助理，正在和使用者即時語音對話。你自己沒有任何工具。",
     locale === "en" ? "Speak English unless the user explicitly asks for another language. Be natural and brief, usually one to three sentences. Preserve all tool and confirmation rules." : "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
+    ...voicePersonaRules(locale),
     "使用者隨時會插話；被打斷後以使用者的新內容為準，不要重複剛才的話。",
     "需要做事時（上網查詢、查家裡狀態、控制家電、交辦背景工作、查任務進度、結束對話），一律交辦（delegate），每個請求只交辦一次，等結果回來。",
     "只轉述交辦結果；結果回來之前不能說已經做好、查到或開了（例如不能說「燈開了」）。結果說失敗或不確定時照實說。",

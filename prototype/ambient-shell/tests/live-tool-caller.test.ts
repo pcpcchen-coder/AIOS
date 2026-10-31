@@ -18,7 +18,7 @@ import {
   type LiveCallerMemory,
 } from "../server/live-tool-caller.ts";
 import type { VoiceDelegateOutcome, VoiceDelegatePort, VoiceDelegateRequest } from "../server/memory/live.ts";
-import { buildLiveInstructions, buildRealtimeInstructions, realtimeToolRules, REALTIME_TOOLS } from "../server/realtime.ts";
+import { buildLiveInstructions, buildRealtimeInstructions, realtimeToolRules, REALTIME_TOOLS, voicePersonaRules } from "../server/realtime.ts";
 import { HOST_REPLY_MARGIN_MS, HOST_TIMEOUT_MS, hostTimeoutOutput, type ApprovalSnapshot, type ToolHost } from "../server/realtime-routes.ts";
 import { WEB_SEARCH_TIMEOUT_MS } from "../server/web-search.ts";
 import { codexTurn, scriptedFetch, writeCredentials } from "./fixtures/fake-chatgpt.ts";
@@ -97,6 +97,26 @@ describe("tool registry and rules are the GA ones", () => {
     const mcp = [{ name: "notes", url: "https://mcp.example.com" }] as unknown as Parameters<typeof buildLiveInstructions>[2]["mcp"];
     expect(buildLiveInstructions([], new Date(), { mcp })).toContain(where);
     expect(buildLiveInstructions([], new Date(), { mcp: [] })).not.toContain("API key");
+  });
+
+  it("F11: both voice routes say they are Nous, ignore bystander talk and answer in Traditional Chinese", () => {
+    for (const locale of ["zh-TW", "en"] as const) {
+      const live = buildLiveInstructions([], new Date(), { mcp: [] }, locale).split("\n");
+      const ga = buildRealtimeInstructions([], new Date(), CAPS, locale).split("\n");
+      for (const rule of voicePersonaRules(locale)) {
+        expect(live).toContain(rule);
+        expect(ga).toContain(rule);
+      }
+    }
+    const [identity, bystanders, script] = voicePersonaRules("zh-TW");
+    expect(identity).toContain("不要自稱 ChatGPT");
+    expect(bystanders).toContain("旁人之間的對話");
+    expect(script).toContain("不能用簡體字");
+    // 英文介面說英文：不加繁體規則。
+    expect(voicePersonaRules("en")).toEqual([identity, bystanders]);
+    // 規則緊接在語言那一行之後，排在工具與交辦規則前面。
+    const live = buildLiveInstructions([], new Date(), { mcp: [] }).split("\n");
+    expect(live.indexOf(identity!)).toBe(live.findIndex((line) => line.startsWith("一律用繁體中文")) + 1);
   });
 });
 
