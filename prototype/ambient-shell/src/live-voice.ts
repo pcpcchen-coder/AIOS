@@ -1,10 +1,11 @@
 import { parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
-import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind, type StopEvidence } from "../shared/realtime-route.ts";
+import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type FallbackOffer, type HostCall, type LiveCoreEvent, type LiveInputKind, type StopEvidence, type StopReplyTurn } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimeCallbacks, RealtimeDeps, RealtimePhase } from "./realtime.ts";
 import { CONNECTING_SPEECH_HINT, EARLY_SPEECH_RMS, EarlySpeech, earlySpeechLogLine } from "./early-speech.ts";
 import type { GreetingOnce, RealtimeSession } from "./realtime-session.ts";
 import { FallbackOfferError, GREETING_SETTLE_MS } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
+import { normalizeSpeech } from "./echo.ts";
 
 // ChatGPT 方案路徑（gpt-live-1-codex）的頁面模組。和 RealtimeVoice 用同一份 RealtimeCallbacks（main.ts 建一次）、
 // 同一個 ApprovalQueue 與 executeRealtimeTool。差別只在事件的來源：
@@ -30,7 +31,8 @@ export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "releaseM
    */
   watchLevel(stream: MediaStream, onLevel: (rms: number) => void): () => void;
   /** F7：POST /api/realtime/stop-reply：手掌停止，核心把這一輪還沒回來的交辦結果改成不念出的背景（任務照常）。 */
-  stopReply?(): Promise<void>;
+  /** turn：HIST-1 Mac F1 的本機畫面指令，只有這一輪；沒有時是手掌停止。 */
+  stopReply?(turn?: StopReplyTurn): Promise<void>;
   /** Esc：這條路徑沒有 response.cancel，只能把本機播放靜音到下一輪。 */
   setMuted(muted: boolean): void;
   /** 說出結束原因（瀏覽器語音合成）。 */
@@ -59,6 +61,13 @@ export const LOCAL_GOODBYES = ["再見", "掰掰", "拜拜", "結束對話"] as 
 const END_GRACE_MS = 1_500;
 const END_FALLBACK_MS = 10_000;
 const DEDUP_TEXT_MS = 10_000;
+/**
+ * HIST-1 Mac F1：本機畫面指令之後，播放最多靜音這麼久（毫秒；上限，審查 M2）。平常在這一輪的回覆（第一則助理逐字稿）之後
+ * LOCAL_COMMAND_DRAIN_MS 就恢復；使用者再開口、打字、系統通知、之前各輪的交辦結束、記憶卡或確認卡出現時立刻恢復。
+ */
+export const LOCAL_COMMAND_QUIET_MS = 8_000;
+/** 這一輪的回覆逐字稿到了之後，再等這麼久讓它的聲音尾巴播完（靜音中）才恢復。 */
+export const LOCAL_COMMAND_DRAIN_MS = 1_500;
 
 /** 逐字稿的來源：資料通道（oai-events）或核心轉送的 sideband。 */
 type TranscriptSource = "channel" | "core";
@@ -86,6 +95,22 @@ export class LiveVoice implements RealtimeSession {
   private muted = false;
   /** MEM-2：核心要求暫停（更正、忘記 commit 前）：播放靜音到恢復或通話結束。 */
   private held = false;
+  /**
+   * HIST-1 Mac F1：本機已執行使用者說的畫面指令：這一輪的模型回答靜音（這條路徑沒有 response.cancel）。
+   * text 是那句指令（正規化後），用來分辨晚到的同一句未完成逐字稿與使用者真的又開口。
+   */
+  private quiet: {
+    text: string;
+    timer: ReturnType<typeof setTimeout>;
+    /** 這一輪（使用者開口之後）才開始的交辦：它們的結果是這一輪的回答，也靜音。 */
+    own: Set<string>;
+    /** 這一輪的回覆已經到了，正在等聲音尾巴。 */
+    draining: boolean;
+  } | null = null;
+  /** 這一輪使用者開口的時間（speech.started 或第一則未完成的使用者逐字稿）；交辦開始的時間。 */
+  private turnStartedAt = 0;
+  private userSpeaking = false;
+  private readonly delegationStartedAt = new Map<string, number>();
   /** 聆聽中的證據。 */
   private evidence = { mic: false, peer: false, started: false };
   /** 逐字稿去重：資料通道與核心可能各送一次。有 item_id 時依 item_id。 */
@@ -119,8 +144,15 @@ export class LiveVoice implements RealtimeSession {
     this.idleMs = options.idleMs;
     this.earlySpeechRms = options.earlySpeechRms ?? EARLY_SPEECH_RMS;
     this.greeting = options.greeting ?? null;
+    // 審查 M2：確認卡（Action Gate）出現時要聽得到模型說明：本機指令的靜音結束。
+    const approvalCallbacks: RealtimeCallbacks = Object.assign(Object.create(callbacks) as RealtimeCallbacks, {
+      onApprovalPrompt: (request: ApprovalRequest, expiresAt: number) => {
+        this.endQuiet();
+        callbacks.onApprovalPrompt(request, expiresAt);
+      },
+    });
     this.approvals = new ApprovalQueue(
-      callbacks,
+      approvalCallbacks,
       {
         generation: () => this.generation,
         notify: (text) => this.notify(text),
@@ -290,6 +322,7 @@ export class LiveVoice implements RealtimeSession {
       return;
     }
     this.resetIdle();
+    this.endQuiet();
     this.approvals.check(text);
     void this.deps.input("user_text", text).catch(() => undefined);
     if (this.phase !== "speaking") this.setPhase("thinking");
@@ -303,6 +336,8 @@ export class LiveVoice implements RealtimeSession {
   /** 系統通知（任務完成、確認卡的結果）：和 API key 路徑同一句話，經核心送給模型。 */
   notify(text: string): void {
     if (!this.capturing) return;
+    // 系統通知（任務完成等）要聽得到：本機指令的靜音到此為止。
+    this.endQuiet();
     void this.deps.input("notice", text).catch(() => undefined);
   }
 
@@ -361,8 +396,14 @@ export class LiveVoice implements RealtimeSession {
     if (role === "user") this.skipGreeting();
     if (!final) {
       if (role === "user") {
+        // 使用者又開口（不是本機指令那一句晚到的片段）：靜音結束，新的一輪照常念。
+        if (this.quiet && !this.quiet.text.includes(normalizeSpeech(clean))) this.endQuiet();
+        this.noteUserStart();
         this.resetIdle();
         if (this.phase === "listening") this.setPhase("hearing");
+      } else {
+        // HIST-1 Mac F1（審查 M3）：助理說到一半的文字（回音判斷用；使用者逐字稿可能比助理的整句先到）。
+        this.callbacks.onAssistantPartial?.(clean);
       }
       return;
     }
@@ -375,17 +416,28 @@ export class LiveVoice implements RealtimeSession {
       return;
     }
     if (role === "user") {
+      // 新的一則使用者話（已去重）：上一個本機指令的靜音到此為止。
+      this.endQuiet();
+      this.userSpeaking = false;
       this.callbacks.onUserTranscript(clean);
+      const local = this.callbacks.onLocalCommand?.(clean) === true;
       this.approvals.check(clean);
       this.resetIdle();
-      if (this.phase === "hearing" || this.phase === "listening") this.setPhase("thinking");
+      if (local) this.quietLocalCommand(clean);
+      else if (this.phase === "hearing" || this.phase === "listening") this.setPhase("thinking");
       if (isLocalGoodbye(clean)) this.requestEnd();
       return;
     }
-    this.callbacks.onAssistantTranscript(clean);
+    // HIST-1 Mac F1：本機指令那一輪的模型回覆已靜音：字幕也不顯示（否則畫面上像是回答了兩次）。審查 M2：只有這一輪的回覆；
+    // 之後的（等聲音尾巴時又來一則）照常顯示並恢復聲音。這一輪自己的交辦還沒結束時，等它的結果也念完。
+    if (this.quiet === null) this.callbacks.onAssistantTranscript(clean);
+    else if (this.quiet.draining) {
+      this.endQuiet();
+      this.callbacks.onAssistantTranscript(clean);
+    } else if (![...this.quiet.own].some((id) => this.delegations.has(id))) this.drainQuiet();
     if (this.muted) {
       this.muted = false;
-      this.deps.setMuted(this.held);
+      this.deps.setMuted(this.held || this.quiet !== null);
     }
     if (!this.speaking && this.phase === "thinking" && !this.delegations.size) this.setPhase("listening");
     if (this.endRequested) this.scheduleEnd(END_GRACE_MS);
@@ -421,6 +473,9 @@ export class LiveVoice implements RealtimeSession {
       case "speech.started":
         // F10：上游的開口事件（資料通道有送時）：和 API key 路徑的 speech_started 一樣，這次不打招呼。
         this.skipGreeting();
+        this.noteUserStart();
+        // HIST-1 Mac F1：使用者又開口：本機指令的靜音結束。
+        this.endQuiet();
         this.resetIdle();
         if (this.phase === "listening") this.setPhase("hearing");
         break;
@@ -431,7 +486,7 @@ export class LiveVoice implements RealtimeSession {
         }
         if (this.muted) {
           this.muted = false;
-          this.deps.setMuted(this.held);
+          this.deps.setMuted(this.held || this.quiet !== null);
         }
         break;
       case "delegation":
@@ -455,9 +510,14 @@ export class LiveVoice implements RealtimeSession {
       case "delegation":
         if (event.state === "started") {
           this.delegations.add(event.id);
+          this.delegationStartedAt.set(event.id, Date.now());
+          if (this.quiet) this.quiet.own.add(event.id);
           if (this.phase === "listening" || this.phase === "hearing") this.setPhase("thinking");
         } else {
+          // 審查 M2：之前各輪的交辦結束了：結果要聽得到，靜音結束（這一輪自己的交辦不算，那是這一輪的回答）。
+          if (this.quiet && !this.quiet.own.has(event.id)) this.endQuiet();
           this.delegations.delete(event.id);
+          this.delegationStartedAt.delete(event.id);
           this.resetIdle();
         }
         break;
@@ -470,12 +530,14 @@ export class LiveVoice implements RealtimeSession {
       case "delegate_blocked":
       case "delegate_card":
       case "delegated":
+        // 審查 M2：核心的記憶確認問句、交辦卡與提示一定要聽得到、看得到：靜音結束（記憶狀態本身不算）。
+        if (event.kind !== "memory" && !(event.kind === "memory_card" && !event.open)) this.endQuiet();
         this.deps.memoryEvent?.(event);
         break;
       case "hold":
         // 更正或忘記 commit 前：立刻把播放靜音（核心同時停止 append）；commit 失敗才恢復。
         this.held = event.active;
-        this.deps.setMuted(event.active || this.muted);
+        this.deps.setMuted(event.active || this.muted || this.quiet !== null);
         break;
       case "closed":
         if (event.reason === "memory_revoked") {
@@ -508,6 +570,7 @@ export class LiveVoice implements RealtimeSession {
     // 已經靜音並拆掉播放：teardown 不要再解除靜音。
     this.muted = false;
     this.held = false;
+    this.clearQuiet();
     this.teardown();
     this.deps.cancelSpeech?.();
     this.setPhase("off");
@@ -571,7 +634,7 @@ export class LiveVoice implements RealtimeSession {
   private onLevel(rms: number): void {
     if (!this.on) return;
     const now = Date.now();
-    const loud = rms >= SPEAKING_RMS && !this.muted;
+    const loud = rms >= SPEAKING_RMS && !this.muted && this.quiet === null;
     if (loud !== this.speaking) {
       if (this.levelSince === null) this.levelSince = now;
       if (now - this.levelSince >= (loud ? SPEAKING_ON_MS : SPEAKING_OFF_MS)) {
@@ -660,18 +723,71 @@ export class LiveVoice implements RealtimeSession {
     this.stopLevel = null;
     this.stopAudio?.();
     this.stopAudio = null;
-    if (this.muted || this.held) this.deps.setMuted(false);
+    const quiet = this.quiet !== null;
+    this.clearQuiet();
+    if (this.muted || this.held || quiet) this.deps.setMuted(false);
     this.muted = false;
     this.held = false;
     this.speaking = false;
     this.levelSince = null;
     this.delegations.clear();
+    this.delegationStartedAt.clear();
+    this.userSpeaking = false;
     this.hostCalls = 0;
     this.homePending = 0;
     this.evidence = { mic: false, peer: false, started: false };
     this.unmatched.channel.clear();
     this.unmatched.core.clear();
     this.approvals.clear();
+  }
+
+  /**
+   * HIST-1 Mac F1：使用者說的是本機畫面指令（主程式已執行）。這條路徑沒有 response.cancel：把播放靜音到下一輪
+   * （使用者再開口、打字、系統通知，或 LOCAL_COMMAND_QUIET_MS 到），模型這一輪念的話聽不到；
+   * 另外和手掌停止一樣請核心把這一輪還沒回來的交辦結果改成不念出（核心依 NOUS_PALM_QUIET_DELEGATION）。
+   * 模型可能仍會查 get_tasks 或想回答；那些只是沒有聲音（殘餘風險見 docs/validation/history-hist1-mac-2026-10-31.md）。
+   */
+  private quietLocalCommand(text: string): void {
+    this.clearQuiet();
+    const timer = setTimeout(() => this.endQuiet(), LOCAL_COMMAND_QUIET_MS);
+    // 這一輪開口之後才開始的交辦（逐字稿比交辦晚到時）也算這一輪的。
+    const own = new Set([...this.delegationStartedAt].filter(([, at]) => at >= this.turnStartedAt).map(([id]) => id));
+    this.quiet = { text: normalizeSpeech(text), timer, own, draining: false };
+    this.deps.setMuted(true);
+    if (this.speaking) {
+      this.speaking = false;
+      this.levelSince = null;
+    }
+    if (this.phase === "speaking" || this.phase === "thinking" || this.phase === "hearing") this.setPhase(this.delegations.size ? "thinking" : "listening");
+    console.info("[live] 本機畫面指令：這一輪的回覆靜音");
+    void this.deps.stopReply?.({ scope: "turn", response_id: null }).catch(() => undefined);
+  }
+
+  /** 這一句使用者話的開始（同一句只記第一次）。 */
+  private noteUserStart(): void {
+    if (this.userSpeaking) return;
+    this.userSpeaking = true;
+    this.turnStartedAt = Date.now();
+  }
+
+  /** 這一輪的回覆到了：再等 LOCAL_COMMAND_DRAIN_MS 讓聲音尾巴在靜音中播完，然後恢復。 */
+  private drainQuiet(): void {
+    if (!this.quiet || this.quiet.draining) return;
+    this.quiet.draining = true;
+    clearTimeout(this.quiet.timer);
+    this.quiet.timer = setTimeout(() => this.endQuiet(), LOCAL_COMMAND_DRAIN_MS);
+  }
+
+  /** 本機指令的靜音結束（沒有在靜音時什麼都不做）。 */
+  private endQuiet(): void {
+    if (!this.quiet) return;
+    this.clearQuiet();
+    if (this.on) this.deps.setMuted(this.held || this.muted);
+  }
+
+  private clearQuiet(): void {
+    if (this.quiet) clearTimeout(this.quiet.timer);
+    this.quiet = null;
   }
 
   private setPhase(phase: RealtimePhase): void {

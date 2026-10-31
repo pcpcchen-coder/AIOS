@@ -1,6 +1,6 @@
 import { translate } from "../shared/i18n.mjs";
 import { parseGaEvent, type GaEvent } from "../shared/realtime-ga.ts";
-import { CORE_TOOLS, LIVE_STOP_REPORT_MS, type CoreToolName, type LiveCoreEvent, type LiveMemoryReason } from "../shared/realtime-route.ts";
+import { CORE_TOOLS, LIVE_STOP_REPORT_MS, type CoreToolName, type LiveCoreEvent, type LiveMemoryReason, type StopReplyTurn } from "../shared/realtime-route.ts";
 import { delegatePolicy, MAX_RECALLS, type LiveCallPort, type LiveMemoryPort, type RevokeWhy } from "./memory/live.ts";
 import { APIKEY_TIMEOUTS_MS, type RealtimeBridge } from "./realtime.ts";
 import { RouteStartError, type RouteCall, type SessionContext } from "./realtime-routes.ts";
@@ -327,8 +327,18 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
    * F7：頁面回報手掌停止（停止回覆；頁面同時送 response.cancel）。這一輪還沒回來的核心工具結果之後只交回、不念出；
    * 已經排隊、還沒送出的工具接續回應丟掉。核心自己的固定句（記憶確認）不在此列；工具與交辦的任務都不中止。
    */
-  stopReply(): void {
+  stopReply(turn?: StopReplyTurn): void {
     if (this.ended || this.revoked) return;
+    if (turn?.scope === "turn") {
+      // HIST-1 Mac F1（審查 M1）：本機畫面指令只讓這一輪的回應不出聲：頁面取消的那個回應（或還沒建立的下一個沒有核心標記的回應）
+      // 的工具結果只交回、不念。之前各輪還沒回來的結果、已排隊的接續回應照常念（不動 quietThrough 與 speakQueue）。
+      if (turn.response_id) {
+        this.quietResponses.add(turn.response_id);
+        while (this.quietResponses.size > 128) this.quietResponses.delete(this.quietResponses.values().next().value!);
+      } else this.quietNext = true;
+      this.deps.log?.("即時語音（API key）：本機畫面指令，這一輪的回應不念");
+      return;
+    }
     this.quietThrough = this.turn;
     this.quietNext = true;
     // 已經送出、還沒建立的工具接續回應：建立時取消（頁面的 response.cancel 可能早於它到達上游）。

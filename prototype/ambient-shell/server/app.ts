@@ -26,6 +26,7 @@ import {
   LIVE_INPUT_KINDS,
   parseRealtimePatch,
   RealtimePatchError,
+  STOP_REPLY_RESPONSE_ID,
   type ApprovalCardOutcome,
   type ApprovalReport,
   type LiveInputKind,
@@ -497,7 +498,10 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       // F7：手掌停止（停止回覆）。沒有內容：核心只把這一輪還沒回來的工具結果改成不念出；任務照常、通話不結束。
       const body = await readJson(req);
       const { sessionId, owner } = sessionAuth(body);
-      sessionCall(() => sessions!.stopReply(sessionId, owner));
+      // HIST-1 Mac F1：scope "turn"＝本機畫面指令，只有這一輪；response_id 形狀不對就當成還沒建立（null）。其他一律是手掌停止。
+      const responseId = typeof body.response_id === "string" && STOP_REPLY_RESPONSE_ID.test(body.response_id) ? body.response_id : null;
+      const turn = body.scope === "turn" ? { scope: "turn" as const, response_id: responseId } : undefined;
+      sessionCall(() => sessions!.stopReply(sessionId, owner, turn));
       return sendJson(res, 200, { ok: true });
     }
     if (method === "POST" && path === "/api/realtime/end") {

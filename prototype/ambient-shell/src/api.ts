@@ -6,7 +6,7 @@ import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { WakePrefsPatch } from "../shared/wake.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
 import { historySearchPath, type HistoryDetail, type HistoryPage, type HistoryQuery } from "../shared/history.ts";
-import type { ApprovalReport, CallAnswer, FallbackOffer, LiveInputKind, RealtimePrefsPatch, StartDecision, StopEvidence } from "../shared/realtime-route.ts";
+import type { ApprovalReport, CallAnswer, FallbackOffer, LiveInputKind, RealtimePrefsPatch, StartDecision, StopEvidence, StopReplyTurn } from "../shared/realtime-route.ts";
 import { FallbackOfferError } from "./realtime-session.ts";
 
 /** 一個經 /api/realtime/start 決定的工作階段（session_id ＋ 擁有者憑證）。 */
@@ -89,7 +89,7 @@ export const api = {
   /** MEM-3：API key 路徑的頁面在資料通道收到播放結束（沒有內容、沒有時間戳）。 */
   realtimePlayback: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/playback", { ...ticket }),
   /** F7：手掌停止（停止回覆）：核心把這一輪還沒回來的工具結果改成不念出（任務照常）。 */
-  realtimeStopReply: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/stop-reply", { ...ticket }),
+  realtimeStopReply: (ticket: RealtimeTicket, turn?: StopReplyTurn) => call<{ ok: true }>("POST", "/api/realtime/stop-reply", { ...ticket, ...(turn ?? {}) }),
   realtimeStopped: (ticket: RealtimeTicket, evidence: StopEvidence) => call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/stopped", { ...ticket, evidence }),
   /** 路徑偏好與 ChatGPT 方案路徑的聲音；下一次開始才生效。 */
   updateRealtime: (patch: RealtimePrefsPatch) => call<SettingsView>("POST", "/api/settings/realtime", patch),

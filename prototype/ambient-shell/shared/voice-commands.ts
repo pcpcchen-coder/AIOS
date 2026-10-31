@@ -33,7 +33,9 @@ export type Matcher = "camera" | "intent" | "approval";
  *   不會和即時語音同時開著，所以沒有確認語句。前面的比對認得就不再往下（firstClaimWins），
  *   例外見 alsoSendsText。
  * - 即時語音（說）：逐字稿同時跑鏡頭規則（onUserTranscript → handleCameraCommand）與確認語句（checkApproval），
- *   兩個互不攔截；不跑 classify，這句話也一定會送到 AI。
+ *   兩個互不攔截；鏡頭指令那句話仍會送到 AI。HIST-1 Mac F1 起另跑一個較窄的畫面指令比對（onLocalCommand →
+ *   src/voice-command.ts 的 matchVoiceCommand：先簡轉繁、classify 認得，而且整句就是指令；回音不算）：認得就在本機
+ *   打開或關掉畫面，這一輪的 AI 回答不出聲。只有 progress、result、history、dismiss，而且「收起」只關畫面、不結束通話。
  */
 export interface Routing {
   matchers: readonly Matcher[];
@@ -44,13 +46,18 @@ export interface Routing {
    * 所以 checkApproval 這時已經沒有確認卡可決定：確認語句在這裡不算有效（channelsFor 照樣不算）。
    */
   alsoSendsText?: readonly LocalIntentKind[];
+  /**
+   * 這條路徑的 intent 比對不是 classify 本身，而是 src/voice-command.ts 的 matchVoiceCommand（classify 認得而且整句就是指令，
+   * 只有 VOICE_COMMAND_KINDS）。測試用真正的 matchVoiceCommand 推算 works。
+   */
+  voiceIntent?: true;
 }
 
 export const LOCAL_ROUTING: Record<Channel, Routing> = {
   typed: { matchers: ["camera", "intent", "approval"], firstClaimWins: true, alsoSendsText: ["progress"] },
   push_to_talk: { matchers: ["camera", "intent"], firstClaimWins: true },
   voice_mode: { matchers: ["camera", "intent"], firstClaimWins: true },
-  realtime: { matchers: ["camera", "approval"], firstClaimWins: false },
+  realtime: { matchers: ["camera", "intent", "approval"], firstClaimWins: false, voiceIntent: true },
 };
 
 /**
@@ -105,6 +112,8 @@ export interface Checks {
   intent?: LocalIntentKind | "task";
   approval?: ApprovalDecision | null;
   stopWord?: boolean;
+  /** 即時語音中用說的畫面指令比對（src/voice-command.ts matchVoiceCommand）的結果；null＝不在本機處理。 */
+  spokenInRealtime?: LocalIntentKind | null;
   /** 這些路徑上沒有任何本機比對會處理這句話。 */
   notLocalIn?: readonly Channel[];
 }
@@ -133,6 +142,7 @@ export interface Control {
 
 const ALL: readonly Channel[] = ["typed", "push_to_talk", "voice_mode", "realtime"];
 const HANDLE_COMMAND: readonly Channel[] = ["typed", "push_to_talk", "voice_mode"];
+const NOTE_REALTIME_SPOKEN = "即時語音中用說的：整句就是這個說法才算（簡體逐字稿也認得），在本機處理，這一輪 AI 不回答（之前問的事照常回答）；含這些字的長句、AI 正在念或剛念完時麥克風收到的同一句（回音）、確認卡開著時（收起除外）仍交給 AI";
 const CAMERA_NEEDS = { text: "需要 .env NOUS_CAMERA=on", live: "camera_enabled" } as const;
 const CARD_NEEDS = { text: "只在即時語音的確認卡開著時" } as const;
 
@@ -171,8 +181,12 @@ export const INTENT_COMMANDS: { readonly [K in LocalIntentKind]: NonEmpty<LocalC
       expect: { matcher: "intent", kind: "voice_off" } },
   ],
   dismiss: [
-    { id: "dismiss", says: ["收起", "回桌布", "先這樣", "關閉畫面"], works: HANDLE_COMMAND,
-      does: "收起畫面，同時結束語音模式或即時語音；進行中的任務照常在背景執行", expect: { matcher: "intent", kind: "dismiss" } },
+    { id: "dismiss", says: ["收起", "回桌布", "關閉畫面"], works: ALL,
+      does: "收起畫面；打字、按麥克風或語音模式中說時同時結束語音模式或即時語音，即時語音中用說的只收起畫面、通話繼續；進行中的任務照常在背景執行",
+      note: `${NOTE_REALTIME_SPOKEN}。即時語音中用說的只收起畫面，通話繼續（同 Esc）`, expect: { matcher: "intent", kind: "dismiss" } },
+    { id: "dismiss-soft", says: ["先這樣"], works: HANDLE_COMMAND,
+      does: "收起畫面，同時結束語音模式或即時語音；進行中的任務照常在背景執行",
+      note: "即時語音中用說的會交給 AI（對話中意思不明確）", expect: { matcher: "intent", kind: "dismiss" } },
   ],
   settings: [
     { id: "settings", says: ["設定", "鏡頭設定", "切換引擎", "打開鏡頭設定"], works: HANDLE_COMMAND,
@@ -187,17 +201,23 @@ export const INTENT_COMMANDS: { readonly [K in LocalIntentKind]: NonEmpty<LocalC
       expect: { matcher: "intent", kind: "use_provider", provider: "mock" } },
   ],
   progress: [
-    { id: "progress", says: ["進度如何", "做到哪了", "好了沒"], works: HANDLE_COMMAND,
-      does: "打開進度畫面（語音模式中也念出真實狀態）；即時語音中打字時另由 AI 查詢後回答", expect: { matcher: "intent", kind: "progress" } },
+    { id: "progress", says: ["進度如何", "做到哪了", "show progress"], works: ALL,
+      does: "打開進度畫面（語音模式中也念出真實狀態）；即時語音中打字時另由 AI 查詢後回答",
+      note: NOTE_REALTIME_SPOKEN, expect: { matcher: "intent", kind: "progress" } },
+    { id: "progress-ask", says: ["好了沒"], works: HANDLE_COMMAND,
+      does: "打開進度畫面（語音模式中也念出真實狀態）；即時語音中打字時另由 AI 查詢後回答",
+      note: "即時語音中用說的會交給 AI（對話中可能是在問別的事）", expect: { matcher: "intent", kind: "progress" } },
   ],
   result: [
-    { id: "result", says: ["看結果", "給我看成果", "剛才那份"], works: HANDLE_COMMAND,
-      does: "打開最近完成的成果；還沒有時會說明", expect: { matcher: "intent", kind: "result" } },
+    { id: "result", says: ["看結果", "給我看成果", "show results"], works: ALL,
+      does: "打開最近完成的成果；還沒有時會說明", note: NOTE_REALTIME_SPOKEN, expect: { matcher: "intent", kind: "result" } },
+    { id: "result-that", says: ["剛才那份"], works: HANDLE_COMMAND,
+      does: "打開最近完成的成果；還沒有時會說明", note: "即時語音中用說的會交給 AI（對話中可能指別的東西）", expect: { matcher: "intent", kind: "result" } },
   ],
   history: [
-    { id: "history", says: ["搜尋成果 香菜", "找之前關於晚餐的成果", "成果紀錄", "search past results for dinner"], works: HANDLE_COMMAND,
+    { id: "history", says: ["搜尋成果 香菜", "找之前關於晚餐的成果", "成果紀錄", "search past results for dinner"], works: ALL,
       does: "打開成果紀錄：搜尋過去的任務與成果（標題、步驟、成果內容），可篩選狀態、引擎與日期，看詳細內容、重做或刪除（刪除前會再確認）",
-      note: "要以「搜尋成果」「找之前…的成果」「成果紀錄」等說法開頭或結尾；查詢詞像在交辦（「然後寫…」「幫我整理…」）時會當成交辦；「之前的比賽結果」這類沒說「做過」的「結果」不算。只說「成果」「看結果」仍是打開最近一份。英文要說 my／past results。macOS App 也可以從選單列「成果紀錄…」打開",
+      note: "要以「搜尋成果」「找之前…的成果」「成果紀錄」等說法開頭或結尾；查詢詞像在交辦（「然後寫…」「幫我整理…」）時會當成交辦；「之前的比賽結果」這類沒說「做過」的「結果」不算。只說「成果」「看結果」仍是打開最近一份。英文要說 my／past results。macOS App 也可以從選單列「成果紀錄…」打開。即時語音中用說的：整句不超過 24 個字（英文 60 個字元）、查詢詞不超過 16 個字（英文 40 個字元）才在本機處理（簡體逐字稿也認得），這一輪 AI 不回答",
       expect: { matcher: "intent", kind: "history" } },
   ],
   stop: [
@@ -255,7 +275,7 @@ export const CAVEATS: readonly Caveat[] = [
   { id: "camera-in-realtime", cases: [{ says: "關掉鏡頭", checks: { camera: { set: { active: false } }, approval: null } }],
     truth: "即時語音中說鏡頭指令：本機照做，這句話也仍會送到 AI，AI 可能另外回應" },
   { id: "dismiss-ends-voice", cases: [{ says: "收起", checks: { intent: "dismiss" } }],
-    truth: "收起畫面的同時也會結束語音模式或即時語音；進行中的任務不會停止（停止任務才會）" },
+    truth: "用打的（或按麥克風、語音模式中說）收起畫面的同時也會結束語音模式或即時語音；即時語音中用說的只收起畫面，通話繼續。進行中的任務都不會停止（停止任務才會）" },
   { id: "typed-replaces-card", cases: [
       { says: "進度如何", checks: { intent: "progress", approval: null } },
       { says: "設定", checks: { intent: "settings", approval: null } },
@@ -267,10 +287,21 @@ export const CAVEATS: readonly Caveat[] = [
     truth: "即時語音確認卡開著時打這些字：會換上進度、設定、成果、成果紀錄或通知畫面，確認卡被換掉就算拒絕，外部動作不執行（即使這句話本身不是確認或取消的說法）。要同意請打或說「確認執行」等確認語句" },
   { id: "realtime-not-local", cases: [
       { says: "停止任務", checks: { intent: "stop", approval: "reject" } },
-      { says: "進度如何", checks: { intent: "progress", notLocalIn: ["realtime"] } },
-      { says: "收起", checks: { intent: "dismiss", notLocalIn: ["realtime"] } },
+      { says: "好了沒", checks: { intent: "progress", notLocalIn: ["realtime"] } },
+      { says: "先這樣", checks: { intent: "dismiss", notLocalIn: ["realtime"] } },
+      { says: "我想知道報告的進度如何", checks: { intent: "progress", notLocalIn: ["realtime"] } },
     ],
-    truth: "即時語音中用說的，這些都不在本機處理，會交給 AI：問進度 AI 會查真實狀態回答；AI 沒有停止任務或收起畫面的工具。要停止任務，請打「停止任務」或按進度畫面上的停止按鈕；要收起，請打「收起」、按 Esc 或點畫面上的按鈕。Esc 只會打斷說話或收起畫面，不會停止任務。確認卡開著時，含「停止」的話會拒絕確認卡" },
+    truth: "即時語音中用說的，這些不在本機處理，會交給 AI：問進度 AI 會查真實狀態回答；AI 沒有停止任務或收起畫面的工具。本機只認整句就是畫面指令的說法（「進度如何」「看結果」「搜尋成果 …」「收起」），含這些字的長句與意思不明確的短句仍交給 AI。要停止任務，請打「停止任務」或按進度畫面上的停止按鈕。Esc 只會打斷說話或收起畫面，不會停止任務。確認卡開著時，含「停止」的話會拒絕確認卡" },
+  { id: "realtime-local-quiet", cases: [
+      { says: "进度如何", checks: { intent: "task", approval: null, spokenInRealtime: "progress" } },
+      { says: "看结果", checks: { intent: "task", approval: null, spokenInRealtime: "result" } },
+    ],
+    truth: "即時語音中說出的畫面指令（逐字稿是簡體也算）由 Nous 在本機打開畫面，只有這一輪 AI 不出聲，之前問的事（交辦、查詢）回來時照常回答：API key 路徑取消這一輪的回應；ChatGPT 方案路徑沒有取消指令，只把播放靜音到這一輪的回覆念完（最多 8 秒），你再開口、打字、有系統通知、之前的交辦結束、記憶確認或確認卡出現時立刻恢復。AI 可能仍會在背景查進度，只是不念出；逐字稿比 AI 回答晚到時，開頭可能已經念出一點。用打的「进度如何」不會打開進度（打字不做簡轉繁），會交給 AI" },
+  { id: "realtime-command-with-card", cases: [
+      { says: "收起", checks: { spokenInRealtime: "dismiss", approval: null } },
+      { says: "進度如何", checks: { spokenInRealtime: "progress", approval: null } },
+    ],
+    truth: "即時語音確認卡開著時：說「進度如何」「看結果」「搜尋成果 …」不在本機處理（換上別的畫面就等於拒絕確認卡），照舊交給 AI；說「收起」和按 Esc 一樣關掉確認卡，算拒絕，外部動作不執行。要同意請說「確認執行」等確認語句" },
   { id: "home-confirm-with-stop", cases: [{ says: "確認執行停止播放", checks: { approval: "reject" } }],
     truth: "確認卡開著時，這句話因為含「停止」而算取消，家電指令不會執行。要同意只說「確認執行」，不要把動作接在後面" },
   { id: "card-ok-is-not-yes", cases: [{ says: "好", checks: { approval: null, camera: null } }],

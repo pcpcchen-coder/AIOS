@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import type { RealtimeBaseInfo } from "../shared/types.ts";
 import { chunkForAppend, parseFramelessEvent, type FramelessEvent } from "../shared/frameless.ts";
 import { GREETING_PLAIN, liveGreetingText } from "../shared/sense.ts";
-import { billingLine, LIVE_STOP_REPORT_MS, LIVE_VOICES, unavailableText, type LiveCoreEvent, type LiveInputKind, type LiveVoiceId, type RouteOption, type UnavailableReason } from "../shared/realtime-route.ts";
+import { billingLine, LIVE_STOP_REPORT_MS, LIVE_VOICES, unavailableText, type LiveCoreEvent, type LiveInputKind, type LiveVoiceId, type RouteOption, type StopReplyTurn, type UnavailableReason } from "../shared/realtime-route.ts";
 import { CodexAuthError, CodexUnauthorized, NOUS_ORIGINATOR, type CodexAuth, type CodexRequestAuth } from "./codex-auth.ts";
 import { redact } from "./codex-responses.ts";
 import type { DelegationRequest, DelegationResult, LiveCallerMemory, TranscriptTurn } from "./live-tool-caller.ts";
@@ -407,6 +407,8 @@ class LiveCall implements RouteCall, LiveCallPort {
    * 使用者舉手時說「停」、「我查一下」的回音或雜音，可能在 stop-reply 送到之前就讓輪次加一（審查 2026-10-31 的競態）。
    */
   private quietThrough = -1;
+  /** HIST-1 Mac F1（審查 M1）：本機畫面指令的那一輪（只有那一輪）的交辦結果不念；之前各輪照常。 */
+  private readonly quietTurns = new Set<number>();
 
   constructor(
     readonly answerSdp: string,
@@ -541,8 +543,19 @@ class LiveCall implements RouteCall, LiveCallPort {
    * F7：頁面回報手掌停止（停止回覆；頁面同時把播放靜音）。這一輪的交辦結果之後改用 commentary（安靜的背景、不念）送回，
    * 「還在處理」也不說；交辦本身不中止，背景任務照常執行。使用者再開口或打字就是新的一輪，照常念。
    */
-  stopReply(): void {
+  stopReply(turn?: StopReplyTurn): void {
     if (this.ended || this.revoked) return;
+    if (turn?.scope === "turn") {
+      // HIST-1 Mac F1（審查 M1）：本機畫面指令：只有這一輪（頁面同時把播放靜音）。之前各輪的交辦結果照常念。
+      if (!this.palmQuietDelegation) {
+        this.log?.("即時語音（ChatGPT 方案）：本機畫面指令（只靜音這一輪；交辦結果照常送回）");
+        return;
+      }
+      this.quietTurns.add(this.turn);
+      while (this.quietTurns.size > 32) this.quietTurns.delete(this.quietTurns.values().next().value!);
+      this.log?.("即時語音（ChatGPT 方案）：本機畫面指令（這一輪的交辦結果不念出）");
+      return;
+    }
     if (!this.palmQuietDelegation) {
       // 預設：只有頁面靜音；交辦照常以 speakable 結束（NOUS_PALM_QUIET_DELEGATION 沒開，等 Mac 驗證）。
       this.log?.("即時語音（ChatGPT 方案）：停止回覆（只靜音；交辦結果照常送回）");
@@ -577,7 +590,7 @@ class LiveCall implements RouteCall, LiveCallPort {
   private async delegate(id: string, text: string, source: "voice" | "typed", asked: { approval: ApprovalSnapshot; at: number; userText: string | null }, turn: number = this.turn): Promise<void> {
     if (this.ended || this.revoked) return;
     /** F7：這一輪被手掌停止了。 */
-    const quiet = () => turn <= this.quietThrough;
+    const quiet = () => turn <= this.quietThrough || this.quietTurns.has(turn);
     const append = (result: { channel: "speakable"; text: string }) => {
       if (this.ended || this.revoked) return;
       // F7：停止回覆之後才回來的結果：改成 commentary（模型知道結果，但不念出）；不丟掉，交辦才有結果、下一輪問得到。

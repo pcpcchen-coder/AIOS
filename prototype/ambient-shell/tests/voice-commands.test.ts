@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { APPROVE_VERBS, matchApproval, REJECT_WORDS, type ApprovalDecision } from "../src/approval.ts";
 import { isStopWord, STOP_WORDS } from "../src/echo.ts";
 import { classify, type Intent } from "../src/intent.ts";
+import { matchVoiceCommand, VOICE_COMMAND_KINDS } from "../src/voice-command.ts";
 import { CAMERA_RULES, matchCameraCommand, type CameraCommand } from "../src/sense/controller.ts";
 import { buildRealtimeTools, HOME_CONTROL_TOOL, HOME_STATUS_TOOL, REALTIME_TOOLS } from "../server/realtime.ts";
 import {
@@ -45,10 +46,13 @@ function intentKind(phrase: string): LocalIntentKind | "task" | "empty" {
   return classify(phrase).kind;
 }
 
-/** 這個比對函式認不認得這句話（認得就不再交給後面的比對或 AI）。 */
-function claims(matcher: Matcher, phrase: string): boolean {
+/** 這個比對函式在這條路徑上認不認得這句話（認得就不再交給後面的比對或 AI）。即時語音的 intent 是較窄的 matchVoiceCommand。 */
+function claims(matcher: Matcher, phrase: string, channel?: Channel): boolean {
   if (matcher === "camera") return matchCameraCommand(phrase) !== null;
-  if (matcher === "intent") return !["task", "empty"].includes(intentKind(phrase));
+  if (matcher === "intent") {
+    if (channel && LOCAL_ROUTING[channel].voiceIntent) return matchVoiceCommand(phrase) !== null;
+    return !["task", "empty"].includes(intentKind(phrase));
+  }
   return matchApproval(phrase) !== null;
 }
 
@@ -57,8 +61,8 @@ function channelsFor(matcher: Matcher, phrase: string): Channel[] {
   return CHANNEL_KEYS.filter((channel) => {
     const { matchers, firstClaimWins } = LOCAL_ROUTING[channel];
     const index = matchers.indexOf(matcher);
-    if (index < 0 || !claims(matcher, phrase)) return false;
-    return !firstClaimWins || matchers.slice(0, index).every((earlier) => !claims(earlier, phrase));
+    if (index < 0 || !claims(matcher, phrase, channel)) return false;
+    return !firstClaimWins || matchers.slice(0, index).every((earlier) => !claims(earlier, phrase, channel));
   });
 }
 
@@ -148,8 +152,9 @@ describe("caveats are what they say", () => {
     if (checks.intent) expect(intentKind(phrase)).toBe(checks.intent);
     if ("approval" in checks) expect(matchApproval(phrase)).toBe(checks.approval);
     if (checks.stopWord !== undefined) expect(isStopWord(phrase)).toBe(checks.stopWord);
+    if (checks.spokenInRealtime !== undefined) expect(matchVoiceCommand(phrase)?.kind ?? null).toBe(checks.spokenInRealtime);
     for (const channel of checks.notLocalIn ?? []) {
-      expect(LOCAL_ROUTING[channel].matchers.filter((m) => claims(m, phrase))).toEqual([]);
+      expect(LOCAL_ROUTING[channel].matchers.filter((m) => claims(m, phrase, channel))).toEqual([]);
     }
   });
 
@@ -162,7 +167,7 @@ describe("caveats are what they say", () => {
 
   it("phrases people expect to be commands are not local commands", () => {
     for (const phrase of ["結束對話", "開始語音對話", "再見"]) {
-      for (const channel of CHANNEL_KEYS) expect(LOCAL_ROUTING[channel].matchers.filter((m) => claims(m, phrase))).toEqual([]);
+      for (const channel of CHANNEL_KEYS) expect(LOCAL_ROUTING[channel].matchers.filter((m) => claims(m, phrase, channel))).toEqual([]);
     }
   });
 });
@@ -172,13 +177,22 @@ describe("LOCAL_ROUTING mirrors src/main.ts", () => {
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
   const realtime = readFileSync(new URL("../src/realtime.ts", import.meta.url), "utf8");
 
-  it("realtime speech runs only the camera rules and the approval phrases, never classify", () => {
+  it("realtime speech runs the camera rules, the narrow spoken-command matcher and the approval phrases, never handleCommand", () => {
     const transcript = main.slice(main.indexOf("onUserTranscript:"), main.indexOf("onAssistantTranscript:"));
     expect(transcript).toContain("handleCameraCommand(text)");
+    expect(transcript).toContain("onLocalCommand: (text) => matchCameraCommand(text) === null && realtimeCommands.handle(text) !== null");
     expect(transcript).not.toMatch(/handleCommand\(|classify\(/);
     const completed = realtime.slice(realtime.indexOf('"conversation.item.input_audio_transcription.completed"'), realtime.indexOf('"response.created"'));
+    expect(completed).toContain("this.callbacks.onLocalCommand?.(transcript)");
     expect(completed).toContain("this.checkApproval(");
-    expect(LOCAL_ROUTING.realtime).toEqual({ matchers: ["camera", "approval"], firstClaimWins: false });
+    expect(LOCAL_ROUTING.realtime).toEqual({ matchers: ["camera", "intent", "approval"], firstClaimWins: false, voiceIntent: true });
+  });
+
+  it("spoken realtime commands are only view commands, and only rows of those kinds list realtime", () => {
+    expect([...VOICE_COMMAND_KINDS].sort()).toEqual(["dismiss", "history", "progress", "result"]);
+    for (const [kind, rows] of Object.entries(INTENT_COMMANDS)) {
+      if (!(VOICE_COMMAND_KINDS as readonly string[]).includes(kind)) for (const row of rows) expect(row.works).not.toContain("realtime");
+    }
   });
 
   it("handleCommand runs the camera rules before classify, and approval only through realtime.sendText", () => {
