@@ -3,6 +3,7 @@ import type { FallbackOffer, RouteId, StartDecision } from "../shared/realtime-r
 import { plainGreetingInstructions } from "../shared/sense.ts";
 import { getLocale, type Locale } from "./i18n.ts";
 import type { ApprovalOutcome, ApprovalRequest, RealtimePhase, RealtimeVoice } from "./realtime.ts";
+import { whenTaiwanReady } from "./zh-tw.ts";
 
 // 頁面唯一的接縫：main.ts 只跟 RealtimeSession 說話，不直接碰哪條路徑的類別。
 // RealtimeVoice（API key，公開 API 不變）與 LiveVoice（ChatGPT 方案）都符合它。
@@ -214,7 +215,8 @@ export interface OpenRealtimeDeps {
  */
 export async function openRealtime(deps: OpenRealtimeDeps, signal?: AbortSignal): Promise<RealtimeSession | null> {
   const cancelled = () => !!signal?.aborted;
-  const decision = await deps.start();
+  // 中文：同時等台灣繁體轉換器載好（最多 1 秒），讓第一句逐字稿就轉換、資料通道與核心兩份逐字稿能配對。
+  const [decision] = await Promise.all([deps.start(), whenTaiwanReady(1000)]);
   if (cancelled()) return null;
   if (!decision.ok) {
     deps.refused(decision.message);

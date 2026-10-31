@@ -1,5 +1,6 @@
 import { normalizeSpeech } from "./echo.ts";
 import { classify, normalizeCommand } from "./intent.ts";
+import { taiwanText } from "./zh-tw.ts";
 import type { ShellEvent } from "./shell-state.ts";
 
 // HIST-1 Mac F1：即時語音中，使用者自己說的「進度如何」「看結果」「搜尋成果 晚餐」「收起」由 Nous 在本機處理，
@@ -41,9 +42,14 @@ const VOICE_S2T: Record<string, string> = Object.fromEntries([
 ].map((pair) => [pair[0]!, pair.slice(1)]));
 const VOICE_S2T_PATTERN = new RegExp(`[${Object.keys(VOICE_S2T).join("")}]`, "gu");
 
-/** 比對用的簡轉繁（長度不變）。 */
+/** 比對用的簡轉繁（長度不變）。台灣繁體轉換器（src/zh-tw.ts）沒載好或英文介面時的備援。 */
 export function foldVoice(text: string): string {
   return text.replace(VOICE_S2T_PATTERN, (ch) => VOICE_S2T[ch] ?? ch);
+}
+
+/** 回音比對用：先轉台灣繁體（兩邊都轉，使用者逐字稿已轉過、再轉不變），再用折疊表補漏，最後正規化。 */
+function comparable(text: string): string {
+  return normalizeSpeech(foldVoice(taiwanText(text)));
 }
 
 const EDGE_PUNCT_START = /^[\s，,。.!！?？~～…、]+/;
@@ -118,6 +124,8 @@ type Phase = "off" | "connecting" | "listening" | "hearing" | "thinking" | "spea
 export class AssistantEcho {
   private recent: { norm: string; at: number }[] = [];
   private partial: { norm: string; at: number } = { norm: "", at: 0 };
+  /** 片段的原文（累積後整段轉台灣繁體，切開的詞才不會轉錯）。 */
+  private partialRaw = "";
   private playing = false;
   private playbackEndedAt: number | null = null;
   private userStartedAt: number | null = null;
@@ -126,8 +134,9 @@ export class AssistantEcho {
   constructor(private readonly now: () => number = Date.now) {}
 
   note(text: string): void {
-    const norm = normalizeSpeech(foldVoice(text));
+    const norm = comparable(text);
     this.partial = { norm: "", at: 0 };
+    this.partialRaw = "";
     if (!norm) return;
     const at = this.now();
     this.recent = [...this.recent.filter((x) => at - x.at <= VOICE_ECHO_WINDOW_MS), { norm, at }].slice(-8);
@@ -135,12 +144,12 @@ export class AssistantEcho {
 
   /** 助理說到一半的片段（資料通道的 delta 或未完成的逐字稿）：使用者逐字稿可能比助理的整句先到。 */
   notePartial(text: string): void {
-    const norm = normalizeSpeech(foldVoice(text));
-    if (!norm) return;
+    if (!comparable(text)) return;
     const at = this.now();
-    const base = at - this.partial.at <= VOICE_ECHO_WINDOW_MS ? this.partial.norm : "";
-    // 片段可能是增量或累積的：兩種都接起來，比對「包含」不受影響。
-    this.partial = { norm: (base + norm).slice(-500), at };
+    const base = at - this.partial.at <= VOICE_ECHO_WINDOW_MS ? this.partialRaw : "";
+    // 片段可能是增量或累積的：兩種都接起來，比對「包含」不受影響。累積的原文整段轉換後再正規化。
+    this.partialRaw = (base + text).slice(-500);
+    this.partial = { norm: comparable(this.partialRaw), at };
   }
 
   /** 工作階段的階段（speaking＝真的在播放；hearing＝使用者開口）。 */
@@ -156,7 +165,7 @@ export class AssistantEcho {
   }
 
   isEcho(text: string): boolean {
-    const norm = normalizeSpeech(foldVoice(text));
+    const norm = comparable(text);
     if (!norm) return true;
     const at = this.now();
     const texts = [...this.recent, this.partial].filter((x) => x.norm && at - x.at <= VOICE_ECHO_WINDOW_MS);

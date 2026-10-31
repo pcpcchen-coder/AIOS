@@ -6,6 +6,8 @@ import type { GreetingOnce, RealtimeSession } from "./realtime-session.ts";
 import { FallbackOfferError, GREETING_SETTLE_MS } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 import { normalizeSpeech } from "./echo.ts";
+import { getLocale } from "./i18n.ts";
+import { taiwanText } from "./zh-tw.ts";
 
 // ChatGPT 方案路徑（gpt-live-1-codex）的頁面模組。和 RealtimeVoice 用同一份 RealtimeCallbacks（main.ts 建一次）、
 // 同一個 ApprovalQueue 與 executeRealtimeTool。差別只在事件的來源：
@@ -83,6 +85,8 @@ export class LiveVoice implements RealtimeSession {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private endTimer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
+  /** 逐字稿轉台灣繁體用的語言：開始這次通話時固定。 */
+  private transcriptLocale: string = getLocale();
   private readonly approvals: ApprovalQueue;
   /** 核心回報正在進行的交辦（真實事件）：「思考中」與閒置暫停。 */
   private readonly delegations = new Set<string>();
@@ -205,6 +209,7 @@ export class LiveVoice implements RealtimeSession {
   async start(): Promise<void> {
     if (this.on) return;
     const generation = ++this.generation;
+    this.transcriptLocale = getLocale();
     this.fallbackOffer = null;
     this.unsentText = [];
     this.setPhase("connecting");
@@ -390,7 +395,8 @@ export class LiveVoice implements RealtimeSession {
 
   /** 逐字稿：資料通道或核心，哪個先到用哪個，依 item_id（沒有時依來源配對）去重。 */
   private transcript(source: TranscriptSource, role: "user" | "assistant", text: string, final: boolean, itemId: string | null): void {
-    const clean = text.trim();
+    // 中文介面：簡體逐字稿轉成台灣繁體（資料通道與核心兩份都轉，去重比對的是轉換後的文字）。
+    const clean = taiwanText(text.trim(), this.transcriptLocale);
     if (!clean) return;
     // 使用者先開口（逐字稿是真實的說話證據，同 OpenClaw 只讓真的逐字稿取消招呼）：這次不打招呼。
     if (role === "user") this.skipGreeting();
@@ -403,7 +409,8 @@ export class LiveVoice implements RealtimeSession {
         if (this.phase === "listening") this.setPhase("hearing");
       } else {
         // HIST-1 Mac F1（審查 M3）：助理說到一半的文字（回音判斷用；使用者逐字稿可能比助理的整句先到）。
-        this.callbacks.onAssistantPartial?.(clean);
+        // 傳原文：AssistantEcho 累積片段之後整段轉台灣繁體再比對（逐段轉會把切開的詞轉錯）。
+        this.callbacks.onAssistantPartial?.(text.trim());
       }
       return;
     }

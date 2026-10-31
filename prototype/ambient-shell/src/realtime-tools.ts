@@ -2,6 +2,7 @@ import { homeControlNotice } from "../shared/home.ts";
 import { matchApproval } from "../shared/approval.ts";
 import type { ApprovalReport } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, HomeResult, RealtimeCallbacks } from "./realtime.ts";
+import { taiwanText } from "./zh-tw.ts";
 
 // 兩條即時語音路徑共用的工具執行器與確認卡佇列，從 RealtimeVoice（src/realtime.ts）原樣搬出：
 //   API key：RealtimeVoice 收到 response.function_call_arguments.done → executeRealtimeTool → function_call_output
@@ -157,7 +158,8 @@ export async function executeRealtimeTool(name: string, rawArgs: string, ctx: To
       return;
     }
     if (name === "delegate_task") {
-      const title = typeof args.title === "string" ? args.title.trim() : "";
+      // 模型產生的任務描述偶爾是簡體：中文介面轉成台灣繁體（ID-02 F11）。
+      const title = typeof args.title === "string" ? taiwanText(args.title.trim()) : "";
       output = title ? await callbacks.onDelegate(title) : { ok: false, error: "缺少任務描述" };
     } else if (name === "web_search") {
       const query = typeof args.query === "string" ? args.query.trim() : "";

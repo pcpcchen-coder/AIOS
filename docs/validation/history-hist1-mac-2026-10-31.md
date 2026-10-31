@@ -112,3 +112,16 @@ HIST-1 的主要放行條件（選單、Surface、`/history`、原生刪除對�
 8. 改成 API key 路徑重做 1–3、5、7；console 是 `[realtime] 本機畫面指令：這一輪不請模型回答`。記下每次說完到畫面打開的時間，以及有沒有聽到模型開頭的半句（殘餘風險 1）。
 9. 英文介面：說 "show progress"、"show results"、"search past results for dinner"、"close the view"。
 10. 依手冊 §4 第 4 步與第 7 步，用說的「進度如何」「收起」重做一次。
+
+### 簡體逐字稿（F1 的簡體部分，2026-10-31，分支 `claude/zh-tw-transcripts`）
+
+George 問「逐字稿為何是簡體字？」，要求一律用台灣繁體。這次只處理 F1 裡「进度如何」「看结果」被辨識成簡體的部分；即時語音接走本機指令（F1 本身）見上一節。上一節 `src/voice-command.ts` 的簡繁折疊表（`foldVoice`）保留，作為轉換器還沒載好或英文介面時的備援；本機指令比對與 `AssistantEcho` 的回音比對都先轉成台灣繁體（助理的片段累積後整段轉）再折疊。
+
+- 原因：API key 路徑的語音辨識是 `gpt-4o-mini-transcribe`、`language: "zh"`，常給簡體；ChatGPT 方案路徑的上游辨識也一樣，而且沒有已知的辨識設定欄位。
+- 修正：(1) 中文介面時，API key 路徑的 `session.audio.input.transcription` 多帶 `prompt`「以下是台灣繁體中文（正體字）的對話。」（上游以 400 拒絕這個欄位時，核心不帶 prompt 重送一次；雜音時上游把 prompt 吐回來當逐字稿的，頁面與核心都丟掉）；(2) 每個逐字稿進入的地方都用 OpenCC s2tw（opencc-js 1.4.2）轉成台灣字形：頁面的資料通道與 Web Speech、ChatGPT 方案與 API key 的核心 sideband（字幕、本機指令、確認卡、回音比對、記憶解析、MEM-4b 交辦原句、交給 Codex 的逐字稿）。只用繁體字寫成、含繁體專用字的句子不改；含簡體字的句子會被轉換，兩邊共用的字在少數情況下也可能被改；英文介面與打字不轉換、不改詞彙（不用 s2twp）。細節見 [原型 README](../../prototype/ambient-shell/README.md) 的「台灣繁體逐字稿」。
+- 測試：`tests/zh-tw-transcripts.test.ts`、`tests/live-route.test.ts`、`tests/live-voice.test.ts`、`tests/memory-apikey.test.ts`、`tests/memory-voice-delegation.test.ts`、`tests/apikey-route.test.ts`（MEM-3 位元組基準只在中文多出 prompt）。只在 Linux 上以 fixture 驗證，**尚未在 Mac 上重新驗收**。
+
+### 要在 Mac 上重新驗證（簡體逐字稿）
+
+1. 中文介面，兩條路徑各說 5 次「進度如何」「看結果」：字幕的「你：…」一律是繁體（不是「进度如何」「看结果」）；API key 路徑的 DevTools 沒有 `[realtime] 語音辨識 prompt 被拒絕`（若出現，記下來，通話仍應正常開始）。英文介面說一次英文，字幕照原樣。
+2. 中文介面、API key 路徑，安靜或有背景雜音時開著語音 1 分鐘：字幕與記憶卡都不能出現「以下是台灣繁體中文（正體字）的對話。」或它的前段。

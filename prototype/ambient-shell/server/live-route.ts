@@ -8,6 +8,8 @@ import { CodexAuthError, CodexUnauthorized, NOUS_ORIGINATOR, type CodexAuth, typ
 import { redact } from "./codex-responses.ts";
 import type { DelegationRequest, DelegationResult, LiveCallerMemory, TranscriptTurn } from "./live-tool-caller.ts";
 import { confirmLine, type LiveCallPort, type LiveMemoryPort, type RevokeWhy, type VoiceDelegatePort } from "./memory/live.ts";
+import { taiwanTranscript, warmTaiwan } from "../shared/zh-tw-opencc.ts";
+import { convertsLocale } from "../shared/zh-tw.ts";
 import { RouteStartError, type ApprovalSnapshot, type LiveControl, type Readiness, type RealtimeRoute, type RouteCall, type SessionContext } from "./realtime-routes.ts";
 
 // 即時語音的 ChatGPT 方案路徑：gpt-live-1-codex，用 Nous 自己的 Codex 登入。負責 chatgpt.com 的通話建立與
@@ -422,6 +424,8 @@ class LiveCall implements RouteCall, LiveCallPort {
     private readonly palmQuietDelegation = false,
   ) {
     this.closed = new Promise<void>((resolve) => (this.resolveClosed = resolve));
+    // 中文：先建好台灣繁體轉換的字典（約 0.15 秒），第一則逐字稿不必等。
+    if (convertsLocale(ctx.locale)) setImmediate(warmTaiwan).unref?.();
     this.voiceDelegation = memory?.delegatePort?.() ?? null;
     this.caller = callerFor(ctx, memory ? memory.callerPort() : null, this.voiceDelegation);
     this.control = { input: (kind, text) => this.input(kind, text) };
@@ -472,6 +476,8 @@ class LiveCall implements RouteCall, LiveCallPort {
         if (event.expires_at !== null) this.armCap(Math.min(LIVE_TIMEOUTS_MS.session, event.expires_at - this.ctx.now()));
         break;
       case "transcript":
+        // 上游語音辨識與模型常給簡體：中文介面先轉成台灣繁體，之後的記憶、交辦原句、回音比對、給 Codex 的逐字稿與頁面字幕都用轉換後的。
+        event = { ...event, text: taiwanTranscript(event.text, this.ctx.locale) };
         if (event.final && event.text.trim()) {
           // 開場問候那一則標起來：交辦給 Codex 的最近逐字稿不附它（server/live-tool-caller.ts requestText）。
           // 只看送出開場後的第一則助理逐字稿；使用者自己說的話（例如「幫 George 寫信」）不受影響。
@@ -505,7 +511,7 @@ class LiveCall implements RouteCall, LiveCallPort {
         // 帶著記憶的通話：交辦文字可能含記憶內容，log 只記長度。
         // MEM-4b 審查 minor 2：放行受保護語音交辦時也只記長度（旗標關閉時和之前一樣）。
         this.log?.(this.memory?.carriesMemory() || this.voiceDelegation ? `即時語音（ChatGPT 方案）：收到交辦（${[...event.text].length} 字）` : `即時語音（ChatGPT 方案）：收到交辦「${preview(event.text)}」`);
-        this.enqueue(event.id, event.text, "voice");
+        this.enqueue(event.id, taiwanTranscript(event.text, this.ctx.locale), "voice");
         break;
       case "speech.started":
         // 上游每一段話送一次：一律算新的一輪（未完成逐字稿可能沒有結尾，不能只靠它判斷）。

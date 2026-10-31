@@ -188,6 +188,30 @@ describe.skipIf(!realLockAvailable)("MEM-3 spoken confirmation (same rules as ME
     expect((await factsOf(h)).filter((f) => f.text === "不喝咖啡")).toHaveLength(1);
   });
 
+  it("台灣繁體：a Simplified ASR transcript is parsed and saved as Taiwan Traditional; a question the model read in Simplified still counts as read; logs carry no text", async () => {
+    const h = await george();
+    const t = await startCall(h);
+    // 「鸭」不在記憶解析自己的簡繁折疊表（server/memory/parse.ts）裡：沒有上游轉換時會存成簡體或對不上。
+    await t.user("记住，我不吃鸭肉");
+    advance(h, 2500);
+    // 模型用簡體念出問句：轉換後與核心送出的繁體問句比對，仍認得是那一句（確認要在問句念完之後）。
+    await t.hear("要记住：不吃鸭肉，记在 George 名下。请说『确认记住』。");
+    advance(h, VOICE_CONFIRM_WINDOW_MS - 1000);
+    await t.user("确认记住");
+    expect((await factsOf(h)).find((f) => f.text === "不吃鴨肉")).toMatchObject({ source: "voice_confirmed", excerpt: "記住，我不吃鴨肉" });
+    expect(JSON.stringify(await factsOf(h))).not.toMatch(/鸭|记/);
+    expect(t.logs.join("\n")).not.toMatch(/鴨|鸭|记住|記住/);
+  });
+
+  it("台灣繁體：the transcription prompt echoed back on noise is dropped by the core (no memory card, no heard utterance); the log has no text", async () => {
+    const h = await george();
+    const t = await startCall(h);
+    await t.user("以下是台湾繁体中文（正体字）的对话。记住，我不吃鸭肉");
+    expect(cards(t.probe.events)).toEqual([]);
+    expect(t.logs.join("\n")).toContain("語音辨識提示的回音");
+    expect(t.logs.join("\n")).not.toMatch(/以下是|鸭|鴨/);
+  });
+
   it("negatives: generic 「好」, before the question was read, an echo of the question, and a timeout never save", async () => {
     const h = await george();
     const t = await startCall(h);

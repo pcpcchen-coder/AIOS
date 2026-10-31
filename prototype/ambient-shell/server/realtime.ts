@@ -1,4 +1,5 @@
 import { type Locale } from "../shared/i18n.mjs";
+import { ZH_TW_TRANSCRIPTION_PROMPT } from "../shared/zh-tw.ts";
 import { computeProgress, sortForProgress } from "../shared/progress.ts";
 import { HOME_COMMANDS } from "../shared/home.ts";
 import type { RealtimeBaseInfo, Task } from "../shared/types.ts";
@@ -300,9 +301,24 @@ export function buildLiveInstructions(tasks: Iterable<Task>, now: Date, caps: { 
 }
 
 export class RealtimeError extends Error {
+  /** 上游回 400 時 error.param 指向的欄位（例如 session.audio.input.transcription.prompt）；其他情況 null。 */
+  rejectedParam: string | null = null;
   constructor(message: string, readonly status: number, options?: ErrorOptions) {
     super(message, options);
   }
+}
+
+/**
+ * API key 路徑的語音辨識提示（session.audio.input.transcription.prompt，gpt-4o-mini-transcribe 接受自由文字；
+ * 欄位依 OpenAI SDK openai@5.23.2 的 RealtimeAPI.AudioTranscription）。gpt-4o-mini-transcribe 用 language "zh" 常給簡體
+ * （HIST-1 F1、ID-02 F3），中文介面請它用台灣繁體；英文介面不帶。這只是提示，頁面與核心仍會把簡體逐字稿轉成台灣繁體。
+ */
+export { ZH_TW_TRANSCRIPTION_PROMPT };
+
+/** 語音辨識設定：中文多一個 prompt（withPrompt false：上游拒絕 prompt 時的退回版本，與加入 prompt 之前相同）。 */
+export function realtimeTranscription(locale: Locale, withPrompt = true): Record<string, string> {
+  if (locale === "en") return { model: "gpt-4o-mini-transcribe", language: "en" };
+  return { model: "gpt-4o-mini-transcribe", language: "zh", ...(withPrompt ? { prompt: ZH_TW_TRANSCRIPTION_PROMPT } : {}) };
 }
 
 export class RealtimeBridge {
@@ -353,28 +369,42 @@ export class RealtimeBridge {
   async connect(offerSdp: string, tasks: Iterable<Task>, locale: Locale = "zh-TW", signal?: AbortSignal): Promise<{ sdp: string; model: string; callId: string | null }> {
     const { apiKey, model, voice } = this.options;
     if (!apiKey) throw new RealtimeError("尚未設定 OPENAI_API_KEY，無法使用即時語音。", 409);
-    const session = {
-      type: "realtime",
-      model,
-      instructions: buildRealtimeInstructions(tasks, new Date(), this.caps, locale),
-      output_modalities: ["audio"],
-      audio: {
-        input: {
-          transcription: { model: "gpt-4o-mini-transcribe", language: locale === "en" ? "en" : "zh" },
-          turn_detection: { type: "semantic_vad", eagerness: "auto" },
-          noise_reduction: { type: "near_field" },
+    const instructions = buildRealtimeInstructions(tasks, new Date(), this.caps, locale);
+    const tools = buildRealtimeTools(this.caps, locale);
+    const mint = (withPrompt: boolean) => {
+      const session = {
+        type: "realtime",
+        model,
+        instructions,
+        output_modalities: ["audio"],
+        audio: {
+          input: {
+            transcription: realtimeTranscription(locale, withPrompt),
+            turn_detection: { type: "semantic_vad", eagerness: "auto" },
+            noise_reduction: { type: "near_field" },
+          },
+          output: { voice },
         },
-        output: { voice },
-      },
-      tools: buildRealtimeTools(this.caps, locale),
-      tool_choice: "auto",
+        tools,
+        tool_choice: "auto",
+      };
+      return this.request(`${this.api}/realtime/client_secrets`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: 120 }, session }),
+        ...(signal ? { signal } : {}),
+      }, "建立即時語音工作階段");
     };
-    const minted = await this.request(`${this.api}/realtime/client_secrets`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ expires_after: { anchor: "created_at", seconds: 120 }, session }),
-      ...(signal ? { signal } : {}),
-    }, "建立即時語音工作階段");
+    let minted: Response;
+    try {
+      minted = await mint(true);
+    } catch (err) {
+      // 上游拒絕語音辨識的 prompt（400，error.param 指向 transcription）：不讓通話因此失敗，不帶 prompt 重送一次
+      // （頁面與核心照樣把簡體逐字稿轉成台灣繁體）。其他錯誤照舊。
+      if (locale === "en" || !(err instanceof RealtimeError) || !/transcription\.prompt$|transcription$/.test(err.rejectedParam ?? "")) throw err;
+      console.warn("[realtime] 語音辨識 prompt 被拒絕，改用不帶 prompt 的設定");
+      minted = await mint(false);
+    }
     const secret = ((await minted.json()) as { value?: string }).value;
     if (!secret) throw new RealtimeError("OpenAI 沒有回傳即時語音的 client secret。", 502);
 
@@ -447,13 +477,18 @@ export class RealtimeBridge {
     if (res.ok) return res;
     const raw = await res.text().catch(() => "");
     let message = raw.slice(0, 200);
+    let param: string | null = null;
     try {
-      message = (JSON.parse(raw) as { error?: { message?: string } }).error?.message ?? message;
+      const error = (JSON.parse(raw) as { error?: { message?: string; param?: unknown } }).error;
+      message = error?.message ?? message;
+      param = typeof error?.param === "string" ? error.param : null;
     } catch {
       // 保留原文
     }
     if (res.status === 401) throw new RealtimeError(`${stage}失敗：OPENAI_API_KEY 無效或未授權（401）。請檢查 .env 後重新啟動。`, 502);
     if (res.status === 429) throw new RealtimeError(`${stage}失敗：OpenAI 額度不足或超過速率限制（429）：${message}`, 502);
-    throw new RealtimeError(`${stage}失敗（HTTP ${res.status}）：${message}`, 502);
+    const failure = new RealtimeError(`${stage}失敗（HTTP ${res.status}）：${message}`, 502);
+    if (res.status === 400) failure.rejectedParam = param;
+    throw failure;
   }
 }
