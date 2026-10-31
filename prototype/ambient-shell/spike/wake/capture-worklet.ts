@@ -17,10 +17,11 @@ class CaptureProcessor extends AudioWorkletProcessor {
     for (let i = 0; i < ch.length; i++) {
       this.buf[this.n++] = ch[i]!;
       if (this.n === this.buf.length) {
-        // 轉移所有權給主執行緒，worklet 這邊換一塊新的
-        this.port.postMessage(this.buf, [this.buf.buffer]);
-        this.buf = new Float32Array(this.buf.length);
+        // 先換一塊新的，再把滿的那塊轉移給主執行緒：轉移後 full 會 detached（length 0），不能再拿來決定新塊的大小。
+        const full = this.buf;
+        this.buf = new Float32Array(full.length);
         this.n = 0;
+        this.port.postMessage(full, [full.buffer]);
       }
     }
     return true;
