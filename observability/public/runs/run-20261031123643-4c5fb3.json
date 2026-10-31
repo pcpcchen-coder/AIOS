@@ -8,16 +8,16 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-10-31T12:36:43.021Z",
-  "updated_at": "2026-10-31T12:36:43.021Z",
+  "updated_at": "2026-10-31T12:36:49.854Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-10-31T12:36:49.854Z",
+      "ended_at": "2026-10-31T12:36:49.854Z",
+      "note": "WK-02 plan + George decisions",
       "evidence": []
     },
     {
@@ -91,6 +91,13 @@
       "step_id": null,
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-10-31T12:36:49.854Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "passed",
+      "note": "WK-02 plan + George decisions"
     }
   ],
   "provenance": "Agent self-reported"
