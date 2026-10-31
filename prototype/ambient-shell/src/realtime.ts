@@ -1,6 +1,7 @@
 import type { HomeControlResult } from "../shared/home.ts";
 import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type HostCall, type LiveCoreEvent, type StopEvidence } from "../shared/realtime-route.ts";
 import type { HomeControlArgs } from "./api.ts";
+import { CONNECTING_SPEECH_HINT, EARLY_SPEECH_RMS, EarlySpeech, earlySpeechLogLine } from "./early-speech.ts";
 import { GREETING_SETTLE_MS, type GreetingOnce } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 
@@ -62,6 +63,11 @@ export interface RealtimeDeps {
   playRemote(stream: MediaStream): () => void;
   /** 把 SDP offer 交給本機核心，取回 OpenAI 的 SDP answer。 */
   exchange(offerSdp: string): Promise<string>;
+  /**
+   * F2／F10：本機麥克風音量（AnalyserNode RMS）。只在連線中與問候送出前用來判斷使用者是不是已經開口；
+   * 不保存、不轉送聲音。沒有提供時（舊的測試、沒有 AudioContext）不偵測。回傳停止。
+   */
+  watchLevel?(stream: MediaStream, onLevel: (rms: number) => void): () => void;
   /** MEM-3：經 /api/realtime/start 決定的工作階段才有（核心的事件、工具呼叫、停播回報）；沒有時行為和 MEM-2 之前一樣。 */
   core?: RealtimeCoreDeps;
 }
@@ -85,6 +91,8 @@ export interface RealtimeCoreDeps {
   cancelSpeech(): void;
   /** 說出結束原因（瀏覽器語音合成）。 */
   speak(text: string): void;
+  /** F7：POST /api/realtime/stop-reply：手掌停止，核心旁路上這一輪還沒回來的工具結果不再請模型念出。 */
+  stopReply?(): Promise<void>;
   /** 記憶事件（狀態、卡片 ID、固定句提示、交辦封鎖）交給主程式顯示；內容由主程式經 IPC 取得。 */
   memoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void;
   /** 停播並回報之後：顯示原因、清掉字幕與卡片；rebuild 而且核心採用了回報時主程式開一通新的（只一次）。 */
@@ -110,6 +118,8 @@ interface RealtimeOptions {
   rebuild?: boolean;
   /** 重建固定句的語言版本（預設繁中原文）。 */
   rebuildLine?: string;
+  /** F2／F10：本機開口偵測的 RMS 門檻（NOUS_EARLY_SPEECH_RMS）；未提供時用 EARLY_SPEECH_RMS。 */
+  earlySpeechRms?: number;
 }
 
 interface ServerEvent {
@@ -160,8 +170,31 @@ export class RealtimeVoice {
   private hostCalls = 0;
   private readonly rebuild: boolean;
   private readonly rebuildLine: string;
+  private readonly earlySpeechRms: number;
   /** 確認卡狀態的回報要先於工具結果到達核心。 */
   private approvalSync: Promise<void> = Promise.resolve();
+  /** F2／F10：本機麥克風音量的監看（連線中與問候送出前）。 */
+  private stopMicLevel: (() => void) | null = null;
+  /** F7：手掌停止的次數；工具開始時記下，結果回來時不同就只交回結果、不請模型接著說。 */
+  private replyEpoch = 0;
+  /**
+   * F7：手掌停止之後、下一輪（使用者開口、打字、系統通知或說出確認卡的回答）之前：事件沒有 response_id 時，
+   * 晚到的工具呼叫也算停止前的（有 response_id 時以 stoppedResponses 為準）。
+   */
+  private quietTurn = false;
+  /** F7：目前（已建立、還沒結束）的回應 ID。 */
+  private currentResponse: string | null = null;
+  /** F7：被手掌停止的回應：它們的工具結果（含 cancel 之後才到的 function_call）只交回、不念。 */
+  private readonly stoppedResponses = new Set<string>();
+  /**
+   * F7（審查 minor 4a）：停止時還沒有建立的回應（已送出 response.create，或伺服器 VAD 正要回答）：下一個沒有核心標記的
+   * response.created 一建立就取消。使用者再開口、打字或系統通知時解除。
+   */
+  private cancelNextCreated = false;
+  /** F1（審查 minor 6）：問候那一輪的 response.create 的 event_id 與指示；上游拒絕新參數時只退回一次。 */
+  private greetRequest: { eventId: string; instructions: string } | null = null;
+  private greetSeq = 0;
+  private greetFallbackUsed = false;
 
   constructor(
     private readonly callbacks: RealtimeCallbacks,
@@ -172,6 +205,7 @@ export class RealtimeVoice {
     this.greeting = options.greeting ?? null;
     this.rebuild = options.rebuild === true;
     this.rebuildLine = options.rebuildLine ?? REBUILD_LINE;
+    this.earlySpeechRms = options.earlySpeechRms ?? EARLY_SPEECH_RMS;
     this.approvals = new ApprovalQueue(
       callbacks,
       {
@@ -203,6 +237,8 @@ export class RealtimeVoice {
             },
           }),
         mcpResolved: (outcome) => {
+          // F7（審查 minor 4c）：停止之後才說出確認卡的回答＝新的一輪，結果照常念。
+          if (outcome === "said_approve" || outcome === "said_reject") this.newTurn();
           this.mcpCalled = true;
           // 說出確認語句的這一輪已經（或即將）有回應：等它結束再接著回應，避免重疊的 response.create。
           this.finishMcp(outcome !== "said_approve" && outcome !== "said_reject");
@@ -250,6 +286,7 @@ export class RealtimeVoice {
         return;
       }
       this.mic = mic;
+      this.watchEarlySpeech(mic, generation);
       // MEM-3：先訂閱核心事件再交換 SDP（核心在回 answer 之前就可能送出記憶狀態）。
       const core = this.deps.core;
       if (core) {
@@ -313,6 +350,30 @@ export class RealtimeVoice {
     this.setPhase("listening");
   }
 
+  /**
+   * F7：手掌停止（停止回覆）。和 Esc 的打斷一樣停掉正在念或正在產生的回覆（response.cancel＋清掉播放緩衝），另外：
+   * 這一輪已經開始、還沒回來的工具結果回來時只交回模型（function_call_output，當背景），不再 response.create 請模型念出；
+   * 核心旁路（帶記憶的通話）處理的工具也一樣（POST stop-reply）。工具本身不中止：交辦的背景任務照常建立、照常執行。
+   * 排隊中的系統通知（例如任務完成）不屬於這一輪，照常轉告。
+   */
+  stopReply(): void {
+    if (!this.capturing) return;
+    this.replyEpoch++;
+    this.quietTurn = true;
+    this.functionsCalled = false;
+    this.mcpCalled = false;
+    if (this.currentResponse) this.stoppedResponses.add(this.currentResponse);
+    while (this.stoppedResponses.size > 64) this.stoppedResponses.delete(this.stoppedResponses.values().next().value!);
+    // 回應還沒建立（已送出請求，或伺服器 VAD 正要回答）：建立時取消。
+    if (!this.currentResponse || this.awaitingCreated) this.cancelNextCreated = true;
+    if (this.responding || this.phase === "speaking") {
+      this.send({ type: "response.cancel" });
+      this.send({ type: "output_audio_buffer.clear" });
+    }
+    if (this.phase === "speaking" || this.phase === "thinking") this.setPhase("listening");
+    void this.deps.core?.stopReply?.().catch(() => undefined);
+  }
+
   /** 打字輸入：當成使用者這一輪說的話送出。連線中打的先排隊，session.created 之後送出。打字一律取消還沒送出的招呼。 */
   sendText(text: string): void {
     this.skipGreeting();
@@ -324,6 +385,7 @@ export class RealtimeVoice {
     if (!this.channel) return;
     this.resetIdle();
     if (this.responding) this.interrupt();
+    this.newTurn();
     this.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
     this.checkApproval(text);
     this.requestResponse();
@@ -345,7 +407,14 @@ export class RealtimeVoice {
     this.sendNotice(text);
   }
 
+  /** F7：新的一輪（使用者開口、打字、系統通知、說出確認卡的回答）：停止回覆的影響到此為止。 */
+  private newTurn(): void {
+    this.quietTurn = false;
+    this.cancelNextCreated = false;
+  }
+
   private sendNotice(text: string): void {
+    this.newTurn();
     this.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text: `（系統通知）${text}` }] } });
     this.requestResponse();
   }
@@ -354,10 +423,10 @@ export class RealtimeVoice {
    * 請模型回應。送出當下就視為回應中，直到 response.done：
    * 同時有多則通知時才不會連續送出 response.create（OpenAI 會拒絕重疊的回應）。
    */
-  private requestResponse(response?: Record<string, unknown>): void {
+  private requestResponse(response?: Record<string, unknown>, eventId?: string): void {
     this.responding = true;
     this.awaitingCreated = true;
-    this.send(response ? { type: "response.create", response } : { type: "response.create" });
+    this.send({ type: "response.create", ...(eventId ? { event_id: eventId } : {}), ...(response ? { response } : {}) });
   }
 
   /** 使用者先開口或打字：這次不打招呼，等待中的計時器也取消。 */
@@ -389,7 +458,9 @@ export class RealtimeVoice {
     const generation = this.generation;
     void this.greeting.take("api_key").then((instructions) => {
       if (!instructions || generation !== this.generation || this.responding) return;
-      this.requestResponse({ instructions });
+      const eventId = `greet_${++this.greetSeq}`;
+      this.greetRequest = { eventId, instructions };
+      this.requestResponse(greetingResponse(instructions), eventId);
     });
   }
 
@@ -408,6 +479,7 @@ export class RealtimeVoice {
       case "input_audio_buffer.speech_started":
         // 使用者先開口：這次不打招呼（已經送出的招呼照一般插話處理）。
         this.skipGreeting();
+        this.newTurn();
         this.resetIdle();
         this.setPhase("hearing");
         break;
@@ -420,7 +492,17 @@ export class RealtimeVoice {
           this.checkApproval(event.transcript);
         }
         break;
-      case "response.created":
+      case "response.created": {
+        const response = event.response as { id?: unknown; metadata?: { nous_trigger?: unknown } | null } | undefined;
+        const id = typeof response?.id === "string" ? response.id : null;
+        this.currentResponse = id;
+        // F7：停止時還沒建立的那一個（沒有核心標記；核心自己的接續回應由核心處理）：一建立就取消，它的工具結果也不念。
+        if (this.cancelNextCreated && typeof response?.metadata?.nous_trigger !== "string") {
+          this.cancelNextCreated = false;
+          if (id) this.stoppedResponses.add(id);
+          this.send({ type: "response.cancel", ...(id ? { response_id: id } : {}) });
+          this.send({ type: "output_audio_buffer.clear" });
+        }
         this.responding = true;
         this.awaitingCreated = false;
         this.functionsCalled = false;
@@ -428,6 +510,7 @@ export class RealtimeVoice {
         if (this.mcpPending === 0) this.mcpCalled = false;
         if (this.phase !== "speaking") this.setPhase("thinking");
         break;
+      }
       case "output_audio_buffer.started":
         this.setPhase("speaking");
         break;
@@ -445,7 +528,7 @@ export class RealtimeVoice {
         const name = String(event.name ?? "");
         // MEM-3：核心處理的工具（recall_memory、delegate_task）：頁面略過，不計入 pendingTools；結果由核心經旁路交回。
         if (this.deps.core?.coreTools().includes(name)) break;
-        void this.runTool(name, String(event.call_id ?? ""), String(event.arguments ?? "{}"));
+        void this.runTool(name, String(event.call_id ?? ""), String(event.arguments ?? "{}"), typeof event.response_id === "string" ? event.response_id : null);
         break;
       }
       case "conversation.item.done":
@@ -462,7 +545,7 @@ export class RealtimeVoice {
         break;
       case "response.mcp_call.in_progress":
         this.mcpPending += 1;
-        this.mcpCalled = true;
+        if (!this.isStopped(typeof event.response_id === "string" ? event.response_id : null)) this.mcpCalled = true;
         break;
       case "response.mcp_call.failed":
         this.callbacks.onToolActivity("外部服務（MCP）呼叫失敗");
@@ -478,6 +561,7 @@ export class RealtimeVoice {
       }
       case "response.done":
         this.responding = false;
+        this.currentResponse = null;
         this.resetIdle();
         if (this.phase === "thinking") this.setPhase("listening");
         if (this.endRequested) {
@@ -489,9 +573,20 @@ export class RealtimeVoice {
         this.continueAfterTools();
         break;
       case "error": {
-        const error = event.error as { message?: string; code?: string } | undefined;
+        const error = event.error as { message?: string; code?: string; param?: string; event_id?: string } | undefined;
         // 取消已結束的回覆之類的錯誤不影響對話。
         if (error?.code === "response_cancel_not_active") break;
+        // F1（審查 minor 6）：上游不接受問候那一輪的 output_modalities／tool_choice：只退回一次，只帶 instructions 重送。
+        const greet = this.greetRequest;
+        if (greet && error?.event_id === greet.eventId && /^response\.(output_modalities|tool_choice)/.test(error.param ?? "") && !this.greetFallbackUsed) {
+          this.greetFallbackUsed = true;
+          this.greetRequest = null;
+          console.warn("[realtime] 問候的 response.create 參數被拒絕，改成只帶 instructions 重送一次", error.param);
+          this.awaitingCreated = false;
+          this.responding = false;
+          this.requestResponse({ instructions: greet.instructions }, `greet_${++this.greetSeq}`);
+          break;
+        }
         console.warn("[realtime]", error?.code, error?.message);
         // 我們要求的回應沒有被建立（例如被拒絕）：不要卡在「回應中」，繼續處理排隊的通知。
         if (this.awaitingCreated) {
@@ -505,10 +600,12 @@ export class RealtimeVoice {
   }
 
   /** 工具呼叫：計數留在這裡（GA 的回應排程），執行交給共用的 executeRealtimeTool。 */
-  private runTool(name: string, callId: string, rawArgs: string): void {
-    this.pendingTools += 1;
-    this.functionsCalled = true;
+  private runTool(name: string, callId: string, rawArgs: string, responseId: string | null = null): void {
     const generation = this.generation;
+    const epoch = this.isStopped(responseId) ? -1 : this.replyEpoch;
+    this.pendingTools += 1;
+    // F7：被停止的回應（或沒有 response_id、停止之後才到）的工具：照常執行、交回結果，但不排接續回應。
+    if (epoch === this.replyEpoch) this.functionsCalled = true;
     void executeRealtimeTool(name, rawArgs, {
       callbacks: this.callbacks,
       approvals: this.approvals,
@@ -525,9 +622,16 @@ export class RealtimeVoice {
         if (generation !== this.generation) return;
         this.send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: callId, output: JSON.stringify(output) } });
         this.pendingTools -= 1;
+        // F7：手掌停止之後才回來：結果已交回模型當背景，不請模型念出（functionsCalled 已在 stopReply 清掉）；排隊的通知照常。
+        if (epoch !== this.replyEpoch || this.isStopped(responseId)) console.info("[realtime] 停止回覆之後才回來的工具結果：只交回、不念出");
         this.continueAfterTools();
       },
     });
+  }
+
+  /** F7：這個回應被手掌停止了？有 response_id 時看 stoppedResponses（不受開口先後影響）；沒有時退回 quietTurn。 */
+  private isStopped(responseId: string | null): boolean {
+    return responseId ? this.stoppedResponses.has(responseId) : this.quietTurn;
   }
 
   /** 使用者說的話（或打的字）是否為確認卡的固定語句（共用佇列判斷）。 */
@@ -537,6 +641,8 @@ export class RealtimeVoice {
 
   /** 結束目前的確認卡並回覆 OpenAI；畫面被收起時由呼叫端以 dismissed 拒絕。 */
   resolveApproval(approve: boolean, outcome: ApprovalOutcome): void {
+    // F7（審查 minor 4c）：使用者回答確認卡＝新的一輪。
+    if (outcome === "said_approve" || outcome === "said_reject") this.newTurn();
     this.approvals.resolve(approve, outcome);
   }
 
@@ -669,6 +775,36 @@ export class RealtimeVoice {
     core.revoked(message, rebuild && accepted, accepted);
   }
 
+  /**
+   * F2／F10：取得麥克風之後開始看本機音量，直到連線完成而且問候不會再送出為止。
+   * 連線中偵測到開口：取消招呼並提示「還在連線，請稍後再說一次」（那段話伺服器沒聽到，不代為猜內容）；
+   * 就緒之後、問候送出前：只取消招呼（聲音已經送到伺服器，照常回答）。
+   */
+  private watchEarlySpeech(mic: MediaStream, generation: number): void {
+    if (!this.deps.watchLevel) return;
+    const detector = new EarlySpeech(Date.now, this.earlySpeechRms);
+    this.stopMicLevel = this.deps.watchLevel(mic, (rms) => {
+      if (generation !== this.generation) return;
+      const connecting = this.phase === "connecting";
+      if (!connecting && !this.greeting?.open) {
+        this.stopEarlySpeech();
+        return;
+      }
+      if (!detector.feed(rms)) return;
+      // 只記事件、階段與峰值 RMS（Mac 重測看誤判用），沒有聲音。
+      console.info(earlySpeechLogLine(connecting ? "connecting" : "pre-greeting", detector.peak));
+      this.skipGreeting();
+      if (connecting) this.callbacks.onToolActivity(CONNECTING_SPEECH_HINT);
+      this.stopEarlySpeech();
+    });
+  }
+
+  private stopEarlySpeech(): void {
+    const stop = this.stopMicLevel;
+    this.stopMicLevel = null;
+    stop?.();
+  }
+
   private resetIdle(): void {
     if (this.idleTimer) clearTimeout(this.idleTimer);
     this.idleTimer = setTimeout(() => {
@@ -695,6 +831,7 @@ export class RealtimeVoice {
     this.endTimer = null;
     this.endRequested = false;
     this.cancelGreetTimer();
+    this.stopEarlySpeech();
     this.queuedText = [];
     this.unsubscribe?.();
     this.unsubscribe = null;
@@ -719,6 +856,11 @@ export class RealtimeVoice {
     this.responding = false;
     this.awaitingCreated = false;
     this.notices = [];
+    this.currentResponse = null;
+    this.cancelNextCreated = false;
+    this.quietTurn = false;
+    this.stoppedResponses.clear();
+    this.greetRequest = null;
   }
 
   private setPhase(phase: RealtimePhase): void {
@@ -726,6 +868,14 @@ export class RealtimeVoice {
     this.phase = phase;
     this.callbacks.onPhase(phase);
   }
+}
+
+/**
+ * F1（ID-02 Mac 2026-10-31）：問候那一輪的 response.create 內容。instructions 是核心組好的嚴格版（strictGreetingInstructions），
+ * 另外只要語音輸出（output_modalities）、不准呼叫工具（tool_choice none），讓這一輪只有那一句。模型是否一字不改只能在 Mac 上重測。
+ */
+export function greetingResponse(instructions: string): Record<string, unknown> {
+  return { instructions, output_modalities: ["audio"], tool_choice: "none" };
 }
 
 /** 瀏覽器實際使用的能力。 */

@@ -146,7 +146,7 @@ export function greetingSentence(name: string | null, locale: Locale = "zh-TW"):
 }
 
 /**
- * 看著說話開始的即時語音連上後，請模型照念的那一句（兩條路徑共用）。只知道使用者面向螢幕：
+ * 看著說話開始的即時語音連上後，請模型照念的那一句（ChatGPT 方案路徑；API key 路徑自 F1 起用 strictGreetingInstructions）。只知道使用者面向螢幕：
  * 不得說看到使用者、不得描述長相或環境（CLAUDE.md：沒有影像分析時不得宣稱正在觀看）；也不得自己猜名字。
  * 模型仍可能改寫：驗收要看實際逐字稿，不能只看這段指示（docs/validation/family-id-02-2026-10-25.md）。
  */
@@ -161,9 +161,30 @@ export function greetingInstructions(sentence: string, locale: Locale = "zh-TW")
   );
 }
 
-/** 沒有姓名、也沒有核心挑句時的問候指示（API key 路徑：瀏覽器版與決策失敗時用它）。 */
+/**
+ * F1（ID-02 Mac 2026-10-31）：API key 路徑（gpt-realtime-mini）的問候指示。response.create 的 instructions 會取代這一輪的
+ * session 指示，模型曾把它當成使用者的請求而先說「好的，我明白了，我會照您說的來：」，或整句換掉。這版明講這一輪不是請求、
+ * 不需要回應或確認，整段輸出就是那一句本身，並點名禁止看過的加字。ChatGPT 方案路徑沒有看到改句，仍用 greetingInstructions
+ * （放進 session.context.append，一段 ≤500 bytes）。模型是否照做只能在 Mac 上重測（docs/validation/family-id-02-mac-2026-10-31.md）。
+ */
+export function strictGreetingInstructions(sentence: string, locale: Locale = "zh-TW"): string {
+  if (locale === "en") return (
+    "You are Nous. This turn is not a user request and needs no reply or acknowledgement: your entire spoken output is exactly the one English sentence inside 「」, word for word. " +
+    `Say only this sentence: 「${sentence}」. ` +
+    "Add nothing before or after it: no \"Okay\", \"Sure\", \"Understood\", \"I'll do as you say\", no preface, explanation, or question. Do not replace it with a different sentence. Stop right after it. " +
+    "You cannot see the scene. Do not claim to see the user or describe their appearance, expression, clothes, or surroundings. Do not say or guess any name beyond the one already in that sentence."
+  );
+  return (
+    "你是 Nous。這一輪不是使用者的請求，不需要回應、也不需要確認收到：你說出的全部內容，就是下面「」裡的那一句本身。" +
+    `請用繁體中文只說這一句，一字不改：「${sentence}」。` +
+    "前後都不要加任何字：不要說「好的」「我明白了」「我會照您說的來」，也不要加開場白、說明或提問；不要換成別的句子；說完這一句就停。" +
+    "你看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境；除了這一句裡已有的名字，不要說出或猜測任何名字。"
+  );
+}
+
+/** 沒有姓名、也沒有核心挑句時的問候指示（API key 路徑：瀏覽器版與決策失敗時用它）。F1 起用嚴格版。 */
 export function plainGreetingInstructions(locale: Locale = "zh-TW"): string {
-  return greetingInstructions(locale === "en" ? "I'm here" : GREETING_PLAIN, locale);
+  return strictGreetingInstructions(locale === "en" ? "I'm here" : GREETING_PLAIN, locale);
 }
 export const LOOK_TO_TALK_GREETING = plainGreetingInstructions();
 

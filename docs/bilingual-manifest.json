@@ -354,8 +354,8 @@
       "source": "docs/validation/family-id-02-mac-2026-10-31.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/family-id-02-mac-2026-10-31.en.md",
-      "sourceSha256": "eee04c9b7594813d13a43e04510fcb255f84c1db914cdad609433509527cb412",
-      "translationSha256": "a3c50319472c6005c6b31cbacbdd3559778f7708c832419d04e00984067fae38"
+      "sourceSha256": "bc29c2ec6a211f7a7c37bb38ce0748b8acb4a741f64b4589edca229ee2f5fe40",
+      "translationSha256": "6898dabc74651b755e533868515a586825c79c2cf194aea0cc98da60941b2b59"
     },
     {
       "source": "docs/validation/history-hist1-2026-10-30.md",
@@ -522,8 +522,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "25a04c15f4daade66c317e4fb00f449dfe2a7f19219f73e3e64cc02188a25523",
-      "translationSha256": "7a103fe7ec214c7666369130a2a9aa7e0537ba9496b3c3a6038416e0e0e49008"
+      "sourceSha256": "44c150d267a3af7cfd809d2eb4c6f7379b41876d0a3f06330a806c746c3bbaaf",
+      "translationSha256": "39b68033d20295841618dc2f4988d22cfcddfd2af7c3c3465b343fe7b46cd04b"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

@@ -6,10 +6,10 @@ import { CameraSettingsStore } from "../server/camera-settings.ts";
 import { loadConfig } from "../server/config.ts";
 import type { HostCall, LiveCoreEvent, LiveInputKind } from "../shared/realtime-route.ts";
 import { buildLiveInstructions } from "../server/realtime.ts";
-import { CAMERA_PREFS, CameraPatchError, DEFAULT_CAMERA_PREFS, GREETING_MARKER, LIVE_GREETING_TEXT, LOOK_TO_TALK_GREETING, parseCameraPatch } from "../shared/sense.ts";
+import { CAMERA_PREFS, CameraPatchError, DEFAULT_CAMERA_PREFS, GREETING_MARKER, greetingInstructions, LIVE_GREETING_TEXT, LOOK_TO_TALK_GREETING, parseCameraPatch, strictGreetingInstructions } from "../shared/sense.ts";
 import { INTERACTION_ID } from "../shared/identity.ts";
 import { LiveVoice, type LiveDeps } from "../src/live-voice.ts";
-import { RealtimeVoice, type RealtimeCallbacks, type RealtimeDeps } from "../src/realtime.ts";
+import { greetingResponse, RealtimeVoice, type RealtimeCallbacks, type RealtimeDeps } from "../src/realtime.ts";
 import { FallbackOfferError, GREETING_SETTLE_MS, greetingFor, GreetingOnce, openRealtime } from "../src/realtime-session.ts";
 import { matchCameraCommand } from "../src/sense/controller.ts";
 
@@ -144,8 +144,9 @@ describe("look_to_talk_greet pref", () => {
     expect(LOOK_TO_TALK_GREETING).toContain("「我在」");
     expect(LOOK_TO_TALK_GREETING).toContain("不要說看到使用者");
     expect(LOOK_TO_TALK_GREETING).toContain("不要說出或猜測任何名字");
-    expect(Buffer.byteLength(LOOK_TO_TALK_GREETING)).toBeLessThanOrEqual(500); // 一段 session.context.append
-    expect(LIVE_GREETING_TEXT).toBe(`（開場）${LOOK_TO_TALK_GREETING}`);
+    // F1：API key 的指示（response.create instructions）是嚴格版；ChatGPT 方案仍是一段 ≤500 bytes 的 session.context.append。
+    expect(LOOK_TO_TALK_GREETING).toBe(strictGreetingInstructions("我在"));
+    expect(LIVE_GREETING_TEXT).toBe(`（開場）${greetingInstructions("我在")}`);
     expect(Buffer.byteLength(LIVE_GREETING_TEXT)).toBeLessThanOrEqual(500);
   });
 
@@ -205,7 +206,7 @@ describe("API key route (RealtimeVoice)", () => {
     await vi.advanceTimersByTimeAsync(GREETING_SETTLE_MS - 1);
     expect(t.responses()).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);
-    expect(t.responses()).toEqual([{ type: "response.create", response: { instructions: LOOK_TO_TALK_GREETING } }]);
+    expect(t.responses()).toEqual([{ type: "response.create", event_id: expect.stringMatching(/^greet_\d+$/), response: greetingResponse(LOOK_TO_TALK_GREETING) }]);
     expect(t.ch.events.some((e) => e.type === "conversation.item.create")).toBe(false);
     // 招呼念完、再來一次 session.created（不該發生，仍防）也不會再打招呼。
     t.ch.emit({ type: "response.created" });
@@ -395,7 +396,7 @@ describe("exactly once across the live → API key fallback", () => {
     expect(second.responses()).toHaveLength(0);
     second.ch.emit({ type: "session.created" });
     await vi.advanceTimersByTimeAsync(GREETING_SETTLE_MS);
-    expect(second.responses()).toEqual([{ type: "response.create", response: { instructions: LOOK_TO_TALK_GREETING } }]);
+    expect(second.responses()).toEqual([{ type: "response.create", event_id: expect.stringMatching(/^greet_\d+$/), response: greetingResponse(LOOK_TO_TALK_GREETING) }]);
     expect(greeting.state).toBe("sent");
     // 同一個招呼物件再給新的工作階段（例如之後又改路徑）也不會再打。
     const third = ga(greeting);

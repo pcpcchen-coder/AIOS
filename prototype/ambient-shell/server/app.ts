@@ -127,6 +127,8 @@ export interface AppOptions {
   voice?: VoiceSettingsSource;
   /** 人臉辨識校正值（FaceTuningStore）；只在鏡頭啟用時提供。 */
   faceTuning?: FaceTuningSource;
+  /** F2／F10：本機開口偵測門檻（NOUS_EARLY_SPEECH_RMS）；未提供時頁面用預設值。 */
+  earlySpeechRms?: number;
   /**
    * 家人辨識的狀態（IdentityService）：只有可用與否與人數。身分資料（姓名、識別碼、特徵）只走 Electron IPC，
    * 這裡沒有任何身分路由。未提供（瀏覽器版）時回報不可用。
@@ -207,7 +209,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const voice = options.voice?.view() ?? DEFAULT_VOICE_PREFS;
       return {
         ...options.settings.view(),
-        ...(live ? { realtime: live } : {}),
+        ...(live ? { realtime: options.earlySpeechRms !== undefined ? { ...live, early_speech_rms: options.earlySpeechRms } : live } : {}),
         ...(camera ? { camera } : {}),
         ...(camera?.enabled && options.faceTuning ? { face_tuning: options.faceTuning.view() } : {}),
         voice,
@@ -449,6 +451,13 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const body = await readJson(req);
       const { sessionId, owner } = sessionAuth(body);
       sessionCall(() => sessions!.playback(sessionId, owner));
+      return sendJson(res, 200, { ok: true });
+    }
+    if (method === "POST" && path === "/api/realtime/stop-reply") {
+      // F7：手掌停止（停止回覆）。沒有內容：核心只把這一輪還沒回來的工具結果改成不念出；任務照常、通話不結束。
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      sessionCall(() => sessions!.stopReply(sessionId, owner));
       return sendJson(res, 200, { ok: true });
     }
     if (method === "POST" && path === "/api/realtime/end") {

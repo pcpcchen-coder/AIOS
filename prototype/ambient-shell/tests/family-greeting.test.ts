@@ -236,7 +236,11 @@ describe("IdentityService：看著說話時的同步辨識與問候決策（核�
     const c = core();
     await enroll(c, [["George", GEORGE], ["Mary", MARY]]);
     await frames(c, 7, GEORGE, 3);
-    expect(text(await greet(c, id(1), 7))).toMatch(NAMED);
+    const decided = text(await greet(c, id(1), 7));
+    expect(decided).toMatch(NAMED);
+    // F1（ID-02 Mac）：API key 的指示是嚴格版（這一輪不是請求、不加「好的，我明白了」）。
+    expect(decided).toContain("這一輪不是使用者的請求");
+    expect(decided).toContain("不要說「好的」「我明白了」「我會照您說的來」");
     // 每個互動最多一次決策，送出狀態未知也不重來（I6）。
     expect(await greet(c, id(1), 7)).toMatchObject({ ok: false, code: "already" });
 
@@ -951,7 +955,7 @@ describe("兩條路徑送出的問候（fixture）", () => {
     await vi.advanceTimersByTimeAsync(GREETING_SETTLE_MS - 1);
     expect(t.responses()).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(1);
-    expect(t.responses()).toEqual([{ type: "response.create", response: { instructions: expect.stringMatching(NAMED) } }]);
+    expect(t.responses()).toEqual([{ type: "response.create", event_id: expect.stringMatching(/^greet_\d+$/), response: { instructions: expect.stringMatching(NAMED), output_modalities: ["audio"], tool_choice: "none" } }]);
     // 送給核心的是核心發出的互動 ID，不是頁面自己的鍵。
     expect(decisions(p)).toEqual([{ op: "greeting", interaction: p.coreInteraction(), track: expect.any(Number), eligible: true, route: "api_key" }]);
   });
@@ -977,7 +981,7 @@ describe("兩條路徑送出的問候（fixture）", () => {
     await api.voice.start();
     api.ch.emit({ type: "session.created" });
     await vi.advanceTimersByTimeAsync(GREETING_SETTLE_MS);
-    expect(api.responses()).toEqual([{ type: "response.create", response: { instructions: expect.stringMatching(PLAIN) } }]);
+    expect(api.responses()).toEqual([{ type: "response.create", event_id: expect.stringMatching(/^greet_\d+$/), response: { instructions: expect.stringMatching(PLAIN), output_modalities: ["audio"], tool_choice: "none" } }]);
     vi.useRealTimers();
 
     const b = await readyPage(STRANGER, "live");
@@ -1033,7 +1037,7 @@ describe("兩條路徑送出的問候（fixture）", () => {
     await second.voice.start();
     second.ch.emit({ type: "session.created" });
     await vi.advanceTimersByTimeAsync(GREETING_SETTLE_MS);
-    expect(second.responses()).toEqual([{ type: "response.create", response: { instructions: expect.stringMatching(NAMED) } }]);
+    expect(second.responses()).toEqual([{ type: "response.create", event_id: expect.stringMatching(/^greet_\d+$/), response: { instructions: expect.stringMatching(NAMED), output_modalities: ["audio"], tool_choice: "none" } }]);
     const third = apiKeyVoice(g);
     await third.voice.start();
     third.ch.emit({ type: "session.created" });

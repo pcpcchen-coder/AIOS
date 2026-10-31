@@ -88,6 +88,12 @@ export interface LiveRouteOptions {
   greeting?: (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting | null;
   /** MEM-2：每通通話的記憶（MemoryService.openLive）；沒有記憶層（瀏覽器版）時不提供。 */
   memory?: (ctx: SessionContext) => LiveMemoryPort | null;
+  /**
+   * F7：手掌停止後，這一輪的交辦結果改用 commentary（不念）送回（NOUS_PALM_QUIET_DELEGATION）。預設 false＝保守的舊行為：
+   * 只有頁面靜音，交辦照常以 speakable 結束（docs/validation/live-voice-2026-10-23.md：每個交辦都以 speakable 結束；
+   * 只用 commentary 結束交辦沒有在上游驗證過）。
+   */
+  palmQuietDelegation?: boolean;
   fetch?: typeof fetch;
   WebSocket?: SidebandSocketCtor;
   urls?: { call: string; sideband: (callId: string) => string };
@@ -264,7 +270,7 @@ export class LiveRoute implements RealtimeRoute {
       void this.hangup(urls.sideband(created.callId), ids);
       throw new RouteStartError("upstream", 502, unavailableText("upstream", { message: "接不上控制連線（sideband）" }), true);
     }
-    const call = new LiveCall(created.answer, this.options.model.display, socket, ctx, this.options.caller, memory, this.options.log, this.options.greeting);
+    const call = new LiveCall(created.answer, this.options.model.display, socket, ctx, this.options.caller, memory, this.options.log, this.options.greeting, this.options.palmQuietDelegation === true);
     memory?.bind(call);
     return call;
   }
@@ -388,6 +394,19 @@ class LiveCall implements RouteCall, LiveCallPort {
   private greeted = false;
   /** 送出的開場句，等模型念出後在逐字稿緩衝裡標成問候（交辦時不附這一則）；認出或下一則助理逐字稿之後清掉。 */
   private greetingSentence: string | null = null;
+  /**
+   * F10（ID-02 Mac 2026-10-31）：sideband 看過使用者開口（speech_started 或使用者逐字稿，含未完成的）。之後頁面才送來的
+   * 問候不送：和 API key 路徑的 speech_started 取消招呼一樣，包括頁面已經決定、POST 還在路上的競態。
+   */
+  private userSpoke = false;
+  /** F7：使用者的第幾輪（開口或打字各算一輪）；交辦送到時記下。inUserTurn：這一輪的使用者話還沒結束。 */
+  private turn = 0;
+  private inUserTurn = false;
+  /**
+   * F7：頁面回報手掌停止時的輪次：這一輪與之前每一輪的交辦結果改成不念出的背景（commentary）。用「≤」而不是「＝」：
+   * 使用者舉手時說「停」、「我查一下」的回音或雜音，可能在 stop-reply 送到之前就讓輪次加一（審查 2026-10-31 的競態）。
+   */
+  private quietThrough = -1;
 
   constructor(
     readonly answerSdp: string,
@@ -398,6 +417,7 @@ class LiveCall implements RouteCall, LiveCallPort {
     private readonly memory: LiveMemoryPort | null,
     private readonly log?: (line: string) => void,
     private readonly greetingText?: (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting | null,
+    private readonly palmQuietDelegation = false,
   ) {
     this.closed = new Promise<void>((resolve) => (this.resolveClosed = resolve));
     this.voiceDelegation = memory?.delegatePort?.() ?? null;
@@ -462,11 +482,19 @@ class LiveCall implements RouteCall, LiveCallPort {
           if (this.transcript.length > TRANSCRIPT_RING) this.transcript.shift();
           // MEM-2：sideband 的使用者 final 逐字稿（上游 ASR 直接到核心，不經頁面）交給記憶；助理的用來判斷回音與問句念完。
           if (event.role === "user") {
+            this.userSpoke = true;
+            if (!this.inUserTurn) this.turn++;
+            this.inUserTurn = false;
             this.lastUserFinal = { text: event.text.trim(), used: false };
             this.memory?.onUserFinal(event.text, this.ctx.now());
-          } else this.memory?.onAssistantFinal(event.text, this.ctx.now());
+          } else {
+            // 助理回了話：之後使用者再開口一定是新的一輪（沒有結尾的雜音逐字稿不會把輪次卡住）。
+            this.inUserTurn = false;
+            this.memory?.onAssistantFinal(event.text, this.ctx.now());
+          }
         } else if (!event.final && event.role === "user" && event.text.trim()) {
           // 這一句第一則未完成的使用者逐字稿：當成開口時間（語音確認要晚於問句播完）。
+          this.userStarted();
           this.memory?.onUserSpeechStart(this.ctx.now());
         }
         this.ctx.emit({ kind: "transcript", role: event.role, text: event.text, final: event.final, item_id: event.item_id });
@@ -478,6 +506,9 @@ class LiveCall implements RouteCall, LiveCallPort {
         this.enqueue(event.id, event.text, "voice");
         break;
       case "speech.started":
+        // 上游每一段話送一次：一律算新的一輪（未完成逐字稿可能沒有結尾，不能只靠它判斷）。
+        this.inUserTurn = false;
+        this.userStarted();
         this.memory?.onUserSpeechStart(this.ctx.now());
         break;
       case "audio.done":
@@ -497,6 +528,30 @@ class LiveCall implements RouteCall, LiveCallPort {
     }
   }
 
+  /** F10／F7：使用者開口（speech_started 或第一則未完成的逐字稿）。 */
+  private userStarted(): void {
+    this.userSpoke = true;
+    if (!this.inUserTurn) {
+      this.turn++;
+      this.inUserTurn = true;
+    }
+  }
+
+  /**
+   * F7：頁面回報手掌停止（停止回覆；頁面同時把播放靜音）。這一輪的交辦結果之後改用 commentary（安靜的背景、不念）送回，
+   * 「還在處理」也不說；交辦本身不中止，背景任務照常執行。使用者再開口或打字就是新的一輪，照常念。
+   */
+  stopReply(): void {
+    if (this.ended || this.revoked) return;
+    if (!this.palmQuietDelegation) {
+      // 預設：只有頁面靜音；交辦照常以 speakable 結束（NOUS_PALM_QUIET_DELEGATION 沒開，等 Mac 驗證）。
+      this.log?.("即時語音（ChatGPT 方案）：停止回覆（只靜音；交辦結果照常送回）");
+      return;
+    }
+    this.quietThrough = this.turn;
+    this.log?.("即時語音（ChatGPT 方案）：停止回覆（到這一輪為止的交辦結果不念出）");
+  }
+
   private enqueue(id: string, text: string, source: "voice" | "typed"): void {
     if (this.seen.has(id)) return;
     this.seen.add(id);
@@ -508,7 +563,8 @@ class LiveCall implements RouteCall, LiveCallPort {
       this.lastUserFinal.used = true;
     }
     const asked = { approval: this.ctx.approval(), at: this.ctx.now(), userText };
-    this.chain = this.chain.then(() => this.delegate(id, text, source, asked)).catch((err: unknown) => {
+    const turn = this.turn;
+    this.chain = this.chain.then(() => this.delegate(id, text, source, asked, turn)).catch((err: unknown) => {
       this.log?.(`即時語音（ChatGPT 方案）交辦出錯：${redact((err as Error).message)}`);
     });
   }
@@ -518,13 +574,18 @@ class LiveCall implements RouteCall, LiveCallPort {
    * （typed 用 session.context.append）→ finished／failed／unknown。空內容直接請使用者再說一次，不呼叫 caller。
    * caller 丟出例外也一樣：說一句失敗、送 failed，頁面才會清掉「思考中」、閒置計時才會繼續。
    */
-  private async delegate(id: string, text: string, source: "voice" | "typed", asked: { approval: ApprovalSnapshot; at: number; userText: string | null }): Promise<void> {
+  private async delegate(id: string, text: string, source: "voice" | "typed", asked: { approval: ApprovalSnapshot; at: number; userText: string | null }, turn: number = this.turn): Promise<void> {
     if (this.ended || this.revoked) return;
+    /** F7：這一輪被手掌停止了。 */
+    const quiet = () => turn <= this.quietThrough;
     const append = (result: { channel: "speakable"; text: string }) => {
       if (this.ended || this.revoked) return;
+      // F7：停止回覆之後才回來的結果：改成 commentary（模型知道結果，但不念出）；不丟掉，交辦才有結果、下一輪問得到。
+      const channel = quiet() ? "commentary" : result.channel;
+      if (quiet()) this.log?.("即時語音（ChatGPT 方案）：停止回覆之後才回來的交辦結果，改成不念出的背景");
       for (const piece of chunkForAppend(result.text)) {
         const content = [{ type: "input_text", text: piece }];
-        this.send(source === "voice" ? { type: "delegation.context.append", delegation_item_id: id, channel: result.channel, content } : { type: "session.context.append", channel: result.channel, content });
+        this.send(source === "voice" ? { type: "delegation.context.append", delegation_item_id: id, channel, content } : { type: "session.context.append", channel, content });
       }
     };
     if (!text.trim()) {
@@ -535,7 +596,7 @@ class LiveCall implements RouteCall, LiveCallPort {
     let progressed = false;
     const progress = setTimeout(() => {
       // 只在真的有工具還在跑時說一次（真實事件，不是假進度）。
-      if (!this.ended && !this.revoked && !progressed && this.ctx.host.outstanding > 0 && source === "voice") {
+      if (!this.ended && !this.revoked && !progressed && !quiet() && this.ctx.host.outstanding > 0 && source === "voice") {
         progressed = true;
         // 獨立的一句話（session.context.append，不帶交辦 ID），不會變成這次交辦的結果（同 OpenClaw sendSessionContext）。
         for (const piece of chunkForAppend("還在處理，再等一下。")) this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: piece }] });
@@ -568,12 +629,23 @@ class LiveCall implements RouteCall, LiveCallPort {
     if (kind === "user_text") {
       // MEM-4b：打字之後，之前的語音原句都不能再當交辦原句。
       this.memory?.typedInput?.();
+      // F7：打字是新的一輪。
+      this.turn++;
+      this.inUserTurn = false;
       this.enqueue(`typed_${++this.typed}`, text, "typed");
       return;
     }
     if (kind === "greeting") {
       // sideband 還沒開（或正在關）：不記成已送，之後重送仍有效；送出之後才記，所以不會送兩次。
       if (this.greeted || this.ended || this.socket.readyState !== 1) return;
+      // F10：使用者已經先開口（sideband 看到 speech_started 或逐字稿）：這次不打招呼，之後重送也不送。
+      if (this.userSpoke) {
+        this.greeted = true;
+        // 核心已經挑好的開場句（IdentityService 的 pendingLive）取走丟掉，不留到之後。
+        this.greetingText?.(text, this.ctx.sessionId, this.ctx.locale);
+        this.log?.("即時語音（ChatGPT 方案）：使用者先開口，略過問候");
+        return;
+      }
       const greeting = this.greetingText?.(text, this.ctx.sessionId, this.ctx.locale) ?? { text: liveGreetingText(translate(GREETING_PLAIN, this.ctx.locale), this.ctx.locale), sentence: translate(GREETING_PLAIN, this.ctx.locale) };
       this.greetingSentence = greeting.sentence;
       for (const piece of chunkForAppend(greeting.text)) this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: piece }] });

@@ -42,6 +42,16 @@ export interface Config {
   /** ChatGPT 方案路徑上替語音模型執行工具的模型（NOUS_LIVE_AGENT_MODEL）；未設定時查 Codex 模型清單。 */
   liveAgentModel: string | null;
   /**
+   * F7（ID-02 Mac 2026-10-31）：ChatGPT 方案路徑手掌停止後，這一輪的交辦結果改用 commentary（不念）送回
+   * （NOUS_PALM_QUIET_DELEGATION=on）。預設關閉：只靜音，交辦照常以 speakable 結束——docs/validation/live-voice-2026-10-23.md
+   * 的結論是每個交辦都以 speakable 結束，只用 commentary 結束交辦沒有在上游驗證過（可能讓上游以為交辦沒完成）。Mac 驗證後才改預設。
+   */
+  palmQuietDelegation: boolean;
+  /**
+   * F2／F10：本機開口偵測的 RMS 門檻（NOUS_EARLY_SPEECH_RMS，0.005–0.3）。未設定時 null＝頁面用 src/early-speech.ts 的預設（未校準）。
+   */
+  earlySpeechRms: number | null;
+  /**
    * 查 Codex 模型清單時帶的 client_version（NOUS_CODEX_CLIENT_VERSION）。Codex 只列出支援這個版本的模型，
    * 帶 Nous 自己的版本（0.1.0）會拿到空清單，所以預設用和 OpenClaw 相同的 Codex 版本號。
    */
@@ -106,6 +116,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     liveModel: { display: env.NOUS_LIVE_MODEL?.trim() || "gpt-live-1-codex", send: env.NOUS_LIVE_MODEL?.trim() || null },
     liveVoice: parseLiveVoice(env.NOUS_LIVE_VOICE),
     liveAgentModel: env.NOUS_LIVE_AGENT_MODEL?.trim() || null,
+    palmQuietDelegation: ["on", "1", "true"].includes((env.NOUS_PALM_QUIET_DELEGATION ?? "off").trim().toLowerCase()),
+    earlySpeechRms: parseEarlySpeechRms(env.NOUS_EARLY_SPEECH_RMS),
     codexClientVersion: env.NOUS_CODEX_CLIENT_VERSION?.trim() || DEFAULT_CODEX_CLIENT_VERSION,
     nousVersion: packageVersion(),
     searchModel: env.NOUS_SEARCH_MODEL?.trim() || "gpt-5.5",
@@ -144,6 +156,19 @@ function parseRoute(raw: string | undefined): RoutePreference {
   if (!value) return "auto";
   if (!(ROUTE_PREFERENCES as readonly string[]).includes(value)) throw new Error(`NOUS_REALTIME_ROUTE 只能是 ${ROUTE_PREFERENCES.join("、")}，收到 "${value}"`);
   return value as RoutePreference;
+}
+
+/** NOUS_EARLY_SPEECH_RMS 的合理範圍：低於 0.005 幾乎任何底噪都算說話，高於 0.3 正常說話也到不了。 */
+export const EARLY_SPEECH_RMS_RANGE = { min: 0.005, max: 0.3 } as const;
+
+function parseEarlySpeechRms(raw: string | undefined): number | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < EARLY_SPEECH_RMS_RANGE.min || n > EARLY_SPEECH_RMS_RANGE.max) {
+    throw new Error(`NOUS_EARLY_SPEECH_RMS 要是 ${EARLY_SPEECH_RMS_RANGE.min}–${EARLY_SPEECH_RMS_RANGE.max} 之間的數字，收到 "${value}"`);
+  }
+  return n;
 }
 
 function parseLiveVoice(raw: string | undefined): LiveVoiceId {
