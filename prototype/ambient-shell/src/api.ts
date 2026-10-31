@@ -1,3 +1,4 @@
+import type { FaceTuning } from "../shared/face-tuning.ts";
 import { getLocale, type Locale } from "./i18n.ts";
 import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
@@ -52,6 +53,9 @@ export const api = {
   /** 鏡頭使用者設定（保存在本機 camera.json）；回傳更新後的設定。 */
   updateCamera: (patch: CameraPrefsPatch) => call<SettingsView>("POST", "/api/settings/camera", patch),
   updateVoice: (patch: VoicePrefsPatch) => call<SettingsView>("POST", "/api/settings/voice", patch),
+  /** 人臉辨識校正值（face-tuning.json）：calibrated 表示這次是「校正人臉辨識」的套用；reset 還原預設。 */
+  updateFaceTuning: (change: Partial<FaceTuning> | "reset", calibrated = false) =>
+    call<SettingsView>("POST", "/api/settings/camera-tuning", change === "reset" ? { reset: true } : { ...change, ...(calibrated ? { calibrated: true } : {}) }),
   chatgptLogin: (mode: "auto" | "new") => call<{ authorize_url: string }>("POST", "/api/auth/chatgpt/login", { mode }),
   chatgptCancel: () => call<SettingsView>("POST", "/api/auth/chatgpt/cancel", {}),
   chatgptLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/chatgpt/logout", {}),

@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createApp } from "../server/app.ts";
+import { FaceTuningStore } from "../server/face-tuning-settings.ts";
 import { CameraSettingsStore } from "../server/camera-settings.ts";
 import { VoiceSettingsStore } from "../server/voice-settings.ts";
 import { loadConfig } from "../server/config.ts";
@@ -69,6 +70,7 @@ async function start(
   home?: HomeBridge,
   camera?: { env: NodeJS.ProcessEnv; dir?: string },
   voice?: { dir?: string },
+  faceTuning = false,
 ) {
   const port = await freePort();
   const store = new TaskStore(null);
@@ -78,6 +80,7 @@ async function start(
     ? new CameraSettingsStore({ base: loadConfig(camera.env).camera, dir, onChange: () => notify(), log: () => {} })
     : undefined;
   const voiceStore = voice ? new VoiceSettingsStore({ dir, onChange: () => notify(), log: () => {} }) : undefined;
+  const faceTuningStore = faceTuning ? new FaceTuningStore({ dir, onChange: () => notify(), log: () => {} }) : undefined;
   const auth = new ChatGPTAuth({ dir, callbackPort: 0, onChange: () => {} });
   const providers = new ProviderManager({
     claude: null,
@@ -100,6 +103,7 @@ async function start(
     home,
     camera: cameraStore,
     voice: voiceStore,
+    faceTuning: faceTuningStore,
     port,
     devPort: 5173,
     distDir: null,
@@ -387,6 +391,25 @@ describe("HTTP API", () => {
       'POST /api/v1/integrations/aifa/devices/h1/children/c1/climate {"mode":"cool","temperature":25,"fan":"low","swing":"fixed_3","feature":"normal"}',
       'POST /api/v1/devices/ir-tv/infrared-commands {"key":"Vol+","key_id":2}',
     ]);
+  });
+
+  it("人臉辨識校正值：只在鏡頭啟用時提供；驗證輸入、合併後檢查範圍、套用記下校正時間、可還原預設", async () => {
+    const off = await start(5, undefined, undefined, undefined, { env: {} }, undefined, true);
+    expect(((await (await fetch(`${off.base}/api/settings`)).json()) as SettingsView).face_tuning).toBeUndefined();
+    expect((await off.post("/api/settings/camera-tuning", { near_max_m: 1.2 })).status).toBe(409);
+    await new Promise((r) => server!.close(r));
+
+    const { base, post } = await start(5, undefined, undefined, undefined, { env: { NOUS_CAMERA: "on" } }, undefined, true);
+    const initial = (await (await fetch(`${base}/api/settings`)).json()) as SettingsView;
+    expect(initial.face_tuning).toMatchObject({ near_min_m: 0.6, near_max_m: 1.5, min_face_px: 100, customized: false, calibrated_at: null });
+    expect((await post("/api/settings/camera-tuning", { match_threshold: 0.3 })).status).toBe(400);
+    expect((await post("/api/settings/camera-tuning", { min_face_px: 20 })).status).toBe(400);
+    expect((await post("/api/settings/camera-tuning", { near_min_m: 1.4 })).status).toBe(400); // 與最遠 1.5 m 太近
+    const applied = (await (await post("/api/settings/camera-tuning", { near_max_m: 1.1, min_face_px: 80, calibrated: true })).json()) as SettingsView;
+    expect(applied.face_tuning).toMatchObject({ near_max_m: 1.1, min_face_px: 80, customized: true });
+    expect(typeof applied.face_tuning!.calibrated_at).toBe("string");
+    const reset = (await (await post("/api/settings/camera-tuning", { reset: true })).json()) as SettingsView;
+    expect(reset.face_tuning).toMatchObject({ near_max_m: 1.5, min_face_px: 100, customized: false, calibrated_at: null });
   });
 
   it("鏡頭設定：驗證輸入、保存到 camera.json、推送 settings.updated，重新啟動後仍保留", async () => {

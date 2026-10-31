@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { parseEnv } from "node:util";
 import { createApp } from "./app.ts";
 import { CameraSettingsStore } from "./camera-settings.ts";
+import { FaceTuningStore } from "./face-tuning-settings.ts";
 import { VoiceSettingsStore } from "./voice-settings.ts";
 import { ChatGPTAuth } from "./chatgpt-auth.ts";
 import { ChatGPTExecutor } from "./chatgpt-executor.ts";
@@ -233,6 +234,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   });
   const camera = new CameraSettingsStore({ base: config.camera, dir: config.configDir, onChange: () => notify(), log });
   const voice = new VoiceSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  const faceTuning = new FaceTuningStore({ dir: config.configDir, onChange: () => notify(), log });
   // MEM-4a：macOS App 加密保存全部任務（金鑰不可用或鎖被占用時 vault 為 null，TaskStore 照實處理並記 log）。
   let vault: SealedVault | null = null;
   let vaultFailure: VaultFailure | null = null;
@@ -350,6 +352,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     webSearch,
     home,
     camera,
+    faceTuning,
     voice,
     identity: identity ?? undefined,
     memory: memory ?? undefined,

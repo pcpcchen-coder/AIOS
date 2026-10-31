@@ -14,7 +14,7 @@ const PREVIEW_GROUP = "camera";
 /**
  * @param settings GET /api/settings 的回應（還沒讀到時是 null）
  * @param handlers command(name)：把選單動作交給頁面；setMenuPref(row, value)：POST { [row.key]: value } 到 row.write_path；
- *   openFamily()：「家人辨識…」（主程序先記下點擊時間，10 秒內頁面才能開管理 session，再交給頁面打開畫面）
+ *   openFamily(mode?)：「家人辨識…」與「校正人臉辨識…」（mode "calibrate"）。主程序先記下點擊時間，10 秒內頁面才能開管理 session，再交給頁面打開畫面
  */
 export function settingsMenu(settings, { command, setMenuPref, openFamily, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
@@ -44,6 +44,8 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, trans
         enabled: identity.available,
         click: () => openFamily?.(),
       });
+      // 校正人臉辨識（George 2026-10-31）：鏡頭換位置後量測常用位置、建議校正值；同樣經家人辨識的管理 session。
+      if (settings.face_tuning) items.push({ label: text("校正人臉辨識…"), enabled: identity.available, click: () => openFamily?.("calibrate") });
       if (identity.disabled_reason) items.push({ label: text(`家人辨識：${text(identity.disabled_reason)}`), enabled: false });
     }
   };

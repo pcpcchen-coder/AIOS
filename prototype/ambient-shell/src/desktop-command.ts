@@ -10,6 +10,8 @@ export interface DesktopCommandHandlers {
   cameraPreview(): void;
   /** 選單列「鏡頭與語音設定 → 家人辨識…」（主程序已記下點擊時間；管理 session 由核心決定能不能開）。 */
   family(): void;
+  /** 選單列「校正人臉辨識…」：打開家人辨識畫面並直接進入校正（點擊時間同「家人辨識…」）。 */
+  familyCalibrate(): void;
   /** 選單列「記憶…」（主程序已記下點擊時間；記憶管理能不能打開由核心決定）。 */
   memory(): void;
   /** 選單列「成果紀錄…」（HIST-1）：打開成果紀錄 Surface。 */
@@ -18,7 +20,7 @@ export interface DesktopCommandHandlers {
   vault(): void;
 }
 
-export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family", "memory", "history", "vault"] as const;
+export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family", "family-calibrate", "memory", "history", "vault"] as const;
 
 /** 認得的指令執行對應動作並回 true；不認得的不做任何事，回 false。 */
 export function runDesktopCommand(command: string, handlers: DesktopCommandHandlers): boolean {
@@ -40,6 +42,9 @@ export function runDesktopCommand(command: string, handlers: DesktopCommandHandl
       return true;
     case "family":
       handlers.family();
+      return true;
+    case "family-calibrate":
+      handlers.familyCalibrate();
       return true;
     case "memory":
       handlers.memory();

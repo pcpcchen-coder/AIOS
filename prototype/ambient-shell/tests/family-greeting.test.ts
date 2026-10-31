@@ -24,7 +24,7 @@ import {
 import { GreetingPicker } from "../server/greeting-picker.ts";
 import type { HostCall, LiveCoreEvent, LiveInputKind } from "../shared/realtime-route.ts";
 import { SenseController, type SenseTuning } from "../src/sense/controller.ts";
-import { AmbientIdentity, FACING_GRACE_MS, INTERACTION_SAMPLE_MAX_MS, isNear, type AmbientSampler } from "../src/sense/identity-ambient.ts";
+import { AmbientIdentity, FACING_GRACE_MS, INTERACTION_SAMPLE_MAX_MS, isNear, type AmbientSampler, type AmbientTuning } from "../src/sense/identity-ambient.ts";
 import type { ClientFrame, ClientState } from "../src/sense/identity-client.ts";
 import { GREETING_SETTLE_MS, GreetingOnce, newInteractionId } from "../src/realtime-session.ts";
 import { RealtimeVoice, type RealtimeCallbacks, type RealtimeDeps } from "../src/realtime.ts";
@@ -534,7 +534,7 @@ interface Page {
 
 const PAGE_SESSION = "rt_page";
 
-async function page(options: { lookS?: number; canAutoTalk?: boolean; withAmbient?: boolean; people?: [string, Float32Array][]; bridge?: boolean; route?: "api_key" | "live" } = {}): Promise<Page> {
+async function page(options: { lookS?: number; canAutoTalk?: boolean; withAmbient?: boolean; people?: [string, Float32Array][]; bridge?: boolean; route?: "api_key" | "live"; tuning?: AmbientTuning } = {}): Promise<Page> {
   const c = core();
   await enroll(c, options.people ?? [["George", GEORGE]]);
   const calls: IdentityRequest[] = [];
@@ -551,6 +551,7 @@ async function page(options: { lookS?: number; canAutoTalk?: boolean; withAmbien
     createSampler: (onFrame, onState) => (sampler = new FakeSampler(onFrame, onState)),
     model: MODEL,
     now: () => c.clock.now,
+    ...(options.tuning ? { tuning: () => options.tuning } : {}),
   });
   const prefs: SenseTuning = { ...DEFAULT_CAMERA_PREFS, look_to_talk_s: options.lookS ?? 1.5 };
   const sense = new SenseController({
@@ -631,8 +632,12 @@ const decisions = (p: Page) => p.calls.filter((r) => r.op === "greeting");
 
 describe("AmbientIdentity：與看著說話的 delay 同步辨識（頁面）", () => {
   it("near range: 0.6–1.5 m only; unknown distance is not near", () => {
-    expect([0.59, 0.6, 1.0, 1.5, 1.51].map(isNear)).toEqual([false, true, true, true, false]);
+    expect([0.59, 0.6, 1.0, 1.5, 1.51].map((d) => isNear(d))).toEqual([false, true, true, true, false]);
     expect(isNear(null)).toBe(false);
+  });
+
+  it("face calibration: a tuned near range replaces the default", () => {
+    expect([0.4, 0.45, 1.2, 1.9, 1.95].map((d) => isNear(d, { min: 0.45, max: 1.9 }))).toEqual([false, true, true, true, false]);
   });
 
   it("I1：George present and facing but look-to-talk cannot start → no sampling, no decision, no greeting", async () => {
@@ -753,6 +758,21 @@ describe("AmbientIdentity：與看著說話的 delay 同步辨識（頁面）", 
     await p.run(800, GEORGE);
     expect(p.ambient.track).toBe(track);
     expect(await p.greeting()!.take("api_key")).toMatch(/George/);
+  });
+
+  it("face calibration: the tuned grace replaces the default (0 ms → any glance resets, 2000 ms → a 1.5 s glance does not)", async () => {
+    for (const [grace, glance, named] of [[0, 300, false], [2000, 1500, true]] as const) {
+      const p = await page({ tuning: { near_min_m: 0.6, near_max_m: 1.5, facing_grace_ms: grace } });
+      await approach(p);
+      await p.run(1600, GEORGE);
+      await p.send({ type: "attention", facing: false });
+      await p.run(glance);
+      await p.send({ type: "attention", facing: true });
+      await p.run(800, GEORGE);
+      const said = await p.greeting()!.take("api_key");
+      if (named) expect(said, `grace ${grace}`).toMatch(/George/);
+      else expect(said, `grace ${grace}`).toMatch(PLAIN);
+    }
   });
 
   it("換人：George walks away and Mary steps in → Mary is never greeted with George's name (and not with her own in George's interaction)", async () => {

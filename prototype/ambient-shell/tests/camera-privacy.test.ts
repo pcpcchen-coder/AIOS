@@ -158,12 +158,18 @@ describe("family recognition privacy boundary (static)", () => {
     expect(manifest.url_prefix).toBe("/face-runtime/");
   });
 
-  it("the worker posts back only counts, quality, a feature and timing — never pixels, boxes or landmarks", () => {
+  it("the worker posts back only counts, quality, a feature, timing and (for calibration) face metrics — never pixels, boxes or landmarks", () => {
     const worker = readFileSync(join(src, "sense", "identity-worker.ts"), "utf8");
     const posts = [...worker.matchAll(/postMessage\(([^;]+)\);/g)].map((m) => m[1]!);
     expect(posts.length).toBeGreaterThan(0);
     for (const p of posts) expect(p).not.toMatch(/rgba|pixels|bitmap|box|landmarks|faces\b/);
-    expect(worker).toMatch(/const message: WorkerResponse = \{ type: "result", gen, face_count: faces\.length, quality: quality\.reason, ms: [^}]+, \.\.\.\(feature \? \{ feature \} : \{\}\) \};/);
+    expect(worker).toMatch(/const message: WorkerResponse = \{ type: "result", gen, face_count: faces\.length, quality: quality\.reason, ms: [^}]+, \.\.\.\(feature \? \{ feature \} : \{\}\), \.\.\.metrics \};/);
+    expect(worker).toMatch(/const metrics = options\.metrics && quality\.metrics \? \{ metrics: quality\.metrics \} : \{\};/);
+    // 「校正人臉辨識」的量測值只有數字與碰到哪一邊：沒有座標、關鍵點或像素。
+    const quality = readFileSync(join(src, "sense", "face", "quality.ts"), "utf8");
+    const fields = quality.slice(quality.indexOf("export interface FaceMetrics {"), quality.indexOf("}", quality.indexOf("export interface FaceMetrics {")));
+    expect([...fields.matchAll(/^\s{2}(\w+):/gm)].map((m) => m[1])).toEqual(["face_px", "score", "yaw", "pitch", "roll_deg", "luma", "edge"]);
+    expect(quality).toMatch(/return \{ face_px: box\.width, score, yaw, pitch, roll_deg, luma: [^}]+, edge \};/);
   });
 
   it("identity data does not go over HTTP: server/app.ts has no identity route and only reads the status", () => {

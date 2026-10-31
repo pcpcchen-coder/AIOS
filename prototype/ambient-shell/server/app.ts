@@ -14,6 +14,7 @@ import { ExecutionError } from "./runner.ts";
 import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { WebSearchError, type WebSearch } from "./web-search.ts";
 import { HomeBridgeError, type ControlRequest, type HomeBridge } from "./home-bridge.ts";
+import { FaceTuningError, parseFaceTuningPatch, type FaceTuning, type FaceTuningView } from "../shared/face-tuning.ts";
 import { CameraPatchError, parseCameraPatch, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
 import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/seconds-menu.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VoicePatchError, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
@@ -124,6 +125,8 @@ export interface AppOptions {
   camera?: CameraSettingsSource;
   /** 語音閒置秒數（通常是 VoiceSettingsStore）；未提供時用預設值且不能修改。 */
   voice?: VoiceSettingsSource;
+  /** 人臉辨識校正值（FaceTuningStore）；只在鏡頭啟用時提供。 */
+  faceTuning?: FaceTuningSource;
   /**
    * 家人辨識的狀態（IdentityService）：只有可用與否與人數。身分資料（姓名、識別碼、特徵）只走 Electron IPC，
    * 這裡沒有任何身分路由。未提供（瀏覽器版）時回報不可用。
@@ -144,6 +147,13 @@ export interface AppOptions {
 export interface CameraSettingsSource {
   view(): CameraSettings;
   update(patch: CameraPrefsPatch): CameraSettings;
+}
+
+/** 人臉辨識校正值的來源（FaceTuningStore）。 */
+export interface FaceTuningSource {
+  view(): FaceTuningView;
+  update(patch: Partial<FaceTuning>, calibrated?: boolean): FaceTuningView;
+  reset(): FaceTuningView;
 }
 
 /** 即時語音路徑偏好的來源。 */
@@ -199,6 +209,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         ...options.settings.view(),
         ...(live ? { realtime: live } : {}),
         ...(camera ? { camera } : {}),
+        ...(camera?.enabled && options.faceTuning ? { face_tuning: options.faceTuning.view() } : {}),
         voice,
         seconds: describeMenuPrefs({ camera, voice, voiceWritable: !!options.voice, realtime: live }),
         camera_preview_disabled_reason: cameraPreviewDisabledReason(camera),
@@ -291,6 +302,21 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         // 寫檔失敗：伺服器記憶體沒有改，回報真實原因，不顯示假成功。
         throw new HttpError(500, `鏡頭設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (method === "POST" && path === "/api/settings/camera-tuning") {
+      if (!options.faceTuning || !options.camera?.view().enabled) throw new HttpError(409, "鏡頭未啟用");
+      const body = await readJson(req);
+      try {
+        if (body && typeof body === "object" && (body as Record<string, unknown>).reset === true) options.faceTuning.reset();
+        else {
+          const { calibrated, ...rest } = (body ?? {}) as Record<string, unknown>;
+          options.faceTuning.update(parseFaceTuningPatch(rest), calibrated === true);
+        }
+      } catch (err) {
+        if (err instanceof FaceTuningError) throw new HttpError(400, err.message);
+        throw new HttpError(500, `校正值沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }

@@ -1,10 +1,11 @@
 import { t, msg, getLocale, setLocale, onLocaleChange, transcriptText, applyStaticTranslations, type Locale } from "./i18n.ts";
 import "./style.css";
 import { computeProgress, isActive, queueText, sortForProgress } from "../shared/progress.ts";
+import { DEFAULT_FACE_TUNING } from "../shared/face-tuning.ts";
 import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type ServerEvent, type SettingsView, type Task } from "../shared/types.ts";
 import { ApiError, api, newRequestId, streamChat, subscribeEvents, type HomeControlArgs, type RealtimeTicket } from "./api.ts";
 import { ConversationSession } from "./conversation.ts";
-import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf } from "./sense/controller.ts";
+import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf, type SenseSnapshot } from "./sense/controller.ts";
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
 import { formatSeconds } from "../shared/prefs.ts";
@@ -558,6 +559,7 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
   if (value.camera && !value.camera.active) cameraOffPending = false; // 伺服器已保存「關掉」
   if (value.camera && wasActive !== undefined && value.camera.active !== wasActive) cameraFailed = false;
   syncCamera();
+  applyFacingTuning();
   // 設定或家人辨識狀態改變：看著說話時的同步辨識重新向核心確認（不中斷正在進行的取樣）。
   ambient.refresh();
 }
@@ -856,6 +858,10 @@ let cameraFailed = false;
 // 鏡頭畫面：使用者要求才出現（user_request），不保存，重新整理後一定是收起。與 sensorIndicator 一樣是 ShellState 之外的覆蓋層。
 const PREVIEW_W = 256;
 const PREVIEW_H = 144;
+/** 最近一次感知快照（校正人臉辨識讀距離與面向）。 */
+let lastSense: SenseSnapshot | null = null;
+/** 下一次打開家人辨識畫面時的模式（選單列「校正人臉辨識…」設成 calibrate）。 */
+let familyOpenMode: "list" | "calibrate" = "list";
 const sensorPreview = document.createElement("div");
 sensorPreview.className = "sensor-preview";
 sensorPreview.hidden = true;
@@ -959,7 +965,15 @@ const ambient = new AmbientIdentity({
   bridge: window.nousDesktop?.identity ? { identity: (request) => window.nousDesktop!.identity!(request) } : null,
   enabled: ambientEnabled,
   createSampler: (onFrame, onState) =>
-    new IdentityClient({ source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) }, createWorker: createIdentityWorker, onFrame, onState }),
+    new IdentityClient({
+      source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) }, createWorker: createIdentityWorker, onFrame, onState,
+      // 看著說話的同步辨識用校正後的品質門檻（登記與試認仍用預設）。
+      frameOptions: () => {
+        const tuning = settings?.face_tuning;
+        return tuning ? { quality: { min_face_px: tuning.min_face_px, max_yaw_offset: tuning.max_yaw_offset } } : {};
+      },
+    }),
+  tuning: () => settings?.face_tuning,
   model: faceRuntime.model_version,
   now: () => performance.now(),
   // 記憶的互動結束：人離開鏡頭或多人入鏡時暫停本次人物（只能降權）。
@@ -975,7 +989,10 @@ const sense = new SenseController({
   // 看著說話開始的對話：連上後依「看著說話時先打招呼」請模型先打一次招呼。
   startTalk: () => startRealtime("look_to_talk"),
   // 同步辨識只讀感知狀態，決定取樣與追蹤世代；看著說話的計時不看它。
-  onSense: (snapshot) => ambient.update(snapshot),
+  onSense: (snapshot) => {
+    lastSense = snapshot;
+    ambient.update(snapshot);
+  },
   interruptSpeech: () => {
     // 即時語音還在連線（還沒打招呼）時舉手掌：直接結束這次語音，不再打招呼（ID-02 第 9 步）。
     if (realtime.current === "connecting" || (realtime.current === "off" && realtimeStarting)) stopRealtime();
@@ -1034,6 +1051,21 @@ const familyView = new FamilyView({
   createWorker: createIdentityWorker,
   model: faceRuntime.model_version,
   dismiss: () => dispatch({ type: "dismiss" }),
+  // 校正人臉辨識：感知狀態、鏡頭畫面（與右下角的鏡頭畫面二選一）、校正值與保存。
+  sense: () => (lastSense?.sensor_ok ? { present: lastSense.present, facing: lastSense.facing, distance_m: lastSense.distance_m } : null),
+  preview: (targets) => {
+    if (targets) closePreview();
+    pipeline?.setPreview(targets);
+  },
+  tuning: () => settings?.face_tuning,
+  applyTuning: async (change, calibrated) => {
+    try {
+      applySettings(await api.updateFaceTuning(change, calibrated));
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  },
 });
 
 const memoryView = new MemoryView({
@@ -1162,6 +1194,11 @@ function applyPointing(): void {
 }
 
 /** 唯一決定鏡頭開關的地方；冪等（管線的 start／stop 重複呼叫不發事件），每次設定更新與指令都呼叫。 */
+/** 面向判斷的寬鬆度：人臉辨識校正值（沒有時用預設）。看著說話與同步辨識共用同一個面向判斷。 */
+function applyFacingTuning(): void {
+  pipeline?.setFacingYawRatio(settings?.face_tuning?.facing_yaw_ratio ?? DEFAULT_FACE_TUNING.facing_yaw_ratio);
+}
+
 function syncCamera(): void {
   if (cameraShouldRun(settings?.camera, cameraOffPending, cameraFailed)) void startCamera();
   else pipeline?.stop();
@@ -1172,6 +1209,7 @@ async function startCamera(): Promise<void> {
   // 載入模組期間可能已收到「鏡頭關掉」。
   if (!settings?.camera || !cameraShouldRun(settings.camera, cameraOffPending, cameraFailed)) return;
   pipeline ??= new SensePipeline(settings.camera, (event) => sense.handle(event));
+  applyFacingTuning();
   await pipeline.start();
 }
 
@@ -1521,7 +1559,8 @@ function dispatch(event: ShellEvent): void {
   // 收起只關畫面：停止取樣並丟掉記憶體中的樣本與 session，不刪已存的家人資料。
   if (leftFamily) familyView.close();
   if (leftMemory && next.surface?.kind !== "memory") memoryView.close();
-  if (enteredFamily) familyView.open();
+  if (enteredFamily) familyView.open(familyOpenMode);
+  familyOpenMode = "list";
   // 家人辨識畫面開著時不做看著說話的同步辨識（核心也拒絕）；收起後重新確認（gallery 可能剛改過）。
   if (leftFamily || enteredFamily) ambient.refresh();
   // 確認卡被收起或被其他畫面取代：視為不同意，外部動作不執行。
@@ -2047,6 +2086,14 @@ window.addEventListener("nous:command", (event) => {
     type: () => dispatch({ type: "input.open" }),
     cameraPreview: actions.openCameraPreview,
     family: () => dispatch({ type: "show.family", request_id: userRequest() }),
+    // 「校正人臉辨識…」：畫面開著就直接進入校正；沒開就經同一個「家人辨識…」入口打開（只有這一處會 show.family）。
+    familyCalibrate() {
+      if (shell.surface?.kind === "family") familyView.calibrate();
+      else {
+        familyOpenMode = "calibrate";
+        this.family();
+      }
+    },
     memory: () => {
       memoryView.openManager();
       dispatch({ type: "show.memory", request_id: userRequest() });

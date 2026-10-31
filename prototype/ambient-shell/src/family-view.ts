@@ -12,6 +12,7 @@ import {
   type FaceModelVersion,
   type FamilyMember,
   type IdentityObservation,
+  type IdentityState,
   type IdentityRequest,
   type IdentityManageStatus,
   type IdentityResponse,
@@ -20,6 +21,10 @@ import { greetingSentence } from "../shared/sense.ts";
 import { EnrollmentCollector, ENROLL_TARGET } from "./family-enroll.ts";
 import { QUALITY_LABEL } from "./sense/face/quality.ts";
 import { IdentityClient, type ClientFrame, type ClientState, type FrameSource, type WorkerLike } from "./sense/identity-client.ts";
+import type { FrameOptions } from "./sense/identity-protocol.ts";
+import { CalibrationPanel, type CalibrationPreview } from "./face-calibration-view.ts";
+import type { SenseSample } from "./face-calibration.ts";
+import type { FaceTuning, FaceTuningView } from "../shared/face-tuning.ts";
 
 export interface FamilyBridge {
   identity(request: IdentityRequest): Promise<IdentityResponse>;
@@ -33,6 +38,11 @@ export interface FamilyViewDeps {
   model: FaceModelVersion;
   /** 收起（dispatch dismiss）；只關畫面。 */
   dismiss: () => void;
+  /** 「校正人臉辨識」用：目前的感知狀態、鏡頭畫面、校正值與保存。未提供時不顯示校正。 */
+  sense?: () => SenseSample | null;
+  preview?: (targets: CalibrationPreview | null) => void;
+  tuning?: () => FaceTuningView | undefined;
+  applyTuning?: (change: Partial<FaceTuning> | "reset", calibrated: boolean) => Promise<string | null>;
 }
 
 export const FAMILY_EXPLANATION =
@@ -56,7 +66,8 @@ type Phase =
   | { kind: "name"; draft: string; minor: boolean; error: string | null }
   | { kind: "consent"; name: string; minor: boolean; consent: boolean; guardian: boolean }
   | { kind: "capture"; name: string; minor: boolean; guardian: boolean; hint: string }
-  | { kind: "submitting"; name: string };
+  | { kind: "submitting"; name: string }
+  | { kind: "calibrate" };
 
 type RawText = { readonly raw: string };
 type Child = Node | string | RawText | null | undefined | false;
@@ -145,15 +156,32 @@ export class FamilyView {
   /** 每次打開或收起加一；晚到的 IPC 回應若世代不符就丟掉。 */
   private openGen = 0;
   private renderedKey: string | null = null;
+  /** 打開後直接進入「校正人臉辨識」（選單列「校正人臉辨識…」）。 */
+  private calibrateOnOpen = false;
+  private readonly calibration: CalibrationPanel;
 
   constructor(private readonly deps: FamilyViewDeps) {
+    this.calibration = new CalibrationPanel({
+      startSampling: (onFrame, options) => this.startClient(onFrame, options),
+      stopSampling: () => this.stopClient(),
+      probe: (frame) => this.probeOnce(frame),
+      hasPeople: () => this.people.length > 0,
+      clientLine: () => (this.client ? this.clientLine() : null),
+      sense: () => this.deps.sense?.() ?? null,
+      preview: (targets) => this.deps.preview?.(targets),
+      tuning: () => this.deps.tuning?.(),
+      applyTuning: (change, calibrated) => this.deps.applyTuning?.(change, calibrated) ?? Promise.resolve("這個版本不能保存校正值"),
+      changed: () => this.render(),
+      back: () => this.backToList(),
+    });
     this.element = h("section", { class: "surface surface--family", role: "region", "data-visibility-reason": "user_request" });
     this.render();
     onLocaleChange(() => { this.renderedKey = null; this.render(); });
   }
 
   /** 打開畫面：向核心開管理 session（主程序只在使用者 10 秒內點過選單列時允許）。 */
-  open(): void {
+  open(mode: "list" | "calibrate" = "list"): void {
+    this.calibrateOnOpen = mode === "calibrate";
     const gen = ++this.openGen;
     this.phase = { kind: "opening" };
     this.render();
@@ -168,6 +196,8 @@ export class FamilyView {
   /** 收起：停止取樣、丟掉記憶體中的樣本與 session；已存的家人資料不動。 */
   close(): void {
     this.openGen++;
+    if (this.phase.kind === "calibrate") this.calibration.close();
+    this.calibrateOnOpen = false;
     this.stopClient();
     this.collector.discard();
     const session = this.session;
@@ -192,7 +222,10 @@ export class FamilyView {
       this.session = res.session;
       this.people = res.people;
       this.status = res.status;
-      if (this.phase.kind === "opening") this.phase = { kind: "list" };
+      if (this.phase.kind === "opening") {
+        this.phase = { kind: "list" };
+        if (this.calibrateOnOpen) this.startCalibration();
+      }
     } else if (!res.ok && (res.code === "no_session" || res.code === "not_user_initiated" || (res.code === "unavailable" && request.op === "open_session"))) {
       this.stopClient();
       this.session = null;
@@ -332,9 +365,46 @@ export class FamilyView {
     this.render();
   }
 
+  // ───────────── 校正人臉辨識 ─────────────
+
+  /** 畫面已開著時，選單列「校正人臉辨識…」直接進入校正；session 還沒開好就等開好再進。 */
+  calibrate(): void {
+    if (this.session && this.phase.kind !== "opening" && this.phase.kind !== "unavailable") this.startCalibration();
+    else this.calibrateOnOpen = true;
+  }
+
+  private startCalibration(): void {
+    this.calibrateOnOpen = false;
+    this.stopTry();
+    this.notice = this.error = null;
+    this.phase = { kind: "calibrate" };
+    this.calibration.open();
+    this.render();
+  }
+
+  /** 校正時的試認：一次一格，只回狀態（matched／unknown…），不含是哪一位或分數。 */
+  private async probeOnce(frame: ClientFrame): Promise<IdentityState | null> {
+    if (!this.session) {
+      frame.feature?.fill(0);
+      return null;
+    }
+    const request: IdentityRequest = {
+      op: "probe",
+      session: this.session,
+      gen: frame.gen,
+      face_count: frame.face_count,
+      quality: frame.quality,
+      model: this.deps.model,
+      ...(frame.feature ? { feature: Array.from(frame.feature) } : {}),
+    };
+    frame.feature?.fill(0);
+    const res = await this.call(request);
+    return res?.ok && res.op === "probe" ? res.observation.state : null;
+  }
+
   // ───────────── 取樣器 ─────────────
 
-  private startClient(onFrame: (frame: ClientFrame) => void): void {
+  private startClient(onFrame: (frame: ClientFrame) => void, frameOptions?: () => FrameOptions): void {
     this.stopClient();
     this.clientState = null;
     this.quality = null;
@@ -343,6 +413,7 @@ export class FamilyView {
       source: this.deps.source,
       createWorker: this.deps.createWorker,
       onFrame,
+      ...(frameOptions ? { frameOptions } : {}),
       onState: (state) => {
         this.clientState = state;
         const phase = this.phase;
@@ -367,6 +438,8 @@ export class FamilyView {
   }
 
   private backToList(): void {
+    if (this.phase.kind === "calibrate") this.calibration.close();
+    this.calibrateOnOpen = false;
     this.stopClient();
     this.collector.discard();
     this.phase = { kind: "list" };
@@ -390,6 +463,7 @@ export class FamilyView {
       this.clientLine(),
       this.quality,
       this.collector.count,
+      this.phase.kind === "calibrate" ? this.calibration.renderKey() : null,
     ]);
     if (key === this.renderedKey) return;
     this.renderedKey = key;
@@ -413,6 +487,7 @@ export class FamilyView {
     if (phase.kind === "consent") return [...messages, this.consentStep(phase)];
     if (phase.kind === "capture") return [...messages, this.captureStep(phase)];
     if (phase.kind === "submitting") return [h("p", { class: "muted" }, msg`正在保存「${phase.name}」…（請在系統對話框確認）`)];
+    if (phase.kind === "calibrate") return [...messages, this.calibration.render()];
     return [...messages, this.statusLines(), this.namingNotice(), this.list(), this.actions(), this.trying ? this.tryPanel() : null, this.explanation()];
   }
 
@@ -477,6 +552,7 @@ export class FamilyView {
       { class: "actions" },
       button(full ? `新增家人（已滿 ${st?.max ?? FAMILY_MAX} 位）` : "新增家人", () => this.startEnroll(), "btn--primary", !ready || full || this.busy),
       button(this.trying ? "停止試認" : "試認", () => this.toggleTry(), "", !ready || this.busy),
+      this.deps.tuning?.() ? button("校正人臉辨識", () => this.startCalibration(), "btn--ghost", this.busy) : null,
     );
     // 只有檔案損壞才提供清除；解不開金鑰（可能只是沒允許鑰匙圈）是可以重試的，不誘導清除。
     if (st?.state === "corrupt") row.append(button("清除全部家人資料…", () => void this.clearAll(), "btn--ghost", this.busy));

@@ -53,6 +53,7 @@ export class SensePipeline {
   private poseR: Landmarker | null = null;
   private gesture: Recognizer | null = null;
   private processor: SenseProcessor;
+  private facingYawRatio: number | null = null;
   private readonly canvasL = document.createElement("canvas");
   private readonly canvasR = document.createElement("canvas");
   private lastFrameAt = 0;
@@ -112,6 +113,7 @@ export class SensePipeline {
       }
       ({ poseL: this.poseL, poseR: this.poseR, gesture: this.gesture } = models);
       this.processor = new SenseProcessor({ width_mm: this.settings.screen_width_mm, offset_mm: this.settings.screen_offset_mm });
+      if (this.facingYawRatio !== null) this.processor.facingYawRatio = this.facingYawRatio;
       this.timer = setInterval(() => this.tick(), FRAME_INTERVAL_MS);
       this.lastFrameAt = performance.now();
       this.phase = "on";
@@ -143,6 +145,12 @@ export class SensePipeline {
   }
 
   /** 開或關鏡頭畫面（null）。只影響畫，不影響偵測；換掉或關掉時清空舊畫布，不留下凍結的最後一格。 */
+  /** 面向判斷的寬鬆度（人臉辨識校正值）；重新建立 processor 時沿用。 */
+  setFacingYawRatio(ratio: number): void {
+    this.facingYawRatio = ratio;
+    this.processor.facingYawRatio = ratio;
+  }
+
   setPreview(targets: PreviewTargets | null): void {
     if (this.preview && this.preview !== targets) clearPreview(this.preview);
     this.preview = targets;

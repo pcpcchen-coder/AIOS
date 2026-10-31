@@ -4,6 +4,7 @@
 import type { PointZone, SenseEvent } from "../../shared/sense.ts";
 import {
   AR0144_NOMINAL,
+  FACING_MAX_YAW_RATIO,
   handRaised,
   isFacing,
   median,
@@ -41,6 +42,8 @@ export class SenseProcessor {
   private stop = new StopGestureDetector();
   private zone = new ZoneStabilizer();
   private present = false;
+  /** 面向判斷的寬鬆度（人臉辨識校正值 facing_yaw_ratio；預設 FACING_MAX_YAW_RATIO）。 */
+  facingYawRatio = FACING_MAX_YAW_RATIO;
 
   constructor(
     private readonly screen: ScreenGeometry,
@@ -66,7 +69,7 @@ export class SenseProcessor {
     }
 
     // 是否面向螢幕（只在有人時判斷；離開時視為未面向）。
-    const facing = this.attention.update(t, this.present && !!left && isFacing(left));
+    const facing = this.attention.update(t, this.present && !!left && isFacing(left, this.facingYawRatio));
     if (facing !== null) events.push({ type: "attention", facing });
 
     // 停止手勢：張開手掌＋至少一隻手腕高於同側肩膀。

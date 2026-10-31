@@ -109,7 +109,7 @@ const MIN_VISIBILITY = 0.5;
  * 是否面向鏡頭（鏡頭裝在螢幕上緣，面向鏡頭約等於面向螢幕）。
  * 以 Pose 關鍵點估計頭部轉向：雙耳都可見、鼻子接近雙耳中點才算。只估頭部方向，不是眼睛視線。
  */
-export function isFacing(landmarks: readonly Landmark2[]): boolean {
+export function isFacing(landmarks: readonly Landmark2[], maxYawRatio = FACING_MAX_YAW_RATIO): boolean {
   const nose = landmarks[POSE.nose];
   const earL = landmarks[POSE.leftEar];
   const earR = landmarks[POSE.rightEar];
@@ -118,7 +118,7 @@ export function isFacing(landmarks: readonly Landmark2[]): boolean {
   const span = Math.abs(earL.x - earR.x);
   if (span < 8) return false;
   const ratio = (nose.x - (earL.x + earR.x) / 2) / span;
-  return Math.abs(ratio) <= FACING_MAX_YAW_RATIO;
+  return Math.abs(ratio) <= maxYawRatio;
 }
 
 /**
