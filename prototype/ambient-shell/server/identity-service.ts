@@ -24,9 +24,14 @@ import {
   isValidSpeakerFeature,
   SPEAKER_FEATURE_DIM,
   VOICE_KEYWORD_SAMPLES,
+  VOICE_MIN_VOICED_MS,
+  VOICE_SEGMENTS,
   VOICE_THRESHOLDS,
   VOICE_UTTERANCE_SAMPLES,
   type SpeakerModelVersion,
+  type VoiceFusion,
+  type VoiceObservation,
+  type VoiceSegment,
   type EvidenceScope,
   type EvidenceState,
   type GreetingDecision,
@@ -44,6 +49,7 @@ import {
   type QualityReason,
 } from "../shared/identity.ts";
 import { liveGreetingText, strictGreetingInstructions } from "../shared/sense.ts";
+import { WAKE_ID } from "../shared/wake.ts";
 import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
 import type { SpeakerRuntimeCheck } from "./speaker-runtime.ts";
@@ -76,6 +82,15 @@ import type { GalleryStore, GalleryVersions, StoredPerson } from "./identity-sto
 //   期間（wakeGreetingOpen），ambient_status／ambient_probe 同樣不需要那兩個設定。
 // - ambient_status／ambient_probe 被拒時不說原因（原因可能透露有沒有登記家人）。
 // - 身分只用於稱呼：GreetingDecision 不給任何授權流程使用。
+//
+// SP-02a（喚醒時認聲音，docs/17 §4、§7.2、§7.3）：
+// - voice_probe：頁面在喚醒後送來這次喚醒（wake_id）的聲音特徵：喚醒詞那一段（keyword，只和喚醒詞模板比）與問候前說的話
+//   （utterance，只和朗讀模板比）。不需要管理 session、不需要鏡頭；回應只有 ok，結果只留在核心給這次喚醒的問候決策。
+// - 問候決策時把聲音與臉融合（§7.3）：臉認出 P、聲音也是 P 才「確認」；聲音認成別人（或兩段指向不同人）不稱名；P 有登記聲音、
+//   這次聲音卻不支持他也不稱名；沒有可用的聲音照 ID-02。只憑聲音稱名要等 SP-03 校準（VOICE_CALIBRATED 全是 false），
+//   所以沒有臉的時候不會因為聲音帶出名字；唯一的例外是 George 2026-11-01 要的測試開關 voiceNameTest（預設關閉，選單列打開）。
+// - voice_test：管理畫面的「試認聲音」，使用者自己按的，回傳這一段認成誰（不含分數）。
+// - log 只記片段狀態與融合結果，不記 person_id、名字或分數。
 
 export const SESSION_IDLE_MS = 10 * 60_000;
 /** session 從開啟起算的上限（不論有沒有在用）。 */
@@ -132,7 +147,12 @@ export interface IdentityServiceOptions {
    * 核心發出的互動 ID 換成真的工作階段（RealtimeSessions.claimGreeting）：沒提供或回 null 時不稱名。
    * 成功一次之後同一個 ID 就不能再用。
    */
-  claimGreeting?: (interaction: string) => { route: GreetingRoute; session_id: string; source?: "look_to_talk" | "wake_word"; locale?: Locale } | null;
+  claimGreeting?: (interaction: string) => { route: GreetingRoute; session_id: string; source?: "look_to_talk" | "wake_word"; locale?: Locale; wake_id?: string } | null;
+  /**
+   * SP-02a 測試開關（George 2026-11-01，wake.json 的 voice_name_test）：喚醒開始的通話認不出臉（沒看鏡頭、鏡頭關、證據不足）時，
+   * 聲音認出一人就叫名字。看到陌生臉、多張臉、臉聲不一致時仍不叫。未提供時視為關閉。
+   */
+  voiceNameTest?: () => boolean;
   /** WK-02：有喚醒開始、還沒決策的互動（RealtimeSessions.wakeGreetingOpen）；那段時間同步辨識不需要「看著說話」設定。 */
   wakeGreetingOpen?: () => boolean;
   /**
@@ -271,8 +291,42 @@ interface AmbientTrack {
 }
 
 const AMBIENT_REFUSED = "目前不能取樣";
+const VOICE_REFUSED = "目前不能辨認聲音";
 
-const QUIET_OPS = new Set(["probe", "ambient_probe", "ambient_status", "greeting", "ack_naming"]);
+/** 一次喚醒的聲音證據只保留這麼久（喚醒到問候決策通常 2–5 秒；連線慢時上限約 20 秒）。 */
+export const VOICE_EVIDENCE_MS = 30_000;
+/** voice_probe 每秒最多幾次（每次喚醒正常只有 2 段）。 */
+export const VOICE_PROBE_RATE_PER_S = 4;
+
+/** 一次喚醒（wake_id）的聲音證據；換喚醒、gallery 改版或逾時就丟掉。 */
+interface WakeVoice {
+  wake_id: string;
+  at: number;
+  gallery_version: number;
+  obs: Partial<Record<VoiceSegment, VoiceObservation>>;
+}
+
+/** 合併兩段聲音：指向兩個不同的人 → conflict；一段 matched → 那個人；否則取最「有內容」的狀態。 */
+export function combineVoice(obs: Partial<Record<VoiceSegment, VoiceObservation>>): { state: VoiceObservation["state"]; person_id?: string; conflict: boolean } {
+  const list = VOICE_SEGMENTS.map((seg) => obs[seg]).filter((o): o is VoiceObservation => !!o);
+  const people = new Set(list.filter((o) => o.state === "matched" && o.person_id).map((o) => o.person_id!));
+  if (people.size > 1) return { state: "ambiguous", conflict: true };
+  if (people.size === 1) return { state: "matched", person_id: [...people][0]!, conflict: false };
+  if (list.some((o) => o.state === "ambiguous")) return { state: "ambiguous", conflict: false };
+  if (list.some((o) => o.state === "unknown")) return { state: "unknown", conflict: false };
+  return { state: "unavailable", conflict: false };
+}
+
+/** log 用的片段摘要（不含身分）：例如「喚醒詞 matched／話語 too_short」。 */
+function voiceSummary(v: WakeVoice | null): string {
+  if (!v) return "沒有聲音";
+  return VOICE_SEGMENTS.map((seg) => {
+    const o = v.obs[seg];
+    return `${seg === "keyword" ? "喚醒詞" : "話語"} ${o ? (o.state === "unavailable" ? (o.reason ?? "unavailable") : o.state) : "—"}`;
+  }).join("／");
+}
+
+const QUIET_OPS = new Set(["probe", "ambient_probe", "ambient_status", "greeting", "ack_naming", "voice_probe"]);
 
 /** 記住多少個已決策的互動 ID（每個互動最多一次決策）。 */
 const DECIDED_KEEP = 32;
@@ -310,6 +364,11 @@ export class IdentityService {
   /** live 路徑：已組好、等 server/live-route.ts 取用的短句（一次只有一個互動）。 */
   private pendingLive: { locale: Locale; interaction: string; session_id: string; named: boolean; text: string; sentence: string; at: number } | null = null;
   private readonly picker: GreetingPicker;
+  /** SP-02a：這次喚醒的聲音證據。 */
+  private wakeVoice: WakeVoice | null = null;
+  private readonly voiceCalls: number[] = [];
+  /** 最近一次問候決策的臉聲融合結果（只給 log）。 */
+  private lastFusion: VoiceFusion | null = null;
   /** 最近一次比對成功、沒有多臉的問候決策（給記憶層當人物候選；同一追蹤世代、60 秒內）。 */
   private lastMatch: { person_id: string; track: number; at: number } | null = null;
 
@@ -452,6 +511,7 @@ export class IdentityService {
     if (op === "ambient_status") return this.ambientStatus();
     if (op === "ambient_probe") return this.ambientProbe(req);
     if (op === "greeting") return this.greeting(req);
+    if (op === "voice_probe") return this.voiceProbe(req);
     if (op === "close_session") {
       this.closeSession(req.session);
       return { ok: true, op: "close_session" };
@@ -472,6 +532,8 @@ export class IdentityService {
         return this.mutate(() => this.enrollVoice(session, req));
       case "delete_voice":
         return this.mutate(() => this.removeVoice(session, req));
+      case "voice_test":
+        return this.voiceTest(req);
       case "ack_naming":
         this.options.store.markNamingNoticeSeen(new Date(this.now()).toISOString());
         this.log("identity: 已看過雲端稱名說明");
@@ -715,7 +777,8 @@ export class IdentityService {
     // 互動 ID 必須換得到核心自己知道的、真的連上的工作階段（頁面自己編的 ID 不給名字）。
     const claim = this.options.claimGreeting?.(interaction) ?? null;
     const session = claim && claim.route === route ? claim : null;
-    const decision = this.decide(interaction, track, req.eligible, session !== null, session?.source === "wake_word");
+    const wakeId = session?.source === "wake_word" ? (session.wake_id ?? null) : null;
+    const decision = this.decide(interaction, track, req.eligible, session !== null, session?.source === "wake_word", wakeId);
     const person = decision.person_id ? this.people.find((p) => p.person_id === decision.person_id) : undefined;
     const name = person ? speakableName(person.name) : null;
     // 從固定清單挑一句（依時段、避開上一次）；log 只記模板編號，不記句子。
@@ -726,10 +789,13 @@ export class IdentityService {
     const ev = this.ambient?.track === track ? this.ambient.evidence.frames : [];
     const span = ev.length ? Math.round(ev.at(-1)!.t - ev[0]!.t) : 0;
     const age = decision.evidence_at === null ? "—" : `${Math.round(decision.decided_at - decision.evidence_at)} ms`;
-    this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前，模板 ${picked.id}，門檻未校準）`);
+    const voice = wakeId !== null ? `，聲音 ${voiceSummary(this.voiceFor(wakeId))}，融合 ${this.lastFusion ?? "—"}` : "";
+    this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前${voice}，模板 ${picked.id}，門檻未校準）`);
     // 證據只為這一次問候存在：決策後丟掉，晚到的推論不能讓下一次互動沿用。
     this.ambient = null;
-    this.lastMatch = decision.person_id && decision.reason === null ? { person_id: decision.person_id, track, at: this.now() } : null;
+    if (wakeId !== null && this.wakeVoice?.wake_id === wakeId) this.wakeVoice = null;
+    // 記憶的臉部候選只來自臉（只憑聲音的測試開關不算）。
+    this.lastMatch = decision.person_id && decision.reason === null && this.lastFusion !== "voice_only_test" ? { person_id: decision.person_id, track, at: this.now() } : null;
     if (route === "api_key") {
       if (session) {
         try { this.options.apiKeyGreeted?.(session.session_id, name !== null); } catch { /* 通知失敗不影響問候 */ }
@@ -741,29 +807,161 @@ export class IdentityService {
   }
 
   /** 建立 GreetingDecision（只在核心）。名稱驗證不過時改成不稱名。 */
-  private decide(interaction: string, track: number, eligible: boolean, claimed: boolean, viaWake = false): GreetingDecision {
+  private decide(interaction: string, track: number, eligible: boolean, claimed: boolean, viaWake = false, wakeId: string | null = null): GreetingDecision {
     const now = this.now();
+    // 先記「沒有臉的結果時」的融合（只給 log）；臉認出人時下面會改寫。
+    this.lastFusion = wakeId === null ? null : combineVoice(this.voiceFor(wakeId)?.obs ?? {}).state === "matched" ? "voice_only" : "none";
     const base = { interaction_id: interaction, track_generation: track, gallery_version: this.versions.gallery_version, decided_at: now, calibrated: CALIBRATED };
     const last = this.ambient?.track === track ? this.ambient.evidence.frames.at(-1) : undefined;
     const plain = (reason: GreetingNameReason): GreetingDecision => ({ ...base, person_id: null, evidence_at: last?.t ?? null, reason });
+    // 認不出臉（不是看到別人）時，測試開關開著就改用聲音（只限喚醒開始的通話）。
+    const faceMissing = (reason: GreetingNameReason): GreetingDecision => (wakeId !== null && this.voiceNameTestOn() ? (this.voiceOnly(base, wakeId, track) ?? plain(reason)) : plain(reason));
     if (!this.ambientPrefs().look_to_talk_greet_name) return plain("naming_off");
     if (!claimed) return plain("no_session");
     if (!this.options.store.namingNoticeSeen()) return plain("notice_unseen");
-    if (!eligible) return plain("not_eligible");
-    if (this.ambientBlock(viaWake)) return plain("unavailable");
+    if (!eligible) return faceMissing("not_eligible");
+    if (this.ambientBlock(viaWake)) return faceMissing("unavailable");
     const a = this.ambient;
-    if (!a) return plain("no_evidence");
-    if (a.track !== track) return plain("track_changed");
+    if (!a) return faceMissing("no_evidence");
+    if (a.track !== track) return faceMissing("track_changed");
     if (a.mixed) return plain("multi_face");
     const obs = decideIdentity(a.evidence, now, this.ambientScope(track));
     if (obs.state !== "matched" || !obs.person_id) {
       const reason: GreetingNameReason = obs.state === "unknown" ? "unknown" : obs.state === "ambiguous" ? (obs.reason === "multi_face" ? "multi_face" : "ambiguous") : ((obs.reason ?? "collecting") as GreetingNameReason);
-      return plain(reason);
+      // 看到陌生臉（unknown）或分不出是哪一位（ambiguous）是臉在反對，不改用聲音；只有證據不足才算「認不出臉」。
+      return obs.state === "unavailable" ? faceMissing(reason) : plain(reason);
     }
     const person = this.comparable().find((p) => p.person_id === obs.person_id);
     if (!person) return plain("person_gone");
     if (!speakableName(person.name)) return plain("bad_name");
+    if (wakeId !== null) {
+      const fusion = this.fuse(person, this.voiceFor(wakeId));
+      this.lastFusion = fusion;
+      if (fusion === "conflict") return plain("voice_conflict");
+      if (fusion === "voice_unsupported") return plain("voice_unsupported");
+    }
     return { ...base, person_id: person.person_id, evidence_at: last?.t ?? null, reason: null };
+  }
+
+  // ─────────────── SP-02a：喚醒時認聲音 ───────────────
+
+  private voiceNameTestOn(): boolean {
+    try {
+      return this.options.voiceNameTest?.() === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * 測試開關：這次喚醒的聲音認出一人（兩段沒有互相矛盾）、名稱可念，就以聲音叫名字；否則 null。
+   * 這個追蹤世代出現過多張臉，或臉曾認出另一位家人，就不用聲音（頁面的 not_eligible 也可能是多張臉）。
+   */
+  private voiceOnly(base: Omit<GreetingDecision, "person_id" | "evidence_at" | "reason">, wakeId: string, track: number): GreetingDecision | null {
+    const v = combineVoice(this.voiceFor(wakeId)?.obs ?? {});
+    if (v.state !== "matched" || v.conflict) return null;
+    const a = this.ambient?.track === track ? this.ambient : null;
+    if (a && (a.mixed || (a.firstMatch !== null && a.firstMatch !== v.person_id))) return null;
+    const person = this.comparableVoice().find((p) => p.person_id === v.person_id);
+    if (!person || !speakableName(person.name)) return null;
+    this.lastFusion = "voice_only_test";
+    return { ...base, person_id: person.person_id, evidence_at: null, reason: null };
+  }
+
+  /**
+   * 臉認出 person 時，這次喚醒的聲音支不支持他（docs/17 §7.3）。這個人沒有登記聲音時，unknown／ambiguous 不算反對
+   * （本來就比不到他），只有聲音明確認成別人才是 conflict。
+   */
+  private fuse(person: StoredPerson, voice: WakeVoice | null): VoiceFusion {
+    const v = combineVoice(voice?.obs ?? {});
+    if (v.conflict) return "conflict";
+    if (v.state === "matched") return v.person_id === person.person_id ? "confirmed" : "conflict";
+    const hasVoice = this.comparableVoice().some((p) => p.person_id === person.person_id);
+    if ((v.state === "unknown" || v.state === "ambiguous") && hasVoice) return "voice_unsupported";
+    return "face_only";
+  }
+
+  /** 這次喚醒還有效的聲音證據（同一個 wake_id、gallery 沒改版、沒逾時）。 */
+  private voiceFor(wakeId: string): WakeVoice | null {
+    const v = this.wakeVoice;
+    if (!v || v.wake_id !== wakeId) return null;
+    if (v.gallery_version !== this.versions.gallery_version || this.now() - v.at > VOICE_EVIDENCE_MS) {
+      this.wakeVoice = null;
+      return null;
+    }
+    return v;
+  }
+
+  /** 喚醒時能不能辨認聲音；null＝可以。不需要鏡頭與看著說話的設定（聲音只能取消或確認臉的稱名）。 */
+  private voiceBlock(): string | null {
+    const st = this.status();
+    if (!st.available) return st.disabled_reason ?? "家人辨識不可用";
+    if (this.session) return "家人辨識畫面開著";
+    if ((this.options.speakerRuntime?.state ?? "not_configured") !== "ok" || !this.options.speakerModel) return "聲音模型不可用";
+    if (this.gallery === "key_unavailable" || this.gallery === "corrupt") return "家人資料解不開";
+    if (this.gallery === "unloaded" && !this.options.store.exists()) return "沒有家人資料";
+    return null;
+  }
+
+  /** 一段聲音與每位家人同類模板的平均方向比對（最高分 ≥ match 且領先第二名 ≥ margin）。 */
+  private matchVoice(segment: VoiceSegment, feature: Float32Array): VoiceObservation {
+    const people = this.comparableVoice();
+    if (people.length === 0) return { state: "unavailable", reason: "no_enrollment", segment };
+    const limits = VOICE_THRESHOLDS[segment];
+    const ranked = people.map((person) => ({ person, score: dot(feature, meanDirection(person.voice![segment])) })).sort((a, b) => b.score - a.score);
+    const [first, second] = ranked;
+    if (!first || first.score < limits.match) return { state: "unknown", segment };
+    if (second && first.score - second.score < limits.margin) return { state: "ambiguous", reason: "margin", segment };
+    return { state: "matched", person_id: first.person.person_id, segment };
+  }
+
+  private segmentOf(v: unknown): VoiceSegment {
+    if (v !== "keyword" && v !== "utterance") throw new RequestError("bad_request", "segment 格式不對");
+    return v;
+  }
+
+  private requireSpeakerModel(req: Record<string, unknown>): void {
+    const model = this.options.speakerModel;
+    if (!model || !sameSpeakerModel(speakerModelOf(req.model), model)) throw new RequestError("model_mismatch", "頁面的聲音模型版本與核心不同，請重新整理");
+  }
+
+  /** 喚醒時的一段聲音。回應只有 ok；被拒時不說原因（原因可能透露有沒有登記家人）。 */
+  private voiceProbe(req: Record<string, unknown>): IdentityResponse {
+    this.ambientRate(this.voiceCalls, VOICE_PROBE_RATE_PER_S);
+    const wakeId = req.wake_id;
+    if (typeof wakeId !== "string" || !WAKE_ID.test(wakeId)) throw new RequestError("bad_request", "wake_id 格式不對");
+    const segment = this.segmentOf(req.segment);
+    const voiced = req.voiced_ms;
+    if (typeof voiced !== "number" || !Number.isInteger(voiced) || voiced < 0 || voiced > 60_000) throw new RequestError("bad_request", "voiced_ms 格式不對");
+    if (this.voiceBlock()) throw new RequestError("unavailable", VOICE_REFUSED);
+    this.ensureLoaded();
+    if (this.gallery !== "ready") throw new RequestError("unavailable", VOICE_REFUSED);
+    this.requireSpeakerModel(req);
+    let obs: VoiceObservation;
+    if (req.feature === undefined || voiced < VOICE_MIN_VOICED_MS[segment]) {
+      obs = { state: "unavailable", reason: "too_short", segment };
+    } else {
+      const feature = toSpeakerFeature(req.feature);
+      obs = this.matchVoice(segment, feature);
+      feature.fill(0);
+    }
+    const now = this.now();
+    const current = this.voiceFor(wakeId);
+    const v: WakeVoice = current ?? { wake_id: wakeId, at: now, gallery_version: this.versions.gallery_version, obs: {} };
+    v.obs[segment] = obs;
+    this.wakeVoice = v;
+    return { ok: true, op: "voice_probe" };
+  }
+
+  /** 管理畫面的「試認聲音」：回傳這一段認成誰（不含分數）。 */
+  private voiceTest(req: Record<string, unknown>): IdentityResponse {
+    this.requireVoiceReady();
+    this.requireSpeakerModel(req);
+    const segment = this.segmentOf(req.segment);
+    const feature = toSpeakerFeature(req.feature);
+    const observation = this.matchVoice(segment, feature);
+    feature.fill(0);
+    return { ok: true, op: "voice_test", observation };
   }
 
   /**

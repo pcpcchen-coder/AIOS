@@ -155,7 +155,7 @@ export interface NousHandle {
    * WK-01a：只有 NOUS_WAKE=on 時存在。「常駐喚醒聆聽」的開關只由 App 主程序在原生說明之後呼叫（同一個行程，不經 HTTP、
    * 不經 preload），頁面拿不到；頁面經 HTTP 只能記下麥克風或關掉（ADR-0003 §2.3）。寫檔失敗時丟錯、設定不變。
    */
-  wake?: { setListen(value: boolean): void };
+  wake?: { setListen(value: boolean): void; setVoiceNameTest(value: boolean): void };
   /**
    * 鏡頭「開關」：App（cameraEnable: "main_process"）由主程序在原生說明之後呼叫（同一個行程，不經 HTTP）；這時頁面經 HTTP
    * 只能關掉或改其他鏡頭設定（POST /api/settings/camera 收到 active: true 一律 403）。先寫 camera.json 再通知 settings；
@@ -335,6 +335,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         model: FACE_MODEL_VERSION,
         speakerRuntime,
         speakerModel: SPEAKER_MODEL_VERSION,
+        // SP-02a 測試開關（wake.json；只有 NOUS_WAKE=on 才有）：喚醒時認不出臉，只憑聲音也叫名字。
+        voiceNameTest: () => wakeStore?.view().voice_name_test === true,
         // 問候決策只接受 /api/realtime/start 發出、真的連上的互動 ID（server 在下面建立，呼叫時已存在）。
         claimGreeting: greetingClaims(() => server.realtimeSessions),
         // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）。
@@ -458,7 +460,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     url: `http://localhost:${port}`,
     ...(identity ? { identity: { handle: (request: unknown, ctx: IdentityContext) => identity.handle(request, ctx), closeSessions: () => identity.closeSessions() } } : {}),
     ...(memory ? { memory: { handle: (request: unknown, ctx: { userInitiated?: boolean }) => memory.handle(request, ctx), closeSessions: () => memory.closeSessions(), suspendAll: () => memory.suspendAll() } } : {}),
-    ...(wakeStore ? { wake: { setListen: (value: boolean) => void wakeStore.update({ wake_listen: value }) } } : {}),
+    ...(wakeStore
+      ? { wake: { setListen: (value: boolean) => void wakeStore.update({ wake_listen: value }), setVoiceNameTest: (value: boolean) => void wakeStore.update({ voice_name_test: value }) } }
+      : {}),
     camera: {
       setActive: (value: boolean) => void camera.update({ active: value }),
       isActive: () => {

@@ -549,7 +549,8 @@ describe("WK-02 RealtimeSessions: wake_word source", () => {
     await t.sessions.call("v=0", d.session_id, d.owner);
     // 喚醒開始的通話：記憶的「看著說話」旗標照舊（有互動 ID 就是 true）
     expect(t.live.ctx?.lookToTalk).toBe(true);
-    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "live", session_id: d.session_id, source: "wake_word" });
+    // SP-02a：喚醒開始的互動另帶 wake_id（核心用它找這次喚醒的聲音證據）
+    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "live", session_id: d.session_id, source: "wake_word", wake_id: "int_00000000000000aa" });
     expect(t.sessions.wakeGreetingOpen()).toBe(false);
     expect(t.sessions.claimGreeting(d.interaction)).toBeNull();
     // 問候被跳過（沒有 claim）時，通話結束也結束放寬
@@ -577,7 +578,7 @@ describe("WK-02 RealtimeSessions: wake_word source", () => {
     expect(t.sessions.claimGreeting(d.interaction)).toBeNull(); // live 沒有連上
     const fb = err.offer.fallback!;
     await t.sessions.call("v=0", fb.session_id, fb.owner);
-    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "api_key", session_id: fb.session_id, source: "wake_word" });
+    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "api_key", session_id: fb.session_id, source: "wake_word", wake_id: "int_00000000000000bb" });
     expect(t.sessions.claimGreeting(d.interaction)).toBeNull();
     await t.sessions.end(fb.session_id, fb.owner);
     // 費用紀錄：live 沒連上（connect_failed）、API key 那通，兩筆都帶同一個 wake_id
@@ -735,7 +736,7 @@ describe("WK-02 POST /api/realtime/start: wake_word only with NOUS_WAKE on", () 
     const key = fakeRoute("api_key", "gpt-realtime");
     const records: VoiceCostRecord[] = [];
     const costLog = { record: (r: VoiceCostRecord) => void records.push(r), list: () => records.slice().reverse() } as unknown as VoiceCostLog;
-    const wake = { view: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5 }), update: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5 }), runtime: () => "missing" as const };
+    const wake = { view: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false }), update: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false }), runtime: () => "missing" as const };
     const probe = createNetServer();
     await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
     const port = (probe.address() as AddressInfo).port;

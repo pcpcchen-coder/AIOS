@@ -9,10 +9,11 @@ export { WAKE_COMMANDS, WakeController, type PowerEvent, type WakeHost, type Wak
 export { NoVoiceWatchdog, NO_VOICE_TIMEOUT_MS } from "./no-voice.ts";
 export type { WakeCallWatch } from "./wake-call.ts";
 
-export function createWakeController(host: WakeHost): WakeController {
+/** keywordPort：SP-02a 把喚醒詞片段直接送到 speaker worker 的 port（見 capture.ts）；沒有時不複製。 */
+export function createWakeController(host: WakeHost, keywordPort: (() => MessagePort | null) | null = null): WakeController {
   return new WakeController(host, {
     mediaDevices: typeof navigator.mediaDevices?.getUserMedia === "function" ? navigator.mediaDevices : null,
-    capture: browserCapture(),
+    capture: browserCapture(keywordPort),
     earcon: browserEarcon(),
   });
 }

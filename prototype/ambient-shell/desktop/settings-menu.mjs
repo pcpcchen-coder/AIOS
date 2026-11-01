@@ -73,6 +73,8 @@ export const WAKE_MENU_TEXT = {
   resume: "繼續聆聽",
   speaker: "通話中辨認說話者",
   speakerNote: "SP-02 之後才能使用",
+  voiceNameTest: "只憑聲音也叫名字（測試）",
+  voiceNameTestNote: "喚醒時認不出臉，聲音認出就叫名字；門檻未校準，可能叫錯人",
   notReported: "尚未回報",
 };
 
@@ -85,7 +87,7 @@ export const DEFAULT_WAKE_SILENCE_S = 5;
  * 開著顯示「尚未回報」（不是裝置事件，所以不說「準備中」）。
  * 「通話中辨認說話者」（George 2026-10-31 D3）：先放一列停用的勾選框，沒有 click，SP-02 之後才啟用。
  */
-export function wakeMenu(wake, report, { command, setWakeListen, setMenuPref, translate = (source) => source }) {
+export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTest, setMenuPref, translate = (source) => source }) {
   const text = (source) => translate(source);
   const reported = isWakeReport(report);
   const current = reported ? report : { state: "off", reason: null };
@@ -128,6 +130,15 @@ export function wakeMenu(wake, report, { command, setWakeListen, setMenuPref, tr
       click: () => command(paused ? "wake-resume" : "wake-pause"),
     },
     { label: text(WAKE_MENU_TEXT.speaker), type: "checkbox", checked: false, enabled: false, sublabel: text(WAKE_MENU_TEXT.speakerNote) },
+    // SP-02a 測試開關（George 2026-11-01）：打開前主程序先顯示原生說明；寫入經核心的同一行程呼叫，頁面只能關。
+    {
+      label: text(WAKE_MENU_TEXT.voiceNameTest),
+      type: "checkbox",
+      checked: wake.voice_name_test === true,
+      enabled: true,
+      sublabel: text(WAKE_MENU_TEXT.voiceNameTestNote),
+      click: () => void setVoiceNameTest?.(wake.voice_name_test !== true),
+    },
   ];
 }
 
@@ -135,9 +146,9 @@ export function wakeMenu(wake, report, { command, setWakeListen, setMenuPref, tr
  * @param settings GET /api/settings 的回應（還沒讀到時是 null）
  * @param handlers command(name)：把選單動作交給頁面；setMenuPref(row, value)：POST { [row.key]: value } 到 row.write_path；
  *   openFamily(mode?)：「家人辨識…」與「校正人臉辨識…」（mode "calibrate"）。主程序先記下點擊時間，10 秒內頁面才能開管理 session，再交給頁面打開畫面；
- *   setWakeListen(value)、wakeReport：常駐喚醒聆聽（只有 settings.wake 存在時用到）
+ *   setWakeListen(value)、wakeReport：常駐喚醒聆聽（只有 settings.wake 存在時用到）；setVoiceNameTest(value)：SP-02a 只憑聲音叫名字的測試開關
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, wakeReport = null, wakeCommand, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, wakeReport = null, wakeCommand, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -205,6 +216,6 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
     });
   }
   closeGroup();
-  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setMenuPref, translate }));
+  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, translate }));
   return items;
 }

@@ -774,5 +774,19 @@
   "今天天氣很好，我們去公園散步吧。": "The weather is lovely today, let's go for a walk in the park.",
   "請幫我把客廳的燈打開，謝謝。": "Please turn on the living room light, thank you.",
   "明天早上七點叫我起床。": "Wake me up at seven tomorrow morning.",
-  "要登記什麼": "What to enroll"
+  "要登記什麼": "What to enroll",
+  "試認聲音": "Test voice",
+  "錄了幾次都沒有錄清楚。請在安靜的地方、靠近電腦再試一次。": "Several tries did not record clearly. Please try again somewhere quiet, closer to the computer.",
+  "試認沒有完成": "The voice test did not finish",
+  "認出：{0}": "Recognised: {0}",
+  "（已刪除的家人）": "(deleted family member)",
+  "分不出是哪一位（太像兩位家人）": "Can't tell which one (close to two family members)",
+  "認不出來": "Not recognised",
+  "還沒有家人登記聲音": "No family member has enrolled a voice yet",
+  "沒辦法比對": "Cannot compare",
+  "試認完成": "Test complete",
+  "{0}：{1}": "{0}: {1}",
+  "只憑聲音不會叫名字：門檻校準之前，喚醒時聲音只用來確認或取消認臉的結果。": "Voice alone never adds a name: until the thresholds are calibrated, after a wake the voice only confirms or cancels the face result.",
+  "再試一次": "Try again",
+  "完成": "Done"
 }

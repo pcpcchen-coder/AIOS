@@ -79,7 +79,7 @@ describe("src/speaker privacy (static)", () => {
   const sources = readdirSync(dir).map((f) => ({ file: f, text: readFileSync(join(dir, f), "utf8") }));
 
   it("has exactly these files", () => {
-    expect(sources.map((s) => s.file).sort()).toEqual(["fbank.ts", "protocol.ts", "recorder.ts", "vad.ts", "worker.ts"]);
+    expect(sources.map((s) => s.file).sort()).toEqual(["fbank.ts", "protocol.ts", "recorder.ts", "vad.ts", "wake-voice.ts", "worker.ts"]);
   });
 
   it("never stores, uploads or sends audio over IPC", () => {
@@ -90,10 +90,10 @@ describe("src/speaker privacy (static)", () => {
     }
   });
 
-  it("the worker only posts ready / level / segment / error; segment carries a feature, never samples", () => {
+  it("the worker only posts ready / level / segment / keyword / error; segment and keyword carry a feature, never samples", () => {
     const worker = sources.find((s) => s.file === "worker.ts")!.text;
     const types = [...worker.matchAll(/postMessage\(\{\s*type:\s*"(\w+)"/g)].map((m) => m[1]);
-    expect(new Set(types)).toEqual(new Set(["ready", "level", "segment", "error"]));
+    expect(new Set(types)).toEqual(new Set(["ready", "level", "segment", "keyword", "error"]));
     const posts = [...worker.matchAll(/postMessage\(\{[^}]*\}/g)].map((m) => m[0]);
     for (const p of posts) expect(p, p).not.toMatch(/samples|chunk|pcm|all\b/);
   });

@@ -18,7 +18,7 @@ export function radio(label: string, checked: boolean, click: () => void, enable
 export const WAKE_STATE_REASONS: Record<WakeState, readonly (WakeReason | null)[]>;
 export const WAKE_STATE_LABEL: Record<WakeState, string>;
 export const WAKE_REASON_LABEL: Record<WakeReason, string>;
-export const WAKE_MENU_TEXT: Record<"group" | "statusPrefix" | "listen" | "listenNote" | "silence" | "silenceNote" | "pause" | "resume" | "speaker" | "speakerNote" | "notReported", string>;
+export const WAKE_MENU_TEXT: Record<"group" | "statusPrefix" | "listen" | "listenNote" | "silence" | "silenceNote" | "pause" | "resume" | "speaker" | "speakerNote" | "voiceNameTest" | "voiceNameTestNote" | "notReported", string>;
 export const WAKE_SILENCE_OPTIONS_S: number[];
 export const DEFAULT_WAKE_SILENCE_S: number;
 /** 「喚醒後等你開口」交給 setMenuPref 的列（main.mjs 的 setMenuPref 只用 key、kind、label、write_path）。 */
@@ -30,6 +30,7 @@ export function wakeMenu(
   handlers: {
     command(name: string): void;
     setWakeListen?(value: boolean): unknown;
+    setVoiceNameTest?(value: boolean): unknown;
     setMenuPref?(row: WakeSilenceRow, value: number): unknown;
     translate?(source: string): string;
   },
@@ -42,6 +43,7 @@ export function settingsMenu(
     setMenuPref(row: MenuPrefSetting | WakeSilenceRow, value: number | boolean): unknown;
     openFamily?(): void;
     setWakeListen?(value: boolean): unknown;
+    setVoiceNameTest?(value: boolean): unknown;
     wakeReport?: WakeReport | null;
     wakeCommand?(name: string): void;
     translate?(source: string): string;

@@ -7,7 +7,7 @@
 import { checkTrustedSender } from "./trusted-sender.mjs";
 
 /** 與 shared/identity.ts 的 IDENTITY_OPS 相同（測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice"];
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test"];
 
 export const MENU_CLICK_WINDOW_MS = 10_000;
 const FEATURE_DIM = 128;
@@ -19,6 +19,9 @@ const VOICE_UTTERANCE_SAMPLES = 3;
 const SESSION = /^ids_[0-9a-f]{32}$/;
 const PERSON = /^fam_[0-9a-f]{24}$/;
 const INTERACTION = /^int_[0-9a-f]{16}$/;
+/** 喚醒 ID（同 shared/wake.ts 的 WAKE_ID）。 */
+const WAKE = /^int_[0-9a-f]{16}$/;
+const SEGMENTS = ["keyword", "utterance"];
 
 /**
  * 發送者檢查（與記憶 IPC 共用 desktop/trusted-sender.mjs）。回傳 true 才轉給核心。
@@ -81,6 +84,21 @@ export function validateIdentityRequest(req) {
     if (req.route !== "api_key" && req.route !== "live") return bad("route must be api_key or live");
     return { ok: true, request: { op, interaction: req.interaction, track: req.track, eligible: req.eligible, route: req.route } };
   }
+  // SP-02a：喚醒時的一段聲音（不需要管理 session；核心另外決定接不接受，回應只有 ok）。
+  if (op === "voice_probe") {
+    const m = speakerModel(req.model);
+    if (!m) return bad("model is required");
+    if (!(typeof req.wake_id === "string" && WAKE.test(req.wake_id))) return bad("wake_id is required");
+    if (!SEGMENTS.includes(req.segment)) return bad("segment must be keyword or utterance");
+    if (!isInt(req.voiced_ms, 0, 60_000)) return bad("voiced_ms must be an integer");
+    const request = { op, wake_id: req.wake_id, segment: req.segment, voiced_ms: req.voiced_ms, model: m };
+    if (req.feature !== undefined) {
+      const f = feature(req.feature, SPEAKER_DIM);
+      if (!f) return bad(`feature must be ${SPEAKER_DIM} finite numbers`);
+      request.feature = f;
+    }
+    return { ok: true, request };
+  }
   if (!(typeof req.session === "string" && SESSION.test(req.session))) return bad("session is required");
   const session = req.session;
   switch (op) {
@@ -116,6 +134,14 @@ export function validateIdentityRequest(req) {
         request.minor = req.minor;
       }
       return { ok: true, request };
+    }
+    case "voice_test": {
+      const m = speakerModel(req.model);
+      if (!m) return bad("model is required");
+      if (!SEGMENTS.includes(req.segment)) return bad("segment must be keyword or utterance");
+      const f = feature(req.feature, SPEAKER_DIM);
+      if (!f) return bad(`feature must be ${SPEAKER_DIM} finite numbers`);
+      return { ok: true, request: { op, session, segment: req.segment, model: m, feature: f } };
     }
     case "probe": {
       const m = model(req.model);

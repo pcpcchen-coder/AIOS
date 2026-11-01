@@ -43,7 +43,8 @@ import { LookTimeline } from "./look-timeline.ts";
 import type { IdentityRequest, IdentityResponse } from "../shared/identity.ts";
 import faceRuntime from "../shared/face-runtime.json" with { type: "json" };
 import speakerRuntime from "../shared/speaker-runtime.json" with { type: "json" };
-import { OWN_MICROPHONE, type MicSource, type SpeakerWorkerLike } from "./speaker/recorder.ts";
+import { OWN_MICROPHONE, SPEAKER_RUNTIME_ASSETS, tapStream, type MicSource, type SpeakerWorkerLike } from "./speaker/recorder.ts";
+import { WakeVoice } from "./speaker/wake-voice.ts";
 import { evaluateSurface } from "./presentation-policy.ts";
 import { blocksAutoTalk, initialShell, reduceShell, type ShellEvent, type ShellState } from "./shell-state.ts";
 import {
@@ -296,6 +297,8 @@ let realtime: RealtimeSession = idleSession();
  * 頁面不載入任何音訊模組、不建立指示圖示、不回報喚醒狀態。
  */
 let wake: WakeController | null = null;
+/** SP-02a：喚醒時認聲音（喚醒詞片段＋連線前的話）；只有桌面版、喚醒控制器存在時有。 */
+let wakeVoice: WakeVoice | null = null;
 let wakeLoading = false;
 /** 載入時已經有一通即時語音（它用的是原本的 getMicrophone）：等它結束才開始常駐聆聽，避免同時有兩個來源。 */
 let wakeDeferred = false;
@@ -766,6 +769,21 @@ function syncWake(view: WakeSettingsView | undefined): void {
     wakeLoading = false;
     const latest = settings?.wake;
     if (!latest || wake) return;
+    // SP-02a：桌面版（有家人辨識）才在喚醒時認聲音；speaker worker 跟著喚醒控制器存在，喚醒詞片段由喚醒 worker 直接送過去。
+    if (window.nousDesktop?.identity && !wakeVoice) {
+      wakeVoice = new WakeVoice({
+        createWorker: createSpeakerWorker,
+        assets: SPEAKER_RUNTIME_ASSETS,
+        model: speakerRuntime.model_version,
+        send: (request) => window.nousDesktop!.identity!(request),
+        lease: () => familyMic.acquire(),
+        release: (stream) => familyMic.release(stream),
+        tap: tapStream,
+        now: () => performance.now(),
+      });
+      wakeVoice.start();
+    }
+    const voiceForWake = wakeVoice;
     wake = module.createWakeController({
       now: () => performance.now(),
       runtime: () => settings?.wake?.runtime ?? "missing",
@@ -783,7 +801,7 @@ function syncWake(view: WakeSettingsView | undefined): void {
       },
       saveDeviceId: async (deviceId) => void (await api.updateWake({ device_id: deviceId })),
       newId: () => newInteractionId(),
-    });
+    }, voiceForWake ? () => voiceForWake.keywordPort() : null);
     // WK-02：喚醒觸發開始 wake_word 即時語音（取代 WK-01a 預設的「聽到了」字幕）。
     wake.setTriggerHandler(onWakeTrigger);
     // 載入前已經開始的 Web Speech 或即時語音照實告訴它（不會在通話或 Web Speech 中途搶麥克風）。
@@ -810,6 +828,8 @@ function applyWakeFirst(latest: WakeSettingsView): void {
 function disposeWake(): void {
   if (!wake) return;
   stopWakeCall();
+  wakeVoice?.dispose();
+  wakeVoice = null;
   wake.dispose();
   wake = null;
   wakeDeferred = false;
@@ -1345,6 +1365,9 @@ setInterval(() => sense.tick(), 200);
  * 記下每條串流是跟誰借的，歸還時才不會還錯地方（喚醒在錄音途中被打開或關掉也一樣）。
  */
 const familyMicLeases = new WeakMap<MediaStream, WakeController>();
+function createSpeakerWorker(): SpeakerWorkerLike {
+  return new Worker(new URL("./speaker/worker.ts", import.meta.url), { type: "module" }) as unknown as SpeakerWorkerLike;
+}
 const familyMic: MicSource = {
   acquire: async () => {
     const owner = wake;
@@ -1367,7 +1390,7 @@ const familyView = new FamilyView({
     ? {
         voice: {
           mic: familyMic,
-          createWorker: () => new Worker(new URL("./speaker/worker.ts", import.meta.url), { type: "module" }) as unknown as SpeakerWorkerLike,
+          createWorker: createSpeakerWorker,
           model: speakerRuntime.model_version,
         },
       }
@@ -1679,8 +1702,11 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
   const interaction = newInteractionId();
   let coreInteraction: string | null = null;
   const viaWake = source === "wake_word";
+  // SP-02a：這次喚醒的聲音（喚醒詞片段與連線前的話）交給核心，問候決策時和臉一起判斷。
+  const voiceWakeId = viaWake && !rebuild ? (options.wake?.wake_id ?? null) : null;
   const endWakeGreeting = () => {
     if (wakeGreetingInteraction === interaction) wakeGreetingInteraction = null;
+    if (voiceWakeId) wakeVoice?.cancel();
   };
   // WK-02：喚醒開始的通話一律打招呼（greetingFor 不讀「看著說話時先打招呼」）；同步辨識在問候決定前不需要「看著說話」設定。
   if (viaWake && !rebuild) wakeGreetingInteraction = interaction;
@@ -1688,6 +1714,7 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     interaction,
     locale: realtimeLocale,
     decide: async (route) => {
+      if (voiceWakeId) await wakeVoice?.finish(voiceWakeId);
       const content = await ambient.decide(interaction, route, coreInteraction);
       lookTimeline.mark("decided");
       return content;
@@ -1701,6 +1728,7 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     ambient.beginInteraction(interaction, realtimeLocale);
     lookTimeline.mark("start");
   }
+  if (voiceWakeId && greeting) void wakeVoice?.attach(voiceWakeId);
   // WK-02：喚醒開始的通話第一次就緒後開始「沒人出聲就結束」的倒數（選單列「喚醒後等你開口」，預設 5 秒；Nous 說話時暫停）。
   stopWakeCall();
   if (viaWake && wake) {
@@ -1781,6 +1809,7 @@ function renderRealtimeState(phase: RealtimePhase): void {
   if (phase !== "off") wakeCall?.phase(phase);
   if (phase === "off" && !realtime.on && !realtimeStarting) {
     stopWakeCall();
+    wakeVoice?.cancel();
     wake?.releaseAllLeases();
     if (wakeDisposePending) {
       wakeDisposePending = false;

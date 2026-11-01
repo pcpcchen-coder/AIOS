@@ -19,6 +19,8 @@ import {
   type IdentityRequest,
   type IdentityManageStatus,
   type IdentityResponse,
+  type VoiceObservation,
+  type VoiceSegment,
 } from "../shared/identity.ts";
 import { greetingSentence } from "../shared/sense.ts";
 import { EnrollmentCollector, ENROLL_TARGET } from "./family-enroll.ts";
@@ -72,6 +74,12 @@ export const VOICE_PROMPTS: readonly { kind: "keyword" | "utterance"; text: stri
 ];
 const VOICE_TRIES = 3;
 
+/** SP-02a「試認聲音」：念一次喚醒詞、一句短句，各自看認成誰（喚醒詞只和喚醒詞模板比，短句只和朗讀模板比）。 */
+export const VOICE_TEST_PROMPTS: readonly { kind: VoiceSegment; text: string; window_ms: number; min_ms: number }[] = [
+  { kind: "keyword", text: "Hey Nous", window_ms: 2500, min_ms: 400 },
+  { kind: "utterance", text: "請幫我把客廳的燈打開，謝謝。", window_ms: 6000, min_ms: 1500 },
+];
+
 export const VOICE_EXPLANATION =
   "聲音登記只在這台 Mac 上運作：錄音只在記憶體裡算成聲音特徵（一串數字）後就丟掉，不存錄音、不上傳；只保存加密的特徵，只用來稱呼，" +
   "不作為解鎖、付款或任何授權的依據。請在安靜的地方、由本人用平常的音量念。";
@@ -107,6 +115,14 @@ type Phase =
       step: number;
       state: "loading" | "get_ready" | "listening" | "processing";
       hint: string | null;
+    }
+  | {
+      kind: "voice_test";
+      step: number;
+      state: "loading" | "get_ready" | "listening" | "processing" | "done";
+      hint: string | null;
+      /** 每段的結果（已翻譯的文字）：名字、認不出來、分不出是誰… */
+      results: { kind: VoiceSegment; label: string }[];
     }
   | { kind: "submitting"; name: string }
   | { kind: "calibrate" };
@@ -462,6 +478,61 @@ export class FamilyView {
     const phase: Extract<Phase, { kind: "voice" }> = { kind: "voice", name, minor, guardian, step: 0, state: "loading", hint: null, ...(personId ? { person_id: personId } : {}) };
     this.phase = phase;
     this.render();
+    const recorder = await this.openRecorder(gen);
+    if (!recorder || gen !== this.voiceGen) return;
+    const keyword: number[][] = [];
+    const utterance: number[][] = [];
+    for (let i = 0; i < VOICE_PROMPTS.length; i++) {
+      const prompt = VOICE_PROMPTS[i]!;
+      const got = await this.recordPrompt(recorder, gen, phase, i, prompt);
+      if (gen !== this.voiceGen) return;
+      if (!got) return this.voiceFailed("錄了幾次都沒有錄清楚，聲音沒有保存。請在安靜的地方、靠近電腦再試一次。");
+      (prompt.kind === "keyword" ? keyword : utterance).push(got);
+    }
+    this.stopVoice();
+    await this.submitVoice(name, minor, guardian, personId, keyword, utterance);
+  }
+
+  /** 錄一段：顯示要念的字與「準備」，叮一聲後才開始錄；人聲不夠就同一句重錄（最多 VOICE_TRIES 次）。回傳特徵或 null。 */
+  private async recordPrompt(
+    recorder: VoiceRecorder,
+    gen: number,
+    phase: { step: number; state: string; hint: string | null },
+    step: number,
+    prompt: { window_ms: number; min_ms: number },
+  ): Promise<number[] | null> {
+    let got: SegmentResult | null = null;
+    for (let attempt = 0; attempt < VOICE_TRIES && !got?.feature; attempt++) {
+      if (gen !== this.voiceGen) return null;
+      phase.step = step;
+      phase.state = "get_ready";
+      this.render();
+      await this.wait(attempt === 0 ? 900 : 1500);
+      if (gen !== this.voiceGen) return null;
+      recorder.chime();
+      await this.wait(250);
+      phase.state = "listening";
+      phase.hint = null;
+      this.render();
+      got = await recorder.record(prompt.window_ms, prompt.min_ms, (ms) => this.wait(ms));
+      if (gen !== this.voiceGen) return null;
+      phase.state = "processing";
+      if (!got.feature) phase.hint = got.problem === "too_quiet" ? "沒有聽到聲音，請靠近一點、大聲一點再念一次" : got.problem === "too_short" ? "念得太短或沒錄完整，請再念一次" : "這段沒有處理成功，請再念一次";
+      this.render();
+    }
+    return got?.feature ?? null;
+  }
+
+  private voiceFailed(message: string): void {
+    this.stopVoice();
+    this.phase = { kind: "list" };
+    this.error = message;
+    this.render();
+  }
+
+  /** 開錄音器（載入模型、打開麥克風）；失敗時回到列表並顯示原因。 */
+  private async openRecorder(gen: number): Promise<VoiceRecorder | null> {
+    const voice = this.deps.voice!;
     const recorder = new VoiceRecorder({
       mic: voice.mic,
       createWorker: voice.createWorker,
@@ -476,48 +547,49 @@ export class FamilyView {
     this.recorder = recorder;
     try {
       await recorder.start();
+      return recorder;
     } catch (err) {
-      if (gen !== this.voiceGen) return;
-      this.stopVoice();
-      this.phase = { kind: "list" };
-      this.error = msg`沒辦法開始錄音：${err instanceof Error ? err.message : String(err)}`;
-      this.render();
-      return;
+      if (gen === this.voiceGen) this.voiceFailed(msg`沒辦法開始錄音：${err instanceof Error ? err.message : String(err)}`);
+      return null;
     }
-    const keyword: number[][] = [];
-    const utterance: number[][] = [];
-    for (let i = 0; i < VOICE_PROMPTS.length; i++) {
-      const prompt = VOICE_PROMPTS[i]!;
-      let got: SegmentResult | null = null;
-      for (let attempt = 0; attempt < VOICE_TRIES && !got?.feature; attempt++) {
-        if (gen !== this.voiceGen) return;
-        phase.step = i;
-        phase.state = "get_ready";
-        this.render();
-        await this.wait(attempt === 0 ? 900 : 1500);
-        if (gen !== this.voiceGen) return;
-        recorder.chime();
-        await this.wait(250);
-        phase.state = "listening";
-        phase.hint = null;
-        this.render();
-        got = await recorder.record(prompt.window_ms, prompt.min_ms, (ms) => this.wait(ms));
-        if (gen !== this.voiceGen) return;
-        phase.state = "processing";
-        if (!got.feature) phase.hint = got.problem === "too_quiet" ? "沒有聽到聲音，請靠近一點、大聲一點再念一次" : got.problem === "too_short" ? "念得太短或沒錄完整，請再念一次" : "這段沒有處理成功，請再念一次";
-        this.render();
-      }
-      if (!got?.feature) {
-        this.stopVoice();
-        this.phase = { kind: "list" };
-        this.error = "錄了幾次都沒有錄清楚，聲音沒有保存。請在安靜的地方、靠近電腦再試一次。";
-        this.render();
-        return;
-      }
-      (prompt.kind === "keyword" ? keyword : utterance).push(got.feature);
+  }
+
+  /**
+   * SP-02a「試認聲音」：念一次喚醒詞、一句短句，核心各自回認成誰（不含分數）。和喚醒時的比對是同一套規則與門檻（未校準）。
+   */
+  private async startVoiceTest(): Promise<void> {
+    if (!this.deps.voice || !this.session) return;
+    this.stopTry();
+    this.stopVoice();
+    this.notice = this.error = null;
+    const gen = ++this.voiceGen;
+    const phase: Extract<Phase, { kind: "voice_test" }> = { kind: "voice_test", step: 0, state: "loading", hint: null, results: [] };
+    this.phase = phase;
+    this.render();
+    const recorder = await this.openRecorder(gen);
+    if (!recorder || gen !== this.voiceGen) return;
+    for (let i = 0; i < VOICE_TEST_PROMPTS.length; i++) {
+      const prompt = VOICE_TEST_PROMPTS[i]!;
+      const feature = await this.recordPrompt(recorder, gen, phase, i, prompt);
+      if (gen !== this.voiceGen) return;
+      if (!feature) return this.voiceFailed("錄了幾次都沒有錄清楚。請在安靜的地方、靠近電腦再試一次。");
+      if (!this.session) return;
+      const res = await this.call({ op: "voice_test", session: this.session, segment: prompt.kind, model: this.deps.voice.model, feature });
+      if (gen !== this.voiceGen) return;
+      if (!res?.ok || res.op !== "voice_test") return this.voiceFailed(res && !res.ok ? res.message : "試認沒有完成");
+      phase.results.push({ kind: prompt.kind, label: this.voiceLabel(res.observation) });
+      this.render();
     }
     this.stopVoice();
-    await this.submitVoice(name, minor, guardian, personId, keyword, utterance);
+    phase.state = "done";
+    this.render();
+  }
+
+  private voiceLabel(o: VoiceObservation): string {
+    if (o.state === "matched") return msg`認出：${this.people.find((p) => p.person_id === o.person_id)?.name ?? t("（已刪除的家人）")}`;
+    if (o.state === "ambiguous") return t("分不出是哪一位（太像兩位家人）");
+    if (o.state === "unknown") return t("認不出來");
+    return t(o.reason === "no_enrollment" ? "還沒有家人登記聲音" : "沒辦法比對");
   }
 
   private async submitVoice(name: string, minor: boolean, guardian: boolean, personId: string | undefined, keyword: number[][], utterance: number[][]): Promise<void> {
@@ -684,7 +756,7 @@ export class FamilyView {
       this.quality,
       this.collector.count,
       this.phase.kind === "calibrate" ? this.calibration.renderKey() : null,
-      this.phase.kind === "voice" ? this.level : null,
+      this.phase.kind === "voice" || this.phase.kind === "voice_test" ? this.level : null,
     ]);
     if (key === this.renderedKey) return;
     this.renderedKey = key;
@@ -708,6 +780,7 @@ export class FamilyView {
     if (phase.kind === "consent") return [...messages, this.consentStep(phase)];
     if (phase.kind === "capture") return [...messages, this.captureStep(phase)];
     if (phase.kind === "voice") return [...messages, this.voiceStep(phase)];
+    if (phase.kind === "voice_test") return [...messages, this.voiceTestStep(phase)];
     if (phase.kind === "submitting") return [h("p", { class: "muted" }, msg`正在保存「${phase.name}」…（請在系統對話框確認）`)];
     if (phase.kind === "calibrate") return [...messages, this.calibration.render()];
     return [...messages, this.statusLines(), this.namingNotice(), this.list(), this.actions(), this.trying ? this.tryPanel() : null, this.explanation()];
@@ -785,6 +858,8 @@ export class FamilyView {
       // SP-01：鏡頭沒開但聲音模型可用時，仍可新增只有聲音的家人。
       button(full ? `新增家人（已滿 ${st?.max ?? FAMILY_MAX} 位）` : "新增家人", () => this.startEnroll(), "btn--primary", !(ready || this.canVoice()) || full || this.busy),
       button(this.trying ? "停止試認" : "試認", () => this.toggleTry(), "", !ready || this.busy),
+      // SP-02a：有家人登記聲音、講者模型可用時才能試認聲音（不需要鏡頭）。
+      this.deps.voice && this.people.some((p) => p.voice === "enrolled") ? button("試認聲音", () => void this.startVoiceTest(), "", !this.canVoice() || this.busy) : null,
       this.deps.tuning?.() ? button("校正人臉辨識", () => this.startCalibration(), "btn--ghost", this.busy) : null,
     );
     // 只有檔案損壞才提供清除；解不開金鑰（可能只是沒允許鑰匙圈）是可以重試的，不誘導清除。
@@ -916,6 +991,33 @@ export class FamilyView {
       phase.hint ? h("p", { class: "notice" }, t(phase.hint)) : null,
       h("p", { class: "muted small" }, t("錄音只在記憶體裡算成聲音特徵，算完就丟掉；不存錄音、不上傳。")),
       h("div", { class: "actions" }, button(t("取消"), () => this.backToList(), "btn--ghost")),
+    );
+  }
+
+  private voiceTestStep(phase: Extract<Phase, { kind: "voice_test" }>): HTMLElement {
+    const prompt = VOICE_TEST_PROMPTS[phase.step]!;
+    const done = phase.state === "done";
+    const status =
+      phase.state === "loading" ? t("載入聲音模型、打開麥克風…") : phase.state === "get_ready" ? t("準備，聽到「叮」再念") : phase.state === "listening" ? t("請念：") : done ? t("試認完成") : t("處理中…");
+    const meter = h("div", { class: "voice-meter", "aria-hidden": "true" }, h("div", { class: "voice-meter-fill", style: `width:${Math.round(this.level * 100)}%` }));
+    const results = h("ul", { class: "voice-results" }, ...phase.results.map((r) => h("li", {}, msg`${r.kind === "keyword" ? t("喚醒詞") : t("短句")}：${r.label}`)));
+    return h(
+      "div",
+      { class: `family-step voice-step voice-step--${done ? "done" : phase.state}`, "aria-live": "polite" },
+      h("h3", {}, t("試認聲音")),
+      h("p", { class: "voice-status" }, status),
+      done || phase.state === "loading" ? null : h("p", { class: "voice-prompt" }, t(prompt.text)),
+      done ? null : meter,
+      phase.hint ? h("p", { class: "notice" }, t(phase.hint)) : null,
+      phase.results.length ? results : null,
+      h("p", { class: "muted small" }, t(UNCALIBRATED_LABEL)),
+      h("p", { class: "muted small" }, t("只憑聲音不會叫名字：門檻校準之前，喚醒時聲音只用來確認或取消認臉的結果。")),
+      h(
+        "div",
+        { class: "actions" },
+        done ? button(t("再試一次"), () => void this.startVoiceTest(), "btn--primary") : null,
+        button(done ? t("完成") : t("取消"), () => this.backToList(), "btn--ghost"),
+      ),
     );
   }
 

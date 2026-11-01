@@ -1,11 +1,16 @@
 // 常駐喚醒聆聽的 worker 邏輯（WK-01a；純類別，tests/wake-logic.test.ts 直接測，wake-worker.ts 只負責接上訊息）。
 // 流程：AudioWorklet 的樣本塊 → 轉 16 kHz → 2 秒環形緩衝 → 偵測器。對外只送出 WakeWorkerOut（started／detected／load_error），
-// 每一則都先經 isWakeWorkerOut 檢查：沒有型別陣列、ArrayBuffer 或樣本離開 worker。用過的樣本塊以 0 覆寫。
+// 每一則都先經 isWakeWorkerOut 檢查：沒有型別陣列、ArrayBuffer 或樣本送到主執行緒。用過的樣本塊以 0 覆寫。
+// SP-02a 唯一的例外：偵測到喚醒詞的那一刻，把緩衝最後 KEYWORD_SPAN_S 秒複製一份交給 keyword（wake-worker.ts 經另一條
+// MessagePort 直接轉移給 speaker worker，不經主執行緒）；沒有接收端就以 0 覆寫。其他時候不複製。
 
 import { isWakeWorkerOut, type WakeWorkerOut } from "../../shared/wake.ts";
 import { WakeDetectorError, type WakeDetector } from "./detector.ts";
 import { StreamResampler } from "./resample.ts";
 import { AudioRing, SAMPLE_RATE } from "./ring.ts";
+
+/** 喚醒詞那一段取多長（KWS 在詞尾之後才回報；speaker worker 再以音量判斷留下有人聲的部分）。 */
+export const KEYWORD_SPAN_S = 1.6;
 
 export class WakeWorkerCore {
   private readonly ring = new AudioRing();
@@ -17,6 +22,8 @@ export class WakeWorkerCore {
   constructor(
     private readonly detector: WakeDetector,
     private readonly post: (message: WakeWorkerOut) => void,
+    /** SP-02a：喚醒詞片段的接收端（取得這塊記憶體的所有權）；沒有時不複製。 */
+    private readonly keyword: ((span: Float32Array) => void) | null = null,
   ) {}
 
   /** 載入偵測器；失敗時送 load_error（不會送 started，主執行緒因此不會顯示「本機聆聽中」）。 */
@@ -46,6 +53,7 @@ export class WakeWorkerCore {
       }
       if (keyword !== null) {
         this.detector.reset();
+        if (this.keyword) this.keyword(this.ring.latest(Math.round(KEYWORD_SPAN_S * SAMPLE_RATE)));
         this.emit({ type: "detected", keyword_index: keyword });
       }
     } finally {
