@@ -7,7 +7,7 @@
 import { checkTrustedSender } from "./trusted-sender.mjs";
 
 /** 與 shared/identity.ts 的 IDENTITY_OPS 相同（測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test", "call_voice"];
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test", "call_voice", "calib_status", "calib_trial", "calib_apply", "calib_clear"];
 
 export const MENU_CLICK_WINDOW_MS = 10_000;
 const FEATURE_DIM = 128;
@@ -119,6 +119,9 @@ export function validateIdentityRequest(req) {
     case "list":
     case "clear_all":
     case "ack_naming":
+    case "calib_status":
+    case "calib_apply":
+    case "calib_clear":
       return { ok: true, request: { op, session } };
     case "delete":
     case "delete_voice":
@@ -145,6 +148,21 @@ export function validateIdentityRequest(req) {
         if (typeof req.minor !== "boolean") return bad("minor must be a boolean");
         request.name = req.name;
         request.minor = req.minor;
+      }
+      return { ok: true, request };
+    }
+    case "calib_trial": {
+      const m = speakerModel(req.model);
+      if (!m) return bad("model is required");
+      if (req.label !== "member" && req.label !== "stranger") return bad("label must be member or stranger");
+      if (!SEGMENTS.includes(req.segment)) return bad("segment must be keyword or utterance");
+      if (!isInt(req.voiced_ms, 0, 60_000)) return bad("voiced_ms must be an integer");
+      const f = feature(req.feature, SPEAKER_DIM);
+      if (!f) return bad(`feature must be ${SPEAKER_DIM} finite numbers`);
+      const request = { op, session, label: req.label, segment: req.segment, voiced_ms: req.voiced_ms, model: m, feature: f };
+      if (req.label === "member") {
+        if (!(typeof req.person_id === "string" && PERSON.test(req.person_id))) return bad("person_id is required for member");
+        request.person_id = req.person_id;
       }
       return { ok: true, request };
     }

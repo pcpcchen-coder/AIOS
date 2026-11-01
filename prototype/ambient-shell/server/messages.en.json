@@ -487,5 +487,11 @@
   "wake_id 格式不對": "wake_id is malformed",
   "voiced_ms 格式不對": "voiced_ms is malformed",
   "只憑聲音叫名字只能從 App 選單列打開": "Voice-only naming can only be turned on from the App menu bar",
-  "voice_name_test 必須是 true 或 false": "voice_name_test must be true or false"
+  "voice_name_test 必須是 true 或 false": "voice_name_test must be true or false",
+  "label 格式不對": "label is malformed",
+  "還沒有家人登記聲音": "No family member has enrolled a voice yet",
+  "找不到這位登記了聲音的家人": "Could not find this family member with an enrolled voice",
+  "資料還不夠：每種片段至少要有 10 筆你的樣本與 30 筆陌生聲音": "Not enough data yet: each kind of segment needs at least 10 of your samples and 30 stranger voices",
+  "沒有套用": "Not applied",
+  "沒有清除": "Not cleared"
 }

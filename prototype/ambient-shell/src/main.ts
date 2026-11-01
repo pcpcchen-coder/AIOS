@@ -1365,6 +1365,28 @@ setInterval(() => sense.tick(), 200);
  * 記下每條串流是跟誰借的，歸還時才不會還錯地方（喚醒在錄音途中被打開或關掉也一樣）。
  */
 const familyMicLeases = new WeakMap<MediaStream, WakeController>();
+/** SP-03a：系統朗讀聲音（speechSynthesis）。speak 念完（或出錯、最多 10 秒）就 resolve。 */
+function systemVoices(): { voices(): { name: string; lang: string }[]; speak(text: string, voice: string): Promise<void> } {
+  return {
+    voices: () => speechSynthesis.getVoices().map((v) => ({ name: v.name, lang: v.lang })),
+    speak: (text, name) =>
+      new Promise<void>((resolve) => {
+        const u = new SpeechSynthesisUtterance(text);
+        const v = speechSynthesis.getVoices().find((x) => x.name === name);
+        if (v) {
+          u.voice = v;
+          u.lang = v.lang;
+        }
+        const timer = setTimeout(resolve, 10_000);
+        u.onend = u.onerror = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        speechSynthesis.speak(u);
+      }),
+  };
+}
+
 function createSpeakerWorker(): SpeakerWorkerLike {
   return new Worker(new URL("./speaker/worker.ts", import.meta.url), { type: "module" }) as unknown as SpeakerWorkerLike;
 }
@@ -1393,6 +1415,8 @@ const familyView = new FamilyView({
           createWorker: createSpeakerWorker,
           model: speakerRuntime.model_version,
         },
+        // SP-03a 校準的陌生聲音：系統內建的朗讀聲音從喇叭念（不連網；macOS 的語音）。
+        ...(typeof speechSynthesis !== "undefined" ? { tts: systemVoices() } : {}),
       }
     : {}),
   source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) },

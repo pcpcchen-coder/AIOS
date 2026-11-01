@@ -6,6 +6,8 @@ import { t, msg, getLocale, onLocaleChange } from "./i18n.ts";
 // - 比對、證據、名稱驗證與寫檔都在核心；這裡不算分數，也看不到分數。門檻未校準，試認畫面照實標示。
 
 import {
+  CALIBRATION_MIN,
+  CALIBRATION_VERIFY_STRANGERS,
   FAMILY_MAX,
   parseFamilyName,
   speakableName,
@@ -19,6 +21,7 @@ import {
   type IdentityRequest,
   type IdentityManageStatus,
   type IdentityResponse,
+  type CalibrationReport,
   type VoiceObservation,
   type VoiceSegment,
 } from "../shared/identity.ts";
@@ -53,6 +56,11 @@ export interface FamilyViewDeps {
   voice?: { mic: MicSource; createWorker: () => SpeakerWorkerLike; model: SpeakerModelVersion };
   /** 測試用：等待（錄音窗、提示之間的停頓）。 */
   wait?: (ms: number) => Promise<void>;
+  /**
+   * SP-03a 校準的陌生聲音：系統內建的朗讀聲音（預設 window.speechSynthesis）。voices 回可用的聲音，speak 念完才 resolve。
+   * 未提供時不顯示「播放陌生聲音」。
+   */
+  tts?: { voices(): { name: string; lang: string }[]; speak(text: string, voice: string): Promise<void> };
 }
 
 /** 新增家人時要登記什麼（George 2026-11-01：可以只錄聲音）。 */
@@ -73,6 +81,30 @@ export const VOICE_PROMPTS: readonly { kind: "keyword" | "utterance"; text: stri
   { kind: "utterance", text: "明天早上七點叫我起床。", window_ms: 6000, min_ms: 1200 },
 ];
 const VOICE_TRIES = 3;
+
+/** SP-03a 校準時你要念的：10 次喚醒詞（兩個輪流）＋10 句和登記不同的話。 */
+export const CALIBRATION_MEMBER_PROMPTS: readonly { kind: VoiceSegment; text: string; window_ms: number; min_ms: number }[] = [
+  ...Array.from({ length: 10 }, (_, i) => ({ kind: "keyword" as const, text: i % 2 ? "Hello Nous" : "Hey Nous", window_ms: 2500, min_ms: 400 })),
+  ...[
+    "幫我看一下今天新竹的天氣。",
+    "把冷氣調到二十六度。",
+    "晚上想吃什麼，給我一點建議。",
+    "提醒我下午三點要開會。",
+    "播一點輕鬆的音樂好嗎？",
+    "明天要不要帶傘出門？",
+    "幫我查一下最近的新聞。",
+    "客廳有點暗，把燈調亮一點。",
+    "週末有什麼好玩的地方？",
+    "幫我記一下要買牛奶和雞蛋。",
+  ].map((text) => ({ kind: "utterance" as const, text, window_ms: 6000, min_ms: 2000 })),
+];
+
+/** SP-03a 陌生聲音念的句子（依朗讀聲音的語言挑）。 */
+export const CALIBRATION_STRANGER_LINES = {
+  keyword: ["Hey Nous", "Hello Nous"],
+  zh: ["今天天氣不錯，我們出去走走吧。", "請把客廳的燈關掉，謝謝。", "晚餐想吃麵還是飯？", "明天早上要早一點出門。", "這首歌很好聽，再放一次。"],
+  en: ["What's the weather like today?", "Please turn off the lights in the living room.", "Remind me to call my mother tonight.", "I would like a cup of coffee.", "Let's go for a walk after dinner."],
+} as const;
 
 /** SP-02a「試認聲音」：念一次喚醒詞、一句短句，各自看認成誰（喚醒詞只和喚醒詞模板比，短句只和朗讀模板比）。 */
 export const VOICE_TEST_PROMPTS: readonly { kind: VoiceSegment; text: string; window_ms: number; min_ms: number }[] = [
@@ -125,7 +157,14 @@ type Phase =
       results: { kind: VoiceSegment; label: string }[];
     }
   | { kind: "submitting"; name: string }
-  | { kind: "calibrate" };
+  | { kind: "calibrate" }
+  | {
+      kind: "voice_calibrate";
+      report: CalibrationReport | null;
+      /** 誰的樣本（家人 person_id）。 */
+      member: string | null;
+      run: null | { kind: "member" | "stranger"; step: number; total: number; state: "loading" | "get_ready" | "listening" | "processing"; text: string; hint: string | null };
+    };
 
 type RawText = { readonly raw: string };
 type Child = Node | string | RawText | null | undefined | false;
@@ -585,6 +624,187 @@ export class FamilyView {
     this.render();
   }
 
+  // ───────────── SP-03a 聲音校準 ─────────────
+
+  private async openVoiceCalibration(): Promise<void> {
+    if (!this.session || !this.deps.voice) return;
+    this.stopTry();
+    this.stopVoice();
+    this.notice = this.error = null;
+    const member = this.people.find((p) => p.voice === "enrolled")?.person_id ?? null;
+    const phase: Extract<Phase, { kind: "voice_calibrate" }> = { kind: "voice_calibrate", report: null, member, run: null };
+    this.phase = phase;
+    this.render();
+    const res = await this.call({ op: "calib_status", session: this.session });
+    if (this.phase !== phase) return;
+    if (res?.ok && res.op === "calib_status") phase.report = res.report;
+    else if (res && !res.ok) this.error = res.message;
+    this.render();
+  }
+
+  /** 錄你的樣本：10 次喚醒詞＋10 句話，每段叮一聲再念；每段都送一筆試驗。 */
+  private async runCalibrationMember(phase: Extract<Phase, { kind: "voice_calibrate" }>): Promise<void> {
+    const voice = this.deps.voice;
+    if (!voice || !this.session || !phase.member || phase.run) return;
+    const gen = ++this.voiceGen;
+    const run = { kind: "member" as const, step: 0, total: CALIBRATION_MEMBER_PROMPTS.length, state: "loading" as const, text: "", hint: null };
+    phase.run = run;
+    this.render();
+    const recorder = await this.openRecorder(gen);
+    if (!recorder || gen !== this.voiceGen) return;
+    for (let i = 0; i < CALIBRATION_MEMBER_PROMPTS.length; i++) {
+      const prompt = CALIBRATION_MEMBER_PROMPTS[i]!;
+      run.text = prompt.text;
+      const feature = await this.recordPrompt(recorder, gen, run, i, prompt);
+      if (gen !== this.voiceGen) return;
+      if (!feature) continue;
+      const res = await this.call({ op: "calib_trial", session: this.session, label: "member", person_id: phase.member, segment: prompt.kind, voiced_ms: prompt.min_ms, model: voice.model, feature });
+      if (gen !== this.voiceGen) return;
+      if (res?.ok && res.op === "calib_trial") phase.report = res.report;
+      else if (res && !res.ok) return this.calibrationFailed(phase, res.message);
+      this.render();
+    }
+    this.stopVoice();
+    phase.run = null;
+    this.render();
+  }
+
+  /**
+   * 陌生聲音：用系統內建的朗讀聲音從喇叭念喚醒詞與句子，經真的麥克風收進來（和平常的收音一樣），每段送一筆 stranger 試驗。
+   * 收集階段每種片段 30 筆，套用門檻之後（驗證）每種 50 筆。聲音依序輪流；沒錄到人聲的那段不算。
+   */
+  private async runCalibrationStrangers(phase: Extract<Phase, { kind: "voice_calibrate" }>): Promise<void> {
+    const voice = this.deps.voice;
+    const tts = this.deps.tts;
+    if (!voice || !tts || !this.session || phase.run) return;
+    const voices = tts.voices().filter((v) => /^(zh|en)/i.test(v.lang));
+    if (voices.length === 0) return this.calibrationFailed(phase, "這台 Mac 沒有可用的中文或英文朗讀聲音");
+    const perSegment = phase.report?.applied_at ? CALIBRATION_VERIFY_STRANGERS : CALIBRATION_MIN.stranger;
+    const plan: { kind: VoiceSegment; text: string; voice: { name: string; lang: string } }[] = [];
+    for (let i = 0; i < perSegment; i++) {
+      const v = voices[i % voices.length]!;
+      plan.push({ kind: "keyword", text: CALIBRATION_STRANGER_LINES.keyword[i % 2]!, voice: v });
+      const lines = /^zh/i.test(v.lang) ? CALIBRATION_STRANGER_LINES.zh : CALIBRATION_STRANGER_LINES.en;
+      plan.push({ kind: "utterance", text: lines[i % lines.length]!, voice: v });
+    }
+    const gen = ++this.voiceGen;
+    const run = { kind: "stranger" as const, step: 0, total: plan.length, state: "loading" as "loading" | "get_ready" | "listening" | "processing", text: "", hint: null as string | null };
+    phase.run = run;
+    this.render();
+    const recorder = await this.openRecorder(gen);
+    if (!recorder || gen !== this.voiceGen) return;
+    for (let i = 0; i < plan.length; i++) {
+      const item = plan[i]!;
+      run.step = i;
+      run.text = `${item.voice.name}：${item.text}`;
+      run.state = "listening";
+      this.render();
+      const windowMs = item.kind === "keyword" ? 3000 : 7000;
+      const minMs = item.kind === "keyword" ? 300 : 2000;
+      const recording = recorder.record(windowMs, minMs, (ms) => this.wait(ms));
+      await this.wait(200);
+      await tts.speak(item.text, item.voice.name).catch(() => undefined);
+      const got = await recording;
+      if (gen !== this.voiceGen) return;
+      if (!got.feature) continue;
+      const res = await this.call({ op: "calib_trial", session: this.session, label: "stranger", segment: item.kind, voiced_ms: got.voiced_ms, model: voice.model, feature: got.feature });
+      if (gen !== this.voiceGen) return;
+      if (res?.ok && res.op === "calib_trial") phase.report = res.report;
+      else if (res && !res.ok) return this.calibrationFailed(phase, res.message);
+      this.render();
+      await this.wait(300);
+    }
+    this.stopVoice();
+    phase.run = null;
+    this.render();
+  }
+
+  private calibrationFailed(phase: Extract<Phase, { kind: "voice_calibrate" }>, message: string): void {
+    this.stopVoice();
+    phase.run = null;
+    this.error = message;
+    this.render();
+  }
+
+  private async calibrationAction(phase: Extract<Phase, { kind: "voice_calibrate" }>, op: "calib_apply" | "calib_clear"): Promise<void> {
+    if (!this.session || phase.run) return;
+    this.busy = true;
+    this.render();
+    const res = await this.call({ op, session: this.session });
+    this.busy = false;
+    if (res?.ok && (res.op === "calib_apply" || res.op === "calib_clear")) {
+      phase.report = res.report;
+      this.notice = op === "calib_apply" ? "已套用建議門檻；接著播放陌生聲音並錄你的樣本來驗證。" : "已清除聲音校準資料。";
+    } else if (res && !res.ok && res.code !== "declined") this.error = res.message;
+    this.render();
+  }
+
+  private voiceCalibrationStep(phase: Extract<Phase, { kind: "voice_calibrate" }>): HTMLElement {
+    const r = phase.report;
+    const run = phase.run;
+    const pct = (x: number | null) => (x === null ? "—" : `${Math.round(x * 100)}%`);
+    const num = (x: number | null) => (x === null ? "—" : x.toFixed(2));
+    const segs = (r?.segments ?? []).map((g) =>
+      h(
+        "div",
+        { class: "calib-seg" },
+        h("h4", {}, t(g.segment === "keyword" ? "喚醒詞" : "話語")),
+        h("p", { class: "small" }, msg`收集：你的樣本 ${g.member_trials}／${CALIBRATION_MIN.member}，陌生聲音 ${g.stranger_trials}／${CALIBRATION_MIN.stranger}`),
+        h("p", { class: "small" }, msg`你的分數：最低 ${num(g.member_min)}、中位數 ${num(g.member_median)}；陌生聲音最高 ${num(g.stranger_max)}`),
+        h("p", { class: "small" }, g.proposed ? msg`建議門檻 ${g.proposed.match.toFixed(2)}（在你的樣本上約 ${pct(g.proposed_reject_rate)} 認不出來）` : t("資料還不夠，沒有建議門檻")),
+        h("p", { class: "small" }, msg`目前門檻 ${g.current.match.toFixed(2)}（${t(g.applied ? "已套用校準值" : "未校準的起點值")}）`),
+        g.applied
+          ? h("p", { class: "small" }, msg`驗證：陌生聲音 ${g.verify.stranger_trials}／${CALIBRATION_VERIFY_STRANGERS}，被認成家人 ${g.verify.false_accepts} 次；你的樣本 ${g.verify.member_trials}，認不出 ${g.verify.rejects} 次`)
+          : null,
+        h("p", { class: g.calibrated ? "notice" : "muted small" }, t(g.calibrated ? "已校準：這種片段可以只憑聲音叫名字" : g.applied && g.verify.false_accepts > 0 ? "沒有通過：有陌生聲音被認成家人，請清除後重新收集" : "還沒校準")),
+      ),
+    );
+    const members = this.people.filter((p) => p.voice === "enrolled");
+    const select = h("select", { "aria-label": "誰的樣本" });
+    for (const p of members) {
+      const o = h("option", { value: p.person_id }, p.name);
+      if (p.person_id === phase.member) o.setAttribute("selected", "selected");
+      select.append(o);
+    }
+    select.addEventListener("change", () => {
+      phase.member = select.value || null;
+    });
+    const meter = h("div", { class: "voice-meter", "aria-hidden": "true" }, h("div", { class: "voice-meter-fill", style: `width:${Math.round(this.level * 100)}%` }));
+    const running = run
+      ? h(
+          "div",
+          { class: `voice-step voice-step--${run.state}`, "aria-live": "polite" },
+          h("p", { class: "muted small" }, msg`第 ${run.step + 1}／${run.total} 段`),
+          h("p", { class: "voice-status" }, t(run.state === "loading" ? "載入聲音模型、打開麥克風…" : run.kind === "stranger" ? "電腦朗讀中，請保持安靜：" : run.state === "get_ready" ? "準備，聽到「叮」再念" : run.state === "listening" ? "請念：" : "處理中…")),
+          run.text ? h("p", { class: "voice-prompt" }, run.kind === "stranger" ? run.text : t(run.text)) : null,
+          meter,
+          run.hint ? h("p", { class: "notice" }, t(run.hint)) : null,
+          h("div", { class: "actions" }, button(t("停止"), () => this.calibrationFailed(phase, "已停止；已收的資料會保留。"), "btn--ghost")),
+        )
+      : null;
+    const anyProposed = !!r?.segments.some((g) => g.proposed);
+    return h(
+      "div",
+      { class: "family-step voice-calibration" },
+      h("h3", {}, t("聲音校準")),
+      h("p", { class: "muted small" }, t("只存每段聲音和每位家人比對的分數（加密），不存錄音或聲音特徵。先收集你的樣本與電腦朗讀的陌生聲音、套用建議門檻，再用新的一輪驗證：陌生聲音全部沒有被認成家人，才會只憑聲音叫名字。")),
+      ...segs,
+      running,
+      run
+        ? null
+        : h(
+            "div",
+            { class: "actions" },
+            members.length > 1 ? select : null,
+            button(t("錄我的聲音（約 3 分鐘）"), () => void this.runCalibrationMember(phase), "btn--primary", !phase.member || this.busy),
+            this.deps.tts ? button(t("播放陌生聲音（電腦朗讀）"), () => void this.runCalibrationStrangers(phase), "", this.busy) : null,
+            button(t("套用建議門檻"), () => void this.calibrationAction(phase, "calib_apply"), "", !anyProposed || this.busy),
+            button(t("清除校準資料"), () => void this.calibrationAction(phase, "calib_clear"), "btn--ghost", !r || this.busy),
+            button(t("完成"), () => this.backToList(), "btn--ghost"),
+          ),
+    );
+  }
+
   private voiceLabel(o: VoiceObservation): string {
     if (o.state === "matched") return msg`認出：${this.people.find((p) => p.person_id === o.person_id)?.name ?? t("（已刪除的家人）")}`;
     if (o.state === "ambiguous") return t("分不出是哪一位（太像兩位家人）");
@@ -756,7 +976,7 @@ export class FamilyView {
       this.quality,
       this.collector.count,
       this.phase.kind === "calibrate" ? this.calibration.renderKey() : null,
-      this.phase.kind === "voice" || this.phase.kind === "voice_test" ? this.level : null,
+      this.phase.kind === "voice" || this.phase.kind === "voice_test" || this.phase.kind === "voice_calibrate" ? this.level : null,
     ]);
     if (key === this.renderedKey) return;
     this.renderedKey = key;
@@ -781,6 +1001,7 @@ export class FamilyView {
     if (phase.kind === "capture") return [...messages, this.captureStep(phase)];
     if (phase.kind === "voice") return [...messages, this.voiceStep(phase)];
     if (phase.kind === "voice_test") return [...messages, this.voiceTestStep(phase)];
+    if (phase.kind === "voice_calibrate") return [...messages, this.voiceCalibrationStep(phase)];
     if (phase.kind === "submitting") return [h("p", { class: "muted" }, msg`正在保存「${phase.name}」…（請在系統對話框確認）`)];
     if (phase.kind === "calibrate") return [...messages, this.calibration.render()];
     return [...messages, this.statusLines(), this.namingNotice(), this.list(), this.actions(), this.trying ? this.tryPanel() : null, this.explanation()];
@@ -860,6 +1081,8 @@ export class FamilyView {
       button(this.trying ? "停止試認" : "試認", () => this.toggleTry(), "", !ready || this.busy),
       // SP-02a：有家人登記聲音、講者模型可用時才能試認聲音（不需要鏡頭）。
       this.deps.voice && this.people.some((p) => p.voice === "enrolled") ? button("試認聲音", () => void this.startVoiceTest(), "", !this.canVoice() || this.busy) : null,
+      // SP-03a：聲音校準（有家人登記聲音時）。
+      this.deps.voice && this.people.some((p) => p.voice === "enrolled") ? button("聲音校準", () => void this.openVoiceCalibration(), "btn--ghost", !this.canVoice() || this.busy) : null,
       this.deps.tuning?.() ? button("校正人臉辨識", () => this.startCalibration(), "btn--ghost", this.busy) : null,
     );
     // 只有檔案損壞才提供清除；解不開金鑰（可能只是沒允許鑰匙圈）是可以重試的，不誘導清除。

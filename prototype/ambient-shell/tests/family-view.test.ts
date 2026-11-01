@@ -356,6 +356,34 @@ describe("FamilyView voice (SP-01)", () => {
     expect(mod.VOICE_TEST_PROMPTS.map((p) => p.kind)).toEqual(["keyword", "utterance"]);
   });
 
+  it("「聲音校準」 (SP-03a) opens its own step, loads the report and offers record / apply / clear (no stranger playback without system voices)", async () => {
+    const report = {
+      voices: 1,
+      applied_at: null,
+      segments: (["keyword", "utterance"] as const).map((segment) => ({
+        segment, member_trials: 10, stranger_trials: 30, member_min: 0.81, member_median: 0.9, stranger_max: 0.32,
+        proposed: { match: 0.37, margin: 0.08 }, proposed_reject_rate: 0, current: { match: 0.5, margin: 0.08 }, applied: false,
+        verify: { stranger_trials: 0, false_accepts: 0, member_trials: 0, rejects: 0 }, calibrated: false,
+      })),
+    };
+    const t = makeVoice((req) => (req.op === "calib_status" ? ({ ok: true, op: "calib_status", report } as IdentityResponse) : manage([both])));
+    t.view.open();
+    await flush();
+    expect(t.buttons("聲音校準")).toHaveLength(1);
+    t.buttons("聲音校準")[0]!.click();
+    await flush();
+    expect(t.calls.at(-1)).toEqual({ op: "calib_status", session: SESSION });
+    expect(t.el.textContent).toContain("建議門檻 0.37");
+    expect(t.el.textContent).toContain("收集：你的樣本 10／10，陌生聲音 30／30");
+    expect(t.buttons("錄我的聲音")).toHaveLength(1);
+    expect(t.buttons("套用建議門檻")[0]!.disabled).toBe(false);
+    expect(t.buttons("播放陌生聲音")).toHaveLength(0);
+    expect(mod.CALIBRATION_MEMBER_PROMPTS.filter((p) => p.kind === "keyword")).toHaveLength(10);
+    expect(mod.CALIBRATION_MEMBER_PROMPTS.filter((p) => p.kind === "utterance")).toHaveLength(10);
+    t.buttons("完成")[0]!.click();
+    expect(t.buttons("聲音校準")).toHaveLength(1);
+  });
+
   it("delete voice sends delete_voice for that person", async () => {
     const t = makeVoice((req) => (req.op === "delete_voice" ? { ...manage([george], ready, "list"), op: "delete_voice" } as IdentityResponse : manage([both])));
     t.view.open();

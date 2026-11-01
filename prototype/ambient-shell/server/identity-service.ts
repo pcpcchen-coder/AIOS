@@ -24,12 +24,18 @@ import {
   isValidSpeakerFeature,
   SPEAKER_FEATURE_DIM,
   VOICE_KEYWORD_SAMPLES,
+  CALIBRATION_MATCH_FLOOR,
+  CALIBRATION_MIN,
+  CALIBRATION_SAFETY,
+  CALIBRATION_VERIFY_STRANGERS,
   CALL_VOICE_MIN_MS,
   VOICE_MIN_VOICED_MS,
   VOICE_SEGMENTS,
   VOICE_THRESHOLDS,
   VOICE_UTTERANCE_SAMPLES,
   type SpeakerModelVersion,
+  type CalibrationReport,
+  type CalibrationSegmentReport,
   type VoiceFusion,
   type VoiceObservation,
   type VoiceSegment,
@@ -54,7 +60,7 @@ import { WAKE_ID } from "../shared/wake.ts";
 import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
 import type { SpeakerRuntimeCheck } from "./speaker-runtime.ts";
-import type { GalleryStore, GalleryVersions, StoredPerson } from "./identity-store.ts";
+import type { CalibrationFileData, GalleryStore, GalleryVersions, StoredCalibrationTrial, StoredPerson } from "./identity-store.ts";
 
 // 家人辨識的核心（ADR-0001 §2.1：核心持有資料與邏輯，IPC 只做傳輸）。跑在 Electron 主程序（desktop/main.mjs 以
 // startNous 的 identity 選項注入）；瀏覽器版沒有注入，settings.identity 照實回報不可用。
@@ -117,7 +123,11 @@ export type ConfirmRequest =
    */
   | { kind: "delete"; name: string; memory?: { count: number | null; defaultDelete: boolean } }
   /** memory：每位家人的連結記憶筆數；未成年的記憶一併刪除，成人只有勾選「同時刪除成人家人的記憶」才刪。 */
-  | { kind: "clear_all"; memory?: { people: { name: string; count: number | null; minor: boolean }[] } };
+  | { kind: "clear_all"; memory?: { people: { name: string; count: number | null; minor: boolean }[] } }
+  /** SP-03a：套用建議的聲音門檻（每種片段的 match 與在收集資料上的拒認率；null＝這種片段資料不足，維持起點值）。 */
+  | { kind: "calib_apply"; keyword: { match: number; reject_rate: number } | null; utterance: { match: number; reject_rate: number } | null }
+  /** SP-03a：清除聲音校準資料（回到未校準的起點門檻，只憑聲音不再稱名）。 */
+  | { kind: "calib_clear" };
 
 /**
  * 主程序的原生確認對話框（dialog.showMessageBox）；回 true 才寫檔。
@@ -136,6 +146,24 @@ export interface IdentityMemoryLink {
   /** SP-02b：通話中的聲音認出一位家人、本次人物沒有選定：請這通語音問一次（named＝可以念出名字）。 */
   offerVoiceCandidate?(named: boolean): void;
 }
+
+/** SP-03a：排序後的分數是否被接受（最高分 ≥ match 且領先第二名 ≥ margin）；接受時回那位家人。 */
+function acceptedBy(scores: readonly { person_id: string; score: number }[], limits: { match: number; margin: number }): string | null {
+  const ranked = [...scores].sort((a, b) => b.score - a.score);
+  const [first, second] = ranked;
+  if (!first || first.score < limits.match) return null;
+  if (second && first.score - second.score < limits.margin) return null;
+  return first.person_id;
+}
+
+function median(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const v = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 ? v[mid]! : (v[mid - 1]! + v[mid]!) / 2;
+}
+
+const round3 = (x: number) => Math.round(x * 1000) / 1000;
 
 /** 給記憶層的臉部候選只保留這麼久（docs/16 §4：只是候選，確認後才選定）。 */
 export const MEMORY_CANDIDATE_MS = 60_000;
@@ -383,6 +411,8 @@ export class IdentityService {
   /** SP-02b：通話中聲音認出的人（給記憶層當候選；同一人只記第一次的時間，候選卡才對得上）。 */
   private callVoice: { person_id: string; at: number } | null = null;
   private readonly callVoiceCalls: number[] = [];
+  /** SP-03a：聲音校準資料（第一次需要時才讀；undefined＝還沒讀）。 */
+  private calibration: CalibrationFileData | null | undefined = undefined;
   /** 最近一次問候決策的臉聲融合結果（只給 log）。 */
   private lastFusion: VoiceFusion | null = null;
   /** 最近一次比對成功、沒有多臉的問候決策（給記憶層當人物候選；同一追蹤世代、60 秒內）。 */
@@ -556,6 +586,15 @@ export class IdentityService {
         return this.mutate(() => this.removeVoice(session, req));
       case "voice_test":
         return this.voiceTest(req);
+      case "calib_status":
+        this.requireVoiceReady();
+        return { ok: true, op: "calib_status", report: this.calibrationReport() };
+      case "calib_trial":
+        return this.calibTrial(req);
+      case "calib_apply":
+        return this.mutate(() => this.calibApply());
+      case "calib_clear":
+        return this.mutate(() => this.calibClear());
       case "ack_naming":
         this.options.store.markNamingNoticeSeen(new Date(this.now()).toISOString());
         this.log("identity: 已看過雲端稱名說明");
@@ -812,14 +851,14 @@ export class IdentityService {
     const span = ev.length ? Math.round(ev.at(-1)!.t - ev[0]!.t) : 0;
     const age = decision.evidence_at === null ? "—" : `${Math.round(decision.decided_at - decision.evidence_at)} ms`;
     const voice = wakeId !== null ? `，聲音 ${voiceSummary(this.voiceFor(wakeId))}，融合 ${this.lastFusion ?? "—"}` : "";
-    this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前${voice}，模板 ${picked.id}，門檻未校準）`);
+    this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前${voice}，模板 ${picked.id}，${decision.calibrated ? "聲音門檻已校準" : "門檻未校準"}）`);
     // 證據只為這一次問候存在：決策後丟掉，晚到的推論不能讓下一次互動沿用。
     this.ambient = null;
     if (wakeId !== null && this.wakeVoice?.wake_id === wakeId) this.wakeVoice = null;
     // 新的互動：上一通的聲音候選不沿用。
     this.callVoice = null;
     // 記憶的臉部候選只來自臉（只憑聲音的測試開關不算）。
-    this.lastMatch = decision.person_id && decision.reason === null && this.lastFusion !== "voice_only_test" ? { person_id: decision.person_id, track, at: this.now() } : null;
+    this.lastMatch = decision.person_id && decision.reason === null && this.lastFusion !== "voice_only_test" && this.lastFusion !== "voice_only_calibrated" ? { person_id: decision.person_id, track, at: this.now() } : null;
     if (route === "api_key") {
       if (session) {
         try { this.options.apiKeyGreeted?.(session.session_id, name !== null); } catch { /* 通知失敗不影響問候 */ }
@@ -839,7 +878,8 @@ export class IdentityService {
     const last = this.ambient?.track === track ? this.ambient.evidence.frames.at(-1) : undefined;
     const plain = (reason: GreetingNameReason): GreetingDecision => ({ ...base, person_id: null, evidence_at: last?.t ?? null, reason });
     // 認不出臉（不是看到別人）時，測試開關開著就改用聲音（只限喚醒開始的通話）。
-    const faceMissing = (reason: GreetingNameReason): GreetingDecision => (wakeId !== null && this.voiceNameTestOn() ? (this.voiceOnly(base, wakeId, track) ?? plain(reason)) : plain(reason));
+    // SP-03a：校準驗證通過的片段，不需要測試開關也可以只憑聲音稱名。
+    const faceMissing = (reason: GreetingNameReason): GreetingDecision => (wakeId !== null ? (this.voiceOnly(base, wakeId, track) ?? plain(reason)) : plain(reason));
     if (!this.ambientPrefs().look_to_talk_greet_name) return plain("naming_off");
     if (!claimed) return plain("no_session");
     if (!this.options.store.namingNoticeSeen()) return plain("notice_unseen");
@@ -882,14 +922,191 @@ export class IdentityService {
    * 這個追蹤世代出現過多張臉，或臉曾認出另一位家人，就不用聲音（頁面的 not_eligible 也可能是多張臉）。
    */
   private voiceOnly(base: Omit<GreetingDecision, "person_id" | "evidence_at" | "reason">, wakeId: string, track: number): GreetingDecision | null {
-    const v = combineVoice(this.voiceFor(wakeId)?.obs ?? {});
+    const voice = this.voiceFor(wakeId);
+    const v = combineVoice(voice?.obs ?? {});
     if (v.state !== "matched" || v.conflict) return null;
+    const test = this.voiceNameTestOn();
+    // 沒有測試開關時，認出這個人的那段片段必須校準驗證通過（17 §4.4：對應片段的校準完成才可以稱名）。
+    const calibrated = this.calibratedSegments();
+    const byCalibrated = VOICE_SEGMENTS.some((seg) => calibrated[seg] && voice?.obs[seg]?.state === "matched" && voice.obs[seg]?.person_id === v.person_id);
+    if (!test && !byCalibrated) return null;
     const a = this.ambient?.track === track ? this.ambient : null;
     if (a && (a.mixed || (a.firstMatch !== null && a.firstMatch !== v.person_id))) return null;
     const person = this.comparableVoice().find((p) => p.person_id === v.person_id);
     if (!person || !speakableName(person.name)) return null;
-    this.lastFusion = "voice_only_test";
-    return { ...base, person_id: person.person_id, evidence_at: null, reason: null };
+    this.lastFusion = byCalibrated ? "voice_only_calibrated" : "voice_only_test";
+    return { ...base, person_id: person.person_id, evidence_at: null, reason: null, ...(byCalibrated ? { calibrated: true } : {}) };
+  }
+
+  // ─────────────── SP-03a：聲音校準 ───────────────
+
+  private loadCalibration(): CalibrationFileData | null {
+    if (this.calibration === undefined) this.calibration = this.options.store.loadCalibration?.() ?? null;
+    const c = this.calibration;
+    const model = this.options.speakerModel;
+    // 講者模型換了：舊分數與門檻都不適用。
+    if (c && model && !sameSpeakerModel(c.model, model)) return null;
+    return c;
+  }
+
+  /** 目前每種片段的門檻：已套用的校準值，否則是起點值。 */
+  private voiceLimits(segment: VoiceSegment): { match: number; margin: number } {
+    const applied = this.loadCalibration()?.applied?.thresholds[segment];
+    if (applied) return applied;
+    const d = VOICE_THRESHOLDS[segment];
+    return { match: d.match, margin: d.margin };
+  }
+
+  private voiceVersions(): Record<string, string> {
+    return Object.fromEntries(this.comparableVoice().map((p) => [p.person_id, p.voice!.updated_at]));
+  }
+
+  /** 還有效的試驗：模板集合與版本和現在一樣（重錄、刪除或新增家人之後，舊分數不再採用）。 */
+  private validTrials(c: CalibrationFileData): StoredCalibrationTrial[] {
+    const now = this.voiceVersions();
+    const keys = Object.keys(now).sort().join(",");
+    return c.trials.filter((t) => Object.keys(t.templates).sort().join(",") === keys && Object.entries(t.templates).every(([pid, at]) => now[pid] === at));
+  }
+
+  calibratedSegments(): Record<VoiceSegment, boolean> {
+    const out: Record<VoiceSegment, boolean> = { keyword: false, utterance: false };
+    try {
+      if (!this.loadCalibration()?.applied) return out;
+      for (const seg of this.calibrationReport().segments) out[seg.segment] = seg.calibrated;
+    } catch {
+      // 讀不到就當沒校準
+    }
+    return out;
+  }
+
+  calibrationReport(): CalibrationReport {
+    const c = this.loadCalibration();
+    const trials = c ? this.validTrials(c) : [];
+    const voices = this.comparableVoice().length;
+    const appliedAt = c?.applied?.at ?? null;
+    const segments = VOICE_SEGMENTS.map((segment): CalibrationSegmentReport => {
+      const current = this.voiceLimits(segment);
+      const seg = trials.filter((t) => t.segment === segment);
+      const collect = seg.filter((t) => t.phase === "collect");
+      const own = (t: StoredCalibrationTrial) => t.scores.find((x) => x.person_id === t.person_id)?.score ?? null;
+      const members = collect.filter((t) => t.label === "member" && t.person_id);
+      const memberScores = members.map(own).filter((x): x is number => x !== null);
+      // 冒名分數：電腦朗讀的陌生聲音對任何家人；家人樣本對其他家人。
+      const impostor: number[] = [];
+      for (const t of collect) {
+        const others = t.label === "stranger" ? t.scores : t.scores.filter((x) => x.person_id !== t.person_id);
+        if (others.length) impostor.push(Math.max(...others.map((x) => x.score)));
+      }
+      const strangers = collect.filter((t) => t.label === "stranger").length;
+      const strangerMax = impostor.length ? Math.max(...impostor) : null;
+      const ready = members.length >= CALIBRATION_MIN.member && strangers >= CALIBRATION_MIN.stranger && strangerMax !== null;
+      const proposed = ready ? { match: round3(Math.min(0.95, Math.max(CALIBRATION_MATCH_FLOOR, strangerMax! + CALIBRATION_SAFETY))), margin: VOICE_THRESHOLDS[segment].margin } : null;
+      const rejectRate = proposed && members.length ? members.filter((t) => acceptedBy(t.scores, proposed) !== t.person_id).length / members.length : null;
+      const verifyTrials = appliedAt ? seg.filter((t) => t.phase === "verify" && t.at >= appliedAt) : [];
+      const vStrangers = verifyTrials.filter((t) => t.label === "stranger");
+      const vMembers = verifyTrials.filter((t) => t.label === "member" && t.person_id);
+      const verify = {
+        stranger_trials: vStrangers.length,
+        false_accepts: vStrangers.filter((t) => acceptedBy(t.scores, current) !== null).length + vMembers.filter((t) => {
+          const who = acceptedBy(t.scores, current);
+          return who !== null && who !== t.person_id;
+        }).length,
+        member_trials: vMembers.length,
+        rejects: vMembers.filter((t) => acceptedBy(t.scores, current) !== t.person_id).length,
+      };
+      const applied = !!c?.applied;
+      return {
+        segment,
+        member_trials: members.length,
+        stranger_trials: strangers,
+        member_min: memberScores.length ? round3(Math.min(...memberScores)) : null,
+        member_median: memberScores.length ? round3(median(memberScores)!) : null,
+        stranger_max: strangerMax === null ? null : round3(strangerMax),
+        proposed,
+        proposed_reject_rate: rejectRate === null ? null : round3(rejectRate),
+        current,
+        applied,
+        verify,
+        calibrated: applied && verify.stranger_trials >= CALIBRATION_VERIFY_STRANGERS && verify.false_accepts === 0,
+      };
+    });
+    return { segments, voices, applied_at: appliedAt };
+  }
+
+  /** 記一筆校準試驗（只存分數）。套用門檻之前是 collect，之後是 verify。 */
+  private calibTrial(req: Record<string, unknown>): IdentityResponse {
+    this.requireVoiceReady();
+    this.requireSpeakerModel(req);
+    const label = req.label;
+    if (label !== "member" && label !== "stranger") throw new RequestError("bad_request", "label 格式不對");
+    const segment = this.segmentOf(req.segment);
+    const voiced = req.voiced_ms;
+    if (typeof voiced !== "number" || !Number.isInteger(voiced) || voiced < 0 || voiced > 60_000) throw new RequestError("bad_request", "voiced_ms 格式不對");
+    const people = this.comparableVoice();
+    if (people.length === 0) throw new RequestError("unavailable", "還沒有家人登記聲音");
+    let personId: string | undefined;
+    if (label === "member") {
+      if (typeof req.person_id !== "string" || !people.some((p) => p.person_id === req.person_id)) throw new RequestError("not_found", "找不到這位登記了聲音的家人");
+      personId = req.person_id;
+    }
+    const feature = toSpeakerFeature(req.feature);
+    const scores = people.map((p) => ({ person_id: p.person_id, score: round3(dot(feature, meanDirection(p.voice![segment]))) }));
+    feature.fill(0);
+    const model = this.options.speakerModel!;
+    const c: CalibrationFileData = this.loadCalibration() ?? { model, trials: [], applied: null };
+    c.trials.push({
+      label,
+      ...(personId ? { person_id: personId } : {}),
+      segment,
+      voiced_ms: voiced,
+      scores,
+      phase: c.applied ? "verify" : "collect",
+      at: new Date(this.now()).toISOString(),
+      templates: this.voiceVersions(),
+    });
+    this.options.store.saveCalibration?.(c);
+    this.calibration = c;
+    return { ok: true, op: "calib_trial", report: this.calibrationReport() };
+  }
+
+  private async calibApply(): Promise<IdentityResponse> {
+    this.requireVoiceReady();
+    const report = this.calibrationReport();
+    const pick = (seg: VoiceSegment) => {
+      const r = report.segments.find((x) => x.segment === seg)!;
+      return r.proposed ? { match: r.proposed.match, reject_rate: r.proposed_reject_rate ?? 0 } : null;
+    };
+    const keyword = pick("keyword");
+    const utterance = pick("utterance");
+    if (!keyword && !utterance) throw new RequestError("bad_samples", "資料還不夠：每種片段至少要有 10 筆你的樣本與 30 筆陌生聲音");
+    const ok = (await this.options.confirm({ kind: "calib_apply", keyword, utterance })) === true;
+    if (!ok) throw new RequestError("declined", "沒有套用");
+    const c = this.loadCalibration()!;
+    const keep = (seg: VoiceSegment) => {
+      const d = VOICE_THRESHOLDS[seg];
+      return { match: d.match, margin: d.margin };
+    };
+    c.applied = {
+      at: new Date(this.now()).toISOString(),
+      thresholds: {
+        keyword: keyword ? { match: keyword.match, margin: VOICE_THRESHOLDS.keyword.margin } : keep("keyword"),
+        utterance: utterance ? { match: utterance.match, margin: VOICE_THRESHOLDS.utterance.margin } : keep("utterance"),
+      },
+    };
+    this.options.store.saveCalibration?.(c);
+    this.calibration = c;
+    this.log(`identity: 聲音門檻已套用（喚醒詞 ${keyword ? "校準值" : "起點值"}，話語 ${utterance ? "校準值" : "起點值"}；待驗證）`);
+    return { ok: true, op: "calib_apply", report: this.calibrationReport() };
+  }
+
+  private async calibClear(): Promise<IdentityResponse> {
+    this.requireVoiceReady();
+    const ok = (await this.options.confirm({ kind: "calib_clear" })) === true;
+    if (!ok) throw new RequestError("declined", "沒有清除");
+    this.options.store.removeCalibration?.();
+    this.calibration = null;
+    this.log("identity: 聲音校準資料已清除");
+    return { ok: true, op: "calib_clear", report: this.calibrationReport() };
   }
 
   /**
@@ -931,7 +1148,7 @@ export class IdentityService {
   private matchVoice(segment: VoiceSegment, feature: Float32Array): VoiceObservation {
     const people = this.comparableVoice();
     if (people.length === 0) return { state: "unavailable", reason: "no_enrollment", segment };
-    const limits = VOICE_THRESHOLDS[segment];
+    const limits = this.voiceLimits(segment);
     const ranked = people.map((person) => ({ person, score: dot(feature, meanDirection(person.voice![segment])) })).sort((a, b) => b.score - a.score);
     const [first, second] = ranked;
     if (!first || first.score < limits.match) return { state: "unknown", segment };

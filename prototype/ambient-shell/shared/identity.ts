@@ -107,6 +107,57 @@ export const CALL_VOICE_MIN_MS = 2000;
  */
 export const VOICE_CALIBRATED: Readonly<Record<VoiceSegment, boolean>> = { keyword: false, utterance: false };
 
+// ───────────── SP-03a 聲音校準（George 2026-11-01：先只有 George、陌生聲音用 Mac 內建朗讀、只存分數、錯認 0/100 才放行） ─────────────
+
+/** 一次校準試驗：誰說的（家人或電腦朗讀的陌生聲音）、哪種片段，以及這段對每位家人同類模板的分數。不存錄音或特徵。 */
+export interface CalibrationTrial {
+  label: "member" | "stranger";
+  /** label member：說話的家人。 */
+  person_id?: string;
+  segment: VoiceSegment;
+  voiced_ms: number;
+  scores: { person_id: string; score: number }[];
+  /** collect：用來建議門檻；verify：套用門檻之後的驗證。 */
+  phase: "collect" | "verify";
+  at: string;
+}
+
+/** 收集階段每種片段至少要有幾筆家人樣本與陌生聲音，才能建議門檻。 */
+export const CALIBRATION_MIN = { member: 10, stranger: 30 } as const;
+/** 驗證階段每種片段要幾筆陌生聲音全部不被認成家人（兩種合計 100 次，17 §13.2 S7「錯認名字 0／100」）。 */
+export const CALIBRATION_VERIFY_STRANGERS = 50;
+/** 建議門檻＝陌生聲音最高分＋這個安全距離（不低於 floor）。 */
+export const CALIBRATION_SAFETY = 0.05;
+export const CALIBRATION_MATCH_FLOOR = 0.3;
+
+export interface CalibrationSegmentReport {
+  segment: VoiceSegment;
+  /** 收集階段：家人樣本數、陌生聲音數（含家人互相當冒名者的分數）。 */
+  member_trials: number;
+  stranger_trials: number;
+  /** 家人樣本對自己模板的分數（最低、中位數）；陌生聲音的最高分。沒有資料時 null。 */
+  member_min: number | null;
+  member_median: number | null;
+  stranger_max: number | null;
+  /** 建議門檻（資料不足時 null）與在收集資料上的拒認率（家人沒被認出的比例）。 */
+  proposed: { match: number; margin: number } | null;
+  proposed_reject_rate: number | null;
+  /** 目前使用的門檻（已套用的，或未校準的起點值）。 */
+  current: { match: number; margin: number };
+  applied: boolean;
+  /** 驗證階段（套用之後）：陌生聲音筆數、其中被認成家人的筆數、家人樣本筆數與沒被認出的筆數。 */
+  verify: { stranger_trials: number; false_accepts: number; member_trials: number; rejects: number };
+  /** 驗證通過（陌生聲音 ≥ CALIBRATION_VERIFY_STRANGERS 且 0 筆被認成家人）：這種片段可以只憑聲音稱名。 */
+  calibrated: boolean;
+}
+
+export interface CalibrationReport {
+  segments: CalibrationSegmentReport[];
+  /** 已登記聲音的家人人數（樣本只算目前模板還有效的）。 */
+  voices: number;
+  applied_at: string | null;
+}
+
 /** 一段聲音的辨認結果（docs/17 §7.2）。只在核心與管理畫面的試認使用；喚醒時的結果不回頁面。 */
 export type VoiceUnavailableReason = "no_enrollment" | "too_short" | "model_unavailable";
 export interface VoiceObservation {
@@ -124,9 +175,10 @@ export interface VoiceObservation {
  * - voice_unsupported：臉認出，但這個人有登記聲音、聲音卻是 unknown／ambiguous（不支持）。
  * - voice_only：沒有臉的結果、聲音認出（校準前不稱名）。
  * - voice_only_test：同上，但 SP-02a 測試開關開著，所以以聲音叫了名字（門檻未校準）。
+ * - voice_only_calibrated：同上，認出這個人的片段已校準驗證通過（SP-03a），不需要測試開關。
  * - none：都沒有。
  */
-export type VoiceFusion = "confirmed" | "conflict" | "face_only" | "voice_unsupported" | "voice_only" | "voice_only_test" | "none";
+export type VoiceFusion = "confirmed" | "conflict" | "face_only" | "voice_unsupported" | "voice_only" | "voice_only_test" | "voice_only_calibrated" | "none";
 
 /** 聲音特徵的形狀檢查：192 個有限數值且已 L2 normalize。 */
 export function isValidSpeakerFeature(v: unknown): v is ArrayLike<number> {
@@ -460,7 +512,7 @@ export interface GreetingDecision {
 }
 
 /** IPC 的操作（desktop/identity-ipc.mjs 的白名單與這裡一致，測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test", "call_voice"] as const;
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test", "call_voice", "calib_status", "calib_trial", "calib_apply", "calib_clear"] as const;
 export type IdentityOp = (typeof IDENTITY_OPS)[number];
 
 export type IdentityRequest =
@@ -508,7 +560,12 @@ export type IdentityRequest =
    * SP-02b 通話中的一段話（「通話中辨認說話者」開著時；不需要管理 session）。feature 在人聲不足時省略。回應一律只有 ok；
    * 核心只拿它當記憶人物候選與換人紀錄（只記 log，不打斷）。
    */
-  | { op: "call_voice"; voiced_ms: number; model: SpeakerModelVersion; feature?: number[] };
+  | { op: "call_voice"; voiced_ms: number; model: SpeakerModelVersion; feature?: number[] }
+  /** SP-03a 校準：報告、記一筆試驗（只回報告，不回這筆的分數）、套用建議門檻（原生確認）、清除校準資料（原生確認）。 */
+  | { op: "calib_status"; session: string }
+  | { op: "calib_trial"; session: string; label: "member" | "stranger"; person_id?: string; segment: VoiceSegment; voiced_ms: number; model: SpeakerModelVersion; feature: number[] }
+  | { op: "calib_apply"; session: string }
+  | { op: "calib_clear"; session: string };
 
 /** 管理畫面需要的狀態（open_session、list 與變更後回傳）。 */
 export interface IdentityManageView {
@@ -556,6 +613,7 @@ export type IdentityResponse =
   | { ok: true; op: "ambient_probe" }
   | { ok: true; op: "voice_probe" }
   | { ok: true; op: "call_voice" }
+  | { ok: true; op: "calib_status" | "calib_trial" | "calib_apply" | "calib_clear"; report: CalibrationReport }
   | { ok: true; op: "voice_test"; observation: VoiceObservation }
   /**
    * api_key：text 是 response.create 這一輪的 instructions（只含核心組好的短句；名字會短暫出現在頁面，ADR-0001 §2.4）。
