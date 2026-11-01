@@ -62,6 +62,7 @@
 | 語音閒置秒數 | `~/.config/nous/voice.json`（與終端機版共用；選單列「鏡頭與語音設定」的語音兩項寫入這裡） |
 | 家人辨識的加密資料 | `~/Library/Application Support/Nous/identity/gallery.v1.json`（資料夾 0700、檔案 0600、加 Time Machine 排除）。只存加密的臉部特徵與名稱，不存照片；資料金鑰以 safeStorage（Keychain 中的應用程式金鑰）包裝，每次登記或刪除都換新金鑰 |
 | 家人辨識的模型與 runtime | `~/Library/Application Support/Nous/face-runtime/`（`npm run face:setup -- --product` 安裝；不在 App 包裡） |
+| 家人聲音登記的模型 | `~/Library/Application Support/Nous/speaker-runtime/`（`npm run speaker:setup` 安裝；不在 App 包裡）。聲音特徵加密存在同一個 `gallery.v1.json`，不存錄音 |
 | 記錄檔 | `~/Library/Application Support/Nous/nous.log` |
 
 App 內容（`app.asar`）只有程式、前端與圖示，不含任何 `.env`、任務資料、登入憑證、家人資料或辨識模型。
@@ -85,6 +86,7 @@ cd desktop
 npm ci
 npm run icons    # 重新產生圖示（已附在 assets/，改了 scripts/make-icons.swift 才需要）
 cd .. && npm run face:setup -- --product && cd desktop   # 選用：家人辨識的模型（約 53 MB，裝到 ~/Library/Application Support/Nous/face-runtime/）
+cd .. && npm run speaker:setup && cd desktop             # 選用：家人聲音登記的模型（約 41 MB，裝到 ~/Library/Application Support/Nous/speaker-runtime/）
 npm start        # 開發：組好內容後直接用 Electron 開
 npm run package  # 打包成 release/Nous-darwin-arm64/Nous.app 與 zip
 ```

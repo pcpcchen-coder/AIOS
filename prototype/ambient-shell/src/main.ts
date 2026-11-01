@@ -42,6 +42,8 @@ import { AmbientIdentity } from "./sense/identity-ambient.ts";
 import { LookTimeline } from "./look-timeline.ts";
 import type { IdentityRequest, IdentityResponse } from "../shared/identity.ts";
 import faceRuntime from "../shared/face-runtime.json" with { type: "json" };
+import speakerRuntime from "../shared/speaker-runtime.json" with { type: "json" };
+import { OWN_MICROPHONE, type MicSource, type SpeakerWorkerLike } from "./speaker/recorder.ts";
 import { evaluateSurface } from "./presentation-policy.ts";
 import { blocksAutoTalk, initialShell, reduceShell, type ShellEvent, type ShellState } from "./shell-state.ts";
 import {
@@ -1338,8 +1340,38 @@ const sense = new SenseController({
 setInterval(() => sense.tick(), 200);
 
 // 家人辨識（docs/14 ID-01）：只由選單列打開；畫面收起時停止取樣、丟掉記憶體中的樣本與 session。
+/**
+ * SP-01 聲音登記的麥克風：常駐喚醒有開時向它租用（KWS 暫停、歸還後自動恢復）；沒有時自己開（src/speaker/recorder.ts）。
+ * 記下每條串流是跟誰借的，歸還時才不會還錯地方（喚醒在錄音途中被打開或關掉也一樣）。
+ */
+const familyMicLeases = new WeakMap<MediaStream, WakeController>();
+const familyMic: MicSource = {
+  acquire: async () => {
+    const owner = wake;
+    if (!owner) return OWN_MICROPHONE.acquire();
+    const stream = await owner.lease();
+    familyMicLeases.set(stream, owner);
+    return stream;
+  },
+  release: (stream) => {
+    const owner = familyMicLeases.get(stream);
+    familyMicLeases.delete(stream);
+    if (owner) owner.releaseLease(stream);
+    else OWN_MICROPHONE.release(stream);
+  },
+};
+
 const familyView = new FamilyView({
   bridge: window.nousDesktop?.identity ? { identity: (request) => window.nousDesktop!.identity!(request) } : null,
+  ...(window.nousDesktop?.identity
+    ? {
+        voice: {
+          mic: familyMic,
+          createWorker: () => new Worker(new URL("./speaker/worker.ts", import.meta.url), { type: "module" }) as unknown as SpeakerWorkerLike,
+          model: speakerRuntime.model_version,
+        },
+      }
+    : {}),
   source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) },
   createWorker: createIdentityWorker,
   model: faceRuntime.model_version,

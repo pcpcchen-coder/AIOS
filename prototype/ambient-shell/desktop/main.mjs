@@ -28,6 +28,8 @@ const logFile = join(userData, "nous.log");
 const identityDir = join(userData, "identity");
 /** 家人辨識的模型與 onnxruntime wasm：只由 npm run face:setup -- --product 安裝到這裡，不在 App 包裡。 */
 const faceRuntimeDir = join(userData, "face-runtime");
+// SP-01 家人聲音辨認的講者模型（npm run speaker:setup 安裝；核心核對雜湊後從 /speaker-runtime/ 提供）。
+const speakerRuntimeDir = join(userData, "speaker-runtime");
 /**
  * 家庭記憶的加密快照（docs/16；0700；Time Machine 排除）。資料夾與 Keychain 只在使用者說「記住…」、打開「記憶…」，
  * 或上次執行時記憶是開著的（核心在 configDir 留一個不含內容的開關提示）而第一次打字時才碰；查狀態不碰。
@@ -153,6 +155,7 @@ async function startCore() {
       excludeFromBackup: excludeFromTimeMachine,
       confirm: confirmIdentity,
       modelDir: faceRuntimeDir,
+      speakerModelDir: speakerRuntimeDir,
     },
     wakeRuntimeDir,
     // 鏡頭只能由主程序在原生說明之後打開（setCameraActive）；頁面經 HTTP 送 active: true 會被核心拒絕（403）。
@@ -224,6 +227,34 @@ async function confirmIdentity(request) {
       ...(minor ? { checkboxLabel: "我是家長，本人在場，我確認同意登記這位未成年家人", checkboxChecked: false } : {}),
     });
     return response === 0 && (!minor || checkboxChecked === true);
+  }
+  if (request?.kind === "enroll_voice") {
+    // SP-01：只存聲音特徵（數字），錄音在頁面算完就丟，不寫檔、不上傳。
+    const minor = request.minor === true;
+    const { response, checkboxChecked } = await ask({
+      type: "question",
+      buttons: ["保存", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: request.existing ? `要保存「${request.name}」的聲音嗎？` : `要登記「${request.name}」為家人（只有聲音）嗎？`,
+      detail:
+        "本人必須在場、聽過說明並同意。Nous 只在這台 Mac 上保存加密的聲音特徵（一串數字，不存錄音、不上傳），只用來稱呼，" +
+        "不作為解鎖或授權的依據；錄音本身在算完特徵後就丟掉。隨時可以在「家人辨識」刪除。目前辨識門檻尚未校準。" +
+        (request.existing ? "\n\n原本登記的聲音（如有）會被取代。" : ""),
+      ...(minor ? { checkboxLabel: "我是家長，本人在場，我確認同意登記這位未成年家人", checkboxChecked: false } : {}),
+    });
+    return response === 0 && (!minor || checkboxChecked === true);
+  }
+  if (request?.kind === "delete_voice") {
+    const { response } = await ask({
+      type: "warning",
+      buttons: ["刪除聲音", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `要刪除「${request.name}」的聲音嗎？`,
+      detail: `只移除這位家人的聲音特徵，臉與名稱保留；會換用新的加密金鑰，刪除後無法還原。\n\n${backupNote}`,
+    });
+    return response === 0;
   }
   if (request?.kind === "delete") {
     // 連結的記憶（docs/17 §9.4、George 決定 ⑨）：顯示筆數；成人預設不勾，未成年預設勾選。不勾只解除連結。

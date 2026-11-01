@@ -19,7 +19,14 @@ import {
   INTERACTION_ID,
   LIVE_GREETING_PICKUP_MS,
   sameModelVersion,
+  sameSpeakerModel,
   speakableName,
+  isValidSpeakerFeature,
+  SPEAKER_FEATURE_DIM,
+  VOICE_KEYWORD_SAMPLES,
+  VOICE_THRESHOLDS,
+  VOICE_UTTERANCE_SAMPLES,
+  type SpeakerModelVersion,
   type EvidenceScope,
   type EvidenceState,
   type GreetingDecision,
@@ -39,6 +46,7 @@ import {
 import { liveGreetingText, strictGreetingInstructions } from "../shared/sense.ts";
 import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
+import type { SpeakerRuntimeCheck } from "./speaker-runtime.ts";
 import type { GalleryStore, GalleryVersions, StoredPerson } from "./identity-store.ts";
 
 // 家人辨識的核心（ADR-0001 §2.1：核心持有資料與邏輯，IPC 只做傳輸）。跑在 Electron 主程序（desktop/main.mjs 以
@@ -77,6 +85,10 @@ export const SESSION_RATE_PER_S = 6;
 
 export type ConfirmRequest =
   | { kind: "enroll"; name: string; minor: boolean }
+  /** SP-01：保存聲音特徵。existing＝加到已登記的家人（取代原本的聲音）；false＝新增一位只有聲音的家人。 */
+  | { kind: "enroll_voice"; name: string; minor: boolean; existing: boolean }
+  /** SP-01：只刪聲音（這位家人還有臉；只有聲音的家人走 delete）。 */
+  | { kind: "delete_voice"; name: string }
   /**
    * memory：連結到這位家人的記憶筆數與預設是否一起刪（17 §9.4、George 決定 ⑨：成人預設不勾，未成年預設勾）。
    * count 為 null：記憶檔這次還沒開過，不為了計數去開（不碰 Keychain），畫面寫「刪除時一併處理」。
@@ -133,6 +145,9 @@ export interface IdentityServiceOptions {
   /** 模型與 runtime 的雜湊核對結果（啟動時算一次）。 */
   runtime: FaceRuntimeCheck;
   model: FaceModelVersion;
+  /** SP-01 講者模型的雜湊核對結果與版本；未提供時（舊的組裝、測試）不能登記聲音。 */
+  speakerRuntime?: SpeakerRuntimeCheck;
+  speakerModel?: SpeakerModelVersion;
   now?: () => number;
   log?: (line: string) => void;
   onChange?: () => void;
@@ -197,6 +212,39 @@ function toFeature(v: unknown): Float32Array {
   return Float32Array.from(v);
 }
 
+function speakerModelOf(v: unknown): SpeakerModelVersion {
+  const m = record(v);
+  const s = (k: string) => {
+    const x = m[k];
+    if (typeof x !== "string" || x.length === 0 || x.length > 64) throw new RequestError("bad_request", "模型版本格式不對");
+    return x;
+  };
+  if (!Number.isInteger(m.dim)) throw new RequestError("bad_request", "模型版本格式不對");
+  return { speaker: s("speaker"), preproc: s("preproc"), dim: m.dim as number };
+}
+
+function toSpeakerFeature(v: unknown): Float32Array {
+  if (!isValidSpeakerFeature(v)) throw new RequestError("bad_request", `聲音特徵必須是 ${SPEAKER_FEATURE_DIM} 個有限數值且已正規化`);
+  return Float32Array.from(v);
+}
+
+/** 正規化的平均方向（特徵都已 normalize）。 */
+function meanDirection(features: readonly Float32Array[]): Float32Array {
+  const dim = features[0]?.length ?? 0;
+  const mean = new Float32Array(dim);
+  for (const f of features) for (let i = 0; i < dim; i++) mean[i]! += f[i]!;
+  const norm = Math.hypot(...mean);
+  for (let i = 0; i < dim; i++) mean[i] = mean[i]! / (norm || 1);
+  return mean;
+}
+
+/** 每段都接近平均方向、任兩段也不能差太多；低於任一項表示混到別人或沒錄到人聲。 */
+function consistent(features: readonly Float32Array[], limits: { consistency: number; consistency_pair: number }): boolean {
+  const mean = meanDirection(features);
+  const pairLow = features.some((f, i) => features.some((g, j) => j > i && dot(f, g) < limits.consistency_pair));
+  return !pairLow && features.every((f) => dot(f, mean) >= limits.consistency);
+}
+
 function dot(a: Float32Array, b: Float32Array): number {
   let s = 0;
   for (let i = 0; i < a.length; i++) s += a[i]! * b[i]!;
@@ -206,7 +254,7 @@ function dot(a: Float32Array, b: Float32Array): number {
 /** 每位家人：各樣本 cosine 的最大值（特徵都已 normalize，內積即 cosine）。 */
 function scores(people: readonly StoredPerson[], feature: Float32Array): { person: StoredPerson; score: number }[] {
   return people
-    .map((person) => ({ person, score: Math.max(...person.features.map((f) => dot(f, feature))) }))
+    .map((person) => ({ person, score: person.features.length > 0 ? Math.max(...person.features.map((f) => dot(f, feature))) : -1 }))
     .sort((a, b) => b.score - a.score);
 }
 
@@ -234,6 +282,8 @@ const LIMIT_MODELS_BAD = "辨識模型雜湊不符，已停用新增與試認；
 const LIMIT_CAMERA = "鏡頭未啟用或已關閉；只能查看與刪除";
 const LIMIT_KEY = "無法解開家人資料的金鑰（可能沒有允許鑰匙圈存取）：關閉後重新打開「家人辨識…」並在系統詢問時按「允許」，或重新啟動 Nous。資料沒有被改動";
 const LIMIT_CORRUPT = "家人資料檔損壞或被改動，無法解密：只能清除全部家人資料後重新登記";
+const VOICE_MODELS_MISSING = "聲音模型未安裝（npm run speaker:setup）；只能查看與刪除聲音";
+const VOICE_MODELS_BAD = "聲音模型雜湊不符，已停用錄製聲音；只能查看與刪除";
 
 export class IdentityService {
   private readonly now: () => number;
@@ -319,11 +369,12 @@ export class IdentityService {
       limited_reason: limited,
       count: this.people.length,
       max: FAMILY_MAX,
-      needs_reenroll: this.people.filter((p) => !sameModelVersion(p.model, this.options.model)).length,
+      needs_reenroll: this.people.filter((p) => p.features.length > 0 && !sameModelVersion(p.model, this.options.model)).length,
       damaged: this.people.filter((p) => p.damaged).length,
       gallery_version: this.versions.gallery_version,
       epoch: this.epoch,
       models: this.options.runtime.state,
+      voice_models: this.options.speakerRuntime?.state ?? "not_configured",
       backup_exclusion: this.options.store.backupExclusion(),
       calibrated: CALIBRATED,
       naming_notice_seen: this.options.store.namingNoticeSeen(),
@@ -417,6 +468,10 @@ export class IdentityService {
         return this.mutate(() => this.remove(session, req));
       case "clear_all":
         return this.mutate(() => this.clearAll(session));
+      case "enroll_voice":
+        return this.mutate(() => this.enrollVoice(session, req));
+      case "delete_voice":
+        return this.mutate(() => this.removeVoice(session, req));
       case "ack_naming":
         this.options.store.markNamingNoticeSeen(new Date(this.now()).toISOString());
         this.log("identity: 已看過雲端稱名說明");
@@ -485,8 +540,10 @@ export class IdentityService {
       name: p.name,
       minor: p.minor,
       created_at: p.created_at,
-      needs_reenroll: !sameModelVersion(p.model, this.options.model),
+      needs_reenroll: p.features.length > 0 && !sameModelVersion(p.model, this.options.model),
       damaged: p.damaged === true,
+      face: p.features.length > 0,
+      voice: !p.voice ? "none" : this.options.speakerModel && sameSpeakerModel(p.voice.model, this.options.speakerModel) ? "enrolled" : "needs_reenroll",
     }));
   }
 
@@ -501,7 +558,23 @@ export class IdentityService {
 
   /** 只與模型版本相符、資料完好的家人比對。 */
   private comparable(): StoredPerson[] {
-    return this.people.filter((p) => !p.damaged && sameModelVersion(p.model, this.options.model));
+    return this.people.filter((p) => !p.damaged && p.features.length > 0 && sameModelVersion(p.model, this.options.model));
+  }
+
+  /** 聲音：只與講者模型版本相符、資料完好的家人比對。 */
+  private comparableVoice(): StoredPerson[] {
+    const model = this.options.speakerModel;
+    return model ? this.people.filter((p) => !p.damaged && p.voice && sameSpeakerModel(p.voice.model, model)) : [];
+  }
+
+  /** 錄製聲音需要 gallery 可用與講者模型核對通過；鏡頭與臉的模型無關。 */
+  private requireVoiceReady(): SpeakerModelVersion {
+    const st = this.manageStatus();
+    if (st.state !== "ready") throw new RequestError("unavailable", st.limited_reason ?? "家人資料不可用");
+    const runtime = this.options.speakerRuntime?.state ?? "not_configured";
+    if (runtime === "hash_mismatch") throw new RequestError("unavailable", VOICE_MODELS_BAD);
+    if (runtime !== "ok" || !this.options.speakerModel) throw new RequestError("unavailable", VOICE_MODELS_MISSING);
+    return this.options.speakerModel;
   }
 
   private matchFrame(req: Record<string, unknown>): FrameMatch {
@@ -716,12 +789,16 @@ export class IdentityService {
   private async enroll(session: Session, req: Record<string, unknown>): Promise<IdentityResponse> {
     this.requireReady("新增家人");
     this.requireModel(req);
-    if (this.people.length >= FAMILY_MAX) throw new RequestError("full", `最多 ${FAMILY_MAX} 位家人`);
-    const name = parseFamilyName(req.name);
+    // SP-01：person_id＝幫只登記了聲音的家人補上臉（名稱與未成年沿用已存的資料）。
+    const existing = req.person_id === undefined ? null : this.findPerson(req.person_id);
+    if (existing && existing.features.length > 0) throw new RequestError("bad_request", "這位家人已經登記過臉；要重新登記請先刪除");
+    if (!existing && this.people.length >= FAMILY_MAX) throw new RequestError("full", `最多 ${FAMILY_MAX} 位家人`);
+    const name = existing ? { ok: true as const, name: existing.name } : parseFamilyName(req.name);
     if (!name.ok) throw new RequestError("bad_name", name.error);
     if (req.consent !== true) throw new RequestError("consent_required", "需要本人在場並同意");
-    if (typeof req.minor !== "boolean") throw new RequestError("bad_request", "minor 格式不對");
-    if (req.minor && req.guardian_confirmed !== true) throw new RequestError("guardian_required", "未成年家人需要家長確認同意");
+    const minor = existing ? existing.minor : req.minor;
+    if (typeof minor !== "boolean") throw new RequestError("bad_request", "minor 格式不對");
+    if (minor && req.guardian_confirmed !== true) throw new RequestError("guardian_required", "未成年家人需要家長確認同意");
     const raw = req.samples;
     if (!Array.isArray(raw) || raw.length < ENROLL_MIN_SAMPLES || raw.length > ENROLL_MAX_SAMPLES) {
       throw new RequestError("bad_samples", `需要 ${ENROLL_MIN_SAMPLES}–${ENROLL_MAX_SAMPLES} 張樣本`);
@@ -737,17 +814,22 @@ export class IdentityService {
       throw new RequestError("inconsistent_samples", "這批樣本看起來不是同一個人或品質不穩定，請重新取樣");
     }
     // 去重：多數樣本都和某位已登記的家人相符時，不新增、不覆蓋。不回是哪一位（避免拿登記當探測工具）。
-    for (const existing of this.comparable()) {
-      const hits = samples.filter((f) => Math.max(...existing.features.map((g) => dot(f, g))) >= MATCH_THRESHOLDS.match).length;
+    for (const other of this.comparable()) {
+      const hits = samples.filter((f) => Math.max(...other.features.map((g) => dot(f, g))) >= MATCH_THRESHOLDS.match).length;
       if (hits * 2 > samples.length) throw new RequestError("duplicate", "這個人看起來可能已經登記過；不會覆蓋。要重新登記請先刪除原本的資料");
     }
-    const minor = req.minor;
     if (!(await this.options.confirm({ kind: "enroll", name: name.name, minor }))) {
       throw new RequestError("declined", "沒有確認，未保存");
     }
     this.afterConfirm(session, "未保存");
-    if (this.people.length >= FAMILY_MAX) throw new RequestError("full", `最多 ${FAMILY_MAX} 位家人`);
     const at = new Date(this.now()).toISOString();
+    if (existing) {
+      if (!this.people.includes(existing)) throw new RequestError("not_found", "找不到這位家人");
+      this.commit(this.people.map((p) => (p === existing ? { ...p, model: { ...this.options.model }, features: samples, updated_at: at } : p)));
+      this.options.store.markNamingNoticeSeen(at);
+      return { ok: true, op: "enroll", ...this.manageView(session) };
+    }
+    if (this.people.length >= FAMILY_MAX) throw new RequestError("full", `最多 ${FAMILY_MAX} 位家人`);
     const person: StoredPerson = {
       person_id: `fam_${randomBytes(12).toString("hex")}`,
       name: name.name,
@@ -763,11 +845,98 @@ export class IdentityService {
     return { ok: true, op: "enroll", ...this.manageView(session) };
   }
 
-  private async remove(session: Session, req: Record<string, unknown>): Promise<IdentityResponse> {
-    if (this.gallery !== "ready") throw new RequestError("unavailable", this.manageStatus().limited_reason ?? "家人資料不可用");
-    const id = req.person_id;
+  private findPerson(id: unknown): StoredPerson {
     const target = typeof id === "string" && PERSON_ID.test(id) ? this.people.find((p) => p.person_id === id) : undefined;
     if (!target) throw new RequestError("not_found", "找不到這位家人");
+    return target;
+  }
+
+  /**
+   * SP-01 登記聲音：只收特徵（頁面算好、錄音已丟）。檢查順序：資料與模型可用 → 模型版本 → 段數與形狀 → 喚醒詞與朗讀各自一致
+   * → 對象（已登記的家人，或新增只有聲音的家人：名稱、同意、未成年的家長確認、人數上限）→ 和別人的聲音去重 → 原生確認 → 寫檔。
+   */
+  private async enrollVoice(session: Session, req: Record<string, unknown>): Promise<IdentityResponse> {
+    const model = this.requireVoiceReady();
+    if (!sameSpeakerModel(speakerModelOf(req.model), model)) throw new RequestError("model_mismatch", "頁面的聲音模型版本與核心不同，請重新整理");
+    if (!Array.isArray(req.keyword) || req.keyword.length !== VOICE_KEYWORD_SAMPLES || !Array.isArray(req.utterance) || req.utterance.length !== VOICE_UTTERANCE_SAMPLES) {
+      throw new RequestError("bad_samples", `需要喚醒詞 ${VOICE_KEYWORD_SAMPLES} 段與朗讀 ${VOICE_UTTERANCE_SAMPLES} 段`);
+    }
+    const keyword = req.keyword.map(toSpeakerFeature);
+    const utterance = req.utterance.map(toSpeakerFeature);
+    if (!consistent(keyword, VOICE_THRESHOLDS.keyword) || !consistent(utterance, VOICE_THRESHOLDS.utterance)) {
+      throw new RequestError("inconsistent_samples", "這次錄到的聲音不太一致（可能有別人說話、太小聲或背景太吵），請在安靜的地方重錄");
+    }
+    if (req.consent !== true) throw new RequestError("consent_required", "需要本人在場並同意");
+    const existing = req.person_id === undefined ? null : this.findPerson(req.person_id);
+    let name: string;
+    let minor: boolean;
+    if (existing) {
+      name = existing.name;
+      minor = existing.minor;
+    } else {
+      if (this.people.length >= FAMILY_MAX) throw new RequestError("full", `最多 ${FAMILY_MAX} 位家人`);
+      const parsed = parseFamilyName(req.name);
+      if (!parsed.ok) throw new RequestError("bad_name", parsed.error);
+      if (typeof req.minor !== "boolean") throw new RequestError("bad_request", "minor 格式不對");
+      name = parsed.name;
+      minor = req.minor;
+    }
+    if (minor && req.guardian_confirmed !== true) throw new RequestError("guardian_required", "未成年家人需要家長確認同意");
+    // 去重：朗讀的平均方向和另一位家人的太像，視為同一個人；不回是哪一位（避免拿登記當探測工具）。
+    const mine = meanDirection(utterance);
+    for (const other of this.comparableVoice()) {
+      if (other === existing) continue;
+      if (dot(mine, meanDirection(other.voice!.utterance)) >= VOICE_THRESHOLDS.duplicate) {
+        throw new RequestError("duplicate", "這個聲音和另一位已登記的家人很像；不會保存。要重錄請先刪除原本的聲音");
+      }
+    }
+    if (!(await this.options.confirm({ kind: "enroll_voice", name, minor, existing: existing !== null }))) {
+      throw new RequestError("declined", "沒有確認，未保存");
+    }
+    this.afterConfirm(session, "未保存");
+    const at = new Date(this.now()).toISOString();
+    const voice = { model: { ...model }, keyword, utterance, updated_at: at };
+    if (existing) {
+      if (!this.people.includes(existing)) throw new RequestError("not_found", "找不到這位家人");
+      const old = existing.voice;
+      this.commit(this.people.map((p) => (p === existing ? { ...p, voice, updated_at: at } : p)));
+      if (old) for (const f of [...old.keyword, ...old.utterance]) f.fill(0);
+    } else {
+      if (this.people.length >= FAMILY_MAX) throw new RequestError("full", `最多 ${FAMILY_MAX} 位家人`);
+      this.commit([
+        ...this.people,
+        { person_id: `fam_${randomBytes(12).toString("hex")}`, name, minor, created_at: at, updated_at: at, model: { ...this.options.model }, features: [], voice },
+      ]);
+    }
+    return { ok: true, op: "enroll_voice", ...this.manageView(session) };
+  }
+
+  /** 只刪聲音；只有聲音的家人等同刪除整位（含記憶的處理），走 remove。 */
+  private async removeVoice(session: Session, req: Record<string, unknown>): Promise<IdentityResponse> {
+    if (this.gallery !== "ready") throw new RequestError("unavailable", this.manageStatus().limited_reason ?? "家人資料不可用");
+    const target = this.findPerson(req.person_id);
+    if (!target.voice) throw new RequestError("not_found", "這位家人沒有登記聲音");
+    if (target.features.length === 0) {
+      const res = await this.remove(session, req);
+      return res.ok && res.op === "delete" ? { ...res, op: "delete_voice" } : res;
+    }
+    if (!(await this.options.confirm({ kind: "delete_voice", name: target.name }))) throw new RequestError("declined", "沒有確認，未刪除");
+    this.afterConfirm(session, "未刪除");
+    if (!this.people.includes(target)) throw new RequestError("not_found", "找不到這位家人");
+    const old = target.voice;
+    const at = new Date(this.now()).toISOString();
+    this.commit(this.people.map((p) => {
+      if (p !== target) return p;
+      const { voice: _voice, ...rest } = p;
+      return { ...rest, updated_at: at };
+    }));
+    for (const f of [...old.keyword, ...old.utterance]) f.fill(0);
+    return { ok: true, op: "delete_voice", ...this.manageView(session) };
+  }
+
+  private async remove(session: Session, req: Record<string, unknown>): Promise<IdentityResponse> {
+    if (this.gallery !== "ready") throw new RequestError("unavailable", this.manageStatus().limited_reason ?? "家人資料不可用");
+    const target = this.findPerson(req.person_id);
     // 連結的記憶筆數（記憶不可用或沒有連結時不問）：未成年預設一起刪，成人預設只解除連結（George 決定 ⑨）。
     const memory = this.options.memory?.() ?? null;
     const linked = memory ? await memory.countForFace(target.person_id).catch(() => null) : null;
@@ -779,6 +948,7 @@ export class IdentityService {
     this.commit(this.people.filter((p) => p !== target));
     // 寫檔成功後才清零被刪者的特徵；寫入失敗時資料與比對都保持原樣。
     for (const f of target.features) f.fill(0);
+    if (target.voice) for (const f of [...target.voice.keyword, ...target.voice.utterance]) f.fill(0);
     // 記憶：不勾只解除連結並撤銷本次人物，不默默刪記憶（16 §8）；勾選才刪除整個人物記憶。結果照實回給畫面。
     let result: MemoryUnlinkResult | undefined;
     if (memory && linked) {

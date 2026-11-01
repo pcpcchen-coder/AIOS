@@ -309,10 +309,13 @@ macOS App 選單列「鏡頭與語音設定 → 家人辨識…」打開「家�
 ```bash
 npm run face:setup -- --product   # YuNet 2023mar、SFace 與 onnxruntime wasm（約 53 MB）；核對 SHA-256 後裝到 face-runtime/（不進 git），
                                   # macOS 另外複製到 ~/Library/Application Support/Nous/face-runtime/（App 從那裡讀）
+npm run speaker:setup             # 家人聲音登記：CAM++ zh_en advanced 與 onnxruntime wasm（約 41 MB）；核對 SHA-256 後裝到 speaker-runtime/（不進 git），
+                                  # macOS 另外複製到 ~/Library/Application Support/Nous/speaker-runtime/
 ```
 
 - **資料**：只存加密的臉部特徵與名稱，不存照片。資料金鑰以 Electron safeStorage 包裝，gallery 用 AES-256-GCM；每次登記或刪除都換新金鑰。刪除與登記前跳系統確認視窗。刪除後新的資料無法還原，但在此之前的 Time Machine 備份或 APFS 本機快照可能仍保有舊的加密檔（應用程式金鑰不輪換），畫面與確認視窗都照實說明。
 - **邊界**：身分資料（姓名、識別碼、特徵）只走 Electron IPC 到核心，不走本機 HTTP；`GET /api/settings` 的 `identity` 只有可用狀態與人數。推論在 module worker（`src/sense/identity-worker.ts`，產品中唯一能讀像素的檔案），像素不離開 worker；模型與 wasm 不進 `dist`，由核心核對雜湊後從 `/face-runtime/` 提供，JS 回應帶 `connect-src 'self'` 的 CSP。
+- **聲音登記（SP-01）**：家人列表的「錄製聲音」，或新增家人時選「只錄聲音」「兩個都做」。每段先響一聲提示音，依序念 5 次喚醒詞（Hey Nous／Hello Nous）與 3 句短句；太小聲或太短就重念，每段最多 3 次。推論在 `src/speaker/worker.ts`，麥克風樣本經 AudioWorklet 直送 worker，只存加密的 192 維聲音特徵、不存錄音；常駐喚醒有開時向它借麥克風，用完歸還。**只登記，通話中還不會用聲音認人或稱名**；一致性與重複門檻未校準。見 [SP-00／SP-01 驗證](../../docs/validation/sp-00-2026-11-01.md)。
 - **登記**：名稱 1–16 字（拒換行、控制字元，以及角括號、大括號、方括號、反引號、雙引號與反斜線）→ 本人在場同意（未成年另需家長確認）→ 依提示（正面、稍左、稍右、抬頭、低頭）自動取 7 張品質合格的樣本，中途出現多張臉或中斷超過 0.5 秒整批重來 → 核心檢查一致性與重複（「看起來已登記為 X」不覆蓋）→ 系統確認後才寫檔。
 - **試認**：顯示「認得：X／不認得／多張臉／品質不足」，標「門檻未校準」。認得、不認得與「分不清是哪一位」都要至少 3 格、跨 0.5 秒一致才回，之前一律顯示「辨識中…」（單一格不能拿來探測某張臉是否已登記）；門檻是未校準的起點值，不是 OpenCV 範例的 0.363。
 - **工作階段**：只有點選單後 10 秒內、主視窗頁面才能開；收起、閒置 10 分鐘、開滿 15 分鐘、主視窗重新載入或導覽、核心重新啟動都會結束。家人資料第一次打開時才載入（啟動時不碰鑰匙圈）；解不開金鑰（可能沒允許鑰匙圈）可重試，檔案損壞才提供「清除全部」。
@@ -422,6 +425,7 @@ prototype/ambient-shell/
 │   └── app.ts / http-guard.ts / config.ts / index.ts
 ├── spike/face/             # ID-00 人臉 spike（開發工具，不接進產品；見 docs/adr/ADR-0001）
 ├── face-runtime/           # 家人辨識的模型與 wasm（npm run face:setup -- --product；不進 git、不進 dist）
+├── speaker-runtime/        # 家人聲音登記的講者模型與 wasm（npm run speaker:setup；不進 git、不進 dist）
 ├── shared/                 # 前後端共用型別與進度計算；prefs.ts、voice-prefs.ts（設定規格）、
 │                           # seconds-menu.ts（選單列鏡頭開關、秒數與倍率）、voice-commands.ts（指令表唯一來源）
 └── tests/                  # vitest

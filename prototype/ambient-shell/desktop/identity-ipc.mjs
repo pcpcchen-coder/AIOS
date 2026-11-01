@@ -7,11 +7,15 @@
 import { checkTrustedSender } from "./trusted-sender.mjs";
 
 /** 與 shared/identity.ts 的 IDENTITY_OPS 相同（測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming"];
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice"];
 
 export const MENU_CLICK_WINDOW_MS = 10_000;
 const FEATURE_DIM = 128;
 const MAX_SAMPLES = 10;
+/** SP-01 聲音特徵（CAM++）與段數（同 shared/identity.ts 的 SPEAKER_FEATURE_DIM、VOICE_KEYWORD_SAMPLES、VOICE_UTTERANCE_SAMPLES）。 */
+const SPEAKER_DIM = 192;
+const VOICE_KEYWORD_SAMPLES = 5;
+const VOICE_UTTERANCE_SAMPLES = 3;
 const SESSION = /^ids_[0-9a-f]{32}$/;
 const PERSON = /^fam_[0-9a-f]{24}$/;
 const INTERACTION = /^int_[0-9a-f]{16}$/;
@@ -24,10 +28,16 @@ export const checkIdentitySender = checkTrustedSender;
 const isInt = (v, min, max) => typeof v === "number" && Number.isInteger(v) && v >= min && v <= max;
 const isShortString = (v, max) => typeof v === "string" && v.length > 0 && v.length <= max;
 
-function feature(v) {
-  if (!Array.isArray(v) || v.length !== FEATURE_DIM) return null;
+function feature(v, dim = FEATURE_DIM) {
+  if (!Array.isArray(v) || v.length !== dim) return null;
   for (const x of v) if (typeof x !== "number" || !Number.isFinite(x)) return null;
   return v.slice();
+}
+
+function speakerModel(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  if (!isShortString(v.speaker, 64) || !isShortString(v.preproc, 64) || !isInt(v.dim, 1, 4096)) return null;
+  return { speaker: v.speaker, preproc: v.preproc, dim: v.dim };
 }
 
 function model(v) {
@@ -80,8 +90,33 @@ export function validateIdentityRequest(req) {
     case "ack_naming":
       return { ok: true, request: { op, session } };
     case "delete":
+    case "delete_voice":
       if (!(typeof req.person_id === "string" && PERSON.test(req.person_id))) return bad("person_id is required");
       return { ok: true, request: { op, session, person_id: req.person_id } };
+    case "enroll_voice": {
+      // 只有特徵，沒有錄音：形狀不對整個拒絕。有 person_id 時不收 name／minor（沿用已存的資料）。
+      const m = speakerModel(req.model);
+      if (!m) return bad("model is required");
+      if (typeof req.consent !== "boolean") return bad("consent must be a boolean");
+      if (req.guardian_confirmed !== undefined && typeof req.guardian_confirmed !== "boolean") return bad("guardian_confirmed must be a boolean");
+      if (!Array.isArray(req.keyword) || req.keyword.length !== VOICE_KEYWORD_SAMPLES) return bad(`keyword must be ${VOICE_KEYWORD_SAMPLES} features`);
+      if (!Array.isArray(req.utterance) || req.utterance.length !== VOICE_UTTERANCE_SAMPLES) return bad(`utterance must be ${VOICE_UTTERANCE_SAMPLES} features`);
+      const keyword = req.keyword.map((f) => feature(f, SPEAKER_DIM));
+      const utterance = req.utterance.map((f) => feature(f, SPEAKER_DIM));
+      if ([...keyword, ...utterance].some((f) => f === null)) return bad(`each voice feature must be ${SPEAKER_DIM} finite numbers`);
+      const request = { op, session, consent: req.consent, model: m, keyword, utterance };
+      if (req.guardian_confirmed !== undefined) request.guardian_confirmed = req.guardian_confirmed;
+      if (req.person_id !== undefined) {
+        if (!(typeof req.person_id === "string" && PERSON.test(req.person_id))) return bad("person_id is malformed");
+        request.person_id = req.person_id;
+      } else {
+        if (typeof req.name !== "string" || req.name.length > 256) return bad("name is required");
+        if (typeof req.minor !== "boolean") return bad("minor must be a boolean");
+        request.name = req.name;
+        request.minor = req.minor;
+      }
+      return { ok: true, request };
+    }
     case "probe": {
       const m = model(req.model);
       if (!m) return bad("model is required");
@@ -103,12 +138,15 @@ export function validateIdentityRequest(req) {
         return bad("minor, guardian_confirmed and consent must be booleans");
       }
       if (!Array.isArray(req.samples) || req.samples.length === 0 || req.samples.length > MAX_SAMPLES) return bad("samples must be 1–10 features");
-      const samples = req.samples.map(feature);
+      const samples = req.samples.map((s) => feature(s));
       if (samples.some((s) => s === null)) return bad(`each sample must be ${FEATURE_DIM} finite numbers`);
-      return {
-        ok: true,
-        request: { op, session, name: req.name, minor: req.minor, guardian_confirmed: req.guardian_confirmed, consent: req.consent, model: m, samples },
-      };
+      const request = { op, session, name: req.name, minor: req.minor, guardian_confirmed: req.guardian_confirmed, consent: req.consent, model: m, samples };
+      // SP-01：幫只登記了聲音的家人補臉（名稱與未成年由核心沿用已存的資料）。
+      if (req.person_id !== undefined) {
+        if (!(typeof req.person_id === "string" && PERSON.test(req.person_id))) return bad("person_id is malformed");
+        request.person_id = req.person_id;
+      }
+      return { ok: true, request };
     }
     default:
       return bad("unknown op");

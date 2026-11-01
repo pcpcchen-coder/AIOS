@@ -50,7 +50,7 @@ describe("English and Chinese App/web views", () => {
     setLocale("zh-TW");
     const { FamilyView } = await import("../src/family-view.ts");
     const family = new FamilyView({
-      bridge: { identity: async () => ({ ok: true, op: "open_session", session: "ids_fixture", people: [], status: { state: "ready", limited_reason: null, count: 0, max: 8, needs_reenroll: 0, damaged: 0, gallery_version: 1, epoch: 1, models: "ok", backup_exclusion: "excluded", calibrated: false, naming_notice_seen: true } }) },
+      bridge: { identity: async () => ({ ok: true, op: "open_session", session: "ids_fixture", people: [], status: { state: "ready", limited_reason: null, count: 0, max: 8, needs_reenroll: 0, damaged: 0, gallery_version: 1, epoch: 1, models: "ok", voice_models: "ok", backup_exclusion: "excluded", calibrated: false, naming_notice_seen: true } }) },
       source: { sampleFrame: async () => null },
       createWorker: () => { throw new Error("No camera is used in this UI fixture"); },
       model: { detector: "d", recognizer: "r", align: "a", preproc: "p" }, dismiss: () => {},

@@ -93,7 +93,12 @@ describe("audio privacy (static)", () => {
     // 鏡頭管線：不收音（audio: false）
     expect(byFile(join("sense", "pipeline.ts")).length).toBe(2);
     expect(readFileSync(join(src, "sense", "pipeline.ts"), "utf8")).toMatch(/audio: false/);
-    expect(callers.filter((c) => ![join("audio", "front-end.ts"), "realtime.ts", join("sense", "pipeline.ts")].includes(c.file))).toEqual([]);
+    // SP-01 聲音登記：只在「家人辨識」畫面、本人同意後才開；常駐喚醒有開時改向 WakeController 租用（src/main.ts 的 familyMic），
+    // 這一行只是喚醒沒開時的備案，約束與即時語音相同。
+    expect(byFile(join("speaker", "recorder.ts")).map((c) => c.line)).toEqual([
+      "acquire: () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }),",
+    ]);
+    expect(callers.filter((c) => ![join("audio", "front-end.ts"), "realtime.ts", join("sense", "pipeline.ts"), join("speaker", "recorder.ts")].includes(c.file))).toEqual([]);
   });
 
   it("src/audio never records, exports, uploads, stores, logs or talks to IPC; the only network lines are the pinned ones in runtime-net.ts", () => {
@@ -236,7 +241,11 @@ describe("audio privacy (static)", () => {
     const product = ["src", "server", "shared", "desktop"].flatMap((d) => files(join(app, d))).filter((f) => !f.startsWith(audio));
     const IMPORTS_AUDIO = /(\bfrom\s+|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`][^"'`]*\baudio\/[\w-]+\.ts/;
     const importers = product.filter((f) => IMPORTS_AUDIO.test(readFileSync(f, "utf8"))).map((f) => relative(app, f));
-    expect(importers).toEqual([join("src", "main.ts")]);
+    expect(importers.sort()).toEqual([join("src", "main.ts"), join("src", "speaker", "recorder.ts"), join("src", "speaker", "worker.ts")].sort());
+    // SP-01 聲音登記只借用兩個無狀態的零件：擷取 AudioWorklet 的網址與取樣率轉換；碰不到 AudioFrontEnd／WakeController／KWS。
+    const audioImports = (rel: string) => [...readFileSync(join(app, rel), "utf8").matchAll(/from\s+["']([^"']*\baudio\/[^"']+)["']/g)].map((m) => m[1]);
+    expect(audioImports(join("src", "speaker", "recorder.ts"))).toEqual(["../audio/capture-worklet.ts?worker&url"]);
+    expect(audioImports(join("src", "speaker", "worker.ts"))).toEqual(["../audio/resample.ts"]);
     const main = readFileSync(join(src, "main.ts"), "utf8");
     const statics = [...main.matchAll(/^import\s+(type\s+)?[^;]*from\s+["']\.\/audio\/[^"']+["'];$/gm)];
     expect(statics.map((m) => Boolean(m[1]))).toEqual([true]); // 只有 import type（編譯後消失）

@@ -20,7 +20,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     // /face-runtime/ 也轉給核心：模型與 wasm 只由核心核對雜湊後提供。
-    proxy: { "/api": { target: "http://127.0.0.1:8787" }, "/face-runtime": { target: "http://127.0.0.1:8787" } },
+    proxy: { "/api": { target: "http://127.0.0.1:8787" }, "/face-runtime": { target: "http://127.0.0.1:8787" }, "/speaker-runtime": { target: "http://127.0.0.1:8787" } },
     headers: dev,
   },
   preview: { headers: page },

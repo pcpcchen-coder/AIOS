@@ -65,6 +65,7 @@ The monochrome template icon adapts to light / dark menu bars. Voice adds a soli
 | Voice idle timeouts | `~/.config/nous/voice.json`, shared with terminal mode |
 | Encrypted family recognition data | `~/Library/Application Support/Nous/identity/gallery.v1.json`, directory 0700, file 0600, excluded from Time Machine. Encrypted face features and names only, no photos. safeStorage wraps the data key with the Keychain application key. Each enrollment / deletion rotates the data key |
 | Recognition models and runtime | `~/Library/Application Support/Nous/face-runtime/`, installed with `npm run face:setup -- --product`, outside the App bundle |
+| Voice enrollment model | `~/Library/Application Support/Nous/speaker-runtime/`, installed with `npm run speaker:setup`, outside the App bundle. Voice features are encrypted in the same `gallery.v1.json`; no recordings are stored |
 | Logs | `~/Library/Application Support/Nous/nous.log` |
 
 `app.asar` contains code, frontend, and icons only. No `.env`, task data, credentials, family data, or recognition models.
@@ -90,6 +91,7 @@ cd desktop
 npm ci
 npm run icons    # 重新產生圖示（已附在 assets/，改了 scripts/make-icons.swift 才需要）
 cd .. && npm run face:setup -- --product && cd desktop   # 選用：家人辨識的模型（約 53 MB，裝到 ~/Library/Application Support/Nous/face-runtime/）
+cd .. && npm run speaker:setup && cd desktop             # 選用：家人聲音登記的模型（約 41 MB，裝到 ~/Library/Application Support/Nous/speaker-runtime/）
 npm start        # 開發：組好內容後直接用 Electron 開
 npm run package  # 打包成 release/Nous-darwin-arm64/Nous.app 與 zip
 ```

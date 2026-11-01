@@ -28,6 +28,7 @@ import { HomeBridge } from "./home-bridge.ts";
 import { TaskRunner } from "./runner.ts";
 import { memoryTaskViews, TaskStore, type PlaintextDropReason } from "./store.ts";
 import { checkFaceRuntime, FACE_MODEL_VERSION } from "./face-runtime.ts";
+import { checkSpeakerRuntime, SPEAKER_MODEL_VERSION } from "./speaker-runtime.ts";
 import { checkWakeRuntime } from "./wake-runtime.ts";
 import { WakeSettingsStore } from "./wake-settings.ts";
 import { GalleryStore, type SecretBox } from "./identity-store.ts";
@@ -126,6 +127,8 @@ export interface IdentityInjection {
   confirm: ConfirmFn;
   /** 模型與 onnxruntime wasm 的資料夾（App：userData/face-runtime；npm run face:setup -- --product 安裝）。 */
   modelDir?: string | null;
+  /** SP-01 講者模型與 onnxruntime wasm 的資料夾（App：userData/speaker-runtime；npm run speaker:setup 安裝）。 */
+  speakerModelDir?: string | null;
 }
 
 export interface NousHandle {
@@ -312,6 +315,10 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const runtime = checkFaceRuntime(options.identity?.modelDir ?? null);
   const faceRuntimeDir = runtime.state === "ok" ? (options.identity?.modelDir ?? null) : null;
   if (options.identity && runtime.state !== "ok") log(`家人辨識模型：${runtime.state}（${runtime.problems.join("、") || "未設定資料夾"}）`);
+  // SP-01：講者模型另外核對；不通過只停用錄製聲音，不影響臉。
+  const speakerRuntime = checkSpeakerRuntime(options.identity?.speakerModelDir ?? null);
+  const speakerRuntimeDir = speakerRuntime.state === "ok" ? (options.identity?.speakerModelDir ?? null) : null;
+  if (options.identity && speakerRuntime.state !== "ok") log(`家人聲音模型：${speakerRuntime.state}（${speakerRuntime.problems.join("、") || "未設定資料夾"}）`);
   const identity = options.identity
     ? new IdentityService({
         store: new GalleryStore({ dir: options.identity.dir, secretBox: options.identity.secretBox, excludeFromBackup: options.identity.excludeFromBackup, log }),
@@ -326,6 +333,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         },
         runtime,
         model: FACE_MODEL_VERSION,
+        speakerRuntime,
+        speakerModel: SPEAKER_MODEL_VERSION,
         // 問候決策只接受 /api/realtime/start 發出、真的連上的互動 ID（server 在下面建立，呼叫時已存在）。
         claimGreeting: greetingClaims(() => server.realtimeSessions),
         // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）。
@@ -400,6 +409,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     identity: identity ?? undefined,
     memory: memory ?? undefined,
     faceRuntimeDir,
+    speakerRuntimeDir,
     // WK-02（F6）：每通即時語音的費用紀錄（configDir/voice-cost.jsonl，最近 500 筆，0600）。George 2026-10-31：
     // 一律記錄，不綁喚醒開關（NOUS_WAKE 關閉時也記；這是旗標關閉「逐位元組相同」唯一刻意的例外）。
     voiceCostLog: new VoiceCostLog({ dir: config.configDir, log }),
