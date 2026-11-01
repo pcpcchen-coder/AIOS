@@ -45,32 +45,32 @@ describe("WakeSettingsStore: wake.json fails closed", () => {
   const store = (dir = root, log: string[] = []) => new WakeSettingsStore({ dir, onChange: () => {}, log: (m) => log.push(m) });
 
   it("defaults to off with no device", () => {
-    expect(store().view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5 });
+    expect(store().view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false });
   });
 
   it("saves, reloads, and clears the device when turned off (late device reports are not kept)", () => {
     const a = store();
     a.update({ wake_listen: true });
     a.update({ device_id: "mic-a" });
-    expect(store().view()).toEqual({ wake_listen: true, device_id: "mic-a", wake_silence_s: 5 });
+    expect(store().view()).toEqual({ wake_listen: true, device_id: "mic-a", wake_silence_s: 5, voice_name_test: false });
     a.update({ wake_listen: false });
-    expect(store().view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5 });
+    expect(store().view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false });
     a.update({ device_id: "mic-b" });
-    expect(store().view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5 });
+    expect(store().view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false });
     expect(JSON.parse(readFileSync(join(root, "wake.json"), "utf8"))).toEqual({ schema_version: 1, prefs: { wake_listen: false, device_id: null } });
   });
 
   it("「喚醒後等你開口」 saves only menu values, survives turning listening off, and falls back to 5 s when the file has a bad value", () => {
     const a = store();
     a.update({ wake_silence_s: 10 });
-    expect(store().view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 10 });
+    expect(store().view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 10, voice_name_test: false });
     a.update({ wake_listen: true });
     a.update({ wake_listen: false });
     expect(store().view().wake_silence_s).toBe(10);
     for (const bad of [0, 4, 7.5, 60, "10", null]) expect(() => parseWakePatch({ wake_silence_s: bad }), String(bad)).toThrow(WakePatchError);
     writeFileSync(join(root, "wake.json"), JSON.stringify({ schema_version: 1, prefs: { wake_listen: false, device_id: null, wake_silence_s: 4 } }));
     const log: string[] = [];
-    expect(store(root, log).view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5 });
+    expect(store(root, log).view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false });
     expect(log.length).toBeGreaterThan(0);
   });
 
@@ -84,7 +84,7 @@ describe("WakeSettingsStore: wake.json fails closed", () => {
     for (const [body, want] of cases) {
       writeFileSync(join(root, "wake.json"), body);
       const log: string[] = [];
-      expect(store(root, log).view(), body).toEqual({ ...want, wake_silence_s: 5 });
+      expect(store(root, log).view(), body).toEqual({ ...want, wake_silence_s: 5, voice_name_test: false });
       expect(log.length, body).toBeGreaterThan(0);
     }
   });
@@ -96,7 +96,7 @@ describe("WakeSettingsStore: wake.json fails closed", () => {
     chmodSync(dir, 0o500);
     try {
       expect(() => s.update({ wake_listen: true })).toThrow();
-      expect(s.view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5 });
+      expect(s.view()).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false });
     } finally {
       chmodSync(dir, 0o700);
     }
@@ -166,7 +166,7 @@ describe("NOUS_WAKE=on", () => {
     const auth = new ChatGPTAuth({ dir: root, callbackPort: 0, onChange: () => {} });
     const providers = new ProviderManager({ claude: null, chatgpt: new ChatGPTExecutor(auth, { model: null }), mock: new MockExecutor(5), auth, dir: root, preferred: "mock", onChange: () => {} });
     let runtime: "ok" | "missing" = "ok";
-    const wake = { view: () => ({ wake_listen: false, device_id: null, wake_silence_s: 5 }), update: () => ({ wake_listen: false, device_id: null, wake_silence_s: 5 }), runtime: () => runtime };
+    const wake = { view: () => ({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false }), update: () => ({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false }), runtime: () => runtime };
     const server = createApp({ store, runner: new TaskRunner(store, providers), settings: providers, auth, chat: providers, port, devPort: 5173, distDir: dist, wake });
     await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
     try {
@@ -194,7 +194,7 @@ describe("NOUS_WAKE=on", () => {
     const auth = new ChatGPTAuth({ dir: root, callbackPort: 0, onChange: () => {} });
     const providers = new ProviderManager({ claude: null, chatgpt: new ChatGPTExecutor(auth, { model: null }), mock: new MockExecutor(5), auth, dir: root, preferred: "mock", onChange: () => {} });
     let runtime: "ok" | "missing" = "missing";
-    const wake = { view: () => ({ wake_listen: false, device_id: null, wake_silence_s: 5 }), update: () => ({ wake_listen: false, device_id: null, wake_silence_s: 5 }), runtime: () => runtime };
+    const wake = { view: () => ({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false }), update: () => ({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false }), runtime: () => runtime };
     const server = createApp({ store, runner: new TaskRunner(store, providers), settings: providers, auth, chat: providers, port, devPort: 5173, distDir: dist, wake, wakeRuntimeDir: runtimeDir });
     await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
     try {
@@ -218,7 +218,7 @@ describe("NOUS_WAKE=on", () => {
   it("settings carry wake (off, runtime missing); with the runtime missing the page CSP stays exactly as with the flag off", async () => {
     const handle = await boot();
     const view = (await (await fetch(`${handle.url}/api/settings`)).json()) as SettingsView;
-    expect(view.wake).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5, runtime: "missing" });
+    expect(view.wake).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false, runtime: "missing" });
     const page = await fetch(`${handle.url}/`);
     expect(page.headers.get("content-security-policy")).toBe(pageHeaders(false)["Content-Security-Policy"]);
     const post = (body: unknown) => fetch(`${handle.url}/api/settings/wake`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -226,7 +226,7 @@ describe("NOUS_WAKE=on", () => {
     expect((await post({ speaker: true })).status).toBe(400);
     expect((await post({ wake_silence_s: 7 })).status).toBe(400);
     const picked = (await (await post({ wake_silence_s: 15 })).json()) as SettingsView;
-    expect(picked.wake).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 15, runtime: "missing" });
+    expect(picked.wake).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 15, voice_name_test: false, runtime: "missing" });
   });
 
   // 審查 M2：頁面（任何本機頁面腳本）不能略過原生說明自己打開；只有 App 主程序經 NousHandle.wake 能打開。
@@ -242,12 +242,19 @@ describe("NOUS_WAKE=on", () => {
     expect(handle.wake).toBeDefined();
     handle.wake!.setListen(true);
     view = (await (await fetch(`${handle.url}/api/settings`)).json()) as SettingsView;
-    expect(view.wake).toEqual({ wake_listen: true, device_id: null, wake_silence_s: 5, runtime: "missing" });
+    expect(view.wake).toEqual({ wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, runtime: "missing" });
     const recorded = (await (await post({ device_id: "mic-a" })).json()) as SettingsView;
-    expect(recorded.wake).toEqual({ wake_listen: true, device_id: "mic-a", wake_silence_s: 5, runtime: "missing" });
+    expect(recorded.wake).toEqual({ wake_listen: true, device_id: "mic-a", wake_silence_s: 5, voice_name_test: false, runtime: "missing" });
     const off = (await (await post({ wake_listen: false })).json()) as SettingsView;
-    expect(off.wake).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5, runtime: "missing" });
+    expect(off.wake).toEqual({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false, runtime: "missing" });
     expect(existsSync(join(root, "config", "wake.json"))).toBe(true);
+    // SP-02a 測試開關：頁面不能打開（只有主程序在原生說明之後可以），可以關
+    expect((await post({ voice_name_test: true })).status).toBe(403);
+    handle.wake!.setVoiceNameTest(true);
+    view = (await (await fetch(`${handle.url}/api/settings`)).json()) as SettingsView;
+    expect(view.wake?.voice_name_test).toBe(true);
+    expect(((await (await post({ voice_name_test: false })).json()) as SettingsView).wake?.voice_name_test).toBe(false);
+    expect((await post({ voice_name_test: "yes" })).status).toBe(400);
     // 引擎清單是 built 但關鍵詞未定（runtime missing）：資料夾裡的檔案也不提供
     expect((await fetch(`${handle.url}/wake-runtime/engine.wasm`)).status).toBe(404);
     expect((await fetch(`${handle.url}/wake-runtime/`)).status).toBe(404);

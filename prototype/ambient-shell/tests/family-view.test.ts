@@ -336,6 +336,26 @@ describe("FamilyView voice (SP-01)", () => {
     expect(start.disabled).toBe(false);
   });
 
+  it("「試認聲音」 appears only when someone has a voice enrolled, opens its own step labelled uncalibrated, and cancels back to the list (SP-02a)", async () => {
+    const none = makeVoice(() => manage([george]));
+    none.view.open();
+    await flush();
+    expect(none.buttons("試認聲音")).toHaveLength(0);
+    const t = makeVoice(() => manage([george, grandma]));
+    t.view.open();
+    await flush();
+    expect(t.buttons("試認聲音")).toHaveLength(1);
+    t.buttons("試認聲音")[0]!.click();
+    await flush();
+    expect(t.el.textContent).toContain("載入聲音模型、打開麥克風…");
+    expect(t.el.textContent).toContain(mod.UNCALIBRATED_LABEL);
+    expect(t.el.textContent).toContain("只憑聲音不會叫名字");
+    t.buttons("取消")[0]!.click();
+    expect(t.buttons("試認聲音")).toHaveLength(1);
+    expect(t.calls.some((c) => c.op === "voice_test")).toBe(false);
+    expect(mod.VOICE_TEST_PROMPTS.map((p) => p.kind)).toEqual(["keyword", "utterance"]);
+  });
+
   it("delete voice sends delete_voice for that person", async () => {
     const t = makeVoice((req) => (req.op === "delete_voice" ? { ...manage([george], ready, "list"), op: "delete_voice" } as IdentityResponse : manage([both])));
     t.view.open();

@@ -481,5 +481,11 @@
   "這個聲音和另一位已登記的家人很像；不會保存。要重錄請先刪除原本的聲音": "This voice is very similar to another enrolled family member, so it was not saved. To record again, delete the existing voice first",
   "這位家人沒有登記聲音": "This family member has no enrolled voice",
   "這位家人已經登記過臉；要重新登記請先刪除": "This family member already has an enrolled face; delete it first to enroll again",
-  "聲音特徵必須是 {0} 個有限數值且已正規化": "Voice features must be {0} finite, normalized numbers"
+  "聲音特徵必須是 {0} 個有限數值且已正規化": "Voice features must be {0} finite, normalized numbers",
+  "目前不能辨認聲音": "Voice recognition is not available right now",
+  "segment 格式不對": "segment is malformed",
+  "wake_id 格式不對": "wake_id is malformed",
+  "voiced_ms 格式不對": "voiced_ms is malformed",
+  "只憑聲音叫名字只能從 App 選單列打開": "Voice-only naming can only be turned on from the App menu bar",
+  "voice_name_test 必須是 true 或 false": "voice_name_test must be true or false"
 }

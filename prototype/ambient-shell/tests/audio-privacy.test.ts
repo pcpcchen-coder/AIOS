@@ -194,10 +194,16 @@ describe("audio privacy (static)", () => {
         'node?.port.postMessage({ type: "stop" });',
         'w.postMessage({ type: "clear" });',
         'w.postMessage({ type: "close" });',
-        'worker.postMessage({ type: "init", sampleRate: ctx.sampleRate }, [channel.port2]);',
+        'worker.postMessage({ type: "init", sampleRate: ctx.sampleRate }, toSpeaker ? [channel.port2, toSpeaker] : [channel.port2]);',
         'node.port.postMessage({ type: "port" }, [channel.port1]);',
       ],
-      "wake-worker.ts": ["postMessage(message: WakeWorkerOut): void;", "core = new WakeWorkerCore(new SherpaWasmDetector(runtime, net), (out) => scope.postMessage(out));", "scope.postMessage(closed);"],
+      "wake-worker.ts": [
+        "postMessage(message: WakeWorkerOut): void;",
+        // SP-02a：喚醒詞片段只經 init 給的第二條 port 轉移給 speaker worker（不經主執行緒）
+        "const toSpeaker = keywordPort ? (span: Float32Array) => keywordPort?.postMessage(span, [span.buffer]) : null;",
+        "core = new WakeWorkerCore(new SherpaWasmDetector(runtime, net), (out) => scope.postMessage(out), toSpeaker);",
+        "scope.postMessage(closed);",
+      ],
     };
     const found: Record<string, string[]> = {};
     for (const file of audioFiles) {
@@ -209,6 +215,10 @@ describe("audio privacy (static)", () => {
     const core = readFileSync(join(audio, "worker-core.ts"), "utf8");
     expect([...core.matchAll(/this\.post\(([^;]+)\);/g)].map((m) => m[1])).toEqual(["message"]);
     expect(core).toMatch(/private emit\(message: WakeWorkerOut\): void \{\s*if \(isWakeWorkerOut\(message\)\) this\.post\(message\);\s*\}/);
+    // SP-02a：喚醒詞片段只在偵測到的那一刻複製一次（緩衝最後 KEYWORD_SPAN_S 秒），交給 keyword 接收端
+    expect([...core.matchAll(/this\.keyword\(([^;]+)\);/g)].map((m) => m[1])).toEqual(["this.ring.latest(Math.round(KEYWORD_SPAN_S * SAMPLE_RATE))"]);
+    expect([...core.matchAll(/this\.ring\.latest\(/g)]).toHaveLength(1);
+    expect(core).toMatch(/if \(keyword !== null\) \{\s*this\.detector\.reset\(\);\s*if \(this\.keyword\) this\.keyword\(/);
     expect(readFileSync(join(audio, "wake-worker.ts"), "utf8")).toMatch(/const closed: WakeWorkerOut = \{ type: "closed" \};/);
     // 主執行緒只接受檢查過的事件
     expect(readFileSync(join(audio, "capture.ts"), "utf8")).toMatch(/if \(stopped \|\| !isWakeWorkerOut\(event\.data\)\) return;/);
@@ -257,7 +267,7 @@ describe("audio privacy (static)", () => {
     expect(main).toMatch(/const owner = wake;\s*if \(!owner\) return \{\};/);
     // 審查 M1／m9：保險的歸還只在沒有任何進行中或開始中的通話時；旗標在通話中關掉時等通話結束才結束常駐聆聽
     // WK-02：先停掉「沒人出聲就結束」的計時再歸還。
-    expect(main).toMatch(/if \(phase === "off" && !realtime\.on && !realtimeStarting\) \{\s*stopWakeCall\(\);\s*wake\?\.releaseAllLeases\(\);/);
+    expect(main).toMatch(/if \(phase === "off" && !realtime\.on && !realtimeStarting\) \{\s*stopWakeCall\(\);\s*wakeVoice\?\.cancel\(\);\s*wake\?\.releaseAllLeases\(\);/);
     expect(main).toMatch(/releaseMicrophone: \(stream\) => \{\s*if \(wakeLevel\?\.stream === stream\) stopWakeLevel\(\);\s*owner\.releaseLease\(stream\);\s*\}/);
     // WK-02：喚醒開始的通話只把租到那一份的 RMS 數字交給計時（browserWatchLevel，不保存樣本）。
     expect(main).toMatch(/const stream = await owner\.lease\(\);\s*watchWakeLevel\(stream\);\s*return stream;/);

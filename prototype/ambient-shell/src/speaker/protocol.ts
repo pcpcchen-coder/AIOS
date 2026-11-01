@@ -18,6 +18,11 @@ export type SpeakerWorkerRequest =
   | { type: "begin"; id: number }
   /** 結束這一段並算特徵；min_voiced_ms 是這一段至少要有多少人聲。 */
   | { type: "end"; id: number; min_voiced_ms: number }
+  /**
+   * SP-02a：喚醒 worker 的喚醒詞片段 port（transfer）。偵測到喚醒詞時那一段 16 kHz 樣本直接從這裡進來，worker 算完回 keyword。
+   * 新的 port 取代舊的（喚醒 worker 每次重建都會給一條新的）。
+   */
+  | { type: "keyword_port" }
   | { type: "dispose" };
 
 export type SegmentProblem = "too_short" | "too_quiet" | "failed";
@@ -27,4 +32,6 @@ export type SpeakerWorkerResponse =
   /** 約每 100 ms 一次的音量（0–1 的 RMS），給畫面的音量條用。 */
   | { type: "level"; rms: number }
   | { type: "segment"; id: number; feature: number[] | null; problem: SegmentProblem | null; voiced_ms: number; ms: number }
+  /** SP-02a：喚醒詞片段的特徵（喚醒 worker 送來一段就回一則）。 */
+  | { type: "keyword"; feature: number[] | null; problem: SegmentProblem | null; voiced_ms: number; ms: number }
   | { type: "error"; message: string };

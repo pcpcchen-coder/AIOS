@@ -371,7 +371,7 @@ function controller(runtime: WakeRuntimeState = "ok") {
     return () => (entry.cancelled = true);
   };
   const c = new WakeController(host, { mediaDevices: media, capture, earcon, timer });
-  const view = (listen: boolean, device: string | null = null): WakeSettingsView => ({ wake_listen: listen, device_id: device, wake_silence_s: 5, runtime });
+  const view = (listen: boolean, device: string | null = null): WakeSettingsView => ({ wake_listen: listen, device_id: device, wake_silence_s: 5, voice_name_test: false, runtime });
   return {
     c, clock, media, capture, earcon, captions, saved, reports, view, timers,
     /** 推進假時鐘並執行到期、沒被取消的計時器。 */
@@ -620,8 +620,8 @@ describe("WakeController: WK-02 hooks (subscribers, rate-limit pause, calls)", (
       now: clock.now, runtime: () => "ok", caption: () => {}, visible: () => true, onVisible: () => () => {}, state: () => {}, saveDeviceId: async () => {}, newId: () => "w",
     };
     const c = new WakeController(host, { mediaDevices: media, capture, earcon: new FakeEarcon(), timer: (run) => { run(); return () => {}; } });
-    c.applySettings({ wake_listen: false, device_id: null, wake_silence_s: 5, runtime: "ok" });
-    c.applySettings({ wake_listen: true, device_id: null, wake_silence_s: 5, runtime: "ok" });
+    c.applySettings({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false, runtime: "ok" });
+    c.applySettings({ wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, runtime: "ok" });
     await flush();
     capture.last!.events.started();
     expect(() => c.pauseFor("rate_limited", 0)).not.toThrow();

@@ -599,7 +599,7 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, wakeReport: pageState.wake, wakeCommand: notifyPage, translate: t });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, wakeReport: pageState.wake, wakeCommand: notifyPage, translate: t });
 }
 
 /** 即時語音用的 Codex 登入：核心開好回呼（1455，被占用時 1457，再不行改裝置代碼），系統瀏覽器開登入頁。 */
@@ -753,6 +753,42 @@ async function setWakeListen(value) {
     core.wake.setListen(value);
   } catch (err) {
     showError("常駐喚醒聆聽沒有保存", String(err.message ?? err));
+  }
+  await refreshSettings();
+}
+
+/**
+ * SP-02a 選單列「只憑聲音也叫名字（測試）」（George 2026-11-01）。打開前先顯示原生說明（門檻未校準、可能叫錯人、名字會送到雲端語音），
+ * 按「打開」才保存；關掉直接保存。開關只經主程序與核心之間的同一行程呼叫（core.wake），頁面腳本無法自己打開。
+ */
+async function setVoiceNameTest(value) {
+  if (value) {
+    let response = 1;
+    try {
+      ({ response } = await showMessage(
+        {
+          type: "warning",
+          buttons: ["打開", "取消"],
+          defaultId: 1,
+          cancelId: 1,
+          message: "要讓 Nous 只憑聲音也叫名字嗎？",
+          detail: t("這是測試功能。喚醒開始的通話認不出臉（沒看螢幕、鏡頭關著）時，只要聲音認出是哪位家人就會叫名字。聲音的門檻還沒有校準，可能叫錯人；錄音或聲音相近的人也可能被認成家人。看到陌生臉、多張臉或臉和聲音不一致時仍不叫。名字會像認臉時一樣以短句送到雲端語音供應商。隨時可以在這裡關掉。"),
+        },
+        dialogParent(),
+      ));
+    } catch {
+      response = 1;
+    }
+    if (response !== 0) {
+      rebuildMenu();
+      return;
+    }
+  }
+  try {
+    if (!core?.wake) throw new Error(t("常駐喚醒聆聽不可用"));
+    core.wake.setVoiceNameTest(value);
+  } catch (err) {
+    showError("只憑聲音叫名字的設定沒有保存", String(err.message ?? err));
   }
   await refreshSettings();
 }

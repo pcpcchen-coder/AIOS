@@ -1393,3 +1393,13 @@ body.history-page {
   max-height: none;
   overflow: visible;
 }
+
+/* SP-02a 試認聲音的結果 */
+.voice-results {
+  margin: 8px 0;
+  padding-left: 1.2em;
+  font-size: 20px;
+}
+.voice-step--done .voice-status {
+  color: var(--accent, inherit);
+}

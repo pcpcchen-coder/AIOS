@@ -75,3 +75,24 @@ describe("speaker worker", () => {
     });
   }
 });
+
+describe("speaker worker keyword port (SP-02a)", () => {
+  it("a span from the wake worker's port becomes one keyword feature; silence is too_quiet; oversize spans are dropped", async () => {
+    scope.onmessage!({ data: { type: "init", assets: { wasmPrefix: "/speaker-runtime/", model: "/speaker-runtime/m.onnx" } }, ports: [] });
+    await until(() => out.some((m) => m.type === "ready"));
+    const channel = new MessageChannel();
+    scope.onmessage!({ data: { type: "keyword_port" }, ports: [channel.port2] });
+    const span = new Float32Array(25_600);
+    span.set(chunks(0.8, 0.2, 16000).reduce((a, c) => Float32Array.from([...a, ...c]), new Float32Array(0)), 4000);
+    channel.port1.postMessage(span);
+    await until(() => out.some((m) => m.type === "keyword"));
+    expect(out.find((m) => m.type === "keyword")).toMatchObject({ problem: null, feature: expect.any(Array) });
+    channel.port1.postMessage(new Float32Array(16_000));
+    await until(() => out.filter((m) => m.type === "keyword").length === 2);
+    expect(out.filter((m) => m.type === "keyword")[1]).toMatchObject({ feature: null, problem: "too_quiet" });
+    channel.port1.postMessage(new Float32Array(16_000 * 4));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(out.filter((m) => m.type === "keyword")).toHaveLength(2);
+    channel.port1.close();
+  });
+});

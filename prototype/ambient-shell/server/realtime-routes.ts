@@ -297,7 +297,7 @@ interface Interaction {
   source: "look_to_talk" | "wake_word";
   issuedAt: number;
   /** 真的連上的工作階段；null＝還沒連上。 */
-  session: { id: string; route: RouteId; at: number; locale: Locale } | null;
+  session: { id: string; route: RouteId; at: number; locale: Locale; wakeId: string | null } | null;
   used: boolean;
 }
 
@@ -544,14 +544,15 @@ export class RealtimeSessions {
   /** 工作階段真的連上：記下互動 ID 屬於哪個工作階段、何時連上。 */
   private connected(decision: Decision): void {
     const it = decision.interaction ? this.interactions.get(decision.interaction) : undefined;
-    if (it && !it.used) it.session = { id: decision.id, route: decision.route, at: this.now(), locale: decision.locale };
+    if (it && !it.used) it.session = { id: decision.id, route: decision.route, at: this.now(), locale: decision.locale, wakeId: decision.wakeId };
   }
 
   /**
    * IdentityService 的問候決策呼叫（ID-02）：這個互動 ID 是核心發出、還沒用過、工作階段真的連上而且還在進行、
    * 連上後 GREETING_CLAIM_MS 內，才回傳它屬於哪個工作階段並標記已用；否則 null（不給名字）。一個 ID 只能成功一次。
+   * 喚醒開始的互動另帶 wake_id（SP-02：核心用它找這次喚醒的聲音證據）。
    */
-  claimGreeting(id: string): { route: RouteId; session_id: string; source: "look_to_talk" | "wake_word"; locale?: Locale } | null {
+  claimGreeting(id: string): { route: RouteId; session_id: string; source: "look_to_talk" | "wake_word"; locale?: Locale; wake_id?: string } | null {
     this.sweep();
     const it = this.interactions.get(id);
     if (!it || it.used || !it.session) return null;
@@ -560,7 +561,7 @@ export class RealtimeSessions {
     const active = s.route === "api_key" ? this.ga?.id === s.id && !this.ga.closed : this.live?.id === s.id && !!this.live.call && !this.live.closed;
     if (!active) return null;
     it.used = true;
-    return { route: s.route, session_id: s.id, source: it.source, ...(s.locale === "en" ? { locale: "en" as const } : {}) };
+    return { route: s.route, session_id: s.id, source: it.source, ...(s.locale === "en" ? { locale: "en" as const } : {}), ...(it.source === "wake_word" && s.wakeId ? { wake_id: s.wakeId } : {}) };
   }
 
   /** 帶記憶規則（有核心工具、核心旁路）的 API key 工作階段還在。 */

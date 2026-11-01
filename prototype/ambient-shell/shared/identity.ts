@@ -82,12 +82,49 @@ export const VOICE_UTTERANCE_SAMPLES = 3;
  * 喚醒詞只有約 1 秒，彼此的分數較低，所以喚醒詞與朗讀分開檢查。
  * - consistency／consistency_pair：同 MATCH_THRESHOLDS，每段與平均方向、任兩段之間的下限；低於表示混到別人或沒錄到人聲。
  * - duplicate：新登記的朗讀平均與已登記家人的朗讀平均高於這個值，視為同一個人（不重複登記）。
+ * - match／margin（SP-02）：辨認時與每位家人同類模板平均方向的 cosine；最高分要 ≥ match、領先第二名 ≥ margin 才算 matched。
+ *   喚醒片段只和喚醒詞模板比（文字相關，docs/17 §4.4），話語只和朗讀模板比。
  */
 export const VOICE_THRESHOLDS = {
-  keyword: { consistency: 0.45, consistency_pair: 0.3 },
-  utterance: { consistency: 0.5, consistency_pair: 0.4 },
+  keyword: { consistency: 0.45, consistency_pair: 0.3, match: 0.5, margin: 0.08 },
+  utterance: { consistency: 0.5, consistency_pair: 0.4, match: 0.55, margin: 0.08 },
   duplicate: 0.8,
 } as const;
+
+/**
+ * 兩種聲音片段（docs/17 §4.2）：keyword 是喚醒詞那一段（約 1 秒），utterance 是喚醒後到問候前說的話。
+ * min_voiced_ms 是辨認時至少要有的人聲；不足就是 too_short（不比對）。
+ */
+export type VoiceSegment = "keyword" | "utterance";
+export const VOICE_SEGMENTS: readonly VoiceSegment[] = ["keyword", "utterance"];
+export const VOICE_MIN_VOICED_MS: Record<VoiceSegment, number> = { keyword: 300, utterance: 1500 };
+
+/**
+ * 只憑聲音稱名要等 SP-03 以家人保留樣本校準兩種片段（docs/17 §4.4、§14 ④）。在那之前一律 false：
+ * 聲音只能讓臉的稱名「確認」或「取消」，不能自己帶出名字。
+ */
+export const VOICE_CALIBRATED: Readonly<Record<VoiceSegment, boolean>> = { keyword: false, utterance: false };
+
+/** 一段聲音的辨認結果（docs/17 §7.2）。只在核心與管理畫面的試認使用；喚醒時的結果不回頁面。 */
+export type VoiceUnavailableReason = "no_enrollment" | "too_short" | "model_unavailable";
+export interface VoiceObservation {
+  state: IdentityState;
+  person_id?: string;
+  reason?: VoiceUnavailableReason | "margin";
+  segment: VoiceSegment;
+}
+
+/**
+ * 臉聲融合（docs/17 §7.3）的結果，只進 log 與測試：
+ * - confirmed：臉與聲音指向同一人。
+ * - conflict：臉與聲音指向不同人，或兩段聲音指向不同人。
+ * - face_only：臉認出、沒有可用的聲音（沒說話、太短、這個人沒登記聲音）；照 ID-02 規則。
+ * - voice_unsupported：臉認出，但這個人有登記聲音、聲音卻是 unknown／ambiguous（不支持）。
+ * - voice_only：沒有臉的結果、聲音認出（校準前不稱名）。
+ * - voice_only_test：同上，但 SP-02a 測試開關開著，所以以聲音叫了名字（門檻未校準）。
+ * - none：都沒有。
+ */
+export type VoiceFusion = "confirmed" | "conflict" | "face_only" | "voice_unsupported" | "voice_only" | "voice_only_test" | "none";
 
 /** 聲音特徵的形狀檢查：192 個有限數值且已 L2 normalize。 */
 export function isValidSpeakerFeature(v: unknown): v is ArrayLike<number> {
@@ -379,6 +416,8 @@ export type GreetingRoute = "api_key" | "live";
  * - 其餘對應 decideIdentity 的結果（collecting、stale、unknown、ambiguous、quality、no_face、no_gallery）。
  * - person_gone：人物已刪除或不再參與比對。
  * - bad_name：名稱沒有通過 speakableName。
+ * - voice_conflict（SP-02）：臉認出一人，聲音認成另一人（或兩段聲音指向不同人）。
+ * - voice_unsupported（SP-02）：臉認出的人有登記聲音，但這次的聲音不支持他（unknown／ambiguous）。
  */
 export type GreetingNameReason =
   | "naming_off"
@@ -397,7 +436,9 @@ export type GreetingNameReason =
   | "no_face"
   | "no_gallery"
   | "person_gone"
-  | "bad_name";
+  | "bad_name"
+  | "voice_conflict"
+  | "voice_unsupported";
 
 /**
  * 結構化的問候決策（docs/14 §6）：只在核心建立與使用，不經 HTTP、不給頁面、不進 log。
@@ -417,7 +458,7 @@ export interface GreetingDecision {
 }
 
 /** IPC 的操作（desktop/identity-ipc.mjs 的白名單與這裡一致，測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice"] as const;
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test"] as const;
 export type IdentityOp = (typeof IDENTITY_OPS)[number];
 
 export type IdentityRequest =
@@ -453,7 +494,14 @@ export type IdentityRequest =
       utterance: number[][];
     }
   /** 只刪聲音，保留臉（只有聲音的家人會整個刪除，和「刪除」相同）。 */
-  | { op: "delete_voice"; session: string; person_id: string };
+  | { op: "delete_voice"; session: string; person_id: string }
+  /**
+   * SP-02 喚醒時的一段聲音（不需要管理 session）：wake_id 是這次喚醒（shared/wake.ts 的 WAKE_ID），feature 在人聲不足時省略
+   * （核心記成 too_short）。回應一律只有 ok，頁面拿不到結果；證據留在核心給這次喚醒的問候決策。
+   */
+  | { op: "voice_probe"; wake_id: string; segment: VoiceSegment; voiced_ms: number; model: SpeakerModelVersion; feature?: number[] }
+  /** SP-02 管理畫面的「試認聲音」：使用者自己按的，回傳這一段認成誰。 */
+  | { op: "voice_test"; session: string; segment: VoiceSegment; model: SpeakerModelVersion; feature: number[] };
 
 /** 管理畫面需要的狀態（open_session、list 與變更後回傳）。 */
 export interface IdentityManageView {
@@ -499,6 +547,8 @@ export type IdentityResponse =
   /** 只回可不可以取樣；不回原因（原因可能透露有沒有登記家人）。 */
   | { ok: true; op: "ambient_status"; ready: boolean }
   | { ok: true; op: "ambient_probe" }
+  | { ok: true; op: "voice_probe" }
+  | { ok: true; op: "voice_test"; observation: VoiceObservation }
   /**
    * api_key：text 是 response.create 這一輪的 instructions（只含核心組好的短句；名字會短暫出現在頁面，ADR-0001 §2.4）。
    * live：text 為 null，短句留在核心，頁面接著 POST /api/realtime/input greeting（只帶互動 ID），核心自己送進 sideband。

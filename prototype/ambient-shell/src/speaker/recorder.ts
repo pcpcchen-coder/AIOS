@@ -32,6 +32,39 @@ export const OWN_MICROPHONE: MicSource = {
   },
 };
 
+/**
+ * 串流 → 16 kHz AudioContext → 擷取 AudioWorklet → MessagePort 直送 worker（主執行緒碰不到樣本）。輸出接音量 0 的節點，
+ * 只為了讓圖持續運轉、不發出聲音。stop() 讓 worklet 不再送樣本並關掉 AudioContext；串流由呼叫的一方歸還。
+ */
+export async function tapStream(stream: MediaStream, worker: Pick<SpeakerWorkerLike, "postMessage">): Promise<{ ctx: AudioContext; stop(): void }> {
+  // 16 kHz 的 AudioContext：Chromium 會把麥克風轉成這個取樣率；不是的話 worker 自己轉。
+  const ctx = new AudioContext({ sampleRate: 16000 });
+  let node: AudioWorkletNode | null = null;
+  const stop = () => {
+    node?.port.postMessage({ type: "stop" });
+    node?.disconnect();
+    node = null;
+    void ctx.close().catch(() => {});
+  };
+  try {
+    await ctx.audioWorklet.addModule(workletUrl);
+    const source = ctx.createMediaStreamSource(stream);
+    node = new AudioWorkletNode(ctx, "nous-wake-capture", { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1, channelCountMode: "explicit", channelInterpretation: "speakers" });
+    const channel = new MessageChannel();
+    worker.postMessage({ type: "port", sampleRate: ctx.sampleRate }, [channel.port2]);
+    node.port.postMessage({ type: "port" }, [channel.port1]);
+    source.connect(node);
+    const mute = ctx.createGain();
+    mute.gain.value = 0;
+    node.connect(mute).connect(ctx.destination);
+    if (ctx.state === "suspended") await ctx.resume();
+  } catch (err) {
+    stop();
+    throw err;
+  }
+  return { ctx, stop };
+}
+
 export interface SegmentResult {
   feature: number[] | null;
   problem: SegmentProblem | null;
@@ -48,7 +81,7 @@ export class VoiceRecorder {
   private worker: SpeakerWorkerLike | null = null;
   private stream: MediaStream | null = null;
   private ctx: AudioContext | null = null;
-  private node: AudioWorkletNode | null = null;
+  private tap: { stop(): void } | null = null;
   private nextId = 1;
   private pending = new Map<number, (r: SegmentResult) => void>();
   model: SpeakerModelVersion | null = null;
@@ -77,22 +110,9 @@ export class VoiceRecorder {
       await ready;
       worker.onmessage = (event) => this.onWorkerMessage(event.data);
       this.stream = await this.deps.mic.acquire();
-      // 16 kHz 的 AudioContext：Chromium 會把麥克風轉成這個取樣率；不是的話 worker 自己轉。
-      const ctx = new AudioContext({ sampleRate: 16000 });
-      this.ctx = ctx;
-      await ctx.audioWorklet.addModule(workletUrl);
-      const source = ctx.createMediaStreamSource(this.stream);
-      const node = new AudioWorkletNode(ctx, "nous-wake-capture", { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1, channelCountMode: "explicit", channelInterpretation: "speakers" });
-      this.node = node;
-      const channel = new MessageChannel();
-      worker.postMessage({ type: "port", sampleRate: ctx.sampleRate }, [channel.port2]);
-      node.port.postMessage({ type: "port" }, [channel.port1]);
-      source.connect(node);
-      // 不接到喇叭：輸出接一個音量 0 的節點，只為了讓圖持續運轉。
-      const mute = ctx.createGain();
-      mute.gain.value = 0;
-      node.connect(mute).connect(ctx.destination);
-      if (ctx.state === "suspended") await ctx.resume();
+      const tap = await tapStream(this.stream, worker);
+      this.tap = tap;
+      this.ctx = tap.ctx;
     } catch (err) {
       this.stop();
       throw err;
@@ -142,10 +162,8 @@ export class VoiceRecorder {
 
   /** 停止一切：worklet 不再送樣本、麥克風歸還、AudioContext 關閉、worker 結束；等待中的段落回 failed。 */
   stop(): void {
-    this.node?.port.postMessage({ type: "stop" });
-    this.node?.disconnect();
-    this.node = null;
-    void this.ctx?.close().catch(() => {});
+    this.tap?.stop();
+    this.tap = null;
     this.ctx = null;
     if (this.stream) this.deps.mic.release(this.stream);
     this.stream = null;

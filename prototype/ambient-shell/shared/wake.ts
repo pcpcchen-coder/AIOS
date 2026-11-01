@@ -61,6 +61,11 @@ export interface WakePrefs {
   device_id: string | null;
   /** 喚醒後多久沒人出聲就結束這通（秒，src/audio/wake-call.ts）；只能是 WAKE_SILENCE_OPTIONS_S 其中一個。 */
   wake_silence_s: number;
+  /**
+   * SP-02a 測試開關（George 2026-11-01）：喚醒開始的通話認不出臉時，只憑聲音也叫名字。門檻未校準、可能叫錯人；
+   * 預設關閉，打開只能從 App 選單列（原生說明之後），頁面只能關。
+   */
+  voice_name_test: boolean;
 }
 export type WakePrefsPatch = Partial<WakePrefs>;
 
@@ -71,15 +76,15 @@ export type WakePrefsPatch = Partial<WakePrefs>;
 export const WAKE_SILENCE_OPTIONS_S = [3, 5, 8, 10, 15, 20] as const;
 export const DEFAULT_WAKE_SILENCE_S = 5;
 
-export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null, wake_silence_s: DEFAULT_WAKE_SILENCE_S };
-export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s"] as const satisfies readonly (keyof WakePrefs)[];
+export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null, wake_silence_s: DEFAULT_WAKE_SILENCE_S, voice_name_test: false };
+export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s", "voice_name_test"] as const satisfies readonly (keyof WakePrefs)[];
 
 export class WakePatchError extends Error {}
 
 /** deviceId 是瀏覽器給的不透明字串；只接受可見 ASCII、最多 256 字元。 */
 const DEVICE_ID = /^[\x21-\x7e]{1,256}$/;
 
-/** 邊界驗證：只接受 wake_listen（布林）、device_id（字串或 null）與 wake_silence_s（選項之一）；其他鍵、空 patch、型別不符一律丟錯。 */
+/** 邊界驗證：只接受 wake_listen、voice_name_test（布林）、device_id（字串或 null）與 wake_silence_s（選項之一）；其他鍵、空 patch、型別不符一律丟錯。 */
 export function parseWakePatch(input: unknown): WakePrefsPatch {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new WakePatchError("喚醒設定必須是 JSON 物件");
   const patch: WakePrefsPatch = {};
@@ -95,6 +100,9 @@ export function parseWakePatch(input: unknown): WakePrefsPatch {
         throw new WakePatchError("wake_silence_s 必須是選單裡的秒數（3、5、8、10、15 或 20）");
       }
       patch.wake_silence_s = value as number;
+    } else if (key === "voice_name_test") {
+      if (typeof value !== "boolean") throw new WakePatchError("voice_name_test 必須是 true 或 false");
+      patch.voice_name_test = value;
     } else {
       throw new WakePatchError(`不認得的喚醒設定：${key}`);
     }
@@ -376,6 +384,8 @@ export const WAKE_TEXT = {
   resume: "繼續聆聽",
   speaker: "通話中辨認說話者",
   speakerNote: "SP-02 之後才能使用",
+  voiceNameTest: "只憑聲音也叫名字（測試）",
+  voiceNameTestNote: "喚醒時認不出臉，聲音認出就叫名字；門檻未校準，可能叫錯人",
   heard: "聽到了",
   resumed: "已恢復常駐喚醒聆聽（只在本機偵測「Hello Nous」或「Hey Nous」）",
   failed: "常駐喚醒聆聽沒有開啟：{0}",
