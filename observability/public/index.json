@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-11-01T14:07:47.556Z",
+  "updated_at": "2026-11-01T14:07:50.925Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261101132754-1de6a9",
       "title": "Audio input/output device selection",
       "playbook": "feature",
-      "status": "running",
-      "updated_at": "2026-11-01T14:07:46.038Z",
+      "status": "passed",
+      "updated_at": "2026-11-01T14:07:49.457Z",
       "started_at": "2026-11-01T13:27:54.517Z",
-      "ended_at": null,
+      "ended_at": "2026-11-01T14:07:49.457Z",
       "branch": "",
       "commit_sha": "",
       "passed_steps": 8,
