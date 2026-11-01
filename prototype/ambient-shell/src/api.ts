@@ -1,4 +1,5 @@
 import type { FaceTuning } from "../shared/face-tuning.ts";
+import { AUDIO_WRITE_PATH, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import { getLocale, type Locale } from "./i18n.ts";
 import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
@@ -55,8 +56,10 @@ export const api = {
   /** 鏡頭使用者設定（保存在本機 camera.json）；回傳更新後的設定。 */
   updateCamera: (patch: CameraPrefsPatch) => call<SettingsView>("POST", "/api/settings/camera", patch),
   updateVoice: (patch: VoicePrefsPatch) => call<SettingsView>("POST", "/api/settings/voice", patch),
-  /** WK-01a：只有 NOUS_WAKE=on 時核心才有這個路由；頁面只用來記下真的在聽的麥克風（device_id）。 */
+  /** WK-01a：只有 NOUS_WAKE=on 時核心才有這個路由（頁面只能關掉或改秒數；麥克風改由 /api/settings/audio）。 */
   updateWake: (patch: WakePrefsPatch) => call<SettingsView>("POST", "/api/settings/wake", patch),
+  /** 聲音輸入／輸出裝置（audio.json；null＝系統預設）。 */
+  updateAudio: (patch: AudioPrefsPatch) => call<SettingsView>("POST", AUDIO_WRITE_PATH, patch),
   /** 人臉辨識校正值（face-tuning.json）：calibrated 表示這次是「校正人臉辨識」的套用；reset 還原預設。 */
   updateFaceTuning: (change: Partial<FaceTuning> | "reset", calibrated = false) =>
     call<SettingsView>("POST", "/api/settings/camera-tuning", change === "reset" ? { reset: true } : { ...change, ...(calibrated ? { calibrated: true } : {}) }),

@@ -151,13 +151,130 @@ export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTes
   ];
 }
 
+// ───────────── 聲音輸入／輸出（George 2026-11-01；不綁旗標，核心一定給 settings.audio） ─────────────
+// 文字、裝置清單整理規則與 shared/audio-devices.ts 相同（這個檔案由 App 直接執行，不能載入 .ts；tests/desktop-menu.test.ts 核對）。
+// 清單、使用中的裝置與兩句狀態都來自頁面以 reportState 回報的裝置事件（preload.cjs 先整理一次，這裡再整理一次）；
+// 勾選只代表保存的選擇，不代表正在收音或播放。
+
+export const AUDIO_TEXT = {
+  group: "聲音",
+  input: "聲音輸入",
+  output: "聲音輸出",
+  systemDefault: "系統預設",
+  systemDefaultNow: "系統預設（目前：{0}）",
+  inUse: "使用中：{0}",
+  missing: "找不到「{0}」，暫用系統預設",
+  noMic: "目前沒有開著的麥克風",
+  nextPlayback: "播放時使用：{0}",
+  notFoundOption: "{0}（目前找不到）",
+  notReportedOption: "{0}（尚未回報）",
+  unnamedInput: "未命名的麥克風 {0}",
+  unnamedOutput: "未命名的聲音輸出 {0}",
+  unknownDevice: "（名稱未知的裝置）",
+  needPermission: "授權麥克風後才會列出裝置名稱",
+  bluetoothHint: "藍牙耳機當麥克風會切到低音質通話模式；建議麥克風留在 Mac、聲音輸出選藍牙喇叭",
+  systemSpeechHint: "按下說話與系統朗讀（語音模式、校準陌生聲音）一律用 Mac 的系統輸入／輸出",
+  notReported: "尚未回報",
+};
+const AUDIO_STATUS_TEXTS = [AUDIO_TEXT.inUse, AUDIO_TEXT.missing, AUDIO_TEXT.noMic, AUDIO_TEXT.nextPlayback, AUDIO_TEXT.notReported];
+const AUDIO_UI_VALUES = [AUDIO_TEXT.systemDefault, AUDIO_TEXT.unknownDevice];
+const DEVICE_ID = /^[\x21-\x7e]{1,256}$/;
+const DEVICE_LIST_MAX = 24;
+const DEVICE_LABEL_MAX = 128;
+
+const cleanLabel = (value) => (typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, DEVICE_LABEL_MAX) : "");
+const cleanDevice = (value) => (value && typeof value === "object" && typeof value.id === "string" && DEVICE_ID.test(value.id) ? { id: value.id, label: cleanLabel(value.label) } : null);
+const cleanInUse = (value) => {
+  if (!value || typeof value !== "object") return null;
+  if (value.id !== null && (typeof value.id !== "string" || !DEVICE_ID.test(value.id))) return null;
+  return { id: value.id, label: cleanLabel(value.label) };
+};
+const cleanLine = (value) => {
+  if (!value || typeof value !== "object" || !AUDIO_STATUS_TEXTS.includes(value.text)) return null;
+  return { text: value.text, values: Array.isArray(value.values) ? value.values.slice(0, 1).map(cleanLabel) : [] };
+};
+
+/** 頁面回報的「聲音」清單與狀態整理成固定形狀（同 shared/audio-devices.ts 的 sanitizeAudioMenuReport）；看不懂回 null。 */
+export function sanitizeAudioMenuReport(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const list = (items) => (Array.isArray(items) ? items.map(cleanDevice).filter((d) => d !== null).slice(0, DEVICE_LIST_MAX) : []);
+  const name = (x) => (typeof x === "string" && x ? cleanLabel(x) : null);
+  const input = cleanLine(value.input_status);
+  const output = cleanLine(value.output_status);
+  if (!input || !output) return null;
+  return {
+    inputs: list(value.inputs),
+    outputs: list(value.outputs),
+    default_input: name(value.default_input),
+    default_output: name(value.default_output),
+    input_in_use: cleanInUse(value.input_in_use),
+    output_in_use: cleanInUse(value.output_in_use),
+    input_fallback: value.input_fallback === true,
+    output_fallback: value.output_fallback === true,
+    labels: value.labels === true,
+    input_status: input,
+    output_status: output,
+  };
+}
+
+/**
+ * 「聲音」分段：「聲音輸入」「聲音輸出」兩個 radio 子選單（系統預設在最前，括號是它目前指向的裝置），各接一列停用的狀態
+ * （「使用中：X」或「找不到「X」，暫用系統預設」，頁面以裝置事件算好）。點選後 setAudio(patch) POST 到 audio.write_path。
+ * 裝置名稱是資料，不翻譯。report 是頁面最後一次回報（還沒回報時清單是空的、狀態「尚未回報」）。
+ */
+export function audioMenu(audio, report, { setAudio, translate = (source) => source }) {
+  const fill = (source, ...values) => translate(source, ...values).replace(/\{(\d+)\}/g, (match, i) => (Number(i) < values.length ? String(values[Number(i)]) : match));
+  const value = (v) => (AUDIO_UI_VALUES.includes(v) ? translate(v) : v);
+  const line = (status) => (status ? fill(status.text, ...status.values.map(value)) : translate(AUDIO_TEXT.notReported));
+  const hints = [
+    { type: "separator" },
+    { label: translate(AUDIO_TEXT.bluetoothHint), enabled: false },
+    { label: translate(AUDIO_TEXT.systemSpeechHint), enabled: false },
+  ];
+  const section = (kind) => {
+    const input = kind === "input";
+    const id = input ? audio.prefs.input_device_id : audio.prefs.output_device_id;
+    const saved = input ? audio.prefs.input_label : audio.prefs.output_label;
+    const devices = (input ? report?.inputs : report?.outputs) ?? [];
+    const now = input ? report?.default_input : report?.default_output;
+    const key = input ? "input" : "output";
+    const pick = (deviceId, label) => () => void setAudio?.({ [`${key}_device_id`]: deviceId, [`${key}_label`]: deviceId === null ? null : label || null });
+    const deviceName = (device, i) => device.label || fill(input ? AUDIO_TEXT.unnamedInput : AUDIO_TEXT.unnamedOutput, i + 1);
+    const listed = devices.find((d) => d.id === id);
+    const savedName = listed?.label || saved || translate(AUDIO_TEXT.unknownDevice);
+    const choice = id === null ? translate(AUDIO_TEXT.systemDefault) : savedName;
+    const status = input ? report?.input_status : report?.output_status;
+    return [
+      {
+        label: `${translate(input ? AUDIO_TEXT.input : AUDIO_TEXT.output)}${translate("：")}${choice}`,
+        submenu: [
+          radio(now ? fill(AUDIO_TEXT.systemDefaultNow, now) : translate(AUDIO_TEXT.systemDefault), id === null, pick(null, null)),
+          ...devices.map((device, i) => radio(deviceName(device, i), device.id === id, pick(device.id, device.label))),
+          // 選定的裝置不在清單裡：仍列出來並勾著，照實顯示目前的選擇。頁面還沒回報清單時寫「尚未回報」，不說找不到。
+          ...(id !== null && !listed ? [radio(fill(devices.length === 0 ? AUDIO_TEXT.notReportedOption : AUDIO_TEXT.notFoundOption, savedName), true, () => {}, false)] : []),
+          ...hints,
+        ],
+      },
+      { label: line(status), enabled: false },
+    ];
+  };
+  return [
+    { type: "separator" },
+    { label: translate(AUDIO_TEXT.group), enabled: false },
+    ...section("input"),
+    ...section("output"),
+    ...(report && !report.labels ? [{ label: translate(AUDIO_TEXT.needPermission), enabled: false }] : []),
+  ];
+}
+
 /**
  * @param settings GET /api/settings 的回應（還沒讀到時是 null）
  * @param handlers command(name)：把選單動作交給頁面；setMenuPref(row, value)：POST { [row.key]: value } 到 row.write_path；
  *   openFamily(mode?)：「家人辨識…」與「校正人臉辨識…」（mode "calibrate"）。主程序先記下點擊時間，10 秒內頁面才能開管理 session，再交給頁面打開畫面；
- *   setWakeListen(value)、wakeReport：常駐喚醒聆聽（只有 settings.wake 存在時用到）；setVoiceNameTest(value)：SP-02a 只憑聲音叫名字的測試開關
+ *   setWakeListen(value)、wakeReport：常駐喚醒聆聽（只有 settings.wake 存在時用到）；setVoiceNameTest(value)：SP-02a 只憑聲音叫名字的測試開關；
+ *   setAudio(patch)、audioReport：「聲音」分段（settings.audio 存在時畫；patch 送到 settings.audio.write_path）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, wakeReport = null, wakeCommand, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, audioReport = null, wakeReport = null, wakeCommand, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -225,6 +342,7 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
     });
   }
   closeGroup();
+  if (settings.audio) items.push(...audioMenu(settings.audio, audioReport, { setAudio, translate }));
   if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, translate }));
   return items;
 }

@@ -66,6 +66,8 @@ import { speakFinished, speakProgress } from "./speech-text.ts";
 import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts";
 import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
+import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
+import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import {
   PushToTalk,
   VoiceConversation,
@@ -86,7 +88,7 @@ interface DesktopBridge {
   onLocaleChange?(listener: (locale: Locale) => void): () => void;
   openExternal(url: string): void;
   /** settings：設定的版本字串；變了 App 就重新讀取設定，選單列不會留著舊的「（目前）」。 */
-  reportState(state: { voice: string; activeTasks: number; settings: string; locale: Locale; wake?: WakeReport }): void;
+  reportState(state: { voice: string; activeTasks: number; settings: string; locale: Locale; wake?: WakeReport; audio?: AudioMenuReport }): void;
   /** 家人辨識（只經 IPC 到 App 的核心；不走 HTTP）。舊版 App 沒有這一項。 */
   identity?(request: IdentityRequest): Promise<IdentityResponse>;
   /** 家庭記憶（docs/16 MEM-1；只經 IPC 到 App 的核心）。舊版 App 與瀏覽器版沒有這一項。 */
@@ -512,6 +514,8 @@ function trackedPlayRemote(stream: MediaStream): () => void {
     guardOwner?.end("playback");
   };
   const audio = new Audio();
+  // 「聲音輸出」選定的裝置（系統預設時不呼叫 setSinkId）；改設定或裝置中斷時 audioDevices 重新套用到這個元素。
+  void audioDevices.sink(audio);
   audio.autoplay = true;
   audio.srcObject = stream;
   liveAudio = audio;
@@ -524,6 +528,7 @@ function trackedPlayRemote(stream: MediaStream): () => void {
     audio.srcObject = null;
     liveAudioPaused = audio.paused;
     if (liveAudio === audio) liveAudio = null;
+    audioDevices.release(audio);
     endGuard();
   };
 }
@@ -744,6 +749,95 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
   // 設定或家人辨識狀態改變：看著說話時的同步辨識重新向核心確認（不中斷正在進行的取樣）。
   ambient.refresh();
   syncWake(value.wake);
+  syncAudioPrefs(value);
+}
+
+/**
+ * 聲音輸入／輸出（George 2026-11-01）：輸出改了立即套到正在播的聲音與提示音（audioDevices 內）；
+ * 麥克風改了，常駐聆聽在閒置時重開，通話中等這通結束——下一通起使用（字幕照實說）。
+ */
+function syncAudioPrefs(value: SettingsView): void {
+  const changed = audioDevices.setPrefs(value.audio?.prefs);
+  if (!changed.input) return;
+  wake?.inputChanged();
+  if (realtime.on || realtimeStarting) {
+    const prefs = audioDevices.current;
+    const label = prefs.input_device_id === null ? null : audioLabel(prefs.input_device_id, prefs.input_label, "inputs");
+    showSubtitle(label === null ? t(AUDIO_TEXT.nextCallDefault) : t(AUDIO_TEXT.nextCall, label));
+  }
+}
+
+/** 裝置名稱（資料，不翻譯）：清單裡的較新，否則用保存的；都沒有時用「名稱未知的裝置」。 */
+function audioLabel(id: string, saved: string | null, kind: "inputs" | "outputs"): string {
+  return audioDevices.report()[kind].find((d) => d.id === id)?.label || saved || t(AUDIO_TEXT.unknownDevice);
+}
+
+/** 裝置事件：找不到選定的麥克風、輸出中斷或回來時照實顯示字幕；之前找不到的麥克風回來時常駐聆聽在閒置時重開。 */
+function onAudioDeviceEvent(event: AudioDeviceEvent): void {
+  switch (event.type) {
+    case "input_fallback":
+      showSubtitle(t(AUDIO_TEXT.missing, event.label ?? t(AUDIO_TEXT.unknownDevice)));
+      break;
+    case "input_returned":
+      wake?.inputChanged();
+      break;
+    case "output_lost":
+      showSubtitle(t(AUDIO_TEXT.outputLost, event.label ?? t(AUDIO_TEXT.unknownDevice)));
+      break;
+    case "output_back":
+      showSubtitle(t(AUDIO_TEXT.outputBack, event.label ?? t(AUDIO_TEXT.unknownDevice)));
+      break;
+    case "changed":
+      backfillAudioLabels();
+      scheduleAudioRender();
+      break;
+  }
+}
+
+let audioRenderPending = false;
+/** 裝置清單或使用中的裝置變了：下一個 microtask 重畫一次（選單列回報與設定畫面）。 */
+function scheduleAudioRender(): void {
+  if (audioRenderPending) return;
+  audioRenderPending = true;
+  queueMicrotask(() => {
+    audioRenderPending = false;
+    render();
+  });
+}
+
+let audioBackfillInFlight = false;
+let audioBackfillFailedAt = 0;
+/**
+ * 選的時候還沒有名稱的裝置（授權麥克風之前選的）：清單有名稱之後補上（deviceId 換掉時才能用名稱找回）。
+ * patch 同時帶 deviceId 與名稱，名稱一定對到那一支；成功才算完成，失敗 30 秒後再試，裝置晚一點才出現時下次清單變化再補。
+ */
+function backfillAudioLabels(): void {
+  const prefs = settings?.audio?.prefs;
+  if (audioBackfillInFlight || !prefs || Date.now() - audioBackfillFailedAt < 30_000) return;
+  const patch = labelBackfill(prefs, audioDevices.report());
+  if (!patch) return;
+  audioBackfillInFlight = true;
+  void api.updateAudio(patch).then(
+    (next) => {
+      audioBackfillInFlight = false;
+      applySettings(next);
+    },
+    () => {
+      audioBackfillInFlight = false;
+      audioBackfillFailedAt = Date.now();
+    },
+  );
+}
+
+/** 設定畫面的「聲音輸入／輸出」：送出選定的裝置（id 與名稱；null＝系統預設）。 */
+async function updateAudioPrefs(patch: AudioPrefsPatch): Promise<string | null> {
+  try {
+    applySettings(await api.updateAudio(patch));
+    render();
+    return null;
+  } catch (err) {
+    return msg`聲音裝置設定沒有保存：${(err as Error).message}`;
+  }
 }
 
 /** WK-01a：settings.wake 第一次出現時才載入 src/audio/（動態 import）；之後每次設定都交給控制器。 */
@@ -799,9 +893,12 @@ function syncWake(view: WakeSettingsView | undefined): void {
         renderWakeIndicator();
         render();
       },
-      saveDeviceId: async (deviceId) => void (await api.updateWake({ device_id: deviceId })),
       newId: () => newInteractionId(),
-    }, voiceForWake ? () => voiceForWake.keywordPort() : null);
+    }, voiceForWake ? () => voiceForWake.keywordPort() : null, {
+      // 常駐聆聽的麥克風跟著「聲音輸入」設定（找不到就暫用系統預設），提示音跟著「聲音輸出」設定（src/audio-devices.ts）。
+      mic: typeof navigator.mediaDevices?.getUserMedia === "function" ? { open: () => audioDevices.openInput(), preferred: () => audioDevices.preferredInput } : null,
+      output: { sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) },
+    });
     // WK-02：喚醒觸發開始 wake_word 即時語音（取代 WK-01a 預設的「聽到了」字幕）。
     wake.setTriggerHandler(onWakeTrigger);
     // 載入前已經開始的 Web Speech 或即時語音照實告訴它（不會在通話或 Web Speech 中途搶麥克風）。
@@ -1358,6 +1455,10 @@ const sense = new SenseController({
   },
 });
 setInterval(() => sense.tick(), 200);
+
+// 聲音輸入／輸出：讀裝置清單、聽 devicechange（enumerateDevices 不開麥克風；名稱要授權麥克風後才有）。
+audioDevices.on(onAudioDeviceEvent);
+audioDevices.start();
 
 // 家人辨識（docs/14 ID-01）：只由選單列打開；畫面收起時停止取樣、丟掉記憶體中的樣本與 session。
 /**
@@ -2345,6 +2446,12 @@ const actions: ViewActions = {
     });
   },
   openCameraPreview: () => openPreview(userRequest()),
+  updateAudio(patch) {
+    const requestId = userRequest();
+    void updateAudioPrefs(patch).then((error) => {
+      if (error) dispatch({ type: "show.settings", request_id: requestId, message: error });
+    });
+  },
   updateRealtime(patch) {
     const requestId = userRequest();
     void api.updateRealtime(patch).then(
@@ -2543,6 +2650,13 @@ function render(): void {
   applyDistanceScale();
 }
 
+/** 選單列「聲音」：裝置清單、真的在用的裝置，與頁面算好的兩句狀態（選單列只翻譯、不重算）。 */
+function audioMenuReport(): AudioMenuReport {
+  const report = audioDevices.report();
+  const prefs = settings?.audio?.prefs ?? audioDevices.current;
+  return { ...report, input_status: inputStatus(prefs, report), output_status: outputStatus(prefs, report) };
+}
+
 let reportedDesktopState = "";
 /**
  * 告訴 App 目前狀態（選單列圖示在收音時改變樣式），以及設定是否變了：頁面收到核心推送的 settings.updated
@@ -2558,6 +2672,8 @@ function reportDesktopState(): void {
     locale: getLocale(),
     // WK-01a：只有載入了常駐喚醒聆聽才帶（列舉值；preload 再過濾一次）。旗標關閉時與之前完全相同。
     ...(wake && wakeReport ? { wake: wakeReport } : {}),
+    // 聲音輸入／輸出的選單：裝置清單（名稱與 deviceId）與真的在用的裝置；preload 再整理一次（每種最多 24 個）。
+    audio: audioMenuReport(),
   };
   const key = JSON.stringify(state);
   if (key === reportedDesktopState) return;
@@ -2814,7 +2930,7 @@ function renderSurface(): void {
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
-      ? `${s.surface_id}:${JSON.stringify(settings)}:${s.message ?? ""}`
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${s.message ?? ""}` // 聲音裝置清單或使用中的裝置變了也重畫
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
@@ -2838,7 +2954,7 @@ function renderSurface(): void {
   // 成果紀錄自己更新內容（搜尋、詳細頁、刪除確認時不重建）。
   else if (s.kind === "history") el = historyView.element;
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
-  else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop });
+  else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, audio: audioDevices.report() });
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));
     el = renderProgress([...tasks.values()].map(shown), s.message, actions);

@@ -345,3 +345,84 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     expect(main).not.toMatch(/\/api\/settings\/wake/);
   });
 });
+
+// 聲音輸入／輸出（George 2026-11-01）：「聲音」分段。清單與狀態句只來自頁面回報（preload 與 main.mjs 都整理過）。
+describe("settings menu: 聲音 (input / output devices)", async () => {
+  const menu = await import("../desktop/settings-menu.mjs");
+  const shared = await import("../shared/audio-devices.ts");
+  const audio = (patch: Partial<import("../shared/audio-devices.ts").AudioPrefs> = {}) => ({ prefs: { ...shared.DEFAULT_AUDIO_PREFS, ...patch }, write_path: "/api/settings/audio" as const });
+  const report = (patch: Partial<import("../shared/audio-devices.ts").AudioReport> = {}, prefs = shared.DEFAULT_AUDIO_PREFS) => {
+    const base = {
+      inputs: [{ id: "mic-mac", label: "MacBook Pro Microphone" }, { id: "mic-usb", label: "USB Mic" }],
+      outputs: [{ id: "spk-mac", label: "MacBook Pro Speakers" }, { id: "spk-bt", label: "JBL Flip" }],
+      default_input: "MacBook Pro Microphone", default_output: "MacBook Pro Speakers",
+      input_in_use: null, output_in_use: null, input_fallback: false, output_fallback: false, labels: true, ...patch,
+    };
+    return { ...base, input_status: shared.inputStatus(prefs, base), output_status: shared.outputStatus(prefs, base) };
+  };
+  const section = (items: MenuItemTemplate[]) => items.slice(items.findIndex((i) => i.label === "聲音" || i.label === "Sound") - 1);
+
+  it("uses the same text as shared/audio-devices.ts", () => {
+    for (const [key, value] of Object.entries(menu.AUDIO_TEXT)) expect(value, key).toBe((shared.AUDIO_TEXT as Record<string, string>)[key]);
+  });
+
+  it("is drawn only when the core provides settings.audio; radio submenus start with the system default (now: X), then devices, then status rows", () => {
+    const setAudio = vi.fn();
+    expect(settingsMenu(view(enabledCamera), { command: vi.fn(), setMenuPref: vi.fn() }).some((i) => i.label === "聲音")).toBe(false);
+    const prefs = shared.DEFAULT_AUDIO_PREFS;
+    const items = section(settingsMenu({ ...view(enabledCamera), audio: audio() }, { command: vi.fn(), setMenuPref: vi.fn(), setAudio, audioReport: report({ input_in_use: { id: null, label: "MacBook Pro Microphone" } }, prefs) }));
+    expect(items.map((i) => (i.type === "separator" ? "----" : i.label))).toEqual([
+      "----", "聲音", "聲音輸入：系統預設", "使用中：MacBook Pro Microphone", "聲音輸出：系統預設", "播放時使用：MacBook Pro Speakers",
+    ]);
+    const input = items[2]!.submenu!;
+    expect(input.map((i) => [i.label, i.type, i.checked, i.enabled])).toEqual([
+      ["系統預設（目前：MacBook Pro Microphone）", "radio", true, true],
+      ["MacBook Pro Microphone", "radio", false, true],
+      ["USB Mic", "radio", false, true],
+      [undefined, "separator", undefined, undefined],
+      ["藍牙耳機當麥克風會切到低音質通話模式；建議麥克風留在 Mac、聲音輸出選藍牙喇叭", undefined, undefined, false],
+      ["按下說話與系統朗讀（語音模式、校準陌生聲音）一律用 Mac 的系統輸入／輸出", undefined, undefined, false],
+    ]);
+    input[2]!.click!();
+    items[4]!.submenu![2]!.click!();
+    items[4]!.submenu![0]!.click!();
+    expect(setAudio.mock.calls).toEqual([
+      [{ input_device_id: "mic-usb", input_label: "USB Mic" }],
+      [{ output_device_id: "spk-bt", output_label: "JBL Flip" }],
+      [{ output_device_id: null, output_label: null }],
+    ]);
+    expect(items.filter((i) => i.enabled === false && i.label !== "聲音").every((i) => !i.click)).toBe(true);
+  });
+
+  it("a missing chosen device stays listed (checked, disabled) and the status row says the default is used for now", () => {
+    const prefs = { ...shared.DEFAULT_AUDIO_PREFS, output_device_id: "spk-gone", output_label: "Bose SoundLink" };
+    const items = section(settingsMenu({ ...view(enabledCamera), audio: audio(prefs) }, { command: vi.fn(), setMenuPref: vi.fn(), setAudio: vi.fn(), audioReport: report({ output_fallback: true }, prefs) }));
+    expect(items[4]!.label).toBe("聲音輸出：Bose SoundLink");
+    expect(items[4]!.submenu!.find((i) => i.label === "Bose SoundLink（目前找不到）")).toMatchObject({ type: "radio", checked: true, enabled: false });
+    expect(items[5]!.label).toBe("找不到「Bose SoundLink」，暫用系統預設");
+  });
+
+  it("before a report: only the system default and the saved choice, status 尚未回報; without labels it says to allow the microphone", () => {
+    const items = section(settingsMenu({ ...view(enabledCamera), audio: audio({ input_device_id: "mic-usb", input_label: "USB Mic" }) }, { command: vi.fn(), setMenuPref: vi.fn() }));
+    expect(items[2]!.submenu!.slice(0, 2).map((i) => [i.label, i.checked])).toEqual([["系統預設", false], ["USB Mic（尚未回報）", true]]);
+    expect(items[3]!.label).toBe("尚未回報");
+    const noLabels = report({ inputs: [{ id: "mic-1", label: "" }], labels: false, default_input: null });
+    const unlabeled = section(settingsMenu({ ...view(enabledCamera), audio: audio() }, { command: vi.fn(), setMenuPref: vi.fn(), audioReport: noLabels }));
+    expect(unlabeled[2]!.submenu![1]!.label).toBe("未命名的麥克風 1");
+    expect(unlabeled.at(-1)!.label).toBe("授權麥克風後才會列出裝置名稱");
+  });
+
+  it("English: interface text translated, device names unchanged", () => {
+    setNativeLocale("en");
+    try {
+      const prefs = { ...shared.DEFAULT_AUDIO_PREFS, output_device_id: "spk-bt", output_label: "JBL Flip" };
+      const items = section(settingsMenu({ ...view(enabledCamera), audio: audio(prefs) }, { command: vi.fn(), setMenuPref: vi.fn(), translate: nativeT, audioReport: report({ output_in_use: { id: "spk-bt", label: "JBL Flip" }, input_fallback: false }, prefs) }));
+      expect(items.map((i) => i.label).filter(Boolean)).toEqual(["Sound", "Sound input: System default", "No microphone is open right now", "Sound output: JBL Flip", "In use: JBL Flip"]);
+      expect(items[2]!.submenu![0]!.label).toBe("System default (now: MacBook Pro Microphone)");
+      const texts = (list: MenuItemTemplate[]): string[] => list.flatMap((i) => [i.label ?? "", ...(i.submenu ? texts(i.submenu) : [])]);
+      expect(texts(items).filter((x) => /\p{Script=Han}/u.test(x))).toEqual([]);
+    } finally {
+      setNativeLocale("zh-TW");
+    }
+  });
+});

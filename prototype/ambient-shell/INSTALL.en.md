@@ -173,6 +173,17 @@ After a wake: an earcon plays, Nous greets you and starts a realtime voice call 
 
 **Current numbers and limits** ([WK-00 Mac trial](../../docs/validation/wk-00-mac-2026-10-31.en.md)): the wake word is the English Hello Nous (zh-en-3M model; "Nous" may sound like nose, nows or noose), boost 1.5, threshold 0.15. George's voice hit 7/10 live on the command line and 4/4 in the App, and "Hello" alone did not trigger. On 2026-11-01 Hey Nous was added (same three pronunciations); because it is shorter and easily confused with phrases like "Hey nurse", those three lines use their own boost 1.0 and threshold 0.25: in George's recording Hey Nous hit 8/10, and "Hey", "Hey, no", "They know us" and "Hey nurse" hit 0/5. The current models cannot recognise the Chinese 「哈囉努斯」, so it is no longer used. Other family members and the 8-hour TV false-wake test are not done yet; if it wakes by mistake or is hard to wake, note it so the threshold can be tuned from the numbers.
 
+### Choosing the microphone and speaker (for example a Bluetooth speaker)
+
+In the macOS App, the menu bar's “Camera and voice settings → Sound” (or the “Accounts and sign-in” page in the window, or the settings screen of the browser version) chooses which microphone Nous uses (“Sound input”) and which speaker it plays through (“Sound output”), saved in `audio.json`. To use a Bluetooth speaker, pair it first in macOS System Settings → Bluetooth, then choose it under “Sound output”.
+
+- A speaker change applies immediately; a microphone change during a call applies from the next call.
+- When the chosen microphone is missing, the system default is used for now; when the chosen speaker disconnects, playback moves to the system default; a caption says so, and it switches back automatically when the device returns.
+- Push-to-talk, voice-mode recognition and system read-aloud (voice mode, stranger voices in calibration) cannot choose a device in the browser and always use the Mac's system input/output.
+- A Bluetooth headset used as the microphone switches to a low-quality call mode; keep the microphone on the Mac and choose the Bluetooth speaker as the sound output.
+
+Not verified on a Mac yet; see the [validation record](../../docs/validation/audio-devices-2026-11-01.en.md).
+
 ### Wuling home controller (optional)
 
 Realtime voice can query home sensors and devices, for example living-room temperature, study CO₂, or main-light connectivity. It can also control one device, such as turning off a light, setting a desk lamp to 60%, or color temperature to 3000K. Configure realtime voice above first.

@@ -7,6 +7,7 @@ import type { RealtimeRouteFields, RealtimeServerEvent } from "./realtime-route.
 import type { IdentityStatus } from "./identity.ts";
 import type { MemorySettingsStatus } from "./memory.ts";
 import type { WakeSettingsView } from "./wake.ts";
+import type { AudioSettingsView } from "./audio-devices.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
 // 這裡先用 TS 型別，schema_version 標為 proto-0.1 以免與正式契約混淆。
@@ -150,6 +151,8 @@ export interface SettingsView {
   identity?: IdentityStatus;
   /** 記憶層（16）：全體 SSE 與 settings 只放可用與否、是否開啟；人物與內容只經 IPC。 */
   memory?: MemorySettingsStatus;
+  /** 聲音輸入／輸出裝置的選擇（audio.json）；本機核心一定提供，未提供時兩者都用系統預設。 */
+  audio?: AudioSettingsView;
   /** WK-01a 常駐喚醒聆聽：只有 NOUS_WAKE=on 時才有（偏好與引擎核對結果；實際狀態以頁面的裝置事件為準）。 */
   wake?: WakeSettingsView;
 }

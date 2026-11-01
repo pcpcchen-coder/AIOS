@@ -190,5 +190,6 @@
   "話語": "Speech",
   "套用後要再錄一輪：至少 50 次喚醒詞與 50 句陌生聲音都沒有被認成家人，才會開始只憑聲音叫名字。之後可以隨時清除校準資料，回到未校準的起點值。": "After applying, record one more round: only when at least 50 wake words and 50 sentences in stranger voices are all not taken for a family member will Nous start naming people by voice alone. You can clear the calibration data at any time to return to the uncalibrated starting values.",
   "要清除聲音校準資料嗎？": "Clear the voice calibration data?",
-  "會刪除校準的分數與已套用的門檻，回到未校準的起點值；只憑聲音不再叫名字（測試開關除外）。家人的聲音登記不受影響。": "This deletes the calibration scores and the applied thresholds and returns to the uncalibrated starting values; Nous will no longer name people by voice alone (except with the test switch). Family voice enrollments are not affected."
+  "會刪除校準的分數與已套用的門檻，回到未校準的起點值；只憑聲音不再叫名字（測試開關除外）。家人的聲音登記不受影響。": "This deletes the calibration scores and the applied thresholds and returns to the uncalibrated starting values; Nous will no longer name people by voice alone (except with the test switch). Family voice enrollments are not affected.",
+  "聲音裝置設定沒有保存": "Sound device settings were not saved"
 }

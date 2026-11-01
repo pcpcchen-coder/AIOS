@@ -12,6 +12,7 @@ import type { SettingsView } from "../shared/types.ts";
 // WK-01a（docs/17 §13.4）：NOUS_WAKE 預設關閉。關閉時頁面標頭、/api/settings 與選單列「鏡頭與語音設定」必須和加入喚醒程式
 // 之前逐位元組相同。快照檔（__snapshots__/wake-flag-off.test.ts.snap）是在 base 9778b41、還沒有任何喚醒程式時先產生的，
 // 之後的變更不得更新它；需要更新代表旗標關閉時的行為變了，要另行說明。
+// 例外（都不是喚醒程式）：F6 費用紀錄（下面另有測試）與 settings.audio（聲音輸入／輸出，2026-11-01；比對前拿掉這個欄位）。
 
 async function freePort(): Promise<number> {
   const s = createServer();
@@ -77,9 +78,15 @@ describe("NOUS_WAKE off is byte-identical to the pre-wake build", () => {
     const handle = await boot();
     const page = await fetch(`${handle.url}/`);
     expect(JSON.stringify(Object.fromEntries(["content-security-policy", "permissions-policy", "x-content-type-options", "referrer-policy"].map((h) => [h, page.headers.get(h)])))).toMatchSnapshot();
-    const body = await (await fetch(`${handle.url}/api/settings`)).text();
+    const raw = await (await fetch(`${handle.url}/api/settings`)).text();
+    // 第二個刻意的例外（George 2026-11-01「聲音輸入／輸出」）：settings.audio 不綁任何旗標，一定存在。拿掉這一個欄位之後
+    // 其餘逐位元組相同（快照不更新）；選單列的「聲音」分段也只來自這個欄位。
+    const parsed = JSON.parse(raw) as SettingsView;
+    expect(parsed.audio).toEqual({ prefs: { input_device_id: null, input_label: null, output_device_id: null, output_label: null }, write_path: "/api/settings/audio" });
+    const { audio: _audio, ...rest } = parsed;
+    const body = JSON.stringify(rest);
     expect(body).toMatchSnapshot();
-    expect(menuJson(JSON.parse(body) as SettingsView)).toMatchSnapshot();
+    expect(menuJson(rest as SettingsView)).toMatchSnapshot();
   });
 
   it("has no wake route, no wake settings and /wake-runtime/ is 404 (not the SPA fallback)", async () => {

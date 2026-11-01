@@ -9,7 +9,7 @@ import { validateMemoryRequest } from "./memory-ipc.mjs";
 import { deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "./tasks-ipc.mjs";
 import { createMemorySecretBox } from "./memory-safe-storage.mjs";
 import { checkTrustedSender, sameOrigin } from "./trusted-sender.mjs";
-import { isWakeReport, radio, settingsMenu } from "./settings-menu.mjs";
+import { isWakeReport, radio, sanitizeAudioMenuReport, settingsMenu } from "./settings-menu.mjs";
 import { isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "./localization.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -588,7 +588,7 @@ function notifyPower(event) {
 // ───────────── 選單列圖示 ─────────────
 
 let tray = null;
-let pageState = { voice: "off", activeTasks: 0, wake: null };
+let pageState = { voice: "off", activeTasks: 0, wake: null, audio: null };
 let settings = null;
 let settingsReadGeneration = 0;
 
@@ -626,7 +626,24 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, wakeReport: pageState.wake, wakeCommand: notifyPage, translate: t });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, translate: t });
+}
+
+/**
+ * 「聲音」分段的選擇（聲音輸入／輸出）：POST 到核心給的 settings.audio.write_path，直接套用回應；失敗時照實說明並重新讀取，
+ * radio 不會停在沒保存的選擇。輸出改了頁面立即套用到正在播的聲音；麥克風通話中改時下一通起使用（頁面顯示字幕）。
+ */
+async function setAudio(patch) {
+  const path = settings?.audio?.write_path;
+  if (!path) return;
+  try {
+    settings = await api(path, patch);
+  } catch (err) {
+    showError("聲音裝置設定沒有保存", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  rebuildMenu();
 }
 
 /** 即時語音用的 Codex 登入：核心開好回呼（1455，被占用時 1457，再不行改裝置代碼），系統瀏覽器開登入頁。 */
@@ -1091,7 +1108,13 @@ ipcMain.on("nous:get-locale", (event) => {
 ipcMain.on("nous:state", (event, state) => {
   if (!trustedLocaleSender(event, win, core?.url) || !state || typeof state !== "object") return;
   if (isLocale(state.locale)) setLocale(state.locale, { notify: false });
-  pageState = { voice: String(state.voice ?? "off"), activeTasks: Number(state.activeTasks) || 0, wake: isWakeReport(state.wake) ? { state: state.wake.state, reason: state.wake.reason ?? null } : null };
+  pageState = {
+    voice: String(state.voice ?? "off"),
+    activeTasks: Number(state.activeTasks) || 0,
+    wake: isWakeReport(state.wake) ? { state: state.wake.state, reason: state.wake.reason ?? null } : null,
+    // 「聲音」的裝置清單與狀態（只有名稱、deviceId 與白名單裡的狀態句；preload 已整理過，這裡再整理一次）。
+    audio: sanitizeAudioMenuReport(state.audio),
+  };
   const revision = String(state.settings ?? "");
   if (revision && revision !== reportedSettings) {
     reportedSettings = revision;

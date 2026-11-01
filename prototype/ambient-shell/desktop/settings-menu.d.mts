@@ -2,6 +2,7 @@
 import type { MenuPrefSetting } from "../shared/seconds-menu.ts";
 import type { SettingsView } from "../shared/types.ts";
 import type { WakePrefs, WakeReason, WakeReport, WakeState } from "../shared/wake.ts";
+import type { AudioMenuReport, AudioPrefsPatch, AudioSettingsView } from "../shared/audio-devices.ts";
 
 export interface MenuItemTemplate {
   label?: string;
@@ -37,6 +38,14 @@ export function wakeMenu(
   },
 ): MenuItemTemplate[];
 
+export const AUDIO_TEXT: Record<string, string>;
+export function sanitizeAudioMenuReport(value: unknown): AudioMenuReport | null;
+export function audioMenu(
+  audio: AudioSettingsView,
+  report: AudioMenuReport | null,
+  handlers: { setAudio?(patch: AudioPrefsPatch): unknown; translate?(source: string, ...values: unknown[]): string },
+): MenuItemTemplate[];
+
 export function settingsMenu(
   settings: SettingsView | null,
   handlers: {
@@ -47,6 +56,8 @@ export function settingsMenu(
     setVoiceNameTest?(value: boolean): unknown;
     wakeReport?: WakeReport | null;
     wakeCommand?(name: string): void;
-    translate?(source: string): string;
+    setAudio?(patch: AudioPrefsPatch): unknown;
+    audioReport?: AudioMenuReport | null;
+    translate?(source: string, ...values: unknown[]): string;
   },
 ): MenuItemTemplate[];

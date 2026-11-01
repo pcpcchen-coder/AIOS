@@ -6,6 +6,7 @@
 import workletUrl from "../audio/capture-worklet.ts?worker&url";
 import manifest from "../../shared/speaker-runtime.json" with { type: "json" };
 import type { SpeakerModelVersion } from "../../shared/identity.ts";
+import { audioDevices } from "../audio-devices.ts";
 import type { SegmentProblem, SpeakerRuntimeAssets, SpeakerWorkerRequest, SpeakerWorkerResponse } from "./protocol.ts";
 
 export const SPEAKER_RUNTIME_ASSETS: SpeakerRuntimeAssets = {
@@ -26,7 +27,8 @@ export interface MicSource {
 }
 
 export const OWN_MICROPHONE: MicSource = {
-  acquire: () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false }),
+  // 跟著「聲音輸入」設定（src/audio-devices.ts）；系統預設時約束和以前相同（AEC／NS／AGC、video: false）。
+  acquire: () => audioDevices.openInput({ video: false }),
   release: (stream) => {
     for (const track of stream.getTracks()) track.stop();
   },
@@ -63,6 +65,46 @@ export async function tapStream(stream: MediaStream, worker: Pick<SpeakerWorkerL
     throw err;
   }
   return { ctx, stop };
+}
+
+/** 提示音的輸出（audioDevices）：sink 導到選定的裝置、release 歸還。 */
+export interface ChimeOutput {
+  sink(ctx: AudioContext): Promise<void>;
+  release(ctx: AudioContext): void;
+}
+
+export const CHIME_SINK_WAIT_MS = 1000;
+
+/**
+ * 「現在開始」的提示音：新開一個 AudioContext、導到選定的輸出（最多等 1 秒，等不到就用系統預設）、排音，
+ * 約 0.15 秒後（加餘裕）關掉並歸還。排好音時 resolve。createContext 與 timer 給測試注入。
+ */
+export async function playChime(
+  output: ChimeOutput,
+  createContext: () => AudioContext | null = () => {
+    const AudioCtx = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
+    return AudioCtx ? new AudioCtx() : null;
+  },
+  timer: (run: () => void, ms: number) => void = (run, ms) => void setTimeout(run, ms),
+): Promise<void> {
+  const ctx = createContext();
+  if (!ctx) return;
+  await Promise.race([output.sink(ctx).catch(() => undefined), new Promise<void>((resolve) => timer(resolve, CHIME_SINK_WAIT_MS))]);
+  void ctx.resume().catch(() => undefined);
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.frequency.value = 880;
+  const t0 = ctx.currentTime;
+  gain.gain.setValueAtTime(0, t0);
+  gain.gain.linearRampToValueAtTime(0.2, t0 + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.15);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.16);
+  timer(() => {
+    output.release(ctx);
+    void ctx.close().catch(() => undefined);
+  }, 300);
 }
 
 export interface SegmentResult {
@@ -119,20 +161,14 @@ export class VoiceRecorder {
     }
   }
 
-  /** 提示音（約 0.15 秒、880 Hz）：告訴念的人「現在開始」。在錄音窗開始前播完，不會被錄進去。 */
-  chime(): void {
-    const ctx = this.ctx;
-    if (!ctx) return;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.frequency.value = 880;
-    const t0 = ctx.currentTime;
-    gain.gain.setValueAtTime(0, t0);
-    gain.gain.linearRampToValueAtTime(0.2, t0 + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.001, t0 + 0.15);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(t0);
-    osc.stop(t0 + 0.16);
+  /**
+   * 提示音（約 0.15 秒、880 Hz）：告訴念的人「現在開始」。在錄音窗開始前播完，不會被錄進去。
+   * 用另外一個短暫的 AudioContext 從「聲音輸出」選定的裝置出聲（擷取用的 AudioContext 不登記成輸出）；
+   * 排好音就 resolve，播完才關掉並歸還。
+   */
+  async chime(): Promise<void> {
+    if (!this.ctx) return;
+    await playChime(audioDevices);
   }
 
   /** 收一段 ms 毫秒的聲音並算特徵（至少要有 minVoicedMs 的人聲）。 */
