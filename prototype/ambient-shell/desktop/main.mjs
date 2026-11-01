@@ -245,6 +245,33 @@ async function confirmIdentity(request) {
     });
     return response === 0 && (!minor || checkboxChecked === true);
   }
+  if (request?.kind === "calib_apply") {
+    // SP-03a：套用建議的聲音門檻；之後還要用新的陌生聲音驗證通過，才會只憑聲音稱名。
+    const line = (label, seg) =>
+      seg && Number.isFinite(seg.match) && Number.isFinite(seg.reject_rate)
+        ? t("{0}：門檻 {1}，在你的樣本上約 {2}% 認不出來", t(label), seg.match.toFixed(2), String(Math.round(seg.reject_rate * 100)))
+        : t("{0}：資料不足，維持起點值", t(label));
+    const { response } = await ask({
+      type: "question",
+      buttons: ["套用", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "要套用建議的聲音門檻嗎？",
+      detail: [line("喚醒詞", request.keyword), line("話語", request.utterance), t("套用後要再錄一輪：至少 50 次喚醒詞與 50 句陌生聲音都沒有被認成家人，才會開始只憑聲音叫名字。之後可以隨時清除校準資料，回到未校準的起點值。")].join("\n"),
+    });
+    return response === 0;
+  }
+  if (request?.kind === "calib_clear") {
+    const { response } = await ask({
+      type: "warning",
+      buttons: ["清除", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "要清除聲音校準資料嗎？",
+      detail: "會刪除校準的分數與已套用的門檻，回到未校準的起點值；只憑聲音不再叫名字（測試開關除外）。家人的聲音登記不受影響。",
+    });
+    return response === 0;
+  }
   if (request?.kind === "delete_voice") {
     const { response } = await ask({
       type: "warning",

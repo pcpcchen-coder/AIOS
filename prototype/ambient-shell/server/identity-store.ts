@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isValidFeature, isValidSpeakerFeature, type FaceModelVersion, type SpeakerModelVersion } from "../shared/identity.ts";
+import { isValidFeature, isValidSpeakerFeature, type CalibrationTrial, type FaceModelVersion, type SpeakerModelVersion, type VoiceSegment } from "../shared/identity.ts";
 
 // 家人辨識的登記資料（gallery）加密保存（ADR-0001 §2.2、§2.3；George 2026-10-25 決定用 Electron safeStorage）。
 //
@@ -142,6 +142,23 @@ function featureFromBase64(s: string): Float32Array {
   return out;
 }
 
+/**
+ * SP-03a 聲音校準資料（voice-calibration.v1.json）：只有分數與標籤，不存錄音或特徵。整份 JSON 以 SecretBox（App 裡是 safeStorage）
+ * 加密；格式錯、解不開就當成沒有（校準可以重做），不影響 gallery。
+ * templates：記這筆分數是對哪一版聲音模板算的（person_id → voice.updated_at）；模板重錄或人物刪除後，那筆就不再採用。
+ */
+export interface StoredCalibrationTrial extends CalibrationTrial {
+  templates: Record<string, string>;
+}
+export interface CalibrationFileData {
+  model: SpeakerModelVersion;
+  trials: StoredCalibrationTrial[];
+  applied: { at: string; thresholds: Record<VoiceSegment, { match: number; margin: number }> } | null;
+}
+const CALIBRATION_FILE = "voice-calibration.v1.json";
+/** 最多保留幾筆（舊的先丟）。 */
+export const CALIBRATION_MAX_TRIALS = 2000;
+
 export class GalleryStore {
   readonly path: string;
   private backup: BackupExclusion = "pending";
@@ -218,6 +235,32 @@ export class GalleryStore {
     const file = join(this.options.dir, NAMING_NOTICE_FILE);
     writeFileSync(file, `${JSON.stringify({ schema_version: 1, seen_at: at })}\n`, { mode: 0o600 });
     chmodSync(file, 0o600);
+  }
+
+  /** SP-03a：讀校準資料；沒有、格式錯或解不開時 null。 */
+  loadCalibration(): CalibrationFileData | null {
+    try {
+      const file = JSON.parse(readFileSync(join(this.options.dir, CALIBRATION_FILE), "utf8")) as { schema_version?: unknown; sealed?: unknown };
+      if (file.schema_version !== 1 || typeof file.sealed !== "string") return null;
+      const data = JSON.parse(this.options.secretBox.open(Buffer.from(file.sealed, "base64"))) as CalibrationFileData;
+      if (!data || !Array.isArray(data.trials) || !data.model) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  /** SP-03a：寫校準資料（整份重寫、原子替換、0600）。 */
+  saveCalibration(data: CalibrationFileData): void {
+    this.prepare();
+    const trimmed: CalibrationFileData = { ...data, trials: data.trials.slice(-CALIBRATION_MAX_TRIALS) };
+    const sealed = this.options.secretBox.seal(JSON.stringify(trimmed)).toString("base64");
+    this.writeAtomic(JSON.stringify({ schema_version: 1, sealed }), CALIBRATION_FILE);
+  }
+
+  /** SP-03a：清除校準資料（之後回到未校準的起點門檻）。 */
+  removeCalibration(): void {
+    rmSync(join(this.options.dir, CALIBRATION_FILE), { force: true });
   }
 
   /** 磁碟上檔頭的 gallery_version（不解密）；沒有檔案是 null，讀不懂是 -1。寫入前用來確認沒有被別的程序改過。 */
@@ -327,7 +370,8 @@ export class GalleryStore {
     this.fsyncDir();
   }
 
-  private writeAtomic(text: string): void {
+  private writeAtomic(text: string, name?: string): void {
+    const target = name ? join(this.options.dir, name) : this.path;
     const tmp = join(this.options.dir, `${TMP_PREFIX}${randomBytes(6).toString("hex")}`);
     const fd = openSync(tmp, "wx", 0o600);
     try {
@@ -341,12 +385,12 @@ export class GalleryStore {
     }
     closeSync(fd);
     try {
-      renameSync(tmp, this.path);
+      renameSync(tmp, target);
     } catch (err) {
       rmSync(tmp, { force: true });
       throw err;
     }
-    chmodSync(this.path, 0o600);
+    chmodSync(target, 0o600);
     this.fsyncDir();
   }
 

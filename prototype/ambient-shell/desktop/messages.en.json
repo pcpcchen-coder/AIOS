@@ -180,5 +180,15 @@
   "本人必須在場、聽過說明並同意。Nous 只在這台 Mac 上保存加密的聲音特徵（一串數字，不存錄音、不上傳），只用來稱呼，不作為解鎖或授權的依據；錄音本身在算完特徵後就丟掉。隨時可以在「家人辨識」刪除。目前辨識門檻尚未校準。\n\n原本登記的聲音（如有）會被取代。": "The person must be present, understand the explanation, and consent. Nous stores encrypted voice features (a list of numbers) only on this Mac, with no recordings or upload. They are used only for greetings, never unlocking or authorization; the recording itself is discarded once the features are computed. You can delete them in Family recognition at any time. Recognition thresholds are not calibrated.\n\nAny voice enrolled before will be replaced.",
   "刪除聲音": "Delete voice",
   "要刪除「{0}」的聲音嗎？": "Delete the voice for “{0}”?",
-  "只移除這位家人的聲音特徵，臉與名稱保留；會換用新的加密金鑰，刪除後無法還原。\n\n{0}": "Only this family member's voice features are removed; the face and name stay. A new encryption key will be used. This cannot be undone.\n\n{0}"
+  "只移除這位家人的聲音特徵，臉與名稱保留；會換用新的加密金鑰，刪除後無法還原。\n\n{0}": "Only this family member's voice features are removed; the face and name stay. A new encryption key will be used. This cannot be undone.\n\n{0}",
+  "套用": "Apply",
+  "清除": "Clear",
+  "要套用建議的聲音門檻嗎？": "Apply the suggested voice thresholds?",
+  "{0}：門檻 {1}，在你的樣本上約 {2}% 認不出來": "{0}: threshold {1}, about {2}% of your samples not recognised",
+  "{0}：資料不足，維持起點值": "{0}: not enough data, keeps the starting value",
+  "喚醒詞": "Wake word",
+  "話語": "Speech",
+  "套用後要再錄一輪：至少 50 次喚醒詞與 50 句陌生聲音都沒有被認成家人，才會開始只憑聲音叫名字。之後可以隨時清除校準資料，回到未校準的起點值。": "After applying, record one more round: only when at least 50 wake words and 50 sentences in stranger voices are all not taken for a family member will Nous start naming people by voice alone. You can clear the calibration data at any time to return to the uncalibrated starting values.",
+  "要清除聲音校準資料嗎？": "Clear the voice calibration data?",
+  "會刪除校準的分數與已套用的門檻，回到未校準的起點值；只憑聲音不再叫名字（測試開關除外）。家人的聲音登記不受影響。": "This deletes the calibration scores and the applied thresholds and returns to the uncalibrated starting values; Nous will no longer name people by voice alone (except with the test switch). Family voice enrollments are not affected."
 }
