@@ -3,6 +3,7 @@ import { PrefsFile } from "./prefs-file.ts";
 
 // 常駐喚醒聆聽的偏好（configDir/wake.json）。這個檔案只有這裡寫入，而且只有 NOUS_WAKE=on 時才建立這個 store。
 // fail closed：檔案讀不懂、或某個鍵不合法時，wake_listen 一律當成關閉、device_id 當成沒有（不猜成開，不用來源不明的裝置）。
+// wake_silence_s 不合法時用預設 5 秒（不影響隱私，只影響誤喚醒時多等幾秒）。
 // 「暫停聆聽」只到本次執行結束，不寫進這個檔案（docs/17 §5.5）。
 
 export interface WakeSettingsStoreOptions {

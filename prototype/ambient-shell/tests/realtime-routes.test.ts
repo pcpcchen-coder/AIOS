@@ -735,7 +735,7 @@ describe("WK-02 POST /api/realtime/start: wake_word only with NOUS_WAKE on", () 
     const key = fakeRoute("api_key", "gpt-realtime");
     const records: VoiceCostRecord[] = [];
     const costLog = { record: (r: VoiceCostRecord) => void records.push(r), list: () => records.slice().reverse() } as unknown as VoiceCostLog;
-    const wake = { view: () => ({ wake_listen: true, device_id: null }), update: () => ({ wake_listen: true, device_id: null }), runtime: () => "missing" as const };
+    const wake = { view: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5 }), update: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5 }), runtime: () => "missing" as const };
     const probe = createNetServer();
     await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
     const port = (probe.address() as AddressInfo).port;

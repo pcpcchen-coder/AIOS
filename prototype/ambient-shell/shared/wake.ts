@@ -59,18 +59,27 @@ export interface WakePrefs {
   wake_listen: boolean;
   /** 上一次真的進入 listening_local 的麥克風 deviceId；自動恢復時以 exact 指定，找不到就 error device_missing。 */
   device_id: string | null;
+  /** 喚醒後多久沒人出聲就結束這通（秒，src/audio/wake-call.ts）；只能是 WAKE_SILENCE_OPTIONS_S 其中一個。 */
+  wake_silence_s: number;
 }
 export type WakePrefsPatch = Partial<WakePrefs>;
 
-export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null };
-export const WAKE_PREF_KEYS = ["wake_listen", "device_id"] as const satisfies readonly (keyof WakePrefs)[];
+/**
+ * 「喚醒後等你開口」的選項（選單列一組 radio）。George 2026-10-31 定 5 秒；2026-11-01 要求可以調整。
+ * 下限 3 秒：念完喚醒詞、聽完招呼還來得及開口；上限 20 秒：誤喚醒時麥克風不會外傳太久（17 §5.7）。
+ */
+export const WAKE_SILENCE_OPTIONS_S = [3, 5, 8, 10, 15, 20] as const;
+export const DEFAULT_WAKE_SILENCE_S = 5;
+
+export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null, wake_silence_s: DEFAULT_WAKE_SILENCE_S };
+export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s"] as const satisfies readonly (keyof WakePrefs)[];
 
 export class WakePatchError extends Error {}
 
 /** deviceId 是瀏覽器給的不透明字串；只接受可見 ASCII、最多 256 字元。 */
 const DEVICE_ID = /^[\x21-\x7e]{1,256}$/;
 
-/** 邊界驗證：只接受 wake_listen（布林）與 device_id（字串或 null）；其他鍵、空 patch、型別不符一律丟錯。 */
+/** 邊界驗證：只接受 wake_listen（布林）、device_id（字串或 null）與 wake_silence_s（選項之一）；其他鍵、空 patch、型別不符一律丟錯。 */
 export function parseWakePatch(input: unknown): WakePrefsPatch {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new WakePatchError("喚醒設定必須是 JSON 物件");
   const patch: WakePrefsPatch = {};
@@ -81,6 +90,11 @@ export function parseWakePatch(input: unknown): WakePrefsPatch {
     } else if (key === "device_id") {
       if (value !== null && (typeof value !== "string" || !DEVICE_ID.test(value))) throw new WakePatchError("device_id 格式不正確");
       patch.device_id = value;
+    } else if (key === "wake_silence_s") {
+      if (!(WAKE_SILENCE_OPTIONS_S as readonly unknown[]).includes(value)) {
+        throw new WakePatchError("wake_silence_s 必須是選單裡的秒數（3、5、8、10、15 或 20）");
+      }
+      patch.wake_silence_s = value as number;
     } else {
       throw new WakePatchError(`不認得的喚醒設定：${key}`);
     }
@@ -319,7 +333,7 @@ export function isWakeWorkerOut(value: unknown): value is WakeWorkerOut {
 
 // ───────────── 介面文字（共用翻譯表） ─────────────
 
-export const WAKE_WORD_TEXT = "Hello Nous";
+export const WAKE_WORD_TEXT = "Hello Nous／Hey Nous";
 
 export const WAKE_STATE_LABEL: { readonly [S in WakeState]: string } = {
   off: "未開啟",
@@ -355,20 +369,22 @@ export const WAKE_TEXT = {
   group: "喚醒詞",
   statusPrefix: "喚醒聆聽",
   listen: "常駐喚醒聆聽",
-  listenNote: "只在這台 Mac 本機偵測「Hello Nous」",
+  listenNote: "只在這台 Mac 本機偵測「Hello Nous」或「Hey Nous」",
+  silence: "喚醒後等你開口",
+  silenceNote: "喚醒後這麼久沒聽到聲音就結束這通；Nous 說話時不算",
   pause: "暫停聆聽（到這次結束）",
   resume: "繼續聆聽",
   speaker: "通話中辨認說話者",
   speakerNote: "SP-02 之後才能使用",
   heard: "聽到了",
-  resumed: "已恢復常駐喚醒聆聽（只在本機偵測「Hello Nous」）",
+  resumed: "已恢復常駐喚醒聆聽（只在本機偵測「Hello Nous」或「Hey Nous」）",
   failed: "常駐喚醒聆聽沒有開啟：{0}",
   stopped: "常駐喚醒聆聽已停止：{0}",
   notReported: "尚未回報",
   indicator: "本機聆聽喚醒詞中",
   dialogMessage: "要開啟常駐喚醒聆聽嗎？",
   dialogDetail:
-    "開啟後麥克風會常駐開著，只在這台 Mac 本機偵測「Hello Nous」。沒有喚醒時的聲音只留在記憶體中約 2 秒，不寫檔、不進紀錄、不上傳。App 重開與睡眠回來後會自動恢復，直到你關掉這個開關；「暫停聆聽」只到這次結束。",
+    "開啟後麥克風會常駐開著，只在這台 Mac 本機偵測「Hello Nous」或「Hey Nous」。沒有喚醒時的聲音只留在記憶體中約 2 秒，不寫檔、不進紀錄、不上傳。App 重開與睡眠回來後會自動恢復，直到你關掉這個開關；「暫停聆聽」只到這次結束。",
   dialogRuntimeMissing: "目前還沒有安裝喚醒引擎：開啟後會顯示「無法使用」，不會開啟麥克風。",
   dialogEnable: "開啟",
   dialogCancel: "取消",

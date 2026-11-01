@@ -133,9 +133,12 @@ describe("SherpaWasmDetector load (fake wasm module, test manifest)", () => {
     expect(seen.keywordsThreshold).toBeCloseTo(0.3, 6);
     expect(seen).toMatchObject({ sampleRate: 16_000, featureDim: 80, numThreads: 1, provider: "cpu", maxActivePaths: 4, numTrailingBlanks: 1, ...{ encoder: KWS_FS_PATHS.encoder, decoder: KWS_FS_PATHS.decoder, joiner: KWS_FS_PATHS.joiner, tokens: KWS_FS_PATHS.tokens } });
     expect(kwsConfig(builtTestManifest()).modelConfig.debug).toBe(0);
-    // 出貨的清單（WK-00 Mac：Hello Nous 三種 Nous 念法，提升分數 1.5、門檻 0.15）
+    // 出貨的清單（WK-00 Mac：Hello Nous 三種 Nous 念法，提升分數 1.5、門檻 0.15；2026-11-01 加 Hey Nous，該三行自己的 :1 #0.25）
     const shipped = kwsConfig(WAKE_RUNTIME);
-    expect(shipped.keywordsBuf).toBe("HH AH0 L OW1 N OW1 S @HELLO_NOUS_OW\nHH AH0 L OW1 N AW1 S @HELLO_NOUS_AW\nHH AH0 L OW1 N UW1 S @HELLO_NOUS_UW\n");
+    expect(shipped.keywordsBuf).toBe(
+      "HH AH0 L OW1 N OW1 S @HELLO_NOUS_OW\nHH AH0 L OW1 N AW1 S @HELLO_NOUS_AW\nHH AH0 L OW1 N UW1 S @HELLO_NOUS_UW\n"
+        + "HH EY1 N OW1 S :1 #0.25 @HEY_NOUS_OW\nHH EY1 N AW1 S :1 #0.25 @HEY_NOUS_AW\nHH EY1 N UW1 S :1 #0.25 @HEY_NOUS_UW\n",
+    );
     expect(shipped.keywordsScore).toBe(1.5);
     expect(shipped.keywordsThreshold).toBe(0.15);
   });

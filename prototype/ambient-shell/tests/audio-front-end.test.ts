@@ -371,7 +371,7 @@ function controller(runtime: WakeRuntimeState = "ok") {
     return () => (entry.cancelled = true);
   };
   const c = new WakeController(host, { mediaDevices: media, capture, earcon, timer });
-  const view = (listen: boolean, device: string | null = null): WakeSettingsView => ({ wake_listen: listen, device_id: device, runtime });
+  const view = (listen: boolean, device: string | null = null): WakeSettingsView => ({ wake_listen: listen, device_id: device, wake_silence_s: 5, runtime });
   return {
     c, clock, media, capture, earcon, captions, saved, reports, view, timers,
     /** 推進假時鐘並執行到期、沒被取消的計時器。 */
@@ -587,7 +587,7 @@ describe("WakeController: WK-02 hooks (subscribers, rate-limit pause, calls)", (
     expect(h.c.state).toEqual({ state: "listening_local", reason: null });
     // 同一支麥克風（exact deviceId），也不顯示「已恢復」字幕（不是自動恢復）
     expect(h.media.calls.at(-1)).toMatchObject({ audio: { deviceId: { exact: "mic-a" } } });
-    expect(h.captions).not.toContain("已恢復常駐喚醒聆聽（只在本機偵測「Hello Nous」）");
+    expect(h.captions).not.toContain("已恢復常駐喚醒聆聽（只在本機偵測「Hello Nous」或「Hey Nous」）");
   });
 
   it("a user pause during the rate-limit pause wins; a new pauseFor replaces the old timer; dispose cancels it", async () => {
@@ -620,8 +620,8 @@ describe("WakeController: WK-02 hooks (subscribers, rate-limit pause, calls)", (
       now: clock.now, runtime: () => "ok", caption: () => {}, visible: () => true, onVisible: () => () => {}, state: () => {}, saveDeviceId: async () => {}, newId: () => "w",
     };
     const c = new WakeController(host, { mediaDevices: media, capture, earcon: new FakeEarcon(), timer: (run) => { run(); return () => {}; } });
-    c.applySettings({ wake_listen: false, device_id: null, runtime: "ok" });
-    c.applySettings({ wake_listen: true, device_id: null, runtime: "ok" });
+    c.applySettings({ wake_listen: false, device_id: null, wake_silence_s: 5, runtime: "ok" });
+    c.applySettings({ wake_listen: true, device_id: null, wake_silence_s: 5, runtime: "ok" });
     await flush();
     capture.last!.events.started();
     expect(() => c.pauseFor("rate_limited", 0)).not.toThrow();

@@ -45,7 +45,7 @@ beforeEach(() => {
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("shared/wake-runtime.json schema", () => {
-  it("the shipped manifest is valid and built from the 2026-10-31 release (real release hashes, tag carries the config hash prefix) with the Hello Nous keywords", () => {
+  it("the shipped manifest is valid and built from the 2026-10-31 release (real release hashes, tag carries the config hash prefix) with the Hello Nous and Hey Nous keywords", () => {
     expect(validateWakeRuntimeManifest(WAKE_RUNTIME)).toEqual([]);
     expect(WAKE_RUNTIME.status).toBe("built");
     expect(WAKE_RUNTIME.build.release_repo).toBe("pcpcchen-coder/AIOS");
@@ -68,6 +68,10 @@ describe("shared/wake-runtime.json schema", () => {
         { id: "HELLO_NOUS_OW", tokens: "HH AH0 L OW1 N OW1 S", boost: null, threshold: null },
         { id: "HELLO_NOUS_AW", tokens: "HH AH0 L OW1 N AW1 S", boost: null, threshold: null },
         { id: "HELLO_NOUS_UW", tokens: "HH AH0 L OW1 N UW1 S", boost: null, threshold: null },
+        // 2026-11-01 Hey Nous：比 Hello Nous 短，自己的門檻較嚴（George 的錄音：0.15 時 Hey nurse 會觸發，0.25 時 0/5）
+        { id: "HEY_NOUS_OW", tokens: "HH EY1 N OW1 S", boost: 1, threshold: 0.25 },
+        { id: "HEY_NOUS_AW", tokens: "HH EY1 N AW1 S", boost: 1, threshold: 0.25 },
+        { id: "HEY_NOUS_UW", tokens: "HH EY1 N UW1 S", boost: 1, threshold: 0.25 },
       ],
     });
     // 每個發音單元都在 zh-en-3M 的 tokens.txt（WK-00 spike 的模型資料夾不進 git，所以以 ARPAbet 的格式檢查代替）

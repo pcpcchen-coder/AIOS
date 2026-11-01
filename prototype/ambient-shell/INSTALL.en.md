@@ -155,7 +155,7 @@ These views and settings have not been verified with the physical camera.
 <a id="常駐喚醒聆聽選填wk-01a尚無喚醒引擎"></a>
 ### Always-on wake listening: "Hello Nous" (optional, off by default)
 
-Say "**Hello Nous**" to wake Nous without looking at the screen or pressing anything. Detection runs only on this Mac; audio stays in memory for about 2 seconds and is never written to disk or uploaded. Only after a wake is audio sent to your chosen voice service, until the call ends.
+Say "**Hello Nous**" or "**Hey Nous**" to wake Nous without looking at the screen or pressing anything. Detection runs only on this Mac; audio stays in memory for about 2 seconds and is never written to disk or uploaded. Only after a wake is audio sent to your chosen voice service, until the call ends.
 
 1. **Install the wake engine** (once; the App never downloads it at runtime):
 
@@ -169,9 +169,9 @@ Say "**Hello Nous**" to wake Nous without looking at the screen or pressing anyt
 
 3. **Turn on always-on listening**: in the menu bar's "Camera and voice settings", last section "Wake word", tick "Always-on wake listening" (an explanation appears first). The status reads "Wake listening: Listening on this Mac" and a small listening icon appears next to the brain.
 
-After a wake: an earcon plays, Nous greets you and starts a realtime voice call (naming follows "Greet recognised family members by name"); with no speech for about 5 seconds the call ends by itself. At most 3 calls per rolling 60 seconds may start from a wake; beyond that listening pauses and resumes automatically. Wake detection pauses while realtime voice, push-to-talk or voice mode is in use and resumes afterwards, so when you sit in front of the screen, look-to-talk often opens the call first. "Pause listening (until this session ends)" turns it off for now.
+After a wake: an earcon plays, Nous greets you and starts a realtime voice call (naming follows "Greet recognised family members by name"); if nobody speaks the call ends by itself; choose how long it waits under Camera and voice settings → Wait after waking in the menu bar (3, 5, 8, 10, 15 or 20 seconds, 5 by default; time while Nous is speaking does not count). At most 3 calls per rolling 60 seconds may start from a wake; beyond that listening pauses and resumes automatically. Wake detection pauses while realtime voice, push-to-talk or voice mode is in use and resumes afterwards, so when you sit in front of the screen, look-to-talk often opens the call first. "Pause listening (until this session ends)" turns it off for now.
 
-**Current numbers and limits** ([WK-00 Mac trial](../../docs/validation/wk-00-mac-2026-10-31.en.md)): the wake word is the English Hello Nous (zh-en-3M model; "Nous" may sound like nose, nows or noose), boost 1.5, threshold 0.15. George's voice hit 7/10 live on the command line and 4/4 in the App, and "Hello" alone did not trigger. The current models cannot recognise the Chinese 「哈囉努斯」, so it is no longer used. Other family members and the 8-hour TV false-wake test are not done yet; if it wakes by mistake or is hard to wake, note it so the threshold can be tuned from the numbers.
+**Current numbers and limits** ([WK-00 Mac trial](../../docs/validation/wk-00-mac-2026-10-31.en.md)): the wake word is the English Hello Nous (zh-en-3M model; "Nous" may sound like nose, nows or noose), boost 1.5, threshold 0.15. George's voice hit 7/10 live on the command line and 4/4 in the App, and "Hello" alone did not trigger. On 2026-11-01 Hey Nous was added (same three pronunciations); because it is shorter and easily confused with phrases like "Hey nurse", those three lines use their own boost 1.0 and threshold 0.25: in George's recording Hey Nous hit 8/10, and "Hey", "Hey, no", "They know us" and "Hey nurse" hit 0/5. The current models cannot recognise the Chinese 「哈囉努斯」, so it is no longer used. Other family members and the 8-hour TV false-wake test are not done yet; if it wakes by mistake or is hard to wake, note it so the threshold can be tuned from the numbers.
 
 ### Wuling home controller (optional)
 
