@@ -2,10 +2,10 @@
 // 與選單指令對到頁面動作（src/desktop-command.ts）。Electron 實際畫出的選單沒有在這裡執行。
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
-import { isWakeReport as menuIsWakeReport, settingsMenu, WAKE_MENU_TEXT, WAKE_REASON_LABEL as MENU_REASON_LABEL, WAKE_STATE_LABEL as MENU_STATE_LABEL, WAKE_STATE_REASONS as MENU_STATE_REASONS, type MenuItemTemplate } from "../desktop/settings-menu.mjs";
+import { DEFAULT_WAKE_SILENCE_S as MENU_DEFAULT_SILENCE, isWakeReport as menuIsWakeReport, settingsMenu, WAKE_MENU_TEXT, WAKE_SILENCE_OPTIONS_S as MENU_SILENCE_OPTIONS, WAKE_REASON_LABEL as MENU_REASON_LABEL, WAKE_STATE_LABEL as MENU_STATE_LABEL, WAKE_STATE_REASONS as MENU_STATE_REASONS, type MenuItemTemplate } from "../desktop/settings-menu.mjs";
 import { setNativeLocale, t as nativeT } from "../desktop/localization.mjs";
 import { WAKE_COMMANDS } from "../src/audio/controller.ts";
-import { WAKE_REASON_LABEL, WAKE_STATE_LABEL, WAKE_STATE_REASONS, WAKE_TEXT, type WakeReport } from "../shared/wake.ts";
+import { DEFAULT_WAKE_SILENCE_S, parseWakePatch, WAKE_REASON_LABEL, WAKE_SILENCE_OPTIONS_S, WAKE_STATE_LABEL, WAKE_STATE_REASONS, WAKE_TEXT, type WakeReport } from "../shared/wake.ts";
 import { DESKTOP_COMMANDS, runDesktopCommand } from "../src/desktop-command.ts";
 import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, VOICE_UNSAVED_REASON } from "../shared/seconds-menu.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
@@ -197,14 +197,15 @@ describe("runDesktopCommand", () => {
 
 // WK-01a 常駐喚醒聆聽（George 2026-10-31 D3：「通話中辨認說話者」先放停用的一列）。
 describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wake)", () => {
-  function wakeBuild(listen: boolean, report: WakeReport | null) {
+  function wakeBuild(listen: boolean, report: WakeReport | null, silence = 5) {
     const command = vi.fn();
     const wakeCommand = vi.fn();
     const setWakeListen = vi.fn();
-    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, runtime: "missing" as const } };
-    const items = settingsMenu(settings, { command, setMenuPref: vi.fn(), setWakeListen, wakeReport: report, wakeCommand });
+    const setMenuPref = vi.fn();
+    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, runtime: "missing" as const } };
+    const items = settingsMenu(settings, { command, setMenuPref, setWakeListen, wakeReport: report, wakeCommand });
     const find = (label: string) => items.find((i) => i.label === label) as MenuItemTemplate;
-    return { items, find, command, wakeCommand, setWakeListen };
+    return { items, find, command, wakeCommand, setWakeListen, setMenuPref };
   }
 
   it("without settings.wake nothing is added (flag off)", () => {
@@ -217,7 +218,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     const { items, find } = wakeBuild(true, { state: "listening_local", reason: null });
     const start = items.findIndex((i) => i.label === "喚醒詞");
     expect(items[start - 1]).toEqual({ type: "separator" });
-    expect(items.slice(start).map((i) => i.label)).toEqual(["喚醒詞", "喚醒聆聽：本機聆聽中", "常駐喚醒聆聽", "暫停聆聽（到這次結束）", "通話中辨認說話者"]);
+    expect(items.slice(start).map((i) => i.label)).toEqual(["喚醒詞", "喚醒聆聽：本機聆聽中", "常駐喚醒聆聽", "喚醒後等你開口：5 秒", "暫停聆聽（到這次結束）", "通話中辨認說話者"]);
     expect(find("喚醒詞").enabled).toBe(false);
     expect(find("喚醒聆聽：本機聆聽中").enabled).toBe(false);
     expect(find("常駐喚醒聆聽")).toMatchObject({ type: "checkbox", checked: true, enabled: true });
@@ -244,6 +245,21 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     expect(off.find("喚醒聆聽：未開啟")).toBeDefined();
   });
 
+  it("「喚醒後等你開口」 lists every option with the current one checked and writes the picked value to /api/settings/wake", () => {
+    const { find, setMenuPref } = wakeBuild(false, null, 10);
+    const row = find("喚醒後等你開口：10 秒");
+    expect(row.sublabel).toBe("喚醒後這麼久沒聽到聲音就結束這通；Nous 說話時不算");
+    const radios = (row.submenu as MenuItemTemplate[]).filter((i) => i.type === "radio");
+    expect(radios.map((i) => i.label)).toEqual(["3 秒", "5 秒（預設）", "8 秒", "10 秒", "15 秒", "20 秒"]);
+    expect(radios.filter((i) => i.checked).map((i) => i.label)).toEqual(["10 秒"]);
+    // 聆聽關著也能先選好
+    expect(radios.every((i) => i.enabled)).toBe(true);
+    radios[0].click!();
+    expect(setMenuPref).toHaveBeenCalledWith(expect.objectContaining({ key: "wake_silence_s", write_path: "/api/settings/wake" }), 3);
+    // 每個選項核心都收（不會被 400 拒絕）
+    for (const n of MENU_SILENCE_OPTIONS) expect(parseWakePatch({ wake_silence_s: n })).toEqual({ wake_silence_s: n });
+  });
+
   it("before the page reports, the status line does not claim a device state (「尚未回報」, or 「未開啟」 when off)", () => {
     const on = wakeBuild(true, null);
     expect(on.find("喚醒聆聽：尚未回報")).toBeDefined();
@@ -266,13 +282,15 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     expect(MENU_STATE_REASONS).toEqual(WAKE_STATE_REASONS);
     expect(MENU_STATE_LABEL).toEqual(WAKE_STATE_LABEL);
     expect(MENU_REASON_LABEL).toEqual(WAKE_REASON_LABEL);
-    for (const key of ["group", "statusPrefix", "listen", "listenNote", "pause", "resume", "speaker", "speakerNote", "notReported"] as const) expect(WAKE_MENU_TEXT[key]).toBe(WAKE_TEXT[key]);
+    for (const key of ["group", "statusPrefix", "listen", "listenNote", "silence", "silenceNote", "pause", "resume", "speaker", "speakerNote", "notReported"] as const) expect(WAKE_MENU_TEXT[key]).toBe(WAKE_TEXT[key]);
+    expect(MENU_SILENCE_OPTIONS).toEqual([...WAKE_SILENCE_OPTIONS_S]);
+    expect(MENU_DEFAULT_SILENCE).toBe(DEFAULT_WAKE_SILENCE_S);
   });
 
   it("is fully translated in English (the wake word Hello Nous is English already)", () => {
     setNativeLocale("en");
     try {
-      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, runtime: "missing" as const } };
+      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, runtime: "missing" as const } };
       for (const report of [null, ...Object.entries(WAKE_STATE_REASONS).flatMap(([state, reasons]) => reasons.map((reason) => ({ state, reason }) as WakeReport))]) {
         const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), wakeReport: report, translate: nativeT });
         const start = items.findIndex((i) => i.label === "Wake word");
@@ -282,7 +300,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
       }
       const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), translate: nativeT });
       expect(items.find((i) => i.label === "Recognise speaker during calls")).toMatchObject({ enabled: false, sublabel: "Available after SP-02" });
-      expect(items.find((i) => i.label === "Always-on wake listening")?.sublabel).toBe("Detects “Hello Nous” only on this Mac");
+      expect(items.find((i) => i.label === "Always-on wake listening")?.sublabel).toBe("Detects “Hello Nous” or “Hey Nous” only on this Mac");
       for (const text of Object.values(WAKE_TEXT)) expect(nativeT(text), text).not.toBe(text);
     } finally {
       setNativeLocale("zh-TW");

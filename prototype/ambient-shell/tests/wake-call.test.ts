@@ -3,12 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import { WAKE_CALL_TICK_MS, WakeCallWatch } from "../src/audio/wake-call.ts";
 import { NO_VOICE_TIMEOUT_MS } from "../src/audio/no-voice.ts";
 import { greetingFor, wakeTriggerAction } from "../src/realtime-session.ts";
+import { DEFAULT_WAKE_SILENCE_S } from "../shared/wake.ts";
 import { FakeClock } from "./fixtures/wake.ts";
 
 // WK-02：喚醒開始的通話「沒人出聲就結束」（docs/17 §5.7 第 2 點；George 2026-10-31：沉默 5 秒）。
 // 假時鐘與假計時器（fixture）：證明的是規則，不是真的音量門檻或 VAD 表現（WK-03 在 Mac 實測）。
 
-function watch() {
+function watch(timeoutMs?: number) {
   const clock = new FakeClock();
   const ticks: { run: () => void; cancelled: boolean }[] = [];
   const onTimeout = vi.fn();
@@ -20,6 +21,7 @@ function watch() {
       return () => (tick.cancelled = true);
     },
     onTimeout,
+    ...(timeoutMs !== undefined ? { timeoutMs } : {}),
   });
   /** 推進時間並跑一次還有效的計時器（每 WAKE_CALL_TICK_MS 一次）。 */
   const advance = (ms: number) => {
@@ -35,6 +37,16 @@ function watch() {
 describe("WakeCallWatch", () => {
   it("is 5 seconds by George's decision", () => {
     expect(NO_VOICE_TIMEOUT_MS).toBe(5000);
+    expect(NO_VOICE_TIMEOUT_MS).toBe(DEFAULT_WAKE_SILENCE_S * 1000);
+  });
+
+  it("uses the menu's 「喚醒後等你開口」 value when given (10 s: still counting at 9.75 s, ends at 10 s)", () => {
+    const { w, onTimeout, advance } = watch(10_000);
+    w.phase("listening");
+    advance(9750);
+    expect(onTimeout).not.toHaveBeenCalled();
+    advance(250);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
   });
 
   it("starts at the first listening and ends the call after 5 s of silence (once)", () => {
@@ -143,6 +155,8 @@ describe("wake trigger → call (pure parts of src/main.ts)", () => {
     expect(main).toMatch(/stopRealtime\("no_voice"\);\s*showSubtitle\(t\(WAKE_TEXT\.noVoice\)\);/);
     expect(main).toMatch(/if \(!decision\.ok && decision\.wake_limited\) wake\?\.pauseFor\("rate_limited", /);
     expect(main).toMatch(/if \(source === "typed"\) wakeCall\?\.disarm\(\);/);
+    // 倒數秒數來自選單列「喚醒後等你開口」（settings.wake.wake_silence_s），沒讀到設定時用預設
+    expect(main).toContain("timeoutMs: (settings?.wake?.wake_silence_s ?? DEFAULT_WAKE_SILENCE_S) * 1000,");
     // F6 一律記錄（不綁喚醒開關）：/end 一律帶結束原因，API key 路徑一律帶 usage
     expect(main).toMatch(/end: async \(\) => void \(await api\.realtimeEnd\(ticket, \{ reason: takeEndReason\(ticket\.session_id\) \}\)\)/);
     expect(main).toMatch(/api\.realtimeEnd\(ticketOf\(ticket\), \{ reason: takeEndReason\(ticket\.session_id\), usage: realtime\.usage \?\? null \}\)/);

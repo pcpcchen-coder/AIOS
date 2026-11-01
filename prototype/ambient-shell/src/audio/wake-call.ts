@@ -1,6 +1,7 @@
 // 喚醒開始的通話：沒有人出聲就自動結束（docs/17 §5.7 第 2 點；WK-02 接上 WK-01a 交付的 NoVoiceWatchdog）。
-// George 2026-10-31：使用者沉默 5 秒就結束。規則（純邏輯，時鐘與計時器可注入，測試見 tests/wake-call.test.ts）：
-// - 通話第一次進入 listening 時開始倒數；Nous 在說話（speaking）或思考（thinking）時暫停，回到 listening 時重新倒數 5 秒；
+// George 2026-10-31：使用者沉默 5 秒就結束；2026-11-01 起可在選單列「喚醒後等你開口」調整（shared/wake.ts 的 WAKE_SILENCE_OPTIONS_S）。
+// 規則（純邏輯，時鐘與計時器可注入，測試見 tests/wake-call.test.ts）：
+// - 通話第一次進入 listening 時開始倒數；Nous 在說話（speaking）或思考（thinking）時暫停，回到 listening 時重新倒數；
 // - 聽到聲音（feed 的 RMS 超過門檻一段時間）、伺服器判斷使用者開口（hearing）或使用者打字：這通不再倒數（disarm）；
 // - 逾時只觸發一次 onTimeout（呼叫端結束通話、顯示字幕，喚醒聆聽在麥克風歸還後自己回到 listening_local）。
 // 誠實說明：判斷的是音量門檻，不是 VAD，分不出人聲與電視；電視開著時可能不會逾時（17 §5.7）。不保存任何樣本，只看 RMS 數字。

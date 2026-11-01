@@ -30,7 +30,7 @@ const [dir] = await packager({
   extendInfo: {
     CFBundleDevelopmentRegion: "en",
     CFBundleLocalizations: ["en", "zh-Hant"],
-    NSMicrophoneUsageDescription: 'Nous uses the microphone for voice conversations and, if you turn on always-on wake listening, to detect "Hello Nous" on this Mac only; that audio stays in memory and is not saved or uploaded. After the wake word or when you start a conversation, audio is sent to your selected voice service until the conversation ends.',
+    NSMicrophoneUsageDescription: 'Nous uses the microphone for voice conversations and, if you turn on always-on wake listening, to detect "Hello Nous" or "Hey Nous" on this Mac only; that audio stays in memory and is not saved or uploaded. After the wake word or when you start a conversation, audio is sent to your selected voice service until the conversation ends.',
     NSCameraUsageDescription: "Nous uses the camera for presence, head direction, gestures, nominal distance, and optional family recognition. Images are processed only on this Mac, without saving or upload.",
     LSMinimumSystemVersion: "13.0",
     NSHumanReadableCopyright: "Nous prototype",

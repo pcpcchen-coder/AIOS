@@ -66,7 +66,9 @@ export const WAKE_MENU_TEXT = {
   group: "喚醒詞",
   statusPrefix: "喚醒聆聽",
   listen: "常駐喚醒聆聽",
-  listenNote: "只在這台 Mac 本機偵測「Hello Nous」",
+  listenNote: "只在這台 Mac 本機偵測「Hello Nous」或「Hey Nous」",
+  silence: "喚醒後等你開口",
+  silenceNote: "喚醒後這麼久沒聽到聲音就結束這通；Nous 說話時不算",
   pause: "暫停聆聽（到這次結束）",
   resume: "繼續聆聽",
   speaker: "通話中辨認說話者",
@@ -74,18 +76,26 @@ export const WAKE_MENU_TEXT = {
   notReported: "尚未回報",
 };
 
+/** 「喚醒後等你開口」的選項與預設（同 shared/wake.ts 的 WAKE_SILENCE_OPTIONS_S、DEFAULT_WAKE_SILENCE_S）。 */
+export const WAKE_SILENCE_OPTIONS_S = [3, 5, 8, 10, 15, 20];
+export const DEFAULT_WAKE_SILENCE_S = 5;
+
 /**
  * 「喚醒詞」分段。report 是頁面最後一次回報的 { state, reason }。還沒回報時不猜：偏好關著顯示「未開啟」，
  * 開著顯示「尚未回報」（不是裝置事件，所以不說「準備中」）。
  * 「通話中辨認說話者」（George 2026-10-31 D3）：先放一列停用的勾選框，沒有 click，SP-02 之後才啟用。
  */
-export function wakeMenu(wake, report, { command, setWakeListen, translate = (source) => source }) {
+export function wakeMenu(wake, report, { command, setWakeListen, setMenuPref, translate = (source) => source }) {
   const text = (source) => translate(source);
   const reported = isWakeReport(report);
   const current = reported ? report : { state: "off", reason: null };
   const stateLabel = reported || !wake.wake_listen ? WAKE_STATE_LABEL[current.state] : WAKE_MENU_TEXT.notReported;
   const paused = current.state === "paused" && current.reason === "user_pause";
   const canPause = wake.wake_listen && reported && (current.state === "listening_local" || current.state === "armed");
+  const silence = wake.wake_silence_s ?? DEFAULT_WAKE_SILENCE_S;
+  // 和「鏡頭與語音設定」的秒數列同一條寫入路徑（setMenuPref POST { wake_silence_s } 到 /api/settings/wake）；關著聆聽也能先選好。
+  const silenceRow = { key: "wake_silence_s", kind: "seconds", label: WAKE_MENU_TEXT.silence, write_path: "/api/settings/wake" };
+  const seconds = (n) => `${n} 秒${n === DEFAULT_WAKE_SILENCE_S ? "（預設）" : ""}`;
   return [
     { type: "separator" },
     { label: text(WAKE_MENU_TEXT.group), enabled: false },
@@ -102,6 +112,15 @@ export function wakeMenu(wake, report, { command, setWakeListen, translate = (so
       sublabel: text(WAKE_MENU_TEXT.listenNote),
       // 寫入與核心回應為準（打開前主程序先顯示原生說明）；失敗時重新讀取，勾選不會停在沒保存的狀態。
       click: () => void setWakeListen?.(!wake.wake_listen),
+    },
+    {
+      label: `${text(WAKE_MENU_TEXT.silence)}${text("：")}${text(`${silence} 秒`)}`,
+      sublabel: text(WAKE_MENU_TEXT.silenceNote),
+      submenu: [
+        ...WAKE_SILENCE_OPTIONS_S.map((n) => radio(text(seconds(n)), n === silence, () => void setMenuPref?.(silenceRow, n))),
+        { type: "separator" },
+        { label: text(WAKE_MENU_TEXT.silenceNote), enabled: false },
+      ],
     },
     {
       label: text(paused ? WAKE_MENU_TEXT.resume : WAKE_MENU_TEXT.pause),
@@ -186,6 +205,6 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
     });
   }
   closeGroup();
-  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, translate }));
+  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setMenuPref, translate }));
   return items;
 }

@@ -61,7 +61,7 @@ import {
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
 import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts";
-import { WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
+import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
 import {
   PushToTalk,
@@ -1669,10 +1669,11 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     ambient.beginInteraction(interaction, realtimeLocale);
     lookTimeline.mark("start");
   }
-  // WK-02：喚醒開始的通話第一次就緒後開始「沒人出聲就結束」的倒數（5 秒；Nous 說話時暫停）。
+  // WK-02：喚醒開始的通話第一次就緒後開始「沒人出聲就結束」的倒數（選單列「喚醒後等你開口」，預設 5 秒；Nous 說話時暫停）。
   stopWakeCall();
   if (viaWake && wake) {
     wakeCall = wake.watchCall({
+      timeoutMs: (settings?.wake?.wake_silence_s ?? DEFAULT_WAKE_SILENCE_S) * 1000,
       ...(typeof settings?.realtime?.early_speech_rms === "number" ? { rms: settings.realtime.early_speech_rms } : {}),
       onTimeout: () => {
         if (!realtime.on && !realtimeStarting) return;
