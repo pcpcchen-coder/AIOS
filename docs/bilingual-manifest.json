@@ -146,8 +146,8 @@
       "source": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.en.md",
-      "sourceSha256": "95acc818ee8cc818be2f59258c74d3eafd5e93186736a85949025c76accb33e6",
-      "translationSha256": "8551ba3dbf933903a20a115cf1846ce5d49b27c8beafe32f3c3c0f660e1c6ba8"
+      "sourceSha256": "04e06aa85195deb3ecdc5e25c2490aecc4358726ee0122c933cf03a582b06338",
+      "translationSha256": "f12a475dfab8b5dd8a6d97453d88c5f4d16a3f62a3b3f709f3ddc944c2411f9a"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -158,8 +158,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "81a04ded42479e80a3971c6c557da6071d9aa866f0980f84318586515ce2a5a3",
-      "translationSha256": "919827ebbfee2a4e4a3da27d5bc7f255075d701cd52043fc5662679da217f959"
+      "sourceSha256": "24e60ce94b617d470899978dc85231cd8c1693fae58243c83e625c6db04a0fe6",
+      "translationSha256": "3d8eb25b9b3ec5d6e9cae336a6deebfec5f5658d38e4ec5bc0515b4f05e37677"
     },
     {
       "source": "docs/README.md",
@@ -186,8 +186,8 @@
       "source": "docs/adr/ADR-0003-local-wake-and-voice-recognition.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/adr/ADR-0003-local-wake-and-voice-recognition.en.md",
-      "sourceSha256": "b442beb6a1abb306c5b46c25624cebba90873cd30d47849d0edef4bceeeb5624",
-      "translationSha256": "f0611cdcfc6fc559b334356499267dc9415e42b435d1691cc9caad07ec285e3a"
+      "sourceSha256": "1a6b1afef91ac5b5bfe54e495e57b025c67d72451cb909f3a534449ca571efe8",
+      "translationSha256": "67bc2d3c6fdcb3de38723a143746a6fefa5060be7c65556ed7d12f0ec438fdde"
     },
     {
       "source": "docs/development/brain-regions.md",
@@ -526,6 +526,13 @@
       "translationSha256": "93d70ee8bdc77dd8776b60e4c08e94e8aaeb684f35e828d5071a74a652a4386d"
     },
     {
+      "source": "docs/validation/sp-02b-2026-11-01.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/sp-02b-2026-11-01.en.md",
+      "sourceSha256": "5eebb3d4da9423b99d9915b0e1bb848f2754df5944736eeaff6c92ebb49fcfe2",
+      "translationSha256": "faa4f9e6e702570beeaea410aac194a08387657407a18b80466b9501beb19a1d"
+    },
+    {
       "source": "docs/validation/wk-00-mac-2026-10-31.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/wk-00-mac-2026-10-31.en.md",
@@ -571,8 +578,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "f37882dc0623fe37ba55155a395aaff54913a3395e04fcb9743ca3eb13b8452d",
-      "translationSha256": "dbe400d376a56890602f7aa45331f185b4e6405a68262ea461f08a7102b8c94e"
+      "sourceSha256": "4f8eccac634443b511289a48bfe61f804ecfb27fca48b75d60f0fea6b56d84bd",
+      "translationSha256": "3a2050c9b4f61431b0c81a3a583b512f7b5c4fecee01e54989847df01d5310e5"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

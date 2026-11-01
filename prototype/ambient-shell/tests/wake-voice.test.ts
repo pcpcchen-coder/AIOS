@@ -4,7 +4,7 @@
 // 全部是 fixture：假的偵測器、假的 speaker worker、假的麥克風租用與 IPC。
 import { describe, expect, it, vi } from "vitest";
 import { KEYWORD_SPAN_S, WakeWorkerCore } from "../src/audio/worker-core.ts";
-import { FINISH_BUDGET_MS, KEYWORD_MAX_AGE_MS, WakeVoice, type WakeVoiceDeps } from "../src/speaker/wake-voice.ts";
+import { CALL_WINDOW_MS, FINISH_BUDGET_MS, KEYWORD_MAX_AGE_MS, WakeVoice, type WakeVoiceDeps } from "../src/speaker/wake-voice.ts";
 import type { SpeakerWorkerRequest, SpeakerWorkerResponse } from "../src/speaker/protocol.ts";
 import type { SpeakerWorkerLike } from "../src/speaker/recorder.ts";
 import { SPEAKER_RUNTIME_ASSETS } from "../src/speaker/recorder.ts";
@@ -190,5 +190,85 @@ describe("WakeVoice", () => {
     worker.emit({ type: "error", message: "load failed" });
     expect(worker.terminated).toBe(true);
     expect(v.keywordPort()).toBeNull();
+  });
+});
+
+describe("WakeVoice in-call windows (SP-02b 通話中辨認說話者)", () => {
+  function callSetup() {
+    const timers: { fn: () => void; ms: number; cleared: boolean }[] = [];
+    const s = setup();
+    s.deps.setTimer = (fn, ms) => {
+      const t = { fn, ms, cleared: false };
+      timers.push(t);
+      return t;
+    };
+    s.deps.clearTimer = (h) => void ((h as { cleared: boolean }).cleared = true);
+    const fire = async () => {
+      const t = timers.filter((x) => !x.cleared).at(-1)!;
+      t.cleared = true;
+      t.fn();
+      await flush();
+    };
+    const begins = () => s.worker.posted.filter((p) => p.message.type === "begin").map((p) => (p.message as { id: number }).id);
+    const ends = () => s.worker.posted.filter((p) => p.message.type === "end").map((p) => p.message as { id: number; min_voiced_ms: number });
+    return { ...s, timers, fire, begins, ends };
+  }
+
+  it("cuts 6 s windows; a window with ≥2 s of voice becomes one call_voice; the next window starts right away", async () => {
+    const s = callSetup();
+    await s.v.startCall();
+    expect(s.taps.started).toBe(1);
+    expect(s.timers[0]!.ms).toBe(CALL_WINDOW_MS);
+    const first = s.begins()[0]!;
+    await s.fire();
+    expect(s.ends()).toEqual([{ type: "end", id: first, min_voiced_ms: 2000 }]);
+    expect(s.begins()).toHaveLength(2);
+    s.worker.emit({ type: "segment", id: first, feature: FEATURE, problem: null, voiced_ms: 3100, ms: 50 });
+    await flush();
+    expect(s.sent).toEqual([{ op: "call_voice", voiced_ms: 3100, model: SPEAKER_MODEL_VERSION, feature: FEATURE }]);
+    // 人聲不足：不送
+    const second = s.begins()[1]!;
+    await s.fire();
+    s.worker.emit({ type: "segment", id: second, feature: null, problem: "too_short", voiced_ms: 900, ms: 3 });
+    await flush();
+    expect(s.sent).toHaveLength(1);
+    s.v.stopCall();
+    expect(s.released).toEqual([s.stream]);
+  });
+
+  it("a window during which Nous spoke is thrown away without computing a feature", async () => {
+    const s = callSetup();
+    await s.v.startCall();
+    s.v.setSpeaking(true);
+    s.v.setSpeaking(false);
+    await s.fire();
+    expect(s.ends()).toEqual([]);
+    expect(s.begins()).toHaveLength(2);
+    // 下一段沒有說話：照常
+    await s.fire();
+    expect(s.ends()).toHaveLength(1);
+    s.v.stopCall();
+  });
+
+  it("stopCall clears the timer, returns the mic, and drops a late result; startCall twice is one tap; not before the model is ready", async () => {
+    const s = callSetup();
+    await s.v.startCall();
+    await s.v.startCall();
+    expect(s.taps.started).toBe(1);
+    const first = s.begins()[0]!;
+    await s.fire();
+    s.v.stopCall();
+    expect(s.timers.every((t) => t.cleared)).toBe(true);
+    expect(s.taps.stopped).toBe(1);
+    expect(s.released).toEqual([s.stream]);
+    s.worker.emit({ type: "segment", id: first, feature: FEATURE, problem: null, voiced_ms: 3000, ms: 50 });
+    await flush();
+    expect(s.sent).toEqual([]);
+    const worker = new FakeWorker();
+    const lease = vi.fn(async () => ({}) as MediaStream);
+    const v = new WakeVoice({ createWorker: () => worker, assets: SPEAKER_RUNTIME_ASSETS, model: SPEAKER_MODEL_VERSION, send: async () => {}, lease, release: () => {}, tap: async () => ({ stop() {} }), now: () => 0 });
+    v.start();
+    await v.startCall();
+    expect(lease).not.toHaveBeenCalled();
   });
 });

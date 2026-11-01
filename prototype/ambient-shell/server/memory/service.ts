@@ -1819,6 +1819,26 @@ export class MemoryService implements LiveMemoryService {
     return data.consents.some(c => c.allowed && c.provider === target.provider && c.account === target.account && (c.profileId === null || c.profileId === profileId));
   }
 
+  /** SP-02b：本次人物連結的家人辨識 person_id（沒有選定或沒有連結時 null）；核心用它記錄通話中的聲音是否換人。 */
+  currentPersonId(): string | null {
+    const id = this.currentProfileId();
+    if (!id) return null;
+    try {
+      return this.snapshot().profiles.find((p) => p.id === id)?.facePersonId ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** SP-02b：通話中的聲音認出一位家人（本次人物沒有選定）：交給這通語音問一次「這次用 X 的偏好嗎？」。 */
+  offerVoiceCandidate(named: boolean): void {
+    try {
+      this.live?.voiceCandidate(named);
+    } catch {
+      // 語音通話自己處理
+    }
+  }
+
   /** 看著說話開始的通話：臉部候選（沿用 faceCandidate 的「每個決策只問一次」），出一張 live 來源的候選卡。 */
   liveFaceCandidate(): { card: string; name: string } | null {
     if (this.closed || this.storeState !== "ready" || !this.store || this.presence.state === "selected") return null;

@@ -7,7 +7,7 @@
 import { checkTrustedSender } from "./trusted-sender.mjs";
 
 /** 與 shared/identity.ts 的 IDENTITY_OPS 相同（測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test"];
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test", "call_voice"];
 
 export const MENU_CLICK_WINDOW_MS = 10_000;
 const FEATURE_DIM = 128;
@@ -92,6 +92,19 @@ export function validateIdentityRequest(req) {
     if (!SEGMENTS.includes(req.segment)) return bad("segment must be keyword or utterance");
     if (!isInt(req.voiced_ms, 0, 60_000)) return bad("voiced_ms must be an integer");
     const request = { op, wake_id: req.wake_id, segment: req.segment, voiced_ms: req.voiced_ms, model: m };
+    if (req.feature !== undefined) {
+      const f = feature(req.feature, SPEAKER_DIM);
+      if (!f) return bad(`feature must be ${SPEAKER_DIM} finite numbers`);
+      request.feature = f;
+    }
+    return { ok: true, request };
+  }
+  // SP-02b：通話中的一段話（不需要管理 session；核心依「通話中辨認說話者」決定接不接受，回應只有 ok）。
+  if (op === "call_voice") {
+    const m = speakerModel(req.model);
+    if (!m) return bad("model is required");
+    if (!isInt(req.voiced_ms, 0, 60_000)) return bad("voiced_ms must be an integer");
+    const request = { op, voiced_ms: req.voiced_ms, model: m };
     if (req.feature !== undefined) {
       const f = feature(req.feature, SPEAKER_DIM);
       if (!f) return bad(`feature must be ${SPEAKER_DIM} finite numbers`);

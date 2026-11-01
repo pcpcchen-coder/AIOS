@@ -467,6 +467,38 @@ describe.skipIf(!realLockAvailable)("face candidate by voice (selection only)", 
     return { h, set };
   }
 
+  it("SP-02b: no voice candidate question while the opening (look-to-talk / wake) candidate is still pending", async () => {
+    const { h, set } = await withCandidate();
+    const waiting = await startLive(h, { lookToTalk: true });
+    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
+    expect(waiting.binding.voiceCandidate(true)).toBe(false);
+  });
+
+  it("SP-02b: a voice candidate later in the call is asked once (service.offerVoiceCandidate); 「是」 selects", async () => {
+    // 一般開始的通話（沒有開場候選）：聲音認出後問一次
+    const { h, set } = await withCandidate();
+    const { call, binding } = await startLive(h, {});
+    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
+    h.service.offerVoiceCandidate(true);
+    expect(call.spoken().at(-1)).toBe("（記憶確認）「這次用 George 的偏好嗎？」");
+    expect(binding.voiceCandidate(true)).toBe(false);
+    hear(binding, "這次用 George 的偏好嗎？", h);
+    advance(h, 2000);
+    await say(binding, "是", h);
+    await binding.idle();
+    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "selected", name: "George" });
+    expect(h.service.currentPersonId()).toBe("fam_000000000000000000000001");
+  });
+
+  it("SP-02b: without the naming permission the voice candidate question has no name", async () => {
+    const { h, set } = await withCandidate();
+    const { call } = await startLive(h, {});
+    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
+    h.service.offerVoiceCandidate(false);
+    expect(call.spoken().at(-1)).toBe("（記憶確認）「這次要用你的偏好嗎？」");
+    expect(h.service.currentPersonId()).toBeNull();
+  });
+
   it("asks once after the greeting; an anchored 「是」 within 10 s and the same tracking generation selects and late-attaches the person's pinned memory", async () => {
     const { h, set } = await withCandidate();
     set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });

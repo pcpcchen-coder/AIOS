@@ -207,5 +207,7 @@
   "喚醒時認不出臉，聲音認出就叫名字；門檻未校準，可能叫錯人": "After a wake, if the face is not recognised, use the name when the voice is recognised; thresholds are uncalibrated and the wrong person may be named",
   "要讓 Nous 只憑聲音也叫名字嗎？": "Let Nous use names based on voice alone?",
   "這是測試功能。喚醒開始的通話認不出臉（沒看螢幕、鏡頭關著）時，只要聲音認出是哪位家人就會叫名字。聲音的門檻還沒有校準，可能叫錯人；錄音或聲音相近的人也可能被認成家人。看到陌生臉、多張臉或臉和聲音不一致時仍不叫。名字會像認臉時一樣以短句送到雲端語音供應商。隨時可以在這裡關掉。": "This is a test feature. When a call started by the wake word cannot recognise a face (you are not looking at the screen, or the camera is off), Nous uses a family member's name as soon as their voice is recognised. Voice thresholds are not calibrated yet, so the wrong person may be named; a recording or a similar-sounding person may also be taken for a family member. No name is used when a stranger's face, several faces, or a face that disagrees with the voice is seen. As with face recognition, the name is sent to the cloud voice provider in a short sentence. You can turn this off here at any time.",
-  "只憑聲音叫名字的設定沒有保存": "The voice-only naming setting was not saved"
+  "只憑聲音叫名字的設定沒有保存": "The voice-only naming setting was not saved",
+  "通話中每段話在本機比對聲音；只用來問要不要用你的記憶，換人只記錄": "Each utterance in a call is compared on this Mac; used only to ask whether to use your memory, and a change of speaker is only logged",
+  "speaker_in_call 必須是 true 或 false": "speaker_in_call must be true or false"
 }

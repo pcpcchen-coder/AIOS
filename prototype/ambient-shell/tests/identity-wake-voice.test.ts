@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { validateIdentityRequest } from "../desktop/identity-ipc.mjs";
 import { GalleryStore } from "../server/identity-store.ts";
-import { combineVoice, IdentityService, VOICE_EVIDENCE_MS, type AmbientPrefs } from "../server/identity-service.ts";
+import { combineVoice, IdentityService, MEMORY_CANDIDATE_MS, VOICE_EVIDENCE_MS, type AmbientPrefs, type IdentityMemoryLink } from "../server/identity-service.ts";
 import { SPEAKER_MODEL_VERSION } from "../server/speaker-runtime.ts";
 import { VOICE_CALIBRATED, VOICE_KEYWORD_SAMPLES, VOICE_UTTERANCE_SAMPLES, type FaceModelVersion, type IdentityResponse, type VoiceSegment } from "../shared/identity.ts";
 import { GREETING_TEMPLATES } from "../shared/sense.ts";
@@ -35,13 +35,14 @@ interface Claim {
   wake_id?: string;
 }
 
-function setup(options: { voiceRuntime?: "ok" | "missing"; camera?: boolean; voiceNameTest?: boolean } = {}) {
+function setup(options: { voiceRuntime?: "ok" | "missing"; camera?: boolean; voiceNameTest?: boolean; speakerInCall?: boolean; memory?: IdentityMemoryLink } = {}) {
   const clock = { now: 1_000_000 };
   const prefs: AmbientPrefs = { look_to_talk: true, look_to_talk_greet: true, look_to_talk_greet_name: true };
   const claims = new Map<string, Claim>();
   const log: string[] = [];
   const camera = { on: options.camera ?? true };
   const voiceNameTest = { on: options.voiceNameTest ?? false };
+  const speakerInCall = { on: options.speakerInCall ?? false };
   const svc = new IdentityService({
     store: new GalleryStore({ dir: join(root, "identity"), secretBox: fakeSecretBox() }),
     confirm: async () => true,
@@ -58,10 +59,12 @@ function setup(options: { voiceRuntime?: "ok" | "missing"; camera?: boolean; voi
     speakerRuntime: { state: options.voiceRuntime ?? "ok", problems: [] },
     speakerModel: VOICE,
     voiceNameTest: () => voiceNameTest.on,
+    speakerInCall: () => speakerInCall.on,
+    ...(options.memory ? { memory: () => options.memory! } : {}),
     now: () => clock.now,
     log: (l) => log.push(l),
   });
-  return { svc, clock, prefs, claims, log, camera, voiceNameTest };
+  return { svc, clock, prefs, claims, log, camera, voiceNameTest, speakerInCall };
 }
 type Setup = ReturnType<typeof setup>;
 
@@ -371,5 +374,112 @@ describe("voice-only naming test switch (George 2026-11-01, off by default)", ()
     c.clock.now += 61_000;
     await voiceProbe(c, wid(2), "keyword", GEORGE.keyword);
     expect(await greet(c, id(2), 1, { wake_id: wid(2) })).toMatch(NAMED);
+  });
+});
+
+describe("SP-02b in-call voice (通話中辨認說話者)", () => {
+  function memoryStub(current: string | null = null) {
+    const offers: boolean[] = [];
+    const suspends: string[] = [];
+    const link: IdentityMemoryLink & { current: string | null } = {
+      current,
+      countForFace: async () => null,
+      unlinkFace: async () => "none",
+      suspend: (reason) => void suspends.push(reason),
+      currentPersonId() {
+        return this.current;
+      },
+      offerVoiceCandidate: (named) => void offers.push(named),
+    };
+    return { link, offers, suspends };
+  }
+  const callVoice = (c: Setup, center: Float32Array | null, voiced = 2600) =>
+    c.svc.handle({ op: "call_voice", voiced_ms: voiced, model: VOICE, ...(center ? { feature: Array.from(near(center, c.clock.now % 991, 0.04)) } : {}) });
+  const lastCall = (c: Setup) => c.log.filter((l) => l.includes("通話中聲音")).at(-1) ?? "";
+
+  it("refused while the switch is off; replies only ok when on", async () => {
+    const m = memoryStub();
+    const c = setup({ memory: m.link });
+    await enroll(c, "George", GEORGE);
+    expect(await callVoice(c, GEORGE.utterance)).toMatchObject({ ok: false, code: "unavailable", message: "目前不能辨認聲音" });
+    c.speakerInCall.on = true;
+    c.clock.now += 1000;
+    expect(await callVoice(c, GEORGE.utterance)).toEqual({ ok: true, op: "call_voice" });
+  });
+
+  it("no current person + George's voice → a voice candidate (memoryCandidate) and one offer; the candidate time stays put; named follows naming prefs", async () => {
+    const m = memoryStub();
+    const c = setup({ speakerInCall: true, memory: m.link });
+    const george = await enroll(c, "George", GEORGE);
+    await callVoice(c, GEORGE.utterance);
+    const first = c.svc.memoryCandidate();
+    expect(first).toMatchObject({ person_id: george, name: "George" });
+    expect(m.offers).toEqual([true]);
+    expect(lastCall(c)).toContain("沒有本次人物，提出聲音候選");
+    expect(lastCall(c)).not.toMatch(/George|fam_|0\.\d{3}/);
+    c.clock.now += 5000;
+    await callVoice(c, GEORGE.utterance);
+    expect(c.svc.memoryCandidate()?.at).toBe(first!.at);
+    c.clock.now += MEMORY_CANDIDATE_MS + 1;
+    expect(c.svc.memoryCandidate()).toBeNull();
+    c.prefs.look_to_talk_greet_name = false;
+    await callVoice(c, GEORGE.utterance);
+    expect(m.offers.at(-1)).toBe(false);
+  });
+
+  it("a second speaker before anyone is selected withdraws the voice candidate", async () => {
+    const m = memoryStub();
+    const c = setup({ speakerInCall: true, memory: m.link });
+    await enroll(c, "George", GEORGE);
+    await enroll(c, "Mary", MARY);
+    await callVoice(c, GEORGE.utterance);
+    c.clock.now += 1000;
+    await callVoice(c, MARY.utterance);
+    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(lastCall(c)).toContain("和其他證據不一致，不提候選");
+    expect(m.offers).toEqual([true]);
+  });
+
+  it("current person George + Mary's voice → log only (no suspend, no offer); same person → consistent", async () => {
+    const m = memoryStub();
+    const c = setup({ speakerInCall: true, memory: m.link });
+    const george = await enroll(c, "George", GEORGE);
+    await enroll(c, "Mary", MARY);
+    m.link.current = george;
+    await callVoice(c, MARY.utterance);
+    expect(lastCall(c)).toContain("像另一位家人（只記錄，不打斷）");
+    c.clock.now += 1000;
+    await callVoice(c, GEORGE.utterance);
+    expect(lastCall(c)).toContain("與本次人物一致");
+    expect(m.suspends).toEqual([]);
+    expect(m.offers).toEqual([]);
+    expect(c.svc.memoryCandidate()).toBeNull();
+  });
+
+  it("short or featureless segments are ignored; unknown voices are logged without a candidate; a new greeting drops the old candidate", async () => {
+    const m = memoryStub();
+    const c = setup({ speakerInCall: true, memory: m.link });
+    await enroll(c, "George", GEORGE);
+    const before = c.log.length;
+    expect(await callVoice(c, GEORGE.utterance, 1800)).toEqual({ ok: true, op: "call_voice" });
+    expect(await callVoice(c, null, 3000)).toEqual({ ok: true, op: "call_voice" });
+    expect(c.log.length).toBe(before);
+    c.clock.now += 1000;
+    await callVoice(c, STRANGER.utterance);
+    expect(lastCall(c)).toContain("通話中聲音（unknown");
+    c.clock.now += 1000;
+    await callVoice(c, GEORGE.utterance);
+    expect(c.svc.memoryCandidate()).not.toBeNull();
+    await faces(c, 1, GEORGE.face);
+    await greet(c, id(1), 1, { source: "look_to_talk" });
+    c.clock.now += 61_000;
+    expect(c.svc.memoryCandidate()).toBeNull();
+  });
+
+  it("IPC: call_voice needs no session; voiced_ms and an optional 192-d feature", () => {
+    const feature = Array.from(unitFeature(4, 192));
+    expect(validateIdentityRequest({ op: "call_voice", voiced_ms: 2500, model: VOICE, feature, wake_id: "x" })).toEqual({ ok: true, request: { op: "call_voice", voiced_ms: 2500, model: VOICE, feature } });
+    expect(validateIdentityRequest({ op: "call_voice", voiced_ms: -1, model: VOICE })).toMatchObject({ ok: false });
+    expect(validateIdentityRequest({ op: "call_voice", voiced_ms: 10, model: VOICE, feature: feature.slice(2) })).toMatchObject({ ok: false });
   });
 });

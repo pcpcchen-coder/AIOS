@@ -197,13 +197,13 @@ describe("runDesktopCommand", () => {
 
 // WK-01a 常駐喚醒聆聽（George 2026-10-31 D3：「通話中辨認說話者」先放停用的一列）。
 describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wake)", () => {
-  function wakeBuild(listen: boolean, report: WakeReport | null, silence = 5, voiceTest = false) {
+  function wakeBuild(listen: boolean, report: WakeReport | null, silence = 5, voiceTest = false, speaker = false) {
     const command = vi.fn();
     const wakeCommand = vi.fn();
     const setWakeListen = vi.fn();
     const setVoiceNameTest = vi.fn();
     const setMenuPref = vi.fn();
-    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, voice_name_test: voiceTest, runtime: "missing" as const } };
+    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, voice_name_test: voiceTest, speaker_in_call: speaker, runtime: "missing" as const } };
     const items = settingsMenu(settings, { command, setMenuPref, setWakeListen, setVoiceNameTest, wakeReport: report, wakeCommand });
     const find = (label: string) => items.find((i) => i.label === label) as MenuItemTemplate;
     return { items, find, command, wakeCommand, setWakeListen, setVoiceNameTest, setMenuPref };
@@ -215,7 +215,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     expect(JSON.stringify(plain.items)).not.toMatch(/喚醒|說話者/);
   });
 
-  it("draws header, device-event status, the switch, pause, the disabled 「通話中辨認說話者」 row, then the voice-only naming test switch", () => {
+  it("draws header, device-event status, the switch, pause, 「通話中辨認說話者」, then the voice-only naming test switch", () => {
     const { items, find } = wakeBuild(true, { state: "listening_local", reason: null });
     const start = items.findIndex((i) => i.label === "喚醒詞");
     expect(items[start - 1]).toEqual({ type: "separator" });
@@ -224,8 +224,17 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     expect(find("喚醒聆聽：本機聆聽中").enabled).toBe(false);
     expect(find("常駐喚醒聆聽")).toMatchObject({ type: "checkbox", checked: true, enabled: true });
     const speaker = find("通話中辨認說話者");
-    expect(speaker).toEqual({ label: "通話中辨認說話者", type: "checkbox", checked: false, enabled: false, sublabel: "SP-02 之後才能使用" });
-    expect(speaker.click).toBeUndefined();
+    expect(speaker).toMatchObject({ label: "通話中辨認說話者", type: "checkbox", checked: false, enabled: true, sublabel: "通話中每段話在本機比對聲音；只用來問要不要用你的記憶，換人只記錄" });
+  });
+
+  it("「通話中辨認說話者」 (SP-02b) is a plain checkbox written through setMenuPref to /api/settings/wake, without a dialog", () => {
+    const off = wakeBuild(true, null);
+    off.find("通話中辨認說話者").click!();
+    expect(off.setMenuPref).toHaveBeenCalledWith({ key: "speaker_in_call", kind: "bool", label: "通話中辨認說話者", write_path: "/api/settings/wake" }, true);
+    const on = wakeBuild(false, null, 5, false, true);
+    expect(on.find("通話中辨認說話者").checked).toBe(true);
+    on.find("通話中辨認說話者").click!();
+    expect(on.setMenuPref).toHaveBeenCalledWith(expect.objectContaining({ key: "speaker_in_call" }), false);
   });
 
   it("the voice-only naming test switch (SP-02a) shows the core's value and asks the main process for the opposite", () => {
@@ -303,7 +312,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
   it("is fully translated in English (the wake word Hello Nous is English already)", () => {
     setNativeLocale("en");
     try {
-      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, runtime: "missing" as const } };
+      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime: "missing" as const } };
       for (const report of [null, ...Object.entries(WAKE_STATE_REASONS).flatMap(([state, reasons]) => reasons.map((reason) => ({ state, reason }) as WakeReport))]) {
         const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), wakeReport: report, translate: nativeT });
         const start = items.findIndex((i) => i.label === "Wake word");
@@ -312,7 +321,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
         expect(texts.filter((x) => /\p{Script=Han}/u.test(x))).toEqual([]);
       }
       const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), translate: nativeT });
-      expect(items.find((i) => i.label === "Recognise speaker during calls")).toMatchObject({ enabled: false, sublabel: "Available after SP-02" });
+      expect(items.find((i) => i.label === "Recognise speaker during calls")).toMatchObject({ enabled: true, sublabel: "Each utterance in a call is compared on this Mac; used only to ask whether to use your memory, and a change of speaker is only logged" });
       expect(items.find((i) => i.label === "Always-on wake listening")?.sublabel).toBe("Detects “Hello Nous” or “Hey Nous” only on this Mac");
       for (const text of Object.values(WAKE_TEXT)) expect(nativeT(text), text).not.toBe(text);
     } finally {
