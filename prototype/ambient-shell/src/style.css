@@ -1206,6 +1206,26 @@ body[data-camera-preview="open"] .subtitle {
 .calibration-table tr.calibration-changed td { color: var(--cyan, #5ce1ff); }
 .calibration-advice { margin: 10px 0 0; padding-left: 20px; font-size: 14px; line-height: 1.6; }
 
+/* 矯正喚醒詞（George 2026-11-01）：「現在念」的 5 秒整個視窗變成綠色（wake-cue 覆蓋層，不擋點擊），面板本身也換色。 */
+.wake-cue {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(80, 220, 140, 0.3), rgba(30, 160, 90, 0.6));
+  box-shadow: inset 0 0 0 14px rgba(90, 240, 150, 0.9);
+  animation: wake-cue-in 160ms ease-out;
+}
+.wake-cue[hidden] { display: none; }
+@keyframes wake-cue-in { from { opacity: 0; } to { opacity: 1; } }
+.surface--wake-calibration { transition: background-color 160ms ease-out, border-color 160ms ease-out; }
+.surface--wake-calibration.wake-calibration--speak { background: rgba(18, 70, 44, 0.92); border-color: rgba(90, 240, 150, 0.8); }
+.wake-calibration-say { font-size: 40px; font-weight: 600; letter-spacing: 0.02em; margin: 6px 0 4px; }
+.wake-calibration-now { font-size: 22px; font-weight: 600; color: #7dffb0; margin: 8px 0; }
+.wake-calibration-good { font-size: 20px; color: #7dffb0; margin: 8px 0; }
+.wake-calibration-bad { font-size: 20px; color: var(--amber); margin: 8px 0; }
+@media (prefers-reduced-motion: reduce) { .wake-cue { animation: none; } }
+
 .language-settings label { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .language-settings select { color: var(--text, #e8eaf0); background: #141b2b; border: 1px solid #39445a; border-radius: 8px; padding: 7px 10px; font: inherit; }
 .language-settings select:focus-visible { outline: 2px solid #8aa4ff; outline-offset: 3px; }

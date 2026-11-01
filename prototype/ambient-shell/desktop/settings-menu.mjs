@@ -20,7 +20,7 @@ export const WAKE_STATE_REASONS = {
   off: [null, "pref_off"],
   armed: ["starting", "auto_resume"],
   listening_local: [null],
-  paused: ["user_pause", "sleep", "lock", "rate_limited"],
+  paused: ["user_pause", "sleep", "lock", "rate_limited", "calibrating"],
   in_call: ["realtime"],
   released: ["web_speech"],
   error: ["permission_denied", "device_missing", "device_ended", "runtime_missing", "runtime_load_failed", "audio_failed", "unsupported"],
@@ -51,6 +51,7 @@ export const WAKE_REASON_LABEL = {
   sleep: "系統睡眠中",
   lock: "螢幕已鎖定",
   rate_limited: "一分鐘內已由喚醒開始 3 次通話，暫停到一分鐘後自動恢復",
+  calibrating: "正在矯正喚醒詞，結束後自動恢復",
   realtime: "即時語音使用中，喚醒偵測暫停",
   web_speech: "按下說話或語音模式使用中，喚醒偵測暫停",
   permission_denied: "麥克風權限被拒，常駐聆聽沒有開啟",
@@ -74,6 +75,10 @@ export const WAKE_MENU_TEXT = {
   speaker: "通話中辨認說話者",
   speakerNote: "SP-02 之後才能使用",
   notReported: "尚未回報",
+  calibrate: "矯正喚醒詞…",
+  calibrateNote: "依提示念幾次，替這個家重新選門檻",
+  calibratedNote: "目前用代號 {0} 的矯正值",
+  calibrateUnavailable: "喚醒引擎可以使用後才能矯正",
 };
 
 /** 「喚醒後等你開口」的選項與預設（同 shared/wake.ts 的 WAKE_SILENCE_OPTIONS_S、DEFAULT_WAKE_SILENCE_S）。 */
@@ -84,8 +89,9 @@ export const DEFAULT_WAKE_SILENCE_S = 5;
  * 「喚醒詞」分段。report 是頁面最後一次回報的 { state, reason }。還沒回報時不猜：偏好關著顯示「未開啟」，
  * 開著顯示「尚未回報」（不是裝置事件，所以不說「準備中」）。
  * 「通話中辨認說話者」（George 2026-10-31 D3）：先放一列停用的勾選框，沒有 click，SP-02 之後才啟用。
+ * 「矯正喚醒詞…」（George 2026-11-01）：引擎可以用時才能按；按下後主程序先顯示原生說明（calibrateWake），同意才打開矯正畫面。
  */
-export function wakeMenu(wake, report, { command, setWakeListen, setMenuPref, translate = (source) => source }) {
+export function wakeMenu(wake, report, { command, setWakeListen, setMenuPref, calibrateWake, translate = (source) => source }) {
   const text = (source) => translate(source);
   const reported = isWakeReport(report);
   const current = reported ? report : { state: "off", reason: null };
@@ -93,6 +99,8 @@ export function wakeMenu(wake, report, { command, setWakeListen, setMenuPref, tr
   const paused = current.state === "paused" && current.reason === "user_pause";
   const canPause = wake.wake_listen && reported && (current.state === "listening_local" || current.state === "armed");
   const silence = wake.wake_silence_s ?? DEFAULT_WAKE_SILENCE_S;
+  const calibrateReady = wake.runtime === "ok";
+  const calibratedCode = typeof wake.keyword_overrides?.code === "string" ? wake.keyword_overrides.code : null;
   // 和「鏡頭與語音設定」的秒數列同一條寫入路徑（setMenuPref POST { wake_silence_s } 到 /api/settings/wake）；關著聆聽也能先選好。
   const silenceRow = { key: "wake_silence_s", kind: "seconds", label: WAKE_MENU_TEXT.silence, write_path: "/api/settings/wake" };
   const seconds = (n) => `${n} 秒${n === DEFAULT_WAKE_SILENCE_S ? "（預設）" : ""}`;
@@ -127,6 +135,16 @@ export function wakeMenu(wake, report, { command, setWakeListen, setMenuPref, tr
       enabled: wake.wake_listen && (paused || canPause),
       click: () => command(paused ? "wake-resume" : "wake-pause"),
     },
+    {
+      label: text(WAKE_MENU_TEXT.calibrate),
+      enabled: calibrateReady,
+      sublabel: !calibrateReady
+        ? text(WAKE_MENU_TEXT.calibrateUnavailable)
+        : calibratedCode
+          ? text(WAKE_MENU_TEXT.calibratedNote).replace("{0}", calibratedCode)
+          : text(WAKE_MENU_TEXT.calibrateNote),
+      click: () => void calibrateWake?.(),
+    },
     { label: text(WAKE_MENU_TEXT.speaker), type: "checkbox", checked: false, enabled: false, sublabel: text(WAKE_MENU_TEXT.speakerNote) },
   ];
 }
@@ -135,9 +153,9 @@ export function wakeMenu(wake, report, { command, setWakeListen, setMenuPref, tr
  * @param settings GET /api/settings 的回應（還沒讀到時是 null）
  * @param handlers command(name)：把選單動作交給頁面；setMenuPref(row, value)：POST { [row.key]: value } 到 row.write_path；
  *   openFamily(mode?)：「家人辨識…」與「校正人臉辨識…」（mode "calibrate"）。主程序先記下點擊時間，10 秒內頁面才能開管理 session，再交給頁面打開畫面；
- *   setWakeListen(value)、wakeReport：常駐喚醒聆聽（只有 settings.wake 存在時用到）
+ *   setWakeListen(value)、wakeReport、calibrateWake()：常駐喚醒聆聽與「矯正喚醒詞…」（只有 settings.wake 存在時用到）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, wakeReport = null, wakeCommand, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, wakeReport = null, wakeCommand, calibrateWake, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -205,6 +223,6 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
     });
   }
   closeGroup();
-  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setMenuPref, translate }));
+  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setMenuPref, calibrateWake, translate }));
   return items;
 }

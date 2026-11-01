@@ -3,7 +3,7 @@
 
 import type { WakeDetector } from "../../src/audio/detector.ts";
 import type { EarconPlayback, EarconPlayer } from "../../src/audio/earcon.ts";
-import type { CaptureDeps, CaptureEvents, CaptureGraph, MediaDevicesLike } from "../../src/audio/front-end.ts";
+import type { CaptureDeps, CaptureEvents, CaptureGraph, CaptureOptions, MediaDevicesLike } from "../../src/audio/front-end.ts";
 
 /** 假時鐘：測試自己推進，沒有牆鐘斷言。 */
 export class FakeClock {
@@ -122,28 +122,48 @@ export class FakeMediaDevices implements MediaDevicesLike {
   }
 }
 
-/** 假的擷取圖：記下 connect／stop；測試以 started()、detected()、failed() 模擬 worker 事件。 */
+/** 假擷取圖的一筆紀錄；commands 是矯正指令（只有矯正模式才有）。 */
+export interface FakeGraph {
+  events: CaptureEvents;
+  stopped: boolean;
+  stream: MediaStream;
+  options: CaptureOptions | undefined;
+  commands: string[];
+}
+
+/** 假的擷取圖：記下 connect／stop；測試以 started()、detected()、failed() 模擬 worker 事件，矯正模式另外記下指令。 */
 export class FakeCapture implements CaptureDeps {
   connects = 0;
   stops = 0;
-  graphs: { events: CaptureEvents; stopped: boolean; stream: MediaStream }[] = [];
+  graphs: FakeGraph[] = [];
   failConnect = false;
 
-  async connect(stream: MediaStream, events: CaptureEvents): Promise<CaptureGraph> {
+  async connect(stream: MediaStream, events: CaptureEvents, options?: CaptureOptions): Promise<CaptureGraph> {
     this.connects++;
     if (this.failConnect) throw new Error("addModule failed");
-    const graph = { events, stopped: false, stream };
+    const graph: FakeGraph = { events, stopped: false, stream, options, commands: [] };
     this.graphs.push(graph);
+    const record = (command: string) => { if (!graph.stopped) graph.commands.push(command); };
     return {
       stop: () => {
         if (graph.stopped) return;
         graph.stopped = true;
         this.stops++;
       },
+      ...(options?.calibrate
+        ? {
+            calibration: {
+              beginClip: () => record("clip_begin"),
+              endClip: () => record("clip_end"),
+              sweep: (candidates, clips) => record(`sweep:${candidates.length}:${clips.map((c) => c.length).join(",")}`),
+              discard: () => record("discard"),
+            },
+          }
+        : {}),
     };
   }
 
-  get last(): { events: CaptureEvents; stopped: boolean; stream: MediaStream } | undefined {
+  get last(): FakeGraph | undefined {
     return this.graphs.at(-1);
   }
 

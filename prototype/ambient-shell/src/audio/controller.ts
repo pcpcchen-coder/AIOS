@@ -3,6 +3,8 @@
 // 預設的 onTrigger 只顯示字幕「聽到了」並回到聆聽，**不開通話**；WK-02 以 setTriggerHandler 接上 startRealtime("wake_word")。
 // WK-02 另外：subscribe（Companion activation=wake 的共用接口，只交付契約）、pauseFor（限速暫停、時間到自動恢復）、
 // watchCall（喚醒開始的通話沒人出聲就結束，src/audio/wake-call.ts）。
+// 「矯正喚醒詞…」（startCalibration）：給畫面一個工作階段（叮聲、開始／結束一段錄音、比較、結束）；睡眠、鎖定、dispose 時中斷。
+// 已套用的矯正值改變時（applySettings）重新載入偵測器。
 // 時鐘、擷取、提示音都可注入；假偵測器只在 tests/fixtures/，測試見 tests/audio-front-end.test.ts。
 
 import {
@@ -14,10 +16,11 @@ import {
   type WakeReport,
   type WakeRuntimeState,
   type WakeSettingsView,
+  type WakeSweepCandidate,
   type WakeTrigger,
 } from "../../shared/wake.ts";
 import type { EarconPlayback, EarconPlayer } from "./earcon.ts";
-import { AudioFrontEnd, type CaptureDeps, type MediaDevicesLike, type StartHow } from "./front-end.ts";
+import { AudioFrontEnd, CalibrationStartError, type CaptureDeps, type CaptureGraph, type MediaDevicesLike, type StartHow } from "./front-end.ts";
 import { WakeGuard, type GuardSource } from "./guard.ts";
 import { WakeCallWatch, type WakeCallOptions } from "./wake-call.ts";
 
@@ -45,6 +48,31 @@ export interface WakeHost {
   newId(): string;
 }
 
+/** 矯正工作階段回報給畫面的事件（只有編號與原因碼）。keywordIndex -1＝沒有偵測到。 */
+export interface WakeCalibrationEvents {
+  /** 麥克風與偵測器都準備好（worker 處理了第一塊樣本）。 */
+  ready(): void;
+  clip(clip: number, keywordIndex: number): void;
+  scan(candidate: number, clip: number, keywordIndex: number): void;
+  sweepDone(): void;
+  /** 引擎載入失敗、睡眠或鎖定：工作階段已結束、錄音已丟掉。 */
+  aborted(reason: "runtime_missing" | "runtime_load_failed" | "sleep" | "lock"): void;
+}
+
+export interface WakeCalibrationSession {
+  /** 叮一聲（播完回 true；結束了回 false）。 */
+  ding(): Promise<boolean>;
+  beginClip(): void;
+  endClip(): void;
+  sweep(candidates: WakeSweepCandidate[], clips: number[][]): void;
+  /** 丟掉目前所有錄音（重新測試）。 */
+  discard(): void;
+  /** 結束：丟掉錄音、還麥克風、恢復常駐喚醒聆聽。可重複呼叫。 */
+  stop(): void;
+}
+
+export { CalibrationStartError };
+
 export interface WakeControllerDeps {
   mediaDevices: MediaDevicesLike | null;
   capture: CaptureDeps;
@@ -66,6 +94,8 @@ export class WakeController implements WakeActivationPort {
   private readonly subscribers = new Set<(activation: WakeActivation) => void>();
   private cancelRateResume: (() => void) | null = null;
   private rateToken: { cancel(): void } | null = null;
+  /** 進行中的矯正（睡眠、鎖定、dispose 時中斷）。 */
+  private calibration: { abort(reason: "sleep" | "lock" | null): void } | null = null;
 
   constructor(
     private readonly host: WakeHost,
@@ -74,7 +104,7 @@ export class WakeController implements WakeActivationPort {
     this.guard = new WakeGuard(host.now);
     this.trigger = () => host.caption(WAKE_TEXT.heard);
     this.frontEnd = new AudioFrontEnd(
-      { mediaDevices: deps.mediaDevices, capture: deps.capture, runtime: () => host.runtime() },
+      { mediaDevices: deps.mediaDevices, capture: deps.capture, runtime: () => host.runtime(), overrides: () => this.settings?.keyword_overrides ?? null },
       {
         state: (report) => this.onState(report),
         detected: (keyword) => void this.onDetected(keyword, deps.earcon),
@@ -144,6 +174,8 @@ export class WakeController implements WakeActivationPort {
       if (view.wake_listen) this.frontEnd.setPreference(true, view.device_id, "auto_resume");
       return;
     }
+    // 套用或回復了矯正值：正在聽就以新的門檻重新載入偵測器。
+    if (JSON.stringify(previous.keyword_overrides ?? null) !== JSON.stringify(view.keyword_overrides ?? null) && previous.wake_listen === view.wake_listen) this.frontEnd.reload();
     if (previous.wake_listen === view.wake_listen) return;
     this.frontEnd.setPreference(view.wake_listen, view.device_id, view.wake_listen ? "enable" : "auto_resume");
   }
@@ -168,9 +200,64 @@ export class WakeController implements WakeActivationPort {
     }
   }
 
+  /**
+   * 「矯正喚醒詞…」：暫停常駐偵測、另開一份麥克風接到 mode calibrate 的 worker。失敗時丟 CalibrationStartError
+   * （麥克風、引擎、已在矯正）。錄音只在 worker 記憶體；stop()、睡眠、鎖定、dispose 都會丟掉並恢復常駐聆聽。
+   */
+  async startCalibration(events: WakeCalibrationEvents): Promise<WakeCalibrationSession> {
+    this.cancelEarcon();
+    let graph: CaptureGraph | null = null;
+    let ended = false;
+    let earcon: EarconPlayback | null = null;
+    const end = (reason: "runtime_missing" | "runtime_load_failed" | "sleep" | "lock" | null) => {
+      if (ended) return;
+      ended = true;
+      earcon?.cancel();
+      earcon = null;
+      if (this.calibration === handle) this.calibration = null;
+      this.frontEnd.endCalibration();
+      if (reason) events.aborted(reason);
+    };
+    const handle = { abort: end };
+    if (this.calibration) throw new CalibrationStartError("busy");
+    this.calibration = handle;
+    try {
+      graph = await this.frontEnd.calibrate(
+        { started: () => { if (!ended) events.ready(); }, detected: () => {}, failed: (reason) => end(reason) },
+        {
+          clip: (clip, k) => { if (!ended) events.clip(clip, k); },
+          scan: (candidate, clip, k) => { if (!ended) events.scan(candidate, clip, k); },
+          sweepDone: () => { if (!ended) events.sweepDone(); },
+        },
+      );
+    } catch (err) {
+      if (this.calibration === handle) this.calibration = null;
+      ended = true;
+      throw err instanceof CalibrationStartError ? err : new CalibrationStartError("audio_failed");
+    }
+    const controls = graph.calibration;
+    const run = (fn: () => void) => { if (!ended) fn(); };
+    return {
+      ding: async () => {
+        if (ended) return false;
+        const playback = this.deps.earcon.play();
+        earcon = playback;
+        const played = await playback.done;
+        if (earcon === playback) earcon = null;
+        return played && !ended;
+      },
+      beginClip: () => run(() => controls?.beginClip()),
+      endClip: () => run(() => controls?.endClip()),
+      sweep: (candidates, clips) => run(() => controls?.sweep(candidates, clips)),
+      discard: () => run(() => controls?.discard()),
+      stop: () => end(null),
+    };
+  }
+
   /** 系統睡眠、醒來、鎖定、解鎖（App 主程序轉來的列舉值）。 */
   power(event: PowerEvent): void {
     if (event === "suspend" || event === "lock") {
+      this.calibration?.abort(event === "suspend" ? "sleep" : "lock");
       this.cancelEarcon();
       this.frontEnd.pause(event === "suspend" ? "sleep" : "lock");
     } else this.frontEnd.resume(event === "resume" ? "sleep" : "lock");
@@ -217,6 +304,7 @@ export class WakeController implements WakeActivationPort {
   }
 
   dispose(): void {
+    this.calibration?.abort(null);
     this.cancelRateResume?.();
     this.cancelRateResume = null;
     this.rateToken = null;

@@ -1,7 +1,7 @@
 // desktop/settings-menu.mjs 的型別（給 tests/desktop-menu.test.ts；App 本身直接跑 .mjs）。
 import type { MenuPrefSetting } from "../shared/seconds-menu.ts";
 import type { SettingsView } from "../shared/types.ts";
-import type { WakePrefs, WakeReason, WakeReport, WakeState } from "../shared/wake.ts";
+import type { WakeReason, WakeReport, WakeSettingsView, WakeState } from "../shared/wake.ts";
 
 export interface MenuItemTemplate {
   label?: string;
@@ -18,19 +18,20 @@ export function radio(label: string, checked: boolean, click: () => void, enable
 export const WAKE_STATE_REASONS: Record<WakeState, readonly (WakeReason | null)[]>;
 export const WAKE_STATE_LABEL: Record<WakeState, string>;
 export const WAKE_REASON_LABEL: Record<WakeReason, string>;
-export const WAKE_MENU_TEXT: Record<"group" | "statusPrefix" | "listen" | "listenNote" | "silence" | "silenceNote" | "pause" | "resume" | "speaker" | "speakerNote" | "notReported", string>;
+export const WAKE_MENU_TEXT: Record<"group" | "statusPrefix" | "listen" | "listenNote" | "silence" | "silenceNote" | "pause" | "resume" | "speaker" | "speakerNote" | "notReported" | "calibrate" | "calibrateNote" | "calibratedNote" | "calibrateUnavailable", string>;
 export const WAKE_SILENCE_OPTIONS_S: number[];
 export const DEFAULT_WAKE_SILENCE_S: number;
 /** 「喚醒後等你開口」交給 setMenuPref 的列（main.mjs 的 setMenuPref 只用 key、kind、label、write_path）。 */
 export interface WakeSilenceRow { key: "wake_silence_s"; kind: "seconds"; label: string; write_path: "/api/settings/wake" }
 export function isWakeReport(value: unknown): value is WakeReport;
 export function wakeMenu(
-  wake: WakePrefs,
+  wake: WakeSettingsView,
   report: WakeReport | null,
   handlers: {
     command(name: string): void;
     setWakeListen?(value: boolean): unknown;
     setMenuPref?(row: WakeSilenceRow, value: number): unknown;
+    calibrateWake?(): unknown;
     translate?(source: string): string;
   },
 ): MenuItemTemplate[];
@@ -44,6 +45,7 @@ export function settingsMenu(
     setWakeListen?(value: boolean): unknown;
     wakeReport?: WakeReport | null;
     wakeCommand?(name: string): void;
+    calibrateWake?(): unknown;
     translate?(source: string): string;
   },
 ): MenuItemTemplate[];

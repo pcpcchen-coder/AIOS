@@ -5,7 +5,7 @@ import { browserCapture } from "./capture.ts";
 import { WakeController, type WakeHost } from "./controller.ts";
 import { browserEarcon } from "./earcon.ts";
 
-export { WAKE_COMMANDS, WakeController, type PowerEvent, type WakeHost, type WakeTriggerHandler } from "./controller.ts";
+export { CalibrationStartError, WAKE_COMMANDS, WakeController, type PowerEvent, type WakeCalibrationEvents, type WakeCalibrationSession, type WakeHost, type WakeTriggerHandler } from "./controller.ts";
 export { NoVoiceWatchdog, NO_VOICE_TIMEOUT_MS } from "./no-voice.ts";
 export type { WakeCallWatch } from "./wake-call.ts";
 

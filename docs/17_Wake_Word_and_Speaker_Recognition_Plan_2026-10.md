@@ -8,6 +8,8 @@
 
 **2026-11-01 現況（喚醒詞改為 Hello Nous）**：WK-01a、WK-01b、WK-02 都已合併，喚醒在 App 內可用（旗標 `NOUS_WAKE` 預設關閉）。2026-10-31 George 在 Mac 上的 WK-00 試跑顯示兩個模型都認不出他自然念的「哈囉努斯」，George 決定改用英文 **Hello Nous**（zh-en-3M 的 ARPAbet，Nous 收 nose／nows／noose 三種念法，提升分數 1.5、門檻 0.15；§3.3、§14 ①）。修正擷取 AudioWorklet 的 bug（#72）後，George 在 App 內喚醒 4/4。數字與還沒做的項目見 [WK-00 Mac 試跑](validation/wk-00-mac-2026-10-31.md)。本文件其餘段落是 2026-10-29 的規劃，以「哈囉努斯」舉例的地方改用 Hello Nous 理解即可。
 
+**2026-11-01 更新（矯正喚醒詞）**：選單列「矯正喚醒詞…」讓每個家庭自己錄音測試、比較門檻並套用（§5.9）；套用的值存在 `wake.json`，不改出貨清單。
+
 **2026-10-31 更新（WK-01a）**：依 George 同日的決定（§14.1），WK-01 拆成 WK-01a 與 WK-01b。WK-01a 已在分支 `claude/wk-01`（基於 main `9778b41`，尚未提交與合併）加入常駐喚醒聆聽的底層：`AudioFrontEnd`、AudioWorklet → worker 的擷取、2 秒環形緩衝、偏好與自動恢復、自我觸發防護、本機提示音、選單列與電子腦指示、功能旗標 `NOUS_WAKE`（預設關閉）。**真正的喚醒引擎還沒有接上**：產品裡的偵測器照實回報 `runtime_missing`，不會開麥克風、也不會偵測；Mac gate 未執行。驗證見 [WK-01a 驗證](validation/wk-01a-2026-10-31.md)。同日另做 WK-01b 的準備部分（自建 wasm 的 GitHub Actions workflow、`wake:setup -- --product`、清單格式與 worker 載入路徑；workflow 尚未執行、不能偵測），見 [WK-01b 準備批次驗證](validation/wk-01b-prep-2026-10-31.md)。同日再做 WK-02（分支 `claude/wk-02`，基於 main `40d92fb`，尚未提交與合併）：`wake_word` 開始來源、每分鐘 3 次限速（時間到自動恢復）、喚醒後一律問候、沉默 5 秒自動結束、F6 費用紀錄、Companion `activation=wake` 契約與 `NSMicrophoneUsageDescription` 改寫；因為還沒有引擎，產品不會觸發，只有 fixture 測試，見 [WK-02 驗證](validation/wk-02-2026-10-31.md)。本文件其餘內容仍是規劃。
 
 入口見 [文件索引](README.md) 與 [目前實作狀態](Current_Implementation_Status.md)。本規劃延伸 [14 家人辨識與稱名問候](14_Family_Recognition_and_Greeting_Plan_2026-10.md)、[ADR-0001](adr/ADR-0001-local-family-recognition.md)、[15 Companion Mode](15_Companion_Mode_Spec_2026-10-24.md) 與 [16 家庭記憶層](16_Nous_Memory_Layer_Design_2026-10-26.md)，不取代它們。
@@ -256,6 +258,19 @@ George 2026-10-29 決定：偏好開著時，App 重開、睡眠或螢幕鎖定�
    - 「暫停聆聽」只到本次執行結束；要長期停止須關選單列開關，畫面照實說明。
    - 自動恢復不改變外傳範圍：未喚醒音訊仍只在 2 秒環形緩衝（§5.2），誤喚醒仍有 §5.7 的提示音、自動結束、費用紀錄與限速。
    - macOS 的麥克風權限仍由系統管理；使用者在系統設定撤銷後立即停止。
+
+### 5.9 由家人自己矯正門檻
+
+2026-11-01 George 用終端機腳本（即時偵測加上事後以 sherpa-onnx-node 重掃錄音）替自己的聲音調好 Hey 三行（:1.0 #0.25，見 [WK-00 Mac 試跑](validation/wk-00-mac-2026-10-31.md)）；家人代號 lion 安靜時 Hey Nous 9/15、Hello Nous 12/15，比 George 低。George 因此要求把「錄音測試、調門檻」做成每個家庭自己在 App 裡能重做的功能，不再靠開發者跑腳本。做法：
+
+1. **入口與同意**：只在 `NOUS_WAKE=on`、引擎可以用時，選單列「鏡頭與語音設定 → 喚醒詞」最後出現「矯正喚醒詞…」。按下後主程序先顯示原生說明（要念的話、錄音只在記憶體、比較完或取消即丟掉、期間暫停常駐聆聽），使用者按「開始」才打開視窗裡的矯正畫面；畫面上還要再按「開始錄音測試」才開麥克風。只記 1–4 個英文字母或數字的代號，不記名字。
+2. **提示**：Hey Nous 10 次、Hello Nous 5 次，加上不該叫醒的「Hey」「Hello」「Hey, no」「They know us」「Hey nurse」各一次，共 20 句。每句先播本機提示音、整個視窗變綠（`wake-cue` 覆蓋層），錄 5 秒；結束後當場用目前生效的設定（清單加已套用的矯正值）掃一次，顯示有沒有偵測到。
+3. **麥克風與暫停**：仍由 `AudioFrontEnd` 擁有麥克風（§10.3）。矯正時常駐偵測暫停（新的原因碼 `paused`／`calibrating`，選單列顯示「正在矯正喚醒詞，結束後自動恢復」），用來源的複製品（沒在聽時依上次的麥克風或預設麥克風開一條）接到同一個 worker 的 `calibrate` 模式；結束、取消、收起畫面、睡眠、鎖定或頁面卸載時都停掉那一份並依偏好恢復。
+4. **錄音只在 worker 記憶體**：只有提示的 5 秒視窗內的樣本留在 worker（`src/audio/calibration-core.ts`），視窗外的樣本塊用過就以 0 覆寫。worker 對外只送結果編號（`clip`、`scan`、`sweep_done`，都是整數，經 `isWakeWorkerOut` 檢查）；主執行緒與畫面拿不到樣本。比較一完成畫面就結束工作階段，worker 以 0 覆寫並丟掉全部錄音；取消、收起、睡眠、鎖定也一樣。不寫檔、不上傳、不進紀錄。
+5. **離線比較**：用同一批錄音、產品同一個 sherpa wasm 引擎，每個候選另建一個偵測器（同一串發音放在同一份關鍵詞檔會互相覆蓋，不能把幾組門檻放在一起）。候選是每一組在出貨值上下各兩格、每格 0.05：Hey 三行（1.0／0.25）比 0.15–0.35，Hello 三行（全域 1.5／0.15）比 0.05–0.25；提升分數不變；已有矯正值而不在格子上時也加進去。Hey 候選只掃 Hey Nous 的段落與不該叫醒的句子，Hello 候選同理。
+6. **建議與保存**：每一組選「不該叫醒的句子 0 次」裡認出最多的；一樣多時選門檻較高的。沒有任何候選做到 0 次、或最好的也沒認出時不建議改。表格列出每一組的成績與建議，按「套用」才經 `POST /api/settings/wake` 的 `keyword_overrides` 保存到 `configDir/wake.json`（核心仍是唯一寫入者、填上套用時間；範圍限制在提升分數 0.5–3、門檻 0.05–0.5），不改出貨的 `shared/wake-runtime.json`；和出貨值相同的組不保存，全部相同等於「回復預設」。偵測器載入時以 `applyKeywordOverrides` 蓋過清單同一組每一行的提升分數與門檻；正在聆聽時立即重新載入。
+7. **旗標關閉**：`NOUS_WAKE` 關閉時 `/api/settings`、頁面標頭與選單列和之前逐位元組相同（`tests/wake-flag-off.test.ts` 的快照沒有更新）。
+8. **限制**：同一個家只有一組門檻，最後按「套用」的為準；建議值只代表那次錄音、那個房間，不代表 8 小時電視誤觸發的結果。自動化測試只用假的麥克風、擷取圖與 Emscripten 模組（fixture），不證明偵測準確度；實機的家人數字要另外記在 `docs/validation/`（只用代號）。
 
 ## 6. 喚醒引擎比較與推薦
 
