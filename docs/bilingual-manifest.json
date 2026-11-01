@@ -158,8 +158,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "24e60ce94b617d470899978dc85231cd8c1693fae58243c83e625c6db04a0fe6",
-      "translationSha256": "3d8eb25b9b3ec5d6e9cae336a6deebfec5f5658d38e4ec5bc0515b4f05e37677"
+      "sourceSha256": "183f6ac6a95f0ddb722ab434bd6965f9f5c305ba5855c21a6dbdfff4b9fff480",
+      "translationSha256": "60289d6552676ccaf5acb52b77107a294508c2d36bb4edeee0247dae1f991fb3"
     },
     {
       "source": "docs/README.md",
@@ -529,8 +529,8 @@
       "source": "docs/validation/sp-02b-2026-11-01.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/sp-02b-2026-11-01.en.md",
-      "sourceSha256": "5eebb3d4da9423b99d9915b0e1bb848f2754df5944736eeaff6c92ebb49fcfe2",
-      "translationSha256": "faa4f9e6e702570beeaea410aac194a08387657407a18b80466b9501beb19a1d"
+      "sourceSha256": "ab529f9466727322b90ad8ca5744d5b6361788ea7b8197731b2dc6903acb9445",
+      "translationSha256": "f5a87c084bac87f102d4b84027b160149b18c3d468ca6cb75a4ba2b73aec70a7"
     },
     {
       "source": "docs/validation/wk-00-mac-2026-10-31.md",
