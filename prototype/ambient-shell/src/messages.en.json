@@ -813,5 +813,10 @@
   "已停止；已收的資料會保留。": "Stopped; data collected so far is kept.",
   "已套用建議門檻；接著播放陌生聲音並錄你的樣本來驗證。": "Suggested threshold applied; now play stranger voices and record your samples to verify.",
   "已清除聲音校準資料。": "Voice calibration data cleared.",
-  "話語": "Speech"
+  "話語": "Speech",
+  "下一通起使用「{0}」": "“{0}” will be used from the next call",
+  "下一通起使用系統預設麥克風": "The system default microphone will be used from the next call",
+  "「{0}」已中斷，改由系統預設播放": "“{0}” disconnected; playing through the system default instead",
+  "已改回「{0}」播放": "Playing through “{0}” again",
+  "聲音裝置設定沒有保存：{0}": "Sound device settings were not saved: {0}"
 }

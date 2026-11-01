@@ -38,6 +38,7 @@ import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity
 import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
 import { readVerifiedSpeakerRuntime, speakerRuntimePath } from "./speaker-runtime.ts";
 import { readVerifiedWakeRuntime, wakeRuntimePath } from "./wake-runtime.ts";
+import { AUDIO_WRITE_PATH, AudioPatchError, DEFAULT_AUDIO_PREFS, parseAudioPatch, type AudioPrefs, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import { parseWakePatch, WAKE_ID, WakePatchError, type WakePrefs, type WakePrefsPatch, type WakeRuntimeState } from "../shared/wake.ts";
 import { parsePageEndReason, parseVoiceUsage } from "../shared/voice-cost.ts";
 import { parseCostLimit, type VoiceCostLog } from "./voice-cost-log.ts";
@@ -155,6 +156,11 @@ export interface AppOptions {
    * /api/settings/wake、settings 沒有 wake 欄位、/wake-runtime/ 一律 404，和加入喚醒程式之前相同。
    */
   wake?: WakeSettingsSource;
+  /**
+   * 聲音輸入／輸出裝置的選擇（通常是 AudioSettingsStore，configDir/audio.json）。不綁旗標；未提供時（舊的組裝方式、測試）
+   * settings.audio 一樣有，但兩者都是系統預設，POST /api/settings/audio 回 409。
+   */
+  audio?: AudioSettingsSource;
   /** 喚醒引擎檔案的資料夾（只提供 shared/wake-runtime.json 清單上、雜湊相符的檔名；WK-01a 清單為空）。 */
   wakeRuntimeDir?: string | null;
   /**
@@ -195,6 +201,12 @@ export interface WakeSettingsSource {
   view(): WakePrefs;
   update(patch: WakePrefsPatch): WakePrefs;
   runtime(): WakeRuntimeState;
+}
+
+/** 聲音輸入／輸出裝置偏好的來源（AudioSettingsStore）。 */
+export interface AudioSettingsSource {
+  view(): AudioPrefs;
+  update(patch: AudioPrefsPatch): AudioPrefs;
 }
 
 /** 語音閒置秒數的來源。 */
@@ -253,6 +265,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         camera_preview_disabled_reason: cameraPreviewDisabledReason(camera),
         identity: options.identity?.status() ?? BROWSER_IDENTITY_STATUS,
         memory: options.memory?.settingsStatus() ?? BROWSER_MEMORY_STATUS,
+        audio: { prefs: options.audio?.view() ?? { ...DEFAULT_AUDIO_PREFS }, write_path: AUDIO_WRITE_PATH },
         ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
       };
     },
@@ -383,6 +396,23 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         options.voice.update(patch);
       } catch (err) {
         throw new HttpError(500, `語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (method === "POST" && path === AUDIO_WRITE_PATH) {
+      if (!options.audio) throw new HttpError(409, "聲音裝置設定未設定");
+      let patch: AudioPrefsPatch;
+      try {
+        patch = parseAudioPatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof AudioPatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      try {
+        // update 會呼叫 onChange（→ notifySettings → SSE settings.updated），頁面與選單列都會更新。
+        options.audio.update(patch);
+      } catch (err) {
+        throw new HttpError(500, `聲音裝置設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }

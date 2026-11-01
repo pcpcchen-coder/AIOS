@@ -548,7 +548,7 @@ export class FamilyView {
       this.render();
       await this.wait(attempt === 0 ? 900 : 1500);
       if (gen !== this.voiceGen) return null;
-      recorder.chime();
+      await recorder.chime();
       await this.wait(250);
       phase.state = "listening";
       phase.hint = null;

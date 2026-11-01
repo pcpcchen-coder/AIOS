@@ -3,6 +3,23 @@ import { WakeController, type WakeHost } from "../src/audio/controller.ts";
 import { AudioFrontEnd, micError, type FrontEndEvents } from "../src/audio/front-end.ts";
 import type { WakeReport, WakeRuntimeState, WakeSettingsView } from "../shared/wake.ts";
 import { FakeCapture, FakeClock, FakeEarcon, FakeMediaDevices, FakeStream, FakeTrack, flush } from "./fixtures/wake.ts";
+import { AudioDevices, type AudioDeviceEvent } from "../src/audio-devices.ts";
+import { DEFAULT_AUDIO_PREFS } from "../shared/audio-devices.ts";
+
+/** 「聲音輸入」設定（null＝系統預設）與真的 AudioDevices（假的 MediaDevices）：常駐聆聽經它開麥克風。 */
+function micFor(media: FakeMediaDevices) {
+  // 「麥克風回來了」的去彈跳在 tests/audio-devices.test.ts 測；這裡用立即執行的計時器。
+  const devices = new AudioDevices(() => media, { timer: (run) => { run(); return () => {}; } });
+  const events: AudioDeviceEvent[] = [];
+  devices.on((e) => events.push(e));
+  devices.start();
+  return {
+    devices,
+    events,
+    mic: { open: () => devices.openInput(), preferred: () => devices.preferredInput },
+    choose: (id: string | null, label: string | null = null) => devices.setPrefs({ ...DEFAULT_AUDIO_PREFS, input_device_id: id, input_label: label }),
+  };
+}
 
 // WK-01a AudioFrontEnd（docs/17 §5.1、§5.3、§5.5、§5.8、§10.3）：假的 MediaDevices 與擷取圖（fixture），狀態只由事件推進。
 
@@ -26,14 +43,15 @@ function setup(runtime: WakeRuntimeState = "ok") {
     detected: (k) => detected.push(k),
     listening: (id, how) => listening.push([id, how]),
   };
-  const fe = new AudioFrontEnd({ mediaDevices: media, capture, runtime: () => rt, defer }, events);
-  return { media, capture, states, listening, detected, fe, runDeferred, setRuntime: (r: WakeRuntimeState) => (rt = r) };
+  const audio = micFor(media);
+  const fe = new AudioFrontEnd({ mic: audio.mic, capture, runtime: () => rt, defer }, events);
+  return { media, capture, states, listening, detected, fe, runDeferred, audio, setRuntime: (r: WakeRuntimeState) => (rt = r) };
 }
 
 describe("AudioFrontEnd: one microphone owner, states driven by device events", () => {
   it("off by default: no getUserMedia at all", async () => {
     const s = setup();
-    s.fe.setPreference(false, null, "auto_resume");
+    s.fe.setPreference(false, "auto_resume");
     await flush();
     expect(s.media.calls).toEqual([]);
     expect(s.fe.current).toEqual({ state: "off", reason: null });
@@ -41,7 +59,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
 
   it("enable → armed → listening_local only after the worklet reports started; one getUserMedia with the realtime constraints", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     expect(s.media.calls).toHaveLength(1);
     expect(s.media.calls[0]).toEqual({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
@@ -56,7 +74,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
 
   it("detections pass through only while listening_local", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     s.capture.last!.events.detected(0);
     expect(s.detected).toEqual([]);
@@ -67,7 +85,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
 
   it("runtime missing: error runtime_missing and the microphone is never opened", async () => {
     const s = setup("missing");
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     expect(s.media.calls).toEqual([]);
     expect(s.capture.connects).toBe(0);
@@ -77,7 +95,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
 
   it("worker load_error after the mic opened: error, source stopped, graph stopped", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     s.capture.last!.events.failed("runtime_load_failed");
     expect(s.fe.current).toEqual({ state: "error", reason: "runtime_load_failed" });
@@ -88,26 +106,89 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
   it("permission denied → error permission_denied, never listening", async () => {
     const s = setup();
     s.media.failWith = "NotAllowedError";
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     expect(s.fe.current).toEqual({ state: "error", reason: "permission_denied" });
     expect(s.capture.connects).toBe(0);
   });
 
-  it("auto-resume uses the exact deviceId; a missing device is error device_missing (no fallback to another mic)", async () => {
+  it("auto-resume uses the chosen microphone (exact); when it is missing it falls back to the system default with one caption event (George 2026-11-01)", async () => {
     const s = setup();
     s.media.devices = ["mic-a"];
-    s.fe.setPreference(true, "mic-b", "auto_resume");
+    await s.audio.devices.refresh();
+    s.audio.choose("mic-b", "USB Mic");
+    s.fe.setPreference(true, "auto_resume");
     await flush();
-    expect(s.media.calls).toHaveLength(1);
+    // exact → 名稱找回（清單裡沒有同名的）→ 系統預設
     expect((s.media.calls[0]!.audio as { deviceId: unknown }).deviceId).toEqual({ exact: "mic-b" });
-    expect(s.fe.current).toEqual({ state: "error", reason: "device_missing" });
-    expect(s.media.liveTracks()).toEqual([]);
+    expect(s.media.calls.at(-1)).toEqual({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    expect(s.fe.current).toEqual({ state: "armed", reason: "auto_resume" });
+    s.capture.last!.events.started();
+    expect(s.listening).toEqual([["mic-a", "auto_resume"]]);
+    expect(s.audio.events.filter((e) => e.type === "input_fallback")).toEqual([{ type: "input_fallback", label: "USB Mic" }]);
+    expect(s.audio.devices.report()).toMatchObject({ input_fallback: true, input_in_use: { id: "mic-a", label: "Mic mic-a" } });
+  });
+
+  it("the chosen microphone returns (devicechange): input_returned, and wake re-opens it while idle", async () => {
+    const s = setup();
+    s.media.devices = ["mic-a"];
+    await s.audio.devices.refresh();
+    s.audio.choose("mic-b", "USB Mic");
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    s.media.devices = ["mic-a", "mic-b"];
+    s.media.deviceChange();
+    await flush();
+    expect(s.audio.events.some((e) => e.type === "input_returned")).toBe(true);
+    s.fe.reopen(); // main.ts 收到 input_returned 時呼叫 wake.inputChanged()
+    await flush();
+    expect(s.media.streams[0]!.tracks[0]!.stopped).toBe(true);
+    expect((s.media.calls.at(-1)!.audio as { deviceId: unknown }).deviceId).toEqual({ exact: "mic-b" });
+    s.capture.last!.events.started();
+    expect(s.listening.at(-1)).toEqual(["mic-b", "reclaim"]);
+    expect(s.audio.devices.report().input_fallback).toBe(false);
+  });
+
+  it("changing the input during a call takes effect after the last lease is returned (next call)", async () => {
+    const s = setup();
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    const leased = await s.fe.lease();
+    s.audio.choose("mic-b", "Mic mic-b");
+    s.fe.reopen();
+    await flush();
+    expect(s.media.calls).toHaveLength(1); // 通話中不換
+    expect(s.fe.current).toEqual({ state: "in_call", reason: "realtime" });
+    s.fe.releaseLease(leased);
+    await flush();
+    expect(s.media.streams[0]!.tracks[0]!.stopped).toBe(true);
+    expect((s.media.calls[1]!.audio as { deviceId: unknown }).deviceId).toEqual({ exact: "mic-b" });
+    s.capture.last!.events.started();
+    expect(s.fe.current.state).toBe("listening_local");
+  });
+
+  it("the chosen microphone is unplugged while listening: re-opened once with the system default (fallback caption), no error", async () => {
+    const s = setup();
+    s.audio.choose("mic-b", "Mic mic-b");
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    s.media.devices = ["mic-a"];
+    (s.media.streams[0]!.tracks[0] as FakeTrack).unplug();
+    await flush();
+    expect(s.media.calls.at(-1)).toEqual({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    expect(s.fe.current).toEqual({ state: "armed", reason: "starting" });
+    s.capture.last!.events.started();
+    expect(s.fe.current.state).toBe("listening_local");
+    expect(s.audio.events.filter((e) => e.type === "input_fallback")).toHaveLength(1);
   });
 
   it("auto-resume with the device present: armed(auto_resume) then listening, reported as auto_resume", async () => {
     const s = setup();
-    s.fe.setPreference(true, "mic-b", "auto_resume");
+    s.audio.choose("mic-b");
+    s.fe.setPreference(true, "auto_resume");
     await flush();
     expect(s.fe.current).toEqual({ state: "armed", reason: "auto_resume" });
     s.capture.last!.events.started();
@@ -116,7 +197,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
 
   it("track ended → error device_ended, no retry and no other device", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     s.capture.last!.events.started();
     (s.media.streams[0]!.tracks[0] as FakeTrack).unplug();
@@ -128,7 +209,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
 
   it("realtime lease returns a clone of the single source and disconnects the worklet (in_call); release returns to listening", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     s.capture.last!.events.started();
     const leased = (await s.fe.lease()) as unknown as FakeStream;
@@ -169,7 +250,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
 
   it("Web Speech: released stops the source; reclaim reopens the same device after the event", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     s.capture.last!.events.started();
     s.fe.webSpeech(true);
@@ -181,15 +262,16 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
     expect(s.media.calls).toHaveLength(1); // 還沒到下一個 macrotask
     s.runDeferred();
     await flush();
-    expect((s.media.calls[1]!.audio as { deviceId: unknown }).deviceId).toEqual({ exact: "mic-a" });
+    // 系統預設（沒有選特定麥克風）：約束和以前開預設麥克風時相同
+    expect(s.media.calls[1]).toEqual({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     expect(s.fe.current.state).toBe("armed");
     s.capture.last!.events.started();
     expect(s.fe.current.state).toBe("listening_local");
   });
 
-  it("sleep and lock stop capture; resume/unlock auto-resume with the exact device; user pause survives power events", async () => {
+  it("sleep and lock stop capture; resume/unlock auto-resume with the input setting; user pause survives power events", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     s.capture.last!.events.started();
     s.fe.pause("lock");
@@ -217,10 +299,10 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
 
   it("turning the preference off stops the source within the same call and reports pref_off", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     s.capture.last!.events.started();
-    s.fe.setPreference(false, null, "auto_resume");
+    s.fe.setPreference(false, "auto_resume");
     expect(s.fe.current).toEqual({ state: "off", reason: "pref_off" });
     expect(s.media.liveTracks()).toEqual([]);
     expect(s.capture.active).toBe(0);
@@ -229,9 +311,9 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
   it("turning off while getUserMedia is pending: the late stream is stopped and never listens", async () => {
     const s = setup();
     s.media.hold();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
-    s.fe.setPreference(false, null, "auto_resume");
+    s.fe.setPreference(false, "auto_resume");
     s.media.open();
     await flush();
     expect(s.media.liveTracks()).toEqual([]);
@@ -285,7 +367,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
 
   it("unplugging during a call with the preference on reports device_ended only after the call, without reopening", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     s.capture.last!.events.started();
     const leased = (await s.fe.lease()) as unknown as FakeStream;
@@ -300,7 +382,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
   // 審查 m2：引擎缺少時，通話前後都不開喚醒用的麥克風；只有通話本身開一次。
   it("runtime missing: a call opens the mic once for the call only and wake never opens one", async () => {
     const s = setup("missing");
-    s.fe.setPreference(true, null, "auto_resume");
+    s.fe.setPreference(true, "auto_resume");
     await flush();
     expect(s.media.calls).toHaveLength(0);
     const leased = await s.fe.lease();
@@ -314,7 +396,7 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
   // 審查 m5：語音模式結束後同一輪就租用，不會有兩個 getUserMedia。
   it("a lease right after Web Speech ends cancels the deferred reclaim (one getUserMedia, no double capture)", async () => {
     const s = setup();
-    s.fe.setPreference(true, null, "enable");
+    s.fe.setPreference(true, "enable");
     await flush();
     s.capture.last!.events.started();
     s.fe.webSpeech(true);
@@ -346,7 +428,6 @@ function controller(runtime: WakeRuntimeState = "ok") {
   const capture = new FakeCapture();
   const earcon = new FakeEarcon();
   const captions: string[] = [];
-  const saved: string[] = [];
   const reports: WakeReport[] = [];
   let visible = true;
   const visibleListeners = new Set<() => void>();
@@ -361,7 +442,6 @@ function controller(runtime: WakeRuntimeState = "ok") {
       return () => visibleListeners.delete(listener);
     },
     state: (r) => reports.push(r),
-    saveDeviceId: async (id) => void saved.push(id),
     newId: () => `wake_${++ids}`,
   };
   const timers: { run: () => void; at: number; cancelled: boolean }[] = [];
@@ -370,10 +450,11 @@ function controller(runtime: WakeRuntimeState = "ok") {
     timers.push(entry);
     return () => (entry.cancelled = true);
   };
-  const c = new WakeController(host, { mediaDevices: media, capture, earcon, timer });
+  const audio = micFor(media);
+  const c = new WakeController(host, { mic: audio.mic, capture, earcon, timer });
   const view = (listen: boolean, device: string | null = null): WakeSettingsView => ({ wake_listen: listen, device_id: device, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime });
   return {
-    c, clock, media, capture, earcon, captions, saved, reports, view, timers,
+    c, clock, media, capture, earcon, captions, reports, view, timers, audio,
     /** 推進假時鐘並執行到期、沒被取消的計時器。 */
     advance(ms: number) {
       clock.advance(ms);
@@ -468,20 +549,26 @@ describe("WakeController: guard → earcon → trigger (WK-01 end point)", () =>
     expect(trigger).not.toHaveBeenCalled();
   });
 
-  it("saves the deviceId of the last real listening_local and shows the resume caption once on auto-resume", async () => {
+  it("follows the input setting (the old wake device_id is ignored and never saved) and shows the resume caption once on auto-resume", async () => {
     const h = controller();
-    h.c.applySettings(h.view(true, "mic-b"));
+    h.audio.choose("mic-b", "Mic mic-b");
+    h.c.applySettings(h.view(true, "mic-a"));
     await flush();
+    expect((h.media.calls[0]!.audio as { deviceId: unknown }).deviceId).toEqual({ exact: "mic-b" });
     h.capture.last!.events.started();
-    expect(h.saved).toEqual([]); // 同一支，不用再存
     expect(h.captions.filter((c) => c.startsWith("已恢復"))).toHaveLength(1);
-    // 使用者在選單關掉再打開：用預設麥克風，記下新的那一支，不顯示恢復字幕
+    // 使用者在選單關掉再打開：一樣用「聲音輸入」的麥克風，不顯示恢復字幕
     h.c.applySettings(h.view(false));
     h.c.applySettings(h.view(true, null));
     await flush();
+    expect((h.media.calls[1]!.audio as { deviceId: unknown }).deviceId).toEqual({ exact: "mic-b" });
     h.capture.last!.events.started();
-    expect(h.saved).toEqual(["mic-a"]);
     expect(h.captions.filter((c) => c.startsWith("已恢復"))).toHaveLength(1);
+    // inputChanged：閒置時照新的設定重開
+    h.audio.choose(null);
+    h.c.inputChanged();
+    await flush();
+    expect(h.media.calls[2]).toEqual({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
   });
 
   it("resume caption waits until the window is visible", async () => {
@@ -585,8 +672,8 @@ describe("WakeController: WK-02 hooks (subscribers, rate-limit pause, calls)", (
     expect(h.c.state.state).toBe("armed");
     h.capture.last!.events.started();
     expect(h.c.state).toEqual({ state: "listening_local", reason: null });
-    // 同一支麥克風（exact deviceId），也不顯示「已恢復」字幕（不是自動恢復）
-    expect(h.media.calls.at(-1)).toMatchObject({ audio: { deviceId: { exact: "mic-a" } } });
+    // 同樣跟著「聲音輸入」設定（系統預設：不帶 deviceId），也不顯示「已恢復」字幕（不是自動恢復）
+    expect(h.media.calls.at(-1)).toEqual({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
     expect(h.captions).not.toContain("已恢復常駐喚醒聆聽（只在本機偵測「Hello Nous」或「Hey Nous」）");
   });
 
@@ -617,9 +704,9 @@ describe("WakeController: WK-02 hooks (subscribers, rate-limit pause, calls)", (
     const media = new FakeMediaDevices();
     const capture = new FakeCapture();
     const host: WakeHost = {
-      now: clock.now, runtime: () => "ok", caption: () => {}, visible: () => true, onVisible: () => () => {}, state: () => {}, saveDeviceId: async () => {}, newId: () => "w",
+      now: clock.now, runtime: () => "ok", caption: () => {}, visible: () => true, onVisible: () => () => {}, state: () => {}, newId: () => "w",
     };
-    const c = new WakeController(host, { mediaDevices: media, capture, earcon: new FakeEarcon(), timer: (run) => { run(); return () => {}; } });
+    const c = new WakeController(host, { mic: micFor(media).mic, capture, earcon: new FakeEarcon(), timer: (run) => { run(); return () => {}; } });
     c.applySettings({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime: "ok" });
     c.applySettings({ wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime: "ok" });
     await flush();

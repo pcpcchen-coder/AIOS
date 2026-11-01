@@ -31,6 +31,7 @@ import { checkFaceRuntime, FACE_MODEL_VERSION } from "./face-runtime.ts";
 import { checkSpeakerRuntime, SPEAKER_MODEL_VERSION } from "./speaker-runtime.ts";
 import { checkWakeRuntime } from "./wake-runtime.ts";
 import { WakeSettingsStore } from "./wake-settings.ts";
+import { AudioSettingsStore } from "./audio-settings.ts";
 import { GalleryStore, type SecretBox } from "./identity-store.ts";
 import { IdentityService, type ConfirmFn, type IdentityContext, type IdentityMemoryLink } from "./identity-service.ts";
 import type { IdentityResponse } from "../shared/identity.ts";
@@ -274,6 +275,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const wakeRuntime = config.wake ? checkWakeRuntime(options.wakeRuntimeDir ?? null) : null;
   if (wakeRuntime && wakeRuntime.state !== "ok") log(`喚醒引擎：${wakeRuntime.state}（${wakeRuntime.problems.join("、") || "清單沒有檔案或未設定資料夾"}）`);
   const wakeStore = config.wake ? new WakeSettingsStore({ dir: config.configDir, onChange: () => notify(), log }) : null;
+  // 聲音輸入／輸出（audio.json，不綁旗標）。wake.json 舊的 device_id 不搬（常駐聆聽跟著這裡，預設＝系統預設）。
+  const audio = new AudioSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   const wake = wakeStore && wakeRuntime
     ? { view: () => wakeStore.view(), update: (patch: Parameters<WakeSettingsStore["update"]>[0]) => wakeStore.update(patch), runtime: () => wakeRuntime.state }
     : undefined;
@@ -409,6 +412,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     camera,
     faceTuning,
     voice,
+    audio,
     ...(config.earlySpeechRms !== null ? { earlySpeechRms: config.earlySpeechRms } : {}),
     identity: identity ?? undefined,
     memory: memory ?? undefined,

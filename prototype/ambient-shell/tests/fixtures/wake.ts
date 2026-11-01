@@ -3,7 +3,8 @@
 
 import type { WakeDetector } from "../../src/audio/detector.ts";
 import type { EarconPlayback, EarconPlayer } from "../../src/audio/earcon.ts";
-import type { CaptureDeps, CaptureEvents, CaptureGraph, MediaDevicesLike } from "../../src/audio/front-end.ts";
+import type { CaptureDeps, CaptureEvents, CaptureGraph } from "../../src/audio/front-end.ts";
+import type { DeviceInfoLike, MediaDevicesLike } from "../../src/audio-devices.ts";
 
 /** 假時鐘：測試自己推進，沒有牆鐘斷言。 */
 export class FakeClock {
@@ -85,12 +86,43 @@ export class FakeStream {
   }
 }
 
-/** 假的 navigator.mediaDevices：記下每次 getUserMedia 的約束；可設定錯誤、可用裝置與延遲。 */
+/**
+ * 假的 navigator.mediaDevices：記下每次 getUserMedia 的約束；可設定錯誤、可用裝置、裝置名稱與延遲。
+ * enumerateDevices 列出麥克風（含 Chromium 的 "default" 別名）與 outputs；unplug／plug 送 devicechange。
+ */
 export class FakeMediaDevices implements MediaDevicesLike {
   calls: MediaStreamConstraints[] = [];
   streams: FakeStream[] = [];
   devices = ["mic-a", "mic-b"];
   defaultDevice = "mic-a";
+  /** deviceId → 名稱（沒有的用 deviceId 加上「Mic 」）；labels 為 false 時模擬還沒授權（名稱是空字串）。 */
+  names: Record<string, string> = {};
+  outputs: { id: string; label: string }[] = [{ id: "spk-mac", label: "MacBook Speakers" }];
+  labels = true;
+  enumerations = 0;
+  private readonly changeListeners: (() => void)[] = [];
+
+  async enumerateDevices(): Promise<DeviceInfoLike[]> {
+    this.enumerations++;
+    const name = (id: string) => (this.labels ? (this.names[id] ?? `Mic ${id}`) : "");
+    const inputs = this.devices.map((id) => ({ deviceId: id, kind: "audioinput", label: name(id) }));
+    const outputs = this.outputs.map((o) => ({ deviceId: o.id, kind: "audiooutput", label: this.labels ? o.label : "" }));
+    return [
+      { deviceId: "default", kind: "audioinput", label: this.labels ? `Default - ${name(this.defaultDevice)}` : "" },
+      ...inputs,
+      { deviceId: "default", kind: "audiooutput", label: this.labels ? `Default - ${this.outputs[0]?.label ?? ""}` : "" },
+      ...outputs,
+    ];
+  }
+
+  addEventListener(type: "devicechange", listener: () => void): void {
+    if (type === "devicechange") this.changeListeners.push(listener);
+  }
+
+  /** 模擬 devicechange（拔除或接上裝置之後呼叫）。 */
+  deviceChange(): void {
+    for (const listener of this.changeListeners) listener();
+  }
   failWith: string | null = null;
   private gate: Promise<void> | null = null;
   private release: (() => void) | null = null;

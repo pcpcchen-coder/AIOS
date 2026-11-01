@@ -3,6 +3,8 @@
 // 這個檔案只有型別、常數與純函式；音訊程式在 src/audio/（NOUS_WAKE=on 才以動態 import 載入）。
 // 介面文字以繁中為原文，英文在 shared/messages.en.json（共用翻譯表）。
 
+import { DEVICE_ID } from "./audio-devices.ts";
+
 export const WAKE_STATES = ["off", "armed", "listening_local", "paused", "in_call", "released", "error"] as const;
 export type WakeState = (typeof WAKE_STATES)[number];
 
@@ -57,7 +59,10 @@ export function isWakeReport(value: unknown): value is WakeReport {
 export interface WakePrefs {
   /** 「常駐喚醒聆聽」開關；預設關閉，讀不懂時也是關閉（fail closed）。 */
   wake_listen: boolean;
-  /** 上一次真的進入 listening_local 的麥克風 deviceId；自動恢復時以 exact 指定，找不到就 error device_missing。 */
+  /**
+   * 舊版（2026-11-01 之前）記下的上一次常駐聆聽麥克風。現在常駐聆聽跟著「聲音輸入」設定（configDir/audio.json），
+   * 這個值不再使用、也不再寫入（不搬到 audio.json：它只是當時的系統預設麥克風）。
+   */
   device_id: string | null;
   /** 喚醒後多久沒人出聲就結束這通（秒，src/audio/wake-call.ts）；只能是 WAKE_SILENCE_OPTIONS_S 其中一個。 */
   wake_silence_s: number;
@@ -86,8 +91,6 @@ export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s", "vo
 
 export class WakePatchError extends Error {}
 
-/** deviceId 是瀏覽器給的不透明字串；只接受可見 ASCII、最多 256 字元。 */
-const DEVICE_ID = /^[\x21-\x7e]{1,256}$/;
 
 /** 邊界驗證：只接受 wake_listen、voice_name_test、speaker_in_call（布林）、device_id（字串或 null）與 wake_silence_s（選項之一）；其他鍵、空 patch、型別不符一律丟錯。 */
 export function parseWakePatch(input: unknown): WakePrefsPatch {

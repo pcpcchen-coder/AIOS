@@ -1,4 +1,5 @@
 import type { HomeControlResult } from "../shared/home.ts";
+import { audioDevices } from "./audio-devices.ts";
 import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type HostCall, type LiveCoreEvent, type StopEvidence, type StopReplyTurn } from "../shared/realtime-route.ts";
 import type { HomeControlArgs } from "./api.ts";
 import { CONNECTING_SPEECH_HINT, EARLY_SPEECH_RMS, EarlySpeech, earlySpeechLogLine } from "./early-speech.ts";
@@ -988,19 +989,24 @@ export function greetingResponse(instructions: string): Record<string, unknown> 
   return { instructions, output_modalities: ["audio"], tool_choice: "none" };
 }
 
-/** 瀏覽器實際使用的能力。 */
+/**
+ * 瀏覽器實際使用的能力。麥克風與播放都經 src/audio-devices.ts：跟著「聲音輸入／輸出」設定（系統預設時約束與以前相同、
+ * 不呼叫 setSinkId）；選定的麥克風找不到時暫用系統預設並顯示字幕。
+ */
 export function browserRealtimeDeps(exchange: (sdp: string) => Promise<string>): RealtimeDeps {
   return {
-    getMicrophone: () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),
+    getMicrophone: () => audioDevices.openInput(),
     createPeer: () => new RTCPeerConnection(),
     playRemote(stream) {
       const audio = new Audio();
+      void audioDevices.sink(audio);
       audio.autoplay = true;
       audio.srcObject = stream;
       void audio.play().catch(() => {});
       return () => {
         audio.pause();
         audio.srcObject = null;
+        audioDevices.release(audio);
       };
     },
     exchange,

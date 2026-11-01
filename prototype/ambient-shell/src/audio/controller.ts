@@ -17,7 +17,7 @@ import {
   type WakeTrigger,
 } from "../../shared/wake.ts";
 import type { EarconPlayback, EarconPlayer } from "./earcon.ts";
-import { AudioFrontEnd, type CaptureDeps, type MediaDevicesLike, type StartHow } from "./front-end.ts";
+import { AudioFrontEnd, type CaptureDeps, type MicOpener, type StartHow } from "./front-end.ts";
 import { WakeGuard, type GuardSource } from "./guard.ts";
 import { WakeCallWatch, type WakeCallOptions } from "./wake-call.ts";
 
@@ -40,13 +40,12 @@ export interface WakeHost {
   onVisible(listener: () => void): () => void;
   /** 狀態改變（電子腦的小圖示、選單列）。 */
   state(report: WakeReport): void;
-  /** 保存上次真的在聽的麥克風（POST /api/settings/wake）。 */
-  saveDeviceId(deviceId: string): Promise<void>;
   newId(): string;
 }
 
 export interface WakeControllerDeps {
-  mediaDevices: MediaDevicesLike | null;
+  /** 開麥克風（main.ts 注入 audioDevices：跟著「聲音輸入」設定）；不支援的環境為 null。 */
+  mic: MicOpener | null;
   capture: CaptureDeps;
   earcon: EarconPlayer;
   /** 單次計時器（預設 setTimeout）；回傳取消。限速暫停的自動恢復用，測試注入假的。 */
@@ -74,11 +73,11 @@ export class WakeController implements WakeActivationPort {
     this.guard = new WakeGuard(host.now);
     this.trigger = () => host.caption(WAKE_TEXT.heard);
     this.frontEnd = new AudioFrontEnd(
-      { mediaDevices: deps.mediaDevices, capture: deps.capture, runtime: () => host.runtime() },
+      { mic: deps.mic, capture: deps.capture, runtime: () => host.runtime() },
       {
         state: (report) => this.onState(report),
         detected: (keyword) => void this.onDetected(keyword, deps.earcon),
-        listening: (deviceId, how) => this.onListening(deviceId, how),
+        listening: (_deviceId, how) => this.onListening(how),
       },
     );
   }
@@ -130,8 +129,8 @@ export class WakeController implements WakeActivationPort {
   }
 
   /**
-   * 核心設定（hello 或 settings.updated）。第一次讀到偏好為開＝App 啟動時自動恢復（exact deviceId）；
-   * 之後由關變開＝使用者剛在選單打開（用預設麥克風）；由開變關＝停止。
+   * 核心設定（hello 或 settings.updated）。第一次讀到偏好為開＝App 啟動時自動恢復；
+   * 之後由關變開＝使用者剛在選單打開；由開變關＝停止。麥克風一律跟著「聲音輸入」設定（舊的 device_id 不再使用）。
    */
   applySettings(view: WakeSettingsView): void {
     const previous = this.settings;
@@ -141,11 +140,11 @@ export class WakeController implements WakeActivationPort {
       this.offRequested = false;
     }
     if (!previous) {
-      if (view.wake_listen) this.frontEnd.setPreference(true, view.device_id, "auto_resume");
+      if (view.wake_listen) this.frontEnd.setPreference(true, "auto_resume");
       return;
     }
     if (previous.wake_listen === view.wake_listen) return;
-    this.frontEnd.setPreference(view.wake_listen, view.device_id, view.wake_listen ? "enable" : "auto_resume");
+    this.frontEnd.setPreference(view.wake_listen, view.wake_listen ? "enable" : "auto_resume");
   }
 
   /** 選單列的暫停、繼續與立即停止（不打開視窗）。認得的指令回 true。 */
@@ -154,7 +153,7 @@ export class WakeController implements WakeActivationPort {
       case "wake-off":
         this.offRequested = true;
         this.cancelEarcon();
-        this.frontEnd.setPreference(false, null, "auto_resume");
+        this.frontEnd.setPreference(false, "auto_resume");
         return true;
       case "wake-pause":
         this.cancelEarcon();
@@ -180,6 +179,11 @@ export class WakeController implements WakeActivationPort {
   webSpeech(active: boolean): void {
     if (active) this.cancelEarcon();
     this.frontEnd.webSpeech(active);
+  }
+
+  /** 「聲音輸入」改了或之前找不到的麥克風回來了：閒置時重開，通話中等這通結束（AudioFrontEnd.reopen）。 */
+  inputChanged(): void {
+    this.frontEnd.reopen();
   }
 
   /** 即時語音租用麥克風（兩條路徑的 getMicrophone）。 */
@@ -243,11 +247,7 @@ export class WakeController implements WakeActivationPort {
     }
   }
 
-  private onListening(deviceId: string | null, how: StartHow): void {
-    if (deviceId && deviceId !== this.settings?.device_id) {
-      if (this.settings) this.settings = { ...this.settings, device_id: deviceId };
-      void this.host.saveDeviceId(deviceId).catch(() => undefined);
-    }
+  private onListening(how: StartHow): void {
     // 一次性恢復字幕：只在自動恢復（App 啟動、睡眠或鎖定回來）成功時；主視窗看不到就等它出現再顯示一次。
     if (how !== "auto_resume") return;
     this.pendingResumeCaption?.();

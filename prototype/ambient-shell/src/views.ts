@@ -10,6 +10,7 @@ import { formatNumberPref, formatSeconds, stepPref } from "../shared/prefs.ts";
 import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
+import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -32,6 +33,8 @@ export interface ViewActions {
   openCameraPreview(): void;
   /** 語音閒置秒數的 −／+：送出單一鍵的 patch（數值已依 VOICE_PREFS 夾在範圍內）。 */
   updateVoice(patch: VoicePrefsPatch): void;
+  /** 聲音輸入／輸出裝置（id 與名稱；null＝系統預設）。舊的測試替身沒有這一項時不畫選單。 */
+  updateAudio?(patch: AudioPrefsPatch): void;
   /** 即時語音的路徑偏好與 ChatGPT 方案路徑的聲音（下一次開始才生效）。 */
   updateRealtime(patch: RealtimePrefsPatch): void;
   /** 即時語音用的 Codex 登入（和上面的 Continue with ChatGPT 分開）。 */
@@ -354,6 +357,8 @@ export interface SettingsRenderOptions {
    * 不畫和選單列重複的引擎選擇、即時語音路徑與聲音、語音秒數、鏡頭與手勢。瀏覽器版（false）畫完整的設定畫面。
    */
   desktop?: boolean;
+  /** 頁面的裝置清單與真的在用的裝置（src/audio-devices.ts）；沒有時「聲音」段只畫系統預設與保存的選擇。 */
+  audio?: AudioReport | null;
 }
 
 /**
@@ -385,7 +390,7 @@ export function renderSettings(
   options: SettingsRenderOptions = {},
 ): HTMLElement {
   if (!settings) return surfaceShell("settings", h("p", { class: "muted" }, t("正在讀取設定…")), footer(actions));
-  if (options.desktop) return renderDesktopAccounts(settings, message, actions);
+  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null);
   const g = settings.chatgpt;
 
   const list = h("ul", { class: "provider-list" });
@@ -418,6 +423,7 @@ export function renderSettings(
     h("p", { class: "muted small" }, t("新交辦的任務會用目前選擇的引擎；已在執行的任務不受影響。")),
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
+    settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
     // 家人辨識只在 macOS App（加密保存需要 safeStorage）；瀏覽器版照實說不可用，不提供任何操作。
     settings.identity && !settings.identity.available && h("p", { class: "muted small" }, msg`家人辨識：${uiText(settings.identity.disabled_reason ?? "不可用")}`),
     footer(actions),
@@ -428,7 +434,7 @@ export function renderSettings(
  * macOS App 內的設定頁：只有帳號與登入（ChatGPT 引擎帳號、即時語音用的 Codex 帳號）和狀態。
  * 引擎選擇、即時語音路徑與聲音、秒數、鏡頭與手勢都在選單列，這裡不重複畫。
  */
-function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions): HTMLElement {
+function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null): HTMLElement {
   const g = settings.chatgpt;
   const account = chatgptAccount(settings, actions, true);
   // 瀏覽器版的「Continue with ChatGPT」在引擎清單裡；這頁沒有引擎清單，未登入時直接放登入按鈕。
@@ -450,6 +456,8 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
       account.length > 0 && h("div", { class: "account" }, ...account),
     ),
     settings.realtime && renderRealtimeSettings(settings.realtime, actions, { desktop: true }),
+    // 聲音輸入／輸出（George 2026-11-01）：選單列「聲音」與這裡都能選，寫入同一個 audio.json。
+    settings.audio && renderAudioSettings(settings.audio.prefs, audio, actions),
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
     footer(actions),
   );
@@ -630,6 +638,77 @@ function renderVoiceSettings(voice: VoicePrefs, realtimeAvailable: boolean, acti
     );
   }
   return h("section", { class: "camera-settings" }, h("h3", {}, t("語音")), list, h("p", { class: "muted small" }, t("改了立即生效：開著的語音從現在起重新計時。macOS App 在選單列「鏡頭與語音設定」調整。")));
+}
+
+/** 狀態句：原文翻譯，裝置名稱照原樣代入（「系統預設」等介面字才翻譯）。 */
+function audioLine(line: AudioLine): string {
+  const ui = new Set<string>([AUDIO_TEXT.systemDefault, AUDIO_TEXT.unknownDevice]);
+  return t(line.text, ...line.values.map((value) => (ui.has(value) ? t(value) : value)));
+}
+
+/** 下拉選單的一個裝置名稱（資料，不翻譯）；沒授權前名稱是空的，用「麥克風 1」這類編號。 */
+function deviceName(device: AudioDevice, index: number, kind: "input" | "output"): string {
+  return device.label || t(kind === "input" ? AUDIO_TEXT.unnamedInput : AUDIO_TEXT.unnamedOutput, index + 1);
+}
+
+/**
+ * 聲音輸入／輸出（George 2026-11-01）：兩個下拉選單、真的在用的裝置與提示。選了就保存（POST /api/settings/audio）；
+ * 輸出立即生效，麥克風在通話中改時下一通起使用。按下說話與系統朗讀瀏覽器不給選裝置，一律用系統輸入／輸出（照實提示）。
+ */
+export function renderAudioSettings(prefs: AudioPrefs, report: AudioReport | null, actions: ViewActions): HTMLElement {
+  const list = h("ul", { class: "pref-list" });
+  const row = (kind: "input" | "output") => {
+    const devices = report ? (kind === "input" ? report.inputs : report.outputs) : [];
+    const id = kind === "input" ? prefs.input_device_id : prefs.output_device_id;
+    const saved = kind === "input" ? prefs.input_label : prefs.output_label;
+    const current = kind === "input" ? report?.default_input : report?.default_output;
+    const title = kind === "input" ? AUDIO_TEXT.input : AUDIO_TEXT.output;
+    const select = h("select", { "aria-label": title, name: `audio-${kind}` });
+    const option = (value: string, label: string, selected: boolean) => {
+      const o = h("option", { value }, label);
+      if (selected) o.setAttribute("selected", "");
+      (o as HTMLOptionElement).selected = selected;
+      return o;
+    };
+    select.append(option("", current ? t(AUDIO_TEXT.systemDefaultNow, current) : t(AUDIO_TEXT.systemDefault), id === null));
+    devices.forEach((device, i) => select.append(option(device.id, deviceName(device, i, kind), device.id === id)));
+    // 選定的裝置不在清單裡（拔掉了）：仍列出來，讓畫面照實顯示目前的選擇。清單還沒讀到時寫「尚未回報」，不說找不到。
+    if (id !== null && !devices.some((d) => d.id === id)) {
+      const name = preferredLabel(id, saved, devices) ?? t(AUDIO_TEXT.unknownDevice);
+      select.append(option(id, t(devices.length === 0 ? AUDIO_TEXT.notReportedOption : AUDIO_TEXT.notFoundOption, name), true));
+    }
+    (select as HTMLSelectElement).disabled = !actions.updateAudio;
+    select.addEventListener("change", () => {
+      const value = (select as HTMLSelectElement).value;
+      const device = devices.find((d) => d.id === value);
+      if (value === id || (value === "" && id === null)) return;
+      const label = device?.label || null;
+      const patch: AudioPrefsPatch = kind === "input"
+        ? { input_device_id: value || null, input_label: value ? label : null }
+        : { output_device_id: value || null, output_label: value ? label : null };
+      actions.updateAudio?.(patch);
+    });
+    const status = kind === "input" ? inputStatus(prefs, report) : outputStatus(prefs, report);
+    list.append(
+      h(
+        "li",
+        { class: "pref" },
+        h("div", { class: "provider-text" }, h("strong", {}, t(title)), h("span", { class: "muted small", role: "status" }, audioLine(status))),
+        select,
+      ),
+    );
+  };
+  row("input");
+  row("output");
+  return h(
+    "section",
+    { class: "camera-settings audio-settings" },
+    h("h3", {}, t(AUDIO_TEXT.group)),
+    list,
+    report && !report.labels && h("p", { class: "muted small" }, t(AUDIO_TEXT.needPermission)),
+    h("p", { class: "muted small" }, t(AUDIO_TEXT.bluetoothHint)),
+    h("p", { class: "muted small" }, t(AUDIO_TEXT.systemSpeechHint)),
+  );
 }
 
 /** 鏡頭與手勢：逐項走 CAMERA_PREFS（順序、標籤、提示、範圍都從那裡來）。 */
