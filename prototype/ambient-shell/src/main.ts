@@ -1722,6 +1722,8 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     settled: () => {
       endWakeGreeting();
       ambient.endInteraction(interaction);
+      // SP-02b：問候決定（或略過）之後才開始通話中辨認說話者（連線前那一段已經停了，不會共用 worker 的收音）。
+      if (settings?.wake?.speaker_in_call === true) void wakeVoice?.startCall();
     },
   });
   if (greeting) {
@@ -1768,6 +1770,8 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     began: (next, decision) => {
       realtime = next;
       realtimeTicket = decision;
+      // SP-02b：沒有問候的通話（使用者自己開始的）在連上時開始通話中辨認說話者。
+      if (!greeting && settings?.wake?.speaker_in_call === true) void wakeVoice?.startCall();
       // MEM-3：兩條路徑都記下憑證（結束後收到記憶撤銷時仍要回報停播）。
       liveTickets.set(decision.session_id, ticketOf(decision));
       if (liveTickets.size > 8) liveTickets.delete(liveTickets.keys().next().value!);
@@ -1807,9 +1811,12 @@ function renderRealtimeState(phase: RealtimePhase): void {
   // 只在已經沒有任何進行中或開始中的通話時才歸還剩下的，不會停掉新通話的複製品）。
   // WK-02：喚醒開始的通話的「沒人出聲就結束」只看真的通話階段（改路徑時的 off 不算結束）。
   if (phase !== "off") wakeCall?.phase(phase);
+  // SP-02b：Nous 說話時的那一段不拿來辨認說話者。
+  wakeVoice?.setSpeaking(phase === "speaking");
   if (phase === "off" && !realtime.on && !realtimeStarting) {
     stopWakeCall();
     wakeVoice?.cancel();
+    wakeVoice?.stopCall();
     wake?.releaseAllLeases();
     if (wakeDisposePending) {
       wakeDisposePending = false;

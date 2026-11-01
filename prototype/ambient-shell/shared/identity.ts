@@ -98,6 +98,8 @@ export const VOICE_THRESHOLDS = {
 export type VoiceSegment = "keyword" | "utterance";
 export const VOICE_SEGMENTS: readonly VoiceSegment[] = ["keyword", "utterance"];
 export const VOICE_MIN_VOICED_MS: Record<VoiceSegment, number> = { keyword: 300, utterance: 1500 };
+/** SP-02b 通話中的一段話至少要有這麼多人聲才比對（17 §4.2：可靠的話語通常要 2 秒以上）。 */
+export const CALL_VOICE_MIN_MS = 2000;
 
 /**
  * 只憑聲音稱名要等 SP-03 以家人保留樣本校準兩種片段（docs/17 §4.4、§14 ④）。在那之前一律 false：
@@ -458,7 +460,7 @@ export interface GreetingDecision {
 }
 
 /** IPC 的操作（desktop/identity-ipc.mjs 的白名單與這裡一致，測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test"] as const;
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test", "call_voice"] as const;
 export type IdentityOp = (typeof IDENTITY_OPS)[number];
 
 export type IdentityRequest =
@@ -501,7 +503,12 @@ export type IdentityRequest =
    */
   | { op: "voice_probe"; wake_id: string; segment: VoiceSegment; voiced_ms: number; model: SpeakerModelVersion; feature?: number[] }
   /** SP-02 管理畫面的「試認聲音」：使用者自己按的，回傳這一段認成誰。 */
-  | { op: "voice_test"; session: string; segment: VoiceSegment; model: SpeakerModelVersion; feature: number[] };
+  | { op: "voice_test"; session: string; segment: VoiceSegment; model: SpeakerModelVersion; feature: number[] }
+  /**
+   * SP-02b 通話中的一段話（「通話中辨認說話者」開著時；不需要管理 session）。feature 在人聲不足時省略。回應一律只有 ok；
+   * 核心只拿它當記憶人物候選與換人紀錄（只記 log，不打斷）。
+   */
+  | { op: "call_voice"; voiced_ms: number; model: SpeakerModelVersion; feature?: number[] };
 
 /** 管理畫面需要的狀態（open_session、list 與變更後回傳）。 */
 export interface IdentityManageView {
@@ -548,6 +555,7 @@ export type IdentityResponse =
   | { ok: true; op: "ambient_status"; ready: boolean }
   | { ok: true; op: "ambient_probe" }
   | { ok: true; op: "voice_probe" }
+  | { ok: true; op: "call_voice" }
   | { ok: true; op: "voice_test"; observation: VoiceObservation }
   /**
    * api_key：text 是 response.create 這一輪的 instructions（只含核心組好的短句；名字會短暫出現在頁面，ADR-0001 §2.4）。

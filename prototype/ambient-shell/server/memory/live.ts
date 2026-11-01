@@ -407,6 +407,8 @@ export class LiveMemoryBinding implements LiveMemoryPort {
   private waitingCandidate: boolean;
   private candidate: Candidate | null = null;
   private pending: Pending | null = null;
+  /** SP-02b：這通已經因為聲音問過一次候選。 */
+  private voiceAsked = false;
   private readonly assistant: { text: string; at: number }[] = [];
   /** 核心送出、要模型念的句子（正規化後）：出現在使用者逐字稿裡就是回音；模型念它時不算自稱記住。 */
   private readonly injected: { text: string; at: number }[] = [];
@@ -606,6 +608,23 @@ export class LiveMemoryBinding implements LiveMemoryPort {
     this.candidate = { card: hit.card, sentence, sentAt: this.options.now(), doneAt: null, spoken };
     if (spoken) this.say(sentence);
     this.call.emit({ kind: "memory_card", card: hit.card, open: true });
+  }
+
+  /**
+   * SP-02b：通話中的聲音認出一位家人、本次人物沒有選定（核心已確認）：問一次「這次用 X 的偏好嗎？」，整通最多一次。
+   * 還在等開場候選、已有候選或等待中的語音卡時不問。named＝核心判斷可以念出名字（稱名設定開著、看過雲端稱名說明）。
+   */
+  voiceCandidate(named: boolean): boolean {
+    if (this.passive || this.waitingCandidate || this.candidate || this.pending || this.voiceAsked || this.ended || !this.call?.active) return false;
+    const hit = this.service.liveFaceCandidate();
+    if (!hit) return false;
+    this.voiceAsked = true;
+    const spoken = this.speakable();
+    const sentence = named && spoken ? this.text(SENTENCES.candidateNamed, hit.name) : this.text(SENTENCES.candidatePlain);
+    this.candidate = { card: hit.card, sentence, sentAt: this.options.now(), doneAt: null, spoken };
+    if (spoken) this.say(sentence);
+    this.call.emit({ kind: "memory_card", card: hit.card, open: true });
+    return true;
   }
 
   /** 本次人物世代改變（MemoryService.replacePresence）：帶著記憶的通話由 boundary 撤銷；還沒帶記憶的就補上新人物的記憶包。 */

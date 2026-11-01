@@ -337,6 +337,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         speakerModel: SPEAKER_MODEL_VERSION,
         // SP-02a 測試開關（wake.json；只有 NOUS_WAKE=on 才有）：喚醒時認不出臉，只憑聲音也叫名字。
         voiceNameTest: () => wakeStore?.view().voice_name_test === true,
+        // SP-02b「通話中辨認說話者」（wake.json）。
+        speakerInCall: () => wakeStore?.view().speaker_in_call === true,
         // 問候決策只接受 /api/realtime/start 發出、真的連上的互動 ID（server 在下面建立，呼叫時已存在）。
         claimGreeting: greetingClaims(() => server.realtimeSessions),
         // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）。

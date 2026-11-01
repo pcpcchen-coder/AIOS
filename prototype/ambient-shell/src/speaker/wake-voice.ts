@@ -3,9 +3,11 @@
 // - 連線前的話：喚醒開始通話時（attach）向 WakeController 租一份麥克風，接到 speaker worker 收音；問候決策前（finish）
 //   結束這一段、算特徵，最多等 FINISH_BUDGET_MS，然後一律停止收音、歸還麥克風。只留在本機，不送雲端（§14 ⑦）。
 // 兩段特徵都以 voice_probe 送給核心（綁這次的 wake_id）；核心的回應只有 ok，頁面不知道認成誰。
+// SP-02b「通話中辨認說話者」開著時（startCall）：通話期間再租一份麥克風，每 CALL_WINDOW_MS 切一段，worker 以音量判斷留下人聲，
+// ≥2 秒才以 call_voice 送給核心；Nous 說話時的那一段整段丟掉（避免把自己的播音算進去）。通話結束（stopCall）一律停止、歸還。
 // 不寫檔、不連網、不用本機儲存；送給核心的只有 192 維特徵、有聲毫秒數與片段種類。
 
-import { VOICE_MIN_VOICED_MS, type IdentityRequest, type SpeakerModelVersion, type VoiceSegment } from "../../shared/identity.ts";
+import { CALL_VOICE_MIN_MS, VOICE_MIN_VOICED_MS, type IdentityRequest, type SpeakerModelVersion, type VoiceSegment } from "../../shared/identity.ts";
 import type { SpeakerWorkerLike } from "./recorder.ts";
 import type { SpeakerRuntimeAssets, SpeakerWorkerResponse } from "./protocol.ts";
 
@@ -13,6 +15,8 @@ import type { SpeakerRuntimeAssets, SpeakerWorkerResponse } from "./protocol.ts"
 export const KEYWORD_MAX_AGE_MS = 5000;
 /** 問候決策前等連線前那段話的特徵最多多久（不為了等聲音延後問候，§4.4）。 */
 export const FINISH_BUDGET_MS = 250;
+/** SP-02b 通話中每段多長（一段裡的人聲不足 CALL_VOICE_MIN_MS 就不送）。 */
+export const CALL_WINDOW_MS = 6000;
 
 export interface WakeVoiceDeps {
   createWorker: () => SpeakerWorkerLike;
@@ -27,6 +31,19 @@ export interface WakeVoiceDeps {
   tap: (stream: MediaStream, worker: SpeakerWorkerLike) => Promise<{ stop(): void }>;
   now: () => number;
   wait?: (ms: number) => Promise<void>;
+  /** 測試用的計時器（預設 setTimeout／clearTimeout）。 */
+  setTimer?: (fn: () => void, ms: number) => unknown;
+  clearTimer?: (handle: unknown) => void;
+}
+
+interface CallTap {
+  stream: MediaStream | null;
+  tap: { stop(): void } | null;
+  segment: number | null;
+  /** 這一段期間 Nous 說過話：整段丟掉。 */
+  dirty: boolean;
+  timer: unknown;
+  done: boolean;
 }
 
 interface Keyword {
@@ -50,6 +67,8 @@ export class WakeVoice {
   private keyword: Keyword | null = null;
   private attached: Attached | null = null;
   private nextId = 1;
+  private callTap: CallTap | null = null;
+  private speaking = false;
   private readonly pending = new Map<number, (r: { feature: number[] | null; voiced_ms: number }) => void>();
 
   constructor(private readonly deps: WakeVoiceDeps) {}
@@ -123,7 +142,77 @@ export class WakeVoice {
     }
   }
 
+  /** SP-02b：通話開始（問候決定之後；沒有問候的通話在連上時）：租麥克風、開始分段。已在進行或模型沒好就不動作。 */
+  async startCall(): Promise<void> {
+    if (this.callTap || !this.worker || !this.ready) return;
+    const worker = this.worker;
+    const c: CallTap = { stream: null, tap: null, segment: null, dirty: false, timer: null, done: false };
+    this.callTap = c;
+    try {
+      const stream = await this.deps.lease();
+      if (c.done) return this.deps.release(stream);
+      c.stream = stream;
+      c.tap = await this.deps.tap(stream, worker);
+      if (c.done) return this.stopCallTap(c);
+      this.nextWindow(c);
+    } catch {
+      this.stopCall();
+    }
+  }
+
+  /** Nous 正在說話（realtime 階段 speaking）：這一段作廢。 */
+  setSpeaking(on: boolean): void {
+    this.speaking = on;
+    if (on && this.callTap) this.callTap.dirty = true;
+  }
+
+  /** 通話結束：停止分段、停止收音、歸還麥克風（還在算的那一段結果丟掉）。 */
+  stopCall(): void {
+    const c = this.callTap;
+    this.callTap = null;
+    if (!c) return;
+    c.done = true;
+    if (c.timer !== null) (this.deps.clearTimer ?? ((h) => clearTimeout(h as ReturnType<typeof setTimeout>)))(c.timer);
+    c.timer = null;
+    this.stopCallTap(c);
+  }
+
+  private nextWindow(c: CallTap): void {
+    if (c.done || !this.worker) return;
+    c.segment = this.nextId++;
+    c.dirty = this.speaking;
+    this.worker.postMessage({ type: "begin", id: c.segment });
+    c.timer = (this.deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms)))(() => void this.closeWindow(c), CALL_WINDOW_MS);
+  }
+
+  /** 一段結束：Nous 說過話就丟掉；否則請 worker 算特徵，接著立刻開始下一段。 */
+  private async closeWindow(c: CallTap): Promise<void> {
+    c.timer = null;
+    const id = c.segment;
+    const worker = this.worker;
+    if (c.done || id === null || !worker) return;
+    if (c.dirty) return this.nextWindow(c);
+    const result = new Promise<{ feature: number[] | null; voiced_ms: number }>((resolve) => this.pending.set(id, resolve));
+    worker.postMessage({ type: "end", id, min_voiced_ms: CALL_VOICE_MIN_MS });
+    this.nextWindow(c);
+    const r = await result;
+    if (c.done || !r.feature) return;
+    try {
+      await this.deps.send({ op: "call_voice", voiced_ms: Math.max(0, Math.round(r.voiced_ms)), model: this.deps.model, feature: r.feature });
+    } catch {
+      // 送不到就算了
+    }
+  }
+
+  private stopCallTap(c: CallTap): void {
+    c.tap?.stop();
+    c.tap = null;
+    if (c.stream) this.deps.release(c.stream);
+    c.stream = null;
+  }
+
   dispose(): void {
+    this.stopCall();
     this.cancel();
     this.keyword = null;
     if (this.worker) {

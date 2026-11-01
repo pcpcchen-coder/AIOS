@@ -22,7 +22,7 @@ export class WakeSettingsStore {
       name: "wake.json",
       version: 1,
       parse: parseWakePatch,
-      failClosed: { wake_listen: false, device_id: null, voice_name_test: false },
+      failClosed: { wake_listen: false, device_id: null, voice_name_test: false, speaker_in_call: false },
       unreadable: "常駐喚醒聆聽保持關閉",
       log: options.log,
     });

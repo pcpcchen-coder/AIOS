@@ -267,7 +267,7 @@ describe("audio privacy (static)", () => {
     expect(main).toMatch(/const owner = wake;\s*if \(!owner\) return \{\};/);
     // 審查 M1／m9：保險的歸還只在沒有任何進行中或開始中的通話時；旗標在通話中關掉時等通話結束才結束常駐聆聽
     // WK-02：先停掉「沒人出聲就結束」的計時再歸還。
-    expect(main).toMatch(/if \(phase === "off" && !realtime\.on && !realtimeStarting\) \{\s*stopWakeCall\(\);\s*wakeVoice\?\.cancel\(\);\s*wake\?\.releaseAllLeases\(\);/);
+    expect(main).toMatch(/if \(phase === "off" && !realtime\.on && !realtimeStarting\) \{\s*stopWakeCall\(\);\s*wakeVoice\?\.cancel\(\);\s*wakeVoice\?\.stopCall\(\);\s*wake\?\.releaseAllLeases\(\);/);
     expect(main).toMatch(/releaseMicrophone: \(stream\) => \{\s*if \(wakeLevel\?\.stream === stream\) stopWakeLevel\(\);\s*owner\.releaseLease\(stream\);\s*\}/);
     // WK-02：喚醒開始的通話只把租到那一份的 RMS 數字交給計時（browserWatchLevel，不保存樣本）。
     expect(main).toMatch(/const stream = await owner\.lease\(\);\s*watchWakeLevel\(stream\);\s*return stream;/);

@@ -23,6 +23,7 @@ export const WAKE_SILENCE_OPTIONS_S: number[];
 export const DEFAULT_WAKE_SILENCE_S: number;
 /** 「喚醒後等你開口」交給 setMenuPref 的列（main.mjs 的 setMenuPref 只用 key、kind、label、write_path）。 */
 export interface WakeSilenceRow { key: "wake_silence_s"; kind: "seconds"; label: string; write_path: "/api/settings/wake" }
+export interface WakeSpeakerRow { key: "speaker_in_call"; kind: "bool"; label: string; write_path: "/api/settings/wake" }
 export function isWakeReport(value: unknown): value is WakeReport;
 export function wakeMenu(
   wake: WakePrefs,
@@ -31,7 +32,7 @@ export function wakeMenu(
     command(name: string): void;
     setWakeListen?(value: boolean): unknown;
     setVoiceNameTest?(value: boolean): unknown;
-    setMenuPref?(row: WakeSilenceRow, value: number): unknown;
+    setMenuPref?(row: WakeSilenceRow | WakeSpeakerRow, value: number | boolean): unknown;
     translate?(source: string): string;
   },
 ): MenuItemTemplate[];
@@ -40,7 +41,7 @@ export function settingsMenu(
   settings: SettingsView | null,
   handlers: {
     command(name: string): void;
-    setMenuPref(row: MenuPrefSetting | WakeSilenceRow, value: number | boolean): unknown;
+    setMenuPref(row: MenuPrefSetting | WakeSilenceRow | WakeSpeakerRow, value: number | boolean): unknown;
     openFamily?(): void;
     setWakeListen?(value: boolean): unknown;
     setVoiceNameTest?(value: boolean): unknown;
