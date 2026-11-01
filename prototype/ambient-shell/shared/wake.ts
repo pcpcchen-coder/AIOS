@@ -14,6 +14,7 @@ export const WAKE_REASONS = [
   "sleep",
   "lock",
   "rate_limited",
+  "calibrating",
   "realtime",
   "web_speech",
   "permission_denied",
@@ -31,7 +32,7 @@ export const WAKE_STATE_REASONS: { readonly [S in WakeState]: readonly (WakeReas
   off: [null, "pref_off"],
   armed: ["starting", "auto_resume"],
   listening_local: [null],
-  paused: ["user_pause", "sleep", "lock", "rate_limited"],
+  paused: ["user_pause", "sleep", "lock", "rate_limited", "calibrating"],
   in_call: ["realtime"],
   released: ["web_speech"],
   error: ["permission_denied", "device_missing", "device_ended", "runtime_missing", "runtime_load_failed", "audio_failed", "unsupported"],
@@ -61,8 +62,65 @@ export interface WakePrefs {
   device_id: string | null;
   /** 喚醒後多久沒人出聲就結束這通（秒，src/audio/wake-call.ts）；只能是 WAKE_SILENCE_OPTIONS_S 其中一個。 */
   wake_silence_s: number;
+  /**
+   * 「矯正喚醒詞…」套用的門檻（George 2026-11-01）：蓋過清單 shared/wake-runtime.json 每一行的提升分數與門檻；
+   * null＝用出貨的清單值（「回復預設」）。偵測器載入時讀這份（src/audio/detector.ts 的 kwsConfig）。
+   */
+  keyword_overrides: WakeKeywordOverrides | null;
 }
 export type WakePrefsPatch = Partial<WakePrefs>;
+
+/** 一組關鍵詞（例如 HEY_NOUS 的三種念法）共用的提升分數與門檻。 */
+export interface WakeKeywordTuning {
+  boost: number;
+  threshold: number;
+}
+
+export interface WakeKeywordOverrides {
+  /** 關鍵詞組（清單 id 去掉最後的念法，wakeKeywordGroup）→ 這組每一行的提升分數與門檻。沒列的組照清單。 */
+  groups: Record<string, WakeKeywordTuning>;
+  /** 做矯正的人的代號（1–4 個英文字母或數字），不記名字。 */
+  code: string;
+  /** 套用時間（ISO 8601；核心保存時填上，頁面送來的會被蓋掉）。 */
+  at: string | null;
+}
+
+/**
+ * 覆寫值的範圍：比清單驗證（提升分數 (0, 10]、門檻 (0, 1)）窄，只容許矯正會掃到的附近。
+ * 門檻太低會讓電視、家人聊天常常叫醒（每次叫醒就開始外傳聲音），所以下限 0.05；太高等於關掉，上限 0.5。
+ */
+export const WAKE_OVERRIDE_LIMITS = { boost: { min: 0.5, max: 3 }, threshold: { min: 0.05, max: 0.5 } } as const;
+export const WAKE_CALIBRATION_CODE = /^[A-Za-z0-9]{1,4}$/;
+const KEYWORD_GROUP = /^[A-Z][A-Z0-9_]{0,31}$/;
+const MAX_OVERRIDE_GROUPS = 8;
+
+const inRange = (value: unknown, { min, max }: { readonly min: number; readonly max: number }): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+
+/** keyword_overrides 的邊界驗證（null 或完整物件）；不合法時丟 WakePatchError。數字一律四捨五入到小數兩位。 */
+export function parseKeywordOverrides(value: unknown): WakeKeywordOverrides | null {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new WakePatchError("keyword_overrides 必須是物件或 null");
+  const { groups, code, at, ...rest } = value as Record<string, unknown>;
+  if (Object.keys(rest).length > 0) throw new WakePatchError("keyword_overrides 只能有 groups、code、at");
+  if (typeof code !== "string" || !WAKE_CALIBRATION_CODE.test(code)) throw new WakePatchError("代號必須是 1–4 個英文字母或數字");
+  if (at !== undefined && at !== null && (typeof at !== "string" || at.length > 40 || Number.isNaN(Date.parse(at)))) throw new WakePatchError("keyword_overrides.at 格式不正確");
+  if (!groups || typeof groups !== "object" || Array.isArray(groups)) throw new WakePatchError("keyword_overrides.groups 必須是物件");
+  const entries = Object.entries(groups as Record<string, unknown>);
+  if (entries.length === 0 || entries.length > MAX_OVERRIDE_GROUPS) throw new WakePatchError("keyword_overrides.groups 要有 1–8 組");
+  const out: Record<string, WakeKeywordTuning> = {};
+  for (const [group, tuning] of entries) {
+    if (!KEYWORD_GROUP.test(group)) throw new WakePatchError(`不認得的關鍵詞組：${group}`);
+    const t = tuning as Record<string, unknown> | null;
+    if (!t || typeof t !== "object" || Object.keys(t).sort().join(",") !== "boost,threshold") throw new WakePatchError(`${group} 只能有 boost 與 threshold`);
+    if (!inRange(t.boost, WAKE_OVERRIDE_LIMITS.boost)) throw new WakePatchError(`${group} 的提升分數必須在 0.5–3 之間`);
+    if (!inRange(t.threshold, WAKE_OVERRIDE_LIMITS.threshold)) throw new WakePatchError(`${group} 的門檻必須在 0.05–0.5 之間`);
+    out[group] = { boost: round2(t.boost), threshold: round2(t.threshold) };
+  }
+  return { groups: out, code, at: typeof at === "string" ? at : null };
+}
+
+const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /**
  * 「喚醒後等你開口」的選項（選單列一組 radio）。George 2026-10-31 定 5 秒；2026-11-01 要求可以調整。
@@ -71,15 +129,18 @@ export type WakePrefsPatch = Partial<WakePrefs>;
 export const WAKE_SILENCE_OPTIONS_S = [3, 5, 8, 10, 15, 20] as const;
 export const DEFAULT_WAKE_SILENCE_S = 5;
 
-export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null, wake_silence_s: DEFAULT_WAKE_SILENCE_S };
-export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s"] as const satisfies readonly (keyof WakePrefs)[];
+export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null, wake_silence_s: DEFAULT_WAKE_SILENCE_S, keyword_overrides: null };
+export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s", "keyword_overrides"] as const satisfies readonly (keyof WakePrefs)[];
 
 export class WakePatchError extends Error {}
 
 /** deviceId 是瀏覽器給的不透明字串；只接受可見 ASCII、最多 256 字元。 */
 const DEVICE_ID = /^[\x21-\x7e]{1,256}$/;
 
-/** 邊界驗證：只接受 wake_listen（布林）、device_id（字串或 null）與 wake_silence_s（選項之一）；其他鍵、空 patch、型別不符一律丟錯。 */
+/**
+ * 邊界驗證：只接受 wake_listen（布林）、device_id（字串或 null）、wake_silence_s（選項之一）與 keyword_overrides
+ * （parseKeywordOverrides）；其他鍵、空 patch、型別不符一律丟錯。
+ */
 export function parseWakePatch(input: unknown): WakePrefsPatch {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new WakePatchError("喚醒設定必須是 JSON 物件");
   const patch: WakePrefsPatch = {};
@@ -95,6 +156,8 @@ export function parseWakePatch(input: unknown): WakePrefsPatch {
         throw new WakePatchError("wake_silence_s 必須是選單裡的秒數（3、5、8、10、15 或 20）");
       }
       patch.wake_silence_s = value as number;
+    } else if (key === "keyword_overrides") {
+      patch.keyword_overrides = parseKeywordOverrides(value);
     } else {
       throw new WakePatchError(`不認得的喚醒設定：${key}`);
     }
@@ -262,6 +325,40 @@ export function wakeKeywordsText(k: WakeKeywordConfig): string {
   return k.entries.map((e) => [e.tokens, e.boost === null ? null : `:${e.boost}`, e.threshold === null ? null : `#${e.threshold}`, `@${e.id}`].filter(Boolean).join(" ")).join("\n") + "\n";
 }
 
+/** 關鍵詞組：清單 id 去掉最後一段念法（HEY_NOUS_OW → HEY_NOUS）。同一組的幾行念法共用一組矯正值。 */
+export function wakeKeywordGroup(id: string): string {
+  const cut = id.lastIndexOf("_");
+  return cut > 0 ? id.slice(0, cut) : id;
+}
+
+/** 每一組目前在清單上的有效值（行內沒寫就用全域的 keywords_score／keywords_threshold），依清單順序。 */
+export function wakeKeywordDefaults(k: WakeKeywordConfig): { group: string; boost: number; threshold: number }[] {
+  const out: { group: string; boost: number; threshold: number }[] = [];
+  for (const e of k.entries) {
+    const group = wakeKeywordGroup(e.id);
+    if (out.some((g) => g.group === group)) continue;
+    out.push({ group, boost: e.boost ?? k.keywords_score ?? 1, threshold: e.threshold ?? k.keywords_threshold ?? 0.25 });
+  }
+  return out;
+}
+
+/** 把使用者的矯正值蓋到清單的每一行（同一組的每種念法都改）；沒列的組、null 時照清單。不改傳入的物件。 */
+export function applyKeywordOverrides(k: WakeKeywordConfig, overrides: WakeKeywordOverrides | null): WakeKeywordConfig {
+  if (!overrides) return k;
+  return {
+    ...k,
+    entries: k.entries.map((e) => {
+      const tuning = overrides.groups[wakeKeywordGroup(e.id)];
+      return tuning ? { ...e, boost: tuning.boost, threshold: tuning.threshold } : e;
+    }),
+  };
+}
+
+/** 只留一組（矯正比較時每個候選各自一個偵測器：同一串發音放在同一份關鍵詞檔會互相覆蓋，不能把幾組門檻放在一起）。 */
+export function wakeKeywordsForGroup(k: WakeKeywordConfig, group: string, tuning: WakeKeywordTuning): WakeKeywordConfig {
+  return { ...k, entries: k.entries.filter((e) => wakeKeywordGroup(e.id) === group).map((e) => ({ ...e, boost: tuning.boost, threshold: tuning.threshold })) };
+}
+
 /** 喚醒引擎檔案（shared/wake-runtime.json）的核對結果；WK-01a 清單是空的，所以一律是 missing。 */
 export type WakeRuntimeState = "ok" | "missing" | "hash_mismatch" | "not_configured";
 
@@ -308,27 +405,61 @@ export interface WakeActivationPort {
 /** 頁面送到核心的 wake_id 格式（只接受這種；核心不拿它當成喚醒真的發生的證據）。 */
 export const WAKE_ID = /^int_[0-9a-f]{16}$/;
 
-// ───────────── worker 協定：worker 只送出事件，不送出任何樣本（started／detected／load_error／closed） ─────────────
+// ───────────── worker 協定：worker 只送出事件，不送出任何樣本（started／detected／load_error／closed；矯正另有 clip／scan／sweep_done） ─────────────
 
 export type WakeWorkerOut =
   | { type: "started" }
   /** worker 已清空環形緩衝並釋放偵測器（收到 close 之後），主執行緒等到它才 terminate。 */
   | { type: "closed" }
   | { type: "detected"; keyword_index: number }
-  | { type: "load_error"; reason: "runtime_missing" | "runtime_load_failed" };
+  | { type: "load_error"; reason: "runtime_missing" | "runtime_load_failed" }
+  /** 矯正：第 clip 段錄完，用目前的設定掃過的結果（keyword_index 是清單編號，-1＝沒有偵測到）。 */
+  | { type: "clip"; clip: number; keyword_index: number }
+  /** 矯正：第 candidate 個候選掃第 clip 段的結果（keyword_index 是清單編號，-1＝沒有偵測到）。 */
+  | { type: "scan"; candidate: number; clip: number; keyword_index: number }
+  /** 矯正：全部候選掃完。 */
+  | { type: "sweep_done" };
+
+/** 矯正一次最多錄幾段、比較幾個候選（worker 與檢查共用）。 */
+export const WAKE_CALIBRATION_MAX_CLIPS = 64;
+export const WAKE_CALIBRATION_MAX_CANDIDATES = 32;
+
+const intIn = (value: unknown, min: number, max: number): boolean => Number.isInteger(value) && (value as number) >= min && (value as number) < max;
 
 /**
- * worker 送出訊息的完整檢查：只接受上面三種形狀，欄位只能是字串或整數，不能有型別陣列、ArrayBuffer、陣列或多餘欄位。
+ * worker 送出訊息的完整檢查：只接受上面幾種形狀，欄位只能是字串或整數，不能有型別陣列、ArrayBuffer、陣列或多餘欄位。
  * 主執行緒收到不符的訊息一律丟掉（tests/audio-privacy.test.ts 另外靜態檢查 worker 的 postMessage）。
  */
 export function isWakeWorkerOut(value: unknown): value is WakeWorkerOut {
   if (!value || typeof value !== "object" || Array.isArray(value) || ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return false;
   const o = value as Record<string, unknown>;
   const keys = Object.keys(o).sort().join(",");
-  if (o.type === "started" || o.type === "closed") return keys === "type";
-  if (o.type === "detected") return keys === "keyword_index,type" && Number.isInteger(o.keyword_index) && (o.keyword_index as number) >= 0 && (o.keyword_index as number) < 64;
+  if (o.type === "started" || o.type === "closed" || o.type === "sweep_done") return keys === "type";
+  if (o.type === "detected") return keys === "keyword_index,type" && intIn(o.keyword_index, 0, 64);
   if (o.type === "load_error") return keys === "reason,type" && (o.reason === "runtime_missing" || o.reason === "runtime_load_failed");
+  if (o.type === "clip") return keys === "clip,keyword_index,type" && intIn(o.clip, 0, WAKE_CALIBRATION_MAX_CLIPS) && intIn(o.keyword_index, -1, 64);
+  if (o.type === "scan") {
+    return keys === "candidate,clip,keyword_index,type" && intIn(o.candidate, 0, WAKE_CALIBRATION_MAX_CANDIDATES) && intIn(o.clip, 0, WAKE_CALIBRATION_MAX_CLIPS) && intIn(o.keyword_index, -1, 64);
+  }
   return false;
+}
+
+/** 矯正比較的一個候選：某一組關鍵詞換成這組提升分數與門檻（主執行緒送進 worker；只有數字與組名）。 */
+export interface WakeSweepCandidate extends WakeKeywordTuning {
+  group: string;
+}
+
+/** worker 收到的候選清單檢查：不合法就整份丟掉（回 null），不猜。 */
+export function parseSweepCandidates(value: unknown): WakeSweepCandidate[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > WAKE_CALIBRATION_MAX_CANDIDATES) return null;
+  const out: WakeSweepCandidate[] = [];
+  for (const c of value) {
+    if (!c || typeof c !== "object" || Object.keys(c).sort().join(",") !== "boost,group,threshold") return null;
+    const { group, boost, threshold } = c as Record<string, unknown>;
+    if (typeof group !== "string" || !KEYWORD_GROUP.test(group) || !inRange(boost, WAKE_OVERRIDE_LIMITS.boost) || !inRange(threshold, WAKE_OVERRIDE_LIMITS.threshold)) return null;
+    out.push({ group, boost, threshold });
+  }
+  return out;
 }
 
 // ───────────── 介面文字（共用翻譯表） ─────────────
@@ -353,6 +484,7 @@ export const WAKE_REASON_LABEL: { readonly [R in WakeReason]: string } = {
   sleep: "系統睡眠中",
   lock: "螢幕已鎖定",
   rate_limited: "一分鐘內已由喚醒開始 3 次通話，暫停到一分鐘後自動恢復",
+  calibrating: "正在矯正喚醒詞，結束後自動恢復",
   realtime: "即時語音使用中，喚醒偵測暫停",
   web_speech: "按下說話或語音模式使用中，喚醒偵測暫停",
   permission_denied: "麥克風權限被拒，常駐聆聽沒有開啟",
@@ -393,4 +525,9 @@ export const WAKE_TEXT = {
   noVoice: "沒有聽到聲音，已結束通話，回到喚醒聆聽",
   /** WK-02：喚醒時即時語音不能用（{0} 是原因）。 */
   unavailable: "即時語音目前不可用（{0}）",
+  /** 「矯正喚醒詞…」（George 2026-11-01）的選單列文字；畫面文字在 src/wake-calibration-view.ts。 */
+  calibrate: "矯正喚醒詞…",
+  calibrateNote: "依提示念幾次，替這個家重新選門檻",
+  calibratedNote: "目前用代號 {0} 的矯正值",
+  calibrateUnavailable: "喚醒引擎可以使用後才能矯正",
 } as const;

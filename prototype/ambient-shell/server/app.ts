@@ -389,8 +389,9 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         if (err instanceof WakePatchError) throw new HttpError(400, err.message);
         throw err;
       }
-      // 頁面（以及任何本機頁面腳本）只能記下麥克風或關掉；打開只能由 App 主程序在原生說明之後經 NousHandle.wake 做
-      // （ADR-0003 §2.3）。關掉一定安全，所以這裡照收。
+      // 頁面（以及任何本機頁面腳本）只能記下麥克風、改「喚醒後等你開口」、套用或回復「矯正喚醒詞」的門檻（範圍在
+      // parseKeywordOverrides 限制），或關掉；打開只能由 App 主程序在原生說明之後經 NousHandle.wake 做（ADR-0003 §2.3）。
+      // 關掉一定安全，所以這裡照收。
       if (patch.wake_listen === true) throw new HttpError(403, "常駐喚醒聆聽只能從 App 選單列打開");
       try {
         options.wake.update(patch);

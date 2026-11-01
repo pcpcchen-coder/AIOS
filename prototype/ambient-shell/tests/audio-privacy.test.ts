@@ -71,7 +71,7 @@ describe("audio privacy (static)", () => {
 
   it("src/audio has the expected modules and no file name mentions the engine (kws)", () => {
     expect(audioFiles.map((f) => relative(audio, f)).sort()).toEqual(
-      ["capture-worklet.ts", "capture.ts", "controller.ts", "detector.ts", "earcon.ts", "front-end.ts", "guard.ts", "index.ts", "no-voice.ts", "resample.ts", "ring.ts", "runtime-net.ts", "wake-call.ts", "wake-worker.ts", "worker-core.ts"].sort(),
+      ["calibration-core.ts", "capture-worklet.ts", "capture.ts", "controller.ts", "detector.ts", "earcon.ts", "front-end.ts", "guard.ts", "index.ts", "no-voice.ts", "resample.ts", "ring.ts", "runtime-net.ts", "wake-call.ts", "wake-worker.ts", "worker-core.ts"].sort(),
     );
     expect(audioFiles.filter((f) => /kws|sherpa/i.test(relative(audio, f)))).toEqual([]);
   });
@@ -183,16 +183,22 @@ describe("audio privacy (static)", () => {
 
   it("every postMessage in src/audio is on a fixed allowlist: the worker posts only events, the worklet sends samples only to the worker port", () => {
     // 審查 m4：逐一列出每個 postMessage（含 port 與 worker），新增任何一個都要在這裡說明。
+    // 「矯正喚醒詞…」（2026-11-01）：主執行緒 → worker 多了四個只有指令與數字的訊息（clip_begin、clip_end、sweep 帶候選門檻與段落編號、
+    // discard），init 多了模式與已套用的矯正值；worker 的兩個核心共用同一個 post（仍只送 WakeWorkerOut，下面另外檢查）。
     const ALLOWED: Record<string, string[]> = {
       "capture-worklet.ts": ["this.out.postMessage(full, [full.buffer]);"],
       "capture.ts": [
         'node?.port.postMessage({ type: "stop" });',
         'w.postMessage({ type: "clear" });',
         'w.postMessage({ type: "close" });',
-        'worker.postMessage({ type: "init", sampleRate: ctx.sampleRate }, [channel.port2]);',
+        'worker.postMessage({ type: "init", sampleRate: ctx.sampleRate, mode: options.calibrate ? "calibrate" : "listen", overrides: options.overrides }, [channel.port2]);',
         'node.port.postMessage({ type: "port" }, [channel.port1]);',
+        'beginClip: () => send(() => w.postMessage({ type: "clip_begin" })),',
+        'endClip: () => send(() => w.postMessage({ type: "clip_end" })),',
+        'sweep: (candidates, clips) => send(() => w.postMessage({ type: "sweep", candidates, clips })),',
+        'discard: () => send(() => w.postMessage({ type: "discard" })),',
       ],
-      "wake-worker.ts": ["postMessage(message: WakeWorkerOut): void;", "core = new WakeWorkerCore(new SherpaWasmDetector(runtime, net), (out) => scope.postMessage(out));", "scope.postMessage(closed);"],
+      "wake-worker.ts": ["postMessage(message: WakeWorkerOut): void;", "const post = (out: WakeWorkerOut) => scope.postMessage(out);", "scope.postMessage(closed);"],
     };
     const found: Record<string, string[]> = {};
     for (const file of audioFiles) {
@@ -201,9 +207,16 @@ describe("audio privacy (static)", () => {
     }
     expect(found).toEqual(ALLOWED);
     // worker 的輸出：worker-core 只經 emit（先 isWakeWorkerOut 檢查），closed 是固定物件
-    const core = readFileSync(join(audio, "worker-core.ts"), "utf8");
-    expect([...core.matchAll(/this\.post\(([^;]+)\);/g)].map((m) => m[1])).toEqual(["message"]);
-    expect(core).toMatch(/private emit\(message: WakeWorkerOut\): void \{\s*if \(isWakeWorkerOut\(message\)\) this\.post\(message\);\s*\}/);
+    for (const name of ["worker-core.ts", "calibration-core.ts"]) {
+      const core = readFileSync(join(audio, name), "utf8");
+      expect([...core.matchAll(/this\.post\(([^;]+)\);/g)].map((m) => m[1]), name).toEqual(["message"]);
+      expect(core, name).toMatch(/private emit\(message: WakeWorkerOut\): void \{\s*if \(isWakeWorkerOut\(message\)\) this\.post\(message\);\s*\}/);
+    }
+    // 兩個核心都只拿到 post（不是 scope），矯正核心的錄音陣列不經任何 postMessage
+    const worker = readFileSync(join(audio, "wake-worker.ts"), "utf8");
+    expect(worker).toMatch(/new WakeCalibrationCore\(detector, runtime\.keywords, overrides, post\)/);
+    expect(worker).toMatch(/new WakeWorkerCore\(detector, post\)/);
+    expect(readFileSync(join(audio, "calibration-core.ts"), "utf8")).not.toMatch(/postMessage/);
     expect(readFileSync(join(audio, "wake-worker.ts"), "utf8")).toMatch(/const closed: WakeWorkerOut = \{ type: "closed" \};/);
     // 主執行緒只接受檢查過的事件
     expect(readFileSync(join(audio, "capture.ts"), "utf8")).toMatch(/if \(stopped \|\| !isWakeWorkerOut\(event\.data\)\) return;/);

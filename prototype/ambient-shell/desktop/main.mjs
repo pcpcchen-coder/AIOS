@@ -568,7 +568,7 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, wakeReport: pageState.wake, wakeCommand: notifyPage, translate: t });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, wakeReport: pageState.wake, wakeCommand: notifyPage, calibrateWake, translate: t });
 }
 
 /** 即時語音用的 Codex 登入：核心開好回呼（1455，被占用時 1457，再不行改裝置代碼），系統瀏覽器開登入頁。 */
@@ -724,6 +724,32 @@ async function setWakeListen(value) {
     showError("常駐喚醒聆聽沒有保存", String(err.message ?? err));
   }
   await refreshSettings();
+}
+
+/**
+ * 選單列「矯正喚醒詞…」（George 2026-11-01）：錄音前一定先顯示原生說明（要念哪些話、錄音只在記憶體、比較完或取消就丟掉、
+ * 期間暫停常駐聆聽），按「開始」才打開視窗裡的矯正畫面；畫面上還要再按「開始錄音測試」才開麥克風。
+ */
+let wakeCalibrateAsking = false;
+async function calibrateWake() {
+  if (wakeCalibrateAsking || !settings?.wake) return;
+  wakeCalibrateAsking = true;
+  let response = 1;
+  try {
+    ({ response } = await showMessage({
+      type: "question",
+      buttons: ["開始", "取消"],
+      defaultId: 0,
+      cancelId: 1,
+      message: "要開始矯正喚醒詞嗎？",
+      detail: t("接下來會請你依提示念「Hey Nous」「Hello Nous」和幾句不該叫醒的話，約 3 分鐘。錄到的聲音只放在這台 Mac 的記憶體裡，用來比較幾組門檻；不寫檔、不上傳、不進紀錄，比較完或取消時立即丟掉。進行中會暫停常駐喚醒聆聽，結束後自動恢復。"),
+    }, dialogParent()));
+  } catch {
+    response = 1;
+  } finally {
+    wakeCalibrateAsking = false;
+  }
+  if (response === 0) command("calibrate-wake");
 }
 
 function rebuildMenu() {
