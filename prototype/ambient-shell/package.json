@@ -17,6 +17,7 @@
     "test": "vitest run",
     "vision:setup": "node scripts/vision-setup.mjs",
     "face:setup": "node scripts/face-setup.mjs",
+    "speaker:setup": "node scripts/speaker-setup.mjs",
     "face:spike": "vite --config spike/face/vite.config.ts",
     "face:bench": "node scripts/face-spike-bench.mjs",
     "wake:setup": "tsx scripts/wake-setup.mjs",

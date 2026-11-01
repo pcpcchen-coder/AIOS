@@ -36,6 +36,7 @@ import {
 import { COMMANDS_PATH, commandsPageHeaders, renderCommandsPage } from "./commands-page.ts";
 import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity.ts";
 import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
+import { readVerifiedSpeakerRuntime, speakerRuntimePath } from "./speaker-runtime.ts";
 import { readVerifiedWakeRuntime, wakeRuntimePath } from "./wake-runtime.ts";
 import { parseWakePatch, WAKE_ID, WakePatchError, type WakePrefs, type WakePrefsPatch, type WakeRuntimeState } from "../shared/wake.ts";
 import { parsePageEndReason, parseVoiceUsage } from "../shared/voice-cost.ts";
@@ -147,6 +148,8 @@ export interface AppOptions {
   identity?: { status(): IdentityStatus };
   /** 家人辨識模型與 onnxruntime wasm 的資料夾（只提供清單上的檔名）；未提供時 /face-runtime/ 一律 404。 */
   faceRuntimeDir?: string | null;
+  /** SP-01 講者模型與 onnxruntime wasm 的資料夾（只提供清單上的檔名）；未提供時 /speaker-runtime/ 一律 404。 */
+  speakerRuntimeDir?: string | null;
   /**
    * WK-01a：常駐喚醒聆聽（只有 NOUS_WAKE=on 時提供，通常是 WakeSettingsStore 加上引擎核對結果）。未提供時沒有
    * /api/settings/wake、settings 沒有 wake 欄位、/wake-runtime/ 一律 404，和加入喚醒程式之前相同。
@@ -297,6 +300,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         await handleApi(req, res, url.pathname, url.searchParams);
       } else if (url.pathname.startsWith("/face-runtime/")) {
         serveFaceRuntime(res, req.method ?? "GET", url.pathname, options.faceRuntimeDir);
+      } else if (url.pathname.startsWith("/speaker-runtime/")) {
+        serveVerifiedRuntime(res, req.method ?? "GET", speakerRuntimePath(options.speakerRuntimeDir, url.pathname), readVerifiedSpeakerRuntime);
       } else if (url.pathname.startsWith("/wake-runtime/")) {
         // 旗標關閉、或引擎核對不是 ok（例如清單仍是 pending_first_build）時一律 404，模型檔也一樣（不落到 SPA fallback）；
         // ok 時只給清單上、雜湊相符的檔案。
@@ -909,6 +914,19 @@ function serveFaceRuntime(res: ServerResponse, method: string, pathname: string,
   // 每次讀取都核對雜湊：啟動後才被換掉的檔案也不會送出去。
   const body = readVerifiedFaceRuntime(file);
   if (!body) throw new HttpError(503, "face runtime file failed verification");
+  const type = CONTENT_TYPES[extname(file)] ?? "application/octet-stream";
+  const headers: Record<string, string> = { "Content-Type": type, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" };
+  if (type.startsWith("text/javascript")) Object.assign(headers, scriptHeaders());
+  res.writeHead(200, headers);
+  res.end(method === "HEAD" ? undefined : body);
+}
+
+/** SP-01 講者模型與 onnxruntime wasm：同 serveFaceRuntime（只給清單上的檔名，不存在 404，雜湊不符 503）。 */
+function serveVerifiedRuntime(res: ServerResponse, method: string, file: string | null, read: (path: string) => Buffer | null): void {
+  if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");
+  if (!file || !existsSync(file)) throw new HttpError(404, "not found");
+  const body = read(file);
+  if (!body) throw new HttpError(503, "runtime file failed verification");
   const type = CONTENT_TYPES[extname(file)] ?? "application/octet-stream";
   const headers: Record<string, string> = { "Content-Type": type, "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" };
   if (type.startsWith("text/javascript")) Object.assign(headers, scriptHeaders());

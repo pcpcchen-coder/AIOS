@@ -617,8 +617,8 @@ ADR-0003 草案（WK-00 交付）必須包含：
 | WK-01b | 等 George 的 Mac WK-00 結果：GitHub Actions 自建 KWS wasm（固定 emsdk 與 sherpa-onnx v2.0.1）、產物雜湊寫進 `shared/wake-runtime.json`、關鍵詞檔（發音單元定案後）、`SherpaWasmDetector` 真正載入與偵測。（2026-10-31 先做**準備部分**：workflow `.github/workflows/wake-wasm.yml`（emsdk 4.0.23、只建 KWS、GPL espeak-ng／piper 檢查、pull_request 不發布）、`npm run wake:setup -- --product`、清單格式（release 雜湊空白並標 `pending_first_build`、關鍵詞為空的佔位）、worker 真的載入路徑與 worker 網路關閉（import 第三方 module 之前就關閉網路全域）；**workflow 尚未執行、不能偵測**，見 [WK-01b 準備批次驗證](validation/wk-01b-prep-2026-10-31.md)。2026-10-31 更新：workflow 已執行，release `wake-runtime-2.0.1-5961b4196003` 已發布，清單改為 `built` 並寫入雜湊。剩下：George 的數字定案關鍵詞與門檻、Mac 上真的偵測） | 含於上列 |
 | WK-02 | `wake_word` 啟動來源與限速、`claimGreeting` 擴充、兩條語音路徑的問候與 fallback、**無人聲自動結束的接線**（WK-01a 已交付 `NoVoiceWatchdog`）、F6 費用紀錄欄位、Companion `activation=wake` 共用接口、`NSMicrophoneUsageDescription` 改寫。（2026-10-31 已實作、Mac 未驗，依 George 同日決定：喚醒後一律問候、每分鐘 3 次超過時暫停並自動恢復、沉默 5 秒結束；費用紀錄記錄所有通話、不綁喚醒開關（旗標關閉時唯一刻意的不同）；引擎未接上前產品不會觸發，見 [WK-02 驗證](validation/wk-02-2026-10-31.md)） | 1–2 人日 |
 | WK-03 | Mac 實機：W1–W12，含至少 8 小時電視負例與家人喚醒測試 | 2–3 人日 |
-| SP-00 | 講者模型 spike：CAM++ 與一個備選在 Node 與瀏覽器的特徵一致性與耗時；瀏覽器沒有現成講者 API，含 `onnxruntime-web`＋自寫 fbank 備案的風險緩衝；1–3 秒片段的分數分布（以自願者或公開測試資料） | 1.5–2.5 人日 |
-| SP-01 | 「加入聲音」登記、gallery v2 遷移、加密保存、刪除與輪換、刪除時的記憶選項、IPC 白名單與 `voice_probe` 限速；含 wasm 整合的風險緩衝 | 2.5–3.5 人日 |
+| SP-00 | 講者模型 spike：CAM++ 與一個備選在 Node 與瀏覽器的特徵一致性與耗時；瀏覽器沒有現成講者 API，含 `onnxruntime-web`＋自寫 fbank 備案的風險緩衝；1–3 秒片段的分數分布（以自願者或公開測試資料）。（2026-11-01 已完成，以 TTS 合成語音選定 CAM++ zh_en advanced，真人分布未量，見 [SP-00／SP-01 驗證](validation/sp-00-2026-11-01.md)） | 1.5–2.5 人日 |
+| SP-01 | 「加入聲音」登記、gallery v2 遷移、加密保存、刪除與輪換、刪除時的記憶選項、IPC 白名單與 `voice_probe` 限速；含 wasm 整合的風險緩衝。（2026-11-01 完成登記、加密保存、刪除與 IPC 白名單，George 已在 Mac 登記自己的聲音；沒有做 gallery v2 遷移（改在 v1 加可選欄位）、刪除時的記憶選項與 `voice_probe`，見 [SP-00／SP-01 驗證](validation/sp-00-2026-11-01.md) §8） | 2.5–3.5 人日 |
 | SP-02 | 喚醒片段（文字相關模板）＋話語的辨識、臉聲融合、以聲音稱名問候的決策（沿用 `GreetingDecision` 與 `claimGreeting`；校準前固定不帶名字，以 fixture 驗證）、便利性限制、**只交付人物候選接口**（記憶讀寫依 MEM 批次） | 2.5–3.5 人日 |
 | SP-03 | 家人保留樣本、喚醒片段與話語兩種門檻校準、跨麥克風、重播測試；達標後開放只有聲音的稱名，並在兩條語音路徑實測；S1–S13 實機驗收 | 2.5–4 人日 |
 

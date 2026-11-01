@@ -59,6 +59,48 @@ export function sameModelVersion(a: FaceModelVersion, b: FaceModelVersion): bool
   return a.detector === b.detector && a.recognizer === b.recognizer && a.align === b.align && a.preproc === b.preproc;
 }
 
+// ───────────── 聲音（SP-01，docs/17 §7、§11.3） ─────────────
+
+/** 講者模型與前處理版本（shared/speaker-runtime.json 的 model_version）：都相符的聲音特徵才參與比對，否則要重新登記。 */
+export interface SpeakerModelVersion {
+  speaker: string;
+  preproc: string;
+  dim: number;
+}
+
+export function sameSpeakerModel(a: SpeakerModelVersion, b: SpeakerModelVersion): boolean {
+  return a.speaker === b.speaker && a.preproc === b.preproc && a.dim === b.dim;
+}
+
+/** CAM++ 特徵維度。 */
+export const SPEAKER_FEATURE_DIM = 192;
+/** 登記時錄幾次喚醒詞（文字相關模板，比對喚醒片段用）與幾句朗讀（比對一般話語用）。George 2026-11-01 選「喚醒詞 5 次＋朗讀 3 句」。 */
+export const VOICE_KEYWORD_SAMPLES = 5;
+export const VOICE_UTTERANCE_SAMPLES = 3;
+/**
+ * 聲音登記的檢查門檻（cosine，起點值、未校準，SP-03 才校準）。SP-00 的合成語音：同一人兩句之間最低 0.79、不同人最高 0.67；
+ * 喚醒詞只有約 1 秒，彼此的分數較低，所以喚醒詞與朗讀分開檢查。
+ * - consistency／consistency_pair：同 MATCH_THRESHOLDS，每段與平均方向、任兩段之間的下限；低於表示混到別人或沒錄到人聲。
+ * - duplicate：新登記的朗讀平均與已登記家人的朗讀平均高於這個值，視為同一個人（不重複登記）。
+ */
+export const VOICE_THRESHOLDS = {
+  keyword: { consistency: 0.45, consistency_pair: 0.3 },
+  utterance: { consistency: 0.5, consistency_pair: 0.4 },
+  duplicate: 0.8,
+} as const;
+
+/** 聲音特徵的形狀檢查：192 個有限數值且已 L2 normalize。 */
+export function isValidSpeakerFeature(v: unknown): v is ArrayLike<number> {
+  if (!(Array.isArray(v) || v instanceof Float32Array) || v.length !== SPEAKER_FEATURE_DIM) return false;
+  let sum = 0;
+  for (let i = 0; i < v.length; i++) {
+    const x = v[i];
+    if (typeof x !== "number" || !Number.isFinite(x)) return false;
+    sum += x * x;
+  }
+  return Math.abs(Math.sqrt(sum) - 1) < FEATURE_NORM_TOLERANCE;
+}
+
 /** worker 回報的畫格品質（src/sense/face/quality.ts）。ok 以外都不送特徵。 */
 export const QUALITY_REASONS = [
   "ok",
@@ -254,6 +296,10 @@ export interface FamilyMember {
   needs_reenroll: boolean;
   /** 載入時發現特徵不合格（維度、非有限值或沒有正規化）：照實標為壞資料，不參與比對，只能刪除。 */
   damaged: boolean;
+  /** 有沒有登記臉（SP-01 起可以只登記聲音）。 */
+  face: boolean;
+  /** 聲音：none 沒登記、enrolled 已登記、needs_reenroll 講者模型或前處理版本不同，要重錄。 */
+  voice: "none" | "enrolled" | "needs_reenroll";
 }
 
 /**
@@ -283,6 +329,8 @@ export interface IdentityManageStatus {
   gallery_version: number;
   epoch: number;
   models: "ok" | "missing" | "hash_mismatch" | "not_configured";
+  /** 講者模型（shared/speaker-runtime.json）的核對結果；不是 ok 時不能錄聲音，查看與刪除仍可用。 */
+  voice_models: "ok" | "missing" | "hash_mismatch" | "not_configured";
   /** Time Machine 排除：excluded／failed（原因只在畫面說明，不阻擋）／pending／not_applicable。 */
   backup_exclusion: "excluded" | "failed" | "pending" | "not_applicable";
   calibrated: boolean;
@@ -369,7 +417,7 @@ export interface GreetingDecision {
 }
 
 /** IPC 的操作（desktop/identity-ipc.mjs 的白名單與這裡一致，測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming"] as const;
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice"] as const;
 export type IdentityOp = (typeof IDENTITY_OPS)[number];
 
 export type IdentityRequest =
@@ -387,7 +435,25 @@ export type IdentityRequest =
   /** 送出問候前：頁面給互動 ID、綁定的追蹤世代與頁面端條件，核心建立 GreetingDecision 並組句。 */
   | { op: "greeting"; interaction: string; track: number; eligible: boolean; route: GreetingRoute }
   /** 管理畫面：使用者按下「我知道了」，記錄已看過雲端稱名的說明（沒看過就不稱名）。 */
-  | { op: "ack_naming"; session: string };
+  | { op: "ack_naming"; session: string }
+  /**
+   * SP-01 登記聲音：只送特徵，不送錄音。有 person_id 時加到（或取代）那位家人的聲音；沒有時以 name／minor／guardian_confirmed
+   * 新增一位只有聲音的家人。keyword 是喚醒詞的特徵（VOICE_KEYWORD_SAMPLES 段），utterance 是朗讀的特徵（VOICE_UTTERANCE_SAMPLES 段）。
+   */
+  | {
+      op: "enroll_voice";
+      session: string;
+      person_id?: string;
+      name?: string;
+      minor?: boolean;
+      guardian_confirmed?: boolean;
+      consent: boolean;
+      model: SpeakerModelVersion;
+      keyword: number[][];
+      utterance: number[][];
+    }
+  /** 只刪聲音，保留臉（只有聲音的家人會整個刪除，和「刪除」相同）。 */
+  | { op: "delete_voice"; session: string; person_id: string };
 
 /** 管理畫面需要的狀態（open_session、list 與變更後回傳）。 */
 export interface IdentityManageView {
@@ -426,8 +492,8 @@ export type IdentityErrorCode =
 export type MemoryUnlinkResult = "none" | "unlinked" | "deleted" | "failed";
 
 export type IdentityResponse =
-  | ({ ok: true; op: "open_session" | "list" | "enroll" | "ack_naming" } & IdentityManageView)
-  | ({ ok: true; op: "delete" | "clear_all"; memory?: MemoryUnlinkResult } & IdentityManageView)
+  | ({ ok: true; op: "open_session" | "list" | "enroll" | "ack_naming" | "enroll_voice" } & IdentityManageView)
+  | ({ ok: true; op: "delete" | "clear_all" | "delete_voice"; memory?: MemoryUnlinkResult } & IdentityManageView)
   | { ok: true; op: "close_session" }
   | { ok: true; op: "probe"; observation: IdentityObservation }
   /** 只回可不可以取樣；不回原因（原因可能透露有沒有登記家人）。 */

@@ -1193,6 +1193,18 @@ body[data-camera-preview="open"] .subtitle {
   margin: 8px 0;
 }
 
+/* SP-01 聲音登記：大字提示、狀態顏色與音量條（George 2026-10-31：提示要明顯）。 */
+.chip--muted { color: var(--muted); opacity: 0.7; }
+.family-modes { display: flex; gap: 18px; flex-wrap: wrap; }
+.voice-step { border-radius: 14px; padding: 14px 16px; border: 1px solid rgba(255, 255, 255, 0.12); transition: background 0.2s; }
+.voice-step--get_ready { background: rgba(255, 196, 0, 0.12); }
+.voice-step--listening { background: rgba(80, 220, 160, 0.16); border-color: var(--mint); }
+.voice-status { font-size: 16px; margin: 6px 0 0; color: var(--muted); }
+.voice-step--listening .voice-status { color: var(--mint); }
+.voice-prompt { font-size: 34px; font-weight: 600; margin: 6px 0 12px; line-height: 1.3; }
+.voice-meter { height: 8px; max-width: 360px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.voice-meter-fill { height: 100%; background: var(--mint); transition: width 0.1s linear; }
+
 /* 校正人臉辨識（George 2026-10-31）：左邊步驟、右邊鏡頭畫面；窄視窗時上下排。 */
 .calibration-layout { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; margin-top: 10px; }
 .calibration-main { flex: 1 1 280px; min-width: 0; }

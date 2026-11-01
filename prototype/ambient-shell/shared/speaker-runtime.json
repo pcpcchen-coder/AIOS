@@ -1,0 +1,32 @@
+{
+  "comment": "家人聲音辨認 SP-01 的本機講者模型與 onnxruntime wasm（npm run speaker:setup 安裝；不進 git、不進 dist、不進 release zip）。CAM++ zh_en advanced 由 2026-11-01 SP-00 選定（docs/validation/sp-00-2026-11-01.md）；onnxruntime wasm 與 face-runtime 相同（1.30.0）。",
+  "url_prefix": "/speaker-runtime/",
+  "files": [
+    {
+      "name": "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+      "role": "speaker",
+      "url": "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx",
+      "sha256": "aa3cfc16963a10586a9393f5035d6d6b57e98d358b347f80c2a30bf4f00ceba2",
+      "license": "Apache-2.0（3D-Speaker CAM++，ModelScope iic/speech_campplus_sv_zh_en_16k-common_advanced；sherpa-onnx 匯出；訓練資料條款未公開，docs/17 §7.1）"
+    },
+    {
+      "name": "ort-wasm-simd-threaded.wasm",
+      "role": "runtime",
+      "package": "onnxruntime-web/dist",
+      "sha256": "3398c10d07d229bd91b364548e130e0e51a8e5704b88c7c083ebbeb78842dee2",
+      "license": "MIT（onnxruntime-web 1.30.0）"
+    },
+    {
+      "name": "ort-wasm-simd-threaded.mjs",
+      "role": "runtime",
+      "package": "onnxruntime-web/dist",
+      "sha256": "e13f7f94fc51b4ca72b12faeb1ee95f4ace6dfbc8939bc718aabdc0a27c4299b",
+      "license": "MIT（onnxruntime-web 1.30.0）"
+    }
+  ],
+  "model_version": {
+    "speaker": "campplus-zh_en-advanced@aa3cfc16",
+    "preproc": "kaldi-fbank80-globalmean-v1",
+    "dim": 192
+  }
+}

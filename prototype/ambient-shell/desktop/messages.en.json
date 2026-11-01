@@ -172,5 +172,13 @@
   "刪除後無法復原。": "This cannot be undone.",
   "要打開鏡頭嗎？": "Turn on the camera?",
   "鏡頭影像只在這台 Mac 本機處理，不保存、不上傳。畫面右下角的圓點顯示鏡頭的實際狀態；隨時可以在選單列或說「關掉鏡頭」關閉。": "Camera images are processed only on this Mac. They are never saved or uploaded. The dot at the bottom-right of the screen shows the camera's real state. You can turn it off at any time from the menu bar or by saying “turn off the camera”.",
-  "鏡頭沒有打開": "The camera was not turned on"
+  "鏡頭沒有打開": "The camera was not turned on",
+  "保存": "Save",
+  "要保存「{0}」的聲音嗎？": "Save the voice for “{0}”?",
+  "要登記「{0}」為家人（只有聲音）嗎？": "Enroll “{0}” as a family member (voice only)?",
+  "本人必須在場、聽過說明並同意。Nous 只在這台 Mac 上保存加密的聲音特徵（一串數字，不存錄音、不上傳），只用來稱呼，不作為解鎖或授權的依據；錄音本身在算完特徵後就丟掉。隨時可以在「家人辨識」刪除。目前辨識門檻尚未校準。": "The person must be present, understand the explanation, and consent. Nous stores encrypted voice features (a list of numbers) only on this Mac, with no recordings or upload. They are used only for greetings, never unlocking or authorization; the recording itself is discarded once the features are computed. You can delete them in Family recognition at any time. Recognition thresholds are not calibrated.",
+  "本人必須在場、聽過說明並同意。Nous 只在這台 Mac 上保存加密的聲音特徵（一串數字，不存錄音、不上傳），只用來稱呼，不作為解鎖或授權的依據；錄音本身在算完特徵後就丟掉。隨時可以在「家人辨識」刪除。目前辨識門檻尚未校準。\n\n原本登記的聲音（如有）會被取代。": "The person must be present, understand the explanation, and consent. Nous stores encrypted voice features (a list of numbers) only on this Mac, with no recordings or upload. They are used only for greetings, never unlocking or authorization; the recording itself is discarded once the features are computed. You can delete them in Family recognition at any time. Recognition thresholds are not calibrated.\n\nAny voice enrolled before will be replaced.",
+  "刪除聲音": "Delete voice",
+  "要刪除「{0}」的聲音嗎？": "Delete the voice for “{0}”?",
+  "只移除這位家人的聲音特徵，臉與名稱保留；會換用新的加密金鑰，刪除後無法還原。\n\n{0}": "Only this family member's voice features are removed; the face and name stay. A new encryption key will be used. This cannot be undone.\n\n{0}"
 }

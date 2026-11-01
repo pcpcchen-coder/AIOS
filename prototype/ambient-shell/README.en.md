@@ -328,8 +328,11 @@ App menu “Camera and voice settings → Family recognition…” opens the Fam
 ```bash
 npm run face:setup -- --product   # YuNet 2023mar、SFace 與 onnxruntime wasm（約 53 MB）；核對 SHA-256 後裝到 face-runtime/（不進 git），
                                   # macOS 另外複製到 ~/Library/Application Support/Nous/face-runtime/（App 從那裡讀）
+npm run speaker:setup             # 家人聲音登記：CAM++ zh_en advanced 與 onnxruntime wasm（約 41 MB）；核對 SHA-256 後裝到 speaker-runtime/（不進 git），
+                                  # macOS 另外複製到 ~/Library/Application Support/Nous/speaker-runtime/
 ```
 
+- **Voice enrollment (SP-01)**: “Record voice” in the member list, or choose “Voice only” or “Both” when adding a member. Each segment starts with a chime; read 5 wake words (Hey Nous / Hello Nous) then 3 short sentences. Too quiet or too short asks again, up to 3 tries per segment. Inference runs in `src/speaker/worker.ts`; microphone samples go from the AudioWorklet straight to the worker. Only encrypted 192-d voice features are stored, never recordings. With wake listening on, the microphone is leased from it and returned afterwards. **Enrollment only: calls do not yet recognise or name anyone by voice.** Consistency and duplicate thresholds are uncalibrated. See [SP-00 / SP-01 validation](../../docs/validation/sp-00-2026-11-01.en.md).
 - **Data**: Save encrypted features/names, never photos. Electron safeStorage wraps data keys and AES-256-GCM encrypts gallery. Rotate keys on every enrollment/deletion. Native confirmation precedes both. Deleted entries cannot be recovered from new data, but preexisting Time Machine/APFS snapshots may retain old encrypted files because the application key does not rotate. UI and confirmation dialogs explain this.
 - **Boundaries**: Names, IDs, and features travel only through Electron IPC to core, not local HTTP. `GET /api/settings` `identity` contains availability/count only. Module worker `src/sense/identity-worker.ts` is the sole production pixel reader; pixels remain inside. Models/wasm stay outside `dist`, hash-verified and served by core at `/face-runtime/`. JS responses have `connect-src 'self'` CSP.
 - **Enrollment**: Name 1–16 characters, rejecting newlines, controls, angle/curly/square brackets, backticks, double quotes, backslashes → person's presence/consent, plus parental confirmation for minors → seven quality samples automatically following front, slight-left, slight-right, up, down prompts. Multiple faces or >0.5-second interruption restarts the batch → core checks consistency/duplicates without overwriting (“looks already enrolled as X”) → native confirmation before writing.
@@ -445,6 +448,7 @@ prototype/ambient-shell/
 │   └── app.ts / http-guard.ts / config.ts / index.ts
 ├── spike/face/             # ID-00 人臉 spike（開發工具，不接進產品；見 docs/adr/ADR-0001）
 ├── face-runtime/           # 家人辨識的模型與 wasm（npm run face:setup -- --product；不進 git、不進 dist）
+├── speaker-runtime/        # 家人聲音登記的講者模型與 wasm（npm run speaker:setup；不進 git、不進 dist）
 ├── shared/                 # 前後端共用型別與進度計算；prefs.ts、voice-prefs.ts（設定規格）、
 │                           # seconds-menu.ts（選單列鏡頭開關、秒數與倍率）、voice-commands.ts（指令表唯一來源）
 └── tests/                  # vitest
