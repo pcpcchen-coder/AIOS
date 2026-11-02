@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-11-02T11:54:04.065Z",
+  "updated_at": "2026-11-02T11:56:46.040Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261102113114-c97516",
+      "title": "Brain processing cue",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-11-02T11:56:44.239Z",
+      "started_at": "2026-11-02T11:31:14.978Z",
+      "ended_at": null,
+      "branch": "",
+      "commit_sha": "",
+      "passed_steps": 6,
+      "total_steps": 8,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261102113059-57ec9c",
@@ -11,21 +26,6 @@
       "status": "running",
       "updated_at": "2026-11-02T11:54:02.204Z",
       "started_at": "2026-11-02T11:30:59.909Z",
-      "ended_at": null,
-      "branch": "",
-      "commit_sha": "",
-      "passed_steps": 5,
-      "total_steps": 8,
-      "provenance": "Agent self-reported"
-    },
-    {
-      "repo": "pcpcchen-coder/AIOS",
-      "run_id": "run-20261102113114-c97516",
-      "title": "Brain processing cue",
-      "playbook": "feature",
-      "status": "running",
-      "updated_at": "2026-11-02T11:46:56.460Z",
-      "started_at": "2026-11-02T11:31:14.978Z",
       "ended_at": null,
       "branch": "",
       "commit_sha": "",
