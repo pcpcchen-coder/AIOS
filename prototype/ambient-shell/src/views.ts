@@ -700,6 +700,20 @@ export function renderAudioSettings(prefs: AudioPrefs, report: AudioReport | nul
   };
   row("input");
   row("output");
+  // 「處理中音效」（George 2026-11-02）：背景任務執行中的聲納提示音；寫入同一個 audio.json。關掉只停聲音，電子腦照舊。
+  const cueOn = prefs.processing_cue !== false;
+  const cue = button(cueOn ? "開" : "關", () => actions.updateAudio?.({ processing_cue: !cueOn }), cueOn ? "btn--primary" : "");
+  cue.setAttribute("aria-pressed", String(cueOn));
+  cue.setAttribute("aria-label", t("{0}：{1}", t(AUDIO_TEXT.processingCue), cueOn ? t("開") : t("關")));
+  cue.disabled = !actions.updateAudio;
+  list.append(
+    h(
+      "li",
+      { class: "pref" },
+      h("div", { class: "provider-text" }, h("strong", {}, t(AUDIO_TEXT.processingCue)), h("span", { class: "muted small" }, t(AUDIO_TEXT.processingCueNote))),
+      cue,
+    ),
+  );
   return h(
     "section",
     { class: "camera-settings audio-settings" },

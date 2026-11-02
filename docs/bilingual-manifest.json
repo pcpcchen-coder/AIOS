@@ -158,8 +158,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "b777631a4f96867ec96fda2b731117b4b0380e4cafab936d4035fd93e52054bb",
-      "translationSha256": "16c6c32497dd4723fff7ec8ff216d8c817c86cb5231485b1a103ce29c003b121"
+      "sourceSha256": "6b1f4f684b8c4c098ebfe459379226c9e6356ea1d4e9c53c0aae33fadc0f324e",
+      "translationSha256": "e4496957771b9e4932fe11f4724d74748466924eec2b340ff6a9eff5db2fef7c"
     },
     {
       "source": "docs/README.md",
@@ -228,8 +228,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "66b970867be3ebede2d47ee29ef4038e41b5082617406fe6ab59d10f9ec2670e",
-      "translationSha256": "50868ef71a85ff6b7e303510479b929bacb125cd6edac074a4290630881d3140"
+      "sourceSha256": "e6791d55eaaeedcfdbfced20fb187a8d0de0f6aa5d97ef1071b016c23f955918",
+      "translationSha256": "2556ce9a2527c9e15005b050402e987e9172e9299097fe9262bfff7680c79aec"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
@@ -251,6 +251,13 @@
       "translation": "docs/validation/brain-distance-2026-10-22.en.md",
       "sourceSha256": "040481979a82deac237078c73cb0aaa752155a047808f3a74c3bcb227d6256da",
       "translationSha256": "88aef388aa3ce4488242638c254a634f2ace961f06746b5870fd4e3da3d43782"
+    },
+    {
+      "source": "docs/validation/brain-processing-cue-2026-11-02.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/brain-processing-cue-2026-11-02.en.md",
+      "sourceSha256": "4df919a55989be8df9735be9f60689a00f2a52d7012fff9d545207207d6950e6",
+      "translationSha256": "808ee751aecff93d7aa57b4ef81b07c6be82143d08ead7fe1287835fef38b254"
     },
     {
       "source": "docs/validation/brain-proximity-zoom-2026-10-23.md",
@@ -599,8 +606,8 @@
       "source": "prototype/ambient-shell/desktop/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/desktop/README.en.md",
-      "sourceSha256": "3060bb1a031804733477894d20366e9b6c34185bb8b7f572562edc7666875751",
-      "translationSha256": "5c9abbaec25b02a7f90f8039f79f1757c411e0db3f719fda2ad704e7b24c4544"
+      "sourceSha256": "cea1ca51ff7af0f92a719412b6195e18e7d0908cfd18279e1e3ef9c6e0583db2",
+      "translationSha256": "e5fbe476bc1c749906be28555af0177921a8c44fbc2e5c9ef87a9bb3ccaf05f9"
     }
   ]
 }

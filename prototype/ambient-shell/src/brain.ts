@@ -23,6 +23,25 @@ export interface BrainVisualState {
    * （George 2026-10-31：只有右上角的字不夠明顯，不知道何時該說話）。沒有即時語音時為 off 或省略。
    */
   voice?: "off" | "connecting" | "live";
+  /**
+   * 背景處理中（George 2026-11-02）：有任務真的在執行（running）或即時語音的查詢還沒回來時為 true（src/processing-cue.ts）。
+   * 整顆腦保持「思考中」的青色並緩慢呼吸；排隊或取消中不算。Nous 說話或錯誤時以那兩種樣子為準。
+   */
+  processing?: boolean;
+}
+
+/** 處理中的青色保持量：0.45 ± 0.1、週期 2 秒（減少動態時固定 0.45）；不在處理中、或正在說話／錯誤時為 0。 */
+export const PROCESSING_TINT = { base: 0.45, swing: 0.1, periodS: 2, energy: 0.65 } as const;
+
+export function processingHold(state: Pick<BrainVisualState, "processing" | "conversation">, time: number, reduced: boolean): number {
+  if (!state.processing || state.conversation === "speaking" || state.conversation === "error") return 0;
+  if (reduced) return PROCESSING_TINT.base;
+  return PROCESSING_TINT.base + PROCESSING_TINT.swing * Math.sin((2 * Math.PI * time) / PROCESSING_TINT.periodS);
+}
+
+/** 處理中時的最低亮度：對話閒置或聆聽時至少和「思考中」一樣（0.65）。 */
+export function processingEnergy(state: Pick<BrainVisualState, "processing" | "conversation">): number {
+  return state.processing && (state.conversation === "idle" || state.conversation === "listening") ? PROCESSING_TINT.energy : 0;
 }
 
 interface Node3 {
@@ -199,6 +218,8 @@ export class Brain {
   /** 已發布到 CSS 的 --brain-cy（待機中心的高度；放大往中間移時跟著緩動）。 */
   private ambientCy = 0;
   private shownProgress = 0;
+  /** 處理中提示音的波紋（0–1 的進度；每次真的排了提示音才有，減少動態時不畫）。 */
+  private cueRings: number[] = [];
 
   private width = 0;
   private height = 0;
@@ -285,6 +306,17 @@ export class Brain {
     }
     if (kind === "success") this.tint = { color: MINT, strength: 1 };
     if (kind === "error") this.tint = { color: AMBER, strength: 1 };
+  }
+
+  /**
+   * 處理中提示音真的排了一次（src/processing-cue.ts 的 onPing）：畫一圈淡淡的波紋。減少動態時不畫。
+   * 不看 state.processing：第一響發生在 main.ts 的 render() 把 processing 交給 setState 之前；
+   * 不在處理中時 step() 會把波紋清掉。
+   */
+  cuePing(): void {
+    if (this.reducedMotion.matches) return;
+    if (this.cueRings.length >= 3) this.cueRings.shift();
+    this.cueRings.push(0);
   }
 
   /** 點擊座標（CSS 像素）是否落在電子腦上：貼著腦形的橢圓（HIT_EXTENT），上下分開。 */
@@ -526,7 +558,7 @@ export class Brain {
     const reduced = this.reducedMotion.matches;
     this.time += dt;
     const phaseEnergy = { idle: 0.35, listening: 0.55, thinking: 0.65, speaking: 0.85, error: 0.3 }[this.state.conversation];
-    const targetEnergy = Math.max(this.state.working ? 0.8 : 0, phaseEnergy);
+    const targetEnergy = Math.max(this.state.working ? 0.8 : 0, phaseEnergy, processingEnergy(this.state));
     this.energy += (targetEnergy - this.energy) * Math.min(1, dt * 2.5);
     this.listenLevel += ((this.state.listening ? 1 : 0) - this.listenLevel) * Math.min(1, dt * 6);
     this.liveLevel += ((this.state.voice === "live" ? 1 : 0) - this.liveLevel) * (reduced ? 1 : Math.min(1, dt * 3));
@@ -535,6 +567,12 @@ export class Brain {
     if (!reduced) this.swing += dt * (0.12 + 0.35 * this.energy);
     this.yaw = YAW_BASE + YAW_SWING * Math.sin(this.swing);
     this.tint.strength = Math.max(0, this.tint.strength - dt * 0.45);
+    // 背景處理中：青色保持在 0.35–0.55 之間緩慢呼吸；成功（薄荷綠）或失敗（琥珀）的閃色比它亮時先讓它們褪到這個水準。
+    const hold = processingHold(this.state, this.time, reduced);
+    if (hold > 0 && (this.tint.color === CYAN || this.tint.strength <= hold)) {
+      this.tint = { color: CYAN, strength: this.tint.color === CYAN ? Math.max(hold, this.tint.strength) : hold };
+    }
+    this.cueRings = reduced || !this.state.processing ? [] : this.cueRings.map((t) => t + dt / 1.2).filter((t) => t < 1);
     // 腦區亮度：有持續焦點時維持在焦點水準，否則逐漸暗下。
     for (const d of DOMAINS) {
       const target = this.state.activity?.some((a) => a.domain === d) ? 0.75 : 0;
@@ -734,6 +772,14 @@ export class Brain {
       ctx.arc(this.cx, this.cy, R * 1.32, 0, Math.PI * 2);
       ctx.stroke();
       ctx.shadowBlur = 0;
+    }
+    // 處理中提示音的波紋：每次真的排了提示音才有一圈，由 1.1 R 擴散到 1.5 R 並淡出。
+    for (const t of this.cueRings) {
+      ctx.strokeStyle = rgba(CYAN, 0.22 * (1 - t));
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(this.cx, this.cy, R * (1.1 + 0.4 * t), 0, Math.PI * 2);
+      ctx.stroke();
     }
     // 前景任務的真實進度環（done / total）
     if (this.state.progress !== null) {

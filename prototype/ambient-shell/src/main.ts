@@ -24,6 +24,8 @@ import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts"
 import { greetingFor, idleSession, newInteractionId, openRealtime, wakeTriggerAction, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
 import type { CallAnswer, LiveCoreEvent, LiveMemoryReason, RealtimeServerEvent, RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
+import { CUE_TIMING, ProcessingCue, processingSource } from "./processing-cue.ts";
+import { browserProcessingSound } from "./processing-sound.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
 import { formatCount } from "./format.ts";
@@ -165,6 +167,29 @@ let pendingProviderSelection: { epoch: number; account: string } | null = null;
 
 const brain = new Brain(canvas);
 brain.start();
+
+/**
+ * 背景處理中的提示（George 2026-11-02；docs/validation/brain-processing-cue-2026-11-02.md）：電子腦的「處理中」樣子與輕聲的聲納提示音。
+ * 來源只有真的在執行的任務與還沒回來的即時語音查詢；聲音跟著「聲音輸出」設定，每一響期間喚醒防護不接受喚醒詞。
+ */
+/** 還沒回來的即時語音查詢（每次查詢一個遞增編號；最多算 CUE_TIMING.searchTimeoutMs）。 */
+const realtimeSearches = new Set<number>();
+let nextRealtimeSearch = 0;
+/** 念話中的句數（speakText 可能重疊；同喚醒防護的計數）。 */
+let speechActive = 0;
+const processingCue = new ProcessingCue({
+  createSound: () => browserProcessingSound({ sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) }),
+  guard: {
+    // 每一響開始時的那一個喚醒控制器負責結束（中途換掉或關閉時，計數跟著舊的控制器一起丟掉）。
+    begin: () => {
+      cueGuardOwners.push(wake);
+      wake?.begin("cue");
+    },
+    end: () => cueGuardOwners.shift()?.end("cue"),
+  },
+  onPing: () => brain.cuePing(),
+});
+const cueGuardOwners: (WakeController | null)[] = [];
 
 const tasks = new Map<string, Task>();
 const artifacts = new Map<string, Artifact>();
@@ -1984,6 +2009,15 @@ async function delegateFromRealtime(title: string): Promise<Record<string, unkno
 /** 模型要上網查詢：本機核心代查，字幕顯示來源；失敗時照實交還給模型。 */
 async function webSearchFromRealtime(query: string): Promise<Record<string, unknown>> {
   brain.pulse("step", classifyDomain(query));
+  // 查詢還沒回來的期間算「處理中」（電子腦的樣子；通話中只有畫面、不出聲）。請求一直沒回來時 30 秒後不再算。
+  const searchId = nextRealtimeSearch++;
+  const releaseSearch = () => {
+    clearTimeout(searchTimer);
+    if (realtimeSearches.delete(searchId)) render();
+  };
+  const searchTimer = setTimeout(releaseSearch, CUE_TIMING.searchTimeoutMs);
+  realtimeSearches.add(searchId);
+  render();
   try {
     // ChatGPT 方案路徑的查詢帶工作階段憑證：本機核心改用 Codex 額度查（不需要 OPENAI_API_KEY）。
     // MEM-3：帶記憶的 API key 通話也帶憑證：工作階段被撤銷後核心回 403，晚到的查詢不再執行。沒有記憶的 API key 通話照舊不帶
@@ -1996,6 +2030,8 @@ async function webSearchFromRealtime(query: string): Promise<Record<string, unkn
     const message = err instanceof Error ? err.message : String(err);
     showSubtitle(message);
     return { ok: false, error: message };
+  } finally {
+    releaseSearch();
   }
 }
 
@@ -2273,7 +2309,11 @@ function firePulses(prev: Task | undefined, next: Task): void {
     const before = prev.steps[i];
     const domain = isDomain(step.domain) ? step.domain : null;
     if (step.status !== before?.status) {
-      if (step.status === "running") brain.pulse("step", domain);
+      if (step.status === "running") {
+        brain.pulse("step", domain);
+        // 新的步驟真的開始執行：處理中提示音重新響 6 秒（每 15 秒最多一次，src/processing-cue.ts）。
+        processingCue.rearm();
+      }
       if (step.status === "done") brain.pulse("stepDone", domain);
     }
     if (step.output_chars !== null && step.output_chars !== (before?.output_chars ?? null)) brain.pulse("stream", domain);
@@ -2614,6 +2654,12 @@ function render(): void {
   canvas.dataset.conversationState = phase;
   conversationStatus.textContent = t({ idle: "", listening: "正在聆聽，你可以直接說話", thinking: "正在等待回覆，你可以插話", speaking: "正在回覆，你可以直接插話", error: "對話暫時中斷，可重試或開啟設定" }[phase]);
   conversationStatus.hidden = phase === "idle";
+  const processing = syncProcessingCue(phase);
+  // 對話閒置時，背景任務真的在執行就照實寫「背景處理中」（排隊或取消中不算）。
+  if (phase === "idle" && processing) {
+    conversationStatus.textContent = t("背景處理中");
+    conversationStatus.hidden = false;
+  }
   const activity = collectRegionActivity({
     tasks: [...tasks.values()], reply: session.view.reply,
     conversationVisible: session.view.visible && shell.surface === null,
@@ -2629,7 +2675,9 @@ function render(): void {
     voice: live === "connecting" || (live === "off" && realtimeStarting) ? "connecting" : live === "off" ? "off" : "live",
     progress:
       shell.mode === "working" && fgProgress?.total ? fgProgress.done / fgProgress.total : null,
+    processing,
   });
+  canvas.dataset.processing = processing ? "on" : "off";
 
   document.body.dataset.mode = shell.mode;
   document.body.classList.toggle("listening", shell.listening);
@@ -2648,6 +2696,27 @@ function render(): void {
   renderCaption(fg);
   renderSurface();
   applyDistanceScale();
+}
+
+/**
+ * 把目前的真實狀態交給處理中提示（render、念話開始／結束、視窗顯示／隱藏時呼叫）。回傳電子腦要不要顯示「處理中」。
+ * 聲音暫停：Nous 說話（含之後 1.5 秒）、麥克風收音、即時語音通話（只有畫面）、主視窗看不到；開關關掉時不出聲。
+ */
+/** 處理中的來源：斷線時不算任務（狀態可能過時），通話結束後不算查詢。 */
+function currentProcessingSource(): string[] {
+  return processingSource({ tasks: tasks.values(), searches: realtimeSearches, connected, callOn: realtime.on });
+}
+
+function syncProcessingCue(phase = document.body.dataset.conversationState): boolean {
+  processingCue.update({
+    owners: currentProcessingSource(),
+    enabled: settings?.audio?.prefs.processing_cue !== false,
+    callOn: realtime.on || realtimeStarting,
+    speaking: speechActive > 0 || conversation.playing || realtime.playing || phase === "speaking",
+    capturing: voice.capturing || conversation.capturing || realtime.capturing,
+    hidden: document.visibilityState === "hidden",
+  });
+  return processingCue.active;
 }
 
 /** 選單列「聲音」：裝置清單、真的在用的裝置，與頁面算好的兩句狀態（選單列只翻譯、不重算）。 */
@@ -3141,7 +3210,14 @@ applyStaticTranslations();
 window.nousDesktop?.onLocaleChange?.(setLocale);
 // WK-01a：系統電源事件（只有列舉值）交給常駐喚醒聆聽；念話期間告訴防護（避免 Nous 自己說出喚醒詞時觸發）。
 window.nousDesktop?.onPower?.((event) => wake?.power(event));
-onSpeechActivity((speaking) => (speaking ? wake?.begin("speech") : wake?.end("speech")));
+onSpeechActivity((speaking) => {
+  if (speaking) wake?.begin("speech");
+  else wake?.end("speech");
+  // 處理中提示音：Nous 念話時暫停，念完 1.5 秒後才恢復。
+  speechActive = Math.max(0, speechActive + (speaking ? 1 : -1));
+  syncProcessingCue();
+});
+document.addEventListener("visibilitychange", () => syncProcessingCue());
 onLocaleChange(() => {
   const selected = getLocale();
   const revision = settingsRevision;

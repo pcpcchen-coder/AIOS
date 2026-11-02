@@ -235,5 +235,9 @@
   "聲音裝置設定沒有任何欄位": "Sound device settings contain no fields",
   "聲音裝置設定未設定": "Sound device settings are not configured",
   "聲音裝置設定沒有保存（無法寫入設定檔：{0}）": "Sound device settings were not saved (cannot write the settings file: {0})",
-  "{0}（尚未回報）": "{0} (not reported yet)"
+  "{0}（尚未回報）": "{0} (not reported yet)",
+  "處理中音效": "Processing sound",
+  "背景任務執行中輕聲提示；Nous 說話或你開口時暫停": "A soft cue while a background task is running; pauses while Nous speaks or you talk",
+  "背景處理中": "Working in background",
+  "processing_cue 必須是 true 或 false": "processing_cue must be true or false"
 }

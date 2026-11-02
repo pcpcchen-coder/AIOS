@@ -2,17 +2,18 @@
 // 以下期間偵測到喚醒詞一律丟掉（不播提示音、不觸發）：
 // - Nous 用瀏覽器語音合成念話（speakText）期間，以及念完後 1.5 秒（起點值，WK-03 依實際回聲調整）；
 // - 即時語音的遠端播放（trackedPlayRemote）期間；
-// - 本機提示音播放期間。
+// - 本機提示音播放期間；
+// - 背景處理中的聲納提示音每一響（約 450 ms，src/processing-cue.ts；George 2026-11-02）。
 // 另外，上一次被接受的喚醒之後 3 秒內不再接受（避免一次喚醒開兩次）。
 
 export const SPEECH_TAIL_MS = 1500;
 export const DEDUPE_MS = 3000;
 
-export type GuardSource = "speech" | "playback" | "earcon";
-export type GuardDrop = "speaking" | "speech_tail" | "playback" | "earcon" | "duplicate";
+export type GuardSource = "speech" | "playback" | "earcon" | "cue";
+export type GuardDrop = "speaking" | "speech_tail" | "playback" | "earcon" | "cue" | "duplicate";
 
 export class WakeGuard {
-  private readonly active: Record<GuardSource, number> = { speech: 0, playback: 0, earcon: 0 };
+  private readonly active: Record<GuardSource, number> = { speech: 0, playback: 0, earcon: 0, cue: 0 };
   private speechEndedAt: number | null = null;
   private acceptedAt: number | null = null;
 
@@ -40,6 +41,7 @@ export class WakeGuard {
     if (this.active.earcon > 0) return "earcon";
     if (this.active.speech > 0) return "speaking";
     if (this.active.playback > 0) return "playback";
+    if (this.active.cue > 0) return "cue";
     if (this.speechEndedAt !== null && t - this.speechEndedAt < this.speechTailMs) return "speech_tail";
     if (this.acceptedAt !== null && t - this.acceptedAt < this.dedupeMs) return "duplicate";
     this.acceptedAt = t;
@@ -51,6 +53,7 @@ export class WakeGuard {
     this.active.speech = 0;
     this.active.playback = 0;
     this.active.earcon = 0;
+    this.active.cue = 0;
     this.speechEndedAt = null;
     this.acceptedAt = null;
   }

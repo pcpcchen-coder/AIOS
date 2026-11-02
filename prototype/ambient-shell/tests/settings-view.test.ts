@@ -288,7 +288,7 @@ describe("renderSettings in the macOS App (nousDesktop): accounts only", () => {
 
 // 聲音輸入／輸出（George 2026-11-01）：瀏覽器版與 App 內的設定頁都有兩個下拉選單、使用中的裝置與兩句提示。
 describe("renderSettings: 聲音 (input / output devices)", () => {
-  const audio = { prefs: { input_device_id: null, input_label: null, output_device_id: "spk-bt", output_label: "JBL Flip" }, write_path: "/api/settings/audio" as const };
+  const audio = { prefs: { input_device_id: null, input_label: null, output_device_id: "spk-bt", output_label: "JBL Flip", processing_cue: true }, write_path: "/api/settings/audio" as const };
   const report = {
     inputs: [{ id: "mic-mac", label: "MacBook Pro 麥克風" }, { id: "mic-usb", label: "" }],
     outputs: [{ id: "spk-mac", label: "MacBook Pro 揚聲器" }],
@@ -340,6 +340,32 @@ describe("renderSettings: 聲音 (input / output devices)", () => {
     ]);
   });
 
+  it("「處理中音效」 row (George 2026-11-02): an on/off button with the note; clicking writes the opposite; English", async () => {
+    const updateAudio = vi.fn();
+    const r = renderAudio(true, { ...actions(), updateAudio });
+    expect(r.text).toContain("處理中音效");
+    expect(r.text).toContain("背景任務執行中輕聲提示；Nous 說話或你開口時暫停");
+    const toggle = r.section.all().find((e) => e.tagName === "button" && e.getAttribute("aria-label") === "處理中音效：開")!;
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    for (const fn of toggle.listeners.get("click") ?? []) fn();
+    expect(updateAudio.mock.calls).toEqual([[{ processing_cue: false }]]);
+    const off = views.renderSettings(view({ audio: { ...audio, prefs: { ...audio.prefs, processing_cue: false } } }), null, { ...actions(), updateAudio }, { desktop: false, audio: report }) as unknown as FakeElement;
+    const offButton = off.all().find((e) => e.tagName === "button" && e.getAttribute("aria-label") === "處理中音效：關")!;
+    expect(offButton.getAttribute("aria-pressed")).toBe("false");
+    for (const fn of offButton.listeners.get("click") ?? []) fn();
+    expect(updateAudio.mock.calls.at(-1)).toEqual([{ processing_cue: true }]);
+    const { setLocale } = await import("../src/i18n.ts");
+    setLocale("en");
+    try {
+      const en = views.renderSettings(view({ audio }), null, actions(), { desktop: true, audio: report }) as unknown as FakeElement;
+      expect(en.textContent).toContain("Processing sound");
+      expect(en.textContent).toContain("A soft cue while a background task is running; pauses while Nous speaks or you talk");
+      expect(en.all().some((e) => e.tagName === "button" && e.getAttribute("aria-label") === "Processing sound: On")).toBe(true);
+    } finally {
+      setLocale("zh-TW");
+    }
+  });
+
   it("before microphone permission it says names appear after allowing the microphone; English keeps device names", async () => {
     const { setLocale } = await import("../src/i18n.ts");
     const el = views.renderSettings(view({ audio }), null, actions(), { desktop: true, audio: { ...report, labels: false } }) as unknown as FakeElement;
@@ -359,7 +385,7 @@ describe("renderSettings: 聲音 (input / output devices)", () => {
 
 describe("renderSettings: 聲音 before the device list is read", () => {
   it("shows the chosen device as 尚未回報 (not 找不到) and in English as not reported yet", async () => {
-    const audio = { prefs: { input_device_id: "mic-usb", input_label: "USB Mic", output_device_id: null, output_label: null }, write_path: "/api/settings/audio" as const };
+    const audio = { prefs: { input_device_id: "mic-usb", input_label: "USB Mic", output_device_id: null, output_label: null, processing_cue: true }, write_path: "/api/settings/audio" as const };
     const empty = { inputs: [], outputs: [], default_input: null, default_output: null, input_in_use: null, output_in_use: null, input_fallback: false, output_fallback: false, labels: false };
     const options = (el: FakeElement) => el.all().filter((e) => e.tagName === "option").map((o) => o.textContent);
     const el = views.renderSettings(view({ audio }), null, actions(), { desktop: true, audio: empty }) as unknown as FakeElement;

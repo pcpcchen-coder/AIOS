@@ -175,6 +175,8 @@ export const AUDIO_TEXT = {
   bluetoothHint: "藍牙耳機當麥克風會切到低音質通話模式；建議麥克風留在 Mac、聲音輸出選藍牙喇叭",
   systemSpeechHint: "按下說話與系統朗讀（語音模式、校準陌生聲音）一律用 Mac 的系統輸入／輸出",
   notReported: "尚未回報",
+  processingCue: "處理中音效",
+  processingCueNote: "背景任務執行中輕聲提示；Nous 說話或你開口時暫停",
 };
 const AUDIO_STATUS_TEXTS = [AUDIO_TEXT.inUse, AUDIO_TEXT.missing, AUDIO_TEXT.noMic, AUDIO_TEXT.nextPlayback, AUDIO_TEXT.notReported];
 const AUDIO_UI_VALUES = [AUDIO_TEXT.systemDefault, AUDIO_TEXT.unknownDevice];
@@ -221,6 +223,7 @@ export function sanitizeAudioMenuReport(value) {
  * 「聲音」分段：「聲音輸入」「聲音輸出」兩個 radio 子選單（系統預設在最前，括號是它目前指向的裝置），各接一列停用的狀態
  * （「使用中：X」或「找不到「X」，暫用系統預設」，頁面以裝置事件算好）。點選後 setAudio(patch) POST 到 audio.write_path。
  * 裝置名稱是資料，不翻譯。report 是頁面最後一次回報（還沒回報時清單是空的、狀態「尚未回報」）。
+ * 最後是「處理中音效」開關（背景任務執行中的聲納提示音，預設開；寫入同一個 audio.json）。
  */
 export function audioMenu(audio, report, { setAudio, translate = (source) => source }) {
   const fill = (source, ...values) => translate(source, ...values).replace(/\{(\d+)\}/g, (match, i) => (Number(i) < values.length ? String(values[Number(i)]) : match));
@@ -263,6 +266,14 @@ export function audioMenu(audio, report, { setAudio, translate = (source) => sou
     { label: translate(AUDIO_TEXT.group), enabled: false },
     ...section("input"),
     ...section("output"),
+    // 「處理中音效」（George 2026-11-02）：勾選是核心保存的值；點了寫入相反值（同其他開關，不看 Electron 切換後的狀態）。
+    {
+      label: translate(AUDIO_TEXT.processingCue),
+      type: "checkbox",
+      checked: audio.prefs.processing_cue !== false,
+      sublabel: translate(AUDIO_TEXT.processingCueNote),
+      click: () => void setAudio?.({ processing_cue: audio.prefs.processing_cue === false }),
+    },
     ...(report && !report.labels ? [{ label: translate(AUDIO_TEXT.needPermission), enabled: false }] : []),
   ];
 }

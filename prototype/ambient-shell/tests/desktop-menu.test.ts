@@ -372,7 +372,7 @@ describe("settings menu: 聲音 (input / output devices)", async () => {
     const prefs = shared.DEFAULT_AUDIO_PREFS;
     const items = section(settingsMenu({ ...view(enabledCamera), audio: audio() }, { command: vi.fn(), setMenuPref: vi.fn(), setAudio, audioReport: report({ input_in_use: { id: null, label: "MacBook Pro Microphone" } }, prefs) }));
     expect(items.map((i) => (i.type === "separator" ? "----" : i.label))).toEqual([
-      "----", "聲音", "聲音輸入：系統預設", "使用中：MacBook Pro Microphone", "聲音輸出：系統預設", "播放時使用：MacBook Pro Speakers",
+      "----", "聲音", "聲音輸入：系統預設", "使用中：MacBook Pro Microphone", "聲音輸出：系統預設", "播放時使用：MacBook Pro Speakers", "處理中音效",
     ]);
     const input = items[2]!.submenu!;
     expect(input.map((i) => [i.label, i.type, i.checked, i.enabled])).toEqual([
@@ -412,12 +412,29 @@ describe("settings menu: 聲音 (input / output devices)", async () => {
     expect(unlabeled.at(-1)!.label).toBe("授權麥克風後才會列出裝置名稱");
   });
 
+  it("「處理中音效」 is a checkbox showing the core's value (default on) that writes the opposite through setAudio", () => {
+    const setAudio = vi.fn();
+    const row = (prefs: Partial<typeof shared.DEFAULT_AUDIO_PREFS>) =>
+      section(settingsMenu({ ...view(enabledCamera), audio: audio(prefs) }, { command: vi.fn(), setMenuPref: vi.fn(), setAudio, audioReport: report() })).find((i) => i.label === "處理中音效")!;
+    const on = row({});
+    expect(on).toMatchObject({ type: "checkbox", checked: true, sublabel: "背景任務執行中輕聲提示；Nous 說話或你開口時暫停" });
+    on.click!();
+    const off = row({ processing_cue: false });
+    expect(off.checked).toBe(false);
+    off.click!();
+    expect(setAudio.mock.calls).toEqual([[{ processing_cue: false }], [{ processing_cue: true }]]);
+    // 沒有回報、沒有裝置名稱時也在（「授權麥克風…」仍是最後一列）
+    const unlabeled = section(settingsMenu({ ...view(enabledCamera), audio: audio() }, { command: vi.fn(), setMenuPref: vi.fn(), audioReport: report({ labels: false }) }));
+    expect(unlabeled.at(-2)!.label).toBe("處理中音效");
+  });
+
   it("English: interface text translated, device names unchanged", () => {
     setNativeLocale("en");
     try {
       const prefs = { ...shared.DEFAULT_AUDIO_PREFS, output_device_id: "spk-bt", output_label: "JBL Flip" };
       const items = section(settingsMenu({ ...view(enabledCamera), audio: audio(prefs) }, { command: vi.fn(), setMenuPref: vi.fn(), translate: nativeT, audioReport: report({ output_in_use: { id: "spk-bt", label: "JBL Flip" }, input_fallback: false }, prefs) }));
-      expect(items.map((i) => i.label).filter(Boolean)).toEqual(["Sound", "Sound input: System default", "No microphone is open right now", "Sound output: JBL Flip", "In use: JBL Flip"]);
+      expect(items.map((i) => i.label).filter(Boolean)).toEqual(["Sound", "Sound input: System default", "No microphone is open right now", "Sound output: JBL Flip", "In use: JBL Flip", "Processing sound"]);
+      expect(items.at(-1)!.sublabel).toBe("A soft cue while a background task is running; pauses while Nous speaks or you talk");
       expect(items[2]!.submenu![0]!.label).toBe("System default (now: MacBook Pro Microphone)");
       const texts = (list: MenuItemTemplate[]): string[] => list.flatMap((i) => [i.label ?? "", ...(i.submenu ? texts(i.submenu) : [])]);
       expect(texts(items).filter((x) => /\p{Script=Han}/u.test(x))).toEqual([]);
