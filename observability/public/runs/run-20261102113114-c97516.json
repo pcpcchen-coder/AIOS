@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-02T11:31:14.978Z",
-  "updated_at": "2026-11-02T11:56:44.239Z",
+  "updated_at": "2026-11-02T11:56:48.341Z",
   "ended_at": null,
   "steps": [
     {
@@ -68,10 +68,10 @@
     {
       "id": "fix",
       "title": "fix",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-11-02T11:56:48.341Z",
+      "ended_at": "2026-11-02T11:56:48.341Z",
+      "note": "fixed",
       "evidence": []
     },
     {
@@ -133,6 +133,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "1 major 3 minor"
+    },
+    {
+      "at": "2026-11-02T11:56:48.341Z",
+      "type": "step_updated",
+      "step_id": "fix",
+      "status": "passed",
+      "note": "fixed"
     }
   ],
   "provenance": "Agent self-reported"
