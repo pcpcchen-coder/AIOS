@@ -202,7 +202,7 @@ export class WakeController implements WakeActivationPort {
     this.frontEnd.releaseAllLeases();
   }
 
-  /** 自我觸發防護：Nous 念話（speakText）、即時語音播放。 */
+  /** 自我觸發防護：Nous 念話（speakText）、即時語音播放、處理中提示音（cue）。 */
   begin(source: Exclude<GuardSource, "earcon">): void {
     this.guard.begin(source);
   }

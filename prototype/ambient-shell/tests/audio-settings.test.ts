@@ -44,6 +44,15 @@ describe("parseAudioPatch", () => {
     }
   });
 
+  it("processing_cue (處理中音效, George 2026-11-02) is a boolean; anything else is rejected", () => {
+    expect(DEFAULT_AUDIO_PREFS.processing_cue).toBe(true);
+    expect(parseAudioPatch({ processing_cue: false })).toEqual({ processing_cue: false });
+    expect(parseAudioPatch({ processing_cue: true, output_device_id: null })).toEqual({ processing_cue: true, output_device_id: null });
+    for (const bad of [{ processing_cue: "false" }, { processing_cue: 0 }, { processing_cue: null }, { processing_cue: 1 }]) {
+      expect(() => parseAudioPatch(bad), JSON.stringify(bad)).toThrow(/processing_cue 必須是 true 或 false/);
+    }
+  });
+
   it("the wake patch still validates device_id with the same rule (moved to shared/audio-devices.ts)", () => {
     expect(parseWakePatch({ device_id: "abc123" })).toEqual({ device_id: "abc123" });
     expect(() => parseWakePatch({ device_id: "has space" })).toThrow();
@@ -65,6 +74,19 @@ describe("AudioSettingsStore: audio.json", () => {
     // 選回系統預設：名稱一起清掉
     a.update({ output_device_id: null });
     expect(store().view()).toEqual(DEFAULT_AUDIO_PREFS);
+  });
+
+  it("處理中音效 defaults on, saves off, survives a restart; a bad saved value falls back to on without touching the devices", () => {
+    const a = store();
+    expect(a.view().processing_cue).toBe(true);
+    a.update({ processing_cue: false });
+    expect(store().view()).toEqual({ ...DEFAULT_AUDIO_PREFS, processing_cue: false });
+    expect(JSON.parse(readFileSync(join(root, "audio.json"), "utf8")).prefs).toEqual({ processing_cue: false });
+    // 選回系統預設的裝置不影響開關
+    a.update({ output_device_id: null });
+    expect(store().view().processing_cue).toBe(false);
+    writeFileSync(join(root, "audio.json"), JSON.stringify({ schema_version: 1, prefs: { processing_cue: "no", output_device_id: "spk-bt" } }));
+    expect(store().view()).toEqual({ ...DEFAULT_AUDIO_PREFS, output_device_id: "spk-bt" });
   });
 
   it("an unreadable file or a bad key means the system default (null), the rest is kept", () => {
@@ -103,6 +125,7 @@ describe("/api/settings/audio", () => {
     const post = (body: unknown) => fetch(`${handle.url}/api/settings/audio`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     expect((await post({ output_device_id: "has space" })).status).toBe(400);
     expect((await post({ volume: 3 })).status).toBe(400);
+    expect((await post({ processing_cue: "off" })).status).toBe(400);
 
     const controller = new AbortController();
     const events = await fetch(`${handle.url}/api/events`, { signal: controller.signal });
@@ -124,6 +147,11 @@ describe("/api/settings/audio", () => {
     view = (await (await fetch(`${handle.url}/api/settings`)).json()) as SettingsView;
     expect(view.audio?.prefs.output_label).toBe("JBL Flip");
     expect(JSON.parse(readFileSync(join(root, "config", "audio.json"), "utf8")).prefs).toEqual({ output_device_id: "spk-bt", output_label: "JBL Flip" });
+    // 處理中音效：同一個路由與檔案
+    const off = await post({ processing_cue: false });
+    expect(off.status).toBe(200);
+    expect(((await off.json()) as SettingsView).audio?.prefs).toMatchObject({ output_device_id: "spk-bt", processing_cue: false });
+    expect(JSON.parse(readFileSync(join(root, "config", "audio.json"), "utf8")).prefs).toEqual({ output_device_id: "spk-bt", output_label: "JBL Flip", processing_cue: false });
   });
 
   it("with NOUS_WAKE=on, the old wake.json device_id is NOT migrated: the input stays the system default and audio.json is not created", async () => {

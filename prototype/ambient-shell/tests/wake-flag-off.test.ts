@@ -82,7 +82,8 @@ describe("NOUS_WAKE off is byte-identical to the pre-wake build", () => {
     // 第二個刻意的例外（George 2026-11-01「聲音輸入／輸出」）：settings.audio 不綁任何旗標，一定存在。拿掉這一個欄位之後
     // 其餘逐位元組相同（快照不更新）；選單列的「聲音」分段也只來自這個欄位。
     const parsed = JSON.parse(raw) as SettingsView;
-    expect(parsed.audio).toEqual({ prefs: { input_device_id: null, input_label: null, output_device_id: null, output_label: null }, write_path: "/api/settings/audio" });
+    // 「處理中音效」processing_cue（George 2026-11-02）也在這個欄位裡（預設開），一樣不綁旗標。
+    expect(parsed.audio).toEqual({ prefs: { input_device_id: null, input_label: null, output_device_id: null, output_label: null, processing_cue: true }, write_path: "/api/settings/audio" });
     const { audio: _audio, ...rest } = parsed;
     const body = JSON.stringify(rest);
     expect(body).toMatchSnapshot();

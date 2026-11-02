@@ -21,11 +21,16 @@ export interface AudioPrefs {
   /** 選定的聲音輸出 deviceId；null＝系統預設。 */
   output_device_id: string | null;
   output_label: string | null;
+  /**
+   * 「處理中音效」（George 2026-11-02）：背景任務執行中時播放輕聲的聲納提示音（src/processing-cue.ts）。預設開。
+   * 關掉只停聲音；電子腦的「處理中」樣子照舊。
+   */
+  processing_cue: boolean;
 }
 export type AudioPrefsPatch = Partial<AudioPrefs>;
 
-export const DEFAULT_AUDIO_PREFS: AudioPrefs = { input_device_id: null, input_label: null, output_device_id: null, output_label: null };
-export const AUDIO_PREF_KEYS = ["input_device_id", "input_label", "output_device_id", "output_label"] as const satisfies readonly (keyof AudioPrefs)[];
+export const DEFAULT_AUDIO_PREFS: AudioPrefs = { input_device_id: null, input_label: null, output_device_id: null, output_label: null, processing_cue: true };
+export const AUDIO_PREF_KEYS = ["input_device_id", "input_label", "output_device_id", "output_label", "processing_cue"] as const satisfies readonly (keyof AudioPrefs)[];
 export const AUDIO_WRITE_PATH = "/api/settings/audio";
 
 /** /api/settings 的 audio 欄位：偏好與寫入路徑（核心一定提供；不綁任何 .env 旗標）。 */
@@ -42,7 +47,10 @@ export function isDeviceLabel(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= DEVICE_LABEL_MAX && !CONTROL.test(value);
 }
 
-/** 邊界驗證：只接受四個鍵；deviceId 是可見 ASCII 或 null，名稱是 128 字以內的字串或 null。其他鍵、空 patch、型別不符一律丟錯。 */
+/**
+ * 邊界驗證：只接受五個鍵；deviceId 是可見 ASCII 或 null，名稱是 128 字以內的字串或 null，processing_cue 是 true／false。
+ * 其他鍵、空 patch、型別不符一律丟錯。
+ */
 export function parseAudioPatch(input: unknown): AudioPrefsPatch {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new AudioPatchError("聲音裝置設定必須是 JSON 物件");
   const patch: AudioPrefsPatch = {};
@@ -53,6 +61,9 @@ export function parseAudioPatch(input: unknown): AudioPrefsPatch {
     } else if (key === "input_label" || key === "output_label") {
       if (value !== null && !isDeviceLabel(value)) throw new AudioPatchError(`${key} 必須是 128 字以內的裝置名稱`);
       patch[key] = value;
+    } else if (key === "processing_cue") {
+      if (typeof value !== "boolean") throw new AudioPatchError("processing_cue 必須是 true 或 false");
+      patch.processing_cue = value;
     } else {
       throw new AudioPatchError(`不認得的聲音裝置設定：${key}`);
     }
@@ -187,6 +198,8 @@ export const AUDIO_TEXT = {
   outputLost: "「{0}」已中斷，改由系統預設播放",
   outputBack: "已改回「{0}」播放",
   notReported: "尚未回報",
+  processingCue: "處理中音效",
+  processingCueNote: "背景任務執行中輕聲提示；Nous 說話或你開口時暫停",
 } as const;
 
 /** 狀態句只能是這幾句（選單列的白名單）。 */
