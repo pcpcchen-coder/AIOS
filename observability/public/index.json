@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-11-01T14:07:50.925Z",
+  "updated_at": "2026-11-02T11:31:02.623Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261102113059-57ec9c",
+      "title": "Memory voice default selection",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-11-02T11:30:59.910Z",
+      "started_at": "2026-11-02T11:30:59.909Z",
+      "ended_at": null,
+      "branch": "",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 8,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261101132754-1de6a9",
