@@ -1403,3 +1403,15 @@ body.history-page {
 .voice-step--done .voice-status {
   color: var(--accent, inherit);
 }
+/* 記憶預設選人（George 2026-11-02）：一行「即將用／正在用 X 的記憶」＋「不是我」，不是卡片，不擋聊天。 */
+.presence-notice-root {
+  position: fixed;
+  left: 50%;
+  top: 2.5vh;
+  transform: translateX(-50%);
+  z-index: 3;
+  max-width: min(560px, 92vw);
+  zoom: var(--distance-scale, 1);
+}
+.presence-notice { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px; border-radius: 12px; font-size: 14px; background: rgba(10, 16, 28, 0.72); color: var(--text, #e6f1ff); }
+.presence-notice p { margin: 0; flex-basis: 100%; }

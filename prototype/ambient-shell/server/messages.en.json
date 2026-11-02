@@ -493,5 +493,16 @@
   "找不到這位登記了聲音的家人": "Could not find this family member with an enrolled voice",
   "資料還不夠：每種片段至少要有 10 筆你的樣本與 30 筆陌生聲音": "Not enough data yet: each kind of segment needs at least 10 of your samples and 30 stranger voices",
   "沒有套用": "Not applied",
-  "沒有清除": "Not cleared"
+  "沒有清除": "Not cleared",
+  "我要用 {0} 的記憶，好嗎？": "I'll use {0}'s memory, OK?",
+  "我要用你的記憶，好嗎？": "I'll use your memory, OK?",
+  "好，這次只用全家共用的記憶。": "OK, I'll only use the shared household memory this time.",
+  "鏡頭和聲音不一致，這次只用全家共用的記憶。": "The camera and the voice don't match, so I'll only use the shared household memory this time.",
+  "鏡頭和聲音不一致，這次只用全家共用的記憶": "The camera and the voice don't match; only the shared household memory is used this time",
+  "候選已失效，這次只用全家共用的記憶": "The candidate is no longer valid; only the shared household memory is used this time",
+  "這次只用全家共用的記憶": "Only the shared household memory is used this time",
+  "本次人物：{0}（鏡頭認出）": "Current person: {0} (recognized by the camera)",
+  "已改用全家共用的記憶": "Switched to the shared household memory",
+  "鏡頭看到的是另一位家人，這次只用全家共用的記憶": "The camera sees a different family member; only the shared household memory is used this time",
+  "鏡頭看到的是另一位家人，這次只用全家共用的記憶。": "The camera sees a different family member, so I'll only use the shared household memory this time."
 }

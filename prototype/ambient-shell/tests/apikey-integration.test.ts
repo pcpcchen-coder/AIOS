@@ -108,10 +108,10 @@ async function page(base: string) {
 
 const liveEvent = (kind: string) => (e: Record<string, unknown>) => e.type === "realtime.live" && (e.event as { kind: string }).kind === kind;
 
-async function memoryHarness(allow = [CLAUDE, OPENAI_RT, CODEX]): Promise<Harness> {
+async function memoryHarness(allow = [CLAUDE, OPENAI_RT, CODEX], identity: Parameters<typeof harness>[0]["identity"] = null): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), "nous-mem3-int-"));
   dirs.push(dir);
-  const h = harness({ dir, key: randomBytes(32), live: CODEX, apiKey: OPENAI_RT, release: { api_key: true } });
+  const h = harness({ dir, key: randomBytes(32), live: CODEX, apiKey: OPENAI_RT, release: { api_key: true }, identity });
   harnesses.push(h);
   await enable(h, "George", allow);
   return h;
@@ -290,6 +290,36 @@ describe.skipIf(!realLockAvailable)("MEM-3 API key memory end to end (fixture)",
     expect(p.frames.join("\n")).not.toContain(CANARY);
     expect([...t.logs, ...t.bodies].join("\n")).not.toContain(CANARY);
     expect(t.fake.requests.map((r) => r.body).join("\n")).not.toContain(CANARY);
+  });
+});
+
+describe.skipIf(!realLockAvailable)("memory default on the API key route (George 2026-11-02)", () => {
+  it("the question is a core response.create; SSE carries only memory_default with a card ID; 「不是我」 keeps household only", async () => {
+    let candidate: { person_id: string; name: string; at: number } | null = null;
+    const h = await memoryHarness([CLAUDE, OPENAI_RT, CODEX], { candidate: () => candidate, people: () => [{ person_id: "fam_000000000000000000000001", name: "George", minor: false }] });
+    await h.turn("記住，我不吃香菜");
+    const token = await manage(h);
+    const status = (await h.call({ op: "status" })) as unknown as { profiles: { id: string }[] };
+    await h.call({ op: "link_face", profile: status.profiles[0]!.id, person: "fam_000000000000000000000001", token });
+    await h.call({ op: "select", profile: null, token });
+    const t = await start(h, { route: "api_key" });
+    const p = await page(t.base);
+    const decision = (await t.post("/api/realtime/start", { client_id: p.clientId })).json as StartDecision;
+    if (!decision.ok) throw new Error(decision.message);
+    await t.post("/api/realtime/call", { sdp: "v=0 offer", session_id: decision.session_id, owner: decision.owner });
+    const conn = await t.fake.next();
+    await conn.waitFor((e) => e.type === "session.update");
+    candidate = { person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now };
+    h.service.offerVoiceCandidate(true);
+    const ask = await conn.waitFor((e) => e.type === "response.create" && JSON.stringify(e).includes("記憶，好嗎"));
+    expect(JSON.stringify(ask)).toContain("我要用 George 的記憶，好嗎？");
+    const proposed = await p.waitFor(liveEvent("memory_default"));
+    expect(Object.keys(proposed.event as object).sort()).toEqual(["card", "kind", "phase"]);
+    ga.user(conn, "不是我");
+    await p.waitFor((e) => liveEvent("memory_default")(e) && (e.event as { phase: string }).phase === "declined");
+    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "unselected" });
+    expect(p.frames.filter((f) => f.includes("memory_default")).join("\n")).not.toContain("George");
+    p.close();
   });
 });
 

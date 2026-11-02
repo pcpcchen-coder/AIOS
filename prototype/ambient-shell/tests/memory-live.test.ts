@@ -5,8 +5,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { LiveCoreEvent } from "../shared/realtime-route.ts";
 import type { MemoryFactView } from "../shared/memory.ts";
-import { CANDIDATE_WINDOW_MS, CONFIRM_AFTER_MS, exactVoiceConfirm, exactYesNo, LiveMemoryBinding, VOICE_CONFIRM_WINDOW_MS, type LiveCallPort, type RevokeWhy } from "../server/memory/live.ts";
+import { CONFIRM_AFTER_MS, declinesDefault, DEFAULT_BACKSTOP_MS, DEFAULT_SELECT_MS, exactVoiceConfirm, exactYesNo, LiveMemoryBinding, VOICE_CONFIRM_WINDOW_MS, type LiveCallPort, type RevokeWhy } from "../server/memory/live.ts";
 import { CONTEXT_MAX_BYTES, CONTEXT_MAX_FACTS } from "../server/memory/retrieve.ts";
+import { DEFAULT_DECLINE_MS, DEFAULT_GRACE_MS } from "../server/memory/service.ts";
 import { realLockAvailable } from "./fixtures/memory-lock.ts";
 import { CHATGPT, CLAUDE, CODEX, enable, harness, manage, selectProfile, type Harness } from "./fixtures/memory-service.ts";
 
@@ -44,8 +45,26 @@ class FakeCall implements LiveCallPort {
   notices(): string[] { return this.events.filter((e): e is Extract<LiveCoreEvent, { kind: "memory_notice" }> => e.kind === "memory_notice").map(e => e.message); }
 }
 
-async function startLive(h: Harness, options: { lookToTalk?: boolean; rebuild?: boolean } = {}) {
-  const binding = h.service.openLive({ lookToTalk: !!options.lookToTalk, rebuild: !!options.rebuild, now: () => h.clock.now });
+/** 記憶預設選人的假計時器：記下要叫醒的工作，fire() 一次叫醒全部（binding 自己用假時鐘判斷時間到了沒）。 */
+class FakeTimers {
+  private next = 1;
+  readonly pending = new Map<number, () => void>();
+  readonly timer = (run: () => void, _ms: number): (() => void) => {
+    const id = this.next++;
+    this.pending.set(id, run);
+    return () => { this.pending.delete(id); };
+  };
+  async fire(binding: LiveMemoryBinding): Promise<void> {
+    const runs = [...this.pending.values()];
+    this.pending.clear();
+    for (const run of runs) run();
+    await binding.idle();
+    await binding.idle();
+  }
+}
+
+async function startLive(h: Harness, options: { lookToTalk?: boolean; rebuild?: boolean; timers?: FakeTimers } = {}) {
+  const binding = h.service.openLive({ lookToTalk: !!options.lookToTalk, rebuild: !!options.rebuild, now: () => h.clock.now, ...(options.timers ? { timer: options.timers.timer } : {}) });
   const call = new FakeCall();
   let block: string | null = null;
   let active = false;
@@ -98,6 +117,17 @@ describe("phrase matchers (anchored, like exactApproval)", () => {
     expect(exactYesNo("是的。")).toBe("yes");
     expect(exactYesNo("不是")).toBe("no");
     expect(exactYesNo("是的話就好")).toBeNull();
+  });
+
+  it("memory default (George 2026-11-02): whole-sentence no; near-misses like 「不是我做的」「不要開燈」 are ordinary sentences", () => {
+    for (const text of ["不要不要", "不用不用", "no no", "不要，用全家的", "不要 用全家共用", "No, use the household memory", "please don't", "Please don't.", "全家的就好", "用全家共用好了", "household only", "不，我是說別的", "不要", "不要了", "不用，謝謝", "不是我", "不是我啦", "不對", "不好", "算了", "等一下", "別", "No.", "nope", "Not me", "that's not me", "don't", "wait", "我不是 George", "不是George", "I'm not George", "不要用我的記憶", "別用 George 的記憶", "不用記憶", "換人", "改用全家共用的記憶", "use household memory"]) {
+      expect(declinesDefault(text, "George"), text).toBe(true);
+    }
+    for (const text of ["不要開燈", "全家的晚餐吃什麼", "household chores today", "不用擔心這個", "no problem", "not now, play music", "不是我做的", "不是我說的", "我不是很餓", "不要太辣", "好", "可以", "是", "幫我查天氣", "不是Mary的錯", "等一下再開燈", "no problem", "not now, play music"]) {
+      expect(declinesDefault(text, "George"), text).toBe(false);
+    }
+    expect(declinesDefault("我不是 Mary", "George")).toBe(false);
+    expect(declinesDefault("我不是 George", null)).toBe(false);
   });
 });
 
@@ -454,137 +484,412 @@ describe.skipIf(!realLockAvailable)("George 2026-10-30: spoken confirmation is t
   });
 });
 
-describe.skipIf(!realLockAvailable)("face candidate by voice (selection only)", () => {
-  async function withCandidate() {
+describe.skipIf(!realLockAvailable)("memory default by voice (George 2026-11-02; selection only, no card)", () => {
+  const PERSON = "fam_000000000000000000000001";
+  async function withCandidate(allow = [CLAUDE, CODEX]) {
     let candidate: { person_id: string; name: string; at: number } | null = null;
-    const identity = { candidate: () => candidate, people: () => [{ person_id: "fam_000000000000000000000001", name: "George", minor: false }] };
-    const h = await george({ identity });
+    const identity = { candidate: () => candidate, people: () => [{ person_id: PERSON, name: "George", minor: false }] };
+    const h = await george({ identity }, allow);
     const token = await manage(h);
     const status = await h.call({ op: "status" }) as unknown as { profiles: { id: string }[] };
-    await h.call({ op: "link_face", profile: status.profiles[0]!.id, person: "fam_000000000000000000000001", token });
+    await h.call({ op: "link_face", profile: status.profiles[0]!.id, person: PERSON, token });
     await selectProfile(h, null);
     const set = (value: typeof candidate) => { candidate = value; };
-    return { h, set };
+    return { h, set, timers: new FakeTimers() };
   }
+  const presence = async (h: Harness) => (await h.call({ op: "status" })).presence;
+  const commentary = (call: FakeCall) => call.injected.filter(x => x.channel === "commentary").map(x => x.text).join("\n");
+  const defaults = (call: FakeCall) => call.events.filter((e): e is Extract<LiveCoreEvent, { kind: "memory_default" }> => e.kind === "memory_default").map(e => e.phase);
+  const QUESTION = "（記憶確認）「我要用 George 的記憶，好嗎？」";
 
-  it("SP-02b: no voice candidate question while the opening (look-to-talk / wake) candidate is still pending", async () => {
-    const { h, set } = await withCandidate();
-    const waiting = await startLive(h, { lookToTalk: true });
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
-    expect(waiting.binding.voiceCandidate(true)).toBe(false);
-  });
-
-  it("SP-02b: a voice candidate later in the call is asked once (service.offerVoiceCandidate); 「是」 selects", async () => {
-    // 一般開始的通話（沒有開場候選）：聲音認出後問一次
-    const { h, set } = await withCandidate();
-    const { call, binding } = await startLive(h, {});
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
-    h.service.offerVoiceCandidate(true);
-    expect(call.spoken().at(-1)).toBe("（記憶確認）「這次用 George 的偏好嗎？」");
-    expect(binding.voiceCandidate(true)).toBe(false);
-    hear(binding, "這次用 George 的偏好嗎？", h);
-    advance(h, 2000);
-    await say(binding, "是", h);
-    await binding.idle();
-    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "selected", name: "George" });
-    expect(h.service.currentPersonId()).toBe("fam_000000000000000000000001");
-  });
-
-  it("SP-02b: without the naming permission the voice candidate question has no name", async () => {
-    const { h, set } = await withCandidate();
-    const { call } = await startLive(h, {});
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
-    h.service.offerVoiceCandidate(false);
-    expect(call.spoken().at(-1)).toBe("（記憶確認）「這次要用你的偏好嗎？」");
-    expect(h.service.currentPersonId()).toBeNull();
-  });
-
-  it("asks once after the greeting; an anchored 「是」 within 10 s and the same tracking generation selects and late-attaches the person's pinned memory", async () => {
-    const { h, set } = await withCandidate();
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
-    const { call, binding, block } = await startLive(h, { lookToTalk: true });
+  it("asks by voice after the greeting (no card); silence for 8 s after the question finished selects and late-attaches the person's pinned memory", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const { call, binding, block } = await startLive(h, { lookToTalk: true, timers });
     expect(block).toBeNull();
     expect(call.events).toContainEqual(expect.objectContaining({ kind: "memory", reason: "waiting_candidate" }));
     binding.afterGreeting(true);
-    expect(call.spoken().at(-1)).toBe("（記憶確認）「這次用 George 的偏好嗎？」");
-    hear(binding, "這次用 George 的偏好嗎？", h);
-    advance(h, 2000);
-    await say(binding, "是的", h);
-    await binding.idle();
-    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "selected", name: "George" });
-    const commentary = call.injected.filter(x => x.channel === "commentary").map(x => x.text).join("\n");
-    expect(commentary).toMatch(/^（記憶資料）/);
-    expect(commentary).toContain("不吃香菜");
+    expect(call.spoken().at(-1)).toBe(QUESTION);
+    expect(call.cards()).toEqual([]);
+    expect(defaults(call)).toEqual(["proposed"]);
+    hear(binding, "我要用 George 的記憶，好嗎？", h);
+    // 問句逐字稿之後：沒有音訊結束事件時 1.8 秒算播完，再 8 秒。
+    advance(h, CONFIRM_AFTER_MS + DEFAULT_SELECT_MS - 1);
+    await timers.fire(binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    advance(h, 1);
+    await timers.fire(binding);
+    expect(await presence(h)).toMatchObject({ state: "selected", name: "George" });
+    expect(defaults(call)).toEqual(["proposed", "selected"]);
+    expect(commentary(call)).toMatch(/^（記憶資料）/);
+    expect(commentary(call)).toContain("不吃香菜");
     expect(binding.callerPort()!.blocked()).toBe(true);
+    expect(h.service.currentPersonId()).toBe(PERSON);
   });
 
-  it("review Minor 2: 「是」 counts only after the question was read and finished playing", async () => {
-    const { h, set } = await withCandidate();
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
-    const { call, binding } = await startLive(h, { lookToTalk: true });
-    binding.afterGreeting(true);
+  it("the audio-done event moves the 8 s window; the 12 s backstop selects when the question was never read", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    let live = await startLive(h, { lookToTalk: true, timers });
+    live.binding.afterGreeting(true);
+    hear(live.binding, "我要用 George 的記憶，好嗎？", h);
     advance(h, 3000);
-    await say(binding, "是", h);
-    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "unselected" });
-    expect(call.notices().at(-1)).toContain("沒有採用這次的回答");
-    hear(binding, "這次用 George 的偏好嗎？", h);
-    advance(h, 500);
-    await say(binding, "是", h);
-    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "unselected" });
-    advance(h, 1500);
-    await say(binding, "是", h);
-    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "selected", name: "George" });
+    live.binding.onAssistantAudioDone(h.clock.now);
+    advance(h, DEFAULT_SELECT_MS - 1);
+    await timers.fire(live.binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    advance(h, 1);
+    await timers.fire(live.binding);
+    expect(await presence(h)).toMatchObject({ state: "selected" });
+    live.call.end();
+    // 一直沒念出：送出後 12 秒。選單改回全家共用＝對預設選定說不要（10 分鐘內不再對 George 預設選人），所以先讓時間過去。
+    await selectProfile(h, null);
+    advance(h, DEFAULT_DECLINE_MS + 1);
+    set({ person_id: PERSON, name: "George", at: h.clock.now + 5 });
+    live = await startLive(h, { lookToTalk: true, timers });
+    live.binding.afterGreeting(true);
+    expect(live.call.spoken().at(-1)).toBe(QUESTION);
+    advance(h, DEFAULT_BACKSTOP_MS - 1);
+    await timers.fire(live.binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    advance(h, 1);
+    await timers.fire(live.binding);
+    expect(await presence(h)).toMatchObject({ state: "selected", name: "George" });
   });
 
-  it("a one-character 「好」 is not mistaken for an echo of the greeting 「George，你好」", async () => {
-    const { h, set } = await withCandidate();
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
-    const { binding } = await startLive(h, { lookToTalk: true });
+  it("the next non-no sentence after the question finished selects BEFORE that sentence is processed (it uses George's memory)", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const { call, binding } = await startLive(h, { lookToTalk: true, timers });
+    binding.afterGreeting(true);
+    hear(binding, "我要用 George 的記憶，好嗎？", h);
+    // 搶在問句播完之前說的一般的話：不選定，照常處理（只用全家共用）。
+    advance(h, 500);
+    await say(binding, "今天天氣如何", h);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    advance(h, 2000);
+    await say(binding, "記住，我不喝咖啡", h);
+    expect(await presence(h)).toMatchObject({ state: "selected", name: "George" });
+    // 這一句用 George 的範圍處理：確認問句記在 George 名下。
+    expect(call.spoken().at(-1)).toBe("（記憶確認）「要記住：不喝咖啡，記在 George 名下。請說『確認記住』。」");
+    expect(commentary(call)).toContain("不吃香菜");
+    // 已選定：計時器不會再做任何事。
+    await timers.fire(binding);
+    expect(defaults(call)).toEqual(["proposed", "selected"]);
+  });
+
+  it("「好」 right after the question selects (not mistaken for an echo of the greeting 「George，你好」)", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const { binding } = await startLive(h, { lookToTalk: true, timers });
     hear(binding, "George，你好", h);
     binding.afterGreeting(true);
-    hear(binding, "這次用 George 的偏好嗎？", h);
+    hear(binding, "我要用 George 的記憶，好嗎？", h);
     advance(h, 2000);
     await say(binding, "好", h);
-    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "selected", name: "George" });
+    expect(await presence(h)).toMatchObject({ state: "selected", name: "George" });
   });
 
-  it("does not name the person when the greeting did not; 「不是」 uses household only and is not asked again; late or changed candidates are refused", async () => {
-    const { h, set } = await withCandidate();
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now });
-    let live = await startLive(h, { lookToTalk: true });
+  it("a whole-sentence no counts any time after the question was sent (talk-over ok): household only, said once, not asked again this interaction", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    let live = await startLive(h, { lookToTalk: true, timers });
     live.binding.afterGreeting(false);
-    hear(live.binding, "這次要用你的偏好嗎？", h);
-    expect(live.call.spoken().at(-1)).toBe("（記憶確認）「這次要用你的偏好嗎？」");
+    expect(live.call.spoken().at(-1)).toBe("（記憶確認）「我要用你的記憶，好嗎？」");
+    advance(h, 300);
+    await say(live.binding, "不要", h);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    expect(live.call.spoken().at(-1)).toBe("（記憶確認）「好，這次只用全家共用的記憶。」");
+    expect(defaults(live.call)).toEqual(["proposed", "declined"]);
+    expect(commentary(live.call)).toContain("家裡週末吃素");
+    expect(commentary(live.call)).not.toContain("香菜");
+    // 時間到也不選定；這通不再問（聲音候選也不問）。
+    advance(h, DEFAULT_BACKSTOP_MS);
+    await timers.fire(live.binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    expect(live.binding.voiceCandidate(true)).toBe(false);
+    live.call.end();
+    // 同一個辨識決策（同一次互動）的下一通也不再問。
+    live = await startLive(h, { lookToTalk: true, timers });
+    live.binding.afterGreeting(true);
+    expect(live.call.spoken().some(t => t.includes("記憶，好嗎"))).toBe(false);
+  });
+
+  it("near-misses 「不是我做的」「不要開燈」 are not a no: they select and go on as ordinary sentences; 「我不是 George」 is a no", async () => {
+    for (const [text, selected] of [["不是我做的", true], ["不要開燈", true], ["我不是 George", false], ["不是我", false]] as const) {
+      const { h, set, timers } = await withCandidate();
+      set({ person_id: PERSON, name: "George", at: h.clock.now });
+      const { binding } = await startLive(h, { lookToTalk: true, timers });
+      binding.afterGreeting(true);
+      hear(binding, "我要用 George 的記憶，好嗎？", h);
+      advance(h, 2000);
+      await say(binding, text, h);
+      expect(await presence(h), text).toMatchObject({ state: selected ? "selected" : "unselected" });
+      await h.close();
+    }
+  });
+
+  it("「我是 X」 replaces the default: it selects X through the parser instead (not the household sentence)", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const { call, binding } = await startLive(h, { lookToTalk: true, timers });
+    binding.afterGreeting(true);
+    advance(h, 500);
+    await say(binding, "我是 George", h);
+    expect(await presence(h)).toMatchObject({ state: "selected", name: "George" });
+    expect(call.spoken().some(t => t.includes("全家共用"))).toBe(false);
+    expect(defaults(call)).toEqual(["proposed", "declined"]);
+  });
+
+  it("selection re-checks the candidate: the camera now sees another family member → 「鏡頭看到的是另一位家人」; a new decision → expired; both use household only", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    let live = await startLive(h, { lookToTalk: true, timers });
+    live.binding.afterGreeting(true);
+    set({ person_id: "fam_000000000000000000000002", name: "Mary", at: h.clock.now });
+    advance(h, DEFAULT_BACKSTOP_MS);
+    await timers.fire(live.binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    expect(live.call.notices()).toContain("鏡頭看到的是另一位家人，這次只用全家共用的記憶");
+    expect(live.call.spoken().at(-1)).toBe("（記憶確認）「鏡頭看到的是另一位家人，這次只用全家共用的記憶。」");
+    expect(commentary(live.call)).toContain("家裡週末吃素");
+    live.call.end();
+    advance(h, DEFAULT_DECLINE_MS + 1);
+    set({ person_id: PERSON, name: "George", at: h.clock.now + 1 });
+    live = await startLive(h, { lookToTalk: true, timers });
+    live.binding.afterGreeting(true);
+    set({ person_id: PERSON, name: "George", at: h.clock.now + 2 });
+    advance(h, DEFAULT_BACKSTOP_MS);
+    await timers.fire(live.binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    expect(live.call.notices()).toContain("候選已失效，這次只用全家共用的記憶");
+  });
+
+  it("SP-02a: a different voice before selection (IdentityService → voiceDisagrees) cancels the default", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const { call, binding } = await startLive(h, { lookToTalk: true, timers });
+    binding.afterGreeting(true);
+    h.service.voiceDisagrees();
+    await binding.idle();
+    advance(h, DEFAULT_BACKSTOP_MS);
+    await timers.fire(binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    expect(call.notices()).toContain("鏡頭和聲音不一致，這次只用全家共用的記憶");
+    expect(defaults(call)).toEqual(["proposed", "declined"]);
+  });
+
+  it("the call ending inside the window selects nothing", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const { call, binding } = await startLive(h, { lookToTalk: true, timers });
+    binding.afterGreeting(true);
+    call.end();
+    await binding.idle();
+    advance(h, DEFAULT_BACKSTOP_MS);
+    await timers.fire(binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    expect(timers.pending.size).toBe(0);
+  });
+
+  it("without consent for the route: nothing is spoken; the screen line can say 「不是我」 (card_answer decline); otherwise it selects 8 s after it was shown", async () => {
+    const { h, set, timers } = await withCandidate([CLAUDE, CHATGPT]);
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    let live = await startLive(h, { lookToTalk: true, timers });
+    live.binding.afterGreeting(true);
+    expect(live.call.injected).toEqual([]);
+    const card = (live.call.events.find(e => e.kind === "memory_default") as { card: string }).card;
+    expect(await h.call({ op: "card_view", card })).toMatchObject({ ok: true, card: { kind: "face_candidate", name: "George" }, origin: "live" });
+    // 語音的「好」不算（沒有問）。
     advance(h, 2000);
-    await say(live.binding, "不是", h);
-    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "unselected" });
-    const commentary = live.call.injected.filter(x => x.channel === "commentary").map(x => x.text).join("\n");
-    expect(commentary).toContain("家裡週末吃素");
-    expect(commentary).not.toContain("香菜");
+    await say(live.binding, "好", h);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    const declined = await h.call({ op: "card_answer", card, choice: "decline" });
+    expect((declined.receipts as { message: string }[])[0]!.message).toBe("這次只用全家共用的記憶");
+    await live.binding.idle();
+    advance(h, DEFAULT_SELECT_MS);
+    await timers.fire(live.binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    expect(defaults(live.call)).toEqual(["proposed", "declined"]);
     live.call.end();
-    // 同一個辨識決策不再問。
-    live = await startLive(h, { lookToTalk: true });
+    // 說過不要：這次互動（10 分鐘內）對 George 不再預設選人，新的辨識決策也一樣。
+    set({ person_id: PERSON, name: "George", at: h.clock.now + 1 });
+    live = await startLive(h, { lookToTalk: true, timers });
     live.binding.afterGreeting(true);
-    expect(live.call.spoken().some(t => t.includes("偏好"))).toBe(false);
+    expect(defaults(live.call)).toEqual([]);
     live.call.end();
-    // 新的決策：超過 10 秒才說「是」→ 不選。
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now + 1 });
-    live = await startLive(h, { lookToTalk: true });
+    advance(h, DEFAULT_DECLINE_MS + 1);
+    set({ person_id: PERSON, name: "George", at: h.clock.now + 2 });
+    live = await startLive(h, { lookToTalk: true, timers });
     live.binding.afterGreeting(true);
-    advance(h, CANDIDATE_WINDOW_MS + 1);
-    await say(live.binding, "是", h);
-    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "unselected" });
-    live.call.end();
-    // 追蹤世代改變（候選換成另一個決策）：「是」不選人。
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now + 2 });
-    live = await startLive(h, { lookToTalk: true });
-    live.binding.afterGreeting(true);
-    hear(live.binding, "這次用 George 的偏好嗎？", h);
-    set({ person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now + 3 });
+    advance(h, DEFAULT_SELECT_MS);
+    await timers.fire(live.binding);
+    expect(await presence(h)).toMatchObject({ state: "selected", name: "George" });
+    expect(live.call.injected).toEqual([]);
+  });
+
+  it("SP-02b: a voice candidate later in the call is asked once (service.offerVoiceCandidate); the next sentence selects", async () => {
+    const { h, set, timers } = await withCandidate();
+    const { call, binding } = await startLive(h, { timers });
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    h.service.offerVoiceCandidate(true);
+    expect(call.spoken().at(-1)).toBe(QUESTION);
+    expect(binding.voiceCandidate(true)).toBe(false);
+    hear(binding, "我要用 George 的記憶，好嗎？", h);
     advance(h, 2000);
-    await say(live.binding, "是", h);
-    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "unselected" });
-    expect(live.call.notices().at(-1)).toContain("候選已失效");
+    await say(binding, "幫我查明天的天氣", h);
+    expect(await presence(h)).toMatchObject({ state: "selected", name: "George" });
+    expect(h.service.currentPersonId()).toBe(PERSON);
+  });
+
+  it("SP-02b: without the naming permission the question has no name", async () => {
+    const { h, set, timers } = await withCandidate();
+    const { call } = await startLive(h, { timers });
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    h.service.offerVoiceCandidate(false);
+    expect(call.spoken().at(-1)).toBe("（記憶確認）「我要用你的記憶，好嗎？」");
+    expect(h.service.currentPersonId()).toBeNull();
+  });
+
+  it("SP-02b: no voice candidate question while the opening (look-to-talk / wake) candidate is still pending", async () => {
+    const { h, set, timers } = await withCandidate();
+    const waiting = await startLive(h, { lookToTalk: true, timers });
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    expect(waiting.binding.voiceCandidate(true)).toBe(false);
+  });
+
+  it("review 1: a voice sample of another family member arriving after the default selected (within 10 s) undoes it → household only, mismatch line, not asked again; after 10 s it is only logged", async () => {
+    for (const late of [false, true]) {
+      const { h, set, timers } = await withCandidate();
+      set({ person_id: PERSON, name: "George", at: h.clock.now });
+      const { call, binding } = await startLive(h, { lookToTalk: true, timers });
+      binding.afterGreeting(true);
+      hear(binding, "我要用 George 的記憶，好嗎？", h);
+      advance(h, 2000);
+      await say(binding, "幫我想晚餐", h);
+      expect(await presence(h)).toMatchObject({ state: "selected", name: "George" });
+      advance(h, late ? DEFAULT_GRACE_MS + 1 : 3000);
+      h.service.voiceDisagrees();
+      await binding.idle();
+      await new Promise(r => setTimeout(r, 0));
+      if (late) {
+        expect(await presence(h), "after the grace window: G2 log only").toMatchObject({ state: "selected", name: "George" });
+      } else {
+        expect(await presence(h)).toMatchObject({ state: "unselected" });
+        expect(call.notices()).toContain("鏡頭和聲音不一致，這次只用全家共用的記憶");
+        expect(defaults(call)).toEqual(["proposed", "selected", "declined"]);
+        // 這次互動不再對 George 預設選人（新的決策也一樣）。
+        set({ person_id: PERSON, name: "George", at: h.clock.now + 1 });
+        const next = await startLive(h, { lookToTalk: true, timers });
+        next.binding.afterGreeting(true);
+        expect(defaults(next.call)).toEqual([]);
+      }
+      await h.close();
+    }
+  });
+
+  it("review 1: the voice mismatch arriving while the selection is in flight cancels it, in both orderings (before the core re-check, and right after it)", async () => {
+    for (const order of ["before", "after"] as const) {
+      const { h, set, timers } = await withCandidate();
+      set({ person_id: PERSON, name: "George", at: h.clock.now });
+      const original = h.service.answerLiveCandidate.bind(h.service);
+      h.service.answerLiveCandidate = async (card, accept) => {
+        if (order === "before") h.service.voiceDisagrees();
+        const result = await original(card, accept);
+        if (order === "after") h.service.voiceDisagrees();
+        return result;
+      };
+      const { call, binding } = await startLive(h, { lookToTalk: true, timers });
+      binding.afterGreeting(true);
+      advance(h, DEFAULT_BACKSTOP_MS);
+      await timers.fire(binding);
+      await new Promise(r => setTimeout(r, 0));
+      expect(await presence(h), order).toMatchObject({ state: "unselected" });
+      expect(call.notices(), order).toContain("鏡頭和聲音不一致，這次只用全家共用的記憶");
+      expect(defaults(call), order).not.toContain("selected");
+      expect(defaults(call).at(-1), order).toBe("declined");
+      await h.close();
+    }
+  });
+
+  it("review 4: a no persists for the interaction across a rebuilt call and a new binding (SP-02b ask included)", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const first = await startLive(h, { lookToTalk: true, timers });
+    first.binding.afterGreeting(true);
+    await say(first.binding, "不要", h);
+    first.call.end();
+    // 重建的通話與新的聲音決策：不問。
+    const rebuilt = await startLive(h, { rebuild: true, timers });
+    set({ person_id: PERSON, name: "George", at: h.clock.now + 7 });
+    h.service.offerVoiceCandidate(true);
+    expect(rebuilt.call.spoken().some(t => t.includes("記憶，好嗎"))).toBe(false);
+    rebuilt.call.end();
+    // 10 分鐘後（或認出另一位家人、選了某位家人之後）才會再對 George 預設選人。
+    advance(h, DEFAULT_DECLINE_MS + 1);
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const later = await startLive(h, { lookToTalk: true, timers });
+    later.binding.afterGreeting(true);
+    expect(later.call.spoken().at(-1)).toBe(QUESTION);
+  });
+
+  it("review 7: a person change or revocation while waiting emits declined so the page line never sticks", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const { call, binding } = await startLive(h, { lookToTalk: true, timers });
+    binding.afterGreeting(true);
+    const status = await h.call({ op: "status" }) as unknown as { profiles: { id: string }[] };
+    await selectProfile(h, status.profiles[0]!.id);
+    await binding.idle();
+    expect(defaults(call)).toEqual(["proposed", "declined"]);
+    advance(h, DEFAULT_BACKSTOP_MS);
+    await timers.fire(binding);
+    expect(defaults(call)).toEqual(["proposed", "declined"]);
+  });
+
+  it("review 9: a route hand-off (close fallback) carries the waiting default to the next binding with the same card and deadline, without asking again", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const first = await startLive(h, { lookToTalk: true, timers });
+    first.binding.afterGreeting(true);
+    const card = (first.call.events.find(e => e.kind === "memory_default") as { card: string }).card;
+    first.binding.handOff();
+    first.call.end();
+    await first.binding.idle();
+    advance(h, 1000);
+    const next = await startLive(h, { lookToTalk: true, timers });
+    expect(next.call.events).toContainEqual({ kind: "memory_default", card, phase: "proposed" });
+    next.binding.afterGreeting(true);
+    expect(next.call.spoken().some(t => t.includes("記憶，好嗎"))).toBe(false);
+    advance(h, DEFAULT_BACKSTOP_MS - 1000 - 1);
+    await timers.fire(next.binding);
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    advance(h, 1);
+    await timers.fire(next.binding);
+    expect(await presence(h)).toMatchObject({ state: "selected", name: "George" });
+    // 一般結束（沒有 handOff）不帶到下一通。
+  });
+
+  it("undo later: 「不是我」 by voice after the default selected → household only (the call carrying memory is revoked and rebuilt); no re-ask", async () => {
+    const { h, set, timers } = await withCandidate();
+    set({ person_id: PERSON, name: "George", at: h.clock.now });
+    const { call, binding } = await startLive(h, { lookToTalk: true, timers });
+    binding.afterGreeting(true);
+    advance(h, DEFAULT_BACKSTOP_MS);
+    await timers.fire(binding);
+    expect(await presence(h)).toMatchObject({ state: "selected" });
+    advance(h, 1000);
+    await say(binding, "不是我", h);
+    await new Promise(r => setTimeout(r, 0));
+    expect(await presence(h)).toMatchObject({ state: "unselected" });
+    // 帶著記憶的通話立刻被撤銷（重建的新通話第一句是固定句），所以舊通話不再送提示。
+    expect(call.revokes).toEqual([{ why: "presence", rebuild: true }]);
+    const next = await startLive(h, { rebuild: true, timers });
+    next.binding.afterGreeting(true);
+    h.service.offerVoiceCandidate(true);
+    expect(next.call.spoken().some(t => t.includes("記憶，好嗎"))).toBe(false);
+    // 沒有選定時，「不是我」只是一般的話。
+    expect(await h.service.voiceTurn("不是我")).toEqual({ kind: "none" });
   });
 });
 

@@ -6,7 +6,7 @@ import type { ExecutorMode, Task } from "../../shared/types.ts";
 import { memoryBlock } from "../chat.ts";
 import type { LiveCallerMemory } from "../live-tool-caller.ts";
 import type { ContextLease, MemorySession } from "./boundary.ts";
-import { parseMemoryText, toTraditional } from "./parse.ts";
+import { parseMemoryText, toTraditional, unselectPhrase } from "./parse.ts";
 import type { ContextFact } from "./retrieve.ts";
 
 // MEM-2：ChatGPT 方案即時語音（Codex live）的記憶（docs/16 §9、§11；設計見 docs/validation/memory-mem2-2026-10-30.md）。
@@ -22,7 +22,11 @@ import type { ContextFact } from "./retrieve.ts";
 //   而且只有和核心問句高度相符的助理逐字稿才算「問句念完」。
 // - 記憶沒有開啟、沒有 codex 同意、沒有帳號或這條路徑已停用時（memoryActive false），即時語音和 MEM-2 之前一樣：
 //   instructions 沒有記憶規則、沒有 recall_memory、不插任何句子；記憶開著但沒有同意時，語音指令只出畫面上的卡。
-// - 臉部候選「這次用 X 的偏好嗎？」可以用語音「是」確認，但只限選人（不是寫入）。
+// - 記憶預設選人（George 2026-11-02，docs/validation/memory-voice-default-2026-11-02.md）：臉或聲音已認出一位家人、本次人物沒有選定時，
+//   不出卡片；核心送一句「我要用 X 的記憶，好嗎？」，使用者沒有說不要就選定：問句念完並播完之後使用者的下一句（不是否定、不是回音；
+//   在處理那一句之前選定）、問句念完 8 秒後，或一直沒念出時送出後 12 秒，先到者為準。否定（整句）在送出之後隨時有效：改用全家共用，
+//   這次互動不再問。選定一律經 MemoryService.answerLiveCandidate 重新核對（同一個辨識決策、同一追蹤世代、60 秒內）。
+//   沒有這條路徑的同意時不念任何句子，只在畫面上顯示一行「即將用 X 的記憶」與「不是我」，8 秒後選定。只限選人（不是寫入）。
 // - 撤銷（換人、更正、忘記、撤回同意、關閉記憶、多臉、追蹤中斷、閒置、OS 鎖定…）由 boundary 呼叫 cleanup：
 //   LiveCall.revokeMemory 停止輸出、通知頁面、關 sideband、等停播回報；只要通話帶著記憶，世代改變一律重建或結束，不換綁。
 // 這裡不送任何內容到 SSE：頁面只收到卡片 ID、筆數與固定句型。
@@ -152,8 +156,12 @@ export function rebuildAfter(why: RevokeWhy): boolean {
 export const MAX_RECALLS = 2;
 /** 問句念完之後，語音確認詞有效的時間（George 2026-10-30）。 */
 export const VOICE_CONFIRM_WINDOW_MS = 15_000;
-/** 臉部候選問句之後，語音「是／不是」有效的時間。 */
+/** 臉部候選問句之後，語音「是／不是」有效的時間（舊的候選卡；記憶預設選人改用下面三個時間）。 */
 export const CANDIDATE_WINDOW_MS = 10_000;
+/** 記憶預設選人：問句念完並播完之後，這段時間內使用者沒有說不要就選定（George 2026-11-02）；沒有同意時從送出算起。 */
+export const DEFAULT_SELECT_MS = 8_000;
+/** 記憶預設選人：問句一直沒有被念出（沒有相符的助理逐字稿）時，送出後這段時間就選定。 */
+export const DEFAULT_BACKSTOP_MS = 12_000;
 /** 使用者逐字稿被這段時間內的助理逐字稿或核心送出的句子包含（或反過來）就當回音。 */
 export const ECHO_WINDOW_MS = 10_000;
 /** 模型自稱「記住了」時，這段時間內沒有成功回條就補一句系統通知。 */
@@ -179,6 +187,36 @@ export const VOICE_CONFIRM_PHRASES: Record<VoiceAction, { zh: string; en: string
 const CANCEL_WORDS = new Set(["取消", "不要", "算了", "不用", "cancel"]);
 const YES_WORDS = new Set(["是", "是的", "對", "對的", "對啊", "好", "好的", "好啊", "要", "用", "yes", "yeah", "yep", "sure"]);
 const NO_WORDS = new Set(["不是", "不用", "不要", "不對", "不", "no", "nope"]);
+/** 記憶預設選人的否定：整句（正規化、去掉語助詞與謝謝之後）就是這些。 */
+const DECLINE_WORDS = new Set(["不", "不要", "不用", "不是", "不對", "不好", "不行", "不可以", "別", "別用", "算了", "等一下", "等等", "等下", "先不要", "先不用", "不是我", "那不是我", "換人", "no", "nope", "nothanks", "notme", "thatsnotme", "itsnotme", "dont", "donot", "pleasedont", "pleasedonot", "dontplease", "wait", "waitaminute", "holdon"]);
+
+/**
+ * 記憶預設選人：這一句是不是說不要（整句比對；去掉「了／啦／喔／謝謝」）。name：問句裡的人物名（「我不是 George」「不是 George」
+ * 「不要用 George 的記憶」）。「不是我做的」「不要開燈」這類一般的話都不算。
+ */
+export function declinesDefault(text: string, name: string | null): boolean {
+  if (unselectPhrase(text)) return true;
+  const plain = toTraditional(text).trim();
+  // 提到全家共用的記憶（「用全家的」「全家共用就好」「household memory」）：就是不要用個人的。
+  if (/全家共用|用全家的|全家的(記憶|偏好|就好|好了)|household (memory|only)/iu.test(plain)) return true;
+  // 句首否定後面有停頓再接別的話（「不要，用全家的」「No, use the household memory」）；「不要開燈」沒有停頓，是一般的要求。
+  if (/^(?:不要|不用|不是|不對|不好|不行|不|算了|別)[\s，,。.!！、;；…~～]+\S/u.test(plain)) return true;
+  // 英文的空白只是分詞（「no problem」不算），要有標點才算停頓。
+  if (/^(?:no|nope|not me|don['’]?t|do not|please don['’]?t)[,.!;…]+\s*\S/iu.test(plain)) return true;
+  const strip = (t: string) => t.replace(/(?:謝謝你|謝謝|thankyou|thanks)$/u, "").replace(/(?:了|啦|喔|哦|啊|呀|吧)+$/u, "");
+  const raw = normalizeSpoken(text);
+  const t = strip(strip(raw));
+  if (!t) return false;
+  if (DECLINE_WORDS.has(t) || DECLINE_WORDS.has(raw) || DECLINE_WORDS.has(raw.replace(/(?:謝謝你|謝謝|thankyou|thanks)$/u, ""))) return true;
+  // 重複的否定（「不要不要」「不用不用」「no no」）。
+  for (const w of DECLINE_WORDS) if (w.length > 0 && t.length > w.length && t.length % w.length === 0 && t === w.repeat(t.length / w.length)) return true;
+  if (/^(?:不要|別|不用)(?:用)?(?:我的)?(?:記憶|偏好)$/u.test(t)) return true;
+  const who = name ? normalizeSpoken(name) : "";
+  if (!who) return false;
+  if (t === `我不是${who}` || t === `不是${who}` || t === `imnot${who}` || t === `iamnot${who}` || t === `not${who}`) return true;
+  for (const lead of ["不要用", "別用", "不用"]) for (const tail of ["的記憶", "的偏好"]) if (t === lead + who + tail) return true;
+  return false;
+}
 
 /** 純解析（不碰 store、卡片或頻率限制）：這句是不是會建立語音卡的記憶指令（記住、更正、忘記、全部忘記、查看）。 */
 export function isMemoryCommand(text: string): boolean {
@@ -249,6 +287,12 @@ export function confirmLine(sentence: string): string {
   return `（記憶確認）「${sentence}」`;
 }
 
+/** MemoryService.answerLiveCandidate 的結果（記憶預設選人與舊的語音「是／不是」共用同一套重新核對）。 */
+export type CandidateAnswer = "ok" | "expired" | "mismatch_face" | "mismatch_voice";
+
+/** 記憶預設選人改路徑時交給下一通的狀態（MemoryService 暫存）。 */
+export interface CarriedDefault { card: string; name: string; sentence: string; sentAt: number; doneAt: number | null; spoken: boolean }
+
 export interface LiveContextResult {
   session: MemorySession;
   epoch: number;
@@ -280,7 +324,11 @@ export interface LiveMemoryService {
   attachVoice(route: VoiceRoute, session: MemorySession, cleanup: () => Promise<void>, closed: Promise<void>): ContextLease | null;
   revokeReasonOf(session: MemorySession): RevokeWhy;
   liveFaceCandidate(): { card: string; name: string } | null;
-  answerLiveCandidate(card: string, accept: boolean): Promise<boolean>;
+  /** ok：已選定（accept）或已作廢（!accept）；expired：卡片或辨識決策已失效；mismatch_face／mismatch_voice：鏡頭（或聲音）指向另一位家人。 */
+  answerLiveCandidate(card: string, accept: boolean): Promise<CandidateAnswer>;
+  /** 記憶預設選人：改路徑時暫存還在等選定的候選（handOff）；下一通 started() 取走。 */
+  carryDefault(carried: CarriedDefault): void;
+  takeCarriedDefault(): CarriedDefault | null;
   voiceTurn(text: string, route?: VoiceRoute): Promise<VoiceTurnOutcome>;
   voiceConfirm(card: string): Promise<{ status: MemoryReceiptStatus }>;
   voiceCancel(card: string): void;
@@ -331,6 +379,8 @@ export interface LiveMemoryPort {
   carriesMemory(): boolean;
   started(): void;
   afterGreeting(named: boolean): void;
+  /** 記憶預設選人：這通因為改路徑而結束（close("fallback")）：還在等選定的候選交給下一通，不默默丟掉。 */
+  handOff?(): void;
   /** 使用者開始說話（sideband 的 speech_started，或這一句第一則未完成的逐字稿）。 */
   onUserSpeechStart(at: number): void;
   /** 助理的音訊結束（sideband 有這個事件時）。 */
@@ -348,8 +398,11 @@ export interface LiveMemoryPort {
 
 /** question：問句本身（核心送出的句子與模型念它的那一則助理逐字稿，正規化後）；回音判斷時只略過它們。 */
 type Pending = { card: string; action: VoiceAction; phrase: string; sentence: string; sentAt: number; doneAt: number | null; question: Set<string> };
-/** spoken：有沒有用語音問（沒有同意時只有畫面卡，語音回答不算）。 */
-type Candidate = { card: string; sentence: string; sentAt: number; doneAt: number | null; spoken: boolean };
+/**
+ * 記憶預設選人的候選（George 2026-11-02）。spoken：有沒有用語音問（沒有同意時只在畫面上顯示一行，8 秒後選定）。
+ * name：候選人物名（只用來比對「我不是 X」「不要用 X 的記憶」；問句不能稱名時不會念出）。
+ */
+type Candidate = { card: string; name: string; sentence: string; sentAt: number; doneAt: number | null; spoken: boolean };
 /**
  * MEM-4b：核心記下的一句使用者原句（繁體）。eligible false：回音、確認詞、是／不是、記憶指令、確認卡開著時的確認或取消；
  * 這種句子不能當交辦原句，也不能被短肯定往前略過以外的方式使用。session／epoch：記下時的本次人物世代。
@@ -370,6 +423,8 @@ export interface LiveBindingOptions {
   busy?: () => boolean;
   /** MEM-4b：等語音辨識逐字稿的時間（預設 ASR_GRACE_MS；測試用）。 */
   asrGraceMs?: number;
+  /** 記憶預設選人的計時器（預設 setTimeout；測試換成假的）。回傳取消函式。時間到時仍以 now() 判斷，所以提早叫醒也不會提早選定。 */
+  timer?: (run: () => void, ms: number) => () => void;
 }
 
 const SENTENCES = {
@@ -379,8 +434,11 @@ const SENTENCES = {
   failed: "沒有保存，請看畫面。",
   cancelled: "好，沒有保存。",
   pick: "有好幾筆，請在畫面上選。",
-  candidateNamed: "這次用 {0} 的偏好嗎？",
-  candidatePlain: "這次要用你的偏好嗎？",
+  candidateNamed: "我要用 {0} 的記憶，好嗎？",
+  candidatePlain: "我要用你的記憶，好嗎？",
+  defaultDeclined: "好，這次只用全家共用的記憶。",
+  defaultMismatch: "鏡頭和聲音不一致，這次只用全家共用的記憶。",
+  defaultFaceMismatch: "鏡頭看到的是另一位家人，這次只用全家共用的記憶。",
   rememberSubject: "要記住：{0}，記在 {1} 名下。請說『確認記住』。",
   rememberPlain: "要記住：{0}。請說『確認記住』。",
   rememberHousehold: "要記住：{0}，記在全家共用。請說『確認記住』。",
@@ -407,8 +465,16 @@ export class LiveMemoryBinding implements LiveMemoryPort {
   private waitingCandidate: boolean;
   private candidate: Candidate | null = null;
   private pending: Pending | null = null;
-  /** SP-02b：這通已經因為聲音問過一次候選。 */
+  /** SP-02b：這通已經因為聲音問過一次候選（記憶預設選人說過不要或已選定之後也不再問）。 */
   private voiceAsked = false;
+  /** 記憶預設選人：這次互動說過不要（或改用全家共用），不再問。 */
+  private declined = false;
+  /** 記憶預設選人的計時器（取消函式）。 */
+  private defaultTimer: (() => void) | null = null;
+  /** 記憶預設選人：正在選定（answerLiveCandidate 的 await 期間）；undone＝期間核心因為聲音不一致改回全家共用。 */
+  private selecting: { card: string; undone: boolean } | null = null;
+  /** 記憶預設選人：最近一次選定的卡片（聲音晚到、10 秒內改回全家共用時通知頁面用）。 */
+  private selectedCard: string | null = null;
   private readonly assistant: { text: string; at: number }[] = [];
   /** 核心送出、要模型念的句子（正規化後）：出現在使用者逐字稿裡就是回音；模型念它時不算自稱記住。 */
   private readonly injected: { text: string; at: number }[] = [];
@@ -556,7 +622,7 @@ export class LiveMemoryBinding implements LiveMemoryPort {
 
   private async cleanup(session: MemorySession): Promise<void> {
     this.pending = null;
-    this.candidate = null;
+    this.dropCandidate();
     this.heard.length = 0;
     const call = this.call;
     if (!call) return;
@@ -568,6 +634,32 @@ export class LiveMemoryBinding implements LiveMemoryPort {
   /** sideband 開始：告訴頁面這通的記憶狀態（只有筆數與原因代碼）。 */
   started(): void {
     if (!this.passive) this.emitStatus();
+    // 記憶預設選人：上一通因為改路徑結束時還在等選定，接著在這一通等（同一張卡、同一個時間），不重問。
+    const carried = this.passive ? null : this.service.takeCarriedDefault();
+    if (carried && this.call?.active && !this.candidate) {
+      this.waitingCandidate = false;
+      this.candidate = { ...carried };
+      this.call.emit({ kind: "memory_default", card: carried.card, phase: "proposed" });
+      this.options.log?.(`memory: ${this.route} 記憶預設選人：接續改路徑前的候選`);
+      this.armDefault();
+    }
+  }
+
+  /** 改路徑（close("fallback")）：還在等選定的候選交給下一通。 */
+  handOff(): void {
+    const c = this.candidate;
+    if (!c || this.ended) return;
+    this.clearDefault();
+    this.candidate = null;
+    this.service.carryDefault({ ...c });
+  }
+
+  /** 候選作廢（換人、撤銷）：頁面那一行一定收掉。 */
+  private dropCandidate(): void {
+    const c = this.candidate;
+    this.clearDefault();
+    this.candidate = null;
+    if (c) this.call?.emit({ kind: "memory_default", card: c.card, phase: "declined" });
   }
 
   private emitStatus(): void {
@@ -592,62 +684,228 @@ export class LiveMemoryBinding implements LiveMemoryPort {
   }
 
   /**
-   * 開場問候送出之後（或使用者先開口、沒有問候時的第一句話之前）：有臉部候選就問一次「這次用 X 的偏好嗎？」
-   * （只有問候已經稱名、而且有 codex 同意時才帶名字）；沒有同意時只出畫面上的候選卡，不念。沒有候選就直接放記憶。
+   * 開場問候送出之後（或使用者先開口、沒有問候時的第一句話之前）：有臉部候選就說一次「我要用 X 的記憶，好嗎？」
+   * （只有問候已經稱名、而且有這條路徑的同意時才帶名字）；沒有同意時不念，只在畫面上顯示一行。沒有候選就直接放記憶。
    */
   afterGreeting(named: boolean): void {
     if (this.passive || !this.waitingCandidate || this.candidate || !this.call?.active) return;
-    const hit = this.service.liveFaceCandidate();
+    const hit = this.declined ? null : this.service.liveFaceCandidate();
     if (!hit) {
       this.waitingCandidate = false;
       this.enqueue(() => this.attachNow());
       return;
     }
-    const spoken = this.speakable();
-    const sentence = named && spoken ? this.text(SENTENCES.candidateNamed, hit.name) : this.text(SENTENCES.candidatePlain);
-    this.candidate = { card: hit.card, sentence, sentAt: this.options.now(), doneAt: null, spoken };
-    if (spoken) this.say(sentence);
-    this.call.emit({ kind: "memory_card", card: hit.card, open: true });
+    this.propose(hit, named);
   }
 
   /**
-   * SP-02b：通話中的聲音認出一位家人、本次人物沒有選定（核心已確認）：問一次「這次用 X 的偏好嗎？」，整通最多一次。
-   * 還在等開場候選、已有候選或等待中的語音卡時不問。named＝核心判斷可以念出名字（稱名設定開著、看過雲端稱名說明）。
+   * SP-02b：通話中的聲音認出一位家人、本次人物沒有選定（核心已確認）：說一次「我要用 X 的記憶，好嗎？」，整通最多一次。
+   * 還在等開場候選、已有候選、等待中的語音卡或這次說過不要時不問。named＝核心判斷可以念出名字（稱名設定開著、看過雲端稱名說明）。
    */
   voiceCandidate(named: boolean): boolean {
-    if (this.passive || this.waitingCandidate || this.candidate || this.pending || this.voiceAsked || this.ended || !this.call?.active) return false;
+    if (this.passive || this.waitingCandidate || this.candidate || this.pending || this.voiceAsked || this.declined || this.ended || !this.call?.active) return false;
     const hit = this.service.liveFaceCandidate();
     if (!hit) return false;
     this.voiceAsked = true;
+    this.propose(hit, named);
+    return true;
+  }
+
+  /** 記憶預設選人（George 2026-11-02）：不出卡片；有同意時念一句問句，頁面顯示一行「即將用 X 的記憶」與「不是我」，計時選定。 */
+  private propose(hit: { card: string; name: string }, named: boolean): void {
     const spoken = this.speakable();
     const sentence = named && spoken ? this.text(SENTENCES.candidateNamed, hit.name) : this.text(SENTENCES.candidatePlain);
-    this.candidate = { card: hit.card, sentence, sentAt: this.options.now(), doneAt: null, spoken };
+    this.candidate = { card: hit.card, name: hit.name, sentence, sentAt: this.options.now(), doneAt: null, spoken };
     if (spoken) this.say(sentence);
-    this.call.emit({ kind: "memory_card", card: hit.card, open: true });
-    return true;
+    this.call?.emit({ kind: "memory_default", card: hit.card, phase: "proposed" });
+    this.options.log?.(`memory: ${this.route} 記憶預設選人（${spoken ? "語音問句" : "沒有同意，不念"}）`);
+    this.armDefault();
+  }
+
+  /** 選定的時間：問句念完並播完後 8 秒；一直沒念出時送出後 12 秒；沒有用語音問時送出後 8 秒。 */
+  private defaultDeadline(c: Candidate): number {
+    if (!c.spoken) return c.sentAt + DEFAULT_SELECT_MS;
+    return c.doneAt !== null ? this.readyAt(c.doneAt) + DEFAULT_SELECT_MS : c.sentAt + DEFAULT_BACKSTOP_MS;
+  }
+
+  private clearDefault(): void {
+    this.defaultTimer?.();
+    this.defaultTimer = null;
+  }
+
+  private armDefault(): void {
+    this.clearDefault();
+    const c = this.candidate;
+    if (!c || this.ended) return;
+    const ms = Math.max(0, this.defaultDeadline(c) - this.options.now());
+    const timer = this.options.timer ?? ((run: () => void, delay: number) => {
+      const handle = setTimeout(run, delay);
+      (handle as { unref?: () => void }).unref?.();
+      return () => clearTimeout(handle);
+    });
+    this.defaultTimer = timer(() => this.enqueue(() => this.defaultDue(c)), ms);
+  }
+
+  /** 計時器到了（在佇列裡，和使用者逐字稿依序處理）：時間真的到了才選定，否則重新計時。 */
+  private async defaultDue(c: Candidate): Promise<void> {
+    if (this.candidate !== c || this.ended || !this.call?.active) return;
+    if (this.options.now() < this.defaultDeadline(c)) {
+      this.armDefault();
+      return;
+    }
+    await this.selectDefault(c);
+  }
+
+  /** 選定候選：經 answerLiveCandidate 重新核對（同一個辨識決策、同一追蹤世代、60 秒內、沒有換成別人）。 */
+  private async selectDefault(c: Candidate): Promise<void> {
+    this.clearDefault();
+    this.candidate = null;
+    this.waitingCandidate = false;
+    this.voiceAsked = true;
+    // await 期間聲音不一致的處理在核心：卡片建立之後的不一致 → mismatch_voice；選定之後 10 秒內 → defaultUndone（看 selecting.undone）。
+    const selecting = { card: c.card, undone: false };
+    this.selecting = selecting;
+    let result: CandidateAnswer = "expired";
+    try {
+      result = await this.service.answerLiveCandidate(c.card, true);
+    } catch {
+      result = "expired";
+    } finally {
+      if (this.selecting === selecting) this.selecting = null;
+    }
+    const call = this.call;
+    if (!call?.active || this.ended) return;
+    if (result === "ok" && !selecting.undone) {
+      this.selectedCard = c.card;
+      call.emit({ kind: "memory_default", card: c.card, phase: "selected" });
+      await this.attachNow();
+      return;
+    }
+    this.declined = true;
+    if (selecting.undone) return;
+    this.mismatchNotice(c, result);
+    call.emit({ kind: "memory_default", card: c.card, phase: "declined" });
+    await this.attachNow();
+  }
+
+  /** 不選定的原因（固定句）：聲音參與→鏡頭和聲音不一致；只有鏡頭→鏡頭看到的是另一位家人；其他→候選已失效。 */
+  private mismatchNotice(c: { spoken: boolean }, result: CandidateAnswer): void {
+    const call = this.call;
+    if (!call?.active) return;
+    if (result === "mismatch_voice") {
+      call.emit({ kind: "memory_notice", message: "鏡頭和聲音不一致，這次只用全家共用的記憶" });
+      if (c.spoken && this.speakable()) this.say(this.text(SENTENCES.defaultMismatch));
+    } else if (result === "mismatch_face") {
+      call.emit({ kind: "memory_notice", message: "鏡頭看到的是另一位家人，這次只用全家共用的記憶" });
+      if (c.spoken && this.speakable()) this.say(this.text(SENTENCES.defaultFaceMismatch));
+    } else call.emit({ kind: "memory_notice", message: "候選已失效，這次只用全家共用的記憶" });
+  }
+
+  /**
+   * 核心在預設選定之後 10 秒內聽到另一位家人的聲音，已改回全家共用（MemoryService.voiceDisagrees）：念不一致的固定句、
+   * 頁面收掉那一行、這次互動不再問。presenceChanged 會補上全家共用的記憶（帶著記憶的通話由 boundary 撤銷並重建）。
+   */
+  defaultUndone(): void {
+    this.voiceAsked = true;
+    this.declined = true;
+    const card = this.selecting?.card ?? this.selectedCard;
+    if (this.selecting) this.selecting.undone = true;
+    this.selectedCard = null;
+    const call = this.call;
+    if (!call?.active || this.ended) return;
+    call.emit({ kind: "memory_notice", message: "鏡頭和聲音不一致，這次只用全家共用的記憶" });
+    if (this.speakable()) this.say(this.text(SENTENCES.defaultMismatch));
+    if (card) call.emit({ kind: "memory_default", card, phase: "declined" });
+  }
+
+  /**
+   * 不用這位候選。why：no＝使用者說不要（念「好，這次只用全家共用的記憶。」）；self＝使用者說「我是 Y」（由 voiceTurn 選 Y，
+   * 這裡不補全家共用的記憶，免得馬上又被撤銷）；click＝畫面上按了「不是我」。
+   */
+  private async declineDefault(c: Candidate, why: "no" | "self" | "click"): Promise<void> {
+    this.clearDefault();
+    this.candidate = null;
+    this.waitingCandidate = false;
+    this.voiceAsked = true;
+    this.declined = true;
+    if (why !== "click") {
+      try {
+        await this.service.answerLiveCandidate(c.card, false);
+      } catch {
+        // 卡片本來就會過期
+      }
+    }
+    const call = this.call;
+    if (!call?.active || this.ended) return;
+    call.emit({ kind: "memory_default", card: c.card, phase: "declined" });
+    if (why === "self") return;
+    if (why === "no") {
+      call.emit({ kind: "memory_notice", message: "這次只用全家共用的記憶" });
+      if (c.spoken && this.speakable()) this.say(this.text(SENTENCES.defaultDeclined));
+    }
+    await this.attachNow();
+  }
+
+  /** 使用者改用全家共用（語音或打字「不是我」、畫面上的「不是我」或「本次人物」選單選全家共用）：這次互動不再問。 */
+  noDefault(): void {
+    this.voiceAsked = true;
+    this.declined = true;
+    const c = this.candidate;
+    if (!c) return;
+    this.clearDefault();
+    this.candidate = null;
+    this.waitingCandidate = false;
+    this.call?.emit({ kind: "memory_default", card: c.card, phase: "declined" });
+  }
+
+  /** SP-02a：還沒選定前，通話中的聲音認出的是另一位家人：不選定，改用全家共用。 */
+  candidateMismatch(): void {
+    const c = this.candidate;
+    if (!c || this.ended) return;
+    this.clearDefault();
+    this.candidate = null;
+    this.enqueue(async () => {
+      this.waitingCandidate = false;
+      this.voiceAsked = true;
+      this.declined = true;
+      try {
+        await this.service.answerLiveCandidate(c.card, false);
+      } catch {
+        // 卡片本來就會過期
+      }
+      const call = this.call;
+      if (!call?.active || this.ended) return;
+      this.mismatchNotice(c, "mismatch_voice");
+      call.emit({ kind: "memory_default", card: c.card, phase: "declined" });
+      await this.attachNow();
+    });
   }
 
   /** 本次人物世代改變（MemoryService.replacePresence）：帶著記憶的通話由 boundary 撤銷；還沒帶記憶的就補上新人物的記憶包。 */
   presenceChanged(): void {
     this.pending = null;
-    if (this.candidate) {
-      this.call?.emit({ kind: "memory_card", card: this.candidate.card, open: false });
-      this.candidate = null;
-    }
+    // 換人（選單、「我是 Y」、暫停…）：候選作廢，頁面那一行收掉。
+    this.dropCandidate();
     if (this.passive || this.lease || this.ended || !this.call?.active) return;
     this.waitingCandidate = false;
     this.enqueue(() => this.attachNow());
   }
 
-  /** 畫面上點了 live 來源的卡（候選拒絕要補上全家共用的記憶；其他卡清掉等待中的語音確認）。 */
+  /** 畫面上點了 live 來源的卡（記憶預設選人按「不是我」要補上全家共用的記憶；其他卡清掉等待中的語音確認）。 */
   cardAnswered(card: string, kind: string, accepted: boolean): void {
     if (this.pending?.card === card) this.pending = null;
-    if (this.candidate?.card === card) {
-      this.candidate = null;
-      if (!accepted && kind === "face_candidate" && !this.lease) {
-        this.waitingCandidate = false;
-        this.enqueue(() => this.attachNow());
+    const c = this.candidate;
+    if (c?.card === card) {
+      if (!accepted && kind === "face_candidate") {
+        this.clearDefault();
+        this.candidate = null;
+        this.enqueue(() => this.declineDefault(c, "click"));
+        return;
       }
+      this.clearDefault();
+      this.candidate = null;
+      this.waitingCandidate = false;
+      this.voiceAsked = true;
     }
   }
 
@@ -899,6 +1157,8 @@ export class LiveMemoryBinding implements LiveMemoryPort {
   /** 助理音訊結束的時間只會往後延（MEM-3：API key 路徑的頁面也會補報播放結束；不能用來縮短確認時窗）。 */
   onAssistantAudioDone(at: number): void {
     this.assistantAudioDone = this.assistantAudioDone === null ? at : Math.max(this.assistantAudioDone, at);
+    // 記憶預設選人：問句播完的時間改了，選定的時間跟著改。
+    if (this.candidate?.doneAt != null) this.armDefault();
   }
 
   onAssistantFinal(text: string, at: number): void {
@@ -914,7 +1174,10 @@ export class LiveMemoryBinding implements LiveMemoryPort {
       pending.question.add(norm);
     }
     const candidate = this.candidate;
-    if (candidate?.spoken && candidate.doneAt === null && at >= candidate.sentAt && readsQuestion(norm, normalizeSpoken(candidate.sentence))) candidate.doneAt = at;
+    if (candidate?.spoken && candidate.doneAt === null && at >= candidate.sentAt && readsQuestion(norm, normalizeSpoken(candidate.sentence))) {
+      candidate.doneAt = at;
+      this.armDefault();
+    }
     // 模型自稱記住了，但最近沒有成功回條：補一句系統通知（念核心送的句子不算）。沒有記憶規則的通話不插任何句子。
     if (!this.active) return;
     const readsInjected = this.injected.some((x) => at - x.at <= 30_000 && (norm.includes(x.text) || x.text.includes(norm)));
@@ -974,32 +1237,28 @@ export class LiveMemoryBinding implements LiveMemoryPort {
         return;
       }
     }
-    // 2. 臉部候選：「是」只能選人；「不是」這次互動不再問，改用全家共用。也要等問句念完並播完。
-    if (this.candidate?.spoken) {
+    // 2. 記憶預設選人（George 2026-11-02）：送出之後的整句否定隨時有效（可以搶話）→ 改用全家共用、這次不再問；「我是 Y」＝不用
+    //    這位候選，交給 voiceTurn 選 Y；問句念完並播完之後的下一句（不是否定、不是回音）→ 先選定，再照常處理這一句。
+    //    沒有用語音問（沒有同意）時，只有「不是我」這類明說改用全家共用的話才算；其餘等 8 秒。
+    if (this.candidate) {
       const c = this.candidate;
-      const answer = exactYesNo(text);
-      if (answer) {
-        heard(false);
-        const sentence = normalizeSpoken(c.sentence);
-        if (this.isEcho(norm, at, (x) => x.includes(sentence) || sentence.includes(x))) return;
-        if (c.doneAt === null || speechStart < this.readyAt(c.doneAt)) {
-          call.emit({ kind: "memory_notice", message: "沒有採用這次的回答：請在問句念完後再回答，或在畫面上選擇" });
+      const echo = this.isEcho(norm, at);
+      if (!echo && speechStart >= c.sentAt) {
+        if (selfIdentifies(text)) {
+          await this.declineDefault(c, "self");
+        } else if (unselectPhrase(text) || (c.spoken && declinesDefault(text, c.name))) {
+          heard(false);
+          await this.declineDefault(c, "no");
           return;
+        } else if (c.spoken && c.doneAt !== null && speechStart >= this.readyAt(c.doneAt)) {
+          await this.selectDefault(c);
+          // 只是回答問句（「好」「是」）：選定就好，不當成一般的話（也不能當交辦原句）。
+          if (exactYesNo(text) === "yes") {
+            heard(false);
+            return;
+          }
+          if (!this.call?.active || this.ended) return;
         }
-        if (speechStart - c.doneAt > CANDIDATE_WINDOW_MS) {
-          this.candidate = null;
-          call.emit({ kind: "memory_notice", message: "候選確認時間已過；請在畫面上選擇本次人物" });
-          return;
-        }
-        this.candidate = null;
-        this.waitingCandidate = false;
-        call.emit({ kind: "memory_card", card: c.card, open: false });
-        const ok = await this.service.answerLiveCandidate(c.card, answer === "yes");
-        if (answer === "no" || !ok) {
-          if (answer === "yes") call.emit({ kind: "memory_notice", message: "候選已失效；請在畫面上選擇本次人物" });
-          await this.attachNow();
-        }
-        return;
       }
     }
     // 3. 其他：回音不處理；單獨的確認詞（沒有等待中的卡）不當成指令。
@@ -1016,6 +1275,8 @@ export class LiveMemoryBinding implements LiveMemoryPort {
     }
     if (this.waitingCandidate && !this.candidate) this.afterGreeting(false);
     const outcome = await this.service.voiceTurn(text, this.route);
+    // 「我是 Y」取代了記憶預設選人、但沒有選到人（同名或不是既有人物）：照常補上目前範圍的記憶。
+    if (outcome.kind !== "selected" && !this.lease && !this.waitingCandidate && !this.candidate && this.declined && selfIdentifies(text)) await this.attachNow();
     // MEM-4b：記憶指令（出卡或固定句）、「我是 X」（審查 minor 1）、確認卡開著時的確認或取消都不能當交辦原句；只有一般的話可以。
     heard(!approvalAnswer && outcome.kind === "none" && !selfIdentifies(text));
     if (!this.call?.active || this.ended) return;
@@ -1079,6 +1340,8 @@ export class LiveMemoryBinding implements LiveMemoryPort {
     if (this.ended) return;
     this.ended = true;
     this.pending = null;
+    // 通話在選定之前結束：不選定（計時器取消）。
+    this.clearDefault();
     this.candidate = null;
     this.heard.length = 0;
     for (const wake of this.heardWaiters.splice(0)) wake();

@@ -145,6 +145,8 @@ export interface IdentityMemoryLink {
   currentPersonId?(): string | null;
   /** SP-02b：通話中的聲音認出一位家人、本次人物沒有選定：請這通語音問一次（named＝可以念出名字）。 */
   offerVoiceCandidate?(named: boolean): void;
+  /** 記憶預設選人（2026-11-02）：還沒選定前，通話中的聲音認出的是和候選不同的家人：不選定，改用全家共用。 */
+  voiceDisagrees?(): void;
 }
 
 /** SP-03a：排序後的分數是否被接受（最高分 ≥ match 且領先第二名 ≥ margin）；接受時回那位家人。 */
@@ -417,6 +419,8 @@ export class IdentityService {
   private lastFusion: VoiceFusion | null = null;
   /** 最近一次比對成功、沒有多臉的問候決策（給記憶層當人物候選；同一追蹤世代、60 秒內）。 */
   private lastMatch: { person_id: string; track: number; at: number } | null = null;
+  /** 記憶預設選人（2026-11-02）：最近一次看到多張臉的時間（多臉時不用聲音候選）。 */
+  private multiFaceAt: number | null = null;
 
   constructor(private readonly options: IdentityServiceOptions) {
     this.now = options.now ?? Date.now;
@@ -506,23 +510,34 @@ export class IdentityService {
     this.ambient = null;
     this.pendingLive = null;
     this.lastMatch = null;
+    this.multiFaceAt = null;
   }
 
   /**
    * 只給記憶層（核心內部）：最近一次比對成功、MEMORY_CANDIDATE_MS 內、同一追蹤世代、沒有多臉的決策。
    * 這只是「這次用 X 的偏好？」的候選，不是授權；記憶層要使用者確認後才選定人物。
    */
-  memoryCandidate(): { person_id: string; name: string; at: number } | null {
-    const m = this.lastMatch;
-    if (m && this.now() - m.at <= MEMORY_CANDIDATE_MS && !(this.ambient && this.ambient.track !== m.track)) {
-      const person = this.comparable().find((p) => p.person_id === m.person_id);
-      if (person) return { person_id: person.person_id, name: person.name, at: m.at };
-    }
-    // SP-02b：沒有臉的候選時，用通話中聲音認出的人（一樣要使用者確認才選定）。
+  memoryCandidate(): { person_id: string; name: string; at: number; source: "face" | "voice" } | null {
+    const face = this.memoryFaceCandidate();
+    if (face) return face;
+    // SP-02b：沒有臉的候選時，用通話中聲音認出的人。記憶預設選人（2026-11-02）：畫面裡有多張臉時不用聲音候選。
     const v = this.callVoice;
-    if (!v || this.now() - v.at > MEMORY_CANDIDATE_MS) return null;
+    if (!v || this.now() - v.at > MEMORY_CANDIDATE_MS || this.multiFaceRecent()) return null;
     const person = this.comparableVoice().find((p) => p.person_id === v.person_id);
-    return person ? { person_id: person.person_id, name: person.name, at: v.at } : null;
+    return person ? { person_id: person.person_id, name: person.name, at: v.at, source: "voice" } : null;
+  }
+
+  /** 只給記憶層：只有臉的候選（打字聊天的記憶預設選人只用臉，不退回通話中的聲音）。 */
+  memoryFaceCandidate(): { person_id: string; name: string; at: number; source: "face" } | null {
+    const m = this.lastMatch;
+    if (!m || this.now() - m.at > MEMORY_CANDIDATE_MS || (this.ambient && this.ambient.track !== m.track)) return null;
+    const person = this.comparable().find((p) => p.person_id === m.person_id);
+    return person ? { person_id: person.person_id, name: person.name, at: m.at, source: "face" } : null;
+  }
+
+  /** 最近（候選有效期間內）看到多張臉。 */
+  private multiFaceRecent(): boolean {
+    return (this.ambient?.mixed ?? false) || (this.multiFaceAt !== null && this.now() - this.multiFaceAt <= MEMORY_CANDIDATE_MS);
   }
 
   /** 只給記憶層：已登記的家人（連結到既有人物用）；家人資料還沒載入時回 null，不在這裡碰 Keychain。 */
@@ -805,6 +820,7 @@ export class IdentityService {
     if (match.kind === "ambiguous" && match.reason === "multi_face") {
       a.mixed = true;
       this.lastMatch = null;
+      this.multiFaceAt = now;
       // 多人入鏡：記憶的本次人物暫停（只降權）。
       this.options.memory?.()?.suspend("multi_face");
     }
@@ -1227,13 +1243,33 @@ export class IdentityService {
     if (obs.state === "matched" && obs.person_id) {
       if (current !== null) {
         note = obs.person_id === current ? "，與本次人物一致" : "，像另一位家人（只記錄，不打斷）";
+        // 記憶預設選人（2026-11-02）：剛預設選定（10 秒內）就聽到另一位家人的聲音時，記憶層改回全家共用；其他情況照 G2 只記錄。
+        if (obs.person_id !== current) {
+          try {
+            memory?.voiceDisagrees?.();
+          } catch {
+            // 記憶層自己處理
+          }
+        }
+      } else if (this.multiFaceRecent()) {
+        // 記憶預設選人（2026-11-02）：多張臉時不提聲音候選（只降權）。
+        this.callVoice = null;
+        note = "，沒有本次人物，畫面有多張臉，不提候選";
       } else {
         const v = this.callVoice;
         const faceAgainst = !!this.ambient && (this.ambient.mixed || (this.ambient.firstMatch !== null && this.ambient.firstMatch !== obs.person_id));
-        if (faceAgainst || (v && now - v.at <= MEMORY_CANDIDATE_MS && v.person_id !== obs.person_id)) {
-          // 臉或前一段話指向別人：不提候選。
+        // 記憶預設選人（2026-11-02）：問候決策認出的臉（記憶的候選）是另一位家人。
+        const lastFace = this.lastMatch && now - this.lastMatch.at <= MEMORY_CANDIDATE_MS ? this.lastMatch.person_id : null;
+        const faceOther = lastFace !== null && lastFace !== obs.person_id;
+        if (faceAgainst || faceOther || (v && now - v.at <= MEMORY_CANDIDATE_MS && v.person_id !== obs.person_id)) {
+          // 臉或前一段話指向別人：不提候選；還在等選定的記憶預設選人也作廢（改用全家共用）。
           this.callVoice = null;
           note = "，沒有本次人物，和其他證據不一致，不提候選";
+          try {
+            memory?.voiceDisagrees?.();
+          } catch {
+            // 記憶層自己處理
+          }
         } else {
           if (!v || now - v.at > MEMORY_CANDIDATE_MS) this.callVoice = { person_id: obs.person_id, at: now };
           note = "，沒有本次人物，提出聲音候選";

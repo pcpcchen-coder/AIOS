@@ -161,6 +161,11 @@ export interface MemoryTurnView {
    * MEM-5a 記憶建議：只有卡片 ID（內容經 card_view 取）。不擋聊天：頁面在這一輪的回覆串流結束後，才在回覆下方顯示一行。
    */
   suggestion: { card: string } | null;
+  /**
+   * 記憶預設選人（George 2026-11-02）：這一輪打字前，核心依鏡頭認出的家人直接選定了本次人物（presence 是選定後的）。
+   * 頁面顯示一行「正在用 X 的記憶」與「不是我」（不擋聊天；按「不是我」＝select 全家共用）。
+   */
+  auto_selected?: boolean;
 }
 
 export type MemoryErrorCode = "bad_request" | "unavailable" | "not_user_initiated" | "no_manage" | "not_found" | "expired" | "conflict" | "declined" | "full" | "busy" | "closed";

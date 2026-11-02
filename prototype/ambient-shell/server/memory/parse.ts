@@ -15,6 +15,11 @@ export type ParsedSegment =
   | { op: "forget"; part: number; value: string; topic: TopicId; key: string; text: string }
   | { op: "forget_all"; part: number }
   | { op: "inspect"; part: number }
+  /**
+   * 記憶預設選人之後的復原（George 2026-11-02）：整句就是「不是我」「不要用我的記憶」「改用全家共用的記憶」「not me」這類說法。
+   * text：原段落（沒有選定本次人物時，原句照樣交給一般聊天）。
+   */
+  | { op: "unselect"; part: number; text: string }
   | { op: "rejected"; part: number; reason: "third_party" | "quote" | "hypothetical" | "joke" | "sensitive" }
   | { op: "unclear"; part: number; reason: "question" | "uncertain" | "too_long" | "empty" | "about_assistant"; value: string }
   | { op: "temporary"; part: number; text: string }
@@ -141,6 +146,18 @@ export const TEMPORARY = /^(?:今天|今晚|這次|這一次|這餐|這頓|現�
 const ZH_SELF = /^(?:我是|我叫)\s*([^\s，,、。]{1,16}?)\s*(?:啦|喔|哦|唷|呀)?$/;
 const EN_SELF = /^(?:[Ii] am|[Ii]'m|[Mm]y name is)\s+([A-Z][A-Za-z'-]{0,30}(?:\s+[A-Z][A-Za-z'-]{0,30}){0,2})$/;
 const SELF_REST = /^((?:我是|我叫)\s*[^\s，,、。]{1,16}?|(?:i am|i'm|my name is)\s+[A-Z][A-Za-z'-]{0,30})\s*[，,]\s*(.+)$/i;
+/**
+ * 改用全家共用（unselect）：只認整句（去掉語助詞與句尾標點）。「不是我做的」「不要開燈」「不是我說的」都不算。
+ */
+const ZH_UNSELECT = /^(?:那|這|那個|這個)?(?:不是我|我不是本人)$|^(?:請)?(?:不要再?用|別再?用|不用)我的(?:記憶|偏好)$|^換人$|^(?:請)?(?:改|只|就)?用全家(?:共用)?的?(?:記憶|偏好)(?:就好)?$/;
+const EN_UNSELECT = /^(?:(?:that|it)(?:'s| is) )?not me$|^(?:please )?(?:don't|do not|dont) use my (?:memory|memories|preferences)$|^(?:please )?(?:just )?(?:use|switch to) (?:the )?(?:household|shared|family) (?:memory|memories)(?: only)?$/i;
+
+/** 這一段是不是「改用全家共用」（整句比對，去掉語助詞、謝謝與句尾標點）。 */
+export function unselectPhrase(text: string): boolean {
+  const t = toTraditional(text).replace(/[\s，,。.!！~～…?？]+$/u, "").replace(/(?:謝謝你?|thanks|thank you)$/iu, "").replace(/[\s，,。.!！~～…]+$/u, "").replace(/(?:了|啦|喔|哦|啊|呀|吧)+$/u, "").trim();
+  return ZH_UNSELECT.test(t) || EN_UNSELECT.test(t.replace(/\s+/g, " ").replace(/’/g, "'"));
+}
+
 const NOT_A_NAME = /^(素食者|素食|吃素|學生|老師|醫生|護士|工程師|新來的|誰|男生|女生|大人|小孩|人|客人|主人|你的主人|管理員|家長|開玩笑的?)$|[者人的了在不很有要會想吃喝愛也都說個們你他她它嗎呢吧]$/;
 
 function cleanValue(raw: string): string {
@@ -253,6 +270,7 @@ function piece(part: number, raw: string): ParsedSegment[] {
   if (!text) return [];
   if (FORGET_ALL.test(text)) return [{ op: "forget_all", part }];
   if (INSPECT.test(text.replace(/[?？]$/, ""))) return [{ op: "inspect", part }];
+  if (unselectPhrase(text)) return [{ op: "unselect", part, text }];
   const zhSelf = ZH_SELF.exec(text) ?? EN_SELF.exec(text);
   if (zhSelf) {
     const name = selfName(zhSelf[1]!);

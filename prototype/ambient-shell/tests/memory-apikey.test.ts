@@ -459,8 +459,8 @@ describe.skipIf(!realLockAvailable)("MEM-3 core tools on the sideband", () => {
   });
 });
 
-describe.skipIf(!realLockAvailable)("MEM-3 face candidate after the page's greeting", () => {
-  it("asks once after the greeting turn ends; an anchored 「是」 selects and late-attaches pinned memory as a system item", async () => {
+describe.skipIf(!realLockAvailable)("MEM-3 memory default after the page's greeting (George 2026-11-02)", () => {
+  it("asks once by voice after the greeting turn ends (no card); the next sentence after the question selects and late-attaches pinned memory as a system item", async () => {
     let candidate: { person_id: string; name: string; at: number } | null = null;
     const identity = { candidate: () => candidate, people: () => [{ person_id: "fam_000000000000000000000001", name: "George", minor: false }] };
     const h = await george({ identity });
@@ -473,16 +473,39 @@ describe.skipIf(!realLockAvailable)("MEM-3 face candidate after the page's greet
     expect(t.call.memoryStatus?.()).toMatchObject({ reason: "waiting_candidate" });
     t.call.greetingDecided!(true);
     await t.hear("嗨，George");
-    expect(t.said().at(-1)).toBe(quoted("這次用 George 的偏好嗎？"));
-    await t.hear("這次用 George 的偏好嗎？");
+    expect(t.said().at(-1)).toBe(quoted("我要用 George 的記憶，好嗎？"));
+    expect(t.probe.events.some((e) => e.kind === "memory_card")).toBe(false);
+    expect(t.probe.events).toContainEqual(expect.objectContaining({ kind: "memory_default", phase: "proposed" }));
+    await t.hear("我要用 George 的記憶，好嗎？");
     advance(h, 2000);
-    await t.user("是的");
+    await t.user("好啊");
     await until(() => t.conn.received.some((e) => (e.item as { role?: string } | undefined)?.role === "system"));
     expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "selected", name: "George" });
     const system = t.conn.received.filter((e) => (e.item as { role?: string } | undefined)?.role === "system").map((e) => JSON.stringify(e)).join("\n");
     expect(system).toContain("（記憶資料）");
     expect(system).toContain("不吃香菜");
     expect(t.binding.carriesMemory()).toBe(true);
+    expect(t.probe.events).toContainEqual(expect.objectContaining({ kind: "memory_default", phase: "selected" }));
+  });
+
+  it("a whole-sentence no (even talking over the question) keeps household only and says so once", async () => {
+    let candidate: { person_id: string; name: string; at: number } | null = null;
+    const identity = { candidate: () => candidate, people: () => [{ person_id: "fam_000000000000000000000001", name: "George", minor: false }] };
+    const h = await george({ identity });
+    const token = await manage(h);
+    const status = (await h.call({ op: "status" })) as unknown as { profiles: { id: string }[] };
+    await h.call({ op: "link_face", profile: status.profiles[0]!.id, person: "fam_000000000000000000000001", token });
+    await selectProfile(h, null);
+    candidate = { person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now };
+    const t = await startCall(h, { lookToTalk: true });
+    t.call.greetingDecided!(true);
+    await t.hear("嗨，George");
+    expect(t.said().at(-1)).toBe(quoted("我要用 George 的記憶，好嗎？"));
+    advance(h, 200);
+    await t.user("不是我");
+    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "unselected" });
+    expect(t.said().at(-1)).toBe(quoted("好，這次只用全家共用的記憶。"));
+    expect(t.probe.events).toContainEqual(expect.objectContaining({ kind: "memory_default", phase: "declined" }));
   });
 });
 

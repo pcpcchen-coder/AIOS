@@ -316,3 +316,96 @@ describe("MEM-5b work decisions", () => {
     expect(t.el.textContent).toContain("Work decision · the linked work no longer exists");
   });
 });
+
+describe("記憶預設選人那一行（PresenceNotice，George 2026-11-02）", () => {
+  const george = { state: "selected" as const, epoch: 7, select_card: "mc_000000000000000000000007", profile: "profile_0123456789abcdef", name: "George", reason: null };
+  function notice(responses: (req: MemoryRequest) => MemoryResponse, presence = george as typeof george | null) {
+    const calls: MemoryRequest[] = [];
+    const applied = vi.fn(), changed = vi.fn();
+    const n = new mod.PresenceNotice({ bridge: { memory: async (req) => { calls.push(req); return responses(req); } }, applied, changed, presence: () => presence });
+    return { n, calls, applied, changed };
+  }
+  const el = (n: InstanceType<typeof mod.PresenceNotice>) => n.render() as unknown as El | null;
+
+  it("while waiting (voice call): one line 「即將用 X 的記憶」 with 「不是我」 → card_answer decline; not a card, not blocking", async () => {
+    const declined = { ok: true as const, op: "card_answer" as const, ...turnView, chat: null, receipts: [{ status: "cancelled" as const, message: "這次只用全家共用的記憶", values: [], operation_id: null }], status };
+    const t = notice(req => req.op === "card_view" ? { ok: true, op: "card_view", card: { kind: "face_candidate", card: "mc_0123456789abcdef01234567", name: "George" }, origin: "live" } : declined);
+    await t.n.propose("mc_0123456789abcdef01234567");
+    const box = el(t.n)!;
+    expect(box.getAttribute("data-visibility-reason")).toBe("user_request");
+    expect(box.textContent).toContain("即將用 George 的記憶");
+    byText(box, "不是我").click();
+    await flush(); await flush();
+    expect(t.calls.at(-1)).toEqual({ op: "card_answer", card: "mc_0123456789abcdef01234567", choice: "decline" });
+    expect(t.applied).toHaveBeenCalledWith(declined);
+    expect(t.n.render()).toBeNull();
+  });
+
+  it("after selection: 「正在用 X 的記憶」; 「不是我」 selects household with this generation's select_card", async () => {
+    const t = notice(() => ({ ok: true, op: "select", ...turnView, chat: null, status }));
+    t.n.selected(george);
+    expect(el(t.n)!.textContent).toContain("正在用 George 的記憶");
+    byText(el(t.n)!, "不是我").click();
+    await flush(); await flush();
+    expect(t.calls).toEqual([{ op: "select", profile: null, card: "mc_000000000000000000000007" }]);
+    expect(t.n.render()).toBeNull();
+  });
+
+  it("收起 only hides (no core call); a presence change or the call ending clears; an expired card shows the core's reason", async () => {
+    const t = notice(req => req.op === "card_view" ? { ok: true, op: "card_view", card: { kind: "face_candidate", card: "mc_0123456789abcdef01234567", name: "George" }, origin: "live" } : { ok: false, code: "expired", message: "這張卡片已失效（可能換了人物或超過時間）；請再說一次" });
+    t.n.selected(george);
+    t.n.hide();
+    expect(t.n.render()).toBeNull();
+    expect(t.calls).toEqual([]);
+    t.n.selected(george);
+    t.n.presenceChanged({ ...george, epoch: 7 });
+    expect(t.n.render()).not.toBeNull();
+    t.n.presenceChanged({ ...george, epoch: 8, state: "unselected", name: null, profile: null });
+    expect(t.n.render()).toBeNull();
+    await t.n.propose("mc_0123456789abcdef01234567");
+    t.n.callEnded();
+    expect(t.n.render()).toBeNull();
+    await t.n.propose("mc_0123456789abcdef01234567");
+    byText(el(t.n)!, "不是我").click();
+    await flush(); await flush();
+    expect(el(t.n)!.textContent).toContain("這張卡片已失效");
+  });
+
+  it("review 8: 收起 during the wait stays hidden after selection; selection shows the card's person; another person selected (「我是 Y」) clears the line", async () => {
+    const view = { ok: true as const, op: "card_view" as const, card: { kind: "face_candidate" as const, card: "mc_0123456789abcdef01234567", name: "George" }, origin: "live" as const };
+    const t = notice(() => view);
+    await t.n.propose("mc_0123456789abcdef01234567");
+    t.n.hide();
+    t.n.confirm("mc_0123456789abcdef01234567", george);
+    expect(t.n.phase).toBe("selected");
+    expect(t.n.render()).toBeNull();
+    // 新的一次提出才重新顯示。
+    await t.n.propose("mc_0123456789abcdef01234567");
+    expect(el(t.n)!.textContent).toContain("即將用 George 的記憶");
+    // 世代改變成卡上那位家人：換成「正在用」（名字取自卡片）。
+    t.n.presenceChanged({ ...george, epoch: 9 });
+    expect(el(t.n)!.textContent).toContain("正在用 George 的記憶");
+    // 「我是 Y」：本次人物是另一位 → 收掉（由一般回條說明）。
+    await t.n.propose("mc_0123456789abcdef01234567");
+    t.n.confirm("mc_0123456789abcdef01234567", { ...george, epoch: 10, name: "Mary", profile: "profile_00000000000000a2" });
+    expect(t.n.render()).toBeNull();
+    // 另一張卡的 selected 不影響這一行。
+    await t.n.propose("mc_0123456789abcdef01234567");
+    t.n.confirm("mc_ffffffffffffffffffffffff", george);
+    expect(t.n.phase).toBe("proposed");
+  });
+
+  it("English copy; the person's name stays as stored; browser version shows nothing", async () => {
+    setLocale("en");
+    const t = notice(() => ({ ok: false, code: "unavailable", message: "x" }));
+    t.n.selected({ ...george, name: "小明" });
+    const box = el(t.n)!;
+    expect(box.textContent).toContain("Using 小明's memory");
+    expect(byText(box, "Not me")).toBeTruthy();
+    expect(box.textContent.replace(/小明/g, "")).not.toMatch(/\p{Script=Han}/u);
+    expect(box.getAttribute("aria-label")).toBe("Current person");
+    const none = new mod.PresenceNotice({ bridge: null, applied: () => {}, changed: () => {}, presence: () => null });
+    none.selected(george);
+    expect(none.render()).toBeNull();
+  });
+});
