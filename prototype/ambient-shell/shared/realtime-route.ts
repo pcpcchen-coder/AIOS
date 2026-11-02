@@ -253,6 +253,12 @@ export type LiveCoreEvent =
   | { kind: "memory"; used: number; reason: LiveMemoryReason | null; epoch: number }
   /** MEM-2：核心建立（open）或作廢（!open）一張記憶卡。只有不透明的卡片 ID；內容由頁面經 IPC card_view 取得。 */
   | { kind: "memory_card"; card: string; open: boolean }
+  /**
+   * 記憶預設選人（George 2026-11-02）：proposed＝核心問了（或沒有同意時只顯示）「我要用 X 的記憶，好嗎？」，等選定；
+   * selected＝已選定；declined＝這次不用（說了不要、按了「不是我」、候選失效或鏡頭和聲音不一致）。只有不透明的卡片 ID：
+   * 人物名由可信主視窗經 IPC（card_view 或 status）取得。
+   */
+  | { kind: "memory_default"; card: string; phase: "proposed" | "selected" | "declined" }
   /** MEM-2：固定句型的提示（拒絕原因、還沒有保存等）；不含使用者的話或記憶內容。 */
   | { kind: "memory_notice"; message: string }
   /** MEM-2：這通通話帶著記憶，交辦改成問使用者；title 是 sideband 最近一則使用者原句（不是模型改寫的文字）。 */

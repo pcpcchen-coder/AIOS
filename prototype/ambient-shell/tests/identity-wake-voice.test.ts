@@ -381,6 +381,7 @@ describe("SP-02b in-call voice (通話中辨認說話者)", () => {
   function memoryStub(current: string | null = null) {
     const offers: boolean[] = [];
     const suspends: string[] = [];
+    const disagrees: number[] = [];
     const link: IdentityMemoryLink & { current: string | null } = {
       current,
       countForFace: async () => null,
@@ -390,8 +391,9 @@ describe("SP-02b in-call voice (通話中辨認說話者)", () => {
         return this.current;
       },
       offerVoiceCandidate: (named) => void offers.push(named),
+      voiceDisagrees: () => void disagrees.push(1),
     };
-    return { link, offers, suspends };
+    return { link, offers, suspends, disagrees };
   }
   const callVoice = (c: Setup, center: Float32Array | null, voiced = 2600) =>
     c.svc.handle({ op: "call_voice", voiced_ms: voiced, model: VOICE, ...(center ? { feature: Array.from(near(center, c.clock.now % 991, 0.04)) } : {}) });
@@ -453,6 +455,25 @@ describe("SP-02b in-call voice (通話中辨認說話者)", () => {
     expect(lastCall(c)).toContain("與本次人物一致");
     expect(m.suspends).toEqual([]);
     expect(m.offers).toEqual([]);
+    expect(c.svc.memoryCandidate()).toBeNull();
+    // 記憶預設選人（2026-11-02）：另一位家人的聲音交給記憶層判斷（剛預設選定 10 秒內才改回全家共用；其他照 G2 只記錄）。
+    expect(m.disagrees).toEqual([1]);
+  });
+
+  it("memory default (2026-11-02): with several faces in view no voice candidate is raised or returned; memoryFaceCandidate never falls back to voice", async () => {
+    const m = memoryStub();
+    const c = setup({ speakerInCall: true, memory: m.link });
+    await enroll(c, "George", GEORGE);
+    await callVoice(c, GEORGE.utterance);
+    expect(c.svc.memoryCandidate()).toMatchObject({ name: "George", source: "voice" });
+    expect(c.svc.memoryFaceCandidate()).toBeNull();
+    const multi = await c.svc.handle({ op: "ambient_probe", track: 3, model: MODEL, face_count: 2, quality: "multi_face" });
+    expect(multi).toEqual({ ok: true, op: "ambient_probe" });
+    expect(c.svc.memoryCandidate()).toBeNull();
+    c.clock.now += 1000;
+    await callVoice(c, GEORGE.utterance);
+    expect(lastCall(c)).toContain("畫面有多張臉，不提候選");
+    expect(m.offers).toEqual([true]);
     expect(c.svc.memoryCandidate()).toBeNull();
   });
 

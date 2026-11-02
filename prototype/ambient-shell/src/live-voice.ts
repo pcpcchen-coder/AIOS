@@ -46,7 +46,7 @@ export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "releaseM
   /** MEM-2：取消瀏覽器語音合成（speechSynthesis.cancel）。 */
   cancelSpeech?(): void;
   /** MEM-2：記憶事件（狀態、卡片 ID、固定句提示、交辦封鎖）交給主程式顯示；內容由主程式經 IPC 取得。 */
-  memoryEvent?(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void;
+  memoryEvent?(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_default" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void;
   /**
    * MEM-2：停播並回報之後：顯示原因、清掉字幕與卡片；rebuild 時主程式開一通新的（只一次）。
    * 只有核心採用了停播回報（accepted）才重建；沒採用時不重建，等核心逾時後的「停止未確認」通知。
@@ -533,12 +533,13 @@ export class LiveVoice implements RealtimeSession {
         break;
       case "memory":
       case "memory_card":
+      case "memory_default":
       case "memory_notice":
       case "delegate_blocked":
       case "delegate_card":
       case "delegated":
         // 審查 M2：核心的記憶確認問句、交辦卡與提示一定要聽得到、看得到：靜音結束（記憶狀態本身不算）。
-        if (event.kind !== "memory" && !(event.kind === "memory_card" && !event.open)) this.endQuiet();
+        if (event.kind !== "memory" && !(event.kind === "memory_card" && !event.open) && !(event.kind === "memory_default" && event.phase !== "proposed")) this.endQuiet();
         this.deps.memoryEvent?.(event);
         break;
       case "hold":

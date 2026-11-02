@@ -31,13 +31,13 @@ import { activityDescription, collectRegionActivity, type RegionActivity } from 
 import { formatCount } from "./format.ts";
 import { homeControlLine, homeStatusLine } from "../shared/home.ts";
 import { classify, settingsReply } from "./intent.ts";
-import { RealtimeLocalCommands } from "./voice-command.ts";
+import { matchVoiceCommand, RealtimeLocalCommands } from "./voice-command.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
 import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
 import type { TasksRequest, TasksResponse, VaultView } from "../shared/protected-tasks.ts";
-import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
+import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, PresenceNotice, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
 import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
 import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
 import { AmbientIdentity } from "./sense/identity-ambient.ts";
@@ -158,6 +158,21 @@ const suggestionPrompt = new SuggestionPrompt({
   applied: (view) => {
     if (view.history_reset) session.forgetMemoryHistory();
     setMemoryPresence(view.presence);
+  },
+  changed: () => render(),
+});
+/**
+ * 記憶預設選人（George 2026-11-02）：一行「即將用／正在用 X 的記憶」與「不是我」（不是卡片、不擋聊天；收起只藏起來）。
+ */
+const presenceNoticeEl = $<HTMLDivElement>("presence-notice");
+const presenceNotice = new PresenceNotice({
+  bridge: window.nousDesktop?.memory ? { memory: (request) => window.nousDesktop!.memory!(request) } : null,
+  presence: () => memoryPresence,
+  applied: (view) => {
+    if (view.history_reset) session.forgetMemoryHistory();
+    setMemoryPresence(view.presence, view.status?.profiles.map(p => ({ id: p.id, name: p.name })));
+    const receipts = receiptsText(view.receipts);
+    if (receipts) showSubtitle(receipts, true);
   },
   changed: () => render(),
 });
@@ -288,6 +303,8 @@ const realtimeCallbacks: RealtimeCallbacks = {
   onUserTranscript: (text) => {
     showTranscript("user", text);
     handleCameraCommand(text);
+    // 說「收起」：記憶預設選人那一行也只藏起來（核心照常選定）。
+    if (matchVoiceCommand(text)?.kind === "dismiss") presenceNotice.hide();
   },
   // 鏡頭指令照舊（本機照做、這句話仍送到 AI）；其他只有整句是明確的畫面指令、而且不是剛才助理念的話（回音）才在本機執行。
   onLocalCommand: (text) => matchCameraCommand(text) === null && realtimeCommands.handle(text) !== null,
@@ -404,7 +421,7 @@ const LIVE_MEMORY_REASON: Record<LiveMemoryReason, string> = {
 };
 
 /** MEM-2：live 通話的記憶事件。SSE 只帶卡片 ID、筆數與固定句；卡片內容經 IPC card_view 取得。 */
-function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void {
+function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_default" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void {
   switch (event.kind) {
     case "memory":
       liveMemory = { used: event.used, reason: event.reason };
@@ -417,6 +434,12 @@ function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "mem
         break;
       }
       void memoryView.showLiveCard(event.card).then((shown) => { if (shown) dispatch({ type: "show.memory", request_id: userRequest() }); });
+      break;
+    case "memory_default":
+      // 記憶預設選人：等選定時經 IPC 取人物名；選定後重讀本次人物，只有就是卡上那位家人才顯示「正在用」。
+      if (event.phase === "proposed") void presenceNotice.propose(event.card);
+      else if (event.phase === "selected") { const card = event.card; void refreshMemoryStatus().then(() => presenceNotice.confirm(card, memoryPresence)); }
+      else presenceNotice.clear();
       break;
     case "memory_notice":
       showSubtitle(t(event.message));
@@ -490,6 +513,8 @@ function ticketOf(decision: SessionDecision): RealtimeTicket {
 function endRealtimeTicket(): void {
   const ticket = realtimeTicket;
   realtimeTicket = null;
+  // 通話在記憶預設選人選定之前結束：核心不會選定，那一行收掉。
+  presenceNotice.callEnded();
   // WK-02（F6）：結束原因（no_voice）與這通加總的 usage 交給核心的費用紀錄。
   // F6 一律記錄（George 2026-10-31，不綁喚醒開關）：usage 不論旗標都送。
   if (ticket?.route === "api_key") void api.realtimeEnd(ticketOf(ticket), { reason: takeEndReason(ticket.session_id), usage: realtime.usage ?? null }).catch(() => undefined);
@@ -1053,6 +1078,8 @@ function applyMemoryTurn(view: MemoryTurnView & { status?: MemoryStatusView }, u
   if (memoryTurnText.size > 32) memoryTurnText.delete(memoryTurnText.keys().next().value!);
   setMemoryPresence(view.presence, view.status?.profiles.map(p => ({ id: p.id, name: p.name })));
   if (view.history_reset) session.forgetMemoryHistory();
+  // 記憶預設選人：核心已依鏡頭認出的家人選定（這一句用他的記憶）；顯示一行「正在用 X 的記憶」與「不是我」。
+  if (view.auto_selected) presenceNotice.selected(view.presence);
   // MEM-5a：記憶建議只有卡片 ID；這一輪的回覆串流結束後才在回覆下方顯示一行（不擋聊天）。
   if (view.suggestion && view.chat && !view.card) suggestionPrompt.set(requestId, view.suggestion.card);
   else if (suggestionPrompt.requestId !== requestId) suggestionPrompt.clear();
@@ -1093,6 +1120,7 @@ function setMemoryPresence(presence: MemoryPresenceView | null, profiles?: { id:
     pendingDelegate = null;
     // 核心換世代時已丟掉記憶建議；畫面上的那一行也一起收掉。
     suggestionPrompt.clear();
+    presenceNotice.presenceChanged(presence);
   }
   memoryPresence = presence;
   if (profiles) memoryProfiles = profiles;
@@ -1112,6 +1140,7 @@ window.nousDesktop?.onMemoryChange?.(() => void refreshMemoryStatus());
 function closeConversation(): void {
   // WK-01a：說「收起」或按收起時，喚醒提示音一併取消（不觸發）。收起只關畫面，不關常駐聆聽。
   wake?.cancelEarcon();
+  presenceNotice.hide();
   conversationEpoch++;
   session.dismiss();
   conversation.stop();
@@ -2666,6 +2695,7 @@ function render(): void {
     capture: { push: voice.capturing, continuous: conversation.capturing || realtime.capturing }, playback: conversation.playing || realtime.playing,
   });
   renderRegionActivity(activity);
+  renderPresenceNotice();
   brain.setState({
     activity,
     conversation: phase,
@@ -2827,6 +2857,14 @@ function renderConversation(): void {
   conversationAnswer.textContent = `${t(PROVIDER_LABEL[provider])}：${answer}${reply.kind === "error" ? `\n${t(reply.message)}` : reply.kind === "interrupted" ? t("\n已打斷回覆。") : ""}`;
   renderDelegatePrompt(reply.requestId);
   renderSuggestionPrompt(reply.requestId, reply.kind === "complete");
+}
+
+/** 記憶預設選人那一行（不是 Surface；不擋聊天）。 */
+function renderPresenceNotice(): void {
+  const el = presenceNotice.render();
+  presenceNoticeEl.hidden = !el;
+  if (!el) { presenceNoticeEl.replaceChildren(); return; }
+  if (el.parentElement !== presenceNoticeEl) presenceNoticeEl.replaceChildren(el);
 }
 
 /** MEM-5a：「要記住『…』嗎？［記住］［不用］」：同一個 request_id 的回覆完成後才出現在回覆下方。 */

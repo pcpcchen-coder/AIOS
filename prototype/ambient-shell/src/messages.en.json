@@ -818,5 +818,9 @@
   "下一通起使用系統預設麥克風": "The system default microphone will be used from the next call",
   "「{0}」已中斷，改由系統預設播放": "“{0}” disconnected; playing through the system default instead",
   "已改回「{0}」播放": "Playing through “{0}” again",
-  "聲音裝置設定沒有保存：{0}": "Sound device settings were not saved: {0}"
+  "聲音裝置設定沒有保存：{0}": "Sound device settings were not saved: {0}",
+  "即將用 {0} 的記憶": "About to use {0}'s memory",
+  "正在用 {0} 的記憶": "Using {0}'s memory",
+  "不是我": "Not me",
+  "家人辨識只提出候選（門檻未校準），不是授權；不是你的話按「不是我」，這次改用全家共用的記憶。": "Family recognition only suggests a candidate (thresholds are uncalibrated); it is not authorization. If this isn't you, press “Not me” to use only the shared household memory this time."
 }

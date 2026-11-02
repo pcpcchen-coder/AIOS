@@ -757,8 +757,10 @@ class LiveCall implements RouteCall, LiveCallPort {
     void this.close("ended");
   }
 
-  async close(_reason: "ended" | "page_gone" | "fallback"): Promise<void> {
+  async close(reason: "ended" | "page_gone" | "fallback"): Promise<void> {
     if (this.ended) return;
+    // 記憶預設選人：改路徑時還在等選定的候選交給下一通（不默默丟掉）。
+    if (reason === "fallback") this.memory?.handOff?.();
     // 先送 session.close，再標記關閉（send 在關閉後不送任何東西）。
     if (this.socket.readyState === 1) {
       try {

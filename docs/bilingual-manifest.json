@@ -139,8 +139,8 @@
       "source": "docs/16_Nous_Memory_Layer_Design_2026-10-26.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/16_Nous_Memory_Layer_Design_2026-10-26.en.md",
-      "sourceSha256": "0a98ac458d19ef1d63156ff20be57deb9f3ada47425ac575a0ba99466521143e",
-      "translationSha256": "b1c1d43d04d40a3317bf028bd3159e5f9f8f54f4b879db83aac0e15f62f318cf"
+      "sourceSha256": "a2d77f6693ff0ffad28de53cc353a37b7d63a4af5f505f9cb886143aab5d67e5",
+      "translationSha256": "83a7c693249631720af87ad2e2a505a054a68587e033f74933245d1c5fd92216"
     },
     {
       "source": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md",
@@ -158,8 +158,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "6b1f4f684b8c4c098ebfe459379226c9e6356ea1d4e9c53c0aae33fadc0f324e",
-      "translationSha256": "e4496957771b9e4932fe11f4724d74748466924eec2b340ff6a9eff5db2fef7c"
+      "sourceSha256": "5e5af8a0c40a7cc22289f05efe36f9c80822f135e1aea4625df5c3d71e36044e",
+      "translationSha256": "85975777998eece8e5bbc4be149b57bc30c5843c4872401ea0c059685b869380"
     },
     {
       "source": "docs/README.md",
@@ -228,8 +228,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "e6791d55eaaeedcfdbfced20fb187a8d0de0f6aa5d97ef1071b016c23f955918",
-      "translationSha256": "2556ce9a2527c9e15005b050402e987e9172e9299097fe9262bfff7680c79aec"
+      "sourceSha256": "e91a2e28d488c67d10446c68779cd90f58a674fa5c1a86d7eede2aa18443e987",
+      "translationSha256": "653e3dc114161d767e2b17c2de2d0704b45df23050ca55189bd489d2edcc85d8"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
@@ -484,6 +484,13 @@
       "translationSha256": "35d9e5ef0248048e552cfe7a9e4654429e37705b966f4af70f0b4e9ecdbabcd0"
     },
     {
+      "source": "docs/validation/memory-voice-default-2026-11-02.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/memory-voice-default-2026-11-02.en.md",
+      "sourceSha256": "bab5afa591878868018b64bee2fb328539ae4a2c1ceb8f9987c578d388afcc73",
+      "translationSha256": "2c5263afa4363012d9f2d35b741f7e54a44b0d79ff9d8414dbf5921784e7d63e"
+    },
+    {
       "source": "docs/validation/menu-seconds-commands-2026-10-22.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/menu-seconds-commands-2026-10-22.en.md",
@@ -543,8 +550,8 @@
       "source": "docs/validation/sp-02b-2026-11-01.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/sp-02b-2026-11-01.en.md",
-      "sourceSha256": "ab529f9466727322b90ad8ca5744d5b6361788ea7b8197731b2dc6903acb9445",
-      "translationSha256": "f5a87c084bac87f102d4b84027b160149b18c3d468ca6cb75a4ba2b73aec70a7"
+      "sourceSha256": "6d3fe1bf195450eb42d698055f1aca3b6ad38af56c484a362034cf199e35b3f0",
+      "translationSha256": "140adb0370745b48046ca2956f3f7a07e39915f8567f997389d14f803cff0d7e"
     },
     {
       "source": "docs/validation/sp-03a-2026-11-01.md",
