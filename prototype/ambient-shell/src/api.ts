@@ -7,7 +7,8 @@ import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { WakePrefsPatch } from "../shared/wake.ts";
 import type { PageEndReason, VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
-import type { IntegrationStatusView } from "../shared/integrations.ts";
+import type { IntegrationStatusView, ToolResult } from "../shared/integrations.ts";
+import type { IntentId, MusicService, RelayRefusal, RelayTrial, VoiceRelayPart, VoiceRelayPreview, VoiceRelayView } from "../shared/voice-relay.ts";
 import { historySearchPath, type HistoryDetail, type HistoryPage, type HistoryQuery } from "../shared/history.ts";
 import type { ApprovalReport, CallAnswer, FallbackOffer, LiveInputKind, RealtimePrefsPatch, StartDecision, StopEvidence, StopReplyTurn } from "../shared/realtime-route.ts";
 import { FallbackOfferError } from "./realtime-session.ts";
@@ -16,6 +17,27 @@ import { FallbackOfferError } from "./realtime-session.ts";
 export interface RealtimeTicket {
   session_id: string;
   owner: string;
+}
+
+// ---- VCR-2：語音中繼診斷區的請求內容（核心嚴格檢查；多的鍵是 400） ----
+export interface VoiceRelaySlots { genre?: string; device?: string; on?: boolean; percent?: number; seconds?: number }
+export interface VoiceRelayPreviewBody { target_id: string; intent_id: IntentId; slots?: VoiceRelaySlots; template_id?: string; voice_profile_id?: string }
+export interface VoiceRelayPlayBody extends VoiceRelayPreviewBody { part: VoiceRelayPart }
+/** 播放回覆：診斷解析被拒絕（沒有播放）或統一結果（永遠不是 confirmed：音箱有沒有照做沒有回讀）。 */
+export type VoiceRelayPlayReply = ToolResult | { status: "refused"; reason: RelayRefusal };
+export interface VoiceRelayTargetBody { id?: string; locale: "zh-TW" | "en-US"; output_device_id: string; voice_id: string; music_service: MusicService }
+export interface VoiceRelayProfileBody { target_id: string; id?: string; voice_id: string; rate: number; gain_db: number; pause_ms: number; lead_ms: number; tail_ms: number }
+export interface VoiceRelayAdoptBody { target_id: string; intent_id: IntentId; template_id: string; template_version: number; voice_profile_id: string }
+export interface VoiceRelayUnadoptBody { target_id: string; template_id: string; template_version: number }
+export interface VoiceRelayTrialBody {
+  target_id: string;
+  template_id: string;
+  template_version: number;
+  voice_profile_id: string;
+  kind: RelayTrial["kind"];
+  wake: RelayTrial["wake"];
+  command: RelayTrial["command"];
+  evidence: RelayTrial["evidence"];
 }
 
 export class ApiError extends Error {
@@ -98,6 +120,17 @@ export const api = {
     call<Record<string, unknown>>("POST", "/api/integrations/call", { ...ticket, name, arguments: args }),
   /** AIL-1：按需的整合服務狀態。 */
   integrationStatus: () => call<IntegrationStatusView>("GET", "/api/integrations/status"),
+  // VCR-2：設定頁「語音中繼（實驗）」診斷區（核心沒有註冊 voice_relay 時這些路徑是 404）。
+  voiceRelay: () => call<VoiceRelayView>("GET", "/api/voice-relay"),
+  voiceRelayRefresh: () => call<VoiceRelayView>("POST", "/api/voice-relay/refresh", {}),
+  voiceRelayPreview: (body: VoiceRelayPreviewBody) => call<{ result: VoiceRelayPreview }>("POST", "/api/voice-relay/preview", body),
+  voiceRelayPlay: (body: VoiceRelayPlayBody) => call<VoiceRelayPlayReply>("POST", "/api/voice-relay/play", body),
+  voiceRelayAdopt: (body: VoiceRelayAdoptBody) => call<VoiceRelayView>("POST", "/api/voice-relay/adopt", body),
+  voiceRelayUnadopt: (body: VoiceRelayUnadoptBody) => call<VoiceRelayView>("POST", "/api/voice-relay/unadopt", body),
+  voiceRelayTarget: (body: VoiceRelayTargetBody) => call<VoiceRelayView>("POST", "/api/voice-relay/target", body),
+  voiceRelayProfile: (body: VoiceRelayProfileBody) => call<VoiceRelayView>("POST", "/api/voice-relay/profile", body),
+  voiceRelayTrial: (body: VoiceRelayTrialBody) => call<VoiceRelayView>("POST", "/api/voice-relay/trial", body),
+  voiceRelayEnabled: (body: { target_id: string; enabled: boolean }) => call<VoiceRelayView>("POST", "/api/voice-relay/enabled", body),
   realtimeHostResult: (ticket: RealtimeTicket, callId: string, output: Record<string, unknown>) =>
     call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/host-result", { ...ticket, call_id: callId, output }),
   /** WK-02（F6）：可選的結束原因（no_voice）與 API key 路徑加總的 usage（核心的費用紀錄）。 */

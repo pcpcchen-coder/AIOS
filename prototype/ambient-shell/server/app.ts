@@ -49,6 +49,8 @@ import type { VoiceRoute } from "./memory/live.ts";
 import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
+import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
+import { VoiceRelayStoreError } from "./integrations/voice-relay/store.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
@@ -271,6 +273,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         audio: { prefs: options.audio?.view() ?? { ...DEFAULT_AUDIO_PREFS }, write_path: AUDIO_WRITE_PATH },
         ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
         ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name) } } : {}),
+        // VCR-2：只有註冊了 voice_relay 才有這個鍵（沒有時輸出和之前完全相同）。
+        ...(options.integrations?.voiceRelay ? { voice_relay: true } : {}),
       };
     },
     select: (provider: ExecutorMode) => options.settings.select(provider),
@@ -588,6 +592,22 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (options.integrations && method === "GET" && path === "/api/integrations/status") {
       // 按需的服務狀態（頁面要看時才查）：只有健康代碼、原因代碼與工具數，沒有網址、帳號或播放內容。
       return sendJson(res, 200, await options.integrations.status.view());
+    }
+
+    if (options.integrations?.voiceRelay && (path === "/api/voice-relay" || path.startsWith("/api/voice-relay/"))) {
+      // VCR-2：設定頁「語音中繼（實驗）」診斷區（按需；和其他設定 POST 一樣只靠 http-guard）。沒有註冊 voice_relay 時落到 404。
+      const controller = new AbortController();
+      res.on("close", () => {
+        if (!res.writableEnded) controller.abort();
+      });
+      let result: unknown;
+      try {
+        result = await handleVoiceRelayRoute(options.integrations.voiceRelay, method, path, () => readJson(req), controller.signal);
+      } catch (err) {
+        if (err instanceof VoiceRelayStoreError) throw new HttpError(err.status, err.message);
+        throw err;
+      }
+      if (result !== undefined) return sendJson(res, 200, result);
     }
 
     if (options.integrations && method === "POST" && path === "/api/integrations/call") {

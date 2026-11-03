@@ -35,9 +35,12 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]/u;
 export const TEXT_MAX = 120;
 const PLACEHOLDER = /\{([a-z_]+)\}/g;
 
-/** 要播出的文字：非空、沒有控制字元或換行、≤120 字。 */
+/** VCR-2：say 的內嵌控制標記（[[slnc]]、[[volm]]…）；會播出的文字不能含 [[ 或 ]]。 */
+const SAY_MARKUP = /\[\[|\]\]/;
+
+/** 要播出的文字：非空、沒有控制字元或換行、沒有 [[／]]、≤120 字。 */
 export function safeText(value: string): boolean {
-  return value.trim().length > 0 && value.length <= TEXT_MAX && !CONTROL.test(value);
+  return value.trim().length > 0 && value.length <= TEXT_MAX && !CONTROL.test(value) && !SAY_MARKUP.test(value);
 }
 
 /** 比對用的正規化：NFKC、小寫、拿掉所有空白與格式字元（"OK  Google"、"ok\u200bgoogle" 都變成 "okgoogle"）。 */
@@ -83,7 +86,7 @@ class Checker {
     return true;
   }
   text(v: unknown, path: string): boolean {
-    if (typeof v !== "string" || !safeText(v)) return this.err(path, `必須是 1–${TEXT_MAX} 字、沒有控制字元或換行的文字`), false;
+    if (typeof v !== "string" || !safeText(v)) return this.err(path, `必須是 1–${TEXT_MAX} 字、沒有控制字元、換行或 [[ ]] 的文字`), false;
     return true;
   }
   optStr(v: unknown, path: string, pattern?: RegExp, max?: number): void {

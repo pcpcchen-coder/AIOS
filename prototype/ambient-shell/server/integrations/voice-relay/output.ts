@@ -1,7 +1,7 @@
 import type { TtsEngine } from "../../../shared/voice-relay.ts";
 
-// VCR-0／VCR-1（fake）：輸出端介面。實體播音（Mac TTS → Pi 喇叭，VCR-2/3）尚未實作；
-// 目前只有 FakeRelayOutput（mock）：不合成、不發聲，只記錄工作並依情境回傳收據，用來測試結果對應。
+// VCR-0／VCR-1（fake）／VCR-2（mac）：輸出端介面。FakeRelayOutput（mock）：不合成、不發聲，只記錄工作並依情境回傳收據；
+// MacSayOutput（mac-say.ts）：Mac 的 say 實際從喇叭發聲（沒有在真的 Mac 上驗證過）。Pi 喇叭（VCR-3）尚未實作。
 // 收據只說「合成完成／開始播／播完」；就算播完也只代表聲音送出了，不代表音箱照做（結果最多 unconfirmed）。
 
 export type RelaySegment = { kind: "silence"; ms: number } | { kind: "speech"; part: "wake" | "command"; text: string };
@@ -31,8 +31,19 @@ export interface PlaybackReceipt {
   mock: boolean;
 }
 
+/** 診斷畫面用：輸出端現在有哪些聲音與喇叭（fake 是示範清單）。 */
+export interface RelayInventory {
+  voices: { id: string; locale: string }[];
+  devices: { id: string; name: string }[];
+  checkedAt: number | null;
+  error: string | null;
+}
+
 export interface RelayOutput {
   readonly mock: boolean;
+  inventory?(): RelayInventory;
+  /** 重新讀聲音與喇叭清單（mac）。 */
+  refresh?(): Promise<void>;
   voiceAvailable(node: string, engine: TtsEngine, voiceId: string): boolean;
   /** 播一次；不重試。收據可能缺漏或對不上（呼叫端要驗證）。 */
   play(job: RelayJob, signal: AbortSignal): Promise<PlaybackReceipt>;
@@ -41,7 +52,9 @@ export interface RelayOutput {
 export type FakeScenario = "finished" | "synthesis_failed" | "device_unavailable" | "synthesis_only" | "timeout_mid" | "interrupted" | "receipt_lost" | "wrong_job" | "wrong_device";
 
 export interface FakeRelayOutputOptions {
-  voices: { node: string; engine: TtsEngine; voiceId: string }[];
+  voices: { node: string; engine: TtsEngine; voiceId: string; locale?: string }[];
+  /** 診斷畫面列出的假喇叭（沒有實體裝置）。 */
+  devices?: { id: string; name: string }[];
   scenario?: () => FakeScenario;
 }
 
@@ -52,6 +65,12 @@ export class FakeRelayOutput implements RelayOutput {
   readonly jobs: RelayJob[] = [];
 
   constructor(private readonly options: FakeRelayOutputOptions) {}
+
+  inventory(): RelayInventory {
+    const voices = new Map<string, string>();
+    for (const v of this.options.voices) if (!voices.has(v.voiceId)) voices.set(v.voiceId, v.locale ?? "");
+    return { voices: [...voices].map(([id, locale]) => ({ id, locale })), devices: [...(this.options.devices ?? [])], checkedAt: null, error: null };
+  }
 
   voiceAvailable(node: string, engine: TtsEngine, voiceId: string): boolean {
     return this.options.voices.some((v) => v.node === node && v.engine === engine && v.voiceId === voiceId);

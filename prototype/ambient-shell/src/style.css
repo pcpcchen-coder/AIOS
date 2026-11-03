@@ -1415,3 +1415,34 @@ body.history-page {
 }
 .presence-notice { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 6px 12px; border-radius: 12px; font-size: 14px; background: rgba(10, 16, 28, 0.72); color: var(--text, #e6f1ff); }
 .presence-notice p { margin: 0; flex-basis: 100%; }
+
+/* VCR-2：設定頁「語音中繼（實驗）」診斷區（沿用 camera-settings／pref-list／chip） */
+.voice-relay-form,
+.voice-relay-target,
+.voice-relay-intent {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.voice-relay-form label,
+.voice-relay-edit label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.voice-relay-profile,
+.voice-relay-template {
+  flex-wrap: wrap;
+}
+.voice-relay-edit,
+.voice-relay-result,
+.voice-relay-trial {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+.voice-relay-edit input[type="number"],
+.voice-relay-intent input[type="number"] {
+  width: 6em;
+}
