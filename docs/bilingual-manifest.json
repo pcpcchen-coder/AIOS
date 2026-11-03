@@ -150,6 +150,13 @@
       "translationSha256": "d96212fded2fdcc5d4f950d4b4e9dfa7ac37959a55688d927e2aa3d04bac7072"
     },
     {
+      "source": "docs/18_App_Integration_Layer_and_Spotify_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/18_App_Integration_Layer_and_Spotify_2026-11.en.md",
+      "sourceSha256": "dd50150eac773c687ba1e1fc278d3f1e235cd6880a12c0f4e8b6fdf73c0535c2",
+      "translationSha256": "fe9623cc2643530c74d5ce244ee19cb4b1e3289b16b3e29d30e0db250b56cf0b"
+    },
+    {
       "source": "docs/BILINGUAL.md",
       "mode": "inline",
       "sha256": "d2ba4d1c494863262594e6d315bcc32759e377756ad7b7de0680e757955cc0cc"
@@ -165,8 +172,8 @@
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "566b2092f54d3b7e48ef3f70e40a794dad832bd75ce91ec75cb7f83433579be2",
-      "translationSha256": "fd131361c143010cb1fe887094a16eecb2b6531aa39f8f3fd23b17ee4b803c46"
+      "sourceSha256": "85ef85bb13187f1f042166f0a7cfe0a6d3edb0f23e213bb61e05982573f019bd",
+      "translationSha256": "eb873252f20e87547df85f0eb1722cfc062120d83fcbca3033774ad748bb22b1"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
@@ -223,6 +230,13 @@
       "translation": "docs/development/pstack.en.md",
       "sourceSha256": "9188aead095ece6faffaa1d0fed089534fab240ead975ba75ffeeb221b155fba",
       "translationSha256": "fe5870de22710ce0c894e1a11315d51141185a70be14290ee695258e550996be"
+    },
+    {
+      "source": "docs/experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.en.md",
+      "sourceSha256": "bfca85734a568fcf799f651b1a38c72ee0783cd289fb8a7b323cc96bdeee766e",
+      "translationSha256": "1734fc0c842885174b0b6b1325c2016eb2b3b54ed7b9bd1e6b321aeab451876b"
     },
     {
       "source": "docs/validation/README.md",
