@@ -36,9 +36,10 @@ for arg in "$@"; do
 done
 
 user_name="${USER:-$(id -un)}"
-key_comment="aios-terminal@$(hostname)"
+# Match the key body, not the comment: every Pi defaults to the hostname "raspberrypi".
+revoke_pattern="/ aios-terminal@$(hostname)\$/d"
 if [[ -f "$AIOS_KEY.pub" ]]; then
-  key_comment="$(awk 'NR==1 {print $3}' "$AIOS_KEY.pub")"
+  revoke_pattern="\\|$(awk 'NR==1 {print $2}' "$AIOS_KEY.pub")|d"
 fi
 
 systemctl --user disable --now "${AIOS_UNITS[@]}" >/dev/null 2>&1 || true
@@ -73,9 +74,9 @@ t "已移除 AIOS Pi 終端。
 若也要移除套件（可能有其他程式在用）：
   sudo apt-get remove autossh chromium
 若要撤銷 Mac 對此 Pi 的授權，在 Mac 執行：
-  sed -i '' '/ $key_comment\$/d' ~/.ssh/authorized_keys" \
+  sed -i '' '$revoke_pattern' ~/.ssh/authorized_keys" \
   "AIOS Pi terminal removed.
 To also remove packages (other programs may use them):
   sudo apt-get remove autossh chromium
 To revoke this Pi's access on the Mac, run on the Mac:
-  sed -i '' '/ $key_comment\$/d' ~/.ssh/authorized_keys"
+  sed -i '' '$revoke_pattern' ~/.ssh/authorized_keys"

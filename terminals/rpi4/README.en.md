@@ -88,7 +88,7 @@ AIOS_MAC_USER=george AIOS_MAC_HOST=mac-mini.local AIOS_PORT=8787 \
 AIOS_MAC_HOSTKEY_SHA256='SHA256:...' bash install.sh --non-interactive
 ```
 
-Other options: `--skip-apt` (no packages), `--skip-copy-id` (public key already on the Mac), `--help`. Re-running the installer converges to the same state without duplicating entries.
+Other options: `--skip-apt` (no packages), `--skip-copy-id` (public key already on the Mac), `--help`. Re-running the installer converges to the same state without duplicating entries; if the port or host changed, the installer restarts the tunnel (and the kiosk if it is running), so the new settings apply immediately.
 
 ### Boot straight into the terminal screen
 
@@ -108,7 +108,7 @@ The kiosk uses `--kiosk --app=http://localhost:<AIOS_PORT>`, a dedicated profile
 aios-doctor
 ```
 
-Each check prints `PASS`, `WARN`, `FAIL` or `SKIP`; the exit code is 1 if anything fails. Checks: config file, SSH key and known_hosts, `aios-tunnel.service`, whether the Pi local port is listening, the core `GET /api/settings` (the core has no `/api/health`; the response body is never printed), the page `GET /`, whether the Mac SSH port is reachable, `aios-kiosk.service`, Chromium, microphones (`arecord -l`), speakers (`aplay -l`), cameras (`v4l2-ctl --list-devices`, none is only a WARN), temperature (WARN from 70 °C, FAIL from 80 °C), `vcgencmd get_throttled` (current under-voltage or throttling is a FAIL, occurred since boot is a WARN), available memory (WARN below 15%), and the default network route. Output follows `LANG`; set `AIOS_LANG=en` or `AIOS_LANG=zh-TW` to choose.
+Each check prints `PASS`, `WARN`, `FAIL` or `SKIP`; the exit code is 1 if anything fails. Checks: config file, SSH key and known_hosts, `aios-tunnel.service`, whether the Pi local `127.0.0.1:<port>` is listening, the core `GET /api/settings` (the core has no `/api/health`; the response body is never printed), the page `GET /`, whether the Mac SSH port is reachable, `aios-kiosk.service`, Chromium, microphones (`arecord -l`), speakers (`aplay -l`), cameras (`v4l2-ctl --list-devices`, excluding the Pi's built-in bcm2835 / rpivid codec nodes; none is only a WARN), temperature (WARN from 70 °C, FAIL from 80 °C), `vcgencmd get_throttled` (current under-voltage or throttling is a FAIL, occurred since boot is a WARN), available memory (WARN below 15%), and the default network route. Output follows `LANG`; set `AIOS_LANG=en` or `AIOS_LANG=zh-TW` to choose.
 
 ## Daily operation
 
@@ -127,7 +127,7 @@ bash uninstall.sh
 bash uninstall.sh --purge
 ```
 
-`uninstall.sh` disables and removes both services, the autostart entry, the command links and the installed scripts, and turns linger back off if the installer turned it on. The config, key and Chromium profile stay unless you pass `--purge`. It does not remove apt packages and does not touch the Mac: it prints the command to remove the packages and how to delete the `aios-terminal@<Pi hostname>` line from the Mac's `~/.ssh/authorized_keys`. To roll back the Mac, turn off Remote Login in Sharing and comment `PORT` out of `.env` again.
+`uninstall.sh` disables and removes both services, the autostart entry, the command links and the installed scripts, and turns linger back off if the installer turned it on. The config, key and Chromium profile stay unless you pass `--purge`. It does not remove apt packages and does not touch the Mac: it prints the command to remove the packages and the command that deletes the line containing this Pi's public key from the Mac's `~/.ssh/authorized_keys` (matched by key content, not the comment, because every Pi defaults to the hostname `raspberrypi`). To roll back the Mac, turn off Remote Login in Sharing and comment `PORT` out of `.env` again.
 
 <a id="known-limitations"></a>
 ## Known limitations (not fixed in RPI-1)
@@ -137,11 +137,16 @@ bash uninstall.sh --purge
 - **Wake listening can only be turned on from the App menu**, and it listens on the microphone used by the Mac main window, not the Pi microphone.
 - **The Mac main window and the Pi page connect to the same core at the same time** (from reading the code, not confirmed on hardware):
   - SSE: the core broadcasts through a client map, so both pages receive the same task and settings events and update their own screens.
-  - Realtime voice: the core allows only one call at a time (ChatGPT plan and API key routes alike). While one side is in a call, starting on the other side returns "busy" (`session_busy`, HTTP 409). Each call belongs to the page that started it, and reply audio plays only on that page.
+  - Realtime voice depends on the route:
+    - While a ChatGPT plan call is active, any call started from the other side is refused; the start response is HTTP 200 with `ok: false` and "busy" (`session_busy`).
+    - While an API key call with memory rules is active, the same refusal applies.
+    - While an API key call without memory is active, starting another API key call from the other side makes the core **end the existing call** without any busy message; starting a ChatGPT plan call from the other side may run both calls at once.
+    - Each call belongs to the page that started it, and reply audio plays only on that page.
   - Always-on wake or "look to talk" on the Mac may start a call from the Mac while the Pi is in use, taking the only call slot.
   - The forced mute on memory revocation applies only to the Mac main window.
   - Recommendation: while using the Pi, turn off always-on wake listening and the camera from the App menu on the Mac, minimise or hide the Mac window, and do not start voice from the Mac.
-- The Pi runs no Agent and stores no task data. If the Mac sleeps or the App quits, the Pi screen has no core to reach; the kiosk waits until the core returns.
+- The Pi runs no Agent and stores no task data. If the Mac sleeps or the App quits, the Pi screen has no core to reach. The kiosk waits for the core only before it opens Chromium; once Chromium is open it does not exit by itself, so recovery relies on the page's own reconnection, or run `systemctl --user restart aios-kiosk.service`.
+- The `aios-doctor` speakers check only looks for playback devices. A Pi with HDMI connected always has an HDMI audio device, so PASS does not mean a USB speaker is connected or selected as output; read the device names in the output.
 
 <a id="rpi-2-draft"></a>
 ## RPI-2 draft plan: trusted Pi terminal pairing (not implemented)

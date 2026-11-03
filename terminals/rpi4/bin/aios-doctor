@@ -66,7 +66,7 @@ if ((config_ok)); then
   label="$(t "本機轉送埠" "local forward port")"
   if ! have ss; then
     report SKIP "$label" "$(missing ss)"
-  elif [[ -n "$(ss -ltnH "sport = :$AIOS_PORT" 2>/dev/null || true)" ]]; then
+  elif [[ -n "$(ss -ltnH "src 127.0.0.1:$AIOS_PORT" 2>/dev/null || true)" ]]; then
     report PASS "$label" "127.0.0.1:$AIOS_PORT $(t "監聽中" "listening")"
   else
     report FAIL "$label" "$(t "127.0.0.1:$AIOS_PORT 沒有監聽；SSH 通道未建立" "nothing listening on 127.0.0.1:$AIOS_PORT; the SSH tunnel is not up")"
@@ -164,9 +164,13 @@ label="$(t "鏡頭" "cameras")"
 if ! have v4l2-ctl; then
   report SKIP "$label" "$(missing v4l2-ctl)"
 else
-  n="$( (v4l2-ctl --list-devices 2>/dev/null || true) | grep -c '/dev/video' || true)"
+  # The Pi 4 always lists its built-in codec/ISP nodes (bcm2835-codec, bcm2835-isp, rpivid); only other devices are cameras.
+  n="$( (v4l2-ctl --list-devices 2>/dev/null || true) | awk '
+    /^[^ \t]/ { builtin = ($0 ~ /bcm2835|rpivid|rpi-hevc|pispbe|platform:/) }
+    /^[ \t]+\/dev\/video/ && !builtin { count++ }
+    END { print count + 0 }')"
   if ((n > 0)); then
-    report PASS "$label" "$(t "$n 個 video 節點" "$n video node(s)")"
+    report PASS "$label" "$(t "$n 個鏡頭 video 節點（不含 Pi 內建編解碼節點）" "$n camera video node(s) (Pi built-in codec nodes excluded)")"
   else
     report WARN "$label" "$(t "沒有偵測到鏡頭（鏡頭為選配）" "no camera detected (camera is optional)")"
   fi

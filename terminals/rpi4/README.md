@@ -88,7 +88,7 @@ AIOS_MAC_USER=george AIOS_MAC_HOST=mac-mini.local AIOS_PORT=8787 \
 AIOS_MAC_HOSTKEY_SHA256='SHA256:...' bash install.sh --non-interactive
 ```
 
-其他選項：`--skip-apt`（不裝套件）、`--skip-copy-id`（公鑰已在 Mac 上）、`--help`。重跑安裝會收斂到同一狀態，不會重複寫入。
+其他選項：`--skip-apt`（不裝套件）、`--skip-copy-id`（公鑰已在 Mac 上）、`--help`。重跑安裝會收斂到同一狀態，不會重複寫入；改了 port 或主機時，安裝程式會重啟通道（kiosk 若在執行也會重啟），新設定立即生效。
 
 ### 開機自動進入終端畫面
 
@@ -108,7 +108,7 @@ kiosk 用 `--kiosk --app=http://localhost:<AIOS_PORT>`、獨立 profile（`~/.lo
 aios-doctor
 ```
 
-逐項輸出 `PASS`、`WARN`、`FAIL` 或 `SKIP`，任何 `FAIL` 時結束碼為 1。檢查項目：設定檔、SSH key 與 known_hosts、`aios-tunnel.service`、Pi 本機 port 是否在聽、核心 `GET /api/settings`（核心沒有 `/api/health`，不印出回應內容）、頁面 `GET /`、Mac SSH port 可否連線、`aios-kiosk.service`、Chromium、麥克風（`arecord -l`）、喇叭（`aplay -l`）、鏡頭（`v4l2-ctl --list-devices`，沒有只算 WARN）、溫度（70 °C 起 WARN、80 °C 起 FAIL）、`vcgencmd get_throttled`（目前低電壓或降頻為 FAIL，開機後曾發生為 WARN）、可用記憶體（低於 15% 為 WARN）、預設網路路由。輸出語言跟著 `LANG`，也可設 `AIOS_LANG=en` 或 `AIOS_LANG=zh-TW`。
+逐項輸出 `PASS`、`WARN`、`FAIL` 或 `SKIP`，任何 `FAIL` 時結束碼為 1。檢查項目：設定檔、SSH key 與 known_hosts、`aios-tunnel.service`、Pi 本機 `127.0.0.1:<port>` 是否在聽、核心 `GET /api/settings`（核心沒有 `/api/health`，不印出回應內容）、頁面 `GET /`、Mac SSH port 可否連線、`aios-kiosk.service`、Chromium、麥克風（`arecord -l`）、喇叭（`aplay -l`）、鏡頭（`v4l2-ctl --list-devices`，不計 Pi 內建的 bcm2835／rpivid 編解碼節點，沒有只算 WARN）、溫度（70 °C 起 WARN、80 °C 起 FAIL）、`vcgencmd get_throttled`（目前低電壓或降頻為 FAIL，開機後曾發生為 WARN）、可用記憶體（低於 15% 為 WARN）、預設網路路由。輸出語言跟著 `LANG`，也可設 `AIOS_LANG=en` 或 `AIOS_LANG=zh-TW`。
 
 ## 日常操作
 
@@ -127,7 +127,7 @@ bash uninstall.sh
 bash uninstall.sh --purge
 ```
 
-`uninstall.sh` 停用並移除兩個服務、自動啟動檔、指令連結與安裝的腳本；若 linger 是安裝程式開的就關回去。設定、key 與 Chromium profile 預設保留，`--purge` 才刪除。它不移除 apt 套件，也不碰 Mac：畫面會印出移除套件的指令，以及從 Mac 的 `~/.ssh/authorized_keys` 刪掉 `aios-terminal@<Pi 主機名>` 那一行的方法。Mac 端要回復，另外在「共享」關掉遠端登入，並把 `.env` 的 `PORT` 改回註解。
+`uninstall.sh` 停用並移除兩個服務、自動啟動檔、指令連結與安裝的腳本；若 linger 是安裝程式開的就關回去。設定、key 與 Chromium profile 預設保留，`--purge` 才刪除。它不移除 apt 套件，也不碰 Mac：畫面會印出移除套件的指令，以及從 Mac 的 `~/.ssh/authorized_keys` 刪掉含這台 Pi 公鑰那一行的指令（以公鑰內容比對，不用註解，因為每台 Pi 預設主機名都是 `raspberrypi`）。Mac 端要回復，另外在「共享」關掉遠端登入，並把 `.env` 的 `PORT` 改回註解。
 
 <a id="known-limitations"></a>
 ## 已知限制（RPI-1 不修）
@@ -137,11 +137,16 @@ bash uninstall.sh --purge
 - **喚醒聆聽只能由 App 選單打開**，而且聽的是 Mac 主視窗所用的麥克風，不是 Pi 的麥克風。
 - **Mac 主視窗與 Pi 頁面同時連同一個核心**（依程式碼閱讀，未經實機確認）：
   - SSE：核心以 client 對照表廣播，兩個頁面都收到同樣的任務與設定事件，各自更新畫面。
-  - 即時語音：核心同一時間只允許一通（ChatGPT 方案或 API key 路徑都一樣）。一邊通話中，另一邊開始會得到「忙線」（`session_busy`，HTTP 409）。每通由開始它的頁面擁有，回覆聲音只在那個頁面播放。
+  - 即時語音，依路徑不同：
+    - ChatGPT 方案的通話進行中：另一邊開始任何通話都會被拒絕，開始的回應是 HTTP 200 加上 `ok: false` 與「忙線」（`session_busy`）。
+    - 帶記憶規則的 API key 通話進行中：同樣拒絕。
+    - 不帶記憶的 API key 通話進行中：另一邊再開始 API key 通話時，核心會**直接結束原本那通**，不顯示忙線；另一邊若開始 ChatGPT 方案通話，兩通可能同時進行。
+    - 每通由開始它的頁面擁有，回覆聲音只在那個頁面播放。
   - Mac 上的常駐喚醒或「看著說話」可能在 Pi 使用時從 Mac 開始一通語音，占住唯一的通話。
   - 記憶撤銷時的強制靜音只作用在 Mac 主視窗。
   - 建議：用 Pi 時在 Mac 的 App 選單關掉常駐喚醒聆聽與鏡頭，把 Mac 視窗縮到 Dock 或隱藏，不從 Mac 開始語音。
-- Pi 端不跑 Agent、不存任務資料；Mac 睡眠或 App 結束，Pi 畫面就沒有核心可連，kiosk 會等到核心回來。
+- Pi 端不跑 Agent、不存任務資料。Mac 睡眠或 App 結束時，Pi 畫面就沒有核心可連。kiosk 只在開 Chromium 之前等核心；Chromium 已經開著時不會自己結束，恢復要靠頁面本身的重新連線，必要時執行 `systemctl --user restart aios-kiosk.service`。
+- `aios-doctor` 的喇叭檢查只看有沒有播放裝置；接著 HDMI 的 Pi 一定有 HDMI 聲音裝置，所以 PASS 不代表 USB 喇叭已接上或已選為輸出，請看輸出裡列出的裝置名稱。
 
 <a id="rpi-2-draft"></a>
 ## RPI-2 規劃草案：受信任的 Pi 終端配對（未實作）

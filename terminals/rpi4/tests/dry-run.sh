@@ -88,7 +88,10 @@ fake ss 'if [[ -z "${FAKE_SS_EMPTY:-}" ]]; then echo "LISTEN 0 128 127.0.0.1:878
 fake arecord 'echo "card 2: Device [USB PnP Sound Device], device 0: USB Audio [USB Audio]"'
 fake aplay 'echo "card 0: vc4hdmi0 [vc4-hdmi-0], device 0: MAI PCM i2s-hifi-0 [MAI PCM i2s-hifi-0]"
 echo "card 2: Device [USB PnP Sound Device], device 0: USB Audio [USB Audio]"'
-fake v4l2-ctl 'printf "USB Camera (usb-0000:01:00.0-1.2):\n\t/dev/video0\n\t/dev/video1\n"'
+fake v4l2-ctl 'printf "bcm2835-codec-decode (platform:bcm2835-codec):\n\t/dev/video10\n\t/dev/video11\n\t/dev/video12\n\n"
+printf "bcm2835-isp (platform:bcm2835-isp):\n\t/dev/video13\n\t/dev/video14\n\n"
+printf "rpivid (platform:rpivid):\n\t/dev/video19\n\t/dev/media0\n\n"
+if [[ -z "${FAKE_NO_CAMERA:-}" ]]; then printf "USB Camera (usb-0000:01:00.0-1.2):\n\t/dev/video0\n\t/dev/video1\n"; fi'
 fake vcgencmd 'case "${1:-}" in
   measure_temp) echo "temp=${FAKE_TEMP:-48.3}'"'"'C" ;;
   get_throttled) echo "throttled=${FAKE_THROTTLED:-0x0}" ;;
@@ -147,7 +150,7 @@ run_install() {
 use_home home
 reset_calls
 check "install --non-interactive succeeds with the correct host key fingerprint" run_install "$HOSTKEY_FP"
-check "config file is mode 600" test "$(stat -c %a "$CONF/terminal.conf")" = 600
+check "config file is mode 600" test "$(stat -c %a "$CONF/terminal.conf" 2>/dev/null || stat -f %Lp "$CONF/terminal.conf")" = 600
 for line in AIOS_MAC_USER=alice AIOS_MAC_HOST=mac-mini.local AIOS_PORT=8787 AIOS_SSH_PORT=22; do
   check "config holds $line" grep -qx "$line" "$CONF/terminal.conf"
 done
@@ -166,7 +169,10 @@ check "apt-get installs autossh, v4l-utils and chromium" called "apt-get install
 check "ssh-copy-id uses the dedicated known_hosts with strict checking" \
   called "ssh-copy-id -i $CONF/id_ed25519.pub -p 22 -o UserKnownHostsFile=$CONF/known_hosts -o StrictHostKeyChecking=yes alice@mac-mini.local"
 check "key login is verified in batch mode" called_matching '^ssh .*-o BatchMode=yes -o IdentitiesOnly=yes alice@mac-mini.local true$'
-check "tunnel unit enabled and started" called "systemctl --user enable --now aios-tunnel.service"
+check "tunnel unit enabled" called "systemctl --user enable aios-tunnel.service"
+check "tunnel unit restarted so a re-run applies new settings" called "systemctl --user restart aios-tunnel.service"
+check "kiosk unit try-restarted so a re-run applies new settings" called "systemctl --user try-restart aios-kiosk.service"
+check "user tunnel unit does not depend on the system network-online target" lacks "network-online" "$HOME/.config/systemd/user/aios-tunnel.service"
 check "kiosk unit is not enabled (started from desktop autostart)" lacks "enable.*aios-kiosk" "$CALLS"
 check "linger enabled through sudo" called "sudo loginctl enable-linger pi"
 check "linger marker written" test -f "$CONF/linger-enabled-by-installer"
@@ -197,11 +203,12 @@ for expected in "-M 0" "-N" "-o ExitOnForwardFailure=yes" "-o ServerAliveInterva
   "-i $CONF/id_ed25519" "-p 22" "-L 127.0.0.1:8787:127.0.0.1:8787" "alice@mac-mini.local"; do
   check "autossh gets $expected" grep -qF -- " $expected" <<<"$tunnel_call"
 done
-sed -i 's/^AIOS_PORT=.*/AIOS_PORT=8790/' "$CONF/terminal.conf"
+set_port() { sed "s/^AIOS_PORT=.*/AIOS_PORT=$1/" "$CONF/terminal.conf" >"$WORK/conf.tmp" && cat "$WORK/conf.tmp" >"$CONF/terminal.conf"; }
+set_port 8790
 reset_calls
 "$LBIN/aios-tunnel"
 check "AIOS_PORT=8790 forwards the same port on both ends" called_matching '^autossh .* -L 127\.0\.0\.1:8790:127\.0\.0\.1:8790 '
-sed -i 's/^AIOS_PORT=.*/AIOS_PORT=8787/' "$CONF/terminal.conf"
+set_port 8787
 mv "$CONF/known_hosts" "$CONF/known_hosts.bak"
 set +e
 "$LBIN/aios-tunnel" >"$WORK/out" 2>&1
@@ -233,7 +240,7 @@ doctor
 check "doctor all-healthy exits 0" test "$status" = 0
 check "doctor all-healthy prints no FAIL" lacks "^FAIL" "$WORK/out"
 check "doctor reports English labels" grep -q '^PASS  SSH tunnel service: ' "$WORK/out"
-check "doctor reports camera count" grep -q '^PASS  cameras: 2 video node' "$WORK/out"
+check "doctor counts only camera nodes, not Pi codec nodes" grep -q '^PASS  cameras: 2 camera video node' "$WORK/out"
 check "doctor reports memory total" grep -q '^PASS  memory: 3793 MiB total, 70% available' "$WORK/out"
 check "doctor never prints the settings body" lacks provider "$WORK/out"
 AIOS_LANG=zh-TW doctor
@@ -241,6 +248,9 @@ check "doctor in zh-TW exits 0" test "$status" = 0
 check "doctor in zh-TW prints Chinese labels" grep -q '^PASS  SSH 通道服務: ' "$WORK/out"
 check "doctor in zh-TW prints a Chinese summary" grep -q '^結果：' "$WORK/out"
 
+FAKE_NO_CAMERA=1 doctor
+check "Pi codec nodes alone give a camera WARN" grep -q '^WARN  cameras: ' "$WORK/out"
+check "no camera keeps the doctor exit 0" test "$status" = 0
 FAKE_THROTTLED=0x50005 doctor
 check "throttled=0x50005 fails the doctor" test "$status" = 1
 check "throttling FAIL names under-voltage now" grep -q '^FAIL  power and throttling: 0x50005 under-voltage now, throttled now, under-voltage occurred, throttling occurred' "$WORK/out"
@@ -289,7 +299,7 @@ check "uninstall removes installed scripts" test ! -e "$SHARE/bin" -a ! -e "$SHA
 check "uninstall disables linger it enabled" called "sudo loginctl disable-linger pi"
 check "uninstall removes the linger marker" test ! -e "$CONF/linger-enabled-by-installer"
 check "uninstall keeps config and key without --purge" test -f "$CONF/terminal.conf" -a -f "$CONF/id_ed25519"
-check "uninstall prints the Mac authorized_keys cleanup" grep -qF "/ aios-terminal@raspberrypi\$/d" "$WORK/out"
+check "uninstall prints the Mac authorized_keys cleanup by key body" grep -qF "\\|$(awk '{print $2}' "$CONF/id_ed25519.pub")|d" "$WORK/out"
 check "uninstall never runs apt" lacks "^apt-get" "$CALLS"
 reset_calls
 check "re-running uninstall succeeds" quiet bash "$KIT/uninstall.sh"

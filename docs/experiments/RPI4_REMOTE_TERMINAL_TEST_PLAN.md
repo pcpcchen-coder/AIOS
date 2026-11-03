@@ -72,7 +72,7 @@ Why this works: the browser sees localhost (secure context for getUserMedia); SS
 4. On the Mac, turn off always-on wake listening and the camera in the App menu and hide the Mac window, so the Mac does not take the single call slot.
 5. Start a Realtime conversation on the Pi. Talk continuously for 10 min, then 30 min.
 6. Verify AI replies play on the **Pi**, not the Mac; disconnect/reconnect three times.
-7. Concurrency check: while the Pi is in a call, try to start a call on the Mac window; record the message (expected from code reading: busy / `session_busy`). Then reverse the roles once.
+7. Concurrency check: while the Pi is in a call, try to start a call on the Mac window; record what happens. Expected from code reading: on the ChatGPT plan route, or on the API key route with memory rules, the second start is refused as busy (`session_busy`); on the API key route without memory, the second call silently ends the first. Then reverse the roles once.
 8. Run a normal Mac desktop workload at the same time and note noticeable interference.
 
 **Pass:** Pi mic captured, Pi speaker outputs, cues play without a click, 30-min conversation without persistent dropout; no accidental Mac mic/speaker use. **Observe:** initial response latency, glitch count, CPU, temperature, memory.
@@ -82,7 +82,7 @@ Note: cloud model compute remains remote; local audio capture/encoding and the b
 ## Phase 3 — Camera, wake word, identity (P1, optional)
 
 1. Attach a USB camera to the Pi; `aios-doctor` lists it (or run `v4l2-ctl --list-devices`).
-2. Try to turn on the camera from the Pi page. Expected from code: refused (HTTP 403) because the App core uses strict camera mode. Record PASS / FAIL / NOT SUPPORTED, and do not bypass it.
+2. Try to turn on the camera from the Pi page (the doctor ignores the Pi's built-in codec nodes, so it lists only real cameras). Expected from code: refused (HTTP 403) because the App core uses strict camera mode. Record PASS / FAIL / NOT SUPPORTED, and do not bypass it.
 3. Check whether wake controls appear on the Pi page. Expected: wake can only be turned on from the App menu and listens on the Mac's microphone. Record the outcome.
 4. Check memory and family recognition on the Pi page. Expected: not available in the browser page. Record the outcome.
 5. Only if something above unexpectedly works, test it properly: 20 wake attempts plus 20 negative utterances; camera + voice for 10 min.
@@ -136,7 +136,7 @@ Use the [report template](RPI4_REMOTE_TERMINAL_REPORT.md). Take readings at idle
 
 ## Rollback
 
-On the Pi run `bash uninstall.sh` (add `--purge` to delete the config, key and Chromium profile). It prints how to remove the apt packages and the Pi key line from the Mac's `~/.ssh/authorized_keys`. On the Mac, turn off Remote Login and comment `PORT` out of `.env` again if you want the previous state. No core code, security policy or main branch behaviour changes.
+On the Pi run `bash uninstall.sh` (add `--purge` to delete the config, key and Chromium profile). It prints how to remove the apt packages and the line holding this Pi's public key from the Mac's `~/.ssh/authorized_keys`. On the Mac, turn off Remote Login and comment `PORT` out of `.env` again if you want the previous state. No core code, security policy or main branch behaviour changes.
 
 ## Next engineering decision
 

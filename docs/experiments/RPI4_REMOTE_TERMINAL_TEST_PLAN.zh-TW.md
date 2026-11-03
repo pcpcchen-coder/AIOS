@@ -72,7 +72,7 @@ aios-doctor
 4. 在 Mac 的 App 選單關掉常駐喚醒聆聽與鏡頭，並隱藏 Mac 視窗，避免 Mac 占走唯一的通話。
 5. 在 Pi 開始即時語音。連續說話 10 分鐘，再 30 分鐘。
 6. 確認 AI 回覆在 **Pi** 播放，不在 Mac；中斷並重新連線三次。
-7. 同時連線檢查：Pi 通話中時，試著在 Mac 視窗開始通話；記錄訊息（依程式碼閱讀預期為忙線／`session_busy`）。再反過來做一次。
+7. 同時連線檢查：Pi 通話中時，試著在 Mac 視窗開始通話；記錄發生什麼事。依程式碼閱讀的預期：ChatGPT 方案路徑，或帶記憶規則的 API key 路徑，第二通會被當成忙線（`session_busy`）拒絕；不帶記憶的 API key 路徑，第二通會直接結束第一通。再反過來做一次。
 8. 同時在 Mac 跑一般桌面工作，記下明顯干擾。
 
 **通過：** 收到 Pi 麥克風、Pi 喇叭出聲、提示音不用先點就會播、30 分鐘對話沒有持續中斷；沒有誤用 Mac 麥克風或喇叭。**觀察：** 首次回應延遲、雜音次數、CPU、溫度、記憶體。
@@ -82,7 +82,7 @@ aios-doctor
 ## 第 3 階段 — 鏡頭、喚醒詞、身分（P1，選做）
 
 1. 把 USB 鏡頭接到 Pi；`aios-doctor` 會列出（或執行 `v4l2-ctl --list-devices`）。
-2. 試著從 Pi 頁面打開鏡頭。依程式預期：被拒絕（HTTP 403），因為 App 核心是嚴格鏡頭模式。記錄 PASS／FAIL／NOT SUPPORTED，不要繞過。
+2. 試著從 Pi 頁面打開鏡頭（診斷會略過 Pi 內建的編解碼節點，只列真的鏡頭）。依程式預期：被拒絕（HTTP 403），因為 App 核心是嚴格鏡頭模式。記錄 PASS／FAIL／NOT SUPPORTED，不要繞過。
 3. 檢查 Pi 頁面是否有喚醒控制。預期：喚醒只能從 App 選單打開，而且聽的是 Mac 的麥克風。記錄結果。
 4. 檢查 Pi 頁面的記憶與家人辨識。預期：瀏覽器頁面沒有。記錄結果。
 5. 只有上面某項意外可用時才正式測：20 次喚醒＋20 句負例；鏡頭＋語音 10 分鐘。
@@ -136,7 +136,7 @@ lsof -nP -iTCP -sTCP:LISTEN -a -c Nous
 
 ## 回復
 
-在 Pi 執行 `bash uninstall.sh`（加 `--purge` 會刪除設定、key 與 Chromium profile）。它會印出移除 apt 套件的指令，以及從 Mac 的 `~/.ssh/authorized_keys` 刪掉 Pi key 那一行的方法。若要回到先前狀態，在 Mac 關掉「遠端登入」，並把 `.env` 的 `PORT` 改回註解。核心程式、安全政策與 main 分支行為都不變。
+在 Pi 執行 `bash uninstall.sh`（加 `--purge` 會刪除設定、key 與 Chromium profile）。它會印出移除 apt 套件的指令，以及從 Mac 的 `~/.ssh/authorized_keys` 刪掉含這台 Pi 公鑰那一行的指令。若要回到先前狀態，在 Mac 關掉「遠端登入」，並把 `.env` 的 `PORT` 改回註解。核心程式、安全政策與 main 分支行為都不變。
 
 ## 下一個工程決定
 

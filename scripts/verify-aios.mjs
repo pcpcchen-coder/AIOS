@@ -17,13 +17,18 @@ let exited;
 let serverLog = '';
 
 try {
-  const kit = spawnSync('bash', ['terminals/rpi4/tests/dry-run.sh'], { cwd: root, encoding: 'utf8' });
-  await writeFile(join(evidence, 'rpi4-terminal-kit.log'), (kit.stdout ?? '') + (kit.stderr ?? ''));
-  process.stdout.write(kit.stdout ?? '');
-  process.stderr.write(kit.stderr ?? '');
-  if (kit.error) throw kit.error;
-  assert.equal(kit.status, 0, 'rpi4 terminal kit dry-run failed');
-  report.checks.push('rpi4 terminal kit dry-run');
+  // The Pi kit targets Linux and its fakes rely on GNU tools; on the Mac development machine this check is skipped, not failed.
+  if (process.platform === 'linux') {
+    const kit = spawnSync('bash', ['terminals/rpi4/tests/dry-run.sh'], { cwd: root, encoding: 'utf8' });
+    await writeFile(join(evidence, 'rpi4-terminal-kit.log'), (kit.stdout ?? '') + (kit.stderr ?? ''));
+    process.stdout.write(kit.stdout ?? '');
+    process.stderr.write(kit.stderr ?? '');
+    if (kit.error) throw kit.error;
+    assert.equal(kit.status, 0, 'rpi4 terminal kit dry-run failed');
+    report.checks.push(/^skip - /m.test(kit.stdout ?? '') ? 'rpi4 terminal kit dry-run (partial: see skip lines in rpi4-terminal-kit.log)' : 'rpi4 terminal kit dry-run');
+  } else {
+    report.skipped = [...(report.skipped ?? []), `rpi4 terminal kit dry-run (Linux only; platform ${process.platform})`];
+  }
 
   for (const command of ['typecheck', 'test', 'build']) {
     const result = spawnSync('npm', ['run', command], { cwd: app, encoding: 'utf8' });

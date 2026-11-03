@@ -186,7 +186,10 @@ enable_linger() {
 start_services() {
   step "啟動服務" "Starting services"
   systemctl --user daemon-reload
-  systemctl --user enable --now aios-tunnel.service
+  systemctl --user enable aios-tunnel.service
+  # restart, not start: a re-run with a new port or host must replace the running forward.
+  systemctl --user restart aios-tunnel.service
+  systemctl --user try-restart aios-kiosk.service
   if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
     "$AIOS_SHARE_DIR/bin/aios-session-start"
   else
