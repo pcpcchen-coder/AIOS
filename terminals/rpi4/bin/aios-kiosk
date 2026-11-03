@@ -27,7 +27,7 @@ done
 
 exec "$chromium" \
   --kiosk \
-  "--app=$(core_url)" \
+  "--app=$(core_url /?terminal=rpi4)" \
   "--user-data-dir=$AIOS_PROFILE_DIR" \
   --autoplay-policy=no-user-gesture-required \
   --no-first-run \

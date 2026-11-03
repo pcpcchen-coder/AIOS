@@ -201,6 +201,7 @@
   "鏡頭只能從 App 打開": "The camera can be turned on only from the App",
   "常駐喚醒聆聽不可用": "Always-on wake listening is unavailable",
   "一分鐘內已由喚醒開始 3 次通話，暫停到一分鐘後自動恢復": "Wake started 3 calls within a minute; paused, resuming automatically within a minute",
+  "服務模式中（這台 Mac 給 Pi 使用），Mac 不收音": "Service mode (this Mac is serving the Pi); the Mac is not listening",
   "沒有聽到聲音，已結束通話，回到喚醒聆聽": "No voice was heard, so the call ended; back to wake listening",
   "這個環境不支援即時語音": "This environment does not support realtime voice",
   "只憑聲音也叫名字（測試）": "Name by voice alone (test)",

@@ -33,6 +33,7 @@ import { homeControlLine, homeStatusLine } from "../shared/home.ts";
 import { classify, settingsReply } from "./intent.ts";
 import { matchVoiceCommand, RealtimeLocalCommands } from "./voice-command.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
+import { startTerminalHeartbeat } from "./terminal-heartbeat.ts";
 import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
 import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
@@ -109,6 +110,10 @@ interface DesktopBridge {
   confirmDelete?(request: { title: string }): Promise<{ confirmed: boolean }>;
   /** WK-01a：系統睡眠、醒來、鎖定、解鎖（只有列舉值）。舊版 App 與瀏覽器版沒有這一項。 */
   onPower?(listener: (event: PowerEvent) => void): () => void;
+  /** 服務模式：載入時是否已在服務模式（之後的改變經 onService）。舊版 App 與瀏覽器版沒有這一項。 */
+  initialService?: boolean;
+  /** 服務模式（Mac 交給 Pi 使用）的進入與離開（只有列舉值）。舊版 App 與瀏覽器版沒有這一項。 */
+  onService?(listener: (event: "enter" | "exit") => void): () => void;
   /**
    * 打開鏡頭：主程序先顯示原生說明，使用者按「開啟」才由核心保存（HTTP 的 active: true 是 403）。不帶參數。
    * 舊版 App 與瀏覽器版沒有這一項。
@@ -348,6 +353,11 @@ let realtime: RealtimeSession = idleSession();
  * 頁面不載入任何音訊模組、不建立指示圖示、不回報喚醒狀態。
  */
 let wake: WakeController | null = null;
+/**
+ * 服務模式（App 主程序的 nous:service）：Mac 的麥克風、喚醒與鏡頭停止，開始語音或鏡頭的指令一律忽略；不改任何保存的設定。
+ * App 另外在權限處理器拒絕 media，這裡只是讓頁面照實停下來。
+ */
+let servicePaused = window.nousDesktop?.initialService === true;
 /** SP-02a：喚醒時認聲音（喚醒詞片段＋連線前的話）；只有桌面版、喚醒控制器存在時有。 */
 let wakeVoice: WakeVoice | null = null;
 let wakeLoading = false;
@@ -960,6 +970,7 @@ function syncWake(view: WakeSettingsView | undefined): void {
     wake.setTriggerHandler(onWakeTrigger);
     // 載入前已經開始的 Web Speech 或即時語音照實告訴它（不會在通話或 Web Speech 中途搶麥克風）。
     if (voice.active || conversation.on) wake.webSpeech(true);
+    if (servicePaused) wake.service(true);
     wakeInitial = initial;
     if (realtime.on || realtimeStarting) wakeDeferred = true;
     else applyWakeFirst(latest);
@@ -1267,6 +1278,7 @@ function renderVoiceState(state: ConversationState): void {
 }
 
 function enableVoiceMode(): void {
+  if (servicePaused) return;
   const ready = settings && (settings.provider === "chatgpt" && chatGPTAvailable()
     || settings.provider === developmentProvider && settings.providers.some((provider) => provider.id === developmentProvider && provider.available));
   if (!ready) {
@@ -1737,17 +1749,18 @@ function applyFacingTuning(): void {
 }
 
 function syncCamera(): void {
-  if (cameraShouldRun(settings?.camera, cameraOffPending, cameraFailed)) void startCamera();
+  if (!servicePaused && cameraShouldRun(settings?.camera, cameraOffPending, cameraFailed)) void startCamera();
   else pipeline?.stop();
 }
 
 async function startCamera(): Promise<void> {
   const { SensePipeline } = await import("./sense/pipeline.ts");
   // 載入模組期間可能已收到「鏡頭關掉」。
-  if (!settings?.camera || !cameraShouldRun(settings.camera, cameraOffPending, cameraFailed)) return;
+  if (servicePaused || !settings?.camera || !cameraShouldRun(settings.camera, cameraOffPending, cameraFailed)) return;
   pipeline ??= new SensePipeline(settings.camera, (event) => sense.handle(event));
   applyFacingTuning();
   await pipeline.start();
+  if (servicePaused) pipeline.stop();
 }
 
 /**
@@ -1860,7 +1873,7 @@ function realtimeReady(): boolean {
  * wake：WK-02 這次喚醒（wake_id 交給核心的費用紀錄；限速時暫停喚醒聆聽）。
  */
 function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean; wake?: WakeTrigger } = {}): void {
-  if (realtime.on || realtimeStarting) return;
+  if (servicePaused || realtime.on || realtimeStarting) return;
   if (!hasVoiceConsent("realtime")) {
     // 不是喚醒開始的同意說明：同意後照舊以 user 開始。
     pendingWakeConsent = null;
@@ -3342,6 +3355,7 @@ if (speechSupported()) {
       voice.stop();
       return;
     }
+    if (servicePaused) return;
     if (!hasVoiceConsent("push")) {
       askConsent("push");
       return;
@@ -3366,7 +3380,7 @@ $<HTMLButtonElement>("consent-yes").addEventListener("click", () => {
   // WK-02：喚醒打開的同意說明：同意後以 wake_word 開始（問候、沉默 5 秒結束、限速照常）。
   if (pendingConsent === "realtime") startRealtime(wakeTrigger ? "wake_word" : "user", wakeTrigger ? { wake: wakeTrigger } : {});
   else if (pendingConsent === "continuous") enableVoiceMode();
-  else voice.start();
+  else if (!servicePaused) voice.start();
 });
 $<HTMLButtonElement>("consent-no").addEventListener("click", () => {
   pendingWakeConsent = null;
@@ -3380,6 +3394,31 @@ applyStaticTranslations();
 window.nousDesktop?.onLocaleChange?.(setLocale);
 // WK-01a：系統電源事件（只有列舉值）交給常駐喚醒聆聽；念話期間告訴防護（避免 Nous 自己說出喚醒詞時觸發）。
 window.nousDesktop?.onPower?.((event) => wake?.power(event));
+// 服務模式：Mac 交給 Pi 使用。進入時停止即時語音、按下說話與語音模式、常駐喚醒聆聽與鏡頭（不改保存的設定）；
+// 離開時喚醒和解鎖一樣依偏好恢復，鏡頭依保存的設定重新開。
+window.nousDesktop?.onService?.((event) => {
+  if (event === "enter") {
+    if (servicePaused) return;
+    servicePaused = true;
+    pendingWakeConsent = null;
+    consentBox.hidden = true;
+    stopRealtime();
+    conversation.stop();
+    voice.abort();
+    wake?.service(true);
+    closePreview();
+    pipeline?.stop();
+  } else {
+    if (!servicePaused) return;
+    servicePaused = false;
+    wake?.service(false);
+    cameraFailed = false;
+    syncCamera();
+  }
+  render();
+});
+// 終端機（Pi kiosk，網址帶 ?terminal=）的心跳：Mac 選單列的「Pi 已連線」只以這個為準。
+startTerminalHeartbeat({ desktop: !!window.nousDesktop, search: location.search, send: (terminal) => api.terminalHeartbeat(terminal) });
 onSpeechActivity((speaking) => {
   if (speaking) wake?.begin("speech");
   else wake?.end("speech");

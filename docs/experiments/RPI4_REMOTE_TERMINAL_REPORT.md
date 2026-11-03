@@ -38,6 +38,7 @@ Branch / commit: __________ (kit in `terminals/rpi4/`)
 - [ ] Phase 2 Pi speaker works; cues play without a click
 - [ ] Phase 2 10-minute Realtime works
 - [ ] Phase 2 30-minute Realtime works
+- [ ] Phase 2 Mac service mode: menu bar shows Pi connected / disconnected correctly (unplug test)
 - [ ] Phase 2 Mac peripherals remain unused
 - [ ] Phase 2 concurrent call from Mac window: message recorded
 - [ ] Phase 3 camera from Pi page: PASS / FAIL / NOT SUPPORTED

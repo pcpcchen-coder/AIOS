@@ -9,6 +9,7 @@
 //   macrotask 才重新取得；同一輪就來的租用（語音模式直接切到即時語音）會取消這次重新取得，不會同時有兩個 getUserMedia。
 // - 暫停（使用者，只到本次執行結束）、睡眠、鎖定：停止來源；醒來、解鎖依偏好自動恢復，用「聲音輸入」選定的麥克風。
 // - WK-02 限速（rate_limited）：喚醒開始的通話超過每分鐘上限時暫停，時間到由控制器呼叫 resume("rate_limited") 自動恢復。
+// - 服務模式（service）：Mac 交給 Pi 使用時停止來源，只有「返回 Mac 使用」才解除，之後和解鎖一樣依偏好自動恢復。
 // - 選定的麥克風找不到（開始、自動恢復）：audioDevices 改用系統預設並顯示字幕「找不到「X」，暫用系統預設」
 //   （George 2026-11-01 改掉 WK-01a 原本「不改用其他麥克風」的規則）；它回來時 reopen() 在閒置時重新開。
 // - track ended：選了特定麥克風時重新開一次（找不到就用系統預設）；系統預設的麥克風結束時照舊 error（device_ended），不在背景重試。
@@ -63,7 +64,7 @@ export interface FrontEndEvents {
   listening(deviceId: string | null, how: StartHow): void;
 }
 
-type SystemPause = "sleep" | "lock" | "rate_limited";
+type SystemPause = "sleep" | "lock" | "rate_limited" | "service";
 
 export class AudioFrontEnd {
   private wanted = false;
@@ -270,6 +271,7 @@ export class AudioFrontEnd {
 
   private blocked(): WakeReport | null {
     if (!this.wanted) return { state: "off", reason: this.offReason };
+    if (this.systemPause.has("service")) return { state: "paused", reason: "service" };
     if (this.leases.length > 0) return { state: "in_call", reason: "realtime" };
     if (this.webSpeechActive) return { state: "released", reason: "web_speech" };
     if (this.userPaused) return { state: "paused", reason: "user_pause" };
