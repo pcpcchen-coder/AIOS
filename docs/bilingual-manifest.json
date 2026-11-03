@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "04db49b03d242f2c9ba435c3fe2b37f0a84caf3d1e05da822334435b2098f5d2",
-      "translationSha256": "33952b523026b05f127162a4896e5e40550b244967bf49147157ca831fd13f6f"
+      "sourceSha256": "bfdd16505dd922cb314b0e172c3847e74227741c06f2e7ff6c52dd50ffd85ed2",
+      "translationSha256": "4bb6117d7517c8c0b72c9aee9eae411b438588695cee1eaa8abff913661912ca"
     },
     {
       "source": "docs/README.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "760041cf5dc9aa4dd5b71ee215e6ef34a313250694031f0d23e9d586a4151261",
-      "translationSha256": "80ec0a6c58374c4675852243a70ec54f1b6e01d3dafe5d46a3ebaa2e47384e3b"
+      "sourceSha256": "9eaa6c19a76b24046494ea66ea012666eb1e27df30af869a43db4ca7b58054ed",
+      "translationSha256": "a36870db6b578cd2b374e99060595dc88dea71530fd2e6379bab4aeb3321eeb8"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -622,6 +622,13 @@
       "translation": "docs/validation/sp-1-soloist-health-2026-11-03.en.md",
       "sourceSha256": "a3a2413813733f34599c4c79ff7ccb675d48dde5737713141e070b6d66a1530c",
       "translationSha256": "a29a862a1c0c558715b2d8526f33261657b3fc358073427ab2259931dfed919d"
+    },
+    {
+      "source": "docs/validation/vcr-0-2026-11-03.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/vcr-0-2026-11-03.en.md",
+      "sourceSha256": "9470cb77d87c88cc9a3dcb22c2cba6ad9caf9f11ec9432e3202123f38bf56f86",
+      "translationSha256": "387afc6b48e1cceb6caf59c024e61beddd456e569b75ce79ddf6e59de18eb0ed"
     },
     {
       "source": "docs/validation/wk-00-mac-2026-10-31.md",
