@@ -1,5 +1,5 @@
 import type { CommandEntry, CommandPack, DownstreamService, IntentDef, RelayCatalog, RelayRefusal, ResolveLevel, Target, TemplateStatus, TestResult, VoiceProfile } from "../../../shared/voice-relay.ts";
-import { safeText } from "./catalog.ts";
+import { containsWakePhrase, safeText } from "./catalog.ts";
 import { relayPolicy } from "./policy.ts";
 
 // VCR-0（docs/19 §4.4）：決定論的解析器。同樣的 (目錄, 請求, 選項) 一定得到同樣的結果（沒有亂數、沒有時間）。
@@ -100,9 +100,29 @@ function render(intent: IntentDef, entry: CommandEntry, target: Target, slots: R
   });
 }
 
+/**
+ * 喚醒詞只能來自同品牌、同助理、同語系的命令包：裝置表指定的（還要屬於這樣的命令包），
+ * 否則依序取型號層（型號也相同）、助理層命令包的選定喚醒詞。絕不從通用包或別的品牌、語系拿。
+ */
+function wakePhraseFor(catalog: RelayCatalog, target: Target): string | undefined {
+  const own = (p: CommandPack) => p.vendor === target.vendor && p.assistant === target.assistant && p.locale === target.locale;
+  if (target.wakePhraseId !== undefined) {
+    return catalog.packs.filter(own).flatMap((p) => p.wakePhrases).find((w) => w.id === target.wakePhraseId)?.text;
+  }
+  const model = catalog.packs.filter((p) => own(p) && p.scope === "model" && p.model === target.model);
+  const assistant = catalog.packs.filter((p) => own(p) && p.scope === "assistant");
+  for (const pack of [...model, ...assistant]) {
+    const selected = pack.wakePhrases.find((w) => w.selected);
+    if (selected) return selected.text;
+  }
+  return undefined;
+}
+
 export function resolveRelay(catalog: RelayCatalog, request: RelayRequest, opts: ResolveOptions = {}): RelayResolution {
   const diag = opts.diagnostic;
   const diagnostic = !!(diag && (diag.candidateTemplateId !== undefined || diag.candidateVoiceId !== undefined));
+  /** 只有明確指定候選模板的診斷才可以試還沒審閱的模板；只換聲線不改審閱規則。 */
+  const tryCandidate = diag?.candidateTemplateId !== undefined;
 
   // 1. 目標
   const target = catalog.targets.find((t) => t.id === request.targetId);
@@ -145,10 +165,10 @@ export function resolveRelay(catalog: RelayCatalog, request: RelayRequest, opts:
   const policy = relayPolicy(intent, entry, target, commandText);
   if (!policy.ok) return refuse("policy_blocked", policy.detail);
 
-  // 5. 審閱：裝置表的審閱紀錄優先（同模板同版本）
-  const reviewStatus = target.reviewedTemplates.find((r) => r.templateId === entry.templateId && r.version === entry.version)?.status ?? entry.status;
+  // 5. 審閱：目錄標成 rejected 的一律拒絕（裝置表不能翻案）；其他以裝置表的審閱紀錄優先（同模板同版本）
+  const reviewStatus = entry.status === "rejected" ? "rejected" : (target.reviewedTemplates.find((r) => r.templateId === entry.templateId && r.version === entry.version)?.status ?? entry.status);
   if (reviewStatus === "rejected") return refuse("not_reviewed", "rejected");
-  if (reviewStatus === "candidate" && !diagnostic) return refuse("not_reviewed", "candidate");
+  if (reviewStatus === "candidate" && !tryCandidate) return refuse("not_reviewed", "candidate");
 
   // 6. 聲線（不換聲）
   let profileId: string | undefined;
@@ -166,20 +186,22 @@ export function resolveRelay(catalog: RelayCatalog, request: RelayRequest, opts:
   if (!profile) return refuse("tts_unavailable", "no_voice");
   if (profile.locale !== target.locale) return refuse("tts_unavailable", "voice_locale");
 
-  // 7. 輸出
-  const outputNode = profile.outputNode ?? target.outputNode;
-  const outputDeviceId = profile.outputDeviceId ?? target.outputDeviceId;
+  // 7. 輸出：聲線指定的輸出端必須就是目標的喇叭；不同就拒絕，絕不把聲音搬到別的喇叭。
+  if ((profile.outputNode !== undefined && profile.outputNode !== target.outputNode) || (profile.outputDeviceId !== undefined && profile.outputDeviceId !== target.outputDeviceId)) {
+    return refuse("output_unavailable", "output_mismatch");
+  }
+  const outputNode = target.outputNode;
+  const outputDeviceId = target.outputDeviceId;
   if (opts.voiceAvailable && !opts.voiceAvailable(outputNode, profile.engine, profile.voiceId)) return refuse("tts_unavailable", "voice_missing");
   if (!outputNode || !outputDeviceId) return refuse("output_unavailable");
 
   // 8. 喚醒詞
-  const wakePhrase = target.wakePhraseId !== undefined
-    ? catalog.packs.flatMap((p) => p.wakePhrases).find((w) => w.id === target.wakePhraseId)?.text
-    : pack.wakePhrases.find((w) => w.selected)?.text;
+  const wakePhrase = wakePhraseFor(catalog, target);
   if (!wakePhrase) return refuse("unsupported_intent", "no_wake_phrase");
 
-  // 9. 組字
+  // 9. 組字：最後的命令不能含任何喚醒詞（正規化後比對目錄裡所有喚醒詞）
   if (!safeText(commandText)) return refuse("invalid_slots", "rendered_text");
+  if (containsWakePhrase(commandText, catalog.packs.flatMap((p) => p.wakePhrases.map((w) => w.text)))) return refuse("invalid_slots", "wake_phrase_in_command");
 
   return {
     kind: "resolved",

@@ -1,4 +1,5 @@
 import { RELAY_SCHEMA_VERSION, type RelayTrial } from "../../../shared/voice-relay.ts";
+import { ID, SHORT_ID } from "./catalog.ts";
 
 // VCR-0（docs/experiments/VOICE_COMMAND_RELAY_TEST_PLAN.md §C）：試驗紀錄的驗證。統計公式在 shared/voice-relay.ts（summarizeTrials）。
 // 規則：同一筆試驗的 commandOK 不能超過 wakeOK（沒有喚醒就一定是 NO_COMMAND）；negative 試驗沒有命令結果；不認得的欄位一律拒絕。
@@ -28,9 +29,12 @@ export function parseTrials(raw: unknown): TrialsResult {
     const p = `$.trials[${i}]`;
     if (!isObj(t)) return void errors.push(`${p}：必須是物件`);
     for (const k of Object.keys(t)) if (!KEYS.includes(k)) errors.push(`${p}.${k.slice(0, 32)}：不認得的欄位`);
+    // ID 用和目錄相同的格式（裝置表 ID 用短格式）。
+    const PATTERNS: Record<string, RegExp> = { id: ID, targetId: SHORT_ID, templateId: ID, voiceProfileId: ID };
     for (const k of ["id", "targetId", "templateId", "voiceProfileId", "at"]) {
       const v = t[k];
       if (typeof v !== "string" || !v.length || v.length > 128 || CONTROL.test(v)) errors.push(`${p}.${k}：必須是非空字串`);
+      else if (PATTERNS[k] && !PATTERNS[k].test(v)) errors.push(`${p}.${k}：格式不合法`);
     }
     if (typeof t.id === "string") {
       if (ids.has(t.id)) errors.push(`${p}.id：ID 重複`);

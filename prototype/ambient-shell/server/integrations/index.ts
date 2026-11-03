@@ -33,7 +33,14 @@ export function createIntegrations(config: Config["ail"], log: (line: string) =>
   for (const id of config.services) if (!enabled.has(id)) log(`整合層：NOUS_AIL_SERVICES 的 ${id} 不是已審核的 Adapter，略過`);
   const registry = new IntegrationRegistry({ enabled });
   for (const id of enabled) {
-    const adapter = known[id]!(config, log);
+    let adapter: IntegrationAdapter | null;
+    try {
+      adapter = known[id]!(config, log);
+    } catch (err) {
+      // 建立失敗：記錄並略過這個 Adapter（fail closed），不讓 Nous 啟動失敗。
+      log(`整合層：${id} 建立失敗，略過（${err instanceof Error ? err.message.slice(0, 200) : "unknown error"}）`);
+      continue;
+    }
     if (adapter) registry.register(adapter);
     else log(id === "voice_relay" && !config.vcr ? "整合層：voice_relay 未啟用（NOUS_VCR=off），略過" : `整合層：${id} 未啟用，略過`);
   }

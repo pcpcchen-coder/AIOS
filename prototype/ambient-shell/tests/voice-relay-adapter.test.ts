@@ -133,6 +133,23 @@ describe("VoiceRelayAdapter execute (fake output)", () => {
     expect(receiptOutcome(null, job, false).status).toBe("unknown");
   });
 
+  it("receiptOutcome: contradictory receipts are unknown, interrupted-before-start is unknown, each failure has its own message", () => {
+    const job = { jobId: "j", outputNode: "n", outputDeviceId: "d" } as RelayJob;
+    const r = (patch: object) => ({ jobId: "j", outputNode: "n", outputDeviceId: "d", synthesisComplete: true, audioStarted: false, audioFinished: false, mock: false, ...patch });
+    expect(receiptOutcome(r({ audioFinished: true }), job, false)).toMatchObject({ status: "unknown", data: { vcr_reason: "receipt_contradictory" } });
+    expect(receiptOutcome(r({ audioFinished: true, failure: "device_unavailable" }), job, false).status).toBe("unknown");
+    expect(receiptOutcome(r({ failure: "interrupted" }), job, false).status).toBe("unknown");
+    expect(receiptOutcome(r({ audioStarted: "yes" }), job, false).status).toBe("unknown");
+    const messages = new Set<string>();
+    for (const failure of ["synthesis_failed", "device_unavailable", "start_failed"]) {
+      const out = receiptOutcome(r({ failure }), job, false);
+      expect(out, failure).toMatchObject({ status: "failed", data: { vcr_reason: failure } });
+      messages.add(out.message);
+    }
+    expect(messages.size).toBe(3);
+    expect([...messages].join()).toMatch(/語音合成失敗.*輸出裝置無法使用.*播放沒有開始/);
+  });
+
   it("refused paths never call play", async () => {
     const { adapter, output } = setup();
     const cases: [Record<string, unknown>, string, string][] = [
@@ -195,9 +212,25 @@ describe("NOUS_VCR config and createIntegrations", () => {
     expect(parseAil("on", "voice_relay", undefined, " FAKE ", "/cfg")).toEqual({ enabled: true, services: ["voice_relay"], soloistPort: 19090, vcr: { mode: "fake", dir: join("/cfg", "voice-relay") } });
     expect(parseAil("off", "voice_relay", undefined, "fake", "/cfg")).toEqual({ enabled: false, services: [], soloistPort: 19090 });
     for (const bad of ["on", "real", "1"]) expect(() => parseAil("on", "voice_relay", undefined, bad), bad).toThrow(/NOUS_VCR 只接受 off 或 fake/);
-    expect(() => loadConfig({ NOUS_VCR: "on" })).toThrow(/NOUS_VCR/);
+    // 整合層關閉時 NOUS_VCR 不看，不報錯。
+    expect(loadConfig({ NOUS_VCR: "on" }).ail).toEqual({ enabled: false, services: [], soloistPort: 19090 });
+    expect(parseAil("off", "voice_relay", undefined, "bogus")).toEqual({ enabled: false, services: [], soloistPort: 19090 });
+    expect(() => loadConfig({ NOUS_AIL: "on", NOUS_VCR: "on" })).toThrow(/NOUS_VCR/);
     expect(loadConfig({ NOUS_AIL: "on", NOUS_AIL_SERVICES: "voice_relay", NOUS_VCR: "fake", NOUS_CONFIG_DIR: "/cfg" }).ail.vcr).toEqual({ mode: "fake", dir: join("/cfg", "voice-relay") });
     expect(loadConfig({}).ail).toEqual({ enabled: false, services: [], soloistPort: 19090 });
+  });
+
+  it("a throwing adapter factory is logged and skipped; Nous still starts", () => {
+    const lines: string[] = [];
+    const ail = createIntegrations({ enabled: true, services: ["voice_relay", "mock"], soloistPort: 19090 }, (l) => lines.push(l), {
+      voice_relay: () => {
+        throw new TypeError("boom");
+      },
+      mock: () => null,
+    });
+    expect(ail).not.toBeNull();
+    expect(ail!.registry.adapters()).toEqual([]);
+    expect(lines.join("\n")).toMatch(/voice_relay 建立失敗，略過（boom）/);
   });
 
   it("voice_relay is skipped with a log line when NOUS_VCR is off", () => {

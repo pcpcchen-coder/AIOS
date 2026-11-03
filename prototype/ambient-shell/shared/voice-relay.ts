@@ -244,7 +244,8 @@ export function rate(num: number, den: number): Rate {
 export function summarizeTrials(trials: readonly RelayTrial[]): TrialSummary[] {
   const groups = new Map<string, TrialSummary>();
   for (const t of trials) {
-    const key = `${t.targetId}|${t.templateId}@${t.templateVersion}|${t.voiceProfileId}`;
+    // JSON 陣列當鍵：ID 裡有 | 或 @ 也不會撞在一起。
+    const key = JSON.stringify([t.targetId, t.templateId, t.templateVersion, t.voiceProfileId]);
     let g = groups.get(key);
     if (!g) {
       g = { key, targetId: t.targetId, templateId: t.templateId, templateVersion: t.templateVersion, voiceProfileId: t.voiceProfileId, trials: 0, wakeDetected: 0, correctCommand: 0, wrongCommand: 0, unknown: 0, negativeTrials: 0, falseWake: 0, pending: 0, wakeRate: rate(0, 0), commandRate: rate(0, 0), endToEndRate: rate(0, 0), falseWakeRate: rate(0, 0), status: "NOT_TESTED" };

@@ -268,14 +268,15 @@ export function parseHttpUrl(raw: string | undefined, name: string): string | nu
 
 /**
  * NOUS_AIL＋NOUS_AIL_SERVICES：只接受小寫英數 Adapter ID；旗標關閉時清單一律為空。
- * VCR-0：NOUS_VCR＝off（預設）｜fake（假輸出，沒有實體喇叭發聲）；其他值一律報錯。
+ * VCR-0：NOUS_VCR＝off（預設）｜fake（假輸出，沒有實體喇叭發聲）；整合層開著時其他值一律報錯，關著時不看。
  * SP-1：NOUS_SPOTIFY_SOLOIST_PORT＝Mac loopback 上經 SSH -R 轉送的 Soloist WebSocket 埠（預設 19090；主機固定 127.0.0.1）。
  */
 export function parseAil(flag: string | undefined, services: string | undefined, soloistPort?: string, vcr?: string, configDir?: string): Config["ail"] {
+  const enabled = (flag ?? "off").trim().toLowerCase() === "on";
+  // 整合層關閉時 NOUS_VCR 整個不看（和 NOUS_AIL_SERVICES 一樣）。
+  if (!enabled) return { enabled: false, services: [], soloistPort: DEFAULT_SOLOIST_PORT };
   const vcrMode = (vcr ?? "off").trim().toLowerCase() || "off";
   if (vcrMode !== "off" && vcrMode !== "fake") throw new Error("NOUS_VCR 只接受 off 或 fake；實體播音（VCR-2/3）尚未實作");
-  const enabled = (flag ?? "off").trim().toLowerCase() === "on";
-  if (!enabled) return { enabled: false, services: [], soloistPort: DEFAULT_SOLOIST_PORT };
   const list = (services ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   for (const id of list) if (!/^[a-z][a-z0-9_]{0,31}$/.test(id)) throw new Error(`NOUS_AIL_SERVICES 的 Adapter ID 不合法："${id}"`);
   const base = { enabled: true, services: [...new Set(list)], soloistPort: parseSoloistPort(soloistPort) };

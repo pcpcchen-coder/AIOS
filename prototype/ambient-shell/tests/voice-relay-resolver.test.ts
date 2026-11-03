@@ -57,12 +57,12 @@ describe("resolveRelay", () => {
     d.targets[0].templateOverrides = {};
     expect(resolved(next())).toMatchObject({ level: "model_locale", commandText: "下一首歌" });
     d.packs[0].entries.find((e: Doc) => e.templateId === "google.next.zh1").selected = false;
-    expect(resolved(next())).toMatchObject({ level: "assistant_locale", commandText: "助理層下一首", wakePhrase: "Hey Google", packId: "t.assistant" });
+    // 喚醒詞一律取最具體的同品牌同助理同語系命令包（型號層 "Ok Google"），不跟著模板所在的命令包。
+    expect(resolved(next())).toMatchObject({ level: "assistant_locale", commandText: "助理層下一首", wakePhrase: "Ok Google", packId: "t.assistant" });
     d.packs.find((p: Doc) => p.id === "t.assistant").entries[0].selected = false;
-    // 品牌層與通用層的命令包沒有喚醒詞：解析器不會自己補。
-    expect(next()).toEqual({ kind: "refused", reason: "unsupported_intent", detail: "no_wake_phrase" });
+    expect(resolved(next())).toMatchObject({ level: "vendor_locale", commandText: "品牌層下一首", wakePhrase: "Ok Google" });
     d.targets[0].wakePhraseId = "google.wake.hey.zh";
-    expect(resolved(next())).toMatchObject({ level: "vendor_locale", commandText: "品牌層下一首", wakePhrase: "Hey Google" });
+    expect(resolved(next())).toMatchObject({ level: "vendor_locale", wakePhrase: "Hey Google" });
     d.packs.find((p: Doc) => p.id === "t.vendor").entries[0].selected = false;
     expect(resolved(next())).toMatchObject({ level: "generic", commandText: "通用層下一首" });
     d.packs.find((p: Doc) => p.id === "t.generic").entries[0].selected = false;
@@ -175,9 +175,62 @@ describe("resolveRelay", () => {
     expect(resolved(resolveRelay(build(d), req)).voiceProfileId).toBe("google_zh_b");
   });
 
-  it("uses the profile's output override when present", () => {
+  it("refuses when the profile's output differs from the target's speaker (never moves audio elsewhere)", () => {
+    const req = { targetId: ZH, intentId: "music.next", slots: {} };
+    for (const patch of [{ outputNode: "kitchen_pi" }, { outputDeviceId: "usb_speaker" }]) {
+      const d = doc();
+      Object.assign(d.profiles[0], patch);
+      expect(resolveRelay(build(d), req), JSON.stringify(patch)).toEqual({ kind: "refused", reason: "output_unavailable", detail: "output_mismatch" });
+    }
+    // 和目標相同的值可以。
     const d = doc();
-    Object.assign(d.profiles[0], { outputNode: "kitchen_pi", outputDeviceId: "usb_speaker" });
-    expect(resolved(resolveRelay(build(d), { targetId: ZH, intentId: "music.next", slots: {} }))).toMatchObject({ outputNode: "kitchen_pi", outputDeviceId: "usb_speaker" });
+    Object.assign(d.profiles[0], { outputNode: "fake_node", outputDeviceId: "fake_speaker_1" });
+    expect(resolved(resolveRelay(build(d), req))).toMatchObject({ outputNode: "fake_node", outputDeviceId: "fake_speaker_1" });
+  });
+
+  it("takes the wake phrase only from a same-brand, same-assistant, same-locale pack; never from generic or other packs", () => {
+    const req = { targetId: ZH, intentId: "music.next", slots: {} };
+    const d = doc();
+    d.packs[0].wakePhrases = [];
+    d.packs.push({ id: "t.generic", version: 1, scope: "generic", compatibleAssistants: ["google_assistant"], locale: "zh-TW", wakePhrases: [{ id: "t.wake.g", text: "Hey Google", selected: true }], entries: [] });
+    // 英文包的喚醒詞、通用包的喚醒詞都不能拿來用。
+    expect(resolveRelay(build(d), req)).toEqual({ kind: "refused", reason: "unsupported_intent", detail: "no_wake_phrase" });
+    // 助理層命令包（同品牌同助理同語系）可以。
+    d.packs.push({ id: "t.assistant", version: 1, scope: "assistant", vendor: "google", assistant: "google_assistant", locale: "zh-TW", wakePhrases: [{ id: "t.wake.a", text: "Hey Google", selected: true }], entries: [] });
+    expect(resolved(resolveRelay(build(d), req)).wakePhrase).toBe("Hey Google");
+  });
+
+  it("validator rejects a target wakePhraseId from another locale, brand or assistant", () => {
+    const d = doc();
+    d.targets[0].wakePhraseId = "google.wake.ok.en";
+    const r = parseRelayCatalog(d);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.join()).toMatch(/wakePhraseId.*品牌、助理或語系/);
+  });
+
+  it("only an explicit candidateTemplateId may try an unreviewed template; candidateVoiceId alone does not", () => {
+    const d = doc();
+    d.targets[0].reviewedTemplates = [];
+    const req = { targetId: ZH, intentId: "music.next", slots: {} };
+    expect(resolveRelay(build(d), req, { diagnostic: { candidateVoiceId: "google_zh_b" } })).toEqual({ kind: "refused", reason: "not_reviewed", detail: "candidate" });
+    expect(resolveRelay(build(d), req, { diagnostic: { candidateTemplateId: "google.next.zh1", candidateVoiceId: "google_zh_b" } }).kind).toBe("resolved");
+  });
+
+  it("a catalog entry marked rejected stays rejected even if the target approved it", () => {
+    const d = doc();
+    d.packs[0].entries.find((e: Doc) => e.templateId === "google.next.zh1").status = "rejected";
+    expect(resolveRelay(build(d), { targetId: ZH, intentId: "music.next", slots: {} })).toEqual({ kind: "refused", reason: "not_reviewed", detail: "rejected" });
+  });
+
+  it("re-checks the rendered command against every wake phrase in the catalog", () => {
+    // 驗證器會擋下含喚醒詞的裝置名稱；這裡直接改凍結前的目錄，模擬繞過驗證的資料。
+    const c = structuredClone(build(doc())) as Doc;
+    for (const name of ["OK  google", "ｏｋ Ｇｏｏｇｌｅ", "hey google 的燈"]) {
+      c.targets[0].devices[0].name = name;
+      expect(resolveRelay(c, { targetId: ZH, intentId: "light.power", slots: { device: "fixture_light", on: true } }), name).toEqual({ kind: "refused", reason: "invalid_slots", detail: "wake_phrase_in_command" });
+    }
+    // 零寬字元本身就不是可以播的文字。
+    c.targets[0].devices[0].name = "OK\u200bgoogle";
+    expect(resolveRelay(c, { targetId: ZH, intentId: "light.power", slots: { device: "fixture_light", on: true } })).toMatchObject({ reason: "invalid_slots" });
   });
 });

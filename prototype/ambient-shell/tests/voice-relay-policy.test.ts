@@ -47,6 +47,27 @@ describe("relay policy", () => {
     }
   });
 
+  it("judges by usage: any music intent is blocked for Spotify/unknown music service whatever the downstream label", () => {
+    for (const label of ["assistant_builtin", "smart_home", "other"]) {
+      for (const musicService of ["spotify", "unknown"]) {
+        const d = doc();
+        d.targets[0].musicService = musicService;
+        d.packs[0].entries.find((e: Doc) => e.templateId === "google.next.zh1").downstreamService = label;
+        expect(resolveRelay(build(d), { targetId: ZH, intentId: "music.next", slots: {} }), `${label} ${musicService}`).toMatchObject({ reason: "policy_blocked" });
+      }
+    }
+  });
+
+  it("normalises the command text before the Spotify check (NFKC, case, spaces, zero-width/bidi)", () => {
+    const c = build(doc());
+    const intent = c.intents.find((i) => i.id === "volume.set")!;
+    const entry = c.packs[0]!.entries.find((e) => e.templateId === "google.volume.zh1")!;
+    for (const text of ["用 S p o t i f y", "ＳＰＯＴＩＦＹ", "spo\u200btify", "spo\u202etify", "聲 破 天", "SpOtIfY"]) {
+      expect(relayPolicy(intent, entry, c.targets[0]!, text), JSON.stringify(text)).toEqual({ ok: false, detail: "spotify_text" });
+    }
+    expect(relayPolicy(intent, entry, c.targets[0]!, "音量調到百分之20")).toEqual({ ok: true });
+  });
+
   it("allows volume and light commands regardless of music service", () => {
     const d = doc();
     d.targets[0].musicService = "spotify";

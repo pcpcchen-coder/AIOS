@@ -43,10 +43,16 @@ describe("summarizeTrials", () => {
   it("groups by target | template@version | voice in sorted key order", () => {
     const out = summarizeTrials([trial({ voiceProfileId: "google_zh_b" }), trial({ templateVersion: 2 }), trial({})]);
     expect(out.map((s) => s.key)).toEqual([
-      "fixture_google_mini_zh|google.next.zh1@1|google_zh_a",
-      "fixture_google_mini_zh|google.next.zh1@1|google_zh_b",
-      "fixture_google_mini_zh|google.next.zh1@2|google_zh_a",
+      JSON.stringify(["fixture_google_mini_zh", "google.next.zh1", 1, "google_zh_a"]),
+      JSON.stringify(["fixture_google_mini_zh", "google.next.zh1", 1, "google_zh_b"]),
+      JSON.stringify(["fixture_google_mini_zh", "google.next.zh1", 2, "google_zh_a"]),
     ]);
+  });
+
+  it("does not merge groups whose ids contain the old separators", () => {
+    const a = trial({ targetId: "a|b", templateId: "c" });
+    const b = trial({ targetId: "a", templateId: "b|c" });
+    expect(summarizeTrials([a, b])).toHaveLength(2);
   });
 });
 
@@ -70,6 +76,9 @@ describe("parseTrials", () => {
       [{ schemaVersion: 1, trials: {} }, /陣列/],
       [{ schemaVersion: 1, trials: [], extra: 1 }, /不認得的欄位/],
       [[], /物件/],
+      [{ schemaVersion: 1, trials: [trial({ targetId: "Bad Target" })] }, /targetId：格式不合法/],
+      [{ schemaVersion: 1, trials: [trial({ templateId: "x|y" })] }, /templateId：格式不合法/],
+      [{ schemaVersion: 1, trials: [trial({ voiceProfileId: "../v" })] }, /voiceProfileId：格式不合法/],
     ];
     for (const [raw, error] of bad) {
       const r = parseTrials(raw);

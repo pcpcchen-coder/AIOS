@@ -27,16 +27,31 @@ import {
 export type CatalogResult = { ok: true; catalog: RelayCatalog } | { ok: false; errors: string[] };
 
 /** 一般 ID（命令包、模板、喚醒詞、聲線）：可含大寫語系段，例如 google.home_mini.zh-TW.v1。 */
-const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
+export const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,79}$/;
 /** 裝置表、輸出節點、燈的 ID。 */
-const SHORT_ID = /^[a-z][a-z0-9_]{0,31}$/;
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+export const SHORT_ID = /^[a-z][a-z0-9_]{0,31}$/;
+/** 控制字元、換行，以及 Unicode 格式字元（零寬、雙向控制、BOM 等 \p{Cf}）。 */
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\p{Cf}]/u;
 export const TEXT_MAX = 120;
 const PLACEHOLDER = /\{([a-z_]+)\}/g;
 
 /** 要播出的文字：非空、沒有控制字元或換行、≤120 字。 */
 export function safeText(value: string): boolean {
   return value.trim().length > 0 && value.length <= TEXT_MAX && !CONTROL.test(value);
+}
+
+/** 比對用的正規化：NFKC、小寫、拿掉所有空白與格式字元（"OK  Google"、"ok\u200bgoogle" 都變成 "okgoogle"）。 */
+export function normalizeSpoken(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/[\s\p{Cf}]+/gu, "");
+}
+
+/** 文字裡有沒有任何一個喚醒詞（正規化後比對）。 */
+export function containsWakePhrase(text: string, wakePhrases: readonly string[]): boolean {
+  const t = normalizeSpoken(text);
+  return wakePhrases.some((w) => {
+    const n = normalizeSpoken(w);
+    return n.length > 0 && t.includes(n);
+  });
 }
 
 export function placeholders(template: string): string[] {
@@ -131,16 +146,21 @@ export function parseRelayCatalog(raw: unknown): CatalogResult {
   // 命令包
   const packs: CommandPack[] = [];
   const templateIds = new Map<string, { intentId: string; pack: Obj }>();
-  const wakeIds = new Set<string>();
+  /** 喚醒詞 ID → 所屬命令包（裝置表的 wakePhraseId 要對得上品牌、助理、語系）。 */
+  const wakeIds = new Map<string, Obj>();
+  const allWakes: string[] = [];
+  /** 最後才檢查（要等所有命令包的喚醒詞都收齊）：會被播出的文字不能含任何喚醒詞。 */
+  const spoken: { path: string; text: string }[] = [];
   c.arr(root.packs, "$.packs").forEach((raw, i) => {
     const p = `$.packs[${i}]`;
     const o = c.obj(raw, p, ["id", "version", "scope", "locale", "wakePhrases", "entries"], ["vendor", "assistant", "model", "compatibleAssistants"]);
     if (!o) return;
     c.str(o.id, `${p}.id`, ID);
     c.int(o.version, `${p}.version`, 1, 1_000_000);
-    c.oneOf(o.scope, `${p}.scope`, PACK_SCOPES);
+    const scopeOk = c.oneOf(o.scope, `${p}.scope`, PACK_SCOPES);
     c.str(o.locale, `${p}.locale`, RELAY_LOCALE, 8);
-    const need = { model: ["vendor", "assistant", "model"], assistant: ["vendor", "assistant"], vendor: ["vendor"], generic: [] }[o.scope as string] ?? [];
+    const NEED: Record<string, readonly string[]> = { model: ["vendor", "assistant", "model"], assistant: ["vendor", "assistant"], vendor: ["vendor"], generic: [] };
+    const need = scopeOk && Object.hasOwn(NEED, o.scope as string) ? NEED[o.scope as string]! : ["vendor", "assistant", "model"];
     for (const k of ["vendor", "assistant", "model"]) {
       if (need.includes(k) && o[k] === undefined) c.err(`${p}.${k}`, `scope ${String(o.scope)} 必須有`);
       if (!need.includes(k) && o[k] !== undefined) c.err(`${p}.${k}`, `scope ${String(o.scope)} 不能有`);
@@ -155,7 +175,6 @@ export function parseRelayCatalog(raw: unknown): CatalogResult {
     } else if (o.compatibleAssistants !== undefined) c.err(`${p}.compatibleAssistants`, "只有 generic 可以有");
 
     const wakes = c.arr(o.wakePhrases, `${p}.wakePhrases`);
-    const wakeTexts: string[] = [];
     let selectedWakes = 0;
     wakes.forEach((raw, j) => {
       const wp = `${p}.wakePhrases[${j}]`;
@@ -163,9 +182,9 @@ export function parseRelayCatalog(raw: unknown): CatalogResult {
       if (!w) return;
       if (c.str(w.id, `${wp}.id`, ID)) {
         if (wakeIds.has(w.id as string)) c.err(`${wp}.id`, "ID 重複");
-        wakeIds.add(w.id as string);
+        wakeIds.set(w.id as string, o);
       }
-      if (c.text(w.text, `${wp}.text`)) wakeTexts.push((w.text as string).toLowerCase());
+      if (c.text(w.text, `${wp}.text`)) allWakes.push(w.text as string);
       c.bool(w.selected, `${wp}.selected`);
       if (w.selected === true) selectedWakes++;
     });
@@ -196,8 +215,7 @@ export function parseRelayCatalog(raw: unknown): CatalogResult {
       }
       if (!c.text(e.utteranceTemplate, `${ep}.utteranceTemplate`) || !intent) return;
       const template = e.utteranceTemplate as string;
-      const lower = template.toLowerCase();
-      if (wakeTexts.some((w) => lower.includes(w))) c.err(`${ep}.utteranceTemplate`, "命令不能含喚醒詞");
+      spoken.push({ path: `${ep}.utteranceTemplate`, text: template });
       if (/[{}]/.test(template.replace(PLACEHOLDER, ""))) c.err(`${ep}.utteranceTemplate`, "大括號只能用在 {slot}");
       const used = placeholders(template);
       const slots = Object.keys(intent.slots ?? {});
@@ -213,7 +231,7 @@ export function parseRelayCatalog(raw: unknown): CatalogResult {
           continue;
         }
         const words = c.obj(slotText[name], `${ep}.slotText.${name}`, values);
-        if (words) for (const v of values) if (words[v] !== undefined) c.text(words[v], `${ep}.slotText.${name}.${v}`);
+        if (words) for (const v of values) if (words[v] !== undefined && c.text(words[v], `${ep}.slotText.${name}.${v}`)) spoken.push({ path: `${ep}.slotText.${name}.${v}`, text: words[v] as string });
       }
       for (const name of Object.keys(slotText)) if (!slots.includes(name)) c.err(`${ep}.slotText.${name}`, "不是意圖的 slot");
     });
@@ -290,7 +308,11 @@ export function parseRelayCatalog(raw: unknown): CatalogResult {
     c.arr(o.candidateVoiceProfileIds, `${p}.candidateVoiceProfileIds`).forEach((id, j) => {
       if (!(typeof id === "string" && profiles.has(id))) c.err(`${p}.candidateVoiceProfileIds[${j}]`, "沒有這個聲線");
     });
-    if (o.wakePhraseId !== undefined && !(typeof o.wakePhraseId === "string" && wakeIds.has(o.wakePhraseId))) c.err(`${p}.wakePhraseId`, "沒有這個喚醒詞");
+    if (o.wakePhraseId !== undefined) {
+      const owner = typeof o.wakePhraseId === "string" ? wakeIds.get(o.wakePhraseId) : undefined;
+      if (!owner) c.err(`${p}.wakePhraseId`, "沒有這個喚醒詞");
+      else if (owner.vendor !== o.vendor || owner.assistant !== o.assistant || owner.locale !== o.locale) c.err(`${p}.wakePhraseId`, "喚醒詞的品牌、助理或語系與目標不同");
+    }
     const overrides = c.obj(o.templateOverrides, `${p}.templateOverrides`, [], INTENT_IDS);
     if (overrides) {
       for (const [intentId, templateId] of Object.entries(overrides)) {
@@ -317,11 +339,13 @@ export function parseRelayCatalog(raw: unknown): CatalogResult {
       if (!d) return;
       if (c.str(d.id, `${dp}.id`, SHORT_ID)) deviceIds.push(d.id as string);
       c.oneOf(d.kind, `${dp}.kind`, ["light"]);
-      c.text(d.name, `${dp}.name`);
+      if (c.text(d.name, `${dp}.name`)) spoken.push({ path: `${dp}.name`, text: d.name as string });
     });
     c.unique(deviceIds, `${p}.devices`);
     c.optBool(o.fixture, `${p}.fixture`);
   });
+
+  for (const { path, text } of spoken) if (containsWakePhrase(text, allWakes)) c.err(path, "會播出的文字不能含喚醒詞");
 
   if (c.errors.length) return { ok: false, errors: c.errors };
   return { ok: true, catalog: deepFreeze(structuredClone(raw) as RelayCatalog) };

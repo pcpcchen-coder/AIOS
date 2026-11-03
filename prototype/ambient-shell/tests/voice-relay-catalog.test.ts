@@ -120,6 +120,44 @@ describe("parseRelayCatalog", () => {
     }
   });
 
+  it("rejects wake phrases (normalised, from any pack) inside templates, slot words and device names", () => {
+    const cases: [(d: Doc) => void, RegExp][] = [
+      [(d) => (entry(d, "google.next.zh1").utteranceTemplate = "OK  Google 下一首"), /utteranceTemplate/],
+      [(d) => (entry(d, "google.next.zh1").utteranceTemplate = "ｏｋ ｇｏｏｇｌｅ下一首"), /utteranceTemplate/],
+      [(d) => (entry(d, "google.genre.zh1").slotText.genre.pop = "hey google"), /slotText\.genre\.pop/],
+      [(d) => (target(d).devices[0].name = "Ok Google 燈"), /devices\[0\]\.name/],
+      // 別的命令包的喚醒詞也算。
+      [(d) => d.packs.push({ id: "x.pack", version: 1, scope: "model", vendor: "amazon", assistant: "alexa", model: "echo_dot", locale: "zh-TW", wakePhrases: [{ id: "x.wake", text: "Alexa", selected: true }], entries: [] }) && (target(d).devices[0].name = "alexa 燈"), /devices\[0\]\.name/],
+    ];
+    for (const [mutate, path] of cases) {
+      const d = doc();
+      mutate(d);
+      const errors = errorsOf(d).join();
+      expect(errors, String(mutate)).toMatch(/喚醒詞/);
+      expect(errors).toMatch(path);
+    }
+  });
+
+  it("rejects Unicode format characters (zero-width, bidi, BOM) in every spoken text field", () => {
+    const chars = ["\u200b", "\u200f", "\u202e", "\u2066", "\ufeff"];
+    const fields: ((d: Doc, ch: string) => void)[] = [
+      (d, ch) => (entry(d, "google.next.zh1").utteranceTemplate = `下一首${ch}歌`),
+      (d, ch) => (entry(d, "google.genre.zh1").slotText.genre.pop = `流${ch}行`),
+      (d, ch) => (zhPack(d).wakePhrases[0].text = `Ok${ch} Google`),
+      (d, ch) => (target(d).devices[0].name = `測試${ch}燈`),
+    ];
+    for (const ch of chars) for (const mutate of fields) expect(parseRelayCatalog(((d) => (mutate(d, ch), d))(doc())).ok, `${String(mutate)} ${ch.codePointAt(0)}`).toBe(false);
+  });
+
+  it("does not crash on scope names inherited from Object.prototype", () => {
+    for (const scope of ["constructor", "toString", "__proto__", "hasOwnProperty"]) {
+      const d = doc();
+      zhPack(d).scope = scope;
+      expect(() => parseRelayCatalog(d), scope).not.toThrow();
+      expect(errorsOf(d).join()).toMatch(/scope/);
+    }
+  });
+
   it("enforces pack scope rules", () => {
     const cases: ((d: Doc) => void)[] = [
       (d) => delete zhPack(d).model,

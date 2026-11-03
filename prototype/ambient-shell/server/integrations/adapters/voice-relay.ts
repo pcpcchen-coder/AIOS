@@ -43,6 +43,10 @@ export class VoiceRelayAdapter implements IntegrationAdapter {
   readonly service = "voice_relay";
   readonly version = 1;
   readonly mock: boolean;
+  /**
+   * 每個輸出端同時只播一個命令。只在這個核心行程裡有效；呼叫被中止或逾時後鎖就釋放，
+   * 但實體輸出端可能還在播（VCR-2/3 要由輸出端自己回報忙碌）。
+   */
   private readonly busy = new Set<string>();
 
   constructor(private readonly options: VoiceRelayAdapterOptions) {
@@ -157,6 +161,13 @@ export class VoiceRelayAdapter implements IntegrationAdapter {
   }
 }
 
+/** 確定沒有發出聲音的失敗 → 說明。 */
+const NOT_PLAYED: Partial<Record<NonNullable<PlaybackReceipt["failure"]>, string>> = {
+  synthesis_failed: "語音合成失敗",
+  device_unavailable: "輸出裝置無法使用",
+  start_failed: "播放沒有開始",
+};
+
 /**
  * 收據 → 結果。永遠不回 confirmed：就算播完，也只代表聲音送出了（unconfirmed）。
  * 收據缺漏、對不上這次工作或裝置、播到一半、只合成沒開始播 → unknown；確定沒有發出聲音的失敗 → failed。
@@ -167,8 +178,12 @@ export function receiptOutcome(receipt: unknown, job: RelayJob, mock: boolean, d
   if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return unknown("receipt_missing");
   const r = receipt as Partial<PlaybackReceipt>;
   if (r.jobId !== job.jobId || r.outputNode !== job.outputNode || r.outputDeviceId !== job.outputDeviceId) return unknown("receipt_mismatch");
-  if (r.audioStarted === false && r.failure !== undefined) {
-    return toolResult("failed", `${m}語音命令沒有發出（${r.failure === "synthesis_failed" ? "語音合成失敗" : "輸出裝置無法使用"}）。`, { reason: "unavailable", data: { ...data, vcr_reason: r.failure } });
+  if (typeof r.audioStarted !== "boolean" || typeof r.audioFinished !== "boolean") return unknown("receipt_invalid");
+  // 自相矛盾（沒開始卻播完）：不採信。
+  if (!r.audioStarted && r.audioFinished) return unknown("receipt_contradictory");
+  // 確定沒有發出聲音的失敗才是 failed；interrupted 表示可能已經播了一部分，所以是 unknown。
+  if (!r.audioStarted && r.failure !== undefined && Object.hasOwn(NOT_PLAYED, r.failure)) {
+    return toolResult("failed", `${m}語音命令沒有發出（${NOT_PLAYED[r.failure]}）。`, { reason: "unavailable", data: { ...data, vcr_reason: r.failure } });
   }
   if (r.audioStarted === true && r.audioFinished === true && r.failure === undefined) {
     return toolResult("unconfirmed", mock ? MOCK_UNCONFIRMED : UNCONFIRMED, { data });
