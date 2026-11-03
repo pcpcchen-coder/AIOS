@@ -1,0 +1,13 @@
+[Unit]
+Description=AIOS Pi terminal SSH tunnel to Mac Nous core
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=%h/.local/share/aios-terminal/bin/aios-tunnel
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

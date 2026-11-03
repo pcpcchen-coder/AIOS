@@ -17,6 +17,14 @@ let exited;
 let serverLog = '';
 
 try {
+  const kit = spawnSync('bash', ['terminals/rpi4/tests/dry-run.sh'], { cwd: root, encoding: 'utf8' });
+  await writeFile(join(evidence, 'rpi4-terminal-kit.log'), (kit.stdout ?? '') + (kit.stderr ?? ''));
+  process.stdout.write(kit.stdout ?? '');
+  process.stderr.write(kit.stderr ?? '');
+  if (kit.error) throw kit.error;
+  assert.equal(kit.status, 0, 'rpi4 terminal kit dry-run failed');
+  report.checks.push('rpi4 terminal kit dry-run');
+
   for (const command of ['typecheck', 'test', 'build']) {
     const result = spawnSync('npm', ['run', command], { cwd: app, encoding: 'utf8' });
     await writeFile(join(evidence, `${command}.log`), (result.stdout ?? '') + (result.stderr ?? ''));

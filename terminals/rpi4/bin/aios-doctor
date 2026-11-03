@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/common.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh"
+
+case "${1:-}" in
+  --help | -h)
+    t "用法：aios-doctor [--help]
+檢查 AIOS Pi 終端的設定、SSH 通道、Nous 核心、Chromium、音訊、鏡頭、溫度、供電、記憶體與網路。
+每行為 PASS／WARN／FAIL／SKIP；有任何 FAIL 時結束碼為 1。" \
+      "Usage: aios-doctor [--help]
+Checks the AIOS Pi terminal config, SSH tunnel, Nous core, Chromium, audio, camera, temperature, power, memory and network.
+Each line is PASS/WARN/FAIL/SKIP; exits 1 if any check FAILs."
+    exit 0
+    ;;
+  "") ;;
+  *) die "未知的參數：$1" "Unknown option: $1" 2 ;;
+esac
+
+pass=0 warns=0 fails=0 skips=0
+report() {
+  local status="$1" label="$2" detail="$3"
+  case "$status" in
+    PASS) pass=$((pass + 1)) ;;
+    WARN) warns=$((warns + 1)) ;;
+    FAIL) fails=$((fails + 1)) ;;
+    SKIP) skips=$((skips + 1)) ;;
+  esac
+  printf '%-4s  %s: %s\n' "$status" "$label" "$detail"
+}
+have() { command -v "$1" >/dev/null 2>&1; }
+missing() { t "找不到 $1 指令" "$1 command not found"; }
+
+config_ok=0
+label="$(t "設定" "config")"
+if load_config; then
+  config_ok=1
+  report PASS "$label" "$AIOS_MAC_USER@$AIOS_MAC_HOST, $(t "核心連接埠 $AIOS_PORT，SSH 連接埠 $AIOS_SSH_PORT" "core port $AIOS_PORT, SSH port $AIOS_SSH_PORT")"
+else
+  report FAIL "$label" "$CONFIG_ERROR"
+fi
+
+label="$(t "SSH 金鑰與主機金鑰" "SSH key and host key")"
+if [[ -f "$AIOS_KEY" && -s "$AIOS_KNOWN_HOSTS" ]]; then
+  report PASS "$label" "$AIOS_KEY, $AIOS_KNOWN_HOSTS"
+else
+  report FAIL "$label" "$(t "缺少 $AIOS_KEY 或 $AIOS_KNOWN_HOSTS，請重新執行 install.sh" "missing $AIOS_KEY or $AIOS_KNOWN_HOSTS; re-run install.sh")"
+fi
+
+unit_state() { systemctl --user is-active "$1" 2>/dev/null || true; }
+
+label="$(t "SSH 通道服務" "SSH tunnel service")"
+if ! have systemctl; then
+  report SKIP "$label" "$(missing systemctl)"
+else
+  state="$(unit_state aios-tunnel.service)"
+  if [[ "$state" == active ]]; then
+    report PASS "$label" "aios-tunnel.service active"
+  else
+    report FAIL "$label" "aios-tunnel.service ${state:-unknown}; $(t "查看：journalctl --user -u aios-tunnel -n 50" "see: journalctl --user -u aios-tunnel -n 50")"
+  fi
+fi
+
+if ((config_ok)); then
+  label="$(t "本機轉送埠" "local forward port")"
+  if ! have ss; then
+    report SKIP "$label" "$(missing ss)"
+  elif [[ -n "$(ss -ltnH "sport = :$AIOS_PORT" 2>/dev/null || true)" ]]; then
+    report PASS "$label" "127.0.0.1:$AIOS_PORT $(t "監聽中" "listening")"
+  else
+    report FAIL "$label" "$(t "127.0.0.1:$AIOS_PORT 沒有監聽；SSH 通道未建立" "nothing listening on 127.0.0.1:$AIOS_PORT; the SSH tunnel is not up")"
+  fi
+
+  label="$(t "Nous 核心健康" "Nous core health")"
+  page_label="$(t "Nous 頁面" "Nous page")"
+  if ! have curl; then
+    report SKIP "$label" "$(missing curl)"
+    report SKIP "$page_label" "$(missing curl)"
+  else
+    body="$(mktemp)"
+    trap 'rm -f "$body"' EXIT
+    code="$(curl -sS --max-time 3 -o "$body" -w '%{http_code}' "$(core_url /api/settings)" 2>/dev/null || true)"
+    if [[ "$code" == 200 ]] && grep -q '"provider"' "$body"; then
+      report PASS "$label" "GET /api/settings 200"
+    else
+      report FAIL "$label" "GET /api/settings → ${code:-000}; $(t "確認 Mac 上的 Nous App 正在執行，且連接埠是 $AIOS_PORT" "check that the Nous App is running on the Mac on port $AIOS_PORT")"
+    fi
+    code="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' "$(core_url /)" 2>/dev/null || true)"
+    if [[ "$code" == 200 ]]; then
+      report PASS "$page_label" "GET / 200"
+    else
+      report FAIL "$page_label" "GET / → ${code:-000}"
+    fi
+  fi
+
+  label="$(t "Mac SSH 可連線" "Mac SSH reachable")"
+  # shellcheck disable=SC2016  # host and port are passed as arguments, not interpolated into the script
+  if ! have timeout; then
+    report SKIP "$label" "$(missing timeout)"
+  elif timeout 3 bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$AIOS_MAC_HOST" "$AIOS_SSH_PORT" 2>/dev/null; then
+    report PASS "$label" "$AIOS_MAC_HOST:$AIOS_SSH_PORT"
+  else
+    report FAIL "$label" "$AIOS_MAC_HOST:$AIOS_SSH_PORT $(t "無法連線；確認 Mac 已開機、遠端登入已開啟、同一網路" "unreachable; check the Mac is awake, Remote Login is on and both are on the same network")"
+  fi
+else
+  for label in "$(t "本機轉送埠" "local forward port")" "$(t "Nous 核心健康" "Nous core health")" \
+    "$(t "Nous 頁面" "Nous page")" "$(t "Mac SSH 可連線" "Mac SSH reachable")"; do
+    report SKIP "$label" "$(t "設定無效" "config invalid")"
+  done
+fi
+
+label="$(t "全螢幕服務" "kiosk service")"
+if ! have systemctl; then
+  report SKIP "$label" "$(missing systemctl)"
+else
+  state="$(unit_state aios-kiosk.service)"
+  if [[ "$state" == active ]]; then
+    report PASS "$label" "aios-kiosk.service active"
+  else
+    report WARN "$label" "aios-kiosk.service ${state:-unknown}; $(t "需要桌面工作階段（自動登入後由自動啟動項目開啟）" "needs a desktop session (started by the autostart entry after login)")"
+  fi
+fi
+
+label="Chromium"
+if chromium="$(find_chromium)"; then
+  report PASS "$label" "$chromium"
+else
+  report FAIL "$label" "$(t "找不到 chromium 或 chromium-browser" "chromium or chromium-browser not found")"
+fi
+
+join_names() {
+  local first="$1"
+  shift
+  printf '%s' "$first" "${@/#/, }"
+}
+count_cards() { "$@" 2>/dev/null | grep -c '^card' || true; }
+
+label="$(t "麥克風" "microphones")"
+if ! have arecord; then
+  report SKIP "$label" "$(missing arecord)"
+else
+  n="$(count_cards arecord -l)"
+  if ((n > 0)); then
+    report PASS "$label" "$(t "$n 個錄音裝置" "$n capture device(s)")"
+  else
+    report FAIL "$label" "$(t "arecord -l 沒有錄音裝置" "arecord -l lists no capture devices")"
+  fi
+fi
+
+label="$(t "喇叭" "speakers")"
+if ! have aplay; then
+  report SKIP "$label" "$(missing aplay)"
+else
+  n="$(count_cards aplay -l)"
+  if ((n > 0)); then
+    report PASS "$label" "$(t "$n 個播放裝置" "$n playback device(s)")"
+  else
+    report FAIL "$label" "$(t "aplay -l 沒有播放裝置" "aplay -l lists no playback devices")"
+  fi
+fi
+
+label="$(t "鏡頭" "cameras")"
+if ! have v4l2-ctl; then
+  report SKIP "$label" "$(missing v4l2-ctl)"
+else
+  n="$( (v4l2-ctl --list-devices 2>/dev/null || true) | grep -c '/dev/video' || true)"
+  if ((n > 0)); then
+    report PASS "$label" "$(t "$n 個 video 節點" "$n video node(s)")"
+  else
+    report WARN "$label" "$(t "沒有偵測到鏡頭（鏡頭為選配）" "no camera detected (camera is optional)")"
+  fi
+fi
+
+temp_label="$(t "溫度" "temperature")"
+throttle_label="$(t "供電與降頻" "power and throttling")"
+if ! have vcgencmd; then
+  report SKIP "$temp_label" "$(missing vcgencmd)"
+  report SKIP "$throttle_label" "$(missing vcgencmd)"
+else
+  raw="$(vcgencmd measure_temp 2>/dev/null || true)"
+  if [[ "$raw" =~ temp=([0-9]+(\.[0-9]+)?) ]]; then
+    temp="${BASH_REMATCH[1]}"
+    whole="${temp%%.*}"
+    if ((whole >= 80)); then
+      report FAIL "$temp_label" "${temp}°C $(t "過熱，加裝散熱" "too hot; add cooling")"
+    elif ((whole >= 70)); then
+      report WARN "$temp_label" "${temp}°C $(t "偏高" "high")"
+    else
+      report PASS "$temp_label" "${temp}°C"
+    fi
+  else
+    report SKIP "$temp_label" "$(t "無法解讀 vcgencmd 輸出" "cannot parse vcgencmd output")"
+  fi
+
+  raw="$(vcgencmd get_throttled 2>/dev/null || true)"
+  if [[ "$raw" =~ throttled=0x([0-9a-fA-F]+) ]]; then
+    flags=$((16#${BASH_REMATCH[1]}))
+    names_now=("$(t "目前電壓不足" "under-voltage now")" "$(t "目前 ARM 頻率受限" "ARM freq capped now")" \
+      "$(t "目前降頻中" "throttled now")" "$(t "目前達軟性溫度上限" "soft temp limit now")")
+    names_past=("$(t "開機後曾電壓不足" "under-voltage occurred")" "$(t "開機後曾限制 ARM 頻率" "ARM freq capping occurred")" \
+      "$(t "開機後曾降頻" "throttling occurred")" "$(t "開機後曾達軟性溫度上限" "soft temp limit occurred")")
+    now=() past=()
+    for bit in 0 1 2 3; do
+      if ((flags & (1 << bit))); then now+=("${names_now[bit]}"); fi
+      if ((flags & (1 << (bit + 16)))); then past+=("${names_past[bit]}"); fi
+    done
+    hex="$(printf '0x%x' "$flags")"
+    if ((${#now[@]})); then
+      report FAIL "$throttle_label" "$hex $(join_names "${now[@]}" "${past[@]}"); $(t "請換用官方 5.1V 3A 電源並加強散熱" "use the official 5.1V 3A power supply and improve cooling")"
+    elif ((${#past[@]})); then
+      report WARN "$throttle_label" "$hex $(join_names "${past[@]}")"
+    else
+      report PASS "$throttle_label" "$hex"
+    fi
+  else
+    report SKIP "$throttle_label" "$(t "無法解讀 vcgencmd 輸出" "cannot parse vcgencmd output")"
+  fi
+fi
+
+label="$(t "記憶體" "memory")"
+meminfo="${AIOS_MEMINFO:-/proc/meminfo}"
+total="$(awk '/^MemTotal:/ {print $2}' "$meminfo" 2>/dev/null || true)"
+avail="$(awk '/^MemAvailable:/ {print $2}' "$meminfo" 2>/dev/null || true)"
+if [[ "$total" =~ ^[0-9]+$ && "$avail" =~ ^[0-9]+$ ]] && ((total > 0)); then
+  pct=$((avail * 100 / total))
+  detail="$(t "共 $((total / 1024)) MiB，可用 $pct%" "$((total / 1024)) MiB total, $pct% available")"
+  if ((pct < 15)); then
+    report WARN "$label" "$detail"
+  else
+    report PASS "$label" "$detail"
+  fi
+else
+  report SKIP "$label" "$(t "無法讀取 $meminfo" "cannot read $meminfo")"
+fi
+
+label="$(t "網路" "network")"
+if ! have ip; then
+  report SKIP "$label" "$(missing ip)"
+else
+  route="$(ip route show default 2>/dev/null | head -n 1 || true)"
+  if [[ "$route" =~ dev[[:space:]]+([^[:space:]]+) ]]; then
+    report PASS "$label" "$(t "預設路由經 ${BASH_REMATCH[1]}" "default route via ${BASH_REMATCH[1]}")"
+  elif [[ -n "$route" ]]; then
+    report PASS "$label" "$route"
+  else
+    report FAIL "$label" "$(t "沒有預設路由；檢查 Wi-Fi 或網路線" "no default route; check Wi-Fi or Ethernet")"
+  fi
+fi
+
+printf '\n%s\n' "$(t "結果：PASS $pass、WARN $warns、FAIL $fails、SKIP $skips" "Summary: PASS $pass, WARN $warns, FAIL $fails, SKIP $skips")"
+((fails == 0))
