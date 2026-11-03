@@ -3402,10 +3402,11 @@ window.nousDesktop?.onService?.((event) => {
     servicePaused = true;
     pendingWakeConsent = null;
     consentBox.hidden = true;
+    // 先暫停喚醒：stopRealtime 歸還麥克風時，喚醒不會先重開收音再被關掉。
+    wake?.service(true);
     stopRealtime();
     conversation.stop();
     voice.abort();
-    wake?.service(true);
     closePreview();
     pipeline?.stop();
   } else {

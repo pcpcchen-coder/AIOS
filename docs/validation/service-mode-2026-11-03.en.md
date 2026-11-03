@@ -27,7 +27,10 @@ Add a service mode to the App on the Mac mini. Once entered:
 | Entering service mode | Menu bar item "Enter service mode (for the Pi)". Saved in `desktop.json` (the App stays in service mode after a restart); hides the main window; tells the page to end realtime voice, voice mode and press-to-talk, pause always-on wake listening with a new pause reason `service`, and stop the camera pipeline. The main window's microphone and camera permissions are always denied, and so is `nous:camera-enable` |
 | While in service mode | Shortcuts, Dock clicks, a second launch and menu items that open the main window do nothing (show brain, voice, typing, progress, sign-in / account settings, results history, memory, family recognition, show camera view, and so on). The wake listening and camera switches are disabled and marked "Paused in service mode (setting unchanged)". Engine choice, Codex browser sign-in, realtime voice settings and `.env` stay usable. The core, existing sign-ins and background tasks continue |
 | Menu bar | The top line is "Service mode: Pi connected" or "Service mode: Pi disconnected", taken only from the core's heartbeat state; the menu is rebuilt on every state change. A note line and "Return to Mac use" follow. The active task count badge is unchanged |
+| Preventing sleep | In service mode a `powerSaveBlocker` (`prevent-app-suspension`) stops App Nap and system idle sleep from pausing the core; the display can still turn off. Released on Return to Mac use |
 | Return to Mac use | Saves `serviceMode: false`, tells the page to release the `service` pause (wake resumes per its saved preference, the camera reopens if its setting is on), and shows the main window |
+
+Every completed page load (startup, core restart, reload) re-sends the current state (enter or exit) to the page, so clicking "Return to Mac use" during a load is not lost. Each menu bar rebuild reads the terminal state directly from the core.
 
 Every new interface string has English through `t()` and `desktop/messages.en.json` / `shared/messages.en.json`.
 
@@ -43,15 +46,21 @@ Every new interface string has English through `t()` and `desktop/messages.en.js
 ## Not verified
 
 - The Electron App itself: menu bar rendering, window hiding, permission denial and IPC behaviour on a Mac. These have only unit tests and static source checks.
-- The Pi sending heartbeats through the SSH tunnel, and switching to "disconnected" within 25 s after the link drops.
+- The Pi sending heartbeats through the SSH tunnel, and how long it takes to switch to "disconnected" after the link drops.
 - Menu sublabel display on macOS 14.4 and later.
+
+## Known limitations
+
+- In service mode the wake listening and camera switches are fully disabled, so they cannot be turned off while in service mode either; return to Mac use first.
+- The page-side (`src/main.ts`) enter and exit handling has no behavioural test; the `main.mjs` wiring has only source-string checks.
+- If the Pi page leaves the URL carrying `?terminal=rpi4` (for example a full-page ChatGPT sign-in redirect), heartbeats stop and the menu bar shows "disconnected" (it can only under-report, never falsely report connected). Reopening the kiosk restores it.
 
 ## Mac gate (for George to run)
 
 1. Open the App and choose "Enter service mode (for the Pi)" in the menu bar. The brain hides; the menu bar shows "Service mode: Pi disconnected" (while the Pi is off).
 2. Say "Hello Nous": the Mac must not wake. Press Alt+Command+N and Alt+Command+V: no brain and no voice. The Mac microphone and camera indicators must be off.
 3. Start the Pi (kiosk). Within 30 s the menu bar changes to "Service mode: Pi connected". Submit a task and start a realtime call on the Pi and confirm they work.
-4. Unplug the Pi network cable or shut down the Pi: within about 25–35 s it changes to "Service mode: Pi disconnected"; after reconnecting it returns to "connected" within 30 s.
+4. Unplug the Pi network cable or shut down the Pi: after about 15–25 s it changes to "Service mode: Pi disconnected" (expiry is 25 s after the last heartbeat and heartbeats come every 10 s, so 15–25 s after unplugging, plus timer slack); after reconnecting it returns to "connected" within 30 s.
 5. Quit and reopen the App: still in service mode, and the brain does not appear.
 6. Choose "Return to Mac use": the brain appears; always-on wake listening and the camera resume per their saved settings; "Hello Nous" wakes the Mac.
 7. Record PASS / FAIL and timing for each step in the [Pi test report](../experiments/RPI4_REMOTE_TERMINAL_REPORT.md).

@@ -306,11 +306,12 @@ describe("service mode wiring (desktop/main.mjs, preload.cjs)", () => {
     const command = main.slice(main.indexOf("function command(name)"), main.indexOf("function notifyPage(name)"));
     expect(command.indexOf("if (prefs.serviceMode) return;")).toBeLessThan(command.indexOf("showWindow()"));
     expect(main).toMatch(/if \(!prefs\.startHidden && !prefs\.serviceMode\) win\.show\(\);/);
-    expect(main).toMatch(/did-finish-load[\s\S]{0,80}if \(prefs\.serviceMode\) notifyService\("enter"\)/);
-    expect([...main.matchAll(/notifyService\("(\w+)"\)/g)].map((m) => m[1]).sort()).toEqual(["enter", "enter", "exit"]);
+    expect(main).toMatch(/did-finish-load[\s\S]{0,80}notifyService\(prefs\.serviceMode \? "enter" : "exit"\)/);
+    expect([...main.matchAll(/notifyService\("(\w+)"\)/g)].map((m) => m[1]).sort()).toEqual(["enter", "exit"]);
+    expect(main).toMatch(/powerSaveBlocker\.start\("prevent-app-suspension"\)/);
     // 狀態句只來自核心的終端機心跳
     expect(main).toMatch(/onTerminalChange: \(status\) => \{\s*terminalStatus = status;\s*rebuildMenu\(\);/);
-    expect(main).toMatch(/serviceTray\(\{ serviceMode: prefs\.serviceMode, terminal: terminalStatus,/);
+    expect(main).toMatch(/serviceTray\(\{ serviceMode: prefs\.serviceMode, terminal: currentTerminalStatus\(\),/);
     const exit = main.slice(main.indexOf("function exitServiceMode()"));
     expect(exit.indexOf("savePrefs({ serviceMode: false })")).toBeLessThan(exit.indexOf("showWindow()"));
   });

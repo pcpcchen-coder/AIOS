@@ -3,7 +3,7 @@ import { execFile } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, safeStorage, session, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, powerSaveBlocker, safeStorage, session, shell, Tray } from "electron";
 import { checkIdentitySender, MenuClickWindow, validateIdentityRequest } from "./identity-ipc.mjs";
 import { validateMemoryRequest } from "./memory-ipc.mjs";
 import { deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "./tasks-ipc.mjs";
@@ -474,9 +474,9 @@ function createWindow() {
   win.once("ready-to-show", () => {
     if (!prefs.startHidden && !prefs.serviceMode) win.show();
   });
-  // 服務模式中每次載入（啟動、核心重啟、重新載入）都再告訴頁面一次，頁面不會在載入後自己打開麥克風或鏡頭。
+  // 每次載入（啟動、核心重啟、重新載入）都把目前狀態再告訴頁面一次：載入中按「返回 Mac 使用」時，頁面可能還沒註冊監聽、收不到 "exit"。
   win.webContents.on("did-finish-load", () => {
-    if (prefs.serviceMode) notifyService("enter");
+    notifyService(prefs.serviceMode ? "enter" : "exit");
   });
   // 關閉視窗只是隱藏：Nous 留在選單列，背景任務繼續。
   win.on("close", (e) => {
@@ -607,6 +607,25 @@ function notifyService(event) {
   if (win && !win.isDestroyed()) win.webContents.send("nous:service", event);
 }
 
+// 服務模式下視窗都隱藏、沒有人操作 Mac：防止 App Nap 與系統閒置睡眠讓核心停住（螢幕仍可關）。
+let serviceBlocker = null;
+function syncServiceBlocker() {
+  if (prefs.serviceMode && serviceBlocker === null) serviceBlocker = powerSaveBlocker.start("prevent-app-suspension");
+  else if (!prefs.serviceMode && serviceBlocker !== null) {
+    powerSaveBlocker.stop(serviceBlocker);
+    serviceBlocker = null;
+  }
+}
+
+/** 選單列用的終端狀態：每次直接問核心（逾時計時器晚到時也不會沿用舊的「已連線」）。 */
+function currentTerminalStatus() {
+  try {
+    return core?.terminals?.status() ?? terminalStatus;
+  } catch {
+    return terminalStatus;
+  }
+}
+
 /** 進入服務模式：頁面停止收音、喚醒與鏡頭，隱藏電子腦；核心、登入與背景任務照常（Pi 繼續使用）。保存的開關都不改。 */
 function enterServiceMode() {
   if (prefs.serviceMode) return;
@@ -619,6 +638,7 @@ function enterServiceMode() {
   }
   notifyService("enter");
   if (win && !win.isDestroyed()) win.hide();
+  syncServiceBlocker();
   rebuildMenu();
 }
 
@@ -632,6 +652,7 @@ function exitServiceMode() {
     log(`服務模式關閉沒有保存：${err.message ?? err}`);
   }
   notifyService("exit");
+  syncServiceBlocker();
   showWindow();
   rebuildMenu();
 }
@@ -893,8 +914,8 @@ function rebuildMenu() {
   const voiceOn = pageState.voice !== "off";
   tray.setImage(trayImage(voiceOn));
   tray.setTitle(pageState.activeTasks > 0 ? ` ${pageState.activeTasks}` : "", { fontType: "monospacedDigit" });
-  tray.setToolTip(prefs.serviceMode ? `Nous · ${t(serviceStatusLine(terminalStatus))}` : t(voiceOn ? `Nous · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}` : "Nous 電子腦"));
-  const service = serviceTray({ serviceMode: prefs.serviceMode, terminal: terminalStatus, voiceOn, showWindow, command, enterService: enterServiceMode, exitService: exitServiceMode });
+  tray.setToolTip(prefs.serviceMode ? `Nous · ${t(serviceStatusLine(currentTerminalStatus()))}` : t(voiceOn ? `Nous · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}` : "Nous 電子腦"));
+  const service = serviceTray({ serviceMode: prefs.serviceMode, terminal: currentTerminalStatus(), voiceOn, showWindow, command, enterService: enterServiceMode, exitService: exitServiceMode });
   // 服務模式中需要主視窗的項目停用（點了也不會顯示電子腦）。
   const local = !prefs.serviceMode;
   const needsWindow = local ? undefined : SERVICE_TEXT.needsWindow;
@@ -1334,6 +1355,7 @@ app.whenReady().then(async () => {
   powerMonitor.on("resume", () => notifyPower("resume"));
   powerMonitor.on("unlock-screen", () => notifyPower("unlock"));
 
+  syncServiceBlocker();
   tray = new Tray(trayImage(false));
   setTimeout(() => log(`選單列圖示位置：${JSON.stringify(tray.getBounds())}`), 3000);
   applyDock();
