@@ -75,6 +75,8 @@ export const api = {
   deleteHistory: (taskId: string, request_id: string) =>
     call<{ ok: true; task_id: string; artifact_id: string | null }>("POST", `/api/history/${encodeURIComponent(taskId)}/delete`, { request_id, confirm: true }),
   redoTask: (taskId: string, request_id: string) => call<Task>("POST", `/api/tasks/${encodeURIComponent(taskId)}/retry`, { request_id, redo: true }),
+  /** 服務模式：終端機（Pi kiosk）頁面的心跳；只有識別碼。 */
+  terminalHeartbeat: (terminal: string) => call<{ ok: true }>("POST", "/api/terminal/heartbeat", { terminal }),
   selectProvider: (provider: ExecutorMode) => call<SettingsView>("POST", "/api/settings/provider", { provider }),
   /** 鏡頭使用者設定（保存在本機 camera.json）；回傳更新後的設定。 */
   updateCamera: (patch: CameraPrefsPatch) => call<SettingsView>("POST", "/api/settings/camera", patch),

@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "1e1f23db80f1b53bc6a861746920c050510ce1d65317ed003e68ba7cd4dc20f2",
-      "translationSha256": "7a3537c02fba3d32571025644c2536c9487531f9cc45211a58a0d48315a2a288"
+      "sourceSha256": "230e357231e74911c6524e6fd9e0b95a07d961bb76f00eb2fe9dff397cd3d86a",
+      "translationSha256": "28573878bc50bf9ef05505b4d5139492f4951622d3420019d2997cfe0b2ef9c0"
     },
     {
       "source": "docs/README.md",
@@ -249,15 +249,15 @@
       "source": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.md",
       "sourceLanguage": "en",
       "translation": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.zh-TW.md",
-      "sourceSha256": "8cfc566afe5aad9334eaf828483512f2097f0aa4136defb99e69ceb7b16b01a0",
-      "translationSha256": "5e65eaec2c89b46cab975396a8b58efb425b049c8635b0790fe1ce8431e6ac3b"
+      "sourceSha256": "6c5be41b222a467f60cf1bd60e23cd0b7bcc9674804aedaac30826c5c4fa5780",
+      "translationSha256": "84c4f0662cee2b2a4f3723e60c92011883fe4f5b57b36a0382bd7c28ffb717bf"
     },
     {
       "source": "docs/experiments/RPI4_REMOTE_TERMINAL_TEST_PLAN.md",
       "sourceLanguage": "en",
       "translation": "docs/experiments/RPI4_REMOTE_TERMINAL_TEST_PLAN.zh-TW.md",
-      "sourceSha256": "eaa42681e339b8bc8f1e5af99fd582de1fa09ad82d02ab858d7d7d867d97f6d2",
-      "translationSha256": "4ced07fdf3acdb02fe00b6776fbb8b6f3bde25eab15b9d93f371700853d6d1d1"
+      "sourceSha256": "6046331c64222478e1c212e2c4193247851d7eb28b510a967b1c820fe645148d",
+      "translationSha256": "ca84d6083aaf6265358330b4bcb43a814d805398fa13b3d56754c9c6b497726c"
     },
     {
       "source": "docs/experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "a6ef482a45bbc1407cf149c3993826496ed09de065841c354fb2c19a44b9c0ca",
-      "translationSha256": "959b5f78d09caa4a13bbabc5320163e30b41dec5b8f8741779a82372f8d39aff"
+      "sourceSha256": "2dd505f8880ef3b243ba4af87dd30eebee044e3437b6bfca62c6c72ead537c35",
+      "translationSha256": "27f49179a732839e03d462794f316596f3f3c2953d32aee2027707bebdc59095"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -561,6 +561,13 @@
       "translationSha256": "37ccb89949f1abd40abbdd96045109398d64b2835012b1f380694033f9767d82"
     },
     {
+      "source": "docs/validation/service-mode-2026-11-03.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/service-mode-2026-11-03.en.md",
+      "sourceSha256": "fb0779bdfe9a249af808a0b35aefa6d146c8d7cc65929d30d5ac95020ce4bd8d",
+      "translationSha256": "e142a55eb7f90abbb2a7873b8612e45307a156467560a06798db2ce1a2ce451c"
+    },
+    {
       "source": "docs/validation/small-decisions-2026-10-25.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/small-decisions-2026-10-25.en.md",
@@ -697,8 +704,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "083acd7cb68cb9da7cbe30557dbbe72ac5cdc9cdec40b91a42414ca4663eb034",
-      "translationSha256": "0023ae77113b379b8f135d051c88851b7c931ee0717d96e0daaaed8bdeea2968"
+      "sourceSha256": "6e5c5eb3692752979d0cfeb936b45060daf8e76b214dace162868fd6cd74ab08",
+      "translationSha256": "72c965d03741bd6e978217889e52cbbc879075d25cbfaa11cb60402697d38bff"
     }
   ]
 }

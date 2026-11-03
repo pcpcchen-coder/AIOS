@@ -6,6 +6,7 @@ import type { AudioMenuReport, AudioPrefsPatch, AudioSettingsView } from "../sha
 
 export interface MenuItemTemplate {
   label?: string;
+  accelerator?: string;
   sublabel?: string;
   type?: "normal" | "separator" | "submenu" | "checkbox" | "radio";
   checked?: boolean;
@@ -34,6 +35,7 @@ export function wakeMenu(
     setWakeListen?(value: boolean): unknown;
     setVoiceNameTest?(value: boolean): unknown;
     setMenuPref?(row: WakeSilenceRow | WakeSpeakerRow, value: number | boolean): unknown;
+    servicePaused?: boolean;
     translate?(source: string): string;
   },
 ): MenuItemTemplate[];
@@ -58,6 +60,20 @@ export function settingsMenu(
     wakeCommand?(name: string): void;
     setAudio?(patch: AudioPrefsPatch): unknown;
     audioReport?: AudioMenuReport | null;
+    /** 服務模式：鏡頭與常駐喚醒聆聽的開關、鏡頭畫面與家人辨識停用（保存的設定不變）。 */
+    servicePaused?: boolean;
     translate?(source: string, ...values: unknown[]): string;
   },
 ): MenuItemTemplate[];
+
+export const SERVICE_TEXT: Record<"connected" | "disconnected" | "note" | "exit" | "enter" | "enterNote" | "paused" | "needsWindow" | "settingsPaused", string>;
+export function serviceStatusLine(terminal: { connected: boolean } | null | undefined): string;
+export function serviceTray(options: {
+  serviceMode: boolean;
+  terminal?: { connected: boolean } | null;
+  voiceOn?: boolean;
+  showWindow(): void;
+  command(name: string): void;
+  enterService(): void;
+  exitService(): void;
+}): { head: MenuItemTemplate[]; actions: MenuItemTemplate[] };

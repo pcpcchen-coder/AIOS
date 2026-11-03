@@ -100,7 +100,7 @@ Other options: `--skip-apt` (no packages), `--skip-copy-id` (public key already 
 
 ### Chromium flags
 
-The kiosk uses `--kiosk --app=http://localhost:<AIOS_PORT>`, a dedicated profile (`~/.local/share/aios-terminal/chromium-profile`), and `--autoplay-policy=no-user-gesture-required` so cues and replies play without a click first. The kit does **not** use `--use-fake-ui-for-media-stream` or any other flag that auto-grants camera or microphone access. The first time the microphone is used, Chromium asks once; click "Allow" with a mouse. The choice is stored in the dedicated profile.
+The kiosk uses `--kiosk --app=http://localhost:<AIOS_PORT>/?terminal=rpi4` (`terminal=rpi4` makes the page send the core a heartbeat every 10 s, which the Mac menu bar uses to show whether the Pi is connected), a dedicated profile (`~/.local/share/aios-terminal/chromium-profile`), and `--autoplay-policy=no-user-gesture-required` so cues and replies play without a click first. The kit does **not** use `--use-fake-ui-for-media-stream` or any other flag that auto-grants camera or microphone access. The first time the microphone is used, Chromium asks once; click "Allow" with a mouse. The choice is stored in the dedicated profile.
 
 ## Diagnostics
 
@@ -109,6 +109,11 @@ aios-doctor
 ```
 
 Each check prints `PASS`, `WARN`, `FAIL` or `SKIP`; the exit code is 1 if anything fails. Checks: config file, SSH key and known_hosts, `aios-tunnel.service`, whether the Pi local `127.0.0.1:<port>` is listening, the core `GET /api/settings` (the core has no `/api/health`; the response body is never printed), the page `GET /`, whether the Mac SSH port is reachable, `aios-kiosk.service`, Chromium, microphones (`arecord -l`), speakers (`aplay -l`), cameras (`v4l2-ctl --list-devices`, excluding the Pi's built-in bcm2835 / rpivid codec nodes; none is only a WARN), temperature (WARN from 70 °C, FAIL from 80 °C), `vcgencmd get_throttled` (current under-voltage or throttling is a FAIL, occurred since boot is a WARN), available memory (WARN below 15%), and the default network route. Output follows `LANG`; set `AIOS_LANG=en` or `AIOS_LANG=zh-TW` to choose.
+
+<a id="service-mode"></a>
+## Mac service mode
+
+While using the Pi, choose "Enter service mode (for the Pi)" in the Mac menu bar: the Mac brain hides, the Mac's microphone, always-on wake and camera stop (settings unchanged), and the core, sign-ins and background tasks keep serving the Pi. The App stays in service mode after a restart. The top of the menu bar menu shows "Service mode: Pi connected" or "Service mode: Pi disconnected"; this follows only the Pi page's heartbeat (connected only with a heartbeat in the last 25 s), not the service mode switch. Choose "Return to Mac use" to switch back; wake and camera resume per their saved settings. Details and Mac acceptance steps are in the [service mode validation](../../docs/validation/service-mode-2026-11-03.en.md) (**not verified on a real Mac or Pi**).
 
 ## Daily operation
 
@@ -144,7 +149,7 @@ bash uninstall.sh --purge
     - Each call belongs to the page that started it, and reply audio plays only on that page.
   - Always-on wake or "look to talk" on the Mac may start a call from the Mac while the Pi is in use, taking the only call slot.
   - The forced mute on memory revocation applies only to the Mac main window.
-  - Recommendation: while using the Pi, turn off always-on wake listening and the camera from the App menu on the Mac, minimise or hide the Mac window, and do not start voice from the Mac.
+  - Recommendation: while using the Pi, put the Mac in [service mode](#service-mode) so the Mac does not listen, wake or start voice.
 - The Pi runs no Agent and stores no task data. If the Mac sleeps or the App quits, the Pi screen has no core to reach. The kiosk waits for the core only before it opens Chromium; once Chromium is open it does not exit by itself, so recovery relies on the page's own reconnection, or run `systemctl --user restart aios-kiosk.service`.
 - The `aios-doctor` speakers check only looks for playback devices. A Pi with HDMI connected always has an HDMI audio device, so PASS does not mean a USB speaker is connected or selected as output; read the device names in the output.
 

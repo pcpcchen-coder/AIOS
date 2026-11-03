@@ -1,4 +1,4 @@
-// 只開放七個動作給網頁（另有幾個不含內容的通知；WK-01a 加上只有列舉值的電源事件）：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示、家人辨識、記憶、加密任務的請求，
+// 只開放七個動作給網頁（另有幾個不含內容的通知；WK-01a 加上只有列舉值的電源事件，服務模式加上只有列舉值的進入／離開）：用系統瀏覽器開連結（登入頁）、回報狀態給選單列圖示、家人辨識、記憶、加密任務的請求，
 // 與成果紀錄刪除的原生確認、打開鏡頭前的原生說明。
 // identity 與 memory 只是傳輸：發送者、op 白名單與形狀在主程序檢查（desktop/identity-ipc.mjs、desktop/memory-ipc.mjs），
 // 資料、比對與記憶規則在核心（ADR-0001 §2.1、docs/16 §9）。
@@ -11,12 +11,13 @@ const WAKE_STATE_REASONS = {
   off: [null, "pref_off"],
   armed: ["starting", "auto_resume"],
   listening_local: [null],
-  paused: ["user_pause", "sleep", "lock", "rate_limited"],
+  paused: ["user_pause", "sleep", "lock", "rate_limited", "service"],
   in_call: ["realtime"],
   released: ["web_speech"],
   error: ["permission_denied", "device_missing", "device_ended", "runtime_missing", "runtime_load_failed", "audio_failed", "unsupported"],
 };
 const POWER_EVENTS = ["suspend", "resume", "lock", "unlock"];
+const SERVICE_EVENTS = ["enter", "exit"];
 const wakeReport = (wake) => {
   const state = typeof wake?.state === "string" && Object.hasOwn(WAKE_STATE_REASONS, wake.state) ? wake.state : null;
   const reason = wake?.reason ?? null;
@@ -62,9 +63,12 @@ const audioReport = (audio) => {
 };
 const argumentLocale = process.argv.find((argument) => argument.startsWith("--nous-locale="))?.slice("--nous-locale=".length);
 const storedLocale = ipcRenderer.sendSync("nous:get-locale");
+const serviceAtLoad = ipcRenderer.sendSync("nous:get-service") === true;
 
 contextBridge.exposeInMainWorld("nousDesktop", {
   initialLocale: validLocale(storedLocale) ? storedLocale : validLocale(argumentLocale) ? argumentLocale : "zh-TW",
+  // 服務模式：載入時是否已在服務模式（之後的改變經 onService）。
+  initialService: serviceAtLoad,
   onLocaleChange: (callback) => {
     if (typeof callback !== "function") return () => {};
     const listener = (_event, locale) => { if (validLocale(locale)) callback(locale); };
@@ -87,6 +91,13 @@ contextBridge.exposeInMainWorld("nousDesktop", {
     const listener = (_event, kind) => { if (POWER_EVENTS.includes(kind)) callback(kind); };
     ipcRenderer.on("nous:power", listener);
     return () => ipcRenderer.removeListener("nous:power", listener);
+  },
+  // 服務模式（Mac 交給 Pi 使用）的進入與離開（只有列舉值）：頁面停止或恢復麥克風、喚醒與鏡頭。
+  onService: (callback) => {
+    if (typeof callback !== "function") return () => {};
+    const listener = (_event, kind) => { if (SERVICE_EVENTS.includes(kind)) callback(kind); };
+    ipcRenderer.on("nous:service", listener);
+    return () => ipcRenderer.removeListener("nous:service", listener);
   },
   identity: (request) => ipcRenderer.invoke("nous:identity", request),
   memory: (request) => ipcRenderer.invoke("nous:memory", request),

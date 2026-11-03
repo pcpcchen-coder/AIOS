@@ -20,7 +20,7 @@ export const WAKE_STATE_REASONS = {
   off: [null, "pref_off"],
   armed: ["starting", "auto_resume"],
   listening_local: [null],
-  paused: ["user_pause", "sleep", "lock", "rate_limited"],
+  paused: ["user_pause", "sleep", "lock", "rate_limited", "service"],
   in_call: ["realtime"],
   released: ["web_speech"],
   error: ["permission_denied", "device_missing", "device_ended", "runtime_missing", "runtime_load_failed", "audio_failed", "unsupported"],
@@ -51,6 +51,7 @@ export const WAKE_REASON_LABEL = {
   sleep: "系統睡眠中",
   lock: "螢幕已鎖定",
   rate_limited: "一分鐘內已由喚醒開始 3 次通話，暫停到一分鐘後自動恢復",
+  service: "服務模式中（這台 Mac 給 Pi 使用），Mac 不收音",
   realtime: "即時語音使用中，喚醒偵測暫停",
   web_speech: "按下說話或語音模式使用中，喚醒偵測暫停",
   permission_denied: "麥克風權限被拒，常駐聆聽沒有開啟",
@@ -88,7 +89,7 @@ export const DEFAULT_WAKE_SILENCE_S = 5;
  * 「通話中辨認說話者」（George 2026-10-31 D3 先放停用的一列；2026-11-01 SP-02b 啟用，選單直接勾、不跳說明）：
  * 和「喚醒後等你開口」同一條寫入路徑（setMenuPref POST { speaker_in_call } 到 /api/settings/wake）。
  */
-export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTest, setMenuPref, translate = (source) => source }) {
+export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused = false, translate = (source) => source }) {
   const text = (source) => translate(source);
   const reported = isWakeReport(report);
   const current = reported ? report : { state: "off", reason: null };
@@ -112,8 +113,9 @@ export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTes
       label: text(WAKE_MENU_TEXT.listen),
       type: "checkbox",
       checked: wake.wake_listen,
-      enabled: true,
-      sublabel: text(WAKE_MENU_TEXT.listenNote),
+      // 服務模式中停用（保存的偏好不變；返回 Mac 使用後依偏好恢復）。
+      enabled: !servicePaused,
+      sublabel: text(servicePaused ? SERVICE_TEXT.paused : WAKE_MENU_TEXT.listenNote),
       // 寫入與核心回應為準（打開前主程序先顯示原生說明）；失敗時重新讀取，勾選不會停在沒保存的狀態。
       click: () => void setWakeListen?.(!wake.wake_listen),
     },
@@ -128,7 +130,7 @@ export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTes
     },
     {
       label: text(paused ? WAKE_MENU_TEXT.resume : WAKE_MENU_TEXT.pause),
-      enabled: wake.wake_listen && (paused || canPause),
+      enabled: !servicePaused && wake.wake_listen && (paused || canPause),
       click: () => command(paused ? "wake-resume" : "wake-pause"),
     },
     {
@@ -285,13 +287,13 @@ export function audioMenu(audio, report, { setAudio, translate = (source) => sou
  *   setWakeListen(value)、wakeReport：常駐喚醒聆聽（只有 settings.wake 存在時用到）；setVoiceNameTest(value)：SP-02a 只憑聲音叫名字的測試開關；
  *   setAudio(patch)、audioReport：「聲音」分段（settings.audio 存在時畫；patch 送到 settings.audio.write_path）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, audioReport = null, wakeReport = null, wakeCommand, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
   const previewReason = settings.camera_preview_disabled_reason;
   const identity = settings.identity;
-  const items = [];
+  const items = servicePaused ? [{ label: text(SERVICE_TEXT.settingsPaused), enabled: false }, { type: "separator" }] : [];
   let group = null;
   const closeGroup = () => {
     if (group !== PREVIEW_GROUP) return;
@@ -299,8 +301,8 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
     if (previewReason !== undefined) {
       items.push({
         label: text("顯示鏡頭畫面"),
-        sublabel: text(previewReason) ?? undefined,
-        enabled: previewReason === null,
+        sublabel: servicePaused ? text(SERVICE_TEXT.paused) : text(previewReason) ?? undefined,
+        enabled: !servicePaused && previewReason === null,
         click: () => command("camera-preview"),
       });
     }
@@ -309,12 +311,12 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
     if (identity !== undefined) {
       items.push({
         label: text("家人辨識…"),
-        sublabel: text(identity.disabled_reason ?? identity.limited_reason) ?? undefined,
-        enabled: identity.available,
+        sublabel: servicePaused ? text(SERVICE_TEXT.needsWindow) : text(identity.disabled_reason ?? identity.limited_reason) ?? undefined,
+        enabled: !servicePaused && identity.available,
         click: () => openFamily?.(),
       });
       // 校正人臉辨識（George 2026-10-31）：鏡頭換位置後量測常用位置、建議校正值；同樣經家人辨識的管理 session。
-      if (settings.face_tuning) items.push({ label: text("校正人臉辨識…"), enabled: identity.available, click: () => openFamily?.("calibrate") });
+      if (settings.face_tuning) items.push({ label: text("校正人臉辨識…"), enabled: !servicePaused && identity.available, click: () => openFamily?.("calibrate") });
       if (identity.disabled_reason) items.push({ label: text(`家人辨識：${text(identity.disabled_reason)}`), enabled: false });
     }
   };
@@ -330,12 +332,14 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
     }
     const enabled = row.disabled_reason === null;
     if (row.kind === "bool") {
+      // 服務模式中「鏡頭」開關停用（保存的設定不變；返回 Mac 使用後依設定重新開）。
+      const cameraSwitch = servicePaused && row.write_path === "/api/settings/camera" && row.key === "active";
       items.push({
         label: text(row.label),
         type: "checkbox",
         checked: row.value,
-        enabled,
-        sublabel: text(row.disabled_reason ?? row.note),
+        enabled: enabled && !cameraSwitch,
+        sublabel: cameraSwitch ? text(SERVICE_TEXT.paused) : text(row.disabled_reason ?? row.note),
         // 寫入與核心回應為準：送出相反的值，成功後依回應重畫，失敗時重新讀取，勾選不會停在沒保存的狀態。
         click: () => void setMenuPref(row, !row.value),
       });
@@ -354,6 +358,55 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
   }
   closeGroup();
   if (settings.audio) items.push(...audioMenu(settings.audio, audioReport, { setAudio, translate }));
-  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, translate }));
+  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused, translate }));
   return items;
+}
+
+// ───────────── 服務模式（George 2026-11-03：Mac mini 只當 Pi 的核心） ─────────────
+// 「Pi 已連線／已斷線」只來自核心的終端機心跳（NousHandle.terminals.status().connected），不看服務模式開關或 SSE 連線。
+
+export const SERVICE_TEXT = {
+  connected: "服務模式：Pi 已連線",
+  disconnected: "服務模式：Pi 已斷線",
+  note: "Mac 的電子腦、麥克風、喚醒聆聽與鏡頭已暫停；核心、登入與背景任務繼續",
+  exit: "返回 Mac 使用",
+  enter: "進入服務模式（給 Pi 使用）",
+  enterNote: "隱藏電子腦並停止 Mac 的麥克風、喚醒聆聽與鏡頭；核心繼續服務 Pi",
+  paused: "服務模式中暫停（設定不變）",
+  needsWindow: "返回 Mac 使用後才能開啟",
+  settingsPaused: "服務模式中：Mac 的麥克風與鏡頭已暫停（設定不變）",
+};
+
+/** 服務模式的狀態句：只看終端機心跳的 connected。 */
+export function serviceStatusLine(terminal) {
+  return terminal?.connected === true ? SERVICE_TEXT.connected : SERVICE_TEXT.disconnected;
+}
+
+/**
+ * 選單列的服務模式部分。head 放在選單最上面；actions 取代「動作」分段。
+ * 服務模式：head 是狀態句、說明與「返回 Mac 使用」，actions 是空的（不畫會打開電子腦或開始語音的項目）。
+ * 一般：head 是空的，actions 是顯示電子腦、語音、打字、看進度與「進入服務模式」。
+ */
+export function serviceTray({ serviceMode, terminal = null, voiceOn = false, showWindow, command, enterService, exitService }) {
+  if (serviceMode) {
+    return {
+      head: [
+        { label: serviceStatusLine(terminal), enabled: false },
+        { label: SERVICE_TEXT.note, enabled: false },
+        { label: SERVICE_TEXT.exit, click: () => exitService() },
+        { type: "separator" },
+      ],
+      actions: [],
+    };
+  }
+  return {
+    head: [],
+    actions: [
+      { label: "顯示電子腦", accelerator: "Alt+Command+N", click: () => showWindow() },
+      { label: voiceOn ? "結束語音對話" : "開始語音對話", accelerator: "Alt+Command+V", click: () => command("voice") },
+      { label: "打字對話", click: () => command("type") },
+      { label: "看進度", click: () => command("progress") },
+      { label: SERVICE_TEXT.enter, sublabel: SERVICE_TEXT.enterNote, click: () => enterService() },
+    ],
+  };
 }

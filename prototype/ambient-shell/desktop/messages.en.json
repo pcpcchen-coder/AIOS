@@ -191,5 +191,15 @@
   "套用後要再錄一輪：至少 50 次喚醒詞與 50 句陌生聲音都沒有被認成家人，才會開始只憑聲音叫名字。之後可以隨時清除校準資料，回到未校準的起點值。": "After applying, record one more round: only when at least 50 wake words and 50 sentences in stranger voices are all not taken for a family member will Nous start naming people by voice alone. You can clear the calibration data at any time to return to the uncalibrated starting values.",
   "要清除聲音校準資料嗎？": "Clear the voice calibration data?",
   "會刪除校準的分數與已套用的門檻，回到未校準的起點值；只憑聲音不再叫名字（測試開關除外）。家人的聲音登記不受影響。": "This deletes the calibration scores and the applied thresholds and returns to the uncalibrated starting values; Nous will no longer name people by voice alone (except with the test switch). Family voice enrollments are not affected.",
-  "聲音裝置設定沒有保存": "Sound device settings were not saved"
+  "聲音裝置設定沒有保存": "Sound device settings were not saved",
+  "服務模式：Pi 已連線": "Service mode: Pi connected",
+  "服務模式：Pi 已斷線": "Service mode: Pi disconnected",
+  "Mac 的電子腦、麥克風、喚醒聆聽與鏡頭已暫停；核心、登入與背景任務繼續": "The Mac's brain, microphone, wake listening and camera are paused; the core, sign-ins and background tasks keep running",
+  "返回 Mac 使用": "Return to Mac use",
+  "進入服務模式（給 Pi 使用）": "Enter service mode (for the Pi)",
+  "隱藏電子腦並停止 Mac 的麥克風、喚醒聆聽與鏡頭；核心繼續服務 Pi": "Hides the brain and stops the Mac's microphone, wake listening and camera; the core keeps serving the Pi",
+  "服務模式中暫停（設定不變）": "Paused in service mode (setting unchanged)",
+  "返回 Mac 使用後才能開啟": "Available after returning to Mac use",
+  "服務模式中：Mac 的麥克風與鏡頭已暫停（設定不變）": "Service mode: the Mac's microphone and camera are paused (settings unchanged)",
+  "服務模式沒有保存": "Service mode was not saved"
 }

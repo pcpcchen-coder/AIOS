@@ -297,6 +297,42 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
     expect(s.fe.current.state).toBe("armed");
   });
 
+  it("service mode pauses capture over every other pause and only its own resume releases it (auto-resume like unlock)", async () => {
+    const s = setup();
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    const opens = s.media.calls.length;
+    s.fe.pause("service");
+    expect(s.fe.current).toEqual({ state: "paused", reason: "service" });
+    expect(s.media.liveTracks()).toEqual([]);
+    // 睡眠、解鎖、使用者繼續都不解除服務模式
+    s.fe.pause("lock");
+    s.fe.resume("lock");
+    s.fe.resume("user_pause");
+    await flush();
+    expect(s.fe.current).toEqual({ state: "paused", reason: "service" });
+    expect(s.media.calls.length).toBe(opens);
+    s.fe.resume("service");
+    await flush();
+    expect(s.fe.current).toEqual({ state: "armed", reason: "auto_resume" });
+    s.capture.last!.events.started();
+    expect(s.listening.at(-1)).toEqual(["mic-a", "auto_resume"]);
+  });
+
+  it("service mode with the preference off stays off; the saved preference is not touched", async () => {
+    const s = setup();
+    s.fe.pause("service");
+    expect(s.fe.current).toEqual({ state: "off", reason: null });
+    s.fe.setPreference(true, "auto_resume");
+    await flush();
+    expect(s.fe.current).toEqual({ state: "paused", reason: "service" });
+    expect(s.media.calls.length).toBe(0);
+    s.fe.resume("service");
+    await flush();
+    expect(s.fe.current.state).toBe("armed");
+  });
+
   it("turning the preference off stops the source within the same call and reports pref_off", async () => {
     const s = setup();
     s.fe.setPreference(true, "enable");
@@ -635,6 +671,20 @@ describe("WakeController: guard → earcon → trigger (WK-01 end point)", () =>
 });
 
 describe("WakeController: WK-02 hooks (subscribers, rate-limit pause, calls)", () => {
+  it("service(true) pauses wake (paused/service) without changing the preference; service(false) resumes it", async () => {
+    const h = controller();
+    await h.listen();
+    h.c.service(true);
+    expect(h.c.state).toEqual({ state: "paused", reason: "service" });
+    expect(h.media.liveTracks()).toEqual([]);
+    h.c.power("unlock");
+    await flush();
+    expect(h.c.state.reason).toBe("service");
+    h.c.service(false);
+    await flush();
+    expect(h.c.state).toEqual({ state: "armed", reason: "auto_resume" });
+  });
+
   it("Companion activation=wake: subscribers get each trigger once (ids, time and keyword only) and can unsubscribe", async () => {
     const h = controller();
     await h.listen();

@@ -163,7 +163,7 @@ describe("history intent and entry points", () => {
     expect(runDesktopCommand("history", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview: noop, family: noop, familyCalibrate: noop, memory: noop, history: () => calls.push("history"), vault: noop })).toBe(true);
     expect(calls).toEqual(["history"]);
     const main = readFileSync(new URL("../desktop/main.mjs", import.meta.url), "utf8");
-    expect(main).toContain('{ label: "成果紀錄…", click: openHistoryMenu }');
+    expect(main).toContain('{ label: "成果紀錄…", sublabel: needsWindow, enabled: local, click: openHistoryMenu }');
     expect(main).toMatch(/function openHistoryMenu\(\) \{\n\s+historyClick\.mark\(Date\.now\(\)\);\n\s+command\("history"\);/);
     expect(main).toMatch(/shell\.openExternal\(`\$\{core\.url\}\/history/);
     const en = JSON.parse(readFileSync(new URL("../desktop/messages.en.json", import.meta.url), "utf8")) as Record<string, string>;

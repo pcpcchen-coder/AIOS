@@ -45,6 +45,8 @@ import type { MemoryLockProvider } from "./memory/store.ts";
 import { createTaskIpc } from "./task-ipc.ts";
 import { createIntegrations } from "./integrations/index.ts";
 import type { TasksResponse } from "../shared/protected-tasks.ts";
+import { TerminalPresence } from "./terminal-presence.ts";
+import type { TerminalStatus } from "../shared/terminal.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
 
@@ -85,6 +87,11 @@ export interface NousOptions {
    * 未提供或 "http"（終端機／瀏覽器版）時頁面照舊可以經 HTTP 打開，由瀏覽器的鏡頭權限提示與畫面指示點把關。
    */
   cameraEnable?: "main_process" | "http";
+  /**
+   * 服務模式：終端機的連線狀態改變（只來自 POST /api/terminal/heartbeat 的心跳，含逾時斷線）。App 用它更新選單列的
+   * 「服務模式：Pi 已連線／已斷線」。
+   */
+  onTerminalChange?: (status: TerminalStatus) => void;
 }
 
 export interface TasksInjection {
@@ -171,6 +178,8 @@ export interface NousHandle {
      */
     isActive(): boolean;
   };
+  /** 終端機（Pi kiosk）心跳的連線狀態；不是服務模式開關。 */
+  terminals: { status(): TerminalStatus };
 }
 
 const LABEL = { claude: "Claude", chatgpt: "ChatGPT（Sign in with ChatGPT）", mock: "模擬（mock）" } as const;
@@ -395,8 +404,15 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         onChange: () => notify(),
       })
     : null;
+  const terminals = new TerminalPresence({
+    onChange: (status) => {
+      log(status.connected ? `終端機已連線：${status.terminals.map((t) => t.id).join("、")}` : "終端機已斷線（心跳逾時）");
+      options.onTerminalChange?.(status);
+    },
+  });
   const server = createApp({
     cameraEnable: options.cameraEnable ?? "http",
+    terminals,
     store,
     runner,
     settings: providers,
@@ -481,6 +497,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         return view.enabled && view.active;
       },
     },
+    terminals: { status: () => terminals.status() },
     ...(options.tasks ? { tasks: (() => {
       const ipc = createTaskIpc({ store, runner, memory, confirmDeleteBackups: options.tasks.confirmDeleteBackups, log });
       // MEM-4c：dropPlaintext＝OS 鎖定與睡眠（desktop/main.mjs 的 powerMonitor）時丟棄解密內容。
@@ -491,6 +508,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         // 先讓家人辨識進入關閉狀態：結束 session，等待中的原生確認回來後也不寫檔。
         identity?.shutdown();
         void memory?.shutdown();
+        terminals.dispose();
         // MEM-4c：結束 App 時丟棄解密內容與索引（只是放掉參照，不是安全抹除）。
         if (plaintextTimer) clearInterval(plaintextTimer);
         store.dropPlaintext("quit");

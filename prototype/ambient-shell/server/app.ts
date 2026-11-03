@@ -49,6 +49,7 @@ import type { VoiceRoute } from "./memory/live.ts";
 import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
+import { isTerminalId } from "../shared/terminal.ts";
 import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
 import { VoiceRelayStoreError } from "./integrations/voice-relay/store.ts";
 
@@ -177,6 +178,10 @@ export interface AppOptions {
    * 成果紀錄（HIST-1）額外的搜尋來源；一般任務（TaskStore）一律包含。MEM-4c 的受保護成果之後由這裡併入。
    */
   historySources?: HistorySource[];
+  /**
+   * 服務模式：終端機（Pi kiosk）頁面的心跳（server/terminal-presence.ts）。未提供時 POST /api/terminal/heartbeat 落到 404。
+   */
+  terminals?: { heartbeat(id: string): void };
   port: number;
   devPort: number;
   distDir: string | null;
@@ -583,6 +588,13 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         if (err instanceof SessionError) throw new HttpError(err.status, err.message);
         throw err;
       }
+      return sendJson(res, 200, { ok: true });
+    }
+    if (method === "POST" && path === "/api/terminal/heartbeat" && options.terminals) {
+      // 只有識別碼；不記 IP、不寫檔、不逐次記 log（連線與斷線的轉換由 TerminalPresence 的呼叫端記）。
+      const body = await readJson(req);
+      if (!isTerminalId(body.terminal)) throw new HttpError(400, "terminal must be a lowercase id (a-z, 0-9, -; up to 32 characters)");
+      options.terminals.heartbeat(body.terminal);
       return sendJson(res, 200, { ok: true });
     }
     if (method === "GET" && path === "/api/realtime/cost-records") {

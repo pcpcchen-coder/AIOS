@@ -175,6 +175,17 @@ export class WakeController implements WakeActivationPort {
     } else this.frontEnd.resume(event === "resume" ? "sleep" : "lock");
   }
 
+  /**
+   * 服務模式（App 主程序轉來的 enter／exit）：進入時停止收音（paused／service），只有離開才解除；離開後和解鎖一樣依偏好自動恢復。
+   * 不改保存的偏好。
+   */
+  service(active: boolean): void {
+    if (active) {
+      this.cancelEarcon();
+      this.frontEnd.pause("service");
+    } else this.frontEnd.resume("service");
+  }
+
   /** Web Speech（按下說話、語音模式）開始或結束收音。 */
   webSpeech(active: boolean): void {
     if (active) this.cancelEarcon();

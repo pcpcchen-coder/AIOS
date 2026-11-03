@@ -100,7 +100,7 @@ AIOS_MAC_HOSTKEY_SHA256='SHA256:...' bash install.sh --non-interactive
 
 ### Chromium 旗標
 
-kiosk 用 `--kiosk --app=http://localhost:<AIOS_PORT>`、獨立 profile（`~/.local/share/aios-terminal/chromium-profile`），以及 `--autoplay-policy=no-user-gesture-required`，讓提示音與回覆不必先點一下就能播放。套件**不使用** `--use-fake-ui-for-media-stream` 之類自動允許鏡頭／麥克風的旗標。第一次使用麥克風時，Chromium 會問一次，請用滑鼠按「允許」；選擇存在獨立 profile 裡。
+kiosk 用 `--kiosk --app=http://localhost:<AIOS_PORT>/?terminal=rpi4`（`terminal=rpi4` 讓頁面每 10 秒向核心送心跳，Mac 選單列據此顯示 Pi 是否連線）、獨立 profile（`~/.local/share/aios-terminal/chromium-profile`），以及 `--autoplay-policy=no-user-gesture-required`，讓提示音與回覆不必先點一下就能播放。套件**不使用** `--use-fake-ui-for-media-stream` 之類自動允許鏡頭／麥克風的旗標。第一次使用麥克風時，Chromium 會問一次，請用滑鼠按「允許」；選擇存在獨立 profile 裡。
 
 ## 診斷
 
@@ -109,6 +109,11 @@ aios-doctor
 ```
 
 逐項輸出 `PASS`、`WARN`、`FAIL` 或 `SKIP`，任何 `FAIL` 時結束碼為 1。檢查項目：設定檔、SSH key 與 known_hosts、`aios-tunnel.service`、Pi 本機 `127.0.0.1:<port>` 是否在聽、核心 `GET /api/settings`（核心沒有 `/api/health`，不印出回應內容）、頁面 `GET /`、Mac SSH port 可否連線、`aios-kiosk.service`、Chromium、麥克風（`arecord -l`）、喇叭（`aplay -l`）、鏡頭（`v4l2-ctl --list-devices`，不計 Pi 內建的 bcm2835／rpivid 編解碼節點，沒有只算 WARN）、溫度（70 °C 起 WARN、80 °C 起 FAIL）、`vcgencmd get_throttled`（目前低電壓或降頻為 FAIL，開機後曾發生為 WARN）、可用記憶體（低於 15% 為 WARN）、預設網路路由。輸出語言跟著 `LANG`，也可設 `AIOS_LANG=en` 或 `AIOS_LANG=zh-TW`。
+
+<a id="service-mode"></a>
+## Mac 服務模式
+
+用 Pi 時，在 Mac 選單列選「進入服務模式（給 Pi 使用）」：Mac 電子腦隱藏，Mac 的麥克風、常駐喚醒與鏡頭停止（設定不變），核心、登入與背景任務繼續給 Pi 使用。App 重開後仍維持服務模式。選單列最上面顯示「服務模式：Pi 已連線」或「服務模式：Pi 已斷線」；這只看 Pi 頁面的心跳（25 秒內有心跳才算連線），不看服務模式開關。選「返回 Mac 使用」切回本機，喚醒與鏡頭照原本設定恢復。細節與 Mac 驗收步驟見[服務模式驗證](../../docs/validation/service-mode-2026-11-03.md)（**未經 Mac 與 Pi 實機驗證**）。
 
 ## 日常操作
 
@@ -144,7 +149,7 @@ bash uninstall.sh --purge
     - 每通由開始它的頁面擁有，回覆聲音只在那個頁面播放。
   - Mac 上的常駐喚醒或「看著說話」可能在 Pi 使用時從 Mac 開始一通語音，占住唯一的通話。
   - 記憶撤銷時的強制靜音只作用在 Mac 主視窗。
-  - 建議：用 Pi 時在 Mac 的 App 選單關掉常駐喚醒聆聽與鏡頭，把 Mac 視窗縮到 Dock 或隱藏，不從 Mac 開始語音。
+  - 建議：用 Pi 時在 Mac 進入[服務模式](#service-mode)，Mac 就不會收音、喚醒或開始語音。
 - Pi 端不跑 Agent、不存任務資料。Mac 睡眠或 App 結束時，Pi 畫面就沒有核心可連。kiosk 只在開 Chromium 之前等核心；Chromium 已經開著時不會自己結束，恢復要靠頁面本身的重新連線，必要時執行 `systemctl --user restart aios-kiosk.service`。
 - `aios-doctor` 的喇叭檢查只看有沒有播放裝置；接著 HDMI 的 Pi 一定有 HDMI 聲音裝置，所以 PASS 不代表 USB 喇叭已接上或已選為輸出，請看輸出裡列出的裝置名稱。
 

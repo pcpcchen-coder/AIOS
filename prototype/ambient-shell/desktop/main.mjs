@@ -3,13 +3,13 @@ import { execFile } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, safeStorage, session, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, powerSaveBlocker, safeStorage, session, shell, Tray } from "electron";
 import { checkIdentitySender, MenuClickWindow, validateIdentityRequest } from "./identity-ipc.mjs";
 import { validateMemoryRequest } from "./memory-ipc.mjs";
 import { deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "./tasks-ipc.mjs";
 import { createMemorySecretBox } from "./memory-safe-storage.mjs";
 import { checkTrustedSender, sameOrigin } from "./trusted-sender.mjs";
-import { isWakeReport, radio, sanitizeAudioMenuReport, settingsMenu } from "./settings-menu.mjs";
+import { isWakeReport, radio, sanitizeAudioMenuReport, SERVICE_TEXT, serviceStatusLine, serviceTray, settingsMenu } from "./settings-menu.mjs";
 import { isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "./localization.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -65,6 +65,8 @@ const DEFAULT_PREFS = {
   showDock: true,
   openAtLogin: false,
   startHidden: false,
+  // 服務模式（George 2026-11-03）：Mac 只當 Pi 的核心；App 重開後維持。
+  serviceMode: false,
   bounds: { width: 1100, height: 760 },
 };
 
@@ -133,6 +135,8 @@ function log(line) {
 
 let core = null; // { port, url, close }
 let quitting = false;
+/** 核心的終端機心跳狀態（不是服務模式開關）；核心重啟後從「已斷線」重新開始。 */
+let terminalStatus = { connected: false, terminals: [] };
 
 async function startCore() {
   const { startNous } = await import(pathToFileURL(join(here, "server.mjs")).href);
@@ -149,6 +153,10 @@ async function startCore() {
       NOUS_MAX_CONCURRENT: String(prefs.maxConcurrent),
     },
     log,
+    onTerminalChange: (status) => {
+      terminalStatus = status;
+      rebuildMenu();
+    },
     identity: {
       dir: identityDir,
       secretBox: identitySecretBox,
@@ -174,6 +182,7 @@ async function startCore() {
     // MEM-2：記憶撤銷後頁面沒有在 1.5 秒內回報停播時，核心把主視窗的聲音強制靜音（下一次回報停播或新通話開始才解除）。
     audio: { setMuted: (muted) => { if (win && !win.isDestroyed()) win.webContents.setAudioMuted(muted); } },
   });
+  terminalStatus = core.terminals.status();
 }
 
 /** MEM-4c 審查 M1：只送原因（固定白名單），不含任何內容；preload 也只接受白名單裡的原因。 */
@@ -463,7 +472,11 @@ function createWindow() {
   });
   win.loadURL(core.url);
   win.once("ready-to-show", () => {
-    if (!prefs.startHidden) win.show();
+    if (!prefs.startHidden && !prefs.serviceMode) win.show();
+  });
+  // 每次載入（啟動、核心重啟、重新載入）都把目前狀態再告訴頁面一次：載入中按「返回 Mac 使用」時，頁面可能還沒註冊監聽、收不到 "exit"。
+  win.webContents.on("did-finish-load", () => {
+    notifyService(prefs.serviceMode ? "enter" : "exit");
   });
   // 關閉視窗只是隱藏：Nous 留在選單列，背景任務繼續。
   win.on("close", (e) => {
@@ -496,6 +509,8 @@ function createWindow() {
 }
 
 function showWindow() {
+  // 服務模式中不顯示電子腦（Dock、再次開啟、快速鍵與選單都經這裡）；只有「返回 Mac 使用」先離開服務模式再顯示。
+  if (prefs.serviceMode) return;
   if (!win || win.isDestroyed()) createWindow();
   if (win.isMinimized()) win.restore();
   win.show();
@@ -503,6 +518,7 @@ function showWindow() {
 }
 
 function toggleWindow() {
+  if (prefs.serviceMode) return;
   if (win?.isVisible() && win.isFocused()) win.hide();
   else showWindow();
 }
@@ -568,6 +584,7 @@ function loadCommands() {
 
 /** 把選單動作交給網頁（開始語音、看進度…）。 */
 function command(name) {
+  if (prefs.serviceMode) return;
   showWindow();
   notifyPage(name);
 }
@@ -583,6 +600,61 @@ function notifyPage(name) {
 /** 系統電源事件交給頁面（只送列舉值）：睡眠、鎖定時停止常駐喚醒聆聽，醒來、解鎖時依偏好自動恢復（docs/17 §5.8）。 */
 function notifyPower(event) {
   if (win && !win.isDestroyed()) win.webContents.send("nous:power", event);
+}
+
+/** 服務模式的進入與離開交給頁面（只送 "enter"／"exit"）。 */
+function notifyService(event) {
+  if (win && !win.isDestroyed()) win.webContents.send("nous:service", event);
+}
+
+// 服務模式下視窗都隱藏、沒有人操作 Mac：防止 App Nap 與系統閒置睡眠讓核心停住（螢幕仍可關）。
+let serviceBlocker = null;
+function syncServiceBlocker() {
+  if (prefs.serviceMode && serviceBlocker === null) serviceBlocker = powerSaveBlocker.start("prevent-app-suspension");
+  else if (!prefs.serviceMode && serviceBlocker !== null) {
+    powerSaveBlocker.stop(serviceBlocker);
+    serviceBlocker = null;
+  }
+}
+
+/** 選單列用的終端狀態：每次直接問核心（逾時計時器晚到時也不會沿用舊的「已連線」）。 */
+function currentTerminalStatus() {
+  try {
+    return core?.terminals?.status() ?? terminalStatus;
+  } catch {
+    return terminalStatus;
+  }
+}
+
+/** 進入服務模式：頁面停止收音、喚醒與鏡頭，隱藏電子腦；核心、登入與背景任務照常（Pi 繼續使用）。保存的開關都不改。 */
+function enterServiceMode() {
+  if (prefs.serviceMode) return;
+  try {
+    savePrefs({ serviceMode: true });
+  } catch (err) {
+    prefs.serviceMode = false;
+    showError("服務模式沒有保存", String(err.message ?? err));
+    return;
+  }
+  notifyService("enter");
+  if (win && !win.isDestroyed()) win.hide();
+  syncServiceBlocker();
+  rebuildMenu();
+}
+
+/** 「返回 Mac 使用」：頁面依保存的設定恢復喚醒與鏡頭，再顯示電子腦。 */
+function exitServiceMode() {
+  if (!prefs.serviceMode) return;
+  try {
+    savePrefs({ serviceMode: false });
+  } catch (err) {
+    // 這次執行已離開服務模式；只有 App 重開後會回到服務模式。
+    log(`服務模式關閉沒有保存：${err.message ?? err}`);
+  }
+  notifyService("exit");
+  syncServiceBlocker();
+  showWindow();
+  rebuildMenu();
 }
 
 // ───────────── 選單列圖示 ─────────────
@@ -626,7 +698,7 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, translate: t });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, servicePaused: prefs.serviceMode, translate: t });
 }
 
 /**
@@ -842,7 +914,11 @@ function rebuildMenu() {
   const voiceOn = pageState.voice !== "off";
   tray.setImage(trayImage(voiceOn));
   tray.setTitle(pageState.activeTasks > 0 ? ` ${pageState.activeTasks}` : "", { fontType: "monospacedDigit" });
-  tray.setToolTip(t(voiceOn ? `Nous · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}` : "Nous 電子腦"));
+  tray.setToolTip(prefs.serviceMode ? `Nous · ${t(serviceStatusLine(currentTerminalStatus()))}` : t(voiceOn ? `Nous · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}` : "Nous 電子腦"));
+  const service = serviceTray({ serviceMode: prefs.serviceMode, terminal: currentTerminalStatus(), voiceOn, showWindow, command, enterService: enterServiceMode, exitService: exitServiceMode });
+  // 服務模式中需要主視窗的項目停用（點了也不會顯示電子腦）。
+  const local = !prefs.serviceMode;
+  const needsWindow = local ? undefined : SERVICE_TEXT.needsWindow;
 
   const realtime = settings?.realtime;
   const provider = settings?.provider;
@@ -859,6 +935,7 @@ function rebuildMenu() {
       : t(realtime.billing_line ?? `不可用（${t(realtime.detail)}）`);
 
   const template = [
+    ...service.head,
     { label: `Nous · 引擎：${t(PROVIDER_LABEL[provider] ?? "讀取中…")}`, enabled: false },
     {
       label: `即時語音：${t(realtimeLine)} · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}`,
@@ -866,11 +943,7 @@ function rebuildMenu() {
     },
     { label: pageState.activeTasks > 0 ? `進行中的任務：${pageState.activeTasks} 個` : "目前沒有進行中的任務", enabled: false },
     { type: "separator" },
-    { label: "顯示電子腦", accelerator: "Alt+Command+N", click: showWindow },
-    { label: voiceOn ? "結束語音對話" : "開始語音對話", accelerator: "Alt+Command+V", click: () => command("voice") },
-    { label: "打字對話", click: () => command("type") },
-    { label: "看進度", click: () => command("progress") },
-    { type: "separator" },
+    ...(service.actions.length ? [...service.actions, { type: "separator" }] : []),
     {
       label: "AI 引擎（執行交辦的工作）",
       submenu: [
@@ -885,7 +958,7 @@ function rebuildMenu() {
           }, p.available),
         ),
         { type: "separator" },
-        { label: "登入／帳號設定…", click: () => command("settings") },
+        { label: "登入／帳號設定…", sublabel: needsWindow, enabled: local, click: () => command("settings") },
       ],
     },
     {
@@ -951,7 +1024,7 @@ function rebuildMenu() {
           ),
         },
         { type: "separator" },
-        { label: "帳號與登入…", click: () => command("settings") },
+        { label: "帳號與登入…", sublabel: needsWindow, enabled: local, click: () => command("settings") },
         { label: "填入 OpenAI API key…", click: openEnvFile },
         { label: "OpenAI 用量與上限", click: () => shell.openExternal("https://platform.openai.com/usage") },
       ],
@@ -970,13 +1043,14 @@ function rebuildMenu() {
     { label: "鏡頭與語音設定", submenu: secondsMenu() },
     { label: "語音指令表", click: openCommandsWindow },
     // 成果紀錄（HIST-1）：使用者點了才打開（App 內的按需畫面，或用系統瀏覽器開核心的 /history）。
-    { label: "成果紀錄…", click: openHistoryMenu },
+    { label: "成果紀錄…", sublabel: needsWindow, enabled: local, click: openHistoryMenu },
     // MEM-4a：任務加密搬遷後的明文備份（顯示提示；刪除前另跳原生確認）。
-    { label: "刪除明文備份…", click: () => command("vault"), enabled: !!core },
+    { label: "刪除明文備份…", sublabel: needsWindow, click: () => command("vault"), enabled: !!core && local },
     { label: "在瀏覽器打開成果紀錄", click: openHistoryInBrowser, enabled: !!core },
     {
       label: "記憶…",
-      sublabel: settings?.memory && !settings.memory.available ? t("此 Mac 無法安全保存，記憶停用") : settings?.memory?.enabled ? undefined : t("尚未開啟"),
+      sublabel: needsWindow ?? (settings?.memory && !settings.memory.available ? t("此 Mac 無法安全保存，記憶停用") : settings?.memory?.enabled ? undefined : t("尚未開啟")),
+      enabled: local,
       click: openMemory,
     },
     languageMenu(prefs.locale, setLocale),
@@ -1086,6 +1160,7 @@ app.setAboutPanelOptions({
   credits: t("漂浮電子腦 × 即時語音 × 背景任務"),
 });
 
+// 服務模式中 showWindow 不做事（不顯示電子腦）。
 app.on("second-instance", showWindow);
 app.on("activate", showWindow);
 app.on("before-quit", () => {
@@ -1102,6 +1177,10 @@ app.on("window-all-closed", () => {
 // 設定在頁面（帳號頁、語音或打字指令）改了：頁面收到核心的 settings.updated 後回報新的版本字串，這裡馬上重新讀取。
 // 不在點選單列圖示時才讀：macOS 上 setContextMenu 的選單在 mouse-down 當下就打開，非同步的讀取趕不上這一次。
 let reportedSettings = null;
+// 頁面載入時同步讀目前是否在服務模式（只有布林值），載入期間就不會先開麥克風或鏡頭。
+ipcMain.on("nous:get-service", (event) => {
+  event.returnValue = prefs.serviceMode === true;
+});
 ipcMain.on("nous:get-locale", (event) => {
   event.returnValue = trustedLocaleSender(event, win, core?.url) ? prefs.locale : "zh-TW";
 });
@@ -1138,7 +1217,7 @@ ipcMain.handle("nous:identity", async (event, request) => {
 // 頁面要打開鏡頭（設定畫面的開關、說或打「打開鏡頭」）：只接受主視窗主框架、來自本機核心頁面的請求；不收任何參數。
 // 一律先顯示主程序的原生說明，使用者按「開啟」才保存（頁面腳本無法略過；HTTP 的 active: true 是 403）。
 ipcMain.handle("nous:camera-enable", async (event) => {
-  if (!core?.camera || !checkTrustedSender(event, win, core.url)) return { ok: false, reason: "unavailable" };
+  if (!core?.camera || prefs.serviceMode || !checkTrustedSender(event, win, core.url)) return { ok: false, reason: "unavailable" };
   try {
     return await setCameraActive(true, { fromPage: true });
   } catch (err) {
@@ -1251,8 +1330,9 @@ app.whenReady().then(async () => {
   // 麥克風與鏡頭（media）只開放給本機核心的頁面；鏡頭需 NOUS_CAMERA=on，影像只在本機處理。
   // 只給本機核心同一個 origin 的頁面（完全相同的協定、主機、埠；不用字首比對）。
   const allowMedia = (url) => Boolean(core && sameOrigin(url, core.url));
+  // 服務模式中一律拒絕（麥克風與鏡頭）：即使頁面沒有照 nous:service 停下來，Mac 的麥克風與鏡頭也打不開。
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-    callback(permission === "media" && allowMedia(details.requestingUrl) && (!wantsVideo(details) || cameraAllowed()));
+    callback(permission === "media" && !prefs.serviceMode && allowMedia(details.requestingUrl) && (!wantsVideo(details) || cameraAllowed()));
   });
   // 權限檢查（navigator.permissions.query、enumerateDevices 的裝置名稱）不會自己打開鏡頭；真正取得影像的 getUserMedia
   // 一律經上面的權限請求處理器，所以這裡維持原樣。
@@ -1275,6 +1355,7 @@ app.whenReady().then(async () => {
   powerMonitor.on("resume", () => notifyPower("resume"));
   powerMonitor.on("unlock-screen", () => notifyPower("unlock"));
 
+  syncServiceBlocker();
   tray = new Tray(trayImage(false));
   setTimeout(() => log(`選單列圖示位置：${JSON.stringify(tray.getBounds())}`), 3000);
   applyDock();

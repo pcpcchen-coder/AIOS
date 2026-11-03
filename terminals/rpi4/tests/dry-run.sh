@@ -220,7 +220,7 @@ check "aios-tunnel exits 2 without a verified host key" test "$status" = 2
 reset_calls
 check "aios-kiosk launches once the core answers" "$LBIN/aios-kiosk"
 kiosk_call="$(grep '^chromium ' "$CALLS" || true)"
-for expected in "--kiosk" "--app=http://localhost:8787" "--autoplay-policy=no-user-gesture-required" \
+for expected in "--kiosk" "--app=http://localhost:8787/?terminal=rpi4" "--autoplay-policy=no-user-gesture-required" \
   "--user-data-dir=$SHARE/chromium-profile" "--no-first-run" "--password-store=basic"; do
   check "chromium gets $expected" grep -qF -- " $expected" <<<"$kiosk_call"
 done

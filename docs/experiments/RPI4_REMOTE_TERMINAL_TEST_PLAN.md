@@ -69,7 +69,7 @@ Why this works: the browser sees localhost (secure context for getUserMedia); SS
 1. In Raspberry Pi OS, select the Pi-connected USB microphone and speaker as system input/output. `aios-doctor` should list both.
 2. In the kiosk, grant microphone permission for `http://localhost:<port>` once with the mouse. The kit uses no flag that auto-grants it.
 3. Test speaker output, mic level, and the AIOS audio-device selection on the Pi page.
-4. On the Mac, turn off always-on wake listening and the camera in the App menu and hide the Mac window, so the Mac does not take the single call slot.
+4. On the Mac, choose "Enter service mode (for the Pi)" in the menu bar, so the Mac does not listen or take the call slot. Within 30 s the menu bar should read "Service mode: Pi connected". Run the Mac gate in the [service mode validation](../validation/service-mode-2026-11-03.en.md).
 5. Start a Realtime conversation on the Pi. Talk continuously for 10 min, then 30 min.
 6. Verify AI replies play on the **Pi**, not the Mac; disconnect/reconnect three times.
 7. Concurrency check: while the Pi is in a call, try to start a call on the Mac window; record what happens. Expected from code reading: on the ChatGPT plan route, or on the API key route with memory rules, the second start is refused as busy (`session_busy`); on the API key route without memory, the second call silently ends the first. Then reverse the roles once.
