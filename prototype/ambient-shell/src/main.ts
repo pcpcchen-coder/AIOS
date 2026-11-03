@@ -62,6 +62,7 @@ import {
   updateLiveCounts,
   type ConfirmDetail,
   type ViewActions,
+  type IntegrationPanelState,
   MAX_LISTED,
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
@@ -2497,7 +2498,29 @@ async function cancelTask(taskId: string, requestId: string): Promise<void> {
   }
 }
 
+/** SP-1：設定頁「App 整合」段的狀態。 */
+let integrationPanel: IntegrationPanelState = { view: null, loading: false, error: false };
+let integrationFetchedAt = 0;
+/** 30 秒內不重查（重新整理畫面不會一直打核心）；force＝「重新檢查」。 */
+function ensureIntegrationStatus(force = false): void {
+  if (!settings?.integrations || integrationPanel.loading) return;
+  if (!force && integrationFetchedAt && Date.now() - integrationFetchedAt < 30_000) return;
+  integrationPanel = { ...integrationPanel, loading: true, error: false };
+  integrationFetchedAt = Date.now();
+  api.integrationStatus().then(
+    (view) => void (integrationPanel = { view, loading: false, error: false }),
+    () => void (integrationPanel = { view: null, loading: false, error: true }),
+  ).finally(() => {
+    integrationFetchedAt = Date.now();
+    render();
+  });
+}
+
 const actions: ViewActions = {
+  refreshIntegrations: () => {
+    ensureIntegrationStatus(true);
+    render();
+  },
   cancel: (taskId) => void cancelTask(taskId, userRequest()),
   redo(taskId) {
     const requestId = userRequest();
@@ -3061,7 +3084,7 @@ function renderSurface(): void {
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
-      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${s.message ?? ""}` // 聲音裝置清單或使用中的裝置變了也重畫
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
@@ -3085,7 +3108,11 @@ function renderSurface(): void {
   // 成果紀錄自己更新內容（搜尋、詳細頁、刪除確認時不重建）。
   else if (s.kind === "history") el = historyView.element;
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
-  else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, audio: audioDevices.report() });
+  else if (s.kind === "settings") {
+    // SP-1：設定頁打開時才查整合服務狀態（NOUS_AIL=on 才有）；不在背景輪詢。
+    ensureIntegrationStatus();
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null });
+  }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));
     el = renderProgress([...tasks.values()].map(shown), s.message, actions);

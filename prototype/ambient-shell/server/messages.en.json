@@ -526,5 +526,6 @@
   "沒有開始即時語音的工作階段，整合工具沒有執行。": "There is no live voice session, so the integration tool was not run.",
   "這次呼叫在執行前已中止，沒有執行。": "This call was aborted before it ran; nothing was run.",
   "整合工具沒有執行。": "The integration tool was not run.",
-  "結果不明，請確認": "Result unknown, please check"
+  "結果不明，請確認": "Result unknown, please check",
+  "Spotify 語音控制沒有取得授權，沒有執行。": "Spotify voice control is not authorized; nothing was run."
 }

@@ -24,7 +24,7 @@ import type { RealtimeCallbacks } from "../src/realtime.ts";
 // Codex、頁面、即時語音路徑與 Adapter 都是模擬（fixture／mock）。
 
 function mockIntegrations(scenario: () => MockScenario = () => "normal"): Integrations {
-  return createIntegrations({ enabled: true, services: ["mock"] }, () => undefined, { mock: () => new MockAdapter({ scenario, timeoutMs: 150 }) })!;
+  return createIntegrations({ enabled: true, services: ["mock"], soloistPort: 19090 }, () => undefined, { mock: () => new MockAdapter({ scenario, timeoutMs: 150 }) })!;
 }
 
 const turn = (partial: Partial<CodexTurn>): CodexTurn => ({ text: "", calls: [], citations: [], model: "gpt-fixture-codex", replay: [], ...partial });

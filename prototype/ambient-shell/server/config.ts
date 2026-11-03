@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ExecutorMode } from "../shared/types.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_MAX_CONCURRENT } from "./runner.ts";
+import { DEFAULT_SOLOIST_PORT, parseSoloistPort } from "./integrations/adapters/spotify-soloist.ts";
 import { DEFAULT_LIVE_VOICE, isLiveVoice, LIVE_VOICES, ROUTE_PREFERENCES, type LiveVoiceId, type RoutePreference } from "../shared/realtime-route.ts";
 
 export interface Config {
@@ -83,7 +84,7 @@ export interface Config {
    * AIL-1（docs/18）：App Integration Layer 的功能旗標（NOUS_AIL=on，預設關閉）與啟用的 Adapter（NOUS_AIL_SERVICES，逗號分隔，例如 mock）。
    * 關閉時不建立 Registry：工具表、說明、/api/settings 與 HTTP 路由都和加入整合層之前相同。
    */
-  ail: { enabled: boolean; services: string[] };
+  ail: { enabled: boolean; services: string[]; soloistPort: number };
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -139,7 +140,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     smarthomeUrl: parseHttpUrl(env.SMARTHOME_URL, "SMARTHOME_URL"),
     smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
     wake: (env.NOUS_WAKE ?? "off").trim().toLowerCase() === "on",
-    ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES),
+    ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES, env.NOUS_SPOTIFY_SOLOIST_PORT),
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",
@@ -265,11 +266,14 @@ export function parseHttpUrl(raw: string | undefined, name: string): string | nu
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
 }
 
-/** NOUS_AIL＋NOUS_AIL_SERVICES：只接受小寫英數 Adapter ID；旗標關閉時清單一律為空。 */
-export function parseAil(flag: string | undefined, services: string | undefined): Config["ail"] {
+/**
+ * NOUS_AIL＋NOUS_AIL_SERVICES：只接受小寫英數 Adapter ID；旗標關閉時清單一律為空。
+ * SP-1：NOUS_SPOTIFY_SOLOIST_PORT＝Mac loopback 上經 SSH -R 轉送的 Soloist WebSocket 埠（預設 19090；主機固定 127.0.0.1）。
+ */
+export function parseAil(flag: string | undefined, services: string | undefined, soloistPort?: string): Config["ail"] {
   const enabled = (flag ?? "off").trim().toLowerCase() === "on";
-  if (!enabled) return { enabled: false, services: [] };
+  if (!enabled) return { enabled: false, services: [], soloistPort: DEFAULT_SOLOIST_PORT };
   const list = (services ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   for (const id of list) if (!/^[a-z][a-z0-9_]{0,31}$/.test(id)) throw new Error(`NOUS_AIL_SERVICES 的 Adapter ID 不合法："${id}"`);
-  return { enabled: true, services: [...new Set(list)] };
+  return { enabled: true, services: [...new Set(list)], soloistPort: parseSoloistPort(soloistPort) };
 }
