@@ -145,14 +145,14 @@ describe("flag off: byte-identical tools and instructions", () => {
   });
 
   it("NOUS_AIL defaults off; services only parse when on; createIntegrations returns null when off and skips unknown adapters", () => {
-    expect(parseAil(undefined, "mock")).toEqual({ enabled: false, services: [] });
-    expect(parseAil("on", " Mock, mock ,")).toEqual({ enabled: true, services: ["mock"] });
+    expect(parseAil(undefined, "mock")).toEqual({ enabled: false, services: [], soloistPort: 19090 });
+    expect(parseAil("on", " Mock, mock ,")).toEqual({ enabled: true, services: ["mock"], soloistPort: 19090 });
     expect(() => parseAil("on", "../evil")).toThrow(/不合法/);
-    expect(createIntegrations({ enabled: false, services: ["mock"] })).toBeNull();
+    expect(createIntegrations({ enabled: false, services: ["mock"], soloistPort: 19090 })).toBeNull();
     const lines: string[] = [];
-    const ail = createIntegrations({ enabled: true, services: ["mock", "unknown_app"] }, (l) => lines.push(l))!;
+    const ail = createIntegrations({ enabled: true, services: ["mock", "unknown_app"], soloistPort: 19090 }, (l) => lines.push(l))!;
     expect(ail.registry.adapters().map((a) => a.id)).toEqual(["mock"]);
     expect(lines.join("\n")).toMatch(/unknown_app 不是已審核的 Adapter/);
-    expect(createIntegrations({ enabled: true, services: [] })!.registry.listTools("api_key")).toEqual([]);
+    expect(createIntegrations({ enabled: true, services: [], soloistPort: 19090 })!.registry.listTools("api_key")).toEqual([]);
   });
 });

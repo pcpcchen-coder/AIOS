@@ -11,6 +11,7 @@ import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } f
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
 import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
+import type { IntegrationServiceStatus, IntegrationStatusView } from "../shared/integrations.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -35,6 +36,8 @@ export interface ViewActions {
   updateVoice(patch: VoicePrefsPatch): void;
   /** 聲音輸入／輸出裝置（id 與名稱；null＝系統預設）。舊的測試替身沒有這一項時不畫選單。 */
   updateAudio?(patch: AudioPrefsPatch): void;
+  /** SP-1：重新檢查整合服務狀態。 */
+  refreshIntegrations?(): void;
   /** 即時語音的路徑偏好與 ChatGPT 方案路徑的聲音（下一次開始才生效）。 */
   updateRealtime(patch: RealtimePrefsPatch): void;
   /** 即時語音用的 Codex 登入（和上面的 Continue with ChatGPT 分開）。 */
@@ -359,6 +362,16 @@ export interface SettingsRenderOptions {
   desktop?: boolean;
   /** 頁面的裝置清單與真的在用的裝置（src/audio-devices.ts）；沒有時「聲音」段只畫系統預設與保存的選擇。 */
   audio?: AudioReport | null;
+  /** SP-1：整合服務的按需狀態（只有 NOUS_AIL=on、settings.integrations 存在時才畫）。 */
+  integrations?: IntegrationPanelState | null;
+}
+
+/** SP-1：設定頁「App 整合」段的狀態（打開設定頁時才向核心查，不在背景輪詢）。 */
+export interface IntegrationPanelState {
+  view: IntegrationStatusView | null;
+  loading: boolean;
+  /** 查詢本身失敗（核心沒有回覆）：照實說查不到，不顯示舊結果當成現在。 */
+  error: boolean;
 }
 
 /**
@@ -390,7 +403,7 @@ export function renderSettings(
   options: SettingsRenderOptions = {},
 ): HTMLElement {
   if (!settings) return surfaceShell("settings", h("p", { class: "muted" }, t("正在讀取設定…")), footer(actions));
-  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null);
+  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null, options.integrations ?? null);
   const g = settings.chatgpt;
 
   const list = h("ul", { class: "provider-list" });
@@ -424,6 +437,7 @@ export function renderSettings(
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
+    settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
     // 家人辨識只在 macOS App（加密保存需要 safeStorage）；瀏覽器版照實說不可用，不提供任何操作。
     settings.identity && !settings.identity.available && h("p", { class: "muted small" }, msg`家人辨識：${uiText(settings.identity.disabled_reason ?? "不可用")}`),
     footer(actions),
@@ -434,7 +448,7 @@ export function renderSettings(
  * macOS App 內的設定頁：只有帳號與登入（ChatGPT 引擎帳號、即時語音用的 Codex 帳號）和狀態。
  * 引擎選擇、即時語音路徑與聲音、秒數、鏡頭與手勢都在選單列，這裡不重複畫。
  */
-function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null): HTMLElement {
+function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null): HTMLElement {
   const g = settings.chatgpt;
   const account = chatgptAccount(settings, actions, true);
   // 瀏覽器版的「Continue with ChatGPT」在引擎清單裡；這頁沒有引擎清單，未登入時直接放登入按鈕。
@@ -458,6 +472,7 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.realtime && renderRealtimeSettings(settings.realtime, actions, { desktop: true }),
     // 聲音輸入／輸出（George 2026-11-01）：選單列「聲音」與這裡都能選，寫入同一個 audio.json。
     settings.audio && renderAudioSettings(settings.audio.prefs, audio, actions),
+    settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
     footer(actions),
   );
@@ -833,4 +848,71 @@ export function refreshCountdowns(root: ParentNode): void {
     const expires = Number(el.dataset.expires);
     if (Number.isFinite(expires)) el.textContent = msg`${Math.max(0, Math.round((expires - Date.now()) / 1000))} 秒`;
   });
+}
+
+/** SP-1：服務的顯示名稱（Adapter ID → 固定句）。 */
+const INTEGRATION_LABEL: Record<string, string> = {
+  spotify_soloist: "Pi 上的 Spotify 播放器",
+  mock: "模擬整合（mock，測試用）",
+};
+
+const HEALTH_TEXT: Record<IntegrationServiceStatus["health"], string> = {
+  available: "可用",
+  unavailable: "不可用",
+  unknown: "狀態不明",
+};
+
+/** 原因代碼 → 固定句（核心只給代碼，沒有網址、帳號或播放內容）。 */
+const HEALTH_REASON_TEXT: Record<IntegrationServiceStatus["reason"], string> = {
+  ok: "已連線",
+  not_configured: "沒有啟用",
+  connection_refused: "連不上（Pi 離線、SSH 通道中斷、Soloist 沒有執行或版本已過期）",
+  connection_closed: "連線在回報前中斷",
+  timeout: "沒有在時限內回覆",
+  bad_reply: "回覆的格式看不懂",
+  expired: "版本已過期",
+  taken_over: "已登入，但不是目前使用中的 Spotify 播放裝置",
+  not_ready: "Soloist 沒有登入 Spotify",
+  error: "檢查時出錯",
+};
+
+/**
+ * SP-1：設定頁「App 整合」段。打開設定頁時查一次（30 秒內不重查），「重新檢查」強制再查。
+ * 只畫核心回的健康與原因代碼；available 只在核心實際連上並確認時出現。
+ */
+export function renderIntegrationStatus(state: IntegrationPanelState, actions: ViewActions): HTMLElement {
+  const rows: Child[] = [];
+  if (state.error) rows.push(h("p", { class: "error-text small" }, t("查不到整合服務的狀態（核心沒有回覆）。")));
+  else if (!state.view) rows.push(h("p", { class: "muted small" }, t("正在檢查…")));
+  else if (!state.view.services.length) rows.push(h("p", { class: "muted small" }, t("沒有啟用任何整合服務。")));
+  else {
+    const list = h("ul", { class: "provider-list" });
+    for (const s of state.view.services) {
+      const label = t(INTEGRATION_LABEL[s.service] ?? s.service);
+      const time = s.checked_at ? new Date(s.checked_at).toLocaleTimeString(getLocale() === "en" ? "en-US" : "zh-TW", { hour12: false }) : null;
+      list.append(
+        h(
+          "li",
+          { class: "provider" },
+          h(
+            "div",
+            { class: "provider-text" },
+            h("strong", {}, label),
+            h("span", { class: "muted small" }, msg`${t(HEALTH_TEXT[s.health])}：${t(HEALTH_REASON_TEXT[s.reason])}`),
+            time && h("span", { class: "muted small" }, msg`檢查時間：${time}`),
+            s.service === "spotify_soloist" && h("span", { class: "muted small" }, t("只顯示狀態；Spotify 語音控制沒有取得授權，沒有開放。")),
+          ),
+          h("span", { class: `chip${s.health === "available" ? " chip--running" : ""}` }, t(HEALTH_TEXT[s.health])),
+        ),
+      );
+    }
+    rows.push(list);
+  }
+  return h(
+    "section",
+    { class: "camera-settings", "aria-label": t("App 整合") },
+    h("h3", {}, t("App 整合")),
+    ...rows,
+    actions.refreshIntegrations && h("div", { class: "actions" }, button(state.loading ? t("檢查中…") : t("重新檢查"), () => actions.refreshIntegrations?.())),
+  );
 }

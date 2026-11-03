@@ -1,5 +1,6 @@
 import type { Config } from "../config.ts";
 import { MockAdapter } from "./adapters/mock.ts";
+import { SpotifySoloistAdapter } from "./adapters/spotify-soloist.ts";
 import type { IntegrationAdapter } from "./contracts.ts";
 import { IntegrationDispatcher, type AuditEntry } from "./dispatcher.ts";
 import { IntegrationRegistry } from "./registry.ts";
@@ -14,17 +15,19 @@ export interface Integrations {
   status: IntegrationStatusBoard;
 }
 
-/** 已審核的 Adapter（ID → 建立方式）。 */
-export const KNOWN_ADAPTERS: Record<string, () => IntegrationAdapter> = {
+/** 已審核的 Adapter（ID → 建立方式，只拿核心設定）。 */
+export const KNOWN_ADAPTERS: Record<string, (config: Config["ail"]) => IntegrationAdapter> = {
   mock: () => new MockAdapter(),
+  // SP-1：只有本機健康狀態，沒有模型工具（SP-2 BLOCKED）。
+  spotify_soloist: (config) => new SpotifySoloistAdapter({ port: config.soloistPort }),
 };
 
-export function createIntegrations(config: Config["ail"], log: (line: string) => void = () => undefined, known: Record<string, () => IntegrationAdapter> = KNOWN_ADAPTERS): Integrations | null {
+export function createIntegrations(config: Config["ail"], log: (line: string) => void = () => undefined, known: Record<string, (config: Config["ail"]) => IntegrationAdapter> = KNOWN_ADAPTERS): Integrations | null {
   if (!config.enabled) return null;
   const enabled = new Set(config.services.filter((id) => Object.hasOwn(known, id)));
   for (const id of config.services) if (!enabled.has(id)) log(`整合層：NOUS_AIL_SERVICES 的 ${id} 不是已審核的 Adapter，略過`);
   const registry = new IntegrationRegistry({ enabled });
-  for (const id of enabled) registry.register(known[id]!());
+  for (const id of enabled) registry.register(known[id]!(config));
   const audit = (e: AuditEntry) => log(`整合層：${e.requestId.slice(0, 8)} ${e.tool} ${e.route} → ${e.status}${e.reason ? `（${e.reason}）` : ""} ${e.ms} ms`);
   return { registry, dispatcher: new IntegrationDispatcher(registry, { audit }), status: new IntegrationStatusBoard(registry) };
 }
