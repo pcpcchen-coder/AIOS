@@ -84,7 +84,7 @@ export interface Config {
    * AIL-1（docs/18）：App Integration Layer 的功能旗標（NOUS_AIL=on，預設關閉）與啟用的 Adapter（NOUS_AIL_SERVICES，逗號分隔，例如 mock）。
    * 關閉時不建立 Registry：工具表、說明、/api/settings 與 HTTP 路由都和加入整合層之前相同。
    */
-  ail: { enabled: boolean; services: string[]; soloistPort: number };
+  ail: { enabled: boolean; services: string[]; soloistPort: number; vcr?: { mode: "fake"; dir: string } };
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -140,7 +140,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     smarthomeUrl: parseHttpUrl(env.SMARTHOME_URL, "SMARTHOME_URL"),
     smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
     wake: (env.NOUS_WAKE ?? "off").trim().toLowerCase() === "on",
-    ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES, env.NOUS_SPOTIFY_SOLOIST_PORT),
+    ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES, env.NOUS_SPOTIFY_SOLOIST_PORT, env.NOUS_VCR, env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous")),
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",
@@ -268,12 +268,18 @@ export function parseHttpUrl(raw: string | undefined, name: string): string | nu
 
 /**
  * NOUS_AIL＋NOUS_AIL_SERVICES：只接受小寫英數 Adapter ID；旗標關閉時清單一律為空。
+ * VCR-0：NOUS_VCR＝off（預設）｜fake（假輸出，沒有實體喇叭發聲）；整合層開著時其他值一律報錯，關著時不看。
  * SP-1：NOUS_SPOTIFY_SOLOIST_PORT＝Mac loopback 上經 SSH -R 轉送的 Soloist WebSocket 埠（預設 19090；主機固定 127.0.0.1）。
  */
-export function parseAil(flag: string | undefined, services: string | undefined, soloistPort?: string): Config["ail"] {
+export function parseAil(flag: string | undefined, services: string | undefined, soloistPort?: string, vcr?: string, configDir?: string): Config["ail"] {
   const enabled = (flag ?? "off").trim().toLowerCase() === "on";
+  // 整合層關閉時 NOUS_VCR 整個不看（和 NOUS_AIL_SERVICES 一樣）。
   if (!enabled) return { enabled: false, services: [], soloistPort: DEFAULT_SOLOIST_PORT };
+  const vcrMode = (vcr ?? "off").trim().toLowerCase() || "off";
+  if (vcrMode !== "off" && vcrMode !== "fake") throw new Error("NOUS_VCR 只接受 off 或 fake；實體播音（VCR-2/3）尚未實作");
   const list = (services ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
   for (const id of list) if (!/^[a-z][a-z0-9_]{0,31}$/.test(id)) throw new Error(`NOUS_AIL_SERVICES 的 Adapter ID 不合法："${id}"`);
-  return { enabled: true, services: [...new Set(list)], soloistPort: parseSoloistPort(soloistPort) };
+  const base = { enabled: true, services: [...new Set(list)], soloistPort: parseSoloistPort(soloistPort) };
+  // VCR-0（docs/19）：NOUS_VCR=fake 才加上 vcr（假輸出，mock）；目錄固定在 <configDir>/voice-relay，不來自模型。
+  return vcrMode === "fake" ? { ...base, vcr: { mode: "fake", dir: join(configDir ?? join(homedir(), ".config", "nous"), "voice-relay") } } : base;
 }
