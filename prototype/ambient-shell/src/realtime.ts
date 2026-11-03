@@ -54,6 +54,12 @@ export interface RealtimeCallbacks {
   onApprovalPrompt(request: ApprovalRequest, expiresAt: number): void;
   /** 確認卡結束：同意、拒絕、逾時、畫面被收起或對話結束。 */
   onApprovalResolved(request: ApprovalRequest, approved: boolean, outcome: ApprovalOutcome): void;
+  /**
+   * AIL-1：核心整合層在 API key 路徑上提供的函式名稱（app__<service>__<action>；NOUS_AIL 關閉時沒有提供）。
+   * 這些名稱的工具呼叫交給 onIntegrationTool 轉交核心執行，頁面自己不執行。
+   */
+  integrationTools?(): readonly string[];
+  onIntegrationTool?(name: string, rawArgs: string): Promise<Record<string, unknown>>;
   /** 工具活動的短說明（例如「上網查詢：新竹天氣」），顯示在字幕。 */
   onToolActivity(text: string): void;
   /** 模式因錯誤或閒置而關閉。 */

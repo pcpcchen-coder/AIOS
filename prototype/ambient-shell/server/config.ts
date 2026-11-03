@@ -79,6 +79,11 @@ export interface Config {
    * /wake-runtime/ 一律 404、頁面不載入 src/audio；開啟只代表「可以在選單列打開」，偏好預設仍是關閉（docs/17 §5.1）。
    */
   wake: boolean;
+  /**
+   * AIL-1（docs/18）：App Integration Layer 的功能旗標（NOUS_AIL=on，預設關閉）與啟用的 Adapter（NOUS_AIL_SERVICES，逗號分隔，例如 mock）。
+   * 關閉時不建立 Registry：工具表、說明、/api/settings 與 HTTP 路由都和加入整合層之前相同。
+   */
+  ail: { enabled: boolean; services: string[] };
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -134,6 +139,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     smarthomeUrl: parseHttpUrl(env.SMARTHOME_URL, "SMARTHOME_URL"),
     smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
     wake: (env.NOUS_WAKE ?? "off").trim().toLowerCase() === "on",
+    ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES),
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",
@@ -257,4 +263,13 @@ export function parseHttpUrl(raw: string | undefined, name: string): string | nu
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`${name} 必須是 http 或 https 網址`);
   if (url.username || url.password) throw new Error(`${name} 不可內含帳號密碼；權杖請放在 SMARTHOME_TOKEN`);
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+/** NOUS_AIL＋NOUS_AIL_SERVICES：只接受小寫英數 Adapter ID；旗標關閉時清單一律為空。 */
+export function parseAil(flag: string | undefined, services: string | undefined): Config["ail"] {
+  const enabled = (flag ?? "off").trim().toLowerCase() === "on";
+  if (!enabled) return { enabled: false, services: [] };
+  const list = (services ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  for (const id of list) if (!/^[a-z][a-z0-9_]{0,31}$/.test(id)) throw new Error(`NOUS_AIL_SERVICES 的 Adapter ID 不合法："${id}"`);
+  return { enabled: true, services: [...new Set(list)] };
 }

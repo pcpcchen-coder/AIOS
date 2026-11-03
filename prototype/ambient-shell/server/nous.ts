@@ -43,6 +43,7 @@ import { MemoryBoundary } from "./memory/boundary.ts";
 import { SealedVault, VaultError, type VaultFailure } from "./sealed-vault.ts";
 import type { MemoryLockProvider } from "./memory/store.ts";
 import { createTaskIpc } from "./task-ipc.ts";
+import { createIntegrations } from "./integrations/index.ts";
 import type { TasksResponse } from "../shared/protected-tasks.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
@@ -227,6 +228,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     codex: codexSearch,
   });
   const home = new HomeBridge({ url: config.smarthomeUrl, token: config.smarthomeToken });
+  // AIL-1（docs/18）：NOUS_AIL=on 才建立整合層；關閉時 ail 為 null，工具表、說明與 HTTP 路由都和之前相同。
+  const ail = createIntegrations(config.ail, log);
   const realtime = new RealtimeBridge({
     apiKey: config.openaiApiKey,
     model: config.realtimeModel,
@@ -235,8 +238,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     mcp: config.realtimeMcp,
     taskWebSearch: config.taskWebSearch,
     home: home.available,
+    ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("api_key", locale) } : {}),
   });
-  const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available });
+  const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available, ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("live", locale) } : {}) });
   // MEM-2：ChatGPT 方案即時語音的記憶同意鍵（provider codex，獨立於 chatgpt）；沒有 Codex 登入時為 null。
   const liveTarget = () => codexTarget(codexAuth.accountSubject());
   // 開場句挑選（固定清單、依本機時段、避開上一次）：家人辨識的決策與 live 保底共用一個。
@@ -251,7 +255,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp, memory: !!memoryOn }, ctx.locale),
     // MEM-4b：voice（受保護的語音交辦）只改 delegate_task 的處理，不影響說明與工具表。
     caller: (ctx, mem, voice) =>
-      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}) }),
+      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}), ...(ail ? { integrations: { dispatcher: ail.dispatcher, sessionId: ctx.sessionId } } : {}) }),
     // MEM-2：每通通話一個記憶 binding（server/memory/live.ts）；瀏覽器版沒有記憶層。
     // MEM-3：頁面的確認卡（MCP、家電）開著時不開語音記憶卡（兩條路徑一致）。
     ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
@@ -409,6 +413,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     hideRevokeFromPage,
     webSearch,
     home,
+    ...(ail ? { integrations: ail } : {}),
     camera,
     faceTuning,
     voice,
