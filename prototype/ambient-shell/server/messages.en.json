@@ -527,5 +527,15 @@
   "這次呼叫在執行前已中止，沒有執行。": "This call was aborted before it ran; nothing was run.",
   "整合工具沒有執行。": "The integration tool was not run.",
   "結果不明，請確認": "Result unknown, please check",
-  "Spotify 語音控制沒有取得授權，沒有執行。": "Spotify voice control is not authorized; nothing was run."
+  "Spotify 語音控制沒有取得授權，沒有執行。": "Spotify voice control is not authorized; nothing was run.",
+  "語音中繼設定不正確，沒有儲存。": "The voice relay settings are invalid; nothing was saved.",
+  "沒有這個語音中繼目標，沒有儲存。": "No such voice relay target; nothing was saved.",
+  "內建示範目標不能修改；請先新增自己的目標。": "Built-in demo targets cannot be changed; add your own target first.",
+  "這個命令說法不能用在這個目標，沒有儲存。": "This command phrasing cannot be used with this target; nothing was saved.",
+  "這個聲線不能用在這個目標，沒有儲存。": "This voice profile cannot be used with this target; nothing was saved.",
+  "語音中繼設定檔無法讀取，沒有儲存。": "The voice relay settings file could not be read; nothing was saved.",
+  "試驗紀錄檔不正確，沒有儲存。": "The trial log file is invalid; nothing was saved.",
+  "語音中繼請求格式不正確。": "The voice relay request is malformed.",
+  "語音中繼設定無法寫入。": "The voice relay settings cannot be written.",
+  "輸出端沒有這個語言的這個聲音，沒有儲存。": "The output has no such voice for this language; nothing was saved."
 }

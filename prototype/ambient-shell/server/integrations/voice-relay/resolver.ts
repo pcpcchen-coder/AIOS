@@ -104,7 +104,7 @@ function render(intent: IntentDef, entry: CommandEntry, target: Target, slots: R
  * 喚醒詞只能來自同品牌、同助理、同語系的命令包：裝置表指定的（還要屬於這樣的命令包），
  * 否則依序取型號層（型號也相同）、助理層命令包的選定喚醒詞。絕不從通用包或別的品牌、語系拿。
  */
-function wakePhraseFor(catalog: RelayCatalog, target: Target): string | undefined {
+export function wakePhraseFor(catalog: RelayCatalog, target: Target): string | undefined {
   const own = (p: CommandPack) => p.vendor === target.vendor && p.assistant === target.assistant && p.locale === target.locale;
   if (target.wakePhraseId !== undefined) {
     return catalog.packs.filter(own).flatMap((p) => p.wakePhrases).find((w) => w.id === target.wakePhraseId)?.text;
@@ -116,6 +116,18 @@ function wakePhraseFor(catalog: RelayCatalog, target: Target): string | undefine
     if (selected) return selected.text;
   }
   return undefined;
+}
+
+/** 層級選定的模板（不看裝置覆寫）：第一個有選定模板的層級；同層多個回 { ambiguous: 層級 }；都沒有是 null。 */
+export function levelDefault(catalog: RelayCatalog, target: Target, intentId: string): { pack: CommandPack; entry: CommandEntry; level: ResolveLevel } | { ambiguous: ResolveLevel } | null {
+  for (const level of LEVELS) {
+    const found = catalog.packs
+      .filter((pack) => packLevel(pack, target) === level)
+      .flatMap((pack) => pack.entries.filter((e) => e.intentId === intentId && e.selected).map((entry) => ({ pack, entry, level })));
+    if (found.length > 1) return { ambiguous: level };
+    if (found.length === 1) return found[0]!;
+  }
+  return null;
 }
 
 export function resolveRelay(catalog: RelayCatalog, request: RelayRequest, opts: ResolveOptions = {}): RelayResolution {
@@ -145,16 +157,9 @@ export function resolveRelay(catalog: RelayCatalog, request: RelayRequest, opts:
     if (!found || found.entry.intentId !== intent.id || !packLevel(found.pack, target)) return refuse("unsupported_intent", "override_incompatible");
     hit = { ...found, level: "device_override" };
   } else {
-    for (const level of LEVELS) {
-      const found = catalog.packs
-        .filter((pack) => packLevel(pack, target) === level)
-        .flatMap((pack) => pack.entries.filter((e) => e.intentId === intent.id && e.selected).map((entry) => ({ pack, entry, level })));
-      if (found.length > 1) return refuse("ambiguous_template", level);
-      if (found.length === 1) {
-        hit = found[0]!;
-        break;
-      }
-    }
+    const found = levelDefault(catalog, target, intent.id);
+    if (found && "ambiguous" in found) return refuse("ambiguous_template", found.ambiguous);
+    hit = found;
   }
   if (!hit) return refuse("unsupported_intent", "no_template");
   const { pack, entry, level } = hit;

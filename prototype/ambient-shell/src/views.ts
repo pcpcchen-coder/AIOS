@@ -11,7 +11,9 @@ import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } f
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
 import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
-import type { IntegrationServiceStatus, IntegrationStatusView } from "../shared/integrations.ts";
+import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
+import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
+import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, VoiceRelayProfileBody, VoiceRelaySlots, VoiceRelayTargetBody, VoiceRelayTrialBody, VoiceRelayUnadoptBody } from "./api.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -38,6 +40,8 @@ export interface ViewActions {
   updateAudio?(patch: AudioPrefsPatch): void;
   /** SP-1：重新檢查整合服務狀態。 */
   refreshIntegrations?(): void;
+  /** VCR-2：設定頁「語音中繼（實驗）」的按鈕（沒有時只畫狀態、按鈕停用）。 */
+  voiceRelay?: VoiceRelayActions;
   /** 即時語音的路徑偏好與 ChatGPT 方案路徑的聲音（下一次開始才生效）。 */
   updateRealtime(patch: RealtimePrefsPatch): void;
   /** 即時語音用的 Codex 登入（和上面的 Continue with ChatGPT 分開）。 */
@@ -364,6 +368,8 @@ export interface SettingsRenderOptions {
   audio?: AudioReport | null;
   /** SP-1：整合服務的按需狀態（只有 NOUS_AIL=on、settings.integrations 存在時才畫）。 */
   integrations?: IntegrationPanelState | null;
+  /** VCR-2：語音中繼診斷區的按需狀態（只有核心註冊了 voice_relay、settings.voice_relay 為 true 時才畫）。 */
+  voiceRelay?: VoiceRelayPanelState | null;
 }
 
 /** SP-1：設定頁「App 整合」段的狀態（打開設定頁時才向核心查，不在背景輪詢）。 */
@@ -403,7 +409,7 @@ export function renderSettings(
   options: SettingsRenderOptions = {},
 ): HTMLElement {
   if (!settings) return surfaceShell("settings", h("p", { class: "muted" }, t("正在讀取設定…")), footer(actions));
-  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null, options.integrations ?? null);
+  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null, options.integrations ?? null, options.voiceRelay ?? null);
   const g = settings.chatgpt;
 
   const list = h("ul", { class: "provider-list" });
@@ -438,6 +444,7 @@ export function renderSettings(
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
     settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
+    settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
     // 家人辨識只在 macOS App（加密保存需要 safeStorage）；瀏覽器版照實說不可用，不提供任何操作。
     settings.identity && !settings.identity.available && h("p", { class: "muted small" }, msg`家人辨識：${uiText(settings.identity.disabled_reason ?? "不可用")}`),
     footer(actions),
@@ -448,7 +455,7 @@ export function renderSettings(
  * macOS App 內的設定頁：只有帳號與登入（ChatGPT 引擎帳號、即時語音用的 Codex 帳號）和狀態。
  * 引擎選擇、即時語音路徑與聲音、秒數、鏡頭與手勢都在選單列，這裡不重複畫。
  */
-function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null): HTMLElement {
+function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null, voiceRelay: VoiceRelayPanelState | null): HTMLElement {
   const g = settings.chatgpt;
   const account = chatgptAccount(settings, actions, true);
   // 瀏覽器版的「Continue with ChatGPT」在引擎清單裡；這頁沒有引擎清單，未登入時直接放登入按鈕。
@@ -473,6 +480,7 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     // 聲音輸入／輸出（George 2026-11-01）：選單列「聲音」與這裡都能選，寫入同一個 audio.json。
     settings.audio && renderAudioSettings(settings.audio.prefs, audio, actions),
     settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
+    settings.voice_relay === true && voiceRelay && renderVoiceRelay(voiceRelay, actions),
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
     footer(actions),
   );
@@ -915,4 +923,461 @@ export function renderIntegrationStatus(state: IntegrationPanelState, actions: V
     ...rows,
     actions.refreshIntegrations && h("div", { class: "actions" }, button(state.loading ? t("檢查中…") : t("重新檢查"), () => actions.refreshIntegrations?.())),
   );
+}
+
+// ───────────── VCR-2：語音中繼（實驗）診斷區 ─────────────
+
+/** 設定頁「語音中繼（實驗）」段的狀態（打開設定頁、核心註冊了 voice_relay 時才查；不在背景輪詢）。 */
+export interface VoiceRelayPanelState {
+  view: VoiceRelayView | null;
+  loading: boolean;
+  /** 查詢本身失敗：照實說查不到，不拿舊結果當成現在。 */
+  error: boolean;
+  /** 有操作在等核心回覆（播放、保存）：按鈕暫停，避免重複送出。 */
+  busy: boolean;
+  /** 最近一次操作的固定句（中文原文，畫面再翻譯；不含使用者資料）。 */
+  notice: string | null;
+  /** 試聽用聲線（只在這頁有效）：目標 id → 聲線 id；沒有時用目標選定的聲線。 */
+  chosen: Record<string, string>;
+  /** 「新增 Google Home Mini」表單選的語言（決定聲音清單）。 */
+  createLocale: VoiceRelayLocale;
+  /** 最近一次「預覽文字」的結果。 */
+  preview: { target_id: string; intent_id: IntentId; template_id: string; result: VoiceRelayPreview } | null;
+  /** 最近一次播放（只由「測試喚醒／測試整句」按鈕觸發）。 */
+  played: VoiceRelayPlayed | null;
+  /** 試驗紀錄的草稿（播放整句後才出現）。 */
+  trial: VoiceRelayTrialDraft;
+}
+
+export type VoiceRelayLocale = "zh-TW" | "en-US";
+
+export interface VoiceRelayPlayed {
+  target_id: string;
+  intent_id: IntentId;
+  template_id: string;
+  template_version: number;
+  voice_profile_id: string;
+  part: VoiceRelayPart;
+  status: ToolResultStatus;
+  /** 診斷解析被拒絕時的原因（固定代碼）。 */
+  reason: RelayRefusal | null;
+}
+
+export interface VoiceRelayTrialDraft {
+  wake: RelayTrial["wake"] | null;
+  command: RelayTrial["command"] | null;
+  evidence: "visual" | "human_confirmed";
+}
+
+export function emptyVoiceRelayPanel(): VoiceRelayPanelState {
+  return { view: null, loading: false, error: false, busy: false, notice: null, chosen: {}, createLocale: "zh-TW", preview: null, played: null, trial: { wake: null, command: null, evidence: "visual" } };
+}
+
+/** 診斷區的動作（main.ts 實作；全部只由使用者按鈕觸發，沒有自動播放）。 */
+export interface VoiceRelayActions {
+  refresh(): void;
+  createTarget(body: VoiceRelayTargetBody): void;
+  setEnabled(targetId: string, enabled: boolean): void;
+  chooseProfile(targetId: string, profileId: string): void;
+  saveProfile(body: VoiceRelayProfileBody): void;
+  setCreateLocale(locale: VoiceRelayLocale): void;
+  preview(body: VoiceRelayPreviewBody): void;
+  play(body: VoiceRelayPlayBody): void;
+  adopt(body: VoiceRelayAdoptBody): void;
+  unadopt(body: VoiceRelayUnadoptBody): void;
+  setTrial(patch: Partial<VoiceRelayTrialDraft>): void;
+  recordTrial(body: VoiceRelayTrialBody): void;
+}
+
+/** 拒絕原因 → 固定句（核心只給代碼）。 */
+export const RELAY_REFUSAL_TEXT: Record<RelayRefusal, string> = {
+  unknown_target: "找不到這個目標",
+  target_disabled: "這個目標已停用",
+  unsupported_intent: "這個目標不支援這個命令",
+  invalid_slots: "命令的參數不對",
+  ambiguous_template: "有不只一組說法符合，沒有播放",
+  not_reviewed: "這組說法還沒有採用",
+  policy_blocked: "政策不允許（例如 Spotify 或音樂服務不明）",
+  tts_unavailable: "這台機器沒有這個聲音",
+  output_unavailable: "找不到指定的喇叭",
+  diagnostic_invalid: "診斷選的說法或聲線不屬於這個目標",
+};
+
+/** 播放結果 → 固定句。永遠不說「成功」：音箱有沒有照做沒有回讀。 */
+const RELAY_PLAY_TEXT: Record<ToolResultStatus, string> = {
+  confirmed: "已發出語音命令，結果未確認",
+  unconfirmed: "已發出語音命令，結果未確認",
+  unknown: "結果不明：可能已播出一部分，也可能沒有",
+  needs_confirmation: "需要確認，沒有播放",
+  refused: "沒有播放（被拒絕）",
+  failed: "播放失敗，沒有發出聲音",
+};
+
+const RELAY_INTENT_LABEL: Record<IntentId, string> = {
+  "music.next": "下一首",
+  "music.pause": "暫停音樂",
+  "music.resume": "繼續播放音樂",
+  "music.play_genre": "播放某類音樂",
+  "volume.set": "設定音量",
+  "light.power": "開關燈",
+  "light.brightness": "調整燈的亮度",
+  "assistant.timer": "計時器",
+};
+
+const RELAY_GENRE_LABEL: Record<(typeof GENRES)[number], string> = {
+  pop: "流行",
+  jazz: "爵士",
+  classical: "古典",
+  rock: "搖滾",
+  lofi: "Lo-fi",
+  kids: "兒歌",
+};
+
+const RELAY_MUSIC_LABEL: Record<MusicService, string> = {
+  youtube_music: "YouTube Music",
+  apple_music: "Apple Music",
+  spotify: "Spotify",
+  other: "其他",
+  unknown: "不知道",
+};
+
+const RELAY_LOCALE_LABEL: Record<VoiceRelayLocale, string> = { "zh-TW": "中文（台灣）", "en-US": "英文（美國）" };
+
+const relayRate = (r: Rate): string => (r.den === 0 ? "N/A" : `${r.num}/${r.den}`);
+
+/** 試驗統計：分母是 0 寫 N/A，沒有任何已審閱的正向試驗寫「未測試」，不捏造數字。 */
+export function relayTrialSummaryText(summary: TrialSummary | undefined): string {
+  if (!summary || summary.status === "NOT_TESTED") return t("未測試");
+  return t("喚醒 {0}、命令 {1}、整體 {2}", relayRate(summary.wakeRate), relayRate(summary.commandRate), relayRate(summary.endToEndRate));
+}
+
+function relaySelect(label: string, options: [string, string][], selected: string | null, onChange?: (value: string) => void): HTMLSelectElement {
+  const select = h("select", { "aria-label": label });
+  for (const [value, text] of options) {
+    const o = h("option", { value }, text);
+    if (value === selected) o.setAttribute("selected", "");
+    (o as HTMLOptionElement).selected = value === selected;
+    select.append(o);
+  }
+  if (selected !== null) select.value = selected;
+  if (onChange) select.addEventListener("change", () => onChange(select.value));
+  return select;
+}
+
+function relayNumber(label: string, value: number, min: number, max: number, step: number): HTMLInputElement {
+  const input = h("input", { type: "number", "aria-label": label, min: String(min), max: String(max), step: String(step), value: String(value) });
+  input.value = String(value);
+  return input;
+}
+
+function relayButton(label: string, onClick: () => void, disabled: boolean, variant = ""): HTMLButtonElement {
+  const b = button(label, onClick, variant);
+  b.disabled = disabled;
+  return b;
+}
+
+/**
+ * VCR-2：設定頁「語音中繼（實驗）」段。只有核心註冊了 voice_relay（settings.voice_relay）才畫。
+ * 播放只由按鈕觸發；播放結果最多說「已發出、結果未確認」，音箱有沒有照做要使用者自己記錄。
+ */
+export function renderVoiceRelay(state: VoiceRelayPanelState, actions: ViewActions): HTMLElement {
+  const relay = actions.voiceRelay;
+  const rows: Child[] = [];
+  const view = state.view;
+  if (state.error) rows.push(h("p", { class: "error-text small" }, t("查不到語音中繼的狀態（核心沒有回覆）。")));
+  else if (!view) rows.push(h("p", { class: "muted small" }, t("正在讀取…")));
+  else {
+    rows.push(
+      h("p", { class: "small" }, view.mode === "mac" ? t("模式：Mac 喇叭實際發聲") : t("模式：模擬：不會發出聲音")),
+      view.restart_required && h("p", { class: "notice small" }, t("目標或燈的清單已變更，重新啟動 Nous 後模型才能使用新的清單。")),
+      h("p", { class: "muted small" }, t("播放成功只代表聲音已送出，不代表音箱照做。")),
+      h("p", { class: "muted small" }, t("沒有回音抑制：Nous 自己的麥克風可能聽到這些播放。")),
+    );
+    const out = view.output;
+    const time = out.checked_at ? new Date(out.checked_at).toLocaleTimeString(getLocale() === "en" ? "en-US" : "zh-TW", { hour12: false }) : null;
+    rows.push(
+      h(
+        "div",
+        { class: "provider-text" },
+        h("span", { class: "small" }, t("聲音 {0} 個、喇叭 {1} 個", out.voices.length, out.devices.length)),
+        time ? h("span", { class: "muted small" }, t("讀取時間：{0}", time)) : h("span", { class: "muted small" }, t("還沒有讀取聲音與喇叭")),
+        out.error && h("span", { class: "error-text small" }, t("讀取聲音與喇叭時出錯，清單可能不完整。")),
+      ),
+      relay && h("div", { class: "actions" }, relayButton(state.busy ? "處理中…" : "重新讀取聲音與喇叭", () => relay.refresh(), state.busy)),
+    );
+    // 示範目標（fake 模式、沒有設定檔）也可以新增：新增後示範目標會被取代。
+    if (!view.targets.length || view.fixtures_active) rows.push(renderRelayCreate(state, view, relay));
+    for (const target of view.targets) rows.push(renderRelayTarget(state, view, target, relay));
+  }
+  if (state.notice) rows.push(h("p", { class: "error-text small", role: "status" }, t(state.notice)));
+  return h("section", { class: "camera-settings voice-relay", "aria-label": "語音中繼" }, h("h3", {}, t("語音中繼（實驗）")), ...rows);
+}
+
+function renderRelayCreate(state: VoiceRelayPanelState, view: VoiceRelayView, relay: VoiceRelayActions | undefined): HTMLElement {
+  const locale = state.createLocale;
+  const localeSelect = relaySelect("語言", (["zh-TW", "en-US"] as const).map((l) => [l, t(RELAY_LOCALE_LABEL[l])]), locale, (v) => relay?.setCreateLocale(v === "en-US" ? "en-US" : "zh-TW"));
+  const deviceSelect = relaySelect("喇叭", view.output.devices.map((d) => [d.id, d.name]), view.output.devices[0]?.id ?? null);
+  const voices = view.output.voices.filter((v) => v.locale === locale);
+  const voiceSelect = relaySelect("聲音", voices.map((v) => [v.id, v.id]), voices[0]?.id ?? null);
+  const musicSelect = relaySelect("音樂服務", MUSIC_SERVICES.map((m) => [m, t(RELAY_MUSIC_LABEL[m])]), "youtube_music");
+  const ready = !!relay && !state.busy && view.output.devices.length > 0 && voices.length > 0;
+  return h(
+    "div",
+    { class: "voice-relay-form", "aria-label": "新增 Google Home Mini" },
+    h("strong", {}, t("新增 Google Home Mini")),
+    h("label", { class: "small" }, t("語言"), localeSelect),
+    h("label", { class: "small" }, t("喇叭"), deviceSelect),
+    h("label", { class: "small" }, t("聲音"), voiceSelect),
+    h("label", { class: "small" }, t("音樂服務"), musicSelect),
+    h("p", { class: "muted small" }, t("音樂服務選 Spotify 或「不知道」時，音樂命令會被政策擋下。")),
+    view.fixtures_active && h("p", { class: "muted small" }, t("新增後會取代示範目標。")),
+    !voices.length && h("p", { class: "muted small" }, t("這個語言沒有可用的聲音。")),
+    !view.output.devices.length && h("p", { class: "muted small" }, t("沒有讀到喇叭。")),
+    h(
+      "div",
+      { class: "actions" },
+      relayButton("新增", () => {
+        const music = MUSIC_SERVICES.find((m) => m === musicSelect.value) ?? "unknown";
+        relay?.createTarget({ locale, output_device_id: deviceSelect.value, voice_id: voiceSelect.value, music_service: music });
+      }, !ready, "btn--primary"),
+    ),
+  );
+}
+
+function renderRelayTarget(state: VoiceRelayPanelState, view: VoiceRelayView, target: VoiceRelayTargetView, relay: VoiceRelayActions | undefined): HTMLElement {
+  const busy = state.busy || !relay;
+  const device = view.output.devices.find((d) => d.id === target.output_device_id || d.name === target.output_device_id);
+  const chosenId = state.chosen[target.id] && target.profiles.some((p) => p.id === state.chosen[target.id]) ? state.chosen[target.id]! : target.voice_profile_id ?? target.profiles[0]?.id ?? null;
+  const box = h("div", { class: "voice-relay-target", "aria-label": "語音中繼目標" });
+  box.append(
+    h(
+      "div",
+      { class: "pref" },
+      h(
+        "div",
+        { class: "provider-text" },
+        h("strong", {}, raw(target.id)),
+        h("span", { class: "muted small" }, t("語言：{0}；喇叭：{1}；音樂服務：{2}", target.locale, device?.name ?? target.output_device_id, t(RELAY_MUSIC_LABEL[target.music_service]))),
+        !device && h("span", { class: "error-text small" }, t("目前讀不到這個喇叭。")),
+      ),
+      h("span", { class: `chip${target.enabled ? " chip--running" : ""}` }, target.enabled ? t("已啟用") : t("已停用")),
+      relayButton(target.enabled ? "停用" : "啟用", () => relay?.setEnabled(target.id, !target.enabled), busy),
+    ),
+  );
+
+  // 聲線：「試聽用」只是這頁的選擇；「採用這組」才把它設成模型路徑的聲線。
+  const profiles = h("ul", { class: "pref-list" });
+  for (const p of target.profiles) {
+    const chosen = p.id === chosenId;
+    const pick = button(chosen ? "試聽用（已選）" : "選為試聽用", () => relay?.chooseProfile(target.id, p.id), chosen ? "btn--primary" : "btn--ghost");
+    pick.setAttribute("role", "radio");
+    pick.setAttribute("aria-checked", String(chosen));
+    const item = h(
+      "li",
+      { class: "pref voice-relay-profile" },
+      h(
+        "div",
+        { class: "provider-text" },
+        h("strong", {}, raw(p.voice_id)),
+        h("span", { class: "muted small" }, raw(p.id)),
+        p.selected && h("span", { class: "chip chip--running" }, t("模型使用中")),
+        !p.editable && h("span", { class: "muted small" }, t("內建聲線，不能編輯")),
+        !p.available && h("span", { class: "error-text small" }, t("這台機器沒有這個聲音")),
+      ),
+      pick,
+    );
+    if (p.editable) {
+      const rate = relayNumber("語速", p.rate, 0.5, 2, 0.05);
+      const gain = relayNumber("音量（dB）", p.gain_db, -30, 0, 1);
+      const pause = relayNumber("喚醒後停頓（毫秒）", p.pause_ms, 0, 5000, 100);
+      const lead = relayNumber("開頭靜音（毫秒）", p.lead_ms, 0, 3000, 100);
+      const tail = relayNumber("結尾靜音（毫秒）", p.tail_ms, 0, 3000, 100);
+      item.append(
+        h(
+          "div",
+          { class: "voice-relay-edit" },
+          h("label", { class: "small" }, t("語速"), rate),
+          h("label", { class: "small" }, t("音量（dB）"), gain),
+          h("label", { class: "small" }, t("喚醒後停頓（毫秒）"), pause),
+          h("label", { class: "small" }, t("開頭靜音（毫秒）"), lead),
+          h("label", { class: "small" }, t("結尾靜音（毫秒）"), tail),
+          relayButton("儲存聲線", () => relay?.saveProfile({
+            target_id: target.id,
+            id: p.id,
+            voice_id: p.voice_id,
+            rate: Number(rate.value),
+            gain_db: Number(gain.value),
+            pause_ms: Number(pause.value),
+            lead_ms: Number(lead.value),
+            tail_ms: Number(tail.value),
+          }), busy),
+        ),
+      );
+    }
+    profiles.append(item);
+  }
+  const voices = view.output.voices.filter((v) => v.locale === target.locale);
+  const newVoice = relaySelect("聲音", voices.map((v) => [v.id, v.id]), voices[0]?.id ?? null);
+  box.append(
+    h("p", { class: "small" }, t("聲線")),
+    profiles,
+    h(
+      "div",
+      { class: "actions" },
+      newVoice,
+      relayButton("新增候選聲線", () => relay?.saveProfile({ target_id: target.id, voice_id: newVoice.value, rate: 1, gain_db: 0, pause_ms: 800, lead_ms: 300, tail_ms: 300 }), busy || !voices.length),
+    ),
+  );
+
+  for (const intent of target.intents) {
+    if (!intent.templates.length) continue;
+    box.append(renderRelayIntent(state, target, intent, chosenId, relay));
+  }
+  return box;
+}
+
+function renderRelayIntent(state: VoiceRelayPanelState, target: VoiceRelayTargetView, intent: VoiceRelayIntentView, chosenId: string | null, relay: VoiceRelayActions | undefined): HTMLElement {
+  const busy = state.busy || !relay;
+  // 參數輸入（按按鈕時才讀值）。
+  const inputs: { read: () => VoiceRelaySlots }[] = [];
+  const fields: Child[] = [];
+  for (const slot of intent.slots) {
+    if (slot === "genre") {
+      const s = relaySelect("音樂類型", GENRES.map((g) => [g, t(RELAY_GENRE_LABEL[g])]), GENRES[0]);
+      fields.push(h("label", { class: "small" }, t("音樂類型"), s));
+      inputs.push({ read: () => ({ genre: s.value }) });
+    } else if (slot === "on") {
+      const s = relaySelect("開或關", [["on", t("開")], ["off", t("關")]], "on");
+      fields.push(h("label", { class: "small" }, t("開或關"), s));
+      inputs.push({ read: () => ({ on: s.value === "on" }) });
+    } else if (slot === "percent") {
+      const n = relayNumber("百分比", 30, 0, 100, 1);
+      fields.push(h("label", { class: "small" }, t("百分比"), n));
+      inputs.push({ read: () => ({ percent: Number(n.value) }) });
+    } else if (slot === "seconds") {
+      const n = relayNumber("秒數", 60, 1, 3600, 1);
+      fields.push(h("label", { class: "small" }, t("秒數"), n));
+      inputs.push({ read: () => ({ seconds: Number(n.value) }) });
+    } else if (slot === "device") {
+      const s = relaySelect("燈", target.devices.map((d) => [d.id, d.name]), target.devices[0]?.id ?? null);
+      fields.push(h("label", { class: "small" }, t("燈"), s));
+      if (!target.devices.length) fields.push(h("span", { class: "muted small" }, t("這個目標沒有登記燈。")));
+      inputs.push({ read: () => ({ device: s.value }) });
+    }
+  }
+  const slots = (): VoiceRelaySlots | undefined => (inputs.length ? Object.assign({}, ...inputs.map((i) => i.read())) : undefined);
+  const base = (template: VoiceRelayTemplateView): VoiceRelayPreviewBody => {
+    const s = slots();
+    return { target_id: target.id, intent_id: intent.intent_id, template_id: template.template_id, ...(chosenId ? { voice_profile_id: chosenId } : {}), ...(s ? { slots: s } : {}) };
+  };
+
+  const list = h("ul", { class: "pref-list" });
+  for (const tpl of intent.templates) {
+    const chip = tpl.policy_blocked
+      ? h("span", { class: "chip chip--failed" }, t("政策封鎖"))
+      : tpl.adopted
+        ? h("span", { class: "chip chip--running" }, t("已採用"))
+        : tpl.status === "rejected"
+          ? h("span", { class: "chip chip--cancelled" }, t("已拒絕"))
+          : h("span", { class: "chip chip--queued" }, t("候選"));
+    const canPlay = !busy && !tpl.policy_blocked && !!chosenId;
+    const item = h(
+      "li",
+      { class: "pref voice-relay-template", "data-template": tpl.template_id },
+      h(
+        "div",
+        { class: "provider-text" },
+        h("strong", {}, raw(tpl.text)),
+        h("span", { class: "muted small" }, t("喚醒詞：{0}", tpl.wake || "—"), raw(` · ${tpl.template_id} v${tpl.version}`)),
+        tpl.selected_default && h("span", { class: "muted small" }, t("這個命令的預設說法")),
+        h("span", { class: "muted small" }, t("試驗：{0}", relayTrialSummaryText(target.trials.find((s) => s.templateId === tpl.template_id && s.templateVersion === tpl.version && s.voiceProfileId === chosenId)))),
+      ),
+      chip,
+    );
+    const actionsRow = h(
+      "div",
+      { class: "actions" },
+      relayButton("預覽文字", () => relay?.preview(base(tpl)), busy),
+      relayButton("測試喚醒", () => relay?.play({ ...base(tpl), part: "wake" }), !canPlay),
+      relayButton("測試整句", () => relay?.play({ ...base(tpl), part: "full" }), !canPlay),
+      tpl.adopted
+        ? relayButton("取消採用", () => relay?.unadopt({ target_id: target.id, template_id: tpl.template_id, template_version: tpl.version }), busy, "btn--ghost")
+        : relayButton("採用這組", () => chosenId && relay?.adopt({ target_id: target.id, intent_id: intent.intent_id, template_id: tpl.template_id, template_version: tpl.version, voice_profile_id: chosenId }), busy || !chosenId || tpl.policy_blocked || tpl.status === "rejected"),
+    );
+    item.append(actionsRow);
+    const pv = state.preview;
+    if (pv && pv.target_id === target.id && pv.intent_id === intent.intent_id && pv.template_id === tpl.template_id) {
+      item.append(
+        pv.result.kind === "resolved"
+          ? h("p", { class: "small", role: "status" }, t("會說：{0}", pv.result.spoken))
+          : h("p", { class: "error-text small", role: "status" }, t("不會播放：{0}", t(RELAY_REFUSAL_TEXT[pv.result.reason] ?? "原因不明"))),
+      );
+    }
+    const pl = state.played;
+    if (pl && pl.target_id === target.id && pl.intent_id === intent.intent_id && pl.template_id === tpl.template_id && pl.template_version === tpl.version) {
+      item.append(renderRelayPlayed(state, pl, relay));
+    }
+    list.append(item);
+  }
+  return h(
+    "div",
+    { class: "voice-relay-intent" },
+    h("p", { class: "small" }, h("strong", {}, t(RELAY_INTENT_LABEL[intent.intent_id] ?? intent.intent_id))),
+    fields.length > 0 && h("div", { class: "actions" }, ...fields),
+    list,
+  );
+}
+
+function renderRelayPlayed(state: VoiceRelayPanelState, pl: VoiceRelayPlayed, relay: VoiceRelayActions | undefined): HTMLElement {
+  const text = pl.reason
+    ? t("沒有播放：{0}", t(RELAY_REFUSAL_TEXT[pl.reason] ?? "原因不明"))
+    : pl.part === "wake" && (pl.status === "unconfirmed" || pl.status === "confirmed")
+      ? t("已播出喚醒詞，結果未確認")
+      : t(RELAY_PLAY_TEXT[pl.status] ?? "結果不明：可能已播出一部分，也可能沒有");
+  const box = h("div", { class: "voice-relay-result" }, h("p", { class: pl.status === "unconfirmed" ? "small" : "error-text small", role: "status" }, text));
+  // 只有整句真的送出（unconfirmed）才記錄試驗：音箱有沒有照做由使用者自己判斷。
+  if (pl.part !== "full" || pl.status !== "unconfirmed" || pl.reason) return box;
+  const draft = state.trial;
+  const busy = state.busy || !relay;
+  const choice = (label: string, active: boolean, onClick: () => void) => {
+    const b = relayButton(label, onClick, busy, active ? "btn--primary" : "btn--ghost");
+    b.setAttribute("aria-pressed", String(active));
+    return b;
+  };
+  const evidence = relaySelect("證據", [["visual", t("目視")], ["human_confirmed", t("人工確認")]], draft.evidence, (v) => relay?.setTrial({ evidence: v === "human_confirmed" ? "human_confirmed" : "visual" }));
+  const command = draft.wake === "NO_WAKE" ? "NO_COMMAND" : draft.command;
+  box.append(h(
+    "div",
+    { class: "voice-relay-trial", "aria-label": "記錄試驗結果" },
+    h("p", { class: "muted small" }, t("音箱有沒有照做？請自己看或聽，再記錄。")),
+    h(
+      "div",
+      { class: "actions" },
+      choice("有喚醒", draft.wake === "WAKE_OK", () => relay?.setTrial({ wake: "WAKE_OK" })),
+      choice("沒喚醒", draft.wake === "NO_WAKE", () => relay?.setTrial({ wake: "NO_WAKE", command: "NO_COMMAND" })),
+    ),
+    draft.wake === "WAKE_OK" && h(
+      "div",
+      { class: "actions" },
+      choice("命令正確", draft.command === "COMMAND_OK", () => relay?.setTrial({ command: "COMMAND_OK" })),
+      choice("命令錯誤", draft.command === "WRONG_COMMAND", () => relay?.setTrial({ command: "WRONG_COMMAND" })),
+      choice("沒有執行", draft.command === "NO_COMMAND", () => relay?.setTrial({ command: "NO_COMMAND" })),
+    ),
+    h(
+      "div",
+      { class: "actions" },
+      h("label", { class: "small" }, t("證據"), evidence),
+      relayButton("記錄結果", () => draft.wake && command && relay?.recordTrial({
+        target_id: pl.target_id,
+        template_id: pl.template_id,
+        template_version: pl.template_version,
+        voice_profile_id: pl.voice_profile_id,
+        kind: "positive",
+        wake: draft.wake,
+        command,
+        evidence: draft.evidence,
+      }), busy || !draft.wake || !command),
+    ),
+  ));
+  return box;
 }

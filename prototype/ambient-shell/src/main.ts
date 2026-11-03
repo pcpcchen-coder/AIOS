@@ -63,6 +63,9 @@ import {
   type ConfirmDetail,
   type ViewActions,
   type IntegrationPanelState,
+  type VoiceRelayActions,
+  type VoiceRelayPanelState,
+  emptyVoiceRelayPanel,
   MAX_LISTED,
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
@@ -2516,11 +2519,87 @@ function ensureIntegrationStatus(force = false): void {
   });
 }
 
+/** VCR-2：設定頁「語音中繼（實驗）」段的狀態（核心註冊了 voice_relay 才有；打開設定頁時才查，不在背景輪詢）。 */
+let voiceRelayPanel: VoiceRelayPanelState = emptyVoiceRelayPanel();
+let voiceRelayFetchedAt = 0;
+/** 30 秒內不重查；保存與播放的回覆本身就帶新的檢視。 */
+function ensureVoiceRelay(): void {
+  if (settings?.voice_relay !== true || voiceRelayPanel.loading || voiceRelayPanel.busy) return;
+  if (voiceRelayFetchedAt && Date.now() - voiceRelayFetchedAt < 30_000) return;
+  voiceRelayPanel = { ...voiceRelayPanel, loading: true, error: false };
+  voiceRelayFetchedAt = Date.now();
+  api.voiceRelay().then(
+    (view) => void (voiceRelayPanel = { ...voiceRelayPanel, view, loading: false, error: false }),
+    () => void (voiceRelayPanel = { ...voiceRelayPanel, view: null, loading: false, error: true }),
+  ).finally(() => {
+    voiceRelayFetchedAt = Date.now();
+    render();
+  });
+}
+
+/** 一次只送一個操作；核心拒絕（400）或沒有回覆時照實說沒有完成，不顯示舊結果當成新的。 */
+function voiceRelayRun<T>(work: () => Promise<T>, done: (value: T) => Partial<VoiceRelayPanelState>, noReply = "核心沒有回覆，這次操作沒有完成。"): void {
+  if (voiceRelayPanel.busy) return;
+  voiceRelayPanel = { ...voiceRelayPanel, busy: true, notice: null };
+  render();
+  work().then(
+    (value) => void (voiceRelayPanel = { ...voiceRelayPanel, ...done(value), busy: false }),
+    (err) => void (voiceRelayPanel = {
+      ...voiceRelayPanel,
+      busy: false,
+      notice: !(err instanceof ApiError) || err.status === 0 || err.status >= 500 ? noReply : err.status === 400 ? "核心拒絕了這次操作（內容沒有通過檢查），沒有完成。" : "核心拒絕了這次操作，沒有完成。",
+    }),
+  ).finally(() => {
+    voiceRelayFetchedAt = Date.now();
+    render();
+  });
+}
+
+const voiceRelayActions: VoiceRelayActions = {
+  refresh: () => voiceRelayRun(api.voiceRelayRefresh, (view) => ({ view })),
+  createTarget: (body) => voiceRelayRun(() => api.voiceRelayTarget(body), (view) => ({ view })),
+  setEnabled: (target_id, enabled) => voiceRelayRun(() => api.voiceRelayEnabled({ target_id, enabled }), (view) => ({ view })),
+  saveProfile: (body) => voiceRelayRun(() => api.voiceRelayProfile(body), (view) => ({ view })),
+  adopt: (body) => voiceRelayRun(() => api.voiceRelayAdopt(body), (view) => ({ view })),
+  unadopt: (body) => voiceRelayRun(() => api.voiceRelayUnadopt(body), (view) => ({ view })),
+  chooseProfile: (targetId, profileId) => {
+    voiceRelayPanel = { ...voiceRelayPanel, chosen: { ...voiceRelayPanel.chosen, [targetId]: profileId }, played: null };
+    render();
+  },
+  setCreateLocale: (locale) => {
+    voiceRelayPanel = { ...voiceRelayPanel, createLocale: locale };
+    render();
+  },
+  setTrial: (patch) => {
+    voiceRelayPanel = { ...voiceRelayPanel, trial: { ...voiceRelayPanel.trial, ...patch } };
+    render();
+  },
+  preview: (body) =>
+    voiceRelayRun(() => api.voiceRelayPreview(body), ({ result }) => ({
+      preview: { target_id: body.target_id, intent_id: body.intent_id, template_id: body.template_id ?? "", result },
+    })),
+  // 播放只由「測試喚醒／測試整句」按鈕觸發；結果最多是「已送出、未確認」。
+  play: (body) => {
+    const template = voiceRelayPanel.view?.targets.find((t) => t.id === body.target_id)?.intents.find((i) => i.intent_id === body.intent_id)?.templates.find((t) => t.template_id === body.template_id);
+    if (!template || !body.voice_profile_id) return;
+    const base = { target_id: body.target_id, intent_id: body.intent_id, template_id: template.template_id, template_version: template.version, voice_profile_id: body.voice_profile_id, part: body.part };
+    voiceRelayRun(() => api.voiceRelayPlay(body), (reply) => ({
+      played: "ok" in reply
+        ? { ...base, status: reply.status, reason: null }
+        : { ...base, status: "refused", reason: reply.reason },
+      trial: { wake: null, command: null, evidence: voiceRelayPanel.trial.evidence },
+    }), "核心沒有回覆：不知道有沒有播出聲音。");
+  },
+  recordTrial: (body) =>
+    voiceRelayRun(() => api.voiceRelayTrial(body), (view) => ({ view, played: null, trial: { wake: null, command: null, evidence: voiceRelayPanel.trial.evidence } })),
+};
+
 const actions: ViewActions = {
   refreshIntegrations: () => {
     ensureIntegrationStatus(true);
     render();
   },
+  voiceRelay: voiceRelayActions,
   cancel: (taskId) => void cancelTask(taskId, userRequest()),
   redo(taskId) {
     const requestId = userRequest();
@@ -3084,7 +3163,7 @@ function renderSurface(): void {
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
-      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
@@ -3111,7 +3190,9 @@ function renderSurface(): void {
   else if (s.kind === "settings") {
     // SP-1：設定頁打開時才查整合服務狀態（NOUS_AIL=on 才有）；不在背景輪詢。
     ensureIntegrationStatus();
-    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null });
+    // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
+    ensureVoiceRelay();
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null });
   }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));

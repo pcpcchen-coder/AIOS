@@ -160,6 +160,8 @@ export interface SettingsView {
    * 頁面收到這些名稱的工具呼叫時轉交核心（POST /api/integrations/call），自己不執行。
    */
   integrations?: { tools: string[] };
+  /** VCR-2：只有核心註冊了 voice_relay（NOUS_AIL=on 且 NOUS_VCR=fake／mac）時才有（true）；設定頁據此畫「語音中繼（實驗）」診斷區。沒有註冊時沒有這個鍵。 */
+  voice_relay?: boolean;
 }
 
 /** API key 路徑（RealtimeBridge.info）提供的欄位；路徑與計費欄位由 RealtimeSessions 補上。 */

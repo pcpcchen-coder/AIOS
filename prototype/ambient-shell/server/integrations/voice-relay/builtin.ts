@@ -124,9 +124,10 @@ export const FIXTURE_TARGETS: readonly Target[] = [
 
 /**
  * 組出整份目錄（尚未驗證）：內建意圖＋內建命令包＋使用者額外命令包；內建聲線＋使用者聲線；
- * 預設聲線以使用者的為準（同一組品牌／助理／型號／語系覆蓋內建）；裝置表：沒有設定檔時用示範目標，有設定檔就只用設定檔的。
+ * 預設聲線以使用者的為準（同一組品牌／助理／型號／語系覆蓋內建）；裝置表：有設定檔就只用設定檔的；
+ * 沒有設定檔時，fixtures（只在 NOUS_VCR=fake）用示範目標，否則（mac）沒有任何目標。
  */
-export function composeRelayDocument(user: RelayUserConfig | null): unknown {
+export function composeRelayDocument(user: RelayUserConfig | null, opts: { fixtures: boolean } = { fixtures: true }): unknown {
   const userDefaults = (user?.voiceDefaults ?? []) as Partial<VoiceDefault>[];
   const key = (d: Partial<VoiceDefault> | null) => `${d?.vendor}|${d?.assistant}|${d?.model ?? ""}|${d?.locale}`;
   const overridden = new Set(userDefaults.map(key));
@@ -137,6 +138,6 @@ export function composeRelayDocument(user: RelayUserConfig | null): unknown {
     packs: [...BUILTIN_PACKS, ...(user?.commandPacks ?? [])],
     profiles: [...BUILTIN_PROFILES, ...(user?.voiceProfiles ?? [])],
     voiceDefaults: [...BUILTIN_VOICE_DEFAULTS.filter((d) => !overridden.has(key(d))), ...userDefaults],
-    targets: user ? (user.targets ?? []) : FIXTURE_TARGETS,
+    targets: user ? (user.targets ?? []) : opts.fixtures ? FIXTURE_TARGETS : [],
   };
 }

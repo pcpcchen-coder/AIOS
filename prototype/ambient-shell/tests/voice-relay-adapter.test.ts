@@ -211,7 +211,7 @@ describe("NOUS_VCR config and createIntegrations", () => {
     expect(parseAil("on", "voice_relay", undefined, "off", "/cfg")).toEqual({ enabled: true, services: ["voice_relay"], soloistPort: 19090 });
     expect(parseAil("on", "voice_relay", undefined, " FAKE ", "/cfg")).toEqual({ enabled: true, services: ["voice_relay"], soloistPort: 19090, vcr: { mode: "fake", dir: join("/cfg", "voice-relay") } });
     expect(parseAil("off", "voice_relay", undefined, "fake", "/cfg")).toEqual({ enabled: false, services: [], soloistPort: 19090 });
-    for (const bad of ["on", "real", "1"]) expect(() => parseAil("on", "voice_relay", undefined, bad), bad).toThrow(/NOUS_VCR 只接受 off 或 fake/);
+    for (const bad of ["on", "real", "1"]) expect(() => parseAil("on", "voice_relay", undefined, bad), bad).toThrow(/NOUS_VCR 只接受 off、fake 或 mac/);
     // 整合層關閉時 NOUS_VCR 不看，不報錯。
     expect(loadConfig({ NOUS_VCR: "on" }).ail).toEqual({ enabled: false, services: [], soloistPort: 19090 });
     expect(parseAil("off", "voice_relay", undefined, "bogus")).toEqual({ enabled: false, services: [], soloistPort: 19090 });

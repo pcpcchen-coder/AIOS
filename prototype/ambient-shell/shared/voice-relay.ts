@@ -1,3 +1,5 @@
+import type { ToolResult } from "./integrations.ts";
+
 // VCR-0（docs/19）：Voice Command Relay 的共用型別、列舉與純函式（試驗統計）。
 // 這裡沒有 I/O、沒有裝置、沒有播音；資料分三層：意圖目錄 → 命令包（品牌／型號／語系的說法）→ 聲線設定，
 // 裝置表（Target）只用 ID 參照這三層。所有命令說法都是待實測的候選，不是任何廠商的相容保證。
@@ -276,3 +278,94 @@ export function summarizeTrials(trials: readonly RelayTrial[]): TrialSummary[] {
   }
   return out;
 }
+
+// ---- VCR-2：設定頁「語音中繼（實驗）」診斷區的檢視（GET /api/voice-relay 與各 POST 回傳） ----
+// 只在核心註冊了 voice_relay 時才有。mac 模式的聲音／喇叭清單來自 `say -v ?`／`say -a ?`（格式沒有在真的 Mac 上驗證過）。
+
+export type VoiceRelayMode = "fake" | "mac";
+
+export interface VoiceRelayProfileView {
+  id: string;
+  voice_id: string;
+  locale: RelayLocale;
+  rate: number;
+  gain_db: number;
+  pause_ms: number;
+  lead_ms: number;
+  tail_ms: number;
+  /** 目標目前選定的聲線（模型路徑用這個）。 */
+  selected: boolean;
+  /** 使用者設定檔裡的聲線才可以編輯（內建示範聲線不行）。 */
+  editable: boolean;
+  /** 輸出端現在有沒有這個聲音。 */
+  available: boolean;
+}
+
+export interface VoiceRelayTemplateView {
+  template_id: string;
+  version: number;
+  /** utteranceTemplate 原樣（含 {slot} 佔位符）。 */
+  text: string;
+  /** 解析器會用的喚醒詞（沒有時是空字串）。 */
+  wake: string;
+  status: TemplateStatus;
+  /** 這個意圖在目標上的預設模板（覆寫或層級選定）。 */
+  selected_default: boolean;
+  /** 模型路徑實際會播這個說法：有效審閱狀態 approved、是解析器選的預設、政策沒擋。 */
+  adopted: boolean;
+  /** 下游政策擋下（例如 Spotify、音樂服務不知道）；播放按鈕要停用。 */
+  policy_blocked: boolean;
+}
+
+export interface VoiceRelayIntentView {
+  intent_id: IntentId;
+  slots: SlotName[];
+  templates: VoiceRelayTemplateView[];
+}
+
+export interface VoiceRelayTargetView {
+  id: string;
+  locale: RelayLocale;
+  enabled: boolean;
+  output_device_id: string;
+  music_service: MusicService;
+  voice_profile_id: string | null;
+  profiles: VoiceRelayProfileView[];
+  intents: VoiceRelayIntentView[];
+  trials: TrialSummary[];
+  /** 燈（light.* 的 device slot 選項）；名稱是使用者資料。 */
+  devices: { id: string; name: string }[];
+}
+
+export interface VoiceRelayView {
+  mode: VoiceRelayMode;
+  /** fake 模式＝true（沒有實體喇叭發聲）。 */
+  mock: boolean;
+  /** 目標或燈的清單和啟動時不同：模型的工具清單要重新啟動 Nous 才會更新。 */
+  restart_required: boolean;
+  /** 現在用的是內建示範目標（只在 fake 模式、沒有設定檔時）；新增目標後示範目標會被取代。 */
+  fixtures_active: boolean;
+  output: {
+    voices: { id: string; locale: RelayLocale }[];
+    /** 喇叭：id 就是名稱（穩定；新增目標時把 id 送回當 output_device_id）。 */
+    devices: { id: string; name: string }[];
+    /** 上次讀取的時間（epoch ms）；還沒讀過是 null。 */
+    checked_at: number | null;
+    /** 讀取失敗的代碼（例如 voices_failed、devices_failed）；沒有錯是 null。 */
+    error: string | null;
+  };
+  targets: VoiceRelayTargetView[];
+}
+
+export type VoiceRelayPart = "wake" | "full";
+
+/** POST /api/voice-relay/preview 的回應。 */
+export type VoiceRelayPreview =
+  | { kind: "resolved"; template_id: string; level: ResolveLevel; voice_profile_id: string; wake: string; command: string; spoken: string; output_device_id: string; test_status: TestResult }
+  | { kind: "refused"; reason: RelayRefusal; detail?: string };
+
+/**
+ * POST /api/voice-relay/play 的回應：解析被拒絕時是 { status: "refused", reason }（沒有 ok 欄位，沒有播放）；
+ * 否則是和模型工具相同的 ToolResult（最多 unconfirmed，永遠不是 confirmed；輸出端忙碌時是 refused＋data.vcr_reason "output_busy"）。
+ */
+export type VoiceRelayPlayResult = { status: "refused"; reason: RelayRefusal; detail?: string } | ToolResult;
