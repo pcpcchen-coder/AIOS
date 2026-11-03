@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=AIOS terminal
+Name[zh_TW]=AIOS 終端
+Comment=Start the AIOS Pi terminal kiosk
+Comment[zh_TW]=啟動 AIOS Pi 終端全螢幕畫面
+Exec=sh -c '"$HOME/.local/share/aios-terminal/bin/aios-session-start"'
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

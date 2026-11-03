@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/common.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh"
+
+load_config || die "$CONFIG_ERROR" "$CONFIG_ERROR" 2
+chromium="$(find_chromium)" || die "找不到 Chromium（chromium 或 chromium-browser）。" "Chromium not found (chromium or chromium-browser)." 2
+
+wait_limit="${AIOS_KIOSK_WAIT_SECONDS:-0}"
+[[ "$wait_limit" =~ ^[0-9]+$ ]] || die "AIOS_KIOSK_WAIT_SECONDS 必須是非負整數。" "AIOS_KIOSK_WAIT_SECONDS must be a non-negative integer." 2
+
+start=$SECONDS
+last_notice=-30
+until curl -fsS -o /dev/null --max-time 3 "$(core_url /api/settings)" 2>/dev/null; do
+  elapsed=$((SECONDS - start))
+  if ((wait_limit > 0 && elapsed >= wait_limit)); then
+    die "等待 $elapsed 秒後 Nous 核心仍無回應（$(core_url)）。請執行 aios-doctor。" \
+      "Nous core still unreachable at $(core_url) after ${elapsed}s. Run aios-doctor." 1
+  fi
+  if ((elapsed - last_notice >= 30)); then
+    t "等待 Mac 上的 Nous 核心（$(core_url)，經 SSH 通道）…" "Waiting for the Nous core on the Mac ($(core_url) via SSH tunnel)..." >&2
+    last_notice=$elapsed
+  fi
+  sleep 2
+done
+
+exec "$chromium" \
+  --kiosk \
+  "--app=$(core_url)" \
+  "--user-data-dir=$AIOS_PROFILE_DIR" \
+  --autoplay-policy=no-user-gesture-required \
+  --no-first-run \
+  --noerrdialogs \
+  --disable-session-crashed-bubble \
+  --disable-infobars \
+  --password-store=basic \
+  --check-for-update-interval=31536000

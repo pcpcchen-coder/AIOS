@@ -165,8 +165,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "4be0ea048a872b3fd484084e364892ee62f2b8bc0b939ed4e7c03bdb35a3934c",
-      "translationSha256": "f0be6fc581da1bee4efa956b18ab65637cfc41bfc761a139f5f4cb9e5bf5064d"
+      "sourceSha256": "f06f3f407d2573000f1a2ef4582a48ee49cff24047d3e54927a3ebddf15f49ae",
+      "translationSha256": "4fe0c691710923fd29cff2d5fb1f30c92d2187a29acb75907e9c5b2babc4a12d"
     },
     {
       "source": "docs/README.md",
@@ -230,6 +230,20 @@
       "translation": "docs/development/pstack.en.md",
       "sourceSha256": "9188aead095ece6faffaa1d0fed089534fab240ead975ba75ffeeb221b155fba",
       "translationSha256": "fe5870de22710ce0c894e1a11315d51141185a70be14290ee695258e550996be"
+    },
+    {
+      "source": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.md",
+      "sourceLanguage": "en",
+      "translation": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.zh-TW.md",
+      "sourceSha256": "8cfc566afe5aad9334eaf828483512f2097f0aa4136defb99e69ceb7b16b01a0",
+      "translationSha256": "5e65eaec2c89b46cab975396a8b58efb425b049c8635b0790fe1ce8431e6ac3b"
+    },
+    {
+      "source": "docs/experiments/RPI4_REMOTE_TERMINAL_TEST_PLAN.md",
+      "sourceLanguage": "en",
+      "translation": "docs/experiments/RPI4_REMOTE_TERMINAL_TEST_PLAN.zh-TW.md",
+      "sourceSha256": "eaa42681e339b8bc8f1e5af99fd582de1fa09ad82d02ab858d7d7d867d97f6d2",
+      "translationSha256": "4ced07fdf3acdb02fe00b6776fbb8b6f3bde25eab15b9d93f371700853d6d1d1"
     },
     {
       "source": "docs/experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.md",
@@ -636,6 +650,13 @@
       "translation": "prototype/ambient-shell/desktop/README.en.md",
       "sourceSha256": "cea1ca51ff7af0f92a719412b6195e18e7d0908cfd18279e1e3ef9c6e0583db2",
       "translationSha256": "e5fbe476bc1c749906be28555af0177921a8c44fbc2e5c9ef87a9bb3ccaf05f9"
+    },
+    {
+      "source": "terminals/rpi4/README.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "terminals/rpi4/README.en.md",
+      "sourceSha256": "083acd7cb68cb9da7cbe30557dbbe72ac5cdc9cdec40b91a42414ca4663eb034",
+      "translationSha256": "0023ae77113b379b8f135d051c88851b7c931ee0717d96e0daaaed8bdeea2968"
     }
   ]
 }

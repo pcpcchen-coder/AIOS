@@ -1,0 +1,40 @@
+name: RPi 4 terminal kit
+
+on:
+  pull_request:
+    paths:
+      - terminals/rpi4/**
+      - .github/workflows/rpi4-terminal-kit.yml
+  push:
+    branches: [main]
+    paths:
+      - terminals/rpi4/**
+      - .github/workflows/rpi4-terminal-kit.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    name: Shellcheck and offline dry run
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure shellcheck and ssh-keygen
+        run: |
+          missing=()
+          command -v shellcheck >/dev/null || missing+=(shellcheck)
+          command -v ssh-keygen >/dev/null || missing+=(openssh-client)
+          if [ "${#missing[@]}" -gt 0 ]; then
+            sudo apt-get update
+            sudo apt-get install -y "${missing[@]}"
+          fi
+
+      - name: Shellcheck
+        run: shellcheck -x terminals/rpi4/bin/* terminals/rpi4/lib/*.sh terminals/rpi4/install.sh terminals/rpi4/uninstall.sh terminals/rpi4/tests/dry-run.sh
+
+      - name: Offline dry run with fake commands
+        run: bash terminals/rpi4/tests/dry-run.sh
