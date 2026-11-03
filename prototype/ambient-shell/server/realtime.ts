@@ -4,6 +4,7 @@ import { computeProgress, sortForProgress } from "../shared/progress.ts";
 import { HOME_COMMANDS } from "../shared/home.ts";
 import type { RealtimeBaseInfo, Task } from "../shared/types.ts";
 import type { McpServerConfig } from "./config.ts";
+import type { IntegrationFunctionSpec } from "./integrations/contracts.ts";
 import { callIdFrom, openSidebandSocket, type SidebandSocket, type SidebandSocketCtor } from "./sideband.ts";
 
 // 即時語音的 API key 路徑（OpenAI Realtime GA，語音直接對語音），也是兩條路徑共用的工具表與規則文字。
@@ -33,6 +34,8 @@ export interface RealtimeOptions {
   taskWebSearch?: boolean;
   /** 是否提供 home_status 與 home_control 工具（已設定武陵居中控時為 true）。 */
   home?: boolean;
+  /** AIL-1：整合層在 api_key 路徑上可用的函式工具（NOUS_AIL 關閉時不提供，工具表與之前相同）。 */
+  integrations?: (locale: Locale) => readonly IntegrationFunctionSpec[];
   fetch?: typeof fetch;
   /** 5xx 重試前的等待（毫秒），測試時設 0。 */
   retryDelayMs?: number;
@@ -59,6 +62,11 @@ export interface RealtimeCapabilities {
    * 有 openai_realtime 同意、旁路接上時，經旁路的 session.update 才變成 true（client secret 的請求永遠是 false）。
    */
   memory?: boolean;
+  /**
+   * AIL-1（docs/18）：整合層提供、這條路徑現在可用的函式工具（app__<service>__<action>，由核心的 Registry 依設定產生）。
+   * 沒有提供或是空清單時，工具表與說明和加入整合層之前一個位元組都不差。
+   */
+  integrations?: (locale: Locale) => readonly IntegrationFunctionSpec[];
 }
 
 const WEB_SEARCH_TOOL = {
@@ -171,7 +179,8 @@ export function buildRealtimeTools(caps: RealtimeCapabilities, locale: Locale = 
     ? { ...tool, parameters: { ...tool.parameters, properties: { title: { ...tool.parameters.properties.title, description: "Describe the requested output in one sentence in English, preserving user names and identifiers." } } } }
     : tool);
   const mcp = caps.mcp.map((server) => ({ type: "mcp", ...server }));
-  return [...functions, ...(caps.home ? [HOME_STATUS_TOOL, HOME_CONTROL_TOOL] : []), ...(caps.memory ? [RECALL_MEMORY_TOOL] : []), ...mcp];
+  const integrations = (caps.integrations?.(locale) ?? []).map((spec) => ({ ...spec }) as Record<string, unknown>);
+  return [...functions, ...(caps.home ? [HOME_STATUS_TOOL, HOME_CONTROL_TOOL] : []), ...(caps.memory ? [RECALL_MEMORY_TOOL] : []), ...integrations, ...mcp];
 }
 
 const STATUS_TEXT: Record<Task["status"], string> = {
@@ -192,6 +201,10 @@ export function taskLines(tasks: Iterable<Task>): string[] {
       return `- 「${t.title}」：${STATUS_TEXT[t.status]}${p.total === null ? "" : `，${p.done}/${p.total} 步`}`;
     });
 }
+
+/** AIL-1：整合工具（app__ 開頭）的說話規則；兩條路徑相同。 */
+export const INTEGRATION_RULE =
+  "名稱以 app__ 開頭的工具由 Nous 核心的整合層執行。依回傳的 status 說話：confirmed 才說已經完成；unconfirmed 是已送出但沒有確認，請使用者看一下；unknown 只能說「結果不明，請確認」，不能說失敗或沒做；refused 表示沒有送出，照 message 說原因；failed 照 message 說沒有成功。工具說明寫著「模擬」的是測試用，不是真的 App，要照實說是模擬。沒有出現在工具清單上的 App 功能就是目前不能用，照實說，不要用其他工具代替。";
 
 /**
  * 工具的使用規則（上網查詢、家電、MCP、背景任務）。API key 路徑的語音模型與 ChatGPT 方案路徑的
@@ -216,6 +229,9 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
     abilities.push(
       `你也接上了這些外部服務，可以直接使用它們的工具：${names.join("、")}。需要確認的動作（寄出、發布、刪除等），系統會在畫面顯示確認卡；你用一句話說明要做什麼、對象和影響，請使用者說「確認執行」或「取消」。使用者要說出「確認執行」才會執行，只說「好」不算，你也不能替使用者確認。沒有執行時照實說。`,
     );
+  }
+  if (caps.integrations?.("zh-TW").length) {
+    abilities.push(INTEGRATION_RULE);
   }
   abilities.push(`需要較長時間產出的工作（報告、整理、規劃、研究）交給背景任務${caps.taskWebSearch ? "，背景任務也能上網查資料" : ""}。`);
   if (caps.memory) {
@@ -341,6 +357,7 @@ export class RealtimeBridge {
       mcp: this.options.mcp ?? [],
       taskWebSearch: !!this.options.taskWebSearch,
       home: !!this.options.home,
+      ...(this.options.integrations ? { integrations: this.options.integrations } : {}),
     };
   }
 

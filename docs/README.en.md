@@ -26,6 +26,7 @@ Updated 2026-11-01: the wake word is now the English Hello Nous and wake works i
 | [10 Distance UI](10_Distance_UI_18inch_2026-10.en.md) | 18-inch and distance UI specification. Distance zoom exists in the prototype; readability needs hardware checks |
 | [11 Stereo camera interaction](11_Stereo_Camera_Interaction_2026-10.en.md) | Head facing, distance estimation, stop gesture, three-region pointing, and settings are implemented. This is not eye tracking; stereo is uncalibrated |
 | [12 Smart home](12_SmartHome_Integration_Plan_2026-10.en.md) | H0, H1, H1b have code and some verbal home reports. H2–H4 are unimplemented |
+| [18 App Integration Layer and Spotify/Pi 4 design](18_App_Integration_Layer_and_Spotify_2026-11.en.md) | **Proposal / unimplemented**: shared core Adapter/Tool Registry, Spotify authorization boundary, and [Pi 4 Soloist weekend test](experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.en.md); Spotify voice control pending permission |
 
 <a id="歷史藍圖與決策"></a>
 ## Historical blueprints and decisions

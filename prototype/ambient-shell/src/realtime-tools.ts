@@ -202,6 +202,9 @@ export async function executeRealtimeTool(name: string, rawArgs: string, ctx: To
       }
     } else if (name === "get_tasks") {
       output = await callbacks.onGetTasks();
+    } else if (callbacks.onIntegrationTool && callbacks.integrationTools?.().includes(name)) {
+      // AIL-1：整合工具由核心執行（POST /api/integrations/call）；頁面只轉交與顯示結果。
+      output = await callbacks.onIntegrationTool(name, rawArgs);
     } else {
       output = { ok: false, error: `未知的工具：${name}` };
     }

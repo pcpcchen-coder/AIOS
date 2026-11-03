@@ -6,6 +6,8 @@ import { CodexError, type CodexInputItem, type CodexResponses, type CodexToolSpe
 import { buildRealtimeTools, realtimeToolRules, taskLines, type RealtimeCapabilities } from "./realtime.ts";
 import { delegatePolicy, DELEGATE_ONCE_OUTPUT, exactVoiceConfirm, MAX_RECALLS, type VoiceDelegatePort } from "./memory/live.ts";
 import { HOST_TIMEOUT_MS, HostGone, type ApprovalSnapshot, type ToolHost } from "./realtime-routes.ts";
+import { fromWireName } from "../shared/integrations.ts";
+import { toModelOutput, type IntegrationDispatcher } from "./integrations/dispatcher.ts";
 
 // gpt-live-1-codex 不能呼叫函式；它把使用者的請求用文字交辦（delegation.created）。
 // LiveToolCaller 用同一個 Codex 登入的 Codex Responses，把這段文字變成 API key 路徑的語音模型會做的
@@ -41,7 +43,8 @@ export interface DelegationRequest {
 
 /** 給 log 與驗證用。腦區只由頁面的執行器依實際執行的工具亮起。 */
 export interface ExecutedTool {
-  name: HostToolName;
+  /** 頁面工具，或 AIL-1 的整合工具（app__<service>__<action>，由核心執行）。 */
+  name: HostToolName | string;
   ok: boolean;
   ms: number;
 }
@@ -166,6 +169,11 @@ export interface LiveToolCallerOptions {
   approval: () => ApprovalSnapshot;
   now?: () => number;
   log?: (line: string) => void;
+  /**
+   * AIL-1：整合層（NOUS_AIL=on 才有）。app__ 開頭的工具在核心由 Dispatcher 執行（不經頁面），和頁面工具共用 maxHostCalls 上限；
+   * 工具時限不超過 60 秒（< MAX_HOST_TIMEOUT_MS），所以 DELEGATION_BUDGET_MS 不變。
+   */
+  integrations?: { dispatcher: IntegrationDispatcher; sessionId: string };
 }
 
 export class LiveToolCaller {
@@ -190,7 +198,7 @@ export class LiveToolCaller {
     const combined = AbortSignal.any([signal, budget.signal]);
     const tools: ExecutedTool[] = [];
     /** 已經執行的工具與它們的輸出：模型來不及轉述時，照這些輸出說（不把已知的結果說成沒做或不明）。 */
-    const executed: { name: HostToolName; output: Record<string, unknown> }[] = [];
+    const executed: { name: string; output: Record<string, unknown> }[] = [];
     /** 有副作用的工具已送出、還沒有確定的結果（等待中或 status unknown）：之後的失敗只能說「結果不明」，不能說失敗。 */
     const unsettled = new Set<string>();
     const done = () => summarizeOutputs(executed);
@@ -212,6 +220,11 @@ export class LiveToolCaller {
         const result = await untilAborted(this.options.responses.turn({ instructions, input, tools: specs, signal: combined }), combined);
         this.options.log?.(`即時語音（ChatGPT 方案）：交辦第 ${turn + 1} 輪（${result.model}）${result.calls.length ? `要呼叫 ${result.calls.map((c) => c.name).join("、")}` : "直接回答，沒有呼叫工具"}`);
         if (!result.calls.length) {
+          // AIL-1：整合工具沒有 confirmed、模型又沒有說話時，不能說「處理好了」：照工具的固定句說（只限整合工具，頁面工具的行為不變）。
+          if (!result.text && executed.some((e) => fromWireName(e.name) && e.output.status !== "confirmed")) {
+            const unknown = executed.some((e) => e.output.status === "unknown");
+            return { ok: false, channel: "speakable", text: `${done()}。`, reason: unknown ? "unknown" : "upstream", tools };
+          }
           const text = result.text || (tools.length ? "處理好了，但沒有可以轉述的結果。" : "我沒有聽懂，請再說一次。");
           return ended ? { ok: true, channel: "speakable", text, tools, ended: true } : { ok: true, channel: "speakable", text, tools };
         }
@@ -249,6 +262,23 @@ export class LiveToolCaller {
             memory.delegateBlocked(title);
             output = decision.run ? { ok: false } : decision.output;
             this.options.log?.("即時語音（ChatGPT 方案）：交辦被封鎖（這通用到記憶），改成畫面上的交辦卡");
+          } else if (this.options.integrations && fromWireName(call.name) && allowed.has(call.name)) {
+            // AIL-1：整合工具在核心執行（不經頁面）。逾時或中止由 Dispatcher 回 unknown；有副作用的工具結果不明時整次交辦照「結果不明」處理。
+            if (hostCalls >= CALLER_LIMITS.maxHostCalls) {
+              output = { ok: false, error: `這次交辦的工具呼叫已達上限（${CALLER_LIMITS.maxHostCalls} 次），沒有執行；請使用者再說一次。` };
+            } else {
+              hostCalls++;
+              const { dispatcher, sessionId } = this.options.integrations;
+              const started = this.now();
+              const key = `${hostCalls}:${call.call_id}`;
+              const sideEffect = dispatcher.effectOf(call.name) !== "read";
+              if (sideEffect) unsettled.add(key);
+              output = toModelOutput(await untilAborted(dispatcher.execute({ tool: call.name, args: call.arguments, route: "live", actor: "agent", sessionId, signal: combined }), combined));
+              if (output.status !== "unknown") unsettled.delete(key);
+              executed.push({ name: call.name, output });
+              tools.push({ name: call.name, ok: output.ok === true, ms: this.now() - started });
+              this.options.log?.(`即時語音（ChatGPT 方案）：整合工具 ${call.name} → ${String(output.status)}`);
+            }
           } else if (!HOST_TOOLS.includes(name) || !allowed.has(name)) {
             output = { ok: false, error: `這條路徑沒有這個工具：${call.name}` };
           } else if (hostCalls >= CALLER_LIMITS.maxHostCalls) {
@@ -278,6 +308,8 @@ export class LiveToolCaller {
       }
       // 輪數用完、模型沒有說最後一句：照已經執行的工具輸出說，已知的結果不說成沒做或不明。
       if (unsettled.size) return { ok: false, channel: "speakable", text: `${RESULT_UNKNOWN_TEXT}。${executed.length ? `已經回報的結果：${done()}。` : ""}`, reason: "unknown", tools };
+      // AIL-1：整合工具沒有 confirmed 時不算成功（頁面工具照舊）。
+      if (executed.some((e) => fromWireName(e.name) && e.output.status !== "confirmed")) return { ok: false, channel: "speakable", text: `${done()}。`, reason: "upstream", tools };
       if (executed.length) return { ok: true, channel: "speakable", text: `${done()}。`, tools, ...(ended ? { ended: true as const } : {}) };
       return { ok: false, channel: "speakable", text: "沒有完成：處理步驟超過上限，請再說一次。", reason: "upstream", tools };
     } catch (err) {
@@ -315,11 +347,13 @@ export class LiveToolCaller {
 }
 
 /** 工具輸出的一句話摘要（只用工具自己回傳的文字，不加油添醋）。 */
-export function summarizeOutputs(executed: readonly { name: HostToolName; output: Record<string, unknown> }[]): string {
+export function summarizeOutputs(executed: readonly { name: string; output: Record<string, unknown> }[]): string {
   return executed
     .map(({ name, output }) => {
       const say = (key: string) => (typeof output[key] === "string" && (output[key] as string).trim() ? (output[key] as string).trim().replace(/[。.]+$/, "") : null);
       if (output.status === "unknown") return RESULT_UNKNOWN_TEXT;
+      // AIL-1：整合工具的 message 已經依 status 寫好（unconfirmed 的 ok 是 false，但不是「沒有成功」）。
+      if (fromWireName(name)) return say("message") ?? `${name}：${String(output.status)}`;
       if (output.ok === false) return `沒有成功：${say("error") ?? say("message") ?? name}`;
       return say("message") ?? say("answer") ?? `${name} 已執行`;
     })

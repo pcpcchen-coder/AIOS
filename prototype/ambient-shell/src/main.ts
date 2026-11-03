@@ -323,6 +323,9 @@ const realtimeCallbacks: RealtimeCallbacks = {
   onApprovalPrompt: showApproval,
   onApprovalResolved: closeApproval,
   onToolActivity: (text) => showSubtitle(text),
+  // AIL-1：只有 NOUS_AIL=on（settings.integrations）時才有名稱；關閉時清單為空，行為和之前相同。
+  integrationTools: () => settings?.integrations?.tools ?? [],
+  onIntegrationTool: integrationFromRealtime,
   onClosed: (reason) => {
     realtimeCommands.reset();
     wakeGreetingInteraction = null;
@@ -2061,6 +2064,27 @@ async function webSearchFromRealtime(query: string): Promise<Record<string, unkn
     return { ok: false, error: message };
   } finally {
     releaseSearch();
+  }
+}
+
+/** AIL-1：API key 路徑的整合工具轉交核心執行；頁面只顯示核心回的固定句（不是模型的話）。 */
+async function integrationFromRealtime(name: string, rawArgs: string): Promise<Record<string, unknown>> {
+  const ticket = realtimeTicket;
+  if (!ticket || ticket.route !== "api_key") return { ok: false, status: "refused", message: t("沒有開始即時語音的工作階段，整合工具沒有執行。") };
+  showSubtitle(t("整合工具：{0}", name), true);
+  try {
+    const result = await api.integrationCall(ticketOf(ticket), name, rawArgs);
+    if (typeof result.message === "string") showSubtitle(t(result.message));
+    return result;
+  } catch (err) {
+    // 核心回 4xx：請求被拒，確定沒有執行。其他（連線中斷、核心沒有回覆、5xx）：核心可能已經執行，只能說結果不明。
+    const status = (err as { status?: unknown } | null)?.status;
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      showSubtitle(t("整合工具沒有執行。"));
+      return { ok: false, status: "refused", message: "整合工具沒有執行。" };
+    }
+    showSubtitle(t("結果不明，請確認"));
+    return { ok: false, status: "unknown", message: "結果不明，請確認" };
   }
 }
 

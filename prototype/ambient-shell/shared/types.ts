@@ -155,6 +155,11 @@ export interface SettingsView {
   audio?: AudioSettingsView;
   /** WK-01a 常駐喚醒聆聽：只有 NOUS_WAKE=on 時才有（偏好與引擎核對結果；實際狀態以頁面的裝置事件為準）。 */
   wake?: WakeSettingsView;
+  /**
+   * AIL-1（docs/18）：只有 NOUS_AIL=on 時才有。tools＝API key 路徑上由核心整合層執行的函式名稱（app__<service>__<action>）；
+   * 頁面收到這些名稱的工具呼叫時轉交核心（POST /api/integrations/call），自己不執行。
+   */
+  integrations?: { tools: string[] };
 }
 
 /** API key 路徑（RealtimeBridge.info）提供的欄位；路徑與計費欄位由 RealtimeSessions 補上。 */

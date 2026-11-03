@@ -4,7 +4,7 @@
 
 # 目前實作、驗證與缺口
 
-更新日期：2026-11-03，Asia/Taipei。「Raspberry Pi 終端」一列記分支 `claude/rpi4-terminal-kit`（基於 main `6674cec`）的內容。2026-11-02：「長期記憶」與「本機喚醒詞」兩列的記憶預設選人記分支 `claude/memory-voice-default`（基於 main `6412ea0`）的內容；「背景處理中的電子腦與處理中音效」一列記分支 `claude/brain-processing-cue`（基於 main `6412ea0`，#82）的內容。2026-11-01：「選擇聲音輸入／輸出裝置」一列記分支 `claude/audio-devices`（基於 main `58af745`）的內容。喚醒詞那一列與「下一步」核對 main [`595f052`](https://github.com/pcpcchen-coder/AIOS/commit/595f052)（PR #72 合併後）；其他各列沿用 2026-10-31 對 main [`9778b41`](https://github.com/pcpcchen-coder/AIOS/commit/9778b4100cb18fec458ba653ff7ad9f9247f7277)（PR #62 合併後）的核對。Raspberry Pi 終端一批新增 Pi 端腳本、CI 與 `verify-aios` 檢查，不變更核心行為；其餘各列只更新文件。不宣稱 G0–G3 通過。本頁只記今日現況；各批次的歷次更新與更正可用 `git log -- docs/Current_Implementation_Status.md` 查到，每批的證據與限制見[驗證紀錄索引](validation/README.md)。
+更新日期：2026-11-03，Asia/Taipei。「Raspberry Pi 終端」一列記分支 `claude/rpi4-terminal-kit`（基於 main `6674cec`）的內容；「App Integration Layer」一列記分支 `claude/ail-1-registry`（從 `design/app-integration-spotify-2026-11` 開出，即 main `6674cec` 加上 18 號設計文件）的內容。2026-11-02：「長期記憶」與「本機喚醒詞」兩列的記憶預設選人記分支 `claude/memory-voice-default`（基於 main `6412ea0`）的內容；「背景處理中的電子腦與處理中音效」一列記分支 `claude/brain-processing-cue`（基於 main `6412ea0`，#82）的內容。2026-11-01：「選擇聲音輸入／輸出裝置」一列記分支 `claude/audio-devices`（基於 main `58af745`）的內容。喚醒詞那一列與「下一步」核對 main [`595f052`](https://github.com/pcpcchen-coder/AIOS/commit/595f052)（PR #72 合併後）；其他各列沿用 2026-10-31 對 main [`9778b41`](https://github.com/pcpcchen-coder/AIOS/commit/9778b4100cb18fec458ba653ff7ad9f9247f7277)（PR #62 合併後）的核對。Raspberry Pi 終端一批新增 Pi 端腳本、CI 與 `verify-aios` 檢查，不變更核心行為；其餘各列只更新文件。不宣稱 G0–G3 通過。本頁只記今日現況；各批次的歷次更新與更正可用 `git log -- docs/Current_Implementation_Status.md` 查到，每批的證據與限制見[驗證紀錄索引](validation/README.md)。
 
 AIOS 已有可執行的 Nous 桌面原型。先使用或延伸 [`prototype/ambient-shell`](../prototype/ambient-shell)，再依具體需求採用目標架構。Claude 是核心開發主力，ChatGPT／Codex 負責 Quest 工程方向；執行時的模型由設定與能力決定，不按裝置綁定供應商。
 
@@ -37,6 +37,7 @@ AIOS 已有可執行的 Nous 桌面原型。先使用或延伸 [`prototype/ambie
 | 在場、頭向、名目距離、張掌、手臂三區 | 有。#57：張掌門檻降到 0.55、手腕可略低於肩、「連線中」舉手直接結束語音；面向中斷 0.8 秒內不重置辨識追蹤。#58：「校正人臉辨識」（選單列或家人辨識畫面，最多三個位置），建議的近距離範圍、面向容許、轉頭寬限、最小臉部與側臉容許存在 `face-tuning.json`，不改比對門檻與證據規則 | 合成點／假鏡頭／合成影像已測 | 非眼動；名目雙目幾何，沒有雙目校正與準確率紀錄（「校正人臉辨識」不是雙目校正）。ID-02 Mac 第 9 步：修正後回答中舉手 5 次全停，ChatGPT 方案另有口頭回報，都未達 10＋10 次 |
 | 智慧家庭 H0、H1 | 有 | 假中控與示例程式路徑已測 | 開關燈有口頭回報；不能外推所有設備已驗 |
 | 智慧家庭 H1b：AIFA／IR | 有 | fixture、失敗及時間預算已測 | 真冷氣／IR 尚待實測；結果只報送出／未知，不宣稱設備已變化 |
+| App Integration Layer（AIL-1） | 有（2026-11-03，旗標 `NOUS_AIL` 預設關閉，`NOUS_AIL_SERVICES` 選已審核的 Adapter）：`server/integrations/` 的 Registry、Dispatcher、政策、按需狀態與模擬的 `mock` Adapter；工具 ID `app.<service>.<action>`；只有 `confirmed` 能說完成，逾時或中止為 `unknown`。兩條即時語音路徑都由核心執行：ChatGPT 方案經 LiveToolCaller，API key 路徑由頁面轉交 `POST /api/integrations/call`。**沒有任何真實 App**；Spotify 的 `app.spotify.*` 一律拒絕註冊（SP-2 BLOCKED）；`external_commit` 尚未接確認卡，一律拒絕 | fixture 與 mock：[驗證](validation/ail-1-2026-11-03.md)；旗標關閉時工具表與說明逐位元組相同 | 沒有 Mac 或真實語音驗證。設計見 [18](18_App_Integration_Layer_and_Spotify_2026-11.md) |
 | MCP | API key 即時語音可配置 | 確認相關邏輯已測 | ChatGPT live 路徑無 MCP；不是完整本地 MCP host |
 | 通用 Action Gate | 部分確認機制 | 局部已測 | HomeBridge H1 預設 allow；H2 設備政策尚未接入，不是所有操作都出確認卡 |
 | Quest、多裝置、OpenClaw worker | 無 | 無 | 擴充評估，不是已實作能力 |

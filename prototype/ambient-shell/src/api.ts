@@ -7,6 +7,7 @@ import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { WakePrefsPatch } from "../shared/wake.ts";
 import type { PageEndReason, VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
+import type { IntegrationStatusView } from "../shared/integrations.ts";
 import { historySearchPath, type HistoryDetail, type HistoryPage, type HistoryQuery } from "../shared/history.ts";
 import type { ApprovalReport, CallAnswer, FallbackOffer, LiveInputKind, RealtimePrefsPatch, StartDecision, StopEvidence, StopReplyTurn } from "../shared/realtime-route.ts";
 import { FallbackOfferError } from "./realtime-session.ts";
@@ -92,6 +93,11 @@ export const api = {
   },
   realtimeInput: (ticket: RealtimeTicket, kind: LiveInputKind, text: string) => call<{ ok: true }>("POST", "/api/realtime/input", { ...ticket, kind, text }),
   realtimeApproval: (ticket: RealtimeTicket, report: ApprovalReport) => call<{ ok: true }>("POST", "/api/realtime/approval", { ...ticket, ...report }),
+  /** AIL-1：API key 路徑的整合工具呼叫轉交核心執行（只有 NOUS_AIL=on）。 */
+  integrationCall: (ticket: RealtimeTicket, name: string, args: string) =>
+    call<Record<string, unknown>>("POST", "/api/integrations/call", { ...ticket, name, arguments: args }),
+  /** AIL-1：按需的整合服務狀態。 */
+  integrationStatus: () => call<IntegrationStatusView>("GET", "/api/integrations/status"),
   realtimeHostResult: (ticket: RealtimeTicket, callId: string, output: Record<string, unknown>) =>
     call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/host-result", { ...ticket, call_id: callId, output }),
   /** WK-02（F6）：可選的結束原因（no_voice）與 API key 路徑加總的 usage（核心的費用紀錄）。 */

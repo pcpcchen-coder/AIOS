@@ -48,6 +48,7 @@ import { tasksForTarget, type TaskStore } from "./store.ts";
 import type { VoiceRoute } from "./memory/live.ts";
 import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
 import type { HistoryDetail } from "../shared/history.ts";
+import type { Integrations } from "./integrations/index.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
@@ -128,6 +129,8 @@ export interface AppOptions {
   webSearch?: WebSearch;
   /** 武陵居中控的查詢與控制（docs/12 H0、H1）；未提供時不可用。 */
   home?: HomeBridge;
+  /** AIL-1：整合層（NOUS_AIL=on 才有）。未提供時沒有 /api/integrations/*（一律 404）、settings 沒有 integrations 欄位。 */
+  integrations?: Integrations;
   /** 雙目鏡頭設定（docs/11，通常是 CameraSettingsStore）；未提供或未啟用時頁面不允許使用鏡頭。 */
   camera?: CameraSettingsSource;
   /**
@@ -267,6 +270,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         memory: options.memory?.settingsStatus() ?? BROWSER_MEMORY_STATUS,
         audio: { prefs: options.audio?.view() ?? { ...DEFAULT_AUDIO_PREFS }, write_path: AUDIO_WRITE_PATH },
         ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
+        ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name) } } : {}),
       };
     },
     select: (provider: ExecutorMode) => options.settings.select(provider),
@@ -581,6 +585,31 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       // WK-02（F6）：最近的費用紀錄（新的在前）；沒有逐字稿與音訊，費用一律 unknown。
       return sendJson(res, 200, { records: options.voiceCostLog?.list(parseCostLimit(params.get("limit"))) ?? [] });
     }
+    if (options.integrations && method === "GET" && path === "/api/integrations/status") {
+      // 按需的服務狀態（頁面要看時才查）：只有健康代碼、原因代碼與工具數，沒有網址、帳號或播放內容。
+      return sendJson(res, 200, await options.integrations.status.view());
+    }
+
+    if (options.integrations && method === "POST" && path === "/api/integrations/call") {
+      // API key 路徑的頁面收到 app__ 工具呼叫時轉交核心執行；只接受開始這通即時語音的頁面（session_id＋owner），
+      // 路徑由核心依工作階段決定（頁面不能指定），工具必須是這條路徑上現在可用的（Dispatcher 再檢查一次）。
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      if (!sessions?.isOwner(sessionId, owner)) throw new HttpError(403, "不是開始這個即時語音的頁面。");
+      const route = sessions.routeOf(sessionId);
+      if (route !== "api_key") throw new HttpError(409, "這個工作階段的整合工具由核心直接執行。");
+      const name = typeof body.name === "string" ? body.name : "";
+      if (typeof body.arguments !== "string") throw new HttpError(400, "arguments must be a JSON string");
+      const args = body.arguments;
+      if (!name || name.length > 64) throw new HttpError(400, "valid name is required");
+      if (args.length > 8_192) throw new HttpError(400, "arguments are too long");
+      const controller = new AbortController();
+      res.on("close", () => {
+        if (!res.writableEnded) controller.abort();
+      });
+      return sendJson(res, 200, await options.integrations.dispatcher.execute({ tool: name, args, route, actor: "agent", sessionId, signal: controller.signal }));
+    }
+
     if (method === "POST" && path === "/api/realtime/web-search") {
       const body = await readJson(req);
       const query = typeof body.query === "string" ? body.query.trim() : "";
