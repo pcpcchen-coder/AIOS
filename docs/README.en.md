@@ -27,6 +27,7 @@ Updated 2026-11-01: the wake word is now the English Hello Nous and wake works i
 | [11 Stereo camera interaction](11_Stereo_Camera_Interaction_2026-10.en.md) | Head facing, distance estimation, stop gesture, three-region pointing, and settings are implemented. This is not eye tracking; stereo is uncalibrated |
 | [12 Smart home](12_SmartHome_Integration_Plan_2026-10.en.md) | H0, H1, H1b have code and some verbal home reports. H2–H4 are unimplemented |
 | [18 App Integration Layer and Spotify/Pi 4 design](18_App_Integration_Layer_and_Spotify_2026-11.en.md) | **Proposal / unimplemented**: shared core Adapter/Tool Registry, Spotify authorization boundary, and [Pi 4 Soloist weekend test](experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.en.md); Spotify voice control pending permission |
+| [19 Voice Command Relay: multi-brand TTS command transport](19_Voice_Command_Relay_Design_2026-11.en.md) | **Design / unimplemented**: vendor-specific Google/Siri/Alexa/XiaoAI templates, per-target TTS engine/voice selection, recognition measurements, [implementation batches](development/voice-command-relay-implementation-plan.en.md) and [experiment matrix](experiments/VOICE_COMMAND_RELAY_TEST_PLAN.en.md) |
 
 <a id="歷史藍圖與決策"></a>
 ## Historical blueprints and decisions
