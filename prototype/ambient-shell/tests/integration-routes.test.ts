@@ -66,6 +66,17 @@ describe("live route: LiveToolCaller runs app__ tools in the core", () => {
     expect(result.text).toMatch(/結果不明/);
   });
 
+  it("a refused or unconfirmed integration result is never reported as done when the model says nothing", async () => {
+    const ail = mockIntegrations(() => "unconfirmed");
+    const { c } = caller([turn({ calls: [{ call_id: "c1", name: "app__mock__toggle", arguments: '{"on":true}' }] }), turn({})], ail);
+    const result = await c.run({ id: "d1", text: "x", source: "voice", transcript: [] }, new AbortController().signal);
+    expect(result).toMatchObject({ ok: false, text: "（模擬）已送出，沒有回讀確認。" });
+    const refused = caller([turn({ calls: [{ call_id: "c1", name: "app__mock__toggle", arguments: '{"on":"yes"}' }] }), turn({})], mockIntegrations());
+    const r2 = await refused.c.run({ id: "d1", text: "x", source: "voice", transcript: [] }, new AbortController().signal);
+    expect(r2).toMatchObject({ ok: false, text: "參數不正確，沒有執行。" });
+    expect(r2.text).not.toMatch(/處理好了/);
+  });
+
   it("without integrations (flag off) an app__ call is not a tool on this route", async () => {
     const { c, requests, hostCalls } = caller([turn({ calls: [{ call_id: "c1", name: "app__mock__echo", arguments: '{"text":"x"}' }] }), turn({ text: "不能用" })], null);
     await c.run({ id: "d1", text: "x", source: "voice", transcript: [] }, new AbortController().signal);
@@ -151,6 +162,7 @@ describe("HTTP /api/integrations/*", () => {
     const body = { session_id: start.session_id, owner: start.owner, name: "app__mock__echo", arguments: '{"text":"hi"}' };
     expect((await a.post("/api/integrations/call", { ...body, owner: `${start.owner.slice(0, -1)}${start.owner.endsWith("A") ? "B" : "A"}` })).status).toBe(403);
     expect((await a.post("/api/integrations/call", { ...body, session_id: "../x" })).status).toBe(400);
+    expect((await a.post("/api/integrations/call", { ...body, arguments: { text: "hi" } })).status).toBe(400);
     const res = await a.post("/api/integrations/call", body);
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, status: "confirmed", message: "（模擬）已回傳。", data: { mock: true, text: "hi" } });

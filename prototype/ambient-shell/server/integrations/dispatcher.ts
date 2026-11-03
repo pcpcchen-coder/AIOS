@@ -103,19 +103,22 @@ export class IntegrationDispatcher {
     if (decide(found.def.effect).kind === "confirm") {
       return finish(toolResult("refused", "這個動作需要你當次確認，但確認卡還沒有接上整合層，所以沒有執行。", { reason: "confirmation_unavailable" }));
     }
+    // 呼叫前就已中止：不執行（確定沒有送出，所以是 refused，不是 unknown）。
+    if (request.signal?.aborted) return finish(toolResult("refused", "這次呼叫在執行前已中止，沒有執行。", { reason: "aborted" }));
     if (!this.limiter.take(found.adapter.id)) return finish(toolResult("refused", "這個服務的呼叫太頻繁，這次沒有執行；請稍後再說一次。", { reason: "rate_limited" }));
 
     const sideEffect = found.def.effect !== "read";
     const timeout = new AbortController();
     const signal = request.signal ? AbortSignal.any([request.signal, timeout.signal]) : timeout.signal;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: (() => void) | undefined;
     const stop = new Promise<"timeout" | "aborted">((resolve) => {
       timer = setTimeout(() => {
         timeout.abort();
         resolve("timeout");
       }, found.def.timeoutMs);
-      if (request.signal?.aborted) resolve("aborted");
-      request.signal?.addEventListener("abort", () => resolve("aborted"), { once: true });
+      onAbort = () => resolve("aborted");
+      request.signal?.addEventListener("abort", onAbort, { once: true });
     });
     try {
       const work = found.adapter.execute(id, checked.value, { actor: request.actor, route: request.route, sessionId: request.sessionId, requestId, signal });
@@ -132,6 +135,7 @@ export class IntegrationDispatcher {
         : toolResult("failed", "整合服務出錯，沒有取得結果。", { reason: "adapter_error" }));
     } finally {
       clearTimeout(timer);
+      if (onAbort) request.signal?.removeEventListener("abort", onAbort);
     }
   }
 }

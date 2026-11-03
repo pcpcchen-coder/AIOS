@@ -2067,7 +2067,6 @@ async function webSearchFromRealtime(query: string): Promise<Record<string, unkn
   }
 }
 
-/** 模型要查家電狀態：本機核心帶權杖問中控，字幕顯示讀值與資料時間；失敗時照實交還給模型。 */
 /** AIL-1：API key 路徑的整合工具轉交核心執行；頁面只顯示核心回的固定句（不是模型的話）。 */
 async function integrationFromRealtime(name: string, rawArgs: string): Promise<Record<string, unknown>> {
   const ticket = realtimeTicket;
@@ -2078,13 +2077,18 @@ async function integrationFromRealtime(name: string, rawArgs: string): Promise<R
     if (typeof result.message === "string") showSubtitle(t(result.message));
     return result;
   } catch (err) {
-    // 轉交本身失敗（連線中斷、核心沒有回覆）：核心可能已經執行，只能說結果不明。
-    const message = err instanceof Error ? err.message : String(err);
-    showSubtitle(message);
+    // 核心回 4xx：請求被拒，確定沒有執行。其他（連線中斷、核心沒有回覆、5xx）：核心可能已經執行，只能說結果不明。
+    const status = (err as { status?: unknown } | null)?.status;
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      showSubtitle(t("整合工具沒有執行。"));
+      return { ok: false, status: "refused", message: "整合工具沒有執行。" };
+    }
+    showSubtitle(t("結果不明，請確認"));
     return { ok: false, status: "unknown", message: "結果不明，請確認" };
   }
 }
 
+/** 模型要查家電狀態：本機核心帶權杖問中控，字幕顯示讀值與資料時間；失敗時照實交還給模型。 */
 async function homeStatusFromRealtime(target: string, metric: string | null): Promise<Record<string, unknown>> {
   brain.pulse("step", classifyDomain(target));
   try {

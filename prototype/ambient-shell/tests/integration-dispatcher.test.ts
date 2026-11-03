@@ -77,9 +77,13 @@ describe("IntegrationDispatcher execution", () => {
     const pending = b.run({ signal: controller.signal });
     controller.abort();
     expect(await pending).toMatchObject({ status: "unknown", reason: "aborted" });
+    // 呼叫前就已中止：確定沒有送出（refused），即使 Adapter 會立刻成功也不執行。
+    const c = setup();
     const pre = new AbortController();
     pre.abort();
-    expect(await b.run({ signal: pre.signal })).toMatchObject({ status: "unknown", reason: "aborted" });
+    expect(await c.run({ tool: "app.mock.toggle", args: { on: true }, signal: pre.signal })).toMatchObject({ ok: false, status: "refused", reason: "aborted" });
+    expect(c.mock.requests).toHaveLength(0);
+    expect(c.mock.switchOn).toBe(false);
   });
 
   it("adapter errors: read → failed, write → unknown; malformed results → failed", async () => {

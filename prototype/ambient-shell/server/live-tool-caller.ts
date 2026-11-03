@@ -220,9 +220,10 @@ export class LiveToolCaller {
         const result = await untilAborted(this.options.responses.turn({ instructions, input, tools: specs, signal: combined }), combined);
         this.options.log?.(`即時語音（ChatGPT 方案）：交辦第 ${turn + 1} 輪（${result.model}）${result.calls.length ? `要呼叫 ${result.calls.map((c) => c.name).join("、")}` : "直接回答，沒有呼叫工具"}`);
         if (!result.calls.length) {
-          // AIL-1：整合工具的結果還不明、模型又沒有說話時，不能說「處理好了」（只限整合工具，頁面工具的行為不變）。
-          if (!result.text && executed.some((e) => fromWireName(e.name) && e.output.status === "unknown")) {
-            return { ok: false, channel: "speakable", text: `${RESULT_UNKNOWN_TEXT}。`, reason: "unknown", tools };
+          // AIL-1：整合工具沒有 confirmed、模型又沒有說話時，不能說「處理好了」：照工具的固定句說（只限整合工具，頁面工具的行為不變）。
+          if (!result.text && executed.some((e) => fromWireName(e.name) && e.output.status !== "confirmed")) {
+            const unknown = executed.some((e) => e.output.status === "unknown");
+            return { ok: false, channel: "speakable", text: `${done()}。`, reason: unknown ? "unknown" : "upstream", tools };
           }
           const text = result.text || (tools.length ? "處理好了，但沒有可以轉述的結果。" : "我沒有聽懂，請再說一次。");
           return ended ? { ok: true, channel: "speakable", text, tools, ended: true } : { ok: true, channel: "speakable", text, tools };
@@ -307,6 +308,8 @@ export class LiveToolCaller {
       }
       // 輪數用完、模型沒有說最後一句：照已經執行的工具輸出說，已知的結果不說成沒做或不明。
       if (unsettled.size) return { ok: false, channel: "speakable", text: `${RESULT_UNKNOWN_TEXT}。${executed.length ? `已經回報的結果：${done()}。` : ""}`, reason: "unknown", tools };
+      // AIL-1：整合工具沒有 confirmed 時不算成功（頁面工具照舊）。
+      if (executed.some((e) => fromWireName(e.name) && e.output.status !== "confirmed")) return { ok: false, channel: "speakable", text: `${done()}。`, reason: "upstream", tools };
       if (executed.length) return { ok: true, channel: "speakable", text: `${done()}。`, tools, ...(ended ? { ended: true as const } : {}) };
       return { ok: false, channel: "speakable", text: "沒有完成：處理步驟超過上限，請再說一次。", reason: "upstream", tools };
     } catch (err) {

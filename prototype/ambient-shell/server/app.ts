@@ -599,7 +599,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const route = sessions.routeOf(sessionId);
       if (route !== "api_key") throw new HttpError(409, "這個工作階段的整合工具由核心直接執行。");
       const name = typeof body.name === "string" ? body.name : "";
-      const args = typeof body.arguments === "string" ? body.arguments : "";
+      if (typeof body.arguments !== "string") throw new HttpError(400, "arguments must be a JSON string");
+      const args = body.arguments;
       if (!name || name.length > 64) throw new HttpError(400, "valid name is required");
       if (args.length > 8_192) throw new HttpError(400, "arguments are too long");
       const controller = new AbortController();
