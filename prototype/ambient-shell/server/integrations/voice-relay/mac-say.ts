@@ -29,9 +29,13 @@ export interface SayVoice {
   id: string;
   locale: string;
 }
+/**
+ * 喇叭：id 用「名稱」（穩定；裝置表存這個），runtimeId 是 CoreAudio 的數字 ID（重新接上可能改變，只在播放當下用）。
+ */
 export interface SayDevice {
   id: string;
   name: string;
+  runtimeId: string;
 }
 
 // 名稱與語系之間通常補空白對齊；名稱太長時可能只剩一個空白，所以用 \s+（語系的格式夠特別，不會誤判）。
@@ -54,12 +58,12 @@ export function parseSayVoices(stdout: string): SayVoice[] {
   return out;
 }
 
-/** `say -a ?`：每行「數字 ID 裝置名稱」。看不懂的行略過。 */
+/** `say -a ?`：每行「數字 ID 裝置名稱」。看不懂的行略過；同名的只留第一個。 */
 export function parseSayDevices(stdout: string): SayDevice[] {
   const out: SayDevice[] = [];
   for (const line of stdout.split(/\r?\n/)) {
     const m = DEVICE_LINE.exec(line);
-    if (m) out.push({ id: String(Number(m[1])), name: m[2]! });
+    if (m && !out.some((d) => d.name === m[2])) out.push({ id: m[2]!, name: m[2]!, runtimeId: String(Number(m[1])) });
   }
   return out;
 }
@@ -130,20 +134,22 @@ export class MacSayOutput implements RelayOutput {
   }
 
   inventory(): RelayInventory {
-    return { voices: [...this.voiceList], devices: [...this.deviceList], checkedAt: this.checkedAt, error: this.error };
+    return { voices: [...this.voiceList], devices: this.deviceList.map((d) => ({ id: d.id, name: d.name })), checkedAt: this.checkedAt, error: this.error };
   }
 
   /** 重新讀聲音與喇叭清單。失敗時清單是空的、error 是代碼（不丟錯）。 */
+  private async list(flag: "-v" | "-a", signal?: AbortSignal): Promise<string | null> {
+    try {
+      const timeout = AbortSignal.timeout(10_000);
+      const r = await this.run(SAY_PATH, [flag, "?"], { signal: signal ? AbortSignal.any([signal, timeout]) : timeout, onSpawn: () => undefined });
+      return r.code === 0 ? r.stdout : null;
+    } catch {
+      return null;
+    }
+  }
+
   async refresh(): Promise<void> {
-    const list = async (flag: "-v" | "-a"): Promise<string | null> => {
-      try {
-        const r = await this.run(SAY_PATH, [flag, "?"], { signal: AbortSignal.timeout(10_000), onSpawn: () => undefined });
-        return r.code === 0 ? r.stdout : null;
-      } catch {
-        return null;
-      }
-    };
-    const [v, a] = await Promise.all([list("-v"), list("-a")]);
+    const [v, a] = await Promise.all([this.list("-v"), this.list("-a")]);
     this.voiceList = v === null ? [] : parseSayVoices(v);
     this.deviceList = a === null ? [] : parseSayDevices(a);
     this.error = v === null ? "voices_failed" : a === null ? "devices_failed" : !this.voiceList.length ? "voices_unparsed" : !this.deviceList.length ? "devices_unparsed" : null;
@@ -159,15 +165,19 @@ export class MacSayOutput implements RelayOutput {
     const notPlayed = (failure: NonNullable<PlaybackReceipt["failure"]>): PlaybackReceipt => ({ ...base, synthesisComplete: false, audioStarted: false, audioFinished: false, failure });
     if (job.outputNode !== this.node || job.engine !== "macos_say") return notPlayed("device_unavailable");
     if (!this.voiceList.some((v) => v.id === job.voiceId)) return notPlayed("synthesis_failed");
-    const device = this.deviceList.find((d) => d.id === job.outputDeviceId) ?? this.deviceList.find((d) => d.name === job.outputDeviceId);
-    if (!device) return notPlayed("device_unavailable");
     // say 指令沒有音高參數：這批不支援 pitch≠0（不偷偷忽略）。
     if (job.pitch !== 0) return notPlayed("synthesis_failed");
     // 多一道防線：文字裡不能有 say 的控制標記（目錄驗證已擋）。
     if (job.segments.some((s) => s.kind === "speech" && MARKUP.test(s.text))) return notPlayed("synthesis_failed");
+    // 每次播放前重新讀喇叭清單（喇叭重新接上時數字 ID 會變）；只用名稱比對，絕不用數字 ID 比對。找不到就不播。
+    const listed = await this.list("-a", signal);
+    if (signal.aborted) throw new Error("aborted");
+    if (listed !== null) this.deviceList = parseSayDevices(listed);
+    const device = listed === null ? undefined : this.deviceList.find((d) => d.name === job.outputDeviceId);
+    if (!device) return notPlayed("device_unavailable");
     let args: string[];
     try {
-      args = buildSayArgs(job, device.id);
+      args = buildSayArgs(job, device.runtimeId);
     } catch {
       return notPlayed("synthesis_failed");
     }

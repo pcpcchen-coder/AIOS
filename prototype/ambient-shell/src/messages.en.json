@@ -956,5 +956,6 @@
   "音箱有沒有照做？請自己看或聽，再記錄。": "Did the speaker do it? Watch or listen yourself, then record.",
   "音量（dB）": "Volume (dB)",
   "預覽文字": "Preview text",
-  "核心拒絕了這次操作，沒有完成。": "The core rejected this action; it was not completed."
+  "核心拒絕了這次操作，沒有完成。": "The core rejected this action; it was not completed.",
+  "新增後會取代示範目標。": "Adding a target replaces the demo targets."
 }

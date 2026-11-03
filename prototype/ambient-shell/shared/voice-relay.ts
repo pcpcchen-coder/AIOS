@@ -311,7 +311,7 @@ export interface VoiceRelayTemplateView {
   status: TemplateStatus;
   /** 這個意圖在目標上的預設模板（覆寫或層級選定）。 */
   selected_default: boolean;
-  /** 裝置表的審閱紀錄是 approved（使用者採用）。 */
+  /** 模型路徑實際會播這個說法：有效審閱狀態 approved、是解析器選的預設、政策沒擋。 */
   adopted: boolean;
   /** 下游政策擋下（例如 Spotify、音樂服務不知道）；播放按鈕要停用。 */
   policy_blocked: boolean;
@@ -343,8 +343,11 @@ export interface VoiceRelayView {
   mock: boolean;
   /** 目標或燈的清單和啟動時不同：模型的工具清單要重新啟動 Nous 才會更新。 */
   restart_required: boolean;
+  /** 現在用的是內建示範目標（只在 fake 模式、沒有設定檔時）；新增目標後示範目標會被取代。 */
+  fixtures_active: boolean;
   output: {
     voices: { id: string; locale: RelayLocale }[];
+    /** 喇叭：id 就是名稱（穩定；新增目標時把 id 送回當 output_device_id）。 */
     devices: { id: string; name: string }[];
     /** 上次讀取的時間（epoch ms）；還沒讀過是 null。 */
     checked_at: number | null;

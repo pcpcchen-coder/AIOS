@@ -31,12 +31,12 @@ interface Call {
   args: string[];
 }
 /** 假的 runner：清單查詢回固定輸出；播放依 behavior。 */
-function fakeRunner(behavior: "ok" | "exit1" | "enoent" | "hang" = "ok") {
+function fakeRunner(behavior: "ok" | "exit1" | "enoent" | "hang" = "ok", devices: () => string = () => DEVICES) {
   const calls: Call[] = [];
   let killed = false;
   const run: SayRunner = async (file, args, { signal, onSpawn }) => {
     calls.push({ file, args: [...args] });
-    if (args[1] === "?") return { code: 0, stdout: args[0] === "-v" ? VOICES : DEVICES };
+    if (args[1] === "?") return { code: 0, stdout: args[0] === "-v" ? VOICES : devices() };
     if (behavior === "enoent") throw Object.assign(new Error("spawn /usr/bin/say ENOENT"), { code: "ENOENT" });
     onSpawn();
     if (behavior === "exit1") return { code: 1, stdout: "" };
@@ -51,7 +51,7 @@ function fakeRunner(behavior: "ok" | "exit1" | "enoent" | "hang" = "ok") {
 }
 
 const job = (patch: Partial<RelayJob> = {}): RelayJob => ({
-  jobId: "j1", targetId: "t", outputNode: "mac_local", outputDeviceId: "91", engine: "macos_say", voiceId: "Meijia", rate: 1, pitch: 0, gainDb: 0,
+  jobId: "j1", targetId: "t", outputNode: "mac_local", outputDeviceId: "MacBook Pro Speakers", engine: "macos_say", voiceId: "Meijia", rate: 1, pitch: 0, gainDb: 0,
   segments: [{ kind: "silence", ms: 300 }, { kind: "speech", part: "wake", text: "Ok Google" }, { kind: "silence", ms: 800 }, { kind: "speech", part: "command", text: "下一首歌" }, { kind: "silence", ms: 300 }],
   ...patch,
 });
@@ -67,10 +67,10 @@ describe("say output parsing", () => {
     expect(parseSayVoices("")).toEqual([]);
   });
 
-  it("parses `say -a ?` devices", () => {
+  it("parses `say -a ?` devices: id is the stable name, runtimeId the numeric CoreAudio id", () => {
     expect(parseSayDevices(DEVICES)).toEqual([
-      { id: "91", name: "MacBook Pro Speakers" },
-      { id: "120", name: "USB Audio Device" },
+      { id: "MacBook Pro Speakers", name: "MacBook Pro Speakers", runtimeId: "91" },
+      { id: "USB Audio Device", name: "USB Audio Device", runtimeId: "120" },
     ]);
   });
 
@@ -96,7 +96,7 @@ describe("MacSayOutput", () => {
   it("refresh lists voices and devices with absolute say path", async () => {
     const { out, calls } = await ready();
     expect(calls.map((c) => c.file)).toEqual([SAY_PATH, SAY_PATH]);
-    expect(out.inventory()).toMatchObject({ checkedAt: 1234, error: null, devices: [{ id: "91", name: "MacBook Pro Speakers" }, { id: "120", name: "USB Audio Device" }] });
+    expect(out.inventory()).toMatchObject({ checkedAt: 1234, error: null, devices: [{ id: "MacBook Pro Speakers", name: "MacBook Pro Speakers" }, { id: "USB Audio Device", name: "USB Audio Device" }] });
     expect(out.voiceAvailable("mac_local", "macos_say", "Meijia")).toBe(true);
     expect(out.voiceAvailable("pi_node", "macos_say", "Meijia")).toBe(false);
     expect(out.voiceAvailable("mac_local", "local_tts", "Meijia")).toBe(false);
@@ -108,7 +108,7 @@ describe("MacSayOutput", () => {
     expect(out.inventory()).toMatchObject({ voices: [], devices: [], error: "voices_failed" });
   });
 
-  it("exit 0 → finished receipt; device can be matched by name and the numeric id is passed", async () => {
+  it("exit 0 → finished receipt; device is matched by name and the current numeric id is passed", async () => {
     const { out, plays } = await ready();
     const receipt = await out.play(job({ outputDeviceId: "USB Audio Device" }), new AbortController().signal);
     expect(receipt).toEqual({ jobId: "j1", outputNode: "mac_local", outputDeviceId: "USB Audio Device", mock: false, synthesisComplete: true, audioStarted: true, audioFinished: true });
@@ -118,12 +118,28 @@ describe("MacSayOutput", () => {
   it("preconditions fail without running say", async () => {
     const { out, plays } = await ready();
     const s = new AbortController().signal;
-    expect(await out.play(job({ outputDeviceId: "999" }), s)).toMatchObject({ audioStarted: false, failure: "device_unavailable" });
+    expect(await out.play(job({ outputDeviceId: "Nowhere" }), s)).toMatchObject({ audioStarted: false, failure: "device_unavailable" });
+    // 數字 ID 不是身分：絕不用它比對。
+    expect(await out.play(job({ outputDeviceId: "91" }), s)).toMatchObject({ audioStarted: false, failure: "device_unavailable" });
     expect(await out.play(job({ voiceId: "Nobody" }), s)).toMatchObject({ audioStarted: false, failure: "synthesis_failed" });
     expect(await out.play(job({ pitch: 2 }), s)).toMatchObject({ audioStarted: false, failure: "synthesis_failed" });
     expect(await out.play(job({ outputNode: "pi" }), s)).toMatchObject({ audioStarted: false, failure: "device_unavailable" });
     expect(await out.play(job({ segments: [{ kind: "speech", part: "command", text: "[[rate 1]]" }] }), s)).toMatchObject({ audioStarted: false, failure: "synthesis_failed" });
     expect(plays()).toHaveLength(0);
+  });
+
+  it("re-reads the device list before each play: a reconnect with a new numeric id is followed; a removed speaker fails without spawning", async () => {
+    let list = DEVICES;
+    const r = fakeRunner("ok", () => list);
+    const out = new MacSayOutput({ run: r.run });
+    await out.refresh();
+    list = "  205 MacBook Pro Speakers\n";
+    expect(await out.play(job(), new AbortController().signal)).toMatchObject({ audioFinished: true });
+    expect(r.plays()[0]!.args.slice(4, 6)).toEqual(["-a", "205"]);
+    list = "  120 USB Audio Device\n";
+    expect(await out.play(job(), new AbortController().signal)).toMatchObject({ audioStarted: false, failure: "device_unavailable" });
+    expect(r.plays()).toHaveLength(1);
+    expect(r.calls.filter((c) => c.args[0] === "-a").length).toBe(3);
   });
 
   it("non-zero exit after spawn → interrupted; ENOENT → start_failed; abort kills and throws", async () => {
@@ -133,6 +149,8 @@ describe("MacSayOutput", () => {
     const hang = await ready("hang");
     const c = new AbortController();
     const p = hang.out.play(job(), c.signal);
+    // 等 say 真的啟動（播放前會先重讀喇叭清單）再中止。
+    await new Promise((r) => setTimeout(r, 10));
     c.abort();
     await expect(p).rejects.toThrow();
     expect(hang.killed()).toBe(true);
@@ -199,7 +217,7 @@ describe("NOUS_VCR=mac adapter", () => {
   async function withTarget(behavior: Parameters<typeof fakeRunner>[0] = "ok", patch: Record<string, unknown> = {}) {
     const dir = tempDir();
     const target = {
-      id: "living", vendor: "google", assistant: "google_assistant", model: "home_mini", locale: "zh-TW", enabled: true, outputNode: "mac_local", outputDeviceId: "91",
+      id: "living", vendor: "google", assistant: "google_assistant", model: "home_mini", locale: "zh-TW", enabled: true, outputNode: "mac_local", outputDeviceId: "MacBook Pro Speakers",
       voiceProfileId: "mac_meijia", candidateVoiceProfileIds: [], templateOverrides: {}, reviewedTemplates: [{ templateId: "google.next.zh1", version: 1, status: "approved", reviewedAt: "2026-11-03T00:00:00.000Z" }],
       musicService: "youtube_music", devices: [], ...patch,
     };
@@ -229,6 +247,7 @@ describe("NOUS_VCR=mac adapter", () => {
     const hang = await withTarget("hang");
     const c = new AbortController();
     const p = hang.adapter.execute("app.voice_relay.send_intent", args, ctx(c.signal));
+    await new Promise((r) => setTimeout(r, 10));
     c.abort();
     expect(await p).toMatchObject({ status: "unknown", reason: "aborted" });
     expect(hang.killed()).toBe(true);
@@ -251,10 +270,29 @@ describe("NOUS_VCR=mac adapter", () => {
     expect(plays()[0]!.args.at(-1)).toBe("[[volm 1]] [[slnc 300]] Ok Google [[slnc 300]]");
   });
 
+  it("a hung diagnostic play times out → unknown, and the busy lock is released", async () => {
+    let hang = true;
+    const run: SayRunner = async (_f, args, { signal, onSpawn }) => {
+      if (args[1] === "?") return { code: 0, stdout: args[0] === "-v" ? VOICES : DEVICES };
+      onSpawn();
+      if (!hang) return { code: 0, stdout: "" };
+      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+      throw new Error("killed");
+    };
+    const base = (await withTarget()).adapter;
+    const out = new MacSayOutput({ run });
+    await out.refresh();
+    const adapter = new VoiceRelayAdapter({ catalog: base.currentCatalog(), output: out, diagnosticTimeoutMs: 50 });
+    const req = { targetId: "living", intentId: "music.next", slots: {} };
+    expect(await adapter.playDiagnostic(req, {}, "wake", new AbortController().signal)).toMatchObject({ status: "unknown", reason: "aborted" });
+    hang = false;
+    expect(await adapter.playDiagnostic(req, {}, "wake", new AbortController().signal)).toMatchObject({ status: "unconfirmed" });
+  });
+
   it("pitch ≠ 0 → failed (say has no pitch flag in this batch)", async () => {
     const d = composeRelayDocument(null, { fixtures: false }) as any;
     d.profiles = [...d.profiles, { id: "p", engine: "macos_say", voiceId: "Meijia", locale: "zh-TW", rate: 1, pitch: 3, gainDb: 0, wakeToCommandPauseMs: 0, leadSilenceMs: 0, tailSilenceMs: 0, testedAt: null, recognitionStatsId: null }];
-    d.targets = [{ id: "t", vendor: "google", assistant: "google_assistant", model: "home_mini", locale: "zh-TW", enabled: true, outputNode: "mac_local", outputDeviceId: "91", voiceProfileId: "p", candidateVoiceProfileIds: [], templateOverrides: {}, reviewedTemplates: [{ templateId: "google.next.zh1", version: 1, status: "approved", reviewedAt: "x" }], musicService: "youtube_music", devices: [] }];
+    d.targets = [{ id: "t", vendor: "google", assistant: "google_assistant", model: "home_mini", locale: "zh-TW", enabled: true, outputNode: "mac_local", outputDeviceId: "MacBook Pro Speakers", voiceProfileId: "p", candidateVoiceProfileIds: [], templateOverrides: {}, reviewedTemplates: [{ templateId: "google.next.zh1", version: 1, status: "approved", reviewedAt: "x" }], musicService: "youtube_music", devices: [] }];
     const parsed = parseRelayCatalog(d);
     if (!parsed.ok) throw new Error(parsed.errors.join("\n"));
     const r = fakeRunner();

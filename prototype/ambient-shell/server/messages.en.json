@@ -536,5 +536,6 @@
   "語音中繼設定檔無法讀取，沒有儲存。": "The voice relay settings file could not be read; nothing was saved.",
   "試驗紀錄檔不正確，沒有儲存。": "The trial log file is invalid; nothing was saved.",
   "語音中繼請求格式不正確。": "The voice relay request is malformed.",
-  "語音中繼設定無法寫入。": "The voice relay settings cannot be written."
+  "語音中繼設定無法寫入。": "The voice relay settings cannot be written.",
+  "輸出端沒有這個語言的這個聲音，沒有儲存。": "The output has no such voice for this language; nothing was saved."
 }

@@ -1105,7 +1105,8 @@ export function renderVoiceRelay(state: VoiceRelayPanelState, actions: ViewActio
       ),
       relay && h("div", { class: "actions" }, relayButton(state.busy ? "處理中…" : "重新讀取聲音與喇叭", () => relay.refresh(), state.busy)),
     );
-    if (!view.targets.length) rows.push(renderRelayCreate(state, view, relay));
+    // 示範目標（fake 模式、沒有設定檔）也可以新增：新增後示範目標會被取代。
+    if (!view.targets.length || view.fixtures_active) rows.push(renderRelayCreate(state, view, relay));
     for (const target of view.targets) rows.push(renderRelayTarget(state, view, target, relay));
   }
   if (state.notice) rows.push(h("p", { class: "error-text small", role: "status" }, t(state.notice)));
@@ -1129,6 +1130,7 @@ function renderRelayCreate(state: VoiceRelayPanelState, view: VoiceRelayView, re
     h("label", { class: "small" }, t("聲音"), voiceSelect),
     h("label", { class: "small" }, t("音樂服務"), musicSelect),
     h("p", { class: "muted small" }, t("音樂服務選 Spotify 或「不知道」時，音樂命令會被政策擋下。")),
+    view.fixtures_active && h("p", { class: "muted small" }, t("新增後會取代示範目標。")),
     !voices.length && h("p", { class: "muted small" }, t("這個語言沒有可用的聲音。")),
     !view.output.devices.length && h("p", { class: "muted small" }, t("沒有讀到喇叭。")),
     h(
@@ -1253,7 +1255,7 @@ function renderRelayIntent(state: VoiceRelayPanelState, target: VoiceRelayTarget
       fields.push(h("label", { class: "small" }, t("百分比"), n));
       inputs.push({ read: () => ({ percent: Number(n.value) }) });
     } else if (slot === "seconds") {
-      const n = relayNumber("秒數", 60, 1, 86400, 1);
+      const n = relayNumber("秒數", 60, 1, 3600, 1);
       fields.push(h("label", { class: "small" }, t("秒數"), n));
       inputs.push({ read: () => ({ seconds: Number(n.value) }) });
     } else if (slot === "device") {

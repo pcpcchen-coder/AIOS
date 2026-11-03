@@ -22,6 +22,7 @@ const NO_TARGET = "沒有這個語音中繼目標，沒有儲存。";
 const FIXTURE_TARGET = "內建示範目標不能修改；請先新增自己的目標。";
 const BAD_TEMPLATE = "這個命令說法不能用在這個目標，沒有儲存。";
 const BAD_PROFILE = "這個聲線不能用在這個目標，沒有儲存。";
+const BAD_VOICE = "輸出端沒有這個語言的這個聲音，沒有儲存。";
 const FILE_BROKEN = "語音中繼設定檔無法讀取，沒有儲存。";
 const TRIALS_BROKEN = "試驗紀錄檔不正確，沒有儲存。";
 
@@ -68,6 +69,8 @@ export interface TrialInput {
 export interface VoiceRelayStoreOptions {
   mode: VoiceRelayMode;
   now?: () => Date;
+  /** 輸出端目前讀到的聲音（建立或修改聲線時，聲音必須在清單裡、語系相同）。 */
+  voices?: () => readonly { id: string; locale: string }[];
   /** 寫檔成功後呼叫（Adapter.reload）。 */
   onChange?: (catalog: RelayCatalog) => void;
 }
@@ -166,6 +169,7 @@ export class VoiceRelayStore {
         while (taken.has(`google_mini_${n}`)) n++;
         id = `google_mini_${n}`;
       }
+      this.requireVoice(input.voice_id, input.locale);
       const profile = this.newProfile(user, before, input.voice_id, input.locale, {});
       user.voiceProfiles.push(profile);
       user.targets.push({
@@ -174,6 +178,11 @@ export class VoiceRelayStore {
         templateOverrides: {}, reviewedTemplates: [], musicService: input.music_service, devices: [],
       });
     });
+  }
+
+  /** 聲音必須是輸出端讀到的、而且語系和目標相同。 */
+  private requireVoice(voiceId: string, locale: string): void {
+    if (!(this.options.voices?.() ?? []).some((v) => v.id === voiceId && v.locale === locale)) throw new VoiceRelayStoreError(400, BAD_VOICE);
   }
 
   private newProfile(user: UserDoc, before: RelayCatalog, voiceId: string, locale: string, patch: Partial<VoiceProfile>): VoiceProfile {
@@ -190,6 +199,7 @@ export class VoiceRelayStore {
   upsertProfile(input: UpsertProfileInput): RelayCatalog {
     return this.mutate((user, before) => {
       const target = this.target(user, before, input.target_id);
+      this.requireVoice(input.voice_id, target.locale);
       const fields = { voiceId: input.voice_id, rate: input.rate, gainDb: input.gain_db, wakeToCommandPauseMs: input.pause_ms, leadSilenceMs: input.lead_ms, tailSilenceMs: input.tail_ms };
       if (input.id !== undefined) {
         const profile = user.voiceProfiles.find((p) => p.id === input.id);
@@ -197,6 +207,12 @@ export class VoiceRelayStore {
         // 只有使用者設定檔裡、屬於這個目標的聲線可以改（內建示範聲線不行）。
         if (!profile || !owned || BUILTIN_PROFILE_IDS.has(input.id) || profile.engine !== "macos_say") throw new VoiceRelayStoreError(400, BAD_PROFILE);
         Object.assign(profile, fields);
+        // 改的是模型正在用的聲線：之前的採用是在舊聲音下確認的，全部作廢（approved 審閱與覆寫清掉，要重新採用；rejected 保留）。
+        // 試驗紀錄以聲線 ID 分組，舊紀錄留著（同一個 ID 的設定已改，判讀時要注意）。
+        if (input.id === target.voiceProfileId) {
+          target.reviewedTemplates = target.reviewedTemplates.filter((r) => r.status !== "approved");
+          target.templateOverrides = {};
+        }
         return;
       }
       const profile = this.newProfile(user, before, input.voice_id, target.locale, fields);
@@ -210,17 +226,17 @@ export class VoiceRelayStore {
       const target = this.target(user, before, input.target_id);
       const live = before.targets.find((t) => t.id === target.id)!;
       const intent = before.intents.find((i) => i.id === input.intent_id);
-      const hit = before.packs.flatMap((pack) => pack.entries.map((entry) => ({ pack, entry }))).find((h) => h.entry.templateId === input.template_id);
-      if (!intent || !hit || hit.entry.intentId !== intent.id || hit.entry.version !== input.template_version || !packLevel(hit.pack, live) || hit.entry.status === "rejected" || !hit.entry.supported) {
-        throw new VoiceRelayStoreError(400, BAD_TEMPLATE);
-      }
-      // 政策擋下的說法不能採用（用模板原文與所有 slot 說法檢查 Spotify 字樣）。
-      if (!templatePolicyOk(before, live, input.template_id)) throw new VoiceRelayStoreError(400, BAD_TEMPLATE);
+      if (!intent || !templateUsable(before, live, input.template_id, input.template_version, intent.id)) throw new VoiceRelayStoreError(400, BAD_TEMPLATE);
       const voice = input.voice_profile_id;
       if (voice !== target.voiceProfileId && !target.candidateVoiceProfileIds.includes(voice)) throw new VoiceRelayStoreError(400, BAD_PROFILE);
 
       const review: ReviewedTemplate = { templateId: input.template_id, version: input.template_version, status: "approved", reviewedAt: this.now().toISOString(), note: "adopted in diagnostics" };
-      target.reviewedTemplates = [...target.reviewedTemplates.filter((r) => !(r.templateId === review.templateId && r.version === review.version)), review];
+      // 每個意圖只採用一個說法：同一個意圖其他 approved 的審閱拿掉（rejected 保留）。
+      const intentOf = new Map(before.packs.flatMap((p) => p.entries).map((e) => [e.templateId, e.intentId]));
+      target.reviewedTemplates = [
+        ...target.reviewedTemplates.filter((r) => !(r.templateId === review.templateId && r.version === review.version) && !(r.status === "approved" && intentOf.get(r.templateId) === intent.id)),
+        review,
+      ];
       const def = levelDefault(before, live, intent.id);
       const overrides = { ...target.templateOverrides };
       if (def && !("ambiguous" in def) && def.entry.templateId === input.template_id) delete overrides[intent.id];
@@ -256,12 +272,10 @@ export class VoiceRelayStore {
   /** 加一筆已審閱的試驗（使用者在診斷畫面記錄的結果），回傳這一組的統計。 */
   recordTrial(input: TrialInput, catalog: RelayCatalog): TrialSummary {
     const target = catalog.targets.find((t) => t.id === input.target_id);
-    const entry = catalog.packs.flatMap((p) => p.entries).find((e) => e.templateId === input.template_id);
     if (!target) throw new VoiceRelayStoreError(400, NO_TARGET);
-    if (!entry || entry.version !== input.template_version) throw new VoiceRelayStoreError(400, BAD_TEMPLATE);
-    if (input.voice_profile_id !== target.voiceProfileId && !target.candidateVoiceProfileIds.includes(input.voice_profile_id) && !catalog.profiles.some((p) => p.id === input.voice_profile_id && p.locale === target.locale)) {
-      throw new VoiceRelayStoreError(400, BAD_PROFILE);
-    }
+    // 和採用相同的檢查：模板要能用在這個目標；聲線必須是目標選定的或候選。
+    if (!templateUsable(catalog, target, input.template_id, input.template_version)) throw new VoiceRelayStoreError(400, BAD_TEMPLATE);
+    if (input.voice_profile_id !== selectedProfileId(catalog, target) && !target.candidateVoiceProfileIds.includes(input.voice_profile_id)) throw new VoiceRelayStoreError(400, BAD_PROFILE);
     const trials = this.readTrials();
     const max = trials.reduce((m, t) => Math.max(m, /^t_(\d+)$/.test(t.id) ? Number(t.id.slice(2)) : 0), 0);
     const trial: RelayTrial = {
@@ -275,6 +289,20 @@ export class VoiceRelayStore {
     const key = JSON.stringify([trial.targetId, trial.templateId, trial.templateVersion, trial.voiceProfileId]);
     return summarizeTrials(parsed.trials).find((s) => s.key === key)!;
   }
+}
+
+/** 模板能不能用在這個目標：存在、版本對、（指定時）意圖對、命令包相容、沒被目錄拒絕、supported、政策沒擋。 */
+export function templateUsable(catalog: RelayCatalog, target: Target, templateId: string, version: number, intentId?: string): boolean {
+  const hit = catalog.packs.flatMap((pack) => pack.entries.map((entry) => ({ pack, entry }))).find((h) => h.entry.templateId === templateId);
+  if (!hit || hit.entry.version !== version || (intentId !== undefined && hit.entry.intentId !== intentId)) return false;
+  if (!packLevel(hit.pack, target) || hit.entry.status === "rejected" || !hit.entry.supported) return false;
+  return templatePolicyOk(catalog, target, templateId);
+}
+
+/** 目標選定的聲線（模型路徑用的）：裝置表指定的，否則同品牌／助理／語系的預設聲線。 */
+export function selectedProfileId(catalog: RelayCatalog, t: Target): string | null {
+  const same = catalog.voiceDefaults.filter((d) => d.vendor === t.vendor && d.assistant === t.assistant && d.locale === t.locale);
+  return t.voiceProfileId ?? (same.find((d) => d.model === t.model) ?? same.find((d) => d.model === undefined))?.voiceProfileId ?? null;
 }
 
 /** 模板層級的政策檢查（不需要 slot 值）：模板原文加上所有 slot 說法一起檢查。 */

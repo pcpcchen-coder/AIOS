@@ -8,7 +8,7 @@ import { parseRelayCatalog, readRelayUserConfig } from "../voice-relay/catalog.t
 import { MacSayOutput, type SayRunner } from "../voice-relay/mac-say.ts";
 import { FakeRelayOutput, type PlaybackReceipt, type RelayJob, type RelayOutput } from "../voice-relay/output.ts";
 import { levelDefault, packLevel, resolveRelay, wakePhraseFor, type DiagnosticOptions, type RelayRequest, type RelayResolution, type RelayResolved } from "../voice-relay/resolver.ts";
-import { templatePolicyOk, VoiceRelayStore } from "../voice-relay/store.ts";
+import { selectedProfileId, templatePolicyOk, VoiceRelayStore } from "../voice-relay/store.ts";
 
 // VCR-0／VCR-1（fake）（docs/19）：Voice Command Relay Adapter。模型只能選「目標＋意圖＋slot」；
 // 實際說法、喚醒詞、聲線、輸出裝置都由核心依已審閱的資料決定，模型看不到也改不了。
@@ -44,6 +44,8 @@ export interface VoiceRelayAdapterOptions {
   mode?: VoiceRelayMode;
   /** 診斷畫面的寫入端（設定檔與試驗紀錄）；沒有時只能看、不能改。 */
   store?: VoiceRelayStore;
+  /** 診斷播放的時限（預設 20 秒；卡住的 say 不能一直佔著忙碌鎖）。 */
+  diagnosticTimeoutMs?: number;
 }
 
 const BUILTIN_PROFILE_IDS = new Set(BUILTIN_PROFILES.map((p) => p.id));
@@ -159,7 +161,8 @@ export class VoiceRelayAdapter implements IntegrationAdapter {
   async playDiagnostic(request: RelayRequest, diagnostic: DiagnosticOptions, part: VoiceRelayPart, signal: AbortSignal): Promise<VoiceRelayPlayResult> {
     const r = this.diagnose(request, diagnostic);
     if (r.kind === "refused") return r.detail ? { status: "refused", reason: r.reason, detail: r.detail } : { status: "refused", reason: r.reason };
-    return this.playResolved(r, part, `diag-${randomUUID()}`, signal);
+    const limited = AbortSignal.any([signal, AbortSignal.timeout(this.options.diagnosticTimeoutMs ?? 20_000)]);
+    return this.playResolved(r, part, `diag-${randomUUID()}`, limited);
   }
 
   /** 設定頁的檢視（GET /api/voice-relay）。 */
@@ -176,6 +179,7 @@ export class VoiceRelayAdapter implements IntegrationAdapter {
       mode: this.mode,
       mock: this.mock,
       restart_required: this.restartRequired,
+      fixtures_active: this.catalog.targets.some((t) => t.fixture === true),
       output: { voices: inv.voices, devices: inv.devices, checked_at: inv.checkedAt, error },
       targets: this.catalog.targets.map((t) => this.targetView(t, trials.filter((x) => x.targetId === t.id))),
     };
@@ -183,8 +187,7 @@ export class VoiceRelayAdapter implements IntegrationAdapter {
 
   private targetView(t: Target, trials: RelayTrial[]): VoiceRelayTargetView {
     const c = this.catalog;
-    const same = c.voiceDefaults.filter((d) => d.vendor === t.vendor && d.assistant === t.assistant && d.locale === t.locale);
-    const selected = t.voiceProfileId ?? (same.find((d) => d.model === t.model) ?? same.find((d) => d.model === undefined))?.voiceProfileId ?? null;
+    const selected = selectedProfileId(c, t);
     const ids = [...new Set([...(selected ? [selected] : []), ...t.candidateVoiceProfileIds])];
     const profiles: VoiceRelayProfileView[] = ids
       .map((id) => c.profiles.find((p) => p.id === id))
@@ -203,10 +206,13 @@ export class VoiceRelayAdapter implements IntegrationAdapter {
         .flatMap((pack) => pack.entries.filter((e) => e.intentId === intent.id))
         .map((e) => {
           const reviewed = t.reviewedTemplates.find((r) => r.templateId === e.templateId && r.version === e.version);
+          const status = e.status === "rejected" ? ("rejected" as const) : (reviewed?.status ?? e.status);
+          const policyBlocked = !templatePolicyOk(c, t, e.templateId);
+          const selectedDefault = e.templateId === defaultId;
           return {
-            template_id: e.templateId, version: e.version, text: e.utteranceTemplate, wake,
-            status: e.status === "rejected" ? ("rejected" as const) : (reviewed?.status ?? e.status),
-            selected_default: e.templateId === defaultId, adopted: e.status !== "rejected" && reviewed?.status === "approved", policy_blocked: !templatePolicyOk(c, t, e.templateId),
+            template_id: e.templateId, version: e.version, text: e.utteranceTemplate, wake, status, selected_default: selectedDefault,
+            // 採用＝模型路徑實際會播這個說法：有效狀態是 approved、是解析器會選的那一個、政策沒擋。
+            adopted: status === "approved" && selectedDefault && e.supported && !policyBlocked, policy_blocked: policyBlocked,
           };
         });
       if (templates.length) intents.push({ intent_id: intent.id, slots: Object.keys(intent.slots) as VoiceRelayIntentView["slots"], templates });
@@ -350,13 +356,15 @@ export function createVoiceRelayAdapter(config: Config["ail"], log: (line: strin
   }
   const catalog = parsed.catalog;
   let adapter: VoiceRelayAdapter | null = null;
-  const store = new VoiceRelayStore(config.vcr.dir, { mode, ...(deps.now ? { now: deps.now } : {}), onChange: (c) => adapter?.reload(c) });
+  let output: RelayOutput | null = null;
+  const store = new VoiceRelayStore(config.vcr.dir, { mode, ...(deps.now ? { now: deps.now } : {}), voices: () => output?.inventory?.().voices ?? [], onChange: (c) => adapter?.reload(c) });
   const count = catalog.targets.filter((t) => t.enabled).length;
   if (mode === "mac") {
-    const output = new MacSayOutput(deps.run ? { run: deps.run } : {});
-    adapter = new VoiceRelayAdapter({ catalog, output, mode, store });
+    const mac = new MacSayOutput(deps.run ? { run: deps.run } : {});
+    output = mac;
+    adapter = new VoiceRelayAdapter({ catalog, output: mac, mode, store });
     // 第一次讀聲音與喇叭清單（非同步；讀完之前所有聲線都當作不可用）。
-    adapter.ready = output.refresh();
+    adapter.ready = mac.refresh();
     log(`整合層：voice_relay 以 Mac say 實際發聲啟用，${count} 個目標（沒有回音抑制；尚未在真的 Mac 上驗證）`);
     return adapter;
   }
@@ -367,6 +375,7 @@ export function createVoiceRelayAdapter(config: Config["ail"], log: (line: strin
   });
   const devices = [...new Set(catalog.targets.map((t) => t.outputDeviceId))].map((id) => ({ id, name: id }));
   log(`整合層：voice_relay 以假輸出（模擬）啟用，${count} 個目標；沒有實體喇叭發聲`);
-  adapter = new VoiceRelayAdapter({ catalog, output: new FakeRelayOutput({ voices, devices }), mode, store });
+  output = new FakeRelayOutput({ voices, devices });
+  adapter = new VoiceRelayAdapter({ catalog, output, mode, store });
   return adapter;
 }

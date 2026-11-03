@@ -85,7 +85,7 @@ const target: VoiceRelayTargetView = {
   devices: [],
 };
 
-const view = (targets: VoiceRelayTargetView[], extra: Partial<VoiceRelayView> = {}): VoiceRelayView => ({ mode: "mac", mock: false, restart_required: false, output, targets, ...extra });
+const view = (targets: VoiceRelayTargetView[], extra: Partial<VoiceRelayView> = {}): VoiceRelayView => ({ mode: "mac", mock: false, restart_required: false, fixtures_active: false, output, targets, ...extra });
 const panel = (v: VoiceRelayView | null, extra: Partial<import("../src/views.ts").VoiceRelayPanelState> = {}) => ({ ...views.emptyVoiceRelayPanel(), view: v, ...extra });
 
 describe("voice relay diagnostics: create form", () => {
@@ -122,6 +122,28 @@ describe("voice relay diagnostics: create form", () => {
     expect(en.textContent).toContain("Add Google Home Mini");
     expect(en.textContent).not.toMatch(HAN);
     for (const e of en.all()) for (const v of e.attributes.values()) expect(v).not.toMatch(HAN);
+  });
+
+  it("fixture targets in use: the create form is still offered with a replace note (zh + en)", () => {
+    const { actions } = recorder();
+    const fixture = { ...target, id: "fixture_google_mini_en" };
+    const zh = views.renderVoiceRelay(panel(view([fixture], { mode: "fake", mock: true, fixtures_active: true }), { createLocale: "en-US" }), actions) as unknown as El;
+    expect(zh.textContent).toContain("新增 Google Home Mini");
+    expect(zh.textContent).toContain("新增後會取代示範目標。");
+    setLocale("en");
+    const en = views.renderVoiceRelay(panel(view([fixture], { mode: "fake", mock: true, fixtures_active: true }), { createLocale: "en-US" }), actions) as unknown as El;
+    expect(en.textContent).toContain("Adding a target replaces the demo targets.");
+    // 不是示範目標時不畫新增表單。
+    const own = views.renderVoiceRelay(panel(view([target])), actions) as unknown as El;
+    expect(own.textContent).not.toContain("Add Google Home Mini");
+  });
+
+  it("the timer seconds input is capped at 3600 like the resolver", () => {
+    const { actions } = recorder();
+    const timer = { ...target, music_service: "youtube_music" as const, intents: [{ intent_id: "assistant.timer" as const, slots: ["seconds" as const], templates: [{ template_id: "t", version: 1, text: "set a timer for {seconds} seconds", wake: "Hey Google", status: "candidate" as const, selected_default: true, adopted: false, policy_blocked: false }] }] };
+    const el = views.renderVoiceRelay(panel(view([timer])), actions) as unknown as El;
+    const input = el.all().find((e) => e.tagName === "input" && e.getAttribute("aria-label") === "秒數")!;
+    expect(input.getAttribute("max")).toBe("3600");
   });
 
   it("disables the create button when no voice exists for the chosen language", () => {
