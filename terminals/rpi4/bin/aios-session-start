@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Raspberry Pi OS Wayland sessions do not reliably reach graphical-session.target, so the
+# desktop autostart entry hands the display environment to the user manager and starts the kiosk.
+systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true
+systemctl --user start aios-kiosk.service

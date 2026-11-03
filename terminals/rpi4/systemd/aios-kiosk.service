@@ -1,0 +1,11 @@
+# No [Install] section: Chromium needs a desktop session, so the XDG autostart entry starts this unit.
+[Unit]
+Description=AIOS Pi terminal Chromium kiosk
+After=aios-tunnel.service
+Wants=aios-tunnel.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=%h/.local/share/aios-terminal/bin/aios-kiosk
+Restart=always
+RestartSec=3
