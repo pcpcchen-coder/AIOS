@@ -957,5 +957,7 @@
   "音量（dB）": "Volume (dB)",
   "預覽文字": "Preview text",
   "核心拒絕了這次操作，沒有完成。": "The core rejected this action; it was not completed.",
-  "新增後會取代示範目標。": "Adding a target replaces the demo targets."
+  "新增後會取代示範目標。": "Adding a target replaces the demo targets.",
+  "寄信給自己（Gmail，gog）": "Email to myself (Gmail, gog)",
+  "「可用」只代表 Mac 上的 gog 能執行；有沒有登入 Gmail，要看寄信的結果。": "“Available” only means gog runs on the Mac; whether it is signed in to Gmail shows in the result of sending."
 }

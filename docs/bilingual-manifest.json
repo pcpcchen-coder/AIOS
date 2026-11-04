@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "230e357231e74911c6524e6fd9e0b95a07d961bb76f00eb2fe9dff397cd3d86a",
-      "translationSha256": "28573878bc50bf9ef05505b4d5139492f4951622d3420019d2997cfe0b2ef9c0"
+      "sourceSha256": "fcf064d383aef7eb18332d8ce40f863d070ca2b8e99063095987c705cec6455c",
+      "translationSha256": "29ef788ef3c75eaa4159293895a995381a85ea111660f37caed501f69326e52d"
     },
     {
       "source": "docs/README.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "2dd505f8880ef3b243ba4af87dd30eebee044e3437b6bfca62c6c72ead537c35",
-      "translationSha256": "27f49179a732839e03d462794f316596f3f3c2953d32aee2027707bebdc59095"
+      "sourceSha256": "f782b252b6d32fa3578c0e32288d8b566200911ce7cfc3c46eda055fe3ddc45a",
+      "translationSha256": "545d9ea2c11a994a2773922e9494a2c09a1d4a1501ddaa3c62710870e571605b"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -475,6 +475,13 @@
       "translation": "docs/validation/mac-acceptance-runbook-2026-10-30.en.md",
       "sourceSha256": "0b8a8519e08a18d60e9006ef23570ca0ad2ecb802a960695aa30231f1524d889",
       "translationSha256": "f02f6e7f9e6798309791a98676a0ea0dd33531888dd41989c28c4f525303bcaf"
+    },
+    {
+      "source": "docs/validation/mail-1-gog-self-2026-11-04.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/mail-1-gog-self-2026-11-04.en.md",
+      "sourceSha256": "8a008ab721ee167c28d7d4cbfa85065a3c2f016d04c7c2aa68ccf33bf933130c",
+      "translationSha256": "24095f7bd33eebbce91a00ba5236c03132a292e746b0a49ff3867c399b7e43b5"
     },
     {
       "source": "docs/validation/memory-mem0-2026-10-26.md",

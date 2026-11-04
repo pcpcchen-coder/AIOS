@@ -19,6 +19,15 @@ export function registrationRefusal(id: IntegrationToolId): string | null {
   return null;
 }
 
+/**
+ * 不需要當次確認的 external_commit 工具（使用者明確決定的例外；產品紅線預設每次確認）。
+ * 每一項都要寫是誰、哪一天、為什麼；新增例外需要使用者本人的決定。
+ */
+export const CONFIRMATION_EXEMPT_TOOLS: Readonly<Record<string, string>> = {
+  // MAIL-1：收件人固定是 George 自己（NOUS_MAIL_SELF），模型改不了收件人。
+  "app.mail.send_to_self": "George 2026-11-04：寄給自己的信每次不用確認，直接寄",
+};
+
 /** 執行前的決定：run 直接執行；confirm 需要使用者當次確認。 */
 export type PolicyDecision = { kind: "run" } | { kind: "confirm" };
 
@@ -26,7 +35,8 @@ export type PolicyDecision = { kind: "run" } | { kind: "confirm" };
  * read 與 reversible_write 直接執行；external_commit（寄出、發布、付費、永久刪除）一律要當次確認（產品紅線）。
  * AIL-1 還沒有接上確認卡，所以 Dispatcher 對 confirm 一律回 refused（confirmation_unavailable），不會執行。
  */
-export function decide(effect: EffectClass): PolicyDecision {
+export function decide(effect: EffectClass, id?: IntegrationToolId): PolicyDecision {
+  if (effect === "external_commit" && id && Object.hasOwn(CONFIRMATION_EXEMPT_TOOLS, id)) return { kind: "run" };
   return effect === "external_commit" ? { kind: "confirm" } : { kind: "run" };
 }
 

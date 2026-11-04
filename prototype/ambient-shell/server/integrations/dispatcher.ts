@@ -100,7 +100,7 @@ export class IntegrationDispatcher {
     const checked = validateArgs(found.def.inputSchema, raw);
     if (!checked.ok) return finish(toolResult("refused", "參數不正確，沒有執行。", { reason: "invalid_arguments" }));
 
-    if (decide(found.def.effect).kind === "confirm") {
+    if (decide(found.def.effect, id).kind === "confirm") {
       return finish(toolResult("refused", "這個動作需要你當次確認，但確認卡還沒有接上整合層，所以沒有執行。", { reason: "confirmation_unavailable" }));
     }
     // 呼叫前就已中止：不執行（確定沒有送出，所以是 refused，不是 unknown）。
