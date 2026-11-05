@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-05T03:34:42.737Z",
-  "updated_at": "2026-11-05T03:58:18.229Z",
+  "updated_at": "2026-11-05T03:58:21.624Z",
   "ended_at": null,
   "steps": [
     {
@@ -68,10 +68,10 @@
     {
       "id": "fix",
       "title": "fix",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-11-05T03:58:21.624Z",
+      "ended_at": "2026-11-05T03:58:21.624Z",
+      "note": "PRO-1 fix; PR #97",
       "evidence": []
     },
     {
@@ -147,6 +147,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "PRO-1 review; PR #97"
+    },
+    {
+      "at": "2026-11-05T03:58:21.624Z",
+      "type": "step_updated",
+      "step_id": "fix",
+      "status": "passed",
+      "note": "PRO-1 fix; PR #97"
     }
   ],
   "provenance": "Agent self-reported"
