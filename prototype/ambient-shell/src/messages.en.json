@@ -959,5 +959,16 @@
   "核心拒絕了這次操作，沒有完成。": "The core rejected this action; it was not completed.",
   "新增後會取代示範目標。": "Adding a target replaces the demo targets.",
   "寄信給自己（Gmail，gog）": "Email to myself (Gmail, gog)",
-  "「可用」只代表 Mac 上的 gog 能執行；有沒有登入 Gmail，要看寄信的結果。": "“Available” only means gog runs on the Mac; whether it is signed in to Gmail shows in the result of sending."
+  "「可用」只代表 Mac 上的 gog 能執行；有沒有登入 Gmail，要看寄信的結果。": "“Available” only means gog runs on the Mac; whether it is signed in to Gmail shows in the result of sending.",
+  "這台裝置的畫面效能": "Display performance on this device",
+  "畫面效能": "Display performance",
+  "只調整畫面，不影響對話的收音、播放與回應速度。": "Only the display changes; listening, playback and response speed are not affected.",
+  "實測：每秒 {0} 格，每格繪製 {1} 毫秒": "Measured: {0} frames per second, {1} ms to draw each frame",
+  "實測：—": "Measured: —",
+  "完整": "Full",
+  "平衡": "Balanced",
+  "省電": "Light",
+  "最多每秒 30 格、高解析度、完整光暈與背景模糊": "Up to 30 frames per second, high resolution, full glow and background blur",
+  "最多每秒 20 格、標準解析度、較少光脈衝、關閉背景模糊": "Up to 20 frames per second, standard resolution, fewer light pulses, background blur off",
+  "最多每秒 12 格、較低解析度、較少光脈衝、簡化光暈、關閉背景模糊": "Up to 12 frames per second, lower resolution, fewer light pulses, simplified glow, background blur off"
 }

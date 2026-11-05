@@ -1,5 +1,6 @@
 import { DOMAINS, REGION_COLOR, regionMap, regionOf, type Domain } from "../shared/domain.ts";
 import { activityDescription, type RegionActivity } from "./region-activity.ts";
+import { RENDER_BUDGETS, type FrameStats, type RenderBudget } from "./performance.ts";
 export { REGION_COLOR } from "../shared/domain.ts";
 
 // 電子腦待機視覺：粒子與神經連線組成的雙半球腦，緩慢呼吸與旋轉。
@@ -102,8 +103,8 @@ const PITCH = -0.5;
 /** 腦形本身比外圈光環略小；放大以填滿原本的半徑。 */
 const SHAPE_SCALE = 1.18;
 const NEIGHBORS = 3;
-const FRAME_MS = 1000 / 30;
-const MAX_PULSES = 70;
+/** 實測每秒格數與繪製時間的視窗。 */
+const STATS_WINDOW_MS = 2000;
 /** 外圈軌道（1.62 R）加呼吸（1.018）與餘裕：不放大時整個圖形，包含淡淡的軌道，都留在視窗內。 */
 export const ORBIT_FIT_EXTENT = 1.7;
 /**
@@ -226,6 +227,10 @@ export class Brain {
   private lastFrame = 0;
   private raf = 0;
   private readonly reducedMotion: MediaQueryList;
+  /** 這台裝置的畫面效能（src/performance.ts）；預設 full＝調整前的畫面。 */
+  private budget: RenderBudget = RENDER_BUDGETS.full;
+  /** 最近約 2 秒每一格的時間（rAF 時間戳）與 step＋draw 花的毫秒。 */
+  private frameSamples: { at: number; ms: number }[] = [];
 
   constructor(private readonly canvas: HTMLCanvasElement) {
     const ctx = canvas.getContext("2d");
@@ -246,18 +251,44 @@ export class Brain {
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
       const elapsed = now - this.lastFrame;
-      // 減少動態時降到約 10 FPS 且不旋轉。
-      const minFrame = this.reducedMotion.matches ? 100 : FRAME_MS;
+      // 減少動態時降到約 10 FPS 且不旋轉；效能設定的上限更低時取較低者。
+      const minFrame = Math.max(this.reducedMotion.matches ? 100 : 0, 1000 / this.budget.maxFps);
       if (elapsed < minFrame) return;
       this.lastFrame = now;
+      const started = performance.now();
       this.step(Math.min(elapsed, 100) / 1000);
       this.draw();
+      this.recordFrame(now, performance.now() - started);
     };
     this.raf = requestAnimationFrame(loop);
   }
 
   stop(): void {
     cancelAnimationFrame(this.raf);
+  }
+
+  /** 換效能設定：立即生效，不重新載入。 */
+  setRenderBudget(budget: RenderBudget): void {
+    const pixelRatioChanged = budget.pixelRatioCap !== this.budget.pixelRatioCap;
+    this.budget = budget;
+    if (this.pulses.length > budget.maxPulses) this.pulses.splice(0, this.pulses.length - budget.maxPulses);
+    if (pixelRatioChanged) this.resize();
+    this.frameSamples = [];
+  }
+
+  /** 實測的每秒格數與平均每格繪製時間（最近約 2 秒）；少於兩格時為 null。 */
+  frameStats(): FrameStats | null {
+    const samples = this.frameSamples;
+    if (samples.length < 2) return null;
+    const span = samples[samples.length - 1].at - samples[0].at;
+    if (span <= 0) return null;
+    const drawMs = samples.reduce((sum, s) => sum + s.ms, 0) / samples.length;
+    return { fps: ((samples.length - 1) * 1000) / span, drawMs };
+  }
+
+  private recordFrame(at: number, ms: number): void {
+    this.frameSamples.push({ at, ms });
+    while (this.frameSamples.length > 1 && at - this.frameSamples[0].at > STATS_WINDOW_MS) this.frameSamples.shift();
   }
 
   /** 字級的距離比例（SenseHooks.setScale）：只影響頂端縮略圖。 */
@@ -344,7 +375,7 @@ export class Brain {
   }
 
   private resize(): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, this.budget.pixelRatioCap);
     this.width = window.innerWidth;
     this.height = window.innerHeight;
     this.canvas.width = Math.round(this.width * dpr);
@@ -523,8 +554,11 @@ export class Brain {
       ctx.lineTo(ex, ey);
       ctx.stroke();
       ctx.textAlign = "left";
-      ctx.shadowColor = "rgba(2,6,16,0.9)";
-      ctx.shadowBlur = 6;
+      // 簡化光暈時不用 shadowBlur（Pi 上很貴）；字仍照畫。
+      if (this.budget.glow === "full") {
+        ctx.shadowColor = "rgba(2,6,16,0.9)";
+        ctx.shadowBlur = 6;
+      }
       ctx.fillStyle = rgba(REGION_COLOR[d], alpha);
       const descriptions = [...new Set(this.state.activity?.filter((a) => a.domain === d).map(activityDescription))];
       if (descriptions.length) {
@@ -540,7 +574,7 @@ export class Brain {
   }
 
   private spawnPulse(color: RGB, domain: Domain | null = null): void {
-    if (this.pulses.length >= MAX_PULSES) this.pulses.shift();
+    while (this.pulses.length >= this.budget.maxPulses) this.pulses.shift();
     const pool = domain && this.regionNodes[domain].length ? this.regionNodes[domain] : this.outerNodes;
     let node = pool[Math.floor(Math.random() * pool.length)];
     const path = [node];
@@ -683,6 +717,7 @@ export class Brain {
   private drawNodes(R: number, bright: number): void {
     const { ctx, projected: p } = this;
     const size = Math.max(0.6, R / 140);
+    const glowEvery = this.budget.glow === "full" ? 4 : 8;
     for (let i = 0; i < this.nodes.length; i++) {
       const z = p[i * 3 + 2];
       const a = this.depthAlpha(z) * bright;
@@ -695,7 +730,7 @@ export class Brain {
       ctx.fillStyle = rgba(this.tinted(color), Math.min(1, a));
       const r = size * (node.inner ? 0.9 : 1.2) * (1.3 - z * 0.4);
       ctx.fillRect(p[i * 3] - r / 2, p[i * 3 + 1] - r / 2, r, r);
-      if (z < -0.55 && !node.inner && i % 4 === 0) {
+      if (z < -0.55 && !node.inner && i % glowEvery === 0) {
         const g = size * 7;
         ctx.globalAlpha = 0.25 * a;
         ctx.drawImage(this.sprite, p[i * 3] - g / 2, p[i * 3 + 1] - g / 2, g, g);
@@ -706,7 +741,7 @@ export class Brain {
 
   private drawPulses(R: number): void {
     const { ctx, projected: p } = this;
-    const g = Math.max(6, R / 9);
+    const g = Math.max(6, R / 9) * (this.budget.glow === "full" ? 1 : 0.6);
     for (const pulse of this.pulses) {
       const seg = Math.floor(pulse.t);
       const frac = pulse.t - seg;
@@ -766,8 +801,10 @@ export class Brain {
       const beat = reduced ? 1 : 0.8 + 0.2 * Math.sin(this.time * 3);
       ctx.strokeStyle = rgba(color, (0.45 + 0.35 * this.liveLevel) * level * beat);
       ctx.lineWidth = 2 + 2 * this.liveLevel;
-      ctx.shadowColor = rgba(color, 0.8 * level);
-      ctx.shadowBlur = 18 + 14 * this.liveLevel;
+      if (this.budget.glow === "full") {
+        ctx.shadowColor = rgba(color, 0.8 * level);
+        ctx.shadowBlur = 18 + 14 * this.liveLevel;
+      }
       ctx.beginPath();
       ctx.arc(this.cx, this.cy, R * 1.32, 0, Math.PI * 2);
       ctx.stroke();
