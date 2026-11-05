@@ -8,6 +8,7 @@ import type { LiveCallerMemory } from "../live-tool-caller.ts";
 import type { ContextLease, MemorySession } from "./boundary.ts";
 import { parseMemoryText, toTraditional, unselectPhrase } from "./parse.ts";
 import type { ContextFact } from "./retrieve.ts";
+import { MAIN_SOURCE } from "../../shared/terminal.ts";
 
 // MEM-2：ChatGPT 方案即時語音（Codex live）的記憶（docs/16 §9、§11；設計見 docs/validation/memory-mem2-2026-10-30.md）。
 // 一通 live 通話一個 LiveMemoryBinding，由 MemoryService.openLive 建立、server/live-route.ts 的 LiveCall 使用：
@@ -323,7 +324,8 @@ export interface LiveMemoryService {
   holdVoice(route: VoiceRoute, session: MemorySession, cleanup: () => Promise<void>, connect: (lease: ContextLease) => Promise<{ closed: Promise<void> }>): Promise<void>;
   attachVoice(route: VoiceRoute, session: MemorySession, cleanup: () => Promise<void>, closed: Promise<void>): ContextLease | null;
   revokeReasonOf(session: MemorySession): RevokeWhy;
-  liveFaceCandidate(): { card: string; name: string } | null;
+  /** page：這通語音所在的頁面；只用那個頁面認出的人當候選。 */
+  liveFaceCandidate(page?: string): { card: string; name: string } | null;
   /** ok：已選定（accept）或已作廢（!accept）；expired：卡片或辨識決策已失效；mismatch_face／mismatch_voice：鏡頭（或聲音）指向另一位家人。 */
   answerLiveCandidate(card: string, accept: boolean): Promise<CandidateAnswer>;
   /** 記憶預設選人：改路徑時暫存還在等選定的候選（handOff）；下一通 started() 取走。 */
@@ -425,6 +427,8 @@ export interface LiveBindingOptions {
   asrGraceMs?: number;
   /** 記憶預設選人的計時器（預設 setTimeout；測試換成假的）。回傳取消函式。時間到時仍以 now() 判斷，所以提早叫醒也不會提早選定。 */
   timer?: (run: () => void, ms: number) => () => void;
+  /** RPI-ID：開始這通的頁面（Mac 主視窗是 "main"，Pi 是終端機識別碼）；未提供時是 Mac 主視窗。 */
+  page?: string;
 }
 
 const SENTENCES = {
@@ -498,6 +502,11 @@ export class LiveMemoryBinding implements LiveMemoryPort {
   ) {
     this.route = options.route ?? "live";
     this.waitingCandidate = options.lookToTalk && !options.rebuild;
+  }
+
+  /** 開始這通的頁面。 */
+  get page(): string {
+    return this.options.page ?? MAIN_SOURCE;
   }
 
   get memoryActive(): boolean {
@@ -689,7 +698,7 @@ export class LiveMemoryBinding implements LiveMemoryPort {
    */
   afterGreeting(named: boolean): void {
     if (this.passive || !this.waitingCandidate || this.candidate || !this.call?.active) return;
-    const hit = this.declined ? null : this.service.liveFaceCandidate();
+    const hit = this.declined ? null : this.service.liveFaceCandidate(this.page);
     if (!hit) {
       this.waitingCandidate = false;
       this.enqueue(() => this.attachNow());
@@ -704,7 +713,7 @@ export class LiveMemoryBinding implements LiveMemoryPort {
    */
   voiceCandidate(named: boolean): boolean {
     if (this.passive || this.waitingCandidate || this.candidate || this.pending || this.voiceAsked || this.declined || this.ended || !this.call?.active) return false;
-    const hit = this.service.liveFaceCandidate();
+    const hit = this.service.liveFaceCandidate(this.page);
     if (!hit) return false;
     this.voiceAsked = true;
     this.propose(hit, named);

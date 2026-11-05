@@ -1,15 +1,15 @@
 // 看著說話時同步辨識已登記的家人（docs/14 ID-02 §2、§3；ADR-0001 §2.1）。頁面端只負責「什麼時候取樣」與「頁面看得到的條件」：
 // - 只在既有 look_to_talk 的面向停留期間（SenseSnapshot.dwelling）開始取樣，條件是在場＋近距離（AMBIENT_NEAR_M）＋面向＋鏡頭 ok，
-//   而且頁面端的啟用條件成立（看著說話、打招呼、稱名三個設定都開、macOS App、settings.identity 可用、家人辨識畫面沒開）
+//   而且頁面端的啟用條件成立（看著說話、打招呼、稱名三個設定都開、macOS App 或終端機頁面、settings.identity 可用、家人辨識畫面沒開）
 //   並且核心說有可比對的家人（ambient_status）。看著說話的計時完全不看這裡（SenseController 照原時間 startTalk）。
 // - 互動開始後（startRealtime 建立互動 ID、綁定當下的追蹤世代）繼續取樣，直到問候送出或取消；之後停止。不做背景常駐辨識。
 // - 追蹤世代（track）：離開在場、轉開、離開近距離、鏡頭不是 ok、設定關閉、辨識出錯都加一。舊世代的證據與互動都不能沿用
 //   （docs/14 §3：換人重置、不把新出現的人套入已開始的舊互動）。PresenceTracker 要 60 秒才判離開，不能拿它維持身分。
-// - 每一格經 IPC 送核心（ambient_probe）；回應不含任何結果。比對、證據、名稱與組句都在核心，頁面拿不到 person_id 與分數。
+// - 每一格經 IPC（Mac）或終端機的 HTTP（RPI-ID，只送特徵向量）送核心（ambient_probe）；回應不含任何結果。比對、證據、名稱與組句都在核心，頁面拿不到 person_id 與分數。
 // - 送出問候前（GreetingOnce.take → decide）把核心發出的互動 ID（即時語音開始時核心回的 interaction）、綁定的追蹤世代與
 //   頁面端條件（eligible）交給核心；核心再核對那個 ID 屬於真的連上的工作階段。核心回傳 API key 路徑要用的 instructions
 //   （只含已組好的短句），live 路徑只回互動 ID（短句留在核心）。頁面這裡的互動鍵只用來綁定追蹤世代，不會被核心接受。
-// 取樣器沿用 IdentityClient：≤4 Hz、同時最多一個推論；推論在 worker，不阻塞 80 ms 的感測迴圈。
+// 取樣器沿用 IdentityClient：≤4 Hz（終端機頁面 2 Hz）、同時最多一個推論；推論在 worker，不阻塞感測迴圈（80 ms；終端機 160 ms）。
 
 import { AMBIENT_NEAR_M, type FaceModelVersion, type GreetingRoute, type IdentityRequest, type IdentityResponse } from "../../shared/identity.ts";
 import { plainGreetingInstructions } from "../../shared/sense.ts";

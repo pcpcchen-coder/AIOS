@@ -10,7 +10,7 @@ import { SenseProcessor } from "./processor.ts";
 
 const EYE_W = 1280;
 const EYE_H = 720;
-/** 約 12 fps：足夠判斷在場、手勢與指向，CPU 負擔較低。 */
+/** 約 12 fps：足夠判斷在場、手勢與指向，CPU 負擔較低。終端機頁面（Pi）由呼叫端傳 PAGE_PACE.terminal 的較長間隔。 */
 const FRAME_INTERVAL_MS = 80;
 /** 超過這麼久沒有新影像就回報降級。 */
 const STALE_MS = 1000;
@@ -68,12 +68,18 @@ export class SensePipeline {
   constructor(
     private readonly settings: CameraInstall,
     private readonly emit: Emit,
+    private readonly options: { frameIntervalMs?: number } = {},
   ) {
     this.processor = new SenseProcessor({ width_mm: settings.screen_width_mm, offset_mm: settings.screen_offset_mm });
     for (const c of [this.canvasL, this.canvasR]) {
       c.width = EYE_W;
       c.height = EYE_H;
     }
+  }
+
+  /** 感知迴圈的間隔（毫秒）。 */
+  get frameIntervalMs(): number {
+    return this.options.frameIntervalMs ?? FRAME_INTERVAL_MS;
   }
 
   get running(): boolean {
@@ -114,7 +120,7 @@ export class SensePipeline {
       ({ poseL: this.poseL, poseR: this.poseR, gesture: this.gesture } = models);
       this.processor = new SenseProcessor({ width_mm: this.settings.screen_width_mm, offset_mm: this.settings.screen_offset_mm });
       if (this.facingYawRatio !== null) this.processor.facingYawRatio = this.facingYawRatio;
-      this.timer = setInterval(() => this.tick(), FRAME_INTERVAL_MS);
+      this.timer = setInterval(() => this.tick(), this.frameIntervalMs);
       this.lastFrameAt = performance.now();
       this.phase = "on";
       this.emit({ type: "sensor", state: "ok", detail: "鏡頭運作中（影像只在本機處理）" });

@@ -40,8 +40,10 @@ export interface FamilyBridge {
 }
 
 export interface FamilyViewDeps {
-  /** macOS App 的 IPC；瀏覽器版為 null。 */
+  /** macOS App 的 IPC；瀏覽器版與終端機頁面為 null。 */
   bridge: FamilyBridge | null;
+  /** bridge 為 null 時顯示的說明；未提供時是瀏覽器版的說明（RPI-ID 的終端機改說登記在 Mac 進行）。 */
+  unavailableMessage?: string;
   source: FrameSource;
   createWorker: () => WorkerLike;
   model: FaceModelVersion;
@@ -293,7 +295,7 @@ export class FamilyView {
     this.phase = { kind: "opening" };
     this.render();
     if (!this.deps.bridge) {
-      this.phase = { kind: "unavailable", message: "家人辨識：瀏覽器版不可用（只在 macOS App 提供）。" };
+      this.phase = { kind: "unavailable", message: this.deps.unavailableMessage ?? "家人辨識：瀏覽器版不可用（只在 macOS App 提供）。" };
       this.render();
       return;
     }

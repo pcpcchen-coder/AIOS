@@ -50,7 +50,8 @@ import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHist
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
 import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
-import { isTerminalId } from "../shared/terminal.ts";
+import { isTerminalId, pageSource } from "../shared/terminal.ts";
+import { terminalIdentity, terminalMemory, type TerminalIdentityPort, type TerminalMemoryPort } from "./terminal-routes.ts";
 import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
 import { VoiceRelayStoreError } from "./integrations/voice-relay/store.ts";
 import { HOME_TOOL } from "./integrations/adapters/home.ts";
@@ -114,7 +115,7 @@ export interface AppOptions {
     taskTitleFilter?(target: ChatTarget | null): ((task: Pick<Task, "task_id" | "memory">) => boolean) | null;
     /** MEM-4a：即時語音路徑的同意對象（live：codex；api_key：openai_realtime）。 */
     routeTarget?(route: VoiceRoute): ChatTarget | null;
-  };
+  } & Partial<TerminalMemoryPort>;
   /** 即時語音的 API key 路徑（OpenAI Realtime GA）；未提供時這條路徑不可用。 */
   realtime?: RealtimeBridge;
   /**
@@ -152,10 +153,11 @@ export interface AppOptions {
   /** F2／F10：本機開口偵測門檻（NOUS_EARLY_SPEECH_RMS）；未提供時頁面用預設值。 */
   earlySpeechRms?: number;
   /**
-   * 家人辨識的狀態（IdentityService）：只有可用與否與人數。身分資料（姓名、識別碼、特徵）只走 Electron IPC，
-   * 這裡沒有任何身分路由。未提供（瀏覽器版）時回報不可用。
+   * 家人辨識的狀態（IdentityService）：只有可用與否與人數。管理與登記只走 Electron IPC；有 handle 時，終端機頁面可經
+   * POST /api/terminal/identity 用不需要管理 session 的認人操作（server/terminal-routes.ts）。未提供（瀏覽器版）時回報不可用、
+   * 終端機路由 404。
    */
-  identity?: { status(): IdentityStatus };
+  identity?: { status(): IdentityStatus } & Partial<TerminalIdentityPort>;
   /** 家人辨識模型與 onnxruntime wasm 的資料夾（只提供清單上的檔名）；未提供時 /face-runtime/ 一律 404。 */
   faceRuntimeDir?: string | null;
   /** SP-01 講者模型與 onnxruntime wasm 的資料夾（只提供清單上的檔名）；未提供時 /speaker-runtime/ 一律 404。 */
@@ -239,7 +241,7 @@ class HttpError extends Error {
   }
 }
 
-export function createApp(options: AppOptions): Server & { notifySettings(): void; realtimeSessions: RealtimeSessions | null } {
+export function createApp(options: AppOptions): Server & { notifySettings(): void; notifyMemoryPresence(): void; realtimeSessions: RealtimeSessions | null } {
   const { store, runner, auth, chat, realtime, webSearch, home, codexAuth } = options;
   /** SSE 串流：client_id → 回應。工具呼叫只送到擁有工作階段的那一條。 */
   const clients = new Map<string, ServerResponse>();
@@ -505,7 +507,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const wakeId = source === "wake_word" && typeof body.wake_id === "string" && WAKE_ID.test(body.wake_id) ? body.wake_id : null;
       const locale = normalizeLocale(req.headers["x-nous-locale"]);
       // rebuild：MEM-2 記憶撤銷後頁面自動重建（只走 live、不問候）；只是開始方式，不是授權。
-      const decision = sessions.start(clientId, source, locale, body.rebuild === true, wakeId);
+      // RPI-ID：哪個頁面開始的（X-Nous-Terminal），記憶候選與喚醒時窗只看那個頁面；不是授權。
+      const decision = sessions.start(clientId, source, locale, body.rebuild === true, wakeId, pageSource(req.headers["x-nous-terminal"]));
       return sendJson(res, 200, decision.ok
         ? { ...decision, billing_line: localize(decision.billing_line, locale), notice: decision.notice === null ? null : localize(decision.notice, locale) }
         : { ...decision, message: localize(decision.message, locale) });
@@ -623,6 +626,18 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (!isTerminalId(body.terminal)) throw new HttpError(400, "terminal must be a lowercase id (a-z, 0-9, -; up to 32 characters)");
       options.terminals.heartbeat(body.terminal);
       return sendJson(res, 200, { ok: true });
+    }
+    if (method === "POST" && path === "/api/terminal/identity" && options.identity?.handle) {
+      // RPI-ID：Pi 的認人（特徵向量，不是影像或錄音）；不記 log（取樣約 2 Hz），核心自己記狀態轉換與問候決策。
+      const out = await terminalIdentity(options.identity as TerminalIdentityPort, await readJson(req));
+      if (out.status !== 200) throw new HttpError(out.status, out.error);
+      return sendJson(res, 200, out.body);
+    }
+    if (method === "POST" && path === "/api/terminal/memory" && options.memory?.handle && options.memory.cardKind) {
+      // RPI-ID：Pi 的「正在用 X 的記憶」與「不是我」（不含記憶內容）。
+      const out = await terminalMemory(options.memory as TerminalMemoryPort, await readJson(req));
+      if (out.status !== 200) throw new HttpError(out.status, out.error);
+      return sendJson(res, 200, out.body);
     }
     if (method === "GET" && path === "/api/realtime/cost-records") {
       // WK-02（F6）：最近的費用紀錄（新的在前）；沒有逐字稿與音訊，費用一律 unknown。
@@ -991,6 +1006,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     realtimeSessions: sessions,
     /** 設定或登入狀態改變時呼叫，推送給所有畫面。 */
     notifySettings: () => broadcast({ type: "settings.updated", sequence: ++sequence, settings: settings.view() }),
+    /** RPI-ID：本次人物世代改變（不含內容）；每個頁面（含 Pi）自己用 status 重讀。Mac 主視窗另有 IPC 通知。 */
+    notifyMemoryPresence: () => broadcast({ type: "memory.presence_changed", sequence: ++sequence }),
   });
 }
 

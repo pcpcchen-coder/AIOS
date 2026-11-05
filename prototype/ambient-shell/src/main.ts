@@ -35,11 +35,13 @@ import { classify, settingsReply } from "./intent.ts";
 import { matchVoiceCommand, RealtimeLocalCommands } from "./voice-command.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { startTerminalHeartbeat } from "./terminal-heartbeat.ts";
+import { selectBridges } from "./identity-bridge.ts";
+import { PAGE_PACE } from "../shared/terminal.ts";
 import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
 import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
 import type { TasksRequest, TasksResponse, VaultView } from "../shared/protected-tasks.ts";
-import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, PresenceNotice, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
+import { conversationPersonLabel, liveMemoryLabel, MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, PresenceNotice, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
 import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
 import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
 import { AmbientIdentity } from "./sense/identity-ambient.ts";
@@ -129,6 +131,19 @@ declare global {
   }
 }
 
+/**
+ * RPI-ID：家人辨識與記憶的傳輸。Mac 主視窗是 IPC；Pi 等終端機頁面是 HTTP（只有認人與「正在用 X 的記憶」「不是我」）；
+ * 一般瀏覽器是 null。登記、校準、記憶管理、打字聊天的記憶與記憶建議仍只看 window.nousDesktop。
+ */
+const bridges = selectBridges({ desktop: window.nousDesktop, search: location.search, http: { identity: api.terminalIdentity, memory: api.terminalMemory } });
+const identityBridge = bridges.identity;
+const presenceBridge = bridges.memory;
+/** Pi 的效能保護（對話流暢優先）：終端機頁面的感知迴圈與同步辨識取樣頻率減半。 */
+const pagePace = bridges.terminal !== null ? PAGE_PACE.terminal : PAGE_PACE.main;
+/** 終端機頁面上，Mac 才有的畫面（家人辨識、記憶管理）說明要到 Mac 的 App 操作。 */
+const TERMINAL_FAMILY_UNAVAILABLE = "家人辨識：登記與管理請在 Mac 的 Nous App 進行（這台終端機只用來認人）。";
+const TERMINAL_MEMORY_UNAVAILABLE = "記憶：管理請在 Mac 的 Nous App 進行（這台終端機只顯示正在用誰的記憶）。";
+
 const canvas = $<HTMLCanvasElement>("brain");
 const regionActivity = $<HTMLParagraphElement>("region-activity");
 const statusLine = $<HTMLParagraphElement>("status-line");
@@ -177,7 +192,7 @@ const suggestionPrompt = new SuggestionPrompt({
  */
 const presenceNoticeEl = $<HTMLDivElement>("presence-notice");
 const presenceNotice = new PresenceNotice({
-  bridge: window.nousDesktop?.memory ? { memory: (request) => window.nousDesktop!.memory!(request) } : null,
+  bridge: presenceBridge ? { memory: presenceBridge } : null,
   presence: () => memoryPresence,
   applied: (view) => {
     if (view.history_reset) session.forgetMemoryHistory();
@@ -936,13 +951,15 @@ function syncWake(view: WakeSettingsView | undefined): void {
     wakeLoading = false;
     const latest = settings?.wake;
     if (!latest || wake) return;
-    // SP-02a：桌面版（有家人辨識）才在喚醒時認聲音；speaker worker 跟著喚醒控制器存在，喚醒詞片段由喚醒 worker 直接送過去。
-    if (window.nousDesktop?.identity && !wakeVoice) {
+    // SP-02a：有家人辨識的頁面（Mac 的 App、RPI-ID 的終端機）才在喚醒時認聲音；speaker worker 跟著喚醒控制器存在，
+    // 喚醒詞片段由喚醒 worker 直接送過去。
+    const sendIdentity = identityBridge;
+    if (sendIdentity && !wakeVoice) {
       wakeVoice = new WakeVoice({
         createWorker: createSpeakerWorker,
         assets: SPEAKER_RUNTIME_ASSETS,
         model: speakerRuntime.model_version,
-        send: (request) => window.nousDesktop!.identity!(request),
+        send: sendIdentity,
         lease: () => familyMic.acquire(),
         release: (stream) => familyMic.release(stream),
         tap: tapStream,
@@ -1153,7 +1170,7 @@ function setMemoryPresence(presence: MemoryPresenceView | null, profiles?: { id:
 
 /** 讀本次人物（status 不開記憶檔、不碰 Keychain）；記憶沒開時不顯示標示，但仍追蹤世代。 */
 async function refreshMemoryStatus(): Promise<void> {
-  const bridge = window.nousDesktop?.memory;
+  const bridge = presenceBridge;
   if (!bridge) return;
   const res = await bridge({ op: "status" });
   if (!res.ok || res.op !== "status") return;
@@ -1419,7 +1436,7 @@ function createIdentityWorker(): WorkerLike {
 }
 
 /**
- * 看著說話時同步辨識（docs/14 ID-02）：只有 macOS App、三個設定（看著說話、打招呼、稱名）都開、settings.identity 可用而且
+ * 看著說話時同步辨識（docs/14 ID-02）：只有 macOS App 或終端機頁面（RPI-ID）、三個設定（看著說話、打招呼、稱名）都開、settings.identity 可用而且
  * 沒有限制、家人辨識畫面沒開時才啟用。只在面向停留期間與問候決策前取樣；不延長看著說話的秒數。
  */
 function ambientEnabled(): boolean {
@@ -1427,7 +1444,7 @@ function ambientEnabled(): boolean {
   const id = settings?.identity;
   // WK-02：喚醒開始、問候還沒決定的互動不需要「看著說話」「看著說話時先打招呼」（George 2026-10-31：喚醒後一律打招呼）。
   const greets = (cam?.look_to_talk && cam.look_to_talk_greet) || wakeGreetingInteraction !== null;
-  return !!window.nousDesktop?.identity && !!cam?.enabled && cam.active && greets && cam.look_to_talk_greet_name
+  return !!identityBridge && !!cam?.enabled && cam.active && greets && cam.look_to_talk_greet_name
     && !!id?.available && !id.limited_reason && !blocksAutoTalk(shell.surface);
 }
 
@@ -1450,11 +1467,12 @@ function applyDistanceScale(): void {
 const lookTimeline = new LookTimeline(() => performance.now(), (line) => console.info(line));
 
 const ambient = new AmbientIdentity({
-  bridge: window.nousDesktop?.identity ? { identity: (request) => window.nousDesktop!.identity!(request) } : null,
+  bridge: identityBridge ? { identity: identityBridge } : null,
   enabled: ambientEnabled,
   createSampler: (onFrame, onState) =>
     new IdentityClient({
       source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) }, createWorker: createIdentityWorker, onFrame, onState,
+      intervalMs: pagePace.identitySampleMs,
       // 看著說話的同步辨識用校正後的品質門檻（登記與試認仍用預設）。
       frameOptions: () => {
         const tuning = settings?.face_tuning;
@@ -1465,7 +1483,7 @@ const ambient = new AmbientIdentity({
   model: faceRuntime.model_version,
   now: () => performance.now(),
   // 記憶的互動結束：人離開鏡頭或多人入鏡時暫停本次人物（只能降權）。
-  onPresenceBreak: (reason) => void window.nousDesktop?.memory?.({ op: "suspend", reason }).then((res) => { if (res.ok && res.op === "suspend") setMemoryPresence(res.presence); }),
+  onPresenceBreak: (reason) => void presenceBridge?.({ op: "suspend", reason }).then((res) => { if (res.ok && res.op === "suspend") setMemoryPresence(res.presence); }),
 });
 
 const sense = new SenseController({
@@ -1588,6 +1606,7 @@ const familyMic: MicSource = {
 
 const familyView = new FamilyView({
   bridge: window.nousDesktop?.identity ? { identity: (request) => window.nousDesktop!.identity!(request) } : null,
+  ...(bridges.terminal !== null ? { unavailableMessage: TERMINAL_FAMILY_UNAVAILABLE } : {}),
   ...(window.nousDesktop?.identity
     ? {
         voice: {
@@ -1622,6 +1641,7 @@ const familyView = new FamilyView({
 
 const memoryView = new MemoryView({
   bridge: window.nousDesktop?.memory ? { memory: (request) => window.nousDesktop!.memory!(request) } : null,
+  ...(bridges.terminal !== null ? { unavailableMessage: TERMINAL_MEMORY_UNAVAILABLE } : {}),
   dismiss: () => dispatch({ type: "dismiss" }),
   resolved: (view, requestId) => applyMemoryTurn(view, memoryTurnText.get(requestId) ?? "", requestId, getLocale()),
   // MEM-2：即時語音的卡：回條只顯示（模型已經聽到了，不經 /api/chat 續送），語音的固定回條由核心送。
@@ -1722,7 +1742,7 @@ async function delegateCard(card: string): Promise<void> {
 }
 
 memoryPerson.addEventListener("change", () => {
-  const bridge = window.nousDesktop?.memory;
+  const bridge = presenceBridge;
   if (!bridge) return;
   const profile = memoryPerson.value === "" ? null : memoryPerson.value;
   // 主視窗的「本次人物」選單：使用者直接選定（換人會撤銷舊世代，用過記憶的對話歷史清空）。
@@ -1763,7 +1783,7 @@ async function startCamera(): Promise<void> {
   const { SensePipeline } = await import("./sense/pipeline.ts");
   // 載入模組期間可能已收到「鏡頭關掉」。
   if (servicePaused || !settings?.camera || !cameraShouldRun(settings.camera, cameraOffPending, cameraFailed)) return;
-  pipeline ??= new SensePipeline(settings.camera, (event) => sense.handle(event));
+  pipeline ??= new SensePipeline(settings.camera, (event) => sense.handle(event), { frameIntervalMs: pagePace.senseFrameMs });
   applyFacingTuning();
   await pipeline.start();
   if (servicePaused) pipeline.stop();
@@ -2340,6 +2360,11 @@ function onServerEvent(event: ServerEvent): void {
     // MEM-4c 審查 M1／minor 5：不一次讀全部任務的真實內容；只為畫面上正在顯示的讀（renderProgress、前景任務）。
     void refreshVault();
     render();
+    return;
+  }
+  if (event.type === "memory.presence_changed") {
+    // RPI-ID：Mac 主視窗另有 IPC 通知（onMemoryChange）；終端機頁面靠這個不含內容的事件重讀本次人物。
+    if (!window.nousDesktop) void refreshMemoryStatus();
     return;
   }
   if (event.type === "task.deleted") {
@@ -3010,7 +3035,7 @@ function renderConversation(): void {
   conversationReply.dataset.status = reply.kind;
   conversationUser.textContent = msg`你：${reply.user}`;
   // 「本次人物」只在輸入列與這個對話 Surface 顯示（不建常駐側欄）。
-  const person = window.nousDesktop?.memory && settings?.memory?.enabled ? presenceLabel(memoryPresence) : "";
+  const person = conversationPersonLabel(memoryPresence, { bridge: !!presenceBridge, enabled: !!settings?.memory?.enabled, terminal: bridges.terminal !== null });
   conversationPerson.hidden = !person;
   conversationPerson.textContent = person;
   conversationNotice.hidden = !("notice" in reply && reply.notice);
@@ -3068,10 +3093,9 @@ function renderDelegatePrompt(requestId: string): void {
   conversationReply.append(box);
 }
 
-/** 輸入列的記憶狀態：桌面版且記憶開啟時顯示「本次人物」選單；瀏覽器版明示不可用。 */
+/** 輸入列的記憶狀態：Mac 的 App 或終端機（RPI-ID）且記憶開啟時顯示「本次人物」選單；一般瀏覽器明示不可用。 */
 function renderMemoryLine(): void {
-  const desktop = !!window.nousDesktop?.memory;
-  if (!desktop) {
+  if (!presenceBridge) {
     memoryLine.hidden = false;
     memoryPersonLabel.textContent = t(MEMORY_BROWSER_UNAVAILABLE);
     memoryPerson.hidden = true;
@@ -3120,19 +3144,8 @@ function renderEngineLine(): void {
     const next = rt?.billing_line && rt.billing_line !== activeLine ? msg`（下次開始時改用：${t(rt.billing_line)}）` : "";
     engineLine.append(msg`即時語音：${t(activeLine ?? rt?.billing_line ?? "—")}${next}｜`);
     // MEM-2／MEM-3：這通即時語音通話的本次人物與記憶筆數（或沒有用到記憶的原因，依路徑）；不含內容。
-    const route = realtimeTicket?.route ?? null;
-    if (route && liveMemory && liveMemory.reason === "route_off") {
-      // 這條路徑的記憶還沒放行：記憶開著時照實標示（和 MEM-2 的 API key 路徑一樣）。
-      if (window.nousDesktop?.memory && settings.memory?.enabled) engineLine.append(t("此路徑未啟用記憶｜"));
-    } else if (route && liveMemory && window.nousDesktop?.memory) {
-      const name = memoryPresence?.state === "selected" ? memoryPresence.name : null;
-      const why = t(liveMemory.reason ? memoryReasonText(route, liveMemory.reason) : "未用記憶");
-      engineLine.append(name
-        ? liveMemory.used > 0 ? msg`本次人物：${name} · 記憶 ${liveMemory.used} 筆｜` : msg`本次人物：${name} · ${why}｜`
-        : liveMemory.used > 0 ? msg`本次人物：未選定 · 記憶 ${liveMemory.used} 筆｜` : msg`本次人物：未選定 · ${why}｜`);
-    }
-    // API key 路徑沒有記憶狀態（舊的核心或沒有事件串流）而記憶開著：照實標示沒有用到。
-    else if (route === "api_key" && !liveMemory && window.nousDesktop?.memory && settings.memory?.enabled) engineLine.append(t("此路徑未啟用記憶｜"));
+    const liveMemoryText = liveMemoryLabel({ route: realtimeTicket?.route ?? null, live: liveMemory, presence: memoryPresence, bridge: !!presenceBridge, enabled: !!settings.memory?.enabled, reasonText: memoryReasonText });
+    if (liveMemoryText) engineLine.append(liveMemoryText);
     engineLine.append(t("交辦工作："));
   }
   if (settings.provider === "chatgpt") {

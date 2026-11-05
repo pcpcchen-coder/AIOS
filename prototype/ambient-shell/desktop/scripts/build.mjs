@@ -31,21 +31,22 @@ await build({
   logLevel: "warning",
 });
 
-await build({
-  entryPoints: [join(desktop, "localization.mjs")],
-  outfile: join(out, "localization.mjs"),
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node24",
-  logLevel: "warning",
-});
+// localization 與兩個 IPC 過濾會 import ../shared/ 的共用程式（終端機的 HTTP 也用同一份驗證）：打包成單檔，build/app 裡沒有 shared/。
+for (const name of ["localization.mjs", "identity-ipc.mjs", "memory-ipc.mjs"]) {
+  await build({
+    entryPoints: [join(desktop, name)],
+    outfile: join(out, name),
+    bundle: true,
+    platform: "node",
+    format: "esm",
+    target: "node24",
+    logLevel: "warning",
+  });
+}
 
 cpSync(join(desktop, "main.mjs"), join(out, "main.mjs"));
 cpSync(join(desktop, "settings-menu.mjs"), join(out, "settings-menu.mjs"));
-cpSync(join(desktop, "identity-ipc.mjs"), join(out, "identity-ipc.mjs"));
 cpSync(join(desktop, "trusted-sender.mjs"), join(out, "trusted-sender.mjs"));
-cpSync(join(desktop, "memory-ipc.mjs"), join(out, "memory-ipc.mjs"));
 cpSync(join(desktop, "tasks-ipc.mjs"), join(out, "tasks-ipc.mjs"));
 cpSync(join(desktop, "memory-safe-storage.mjs"), join(out, "memory-safe-storage.mjs"));
 cpSync(join(desktop, "preload.cjs"), join(out, "preload.cjs"));

@@ -329,7 +329,7 @@ describe("voice-only naming test switch (George 2026-11-01, off by default)", ()
     await voiceProbe(c, wid(1), "keyword", GEORGE.keyword);
     expect(await greet(c, id(1), 1, { wake_id: wid(1) })).toMatch(NAMED);
     expect(lastDecision(c)).toMatch(/（api_key，ok，.*融合 voice_only_test/);
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
     c.camera.on = false;
     c.clock.now += 61_000;
     await voiceProbe(c, wid(2), "utterance", GEORGE.utterance);
@@ -414,16 +414,16 @@ describe("SP-02b in-call voice (通話中辨認說話者)", () => {
     const c = setup({ speakerInCall: true, memory: m.link });
     const george = await enroll(c, "George", GEORGE);
     await callVoice(c, GEORGE.utterance);
-    const first = c.svc.memoryCandidate();
+    const first = c.svc.memoryCandidate("main");
     expect(first).toMatchObject({ person_id: george, name: "George" });
     expect(m.offers).toEqual([true]);
     expect(lastCall(c)).toContain("沒有本次人物，提出聲音候選");
     expect(lastCall(c)).not.toMatch(/George|fam_|0\.\d{3}/);
     c.clock.now += 5000;
     await callVoice(c, GEORGE.utterance);
-    expect(c.svc.memoryCandidate()?.at).toBe(first!.at);
+    expect(c.svc.memoryCandidate("main")?.at).toBe(first!.at);
     c.clock.now += MEMORY_CANDIDATE_MS + 1;
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
     c.prefs.look_to_talk_greet_name = false;
     await callVoice(c, GEORGE.utterance);
     expect(m.offers.at(-1)).toBe(false);
@@ -437,7 +437,7 @@ describe("SP-02b in-call voice (通話中辨認說話者)", () => {
     await callVoice(c, GEORGE.utterance);
     c.clock.now += 1000;
     await callVoice(c, MARY.utterance);
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
     expect(lastCall(c)).toContain("和其他證據不一致，不提候選");
     expect(m.offers).toEqual([true]);
   });
@@ -455,7 +455,7 @@ describe("SP-02b in-call voice (通話中辨認說話者)", () => {
     expect(lastCall(c)).toContain("與本次人物一致");
     expect(m.suspends).toEqual([]);
     expect(m.offers).toEqual([]);
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
     // 記憶預設選人（2026-11-02）：另一位家人的聲音交給記憶層判斷（剛預設選定 10 秒內才改回全家共用；其他照 G2 只記錄）。
     expect(m.disagrees).toEqual([1]);
   });
@@ -465,16 +465,16 @@ describe("SP-02b in-call voice (通話中辨認說話者)", () => {
     const c = setup({ speakerInCall: true, memory: m.link });
     await enroll(c, "George", GEORGE);
     await callVoice(c, GEORGE.utterance);
-    expect(c.svc.memoryCandidate()).toMatchObject({ name: "George", source: "voice" });
-    expect(c.svc.memoryFaceCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toMatchObject({ name: "George", source: "voice" });
+    expect(c.svc.memoryFaceCandidate("main")).toBeNull();
     const multi = await c.svc.handle({ op: "ambient_probe", track: 3, model: MODEL, face_count: 2, quality: "multi_face" });
     expect(multi).toEqual({ ok: true, op: "ambient_probe" });
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
     c.clock.now += 1000;
     await callVoice(c, GEORGE.utterance);
     expect(lastCall(c)).toContain("畫面有多張臉，不提候選");
     expect(m.offers).toEqual([true]);
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
   });
 
   it("short or featureless segments are ignored; unknown voices are logged without a candidate; a new greeting drops the old candidate", async () => {
@@ -490,11 +490,11 @@ describe("SP-02b in-call voice (通話中辨認說話者)", () => {
     expect(lastCall(c)).toContain("通話中聲音（unknown");
     c.clock.now += 1000;
     await callVoice(c, GEORGE.utterance);
-    expect(c.svc.memoryCandidate()).not.toBeNull();
+    expect(c.svc.memoryCandidate("main")).not.toBeNull();
     await faces(c, 1, GEORGE.face);
     await greet(c, id(1), 1, { source: "look_to_talk" });
     c.clock.now += 61_000;
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
   });
 
   it("IPC: call_voice needs no session; voiced_ms and an optional 192-d feature", () => {

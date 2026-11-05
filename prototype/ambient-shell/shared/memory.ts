@@ -181,6 +181,24 @@ export type MemoryResponse =
   | ({ ok: true; op: "edit" | "forget" | "pin" | "profile_delete" | "link_face" | "profile_minor" | "suggestions" } & { receipt: MemoryReceiptView; history_reset: boolean; status: MemoryStatusView })
   | { ok: false; code: MemoryErrorCode; message: string };
 
+/**
+ * RPI-ID：終端機（POST /api/terminal/memory）拿到的本次人物狀態：只有 Pi 的「正在用 X 的記憶」、「不是我」與本次人物選單用到的
+ * 欄位（狀態、本次人物、人物的 ID 與名字）。記憶筆數、未成年與連結旗標、服務帳號與同意、建議旗標都不給。
+ */
+export interface MemoryPresenceStatus {
+  state: MemoryStatusView["state"];
+  presence: MemoryPresenceView;
+  profiles: Pick<MemoryProfileView, "id" | "name">[];
+}
+
+/** RPI-ID：終端機的記憶回應（allow-list 投影；server/terminal-routes.ts）。 */
+export type MemoryPresenceResponse =
+  | ({ ok: true; op: "status" } & MemoryPresenceStatus)
+  | ({ ok: true; op: "card_answer" | "select" } & Pick<MemoryTurnView, "receipts" | "presence" | "history_reset"> & { status: MemoryPresenceStatus })
+  | { ok: true; op: "suspend"; presence: MemoryPresenceView }
+  | { ok: true; op: "card_view"; card: Extract<MemoryCardView, { kind: "face_candidate" }>; origin: "typed" | "live" }
+  | { ok: false; code: MemoryErrorCode; message: string };
+
 export type MemorySetupSubject = { kind: "household" } | { kind: "profile"; profile: string } | { kind: "name"; name: string };
 
 export type MemoryRequest =

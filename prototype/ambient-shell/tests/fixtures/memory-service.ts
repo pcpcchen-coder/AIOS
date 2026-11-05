@@ -32,7 +32,7 @@ export interface Harness {
   confirms: unknown[];
   /** openStore 被呼叫的次數（碰 Keychain 與建資料夾的時機）。 */
   opens: { count: number };
-  call(request: Record<string, unknown>, ctx?: { userInitiated?: boolean }): Promise<MemoryResponse & Record<string, unknown>>;
+  call(request: Record<string, unknown>, ctx?: { userInitiated?: boolean; source?: string }): Promise<MemoryResponse & Record<string, unknown>>;
   turn(text: string, requestId?: string): Promise<MemoryResponse & Record<string, unknown>>;
   close(): Promise<void>;
 }
@@ -83,7 +83,7 @@ export function harness(options: { dir: string; key: Buffer; clock?: { now: numb
     ...(options.log ? { log: options.log } : {}),
     now: () => clock.now,
   });
-  const call = (request: Record<string, unknown>, ctx?: { userInitiated?: boolean }) => service.handle(request, ctx) as Promise<MemoryResponse & Record<string, unknown>>;
+  const call = (request: Record<string, unknown>, ctx?: { userInitiated?: boolean; source?: string }) => service.handle(request, ctx) as Promise<MemoryResponse & Record<string, unknown>>;
   return {
     service, clock, target, confirms, opens, call,
     turn: (text, requestId = req()) => call({ op: "turn", text, request_id: requestId }),

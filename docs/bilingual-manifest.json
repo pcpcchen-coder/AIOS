@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "399475dc5c74fe36ebab4d8644f3f1c082c9317765f2cf1458257ff4245691ea",
-      "translationSha256": "546f21789aa1b6a41a9ad750c60437e3476ee5792c66b59e509eae7d9f73a640"
+      "sourceSha256": "3686e7803991d9939ce2e69bfdb48bc308f62ac3b40cdf0a36906e2cb6a08841",
+      "translationSha256": "ea4500c69747092a37e6536ab55c91b84f1ecf777336deb4901c2069abdc5763"
     },
     {
       "source": "docs/README.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "2238c508b1278912b099df718fa77e08a9895b60745e499d86638c214a42de23",
-      "translationSha256": "f082f59ee1b7ceb92870f77d72e2c282717fcf78c9203e94bb28e74c3a7bac0c"
+      "sourceSha256": "9d27f89bdbb3830a486bdf043f8fa8dd20aab8b49f5a1ab09fb0ef5e6504d86e",
+      "translationSha256": "d9a36a44dc00ab25d8a54c826c273c8b90fd0955f9cf1f50cdbee2bc1aaedf37"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -589,6 +589,13 @@
       "translationSha256": "37ccb89949f1abd40abbdd96045109398d64b2835012b1f380694033f9767d82"
     },
     {
+      "source": "docs/validation/pi-family-recognition-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pi-family-recognition-2026-11-05.en.md",
+      "sourceSha256": "fb06ffc218d7af00430026e809fd565c374a51bfe54cfd34964c5865d682550d",
+      "translationSha256": "95b00be393cc289c49b94ff281b1742a6215d051418be90885367a1de895c8c3"
+    },
+    {
       "source": "docs/validation/pi-performance-2026-11-05.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/pi-performance-2026-11-05.en.md",
@@ -753,8 +760,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "9e5929d9c777b523506d58c7789958c29b51e07e9e4365e75ea937fe72ea490a",
-      "translationSha256": "16c0fd9e1380a3d1268f55b53bd1528663ec72bf94fae2a761b6da965bd13966"
+      "sourceSha256": "6afc894c855fd84190943c1f228e8bed6436074703e7907022aa6c4473cf0826",
+      "translationSha256": "2393bd1948e011dbd29283035c903ccbebbdc3bbda2c67165f567e04e1eb4820"
     }
   ]
 }

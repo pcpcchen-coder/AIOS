@@ -172,16 +172,28 @@ describe("family recognition privacy boundary (static)", () => {
     expect(quality).toMatch(/return \{ face_px: box\.width, score, yaw, pitch, roll_deg, luma: [^}]+, edge \};/);
   });
 
-  it("identity data does not go over HTTP: server/app.ts has no identity route and only reads the status", () => {
+  it("identity data does not go over HTTP except the terminal recognition route (RPI-ID): no management, enrollment or gallery route", () => {
     const appTs = readFileSync(join(app, "server", "app.ts"), "utf8");
-    expect(appTs).not.toMatch(/["'`]\/api\/[^"'`]*(identity|family|face|person)/i);
+    // RPI-ID（George 2026-11-05）：唯一的身分路由是終端機的認人，交給 server/terminal-routes.ts 過濾；沒有其他身分路徑。
+    const routes = [...appTs.matchAll(/["'`](\/api\/[^"'`]*(identity|family|face|person)[^"'`]*)["'`]/gi)].map((m) => m[1]);
+    expect(routes).toEqual(["/api/terminal/identity"]);
     expect(appTs).not.toMatch(/person_id|\.handle\(|enroll|probe|gallery/);
-    expect([...appTs.matchAll(/options\.identity\b[^\n]*/g)].map((m) => m[0])).toEqual(["options.identity?.status() ?? BROWSER_IDENTITY_STATUS,"]);
-    // 頁面端也不經 HTTP 送身分資料：只用 window.nousDesktop.identity（IPC）
-    for (const name of ["family-view.ts", join("sense", "identity-client.ts"), join("sense", "identity-ambient.ts"), "main.ts"]) {
+    expect([...appTs.matchAll(/options\.identity\b[^\n]*/g)].map((m) => m[0])).toEqual([
+      "options.identity?.status() ?? BROWSER_IDENTITY_STATUS,",
+      'options.identity?.handle) {',
+      "options.identity as TerminalIdentityPort, await readJson(req));",
+    ]);
+    // 終端機只能用不需要管理 session 的認人操作；登記、刪除、校準與管理 session 只在 IPC。
+    const terminal = readFileSync(join(app, "shared", "terminal.ts"), "utf8");
+    expect(terminal).toContain('export const TERMINAL_IDENTITY_OPS = ["ambient_status", "ambient_probe", "greeting", "voice_probe", "call_voice"] as const;');
+    // userInitiated 一律 false、來源是終端機識別碼：由 tests/terminal-identity.test.ts 的路由行為測試檢查。
+    // 頁面端：認人元件只經注入的 bridge；HTTP 只在 main.ts 交給 src/identity-bridge.ts 的那一處（終端機頁面）。
+    for (const name of ["family-view.ts", join("sense", "identity-client.ts"), join("sense", "identity-ambient.ts")]) {
       const text = readFileSync(join(src, name), "utf8");
       expect(text, name).not.toMatch(/api\.\w*(identity|family|enroll|probe)/i);
     }
+    const main = readFileSync(join(src, "main.ts"), "utf8");
+    expect([...main.matchAll(/api\.\w*(identity|family|enroll|probe)\w*/gi)].map((m) => m[0])).toEqual(["api.terminalIdentity"]);
   });
 
   it("ID-02：names are composed only in the core — the page never builds a named sentence (except the enrollment preview of the user's own typed name)", () => {

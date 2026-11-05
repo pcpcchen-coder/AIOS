@@ -92,6 +92,29 @@ describe("FamilyView", () => {
     expect(t.el.getAttribute("data-visibility-reason")).toBe("user_request");
   });
 
+  it("RPI-ID terminal page (no IPC bridge): says enrollment is done on the Mac, in zh-TW and English", async () => {
+    const { setLocale } = await import("../src/i18n.ts");
+    const view = new mod.FamilyView({
+      bridge: null,
+      unavailableMessage: "家人辨識：登記與管理請在 Mac 的 Nous App 進行（這台終端機只用來認人）。",
+      source: { sampleFrame: async () => null },
+      createWorker: () => ({ postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null }) as unknown as WorkerLike,
+      model: MODEL,
+      dismiss: () => {},
+    });
+    const el = view.element as unknown as FakeElement;
+    view.open();
+    expect(el.textContent).toContain("家人辨識：登記與管理請在 Mac 的 Nous App 進行（這台終端機只用來認人）。");
+    expect(el.textContent).not.toContain("瀏覽器版");
+    setLocale("en");
+    try {
+      view.open();
+      expect(el.textContent).toContain("Family recognition: enroll and manage family members in the Nous App on the Mac (this terminal only recognizes people).");
+    } finally {
+      setLocale("zh-TW");
+    }
+  });
+
   it("opens a management session and lists people with registration date, minor and re-enrol marks; explanation is always shown", async () => {
     const t = make(() => manage([george, kid]));
     t.view.open();
