@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-05T03:34:42.737Z",
-  "updated_at": "2026-11-05T03:46:45.712Z",
+  "updated_at": "2026-11-05T03:46:49.684Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,10 +23,10 @@
     {
       "id": "checkpoint",
       "title": "checkpoint",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-11-05T03:46:49.683Z",
+      "ended_at": "2026-11-05T03:46:49.684Z",
+      "note": "PRO-1 checkpoint done in session",
       "evidence": []
     },
     {
@@ -98,6 +98,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "PRO-1 how done in session"
+    },
+    {
+      "at": "2026-11-05T03:46:49.684Z",
+      "type": "step_updated",
+      "step_id": "checkpoint",
+      "status": "passed",
+      "note": "PRO-1 checkpoint done in session"
     }
   ],
   "provenance": "Agent self-reported"
