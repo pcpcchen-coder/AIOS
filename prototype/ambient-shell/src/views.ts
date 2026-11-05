@@ -862,6 +862,7 @@ export function refreshCountdowns(root: ParentNode): void {
 const INTEGRATION_LABEL: Record<string, string> = {
   spotify_soloist: "Pi 上的 Spotify 播放器",
   gmail_gog: "寄信給自己（Gmail，gog）",
+  home: "武陵居家電（中控）",
   mock: "模擬整合（mock，測試用）",
 };
 

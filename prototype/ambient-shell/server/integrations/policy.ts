@@ -46,8 +46,12 @@ export const RATE_LIMIT_PER_MINUTE = 30;
 /** 結果 data 序列化後的上限（位元組）；超過就不交回模型。 */
 export const MAX_RESULT_DATA_BYTES = 4_096;
 
-/** 工具時限的範圍。 */
+/** 工具時限的範圍（模型工具）。 */
 export const TIMEOUT_RANGE_MS = { min: 100, max: 60_000 } as const;
+/** AIL-2：legacy Facade 工具的時限上限（家電控制一句話最多 60 秒，加上讀中控清單）。 */
+export const LEGACY_TIMEOUT_MAX_MS = 90_000;
+/** AIL-2：legacy Facade 工具交回的原始結果上限（位元組）；只防異常，正常的家電結果遠小於此。 */
+export const MAX_LEGACY_DATA_BYTES = 262_144;
 
 /** 簡單的滑動視窗計數器（每個 Adapter 一個）。 */
 export class RateLimiter {

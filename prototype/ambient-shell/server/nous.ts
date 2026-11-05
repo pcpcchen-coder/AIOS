@@ -238,7 +238,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   });
   const home = new HomeBridge({ url: config.smarthomeUrl, token: config.smarthomeToken });
   // AIL-1（docs/18）：NOUS_AIL=on 才建立整合層；關閉時 ail 為 null，工具表、說明與 HTTP 路由都和之前相同。
-  const ail = createIntegrations(config.ail, log);
+  // AIL-2：HomeBridge 交給整合層包成 Facade（NOUS_AIL_SERVICES 列出 home 才註冊）。
+  const ail = createIntegrations(config.ail, log, undefined, { home });
   const realtime = new RealtimeBridge({
     apiKey: config.openaiApiKey,
     model: config.realtimeModel,

@@ -3,6 +3,7 @@ import { MockAdapter } from "./adapters/mock.ts";
 import { SpotifySoloistAdapter } from "./adapters/spotify-soloist.ts";
 import { createVoiceRelayAdapter, VoiceRelayAdapter } from "./adapters/voice-relay.ts";
 import { GmailGogAdapter, resolveGogPath } from "./adapters/gmail-gog.ts";
+import { HomeAdapter, type HomeBridgePort } from "./adapters/home.ts";
 import type { IntegrationAdapter } from "./contracts.ts";
 import { IntegrationDispatcher, type AuditEntry } from "./dispatcher.ts";
 import { IntegrationRegistry } from "./registry.ts";
@@ -19,11 +20,24 @@ export interface Integrations {
   voiceRelay?: VoiceRelayAdapter;
 }
 
-/** 已審核的 Adapter（ID → 建立方式，只拿核心設定）。回 null＝這次設定下不啟用（不註冊）。 */
-export type AdapterFactory = (config: Config["ail"], log: (line: string) => void) => IntegrationAdapter | null;
+/** 核心已經建立、要交給 Adapter 包裝的既有模組（AIL-2：HomeBridge）。 */
+export interface AdapterDeps {
+  home?: HomeBridgePort;
+}
+
+/** 已審核的 Adapter（ID → 建立方式，只拿核心設定與既有模組）。回 null＝這次設定下不啟用（不註冊）。 */
+export type AdapterFactory = (config: Config["ail"], log: (line: string) => void, deps: AdapterDeps) => IntegrationAdapter | null;
 
 export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
   mock: () => new MockAdapter(),
+  // AIL-2：武陵居家電的 Facade（/api/home/* 改經整合層，行為不變）。中控沒設定時不註冊，/api/home/* 照原本的路徑回 409。
+  home: (_config, log, deps) => {
+    if (!deps.home?.available) {
+      log("整合層：home 需要已設定的武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN），略過");
+      return null;
+    }
+    return new HomeAdapter(deps.home);
+  },
   // SP-1：只有本機健康狀態，沒有模型工具（SP-2 BLOCKED）。
   spotify_soloist: (config) => new SpotifySoloistAdapter({ port: config.soloistPort }),
   // VCR-0／VCR-1／VCR-2（docs/19）：NOUS_VCR=fake（假輸出，mock）或 mac（say 實際發聲，只限 macOS）才建立；否則回 null。
@@ -44,7 +58,7 @@ export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
   },
 };
 
-export function createIntegrations(config: Config["ail"], log: (line: string) => void = () => undefined, known: Record<string, AdapterFactory> = KNOWN_ADAPTERS): Integrations | null {
+export function createIntegrations(config: Config["ail"], log: (line: string) => void = () => undefined, known: Record<string, AdapterFactory> = KNOWN_ADAPTERS, deps: AdapterDeps = {}): Integrations | null {
   if (!config.enabled) return null;
   const enabled = new Set(config.services.filter((id) => Object.hasOwn(known, id)));
   for (const id of config.services) if (!enabled.has(id)) log(`整合層：NOUS_AIL_SERVICES 的 ${id} 不是已審核的 Adapter，略過`);
@@ -53,7 +67,7 @@ export function createIntegrations(config: Config["ail"], log: (line: string) =>
   for (const id of enabled) {
     let adapter: IntegrationAdapter | null;
     try {
-      adapter = known[id]!(config, log);
+      adapter = known[id]!(config, log, deps);
     } catch (err) {
       // 建立失敗：記錄並略過這個 Adapter（fail closed），不讓 Nous 啟動失敗。
       log(`整合層：${id} 建立失敗，略過（${err instanceof Error ? err.message.slice(0, 200) : "unknown error"}）`);

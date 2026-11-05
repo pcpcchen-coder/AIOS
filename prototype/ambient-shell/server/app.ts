@@ -52,6 +52,8 @@ import type { Integrations } from "./integrations/index.ts";
 import { isTerminalId } from "../shared/terminal.ts";
 import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
 import { VoiceRelayStoreError } from "./integrations/voice-relay/store.ts";
+import { HOME_TOOL } from "./integrations/adapters/home.ts";
+import type { IntegrationToolId } from "../shared/integrations.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
@@ -691,7 +693,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const metric = typeof body.metric === "string" ? body.metric.trim() : null;
       if (!target) throw new HttpError(400, "target is required");
       if (target.length > 100 || (metric?.length ?? 0) > 40) throw new HttpError(400, "target or metric is too long");
-      return sendJson(res, 200, await homeCall(() => home!.status(target, metric)));
+      return sendJson(res, 200, await homeCall(() => home!.status(target, metric), HOME_TOOL.status, { target, ...(metric !== null ? { metric } : {}) }));
     }
     if (method === "POST" && path === "/api/home/control") {
       const body = await readJson(req);
@@ -703,7 +705,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (!(value === null || typeof value === "boolean" || typeof value === "number" || (typeof value === "string" && value.length <= 40))) {
         throw new HttpError(400, "value must be a short string, a number or a boolean");
       }
-      return sendJson(res, 200, await homeCall(() => home!.control({ target, command, value: value as ControlRequest["value"] })));
+      return sendJson(res, 200, await homeCall(() => home!.control({ target, command, value: value as ControlRequest["value"] }), HOME_TOOL.control, { target, command, ...(value !== null ? { value } : {}) }));
     }
     if (method === "POST" && path === "/api/home/confirm") {
       const body = await readJson(req);
@@ -712,7 +714,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         throw new HttpError(400, "confirm_id and approve are required");
       }
       const approve = body.approve;
-      return sendJson(res, 200, await homeCall(() => home!.confirm(id, approve)));
+      return sendJson(res, 200, await homeCall(() => home!.confirm(id, approve), HOME_TOOL.confirm, { confirm_id: id, approve }));
     }
     if (method === "POST" && path === "/api/auth/chatgpt/login") {
       const body = await readJson(req);
@@ -824,8 +826,25 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
   }
 
   /** 武陵居中控的呼叫：未設定時 409；連不上、權杖被拒等照實轉成 HTTP 錯誤。 */
-  async function homeCall<T>(run: () => Promise<T>): Promise<T> {
+  /**
+   * 家電 API。AIL-2：整合層註冊了 home Facade（NOUS_AIL=on、NOUS_AIL_SERVICES 有 home、中控已設定）時改經 Dispatcher 呼叫 HomeBridge，
+   * HTTP 回應（狀態碼、內容）和直接呼叫完全相同；沒有 Facade 時照原本直接呼叫。
+   */
+  async function homeCall<T>(run: () => Promise<T>, tool: string, args: Record<string, unknown>): Promise<T> {
     if (!home?.available) throw new HttpError(409, "尚未設定武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）");
+    const ail = options.integrations;
+    if (ail && ail.registry.status(tool as IntegrationToolId, "page") === "available") {
+      const result = await ail.dispatcher.execute({ tool, args, route: "page", actor: tool === HOME_TOOL.confirm ? "user" : "agent", sessionId: "page" });
+      const data = result.data as { legacy?: T; http_error?: { status: number; message: string }; rethrow?: unknown } | undefined;
+      if (data?.legacy !== undefined) return data.legacy;
+      if (data && "rethrow" in data) throw data.rethrow;
+      if (data?.http_error) throw new HttpError(data.http_error.status, data.http_error.message);
+      // Dispatcher 自己的結果（參數不合、逾時、Adapter 出錯）：頁面原本只會收到 HTTP 錯誤，照樣回錯誤；
+      // 控制指令逾時或出錯時，HomeBridge 可能已經送出，所以說不確定有沒有執行。
+      if (result.status === "refused") throw new HttpError(400, result.message);
+      if (tool !== HOME_TOOL.status && result.status === "unknown") throw new HttpError(504, "武陵居中控沒有在時限內回覆，不確定有沒有執行，請看一下設備。");
+      throw new HttpError(502, result.message);
+    }
     try {
       return await run();
     } catch (err) {

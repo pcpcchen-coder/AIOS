@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { fromWireName, isIntegrationToolId, isToolResult, toolResult, type IntegrationRoute, type IntegrationToolId, type ToolResult } from "../../shared/integrations.ts";
-import { decide, MAX_RESULT_DATA_BYTES, RateLimiter } from "./policy.ts";
+import { decide, MAX_LEGACY_DATA_BYTES, MAX_RESULT_DATA_BYTES, RateLimiter } from "./policy.ts";
 import type { IntegrationRegistry } from "./registry.ts";
 import { validateArgs } from "./schema.ts";
 
@@ -105,7 +105,8 @@ export class IntegrationDispatcher {
     }
     // 呼叫前就已中止：不執行（確定沒有送出，所以是 refused，不是 unknown）。
     if (request.signal?.aborted) return finish(toolResult("refused", "這次呼叫在執行前已中止，沒有執行。", { reason: "aborted" }));
-    if (!this.limiter.take(found.adapter.id)) return finish(toolResult("refused", "這個服務的呼叫太頻繁，這次沒有執行；請稍後再說一次。", { reason: "rate_limited" }));
+    // AIL-2：legacy Facade（例如家電）由原本的模組自己限速（HomeBridge 每分鐘 6 個指令），不另外套整合層的上限。
+    if (!found.def.legacyName && !this.limiter.take(found.adapter.id)) return finish(toolResult("refused", "這個服務的呼叫太頻繁，這次沒有執行；請稍後再說一次。", { reason: "rate_limited" }));
 
     const sideEffect = found.def.effect !== "read";
     const timeout = new AbortController();
@@ -128,7 +129,7 @@ export class IntegrationDispatcher {
       if ("why" in outcome) {
         return finish(toolResult("unknown", outcome.why === "timeout" ? "整合服務沒有在時限內回覆，結果不明，請確認。" : "這次呼叫已中止，結果不明，請確認。", { reason: outcome.why }));
       }
-      return finish(normalize(outcome.value));
+      return finish(normalize(outcome.value, found.def.legacyName ? MAX_LEGACY_DATA_BYTES : MAX_RESULT_DATA_BYTES));
     } catch {
       return finish(sideEffect
         ? toolResult("unknown", "整合服務出錯，結果不明，請確認。", { reason: "adapter_error" })
@@ -147,7 +148,7 @@ function resolveId(name: string): IntegrationToolId | null {
 }
 
 /** Adapter 的結果：照契約重建（ok 由 status 推導、只留已知欄位、data 有大小上限）。 */
-function normalize(value: unknown): ToolResult {
+function normalize(value: unknown, maxDataBytes: number = MAX_RESULT_DATA_BYTES): ToolResult {
   if (!isToolResult(value)) return toolResult("failed", "整合服務回傳的結果格式不正確。", { reason: "invalid_result" });
   let data = value.data;
   if (data !== undefined) {
@@ -157,7 +158,7 @@ function normalize(value: unknown): ToolResult {
     } catch {
       // 不能序列化：當成太大
     }
-    if (size > MAX_RESULT_DATA_BYTES) data = undefined;
+    if (size > maxDataBytes) data = undefined;
   }
   return toolResult(value.status, value.message.slice(0, 500), { ...(value.reason ? { reason: value.reason } : {}), ...(data !== undefined ? { data } : {}) });
 }

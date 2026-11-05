@@ -930,6 +930,14 @@ export class HomeBridge {
     return `${this.base}（查詢與控制）`;
   }
 
+  /**
+   * AIL-2：整合層的健康檢查。讀一次中控快照（和 status() 同一個請求）；連不上、權杖被拒、格式不符時丟 HomeBridgeError。
+   * 不送任何控制指令。
+   */
+  async probe(): Promise<void> {
+    await this.snapshot();
+  }
+
   async status(target: string, metric?: string | null): Promise<HomeStatusResult> {
     const home = await this.snapshot();
     const resolved = resolveTarget(home, target);
