@@ -115,6 +115,11 @@ Each check prints `PASS`, `WARN`, `FAIL` or `SKIP`; the exit code is 1 if anythi
 
 While using the Pi, choose "Enter service mode (for the Pi)" in the Mac menu bar: the Mac brain hides, the Mac's microphone, always-on wake and camera stop (settings unchanged), and the core, sign-ins and background tasks keep serving the Pi. The App stays in service mode after a restart. The top of the menu bar menu shows "Service mode: Pi connected" or "Service mode: Pi disconnected"; this follows only the Pi page's heartbeat (connected only with a heartbeat in the last 25 s), not the service mode switch. Choose "Return to Mac use" to switch back; wake and camera resume per their saved settings. Details and Mac acceptance steps are in the [service mode validation](../../docs/validation/service-mode-2026-11-03.en.md) (**not verified on a real Mac or Pi**).
 
+<a id="display-performance"></a>
+## Display performance
+
+If the Pi display is not smooth, open "Settings" → "Display performance on this device" on the Pi page and choose "Full", "Balanced" or "Light". It changes only the brain animation and background blur, not listening, playback or response speed; the choice is stored in the Pi's browser, and the Pi defaults to "Balanced". The same section shows the measured frames per second and draw time per frame. Details are in the [display performance validation](../../docs/validation/pi-performance-2026-11-05.en.md) (**improvement on a real Pi not measured**).
+
 ## Daily operation
 
 ```bash

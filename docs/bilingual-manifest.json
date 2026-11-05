@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "d50f52d701de015b14d8839cb548e841327af993f0ec9afb300470dab3386a88",
-      "translationSha256": "34697a2db49056698add3f473e4c7028c92bcb2d18e51730eb650cffe6710090"
+      "sourceSha256": "ae468a3610a4fa690c3526378ed0a1cd59b0ce4b3b7f2af5ce479cf346cca91b",
+      "translationSha256": "c3390f0bedf39e240a86ef76e9df9087fb4f743ce067f3e6735e33cad01478e1"
     },
     {
       "source": "docs/README.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "2d2e513553e9733de5921223e0e4f796ed659185cd2f7668b38910d452a5da39",
-      "translationSha256": "84b85391cb0c697e8709348585eb74d743403b87993e72579aea747d1a34172c"
+      "sourceSha256": "2238c508b1278912b099df718fa77e08a9895b60745e499d86638c214a42de23",
+      "translationSha256": "f082f59ee1b7ceb92870f77d72e2c282717fcf78c9203e94bb28e74c3a7bac0c"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -589,6 +589,13 @@
       "translationSha256": "37ccb89949f1abd40abbdd96045109398d64b2835012b1f380694033f9767d82"
     },
     {
+      "source": "docs/validation/pi-performance-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pi-performance-2026-11-05.en.md",
+      "sourceSha256": "00d48e06614dfbaf401ae974ce13908de650c0372ce3acb882f37db5d0a70e66",
+      "translationSha256": "15be886d3bc85c92816c9e79645aea8b8addc3cd605c581b7dfb289f581dd4e7"
+    },
+    {
       "source": "docs/validation/pro-1-2026-11-05.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/pro-1-2026-11-05.en.md",
@@ -746,8 +753,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "6e5c5eb3692752979d0cfeb936b45060daf8e76b214dace162868fd6cd74ab08",
-      "translationSha256": "72c965d03741bd6e978217889e52cbbc879075d25cbfaa11cb60402697d38bff"
+      "sourceSha256": "64cf6f962f973ac4e47f8fa4f5f354159532942328cf1c76e8413c6533351d74",
+      "translationSha256": "6dca721280188f4469fe46e2d3b1a695e40092adfb2399a7e7940dd11d8ae2e7"
     }
   ]
 }
