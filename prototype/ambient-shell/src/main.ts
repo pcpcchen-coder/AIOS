@@ -8,6 +8,7 @@ import { ConversationSession } from "./conversation.ts";
 import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf, type SenseSnapshot } from "./sense/controller.ts";
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
+import { TerminalCameraPrefs } from "./terminal-camera.ts";
 import { formatSeconds } from "../shared/prefs.ts";
 import { DEFAULT_VOICE_PREFS, idleTimeoutsMs, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import {
@@ -243,6 +244,7 @@ const artifactErrors = new Map<string, string>();
 const userRequestIds = new Set<string>();
 let shell: ShellState = initialShell;
 let settings: SettingsView | null = null;
+const terminalCamera = new TerminalCameraPrefs({ search: location.search, desktop: !!window.nousDesktop, storage: () => localStorage });
 /** applySettings 收到不同的設定就加一；連同每次載入頁面不同的 pageLoadId 回報給 App（重新整理後版本重算也不會撞號）。 */
 let settingsRevision = 0;
 const pageLoadId = Math.random().toString(36).slice(2, 10);
@@ -814,6 +816,10 @@ function accountKey(value: SettingsView): string {
 }
 
 function applySettings(value: SettingsView, preserveEntry = false): void {
+  applyEffectiveSettings(terminalCamera.receive(value), preserveEntry);
+}
+
+function applyEffectiveSettings(value: SettingsView, preserveEntry = false): void {
   if (settings && (settings.provider !== value.provider || accountKey(settings) !== accountKey(value))) {
     const expectedSelection = settings.provider !== "chatgpt" && value.provider === "chatgpt"
       && pendingProviderSelection?.epoch === conversationEpoch
@@ -1794,6 +1800,24 @@ async function startCamera(): Promise<void> {
  * 「關掉」先在本機釋放鏡頭再送出，不等網路。回傳失敗說明；成功時為 null。
  */
 async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null> {
+  if (terminalCamera.local) {
+    if (patch.active === false) {
+      cameraOffPending = true;
+      pipeline?.stop();
+    }
+    try {
+      const result = terminalCamera.update(patch);
+      if (patch.active === true && !result.error) {
+        cameraOffPending = false;
+        cameraFailed = false;
+      }
+      applyEffectiveSettings(result.settings);
+      render();
+      return result.error;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  }
   if (patch.active === true && settings?.camera?.enable_via === "app") {
     // App：打開不經 HTTP（核心回 403）。其他鍵照常保存，鏡頭交給 App 主程序的原生說明。
     const { active: _active, ...rest } = patch;
@@ -1832,6 +1856,7 @@ async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null
  * 在核心保存之前不在本機啟動鏡頭：syncCamera 只看核心回報的設定，取消時什麼都不變。
  */
 async function enableCamera(): Promise<string | null> {
+  if (terminalCamera.local) return updateCameraPrefs({ active: true });
   if (settings?.camera?.active && !cameraOffPending) {
     // 已經是開：不必再問，只在上次啟動失敗時重試。
     cameraFailed = false;
@@ -3242,7 +3267,7 @@ function renderSurface(): void {
     ensureIntegrationStatus();
     // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
     ensureVoiceRelay();
-    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats() } });
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats() } });
   }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));

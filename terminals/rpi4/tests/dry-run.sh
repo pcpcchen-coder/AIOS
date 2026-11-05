@@ -221,7 +221,7 @@ reset_calls
 check "aios-kiosk launches once the core answers" "$LBIN/aios-kiosk"
 kiosk_call="$(grep '^chromium ' "$CALLS" || true)"
 for expected in "--kiosk" "--app=http://localhost:8787/?terminal=rpi4" "--autoplay-policy=no-user-gesture-required" \
-  "--user-data-dir=$SHARE/chromium-profile" "--no-first-run" "--password-store=basic"; do
+  "--disable-features=WebRtcPipeWireCamera" "--user-data-dir=$SHARE/chromium-profile" "--no-first-run" "--password-store=basic"; do
   check "chromium gets $expected" grep -qF -- " $expected" <<<"$kiosk_call"
 done
 check "kiosk probes /api/settings" called_matching '^curl .*http://localhost:8787/api/settings$'
