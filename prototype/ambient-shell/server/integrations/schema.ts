@@ -5,7 +5,9 @@
 export type PropertySchema =
   | { type: "string"; description?: string; enum?: readonly string[]; minLength?: number; maxLength?: number }
   | { type: "number" | "integer"; description?: string; minimum?: number; maximum?: number }
-  | { type: "boolean"; description?: string };
+  | { type: "boolean"; description?: string }
+  /** AIL-2：字串、有限數字或布林值（只限 legacy Facade 工具，不給模型看；字串長度同 maxLength）。 */
+  | { type: "scalar"; description?: string; maxLength?: number };
 
 export interface InputSchema {
   type: "object";
@@ -22,6 +24,7 @@ const PROPERTY_KEYS: Record<PropertySchema["type"], readonly string[]> = {
   number: ["type", "description", "minimum", "maximum"],
   integer: ["type", "description", "minimum", "maximum"],
   boolean: ["type", "description"],
+  scalar: ["type", "description", "maxLength"],
 };
 
 export class SchemaError extends Error {}
@@ -77,6 +80,9 @@ export function validateArgs(schema: InputSchema, input: unknown): ValidationRes
       if (typeof v !== "number" || !Number.isFinite(v) || (prop.type === "integer" && !Number.isInteger(v))) return { ok: false, error: `${key} 必須是${prop.type === "integer" ? "整數" : "數字"}` };
       if (prop.minimum !== undefined && v < prop.minimum) return { ok: false, error: `${key} 小於下限` };
       if (prop.maximum !== undefined && v > prop.maximum) return { ok: false, error: `${key} 大於上限` };
+    } else if (prop.type === "scalar") {
+      const okType = typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v)) || (typeof v === "string" && v.length <= (prop.maxLength ?? DEFAULT_MAX_STRING));
+      if (!okType) return { ok: false, error: `${key} 必須是短字串、數字或布林值` };
     } else if (typeof v !== "boolean") {
       return { ok: false, error: `${key} 必須是 true 或 false` };
     }

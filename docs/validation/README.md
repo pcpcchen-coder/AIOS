@@ -10,6 +10,7 @@
 
 | 紀錄 | 證據範圍與限制 |
 |---|---|
+| [家電 Facade AIL-2](ail-2-home-facade-2026-11-05.md) | 2026-11-05：`/api/home/*` 經整合層的 `home` Facade 呼叫 HomeBridge（`legacyName`、`page` 路徑、`scalar`）；Facade 開關兩路逐筆比對 HTTP 回應與中控請求，H0／H1／H1b 完全相同；模型工具逐位元組不變；gog 共用模組；**Mac 與真實中控未驗證** |
 | [用 gog 寄信給自己 MAIL-1](mail-1-gog-self-2026-11-04.md) | 2026-11-04：`gmail_gog` Adapter 與模型工具 `app.mail.send_to_self`（只有主旨與內文，收件人只來自 `NOUS_MAIL_SELF`）；不經 shell、內文走 stdin；依 George 的決定不出確認卡、每分鐘最多 5 封；非 0 結束回結果不明；假 gog 與真 spawn 的雲端測試；附「更簡單做法」比較；**Mac 與真實 Gmail 未驗證** |
 | [Mac 服務模式](service-mode-2026-11-03.md) | 2026-11-03：服務模式隱藏電子腦、停止 Mac 麥克風、喚醒與鏡頭；選單列依 Pi 頁面心跳顯示已連線／已斷線。只有 Linux 雲端 fixture，Mac 與 Pi 實機未驗證 |
 | [記憶預設選人](memory-voice-default-2026-11-02.md) | 2026-11-02：臉或聲音已認出家人時不出卡片；即時語音說一次「我要用 George 的記憶，好嗎？」，問句念完後的下一句、念完 8 秒或送出 12 秒（先到者）就選定，整句否定隨時有效、只用全家共用、這次不再問；打字聊天直接選定並顯示「正在用 X 的記憶｜不是我」；新的 `unselect`（「不是我」）；沒有同意時不念、8 秒選定；覆寫 SP-02b G3 與 17 §9.2 的確認要求；fixture 與假計時器的雲端測試；**Mac 試用未執行** |

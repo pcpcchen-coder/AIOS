@@ -1,8 +1,10 @@
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { toolResult, type IntegrationToolId, type ToolResult } from "../../../shared/integrations.ts";
 import type { ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import { defaultGogRunner, isEmail, type GogRunner } from "../gog/runner.ts";
+
+// AIL-2：gog 的執行方式移到 ../gog/runner.ts（Gmail 與 Calendar 共用）；這裡照舊匯出，既有的呼叫端不用改。
+export { defaultGogRunner, GOG_CANDIDATES, GOG_KILL_GRACE_MS, isEmail, parseGogPath, resolveGogPath, type GogRunner, type GogRunOptions } from "../gog/runner.ts";
 
 // MAIL-1（George 2026-11-04）：用 gog（github.com/steipete/gogcli，MIT）寄信給使用者自己。
 // - 收件人與寄件帳號都只來自核心設定 NOUS_MAIL_SELF（.env，不在 repo）；模型只能給主旨與內文，沒有收件人參數。
@@ -16,19 +18,7 @@ import type { ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition
 // - 寄給自己不需要當次確認：George 2026-11-04 的明確決定（policy.ts CONFIRMATION_EXEMPT_TOOLS）。
 
 export const MAIL_TOOL_ID = "app.mail.send_to_self" as const;
-/** NOUS_GOG_PATH 沒設定時依序找的位置（App 從 Finder 啟動時 PATH 不含 Homebrew）。 */
-export const GOG_CANDIDATES = ["/opt/homebrew/bin/gog", "/usr/local/bin/gog"] as const;
 export const MAIL_LIMITS = { subject: 200, body: 10_000, timeoutMs: 30_000, perMinute: 5 } as const;
-/** SIGTERM 之後多久還沒結束就 SIGKILL。 */
-export const GOG_KILL_GRACE_MS = 2_000;
-const EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,}$/;
-
-export interface GogRunOptions {
-  signal: AbortSignal;
-  /** 寫進 stdin 的內容（沒有時 stdin 關閉）。 */
-  stdin?: string;
-}
-export type GogRunner = (file: string, args: string[], opts: GogRunOptions) => Promise<{ code: number | null; stdout: string }>;
 
 export interface GmailGogOptions {
   /** 使用者自己的 Gmail（寄件帳號與收件人相同）。 */
@@ -38,30 +28,12 @@ export interface GmailGogOptions {
   now?: () => number;
 }
 
-export function isEmail(value: string): boolean {
-  return EMAIL.test(value);
-}
-
 /** NOUS_MAIL_SELF：必須是一個 email；沒設定回 null。 */
 export function parseMailSelf(value: string | undefined): string | null {
   const v = value?.trim();
   if (!v) return null;
   if (!isEmail(v)) throw new Error("NOUS_MAIL_SELF 必須是一個 email 地址");
   return v;
-}
-
-/** NOUS_GOG_PATH：必須是絕對路徑；沒設定回 null（之後依 GOG_CANDIDATES 找）。 */
-export function parseGogPath(value: string | undefined): string | null {
-  const v = value?.trim();
-  if (!v) return null;
-  if (!isAbsolute(v)) throw new Error("NOUS_GOG_PATH 必須是絕對路徑");
-  return v;
-}
-
-/** 找 gog：設定的路徑優先，否則看 Homebrew 的兩個位置；找不到回 null。 */
-export function resolveGogPath(configured: string | null, exists: (path: string) => boolean = existsSync): string | null {
-  if (configured) return configured;
-  return GOG_CANDIDATES.find((p) => exists(p)) ?? null;
 }
 
 /** 主旨：去掉控制字元（含換行，避免標頭注入）、壓縮空白、截長度。 */
@@ -97,41 +69,6 @@ export function findMessageId(stdout: string): string | null {
   };
   return pick(parsed) ?? pick((parsed as Record<string, unknown> | null)?.message);
 }
-
-/** 預設的執行方式：spawn（不經 shell）、stderr 丟掉、stdout 最多 64 KB；中止時送 SIGTERM。 */
-export const defaultGogRunner: GogRunner = (file, args, { signal, stdin }) =>
-  new Promise((resolve, reject) => {
-    if (signal.aborted) return reject(new Error("aborted"));
-    const child = spawn(file, args, { shell: false, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "ignore"] });
-    let stdout = "";
-    let settled = false;
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
-    const onAbort = () => {
-      child.kill("SIGTERM");
-      // 不理 SIGTERM 的 gog：寬限後 SIGKILL，不留下殘餘的子行程。
-      killTimer = setTimeout(() => child.kill("SIGKILL"), GOG_KILL_GRACE_MS);
-      killTimer.unref?.();
-    };
-    signal.addEventListener("abort", onAbort, { once: true });
-    const done = (fn: () => void) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(killTimer);
-      signal.removeEventListener("abort", onAbort);
-      fn();
-    };
-    child.stdout?.setEncoding("utf8");
-    child.stdout?.on("data", (chunk: string) => {
-      if (stdout.length < 65_536) stdout += chunk;
-    });
-    child.stdin?.on("error", () => undefined);
-    if (stdin !== undefined) child.stdin?.end(stdin, "utf8");
-    // 沒能啟動（找不到、沒有執行權限…）：標記 spawnFailed，呼叫端據此判斷「確定沒有送出」。
-    let started = false;
-    child.once("spawn", () => void (started = true));
-    child.once("error", (err) => done(() => reject(started ? err : Object.assign(err, { spawnFailed: true }))));
-    child.once("close", (code) => done(() => (signal.aborted ? reject(new Error("aborted")) : resolve({ code, stdout }))));
-  });
 
 const TOOLS: readonly ToolDefinition[] = [
   {

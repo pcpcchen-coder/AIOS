@@ -7,8 +7,11 @@
 export const EFFECT_CLASSES = ["read", "reversible_write", "external_commit"] as const;
 export type EffectClass = (typeof EFFECT_CLASSES)[number];
 
-/** 呼叫來源（路徑）。AIL-1 只接兩條即時語音路徑；text／background 先列在契約上，沒有接上任何呼叫端。 */
-export const INTEGRATION_ROUTES = ["api_key", "live", "text", "background"] as const;
+/**
+ * 呼叫來源（路徑）。AIL-1 接兩條即時語音路徑；text／background 先列在契約上，沒有接上任何呼叫端。
+ * AIL-2：page＝頁面經本機 HTTP 轉交的既有工具（例如 /api/home/*），頁面不帶工作階段，所以分不出是哪條語音路徑。
+ */
+export const INTEGRATION_ROUTES = ["api_key", "live", "text", "background", "page"] as const;
 export type IntegrationRoute = (typeof INTEGRATION_ROUTES)[number];
 
 /** 一個工具在目前設定下的能力狀態（由核心依設定推導；模型沒辦法改）。 */
