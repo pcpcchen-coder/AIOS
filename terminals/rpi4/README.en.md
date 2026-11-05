@@ -4,11 +4,11 @@
 
 # Raspberry Pi 4 terminal kit (RPI-1)
 
-Status: **kit available, not verified on a real Pi** (2026-11-03). The scripts have only run in a Linux container through a dry-run test with fake `systemctl`, `ssh`, `apt-get` and similar commands, plus shellcheck. Installation, boot autostart, audio and camera on a Pi have no test record yet.
+Status: **deployment and hardware evidence are available for one Pi 4** (2026-11-05). SSH forwarding, kiosk, USB audio, camera preview, look-to-talk, face naming, and voice-only wake naming were confirmed. These observations do not establish support for other hardware or long-term stability. Boot autostart was last tested on 2026-11-03, not repeated this evening. See the [deployment fixes and hardware record](../../docs/validation/rpi-deployment-fixes-2026-11-05.en.md).
 
 ## What this is
 
-The Mac mini keeps running the **Nous App** (Electron). The Agent, the realtime voice backend and all data stay in the App core on the Mac. The Raspberry Pi 4 is only a terminal: screen, microphone, speaker, and later a camera.
+The Mac mini keeps running the **Nous App** (Electron). The Agent, the realtime voice backend and all data stay in the App core on the Mac. The Raspberry Pi 4 is only a terminal, using its own screen, microphone, speaker, and camera.
 
 ```text
 Pi Chromium ──http://localhost:<AIOS_PORT>──> Pi 127.0.0.1:<AIOS_PORT>
@@ -102,6 +102,8 @@ Other options: `--skip-apt` (no packages), `--skip-copy-id` (public key already 
 
 The kiosk uses `--kiosk --app=http://localhost:<AIOS_PORT>/?terminal=rpi4` (`terminal=rpi4` makes the page send the core a heartbeat every 10 s, which the Mac menu bar uses to show whether the Pi is connected), a dedicated profile (`~/.local/share/aios-terminal/chromium-profile`), and `--autoplay-policy=no-user-gesture-required` so cues and replies play without a click first. The kit does **not** use `--use-fake-ui-for-media-stream` or any other flag that auto-grants camera or microphone access. The first time the microphone is used, Chromium asks once; click "Allow" with a mouse. The choice is stored in the dedicated profile.
 
+`--disable-features=WebRtcPipeWireCamera` avoids the camera-enumeration hang observed with Wayland/Chromium. It changes only the camera backend, keeps PipeWire audio, and does not grant media permission.
+
 ## Diagnostics
 
 ```bash
@@ -113,12 +115,12 @@ Each check prints `PASS`, `WARN`, `FAIL` or `SKIP`; the exit code is 1 if anythi
 <a id="service-mode"></a>
 ## Mac service mode
 
-While using the Pi, choose "Enter service mode (for the Pi)" in the Mac menu bar: the Mac brain hides, the Mac's microphone, always-on wake and camera stop (settings unchanged), and the core, sign-ins and background tasks keep serving the Pi. The App stays in service mode after a restart. The top of the menu bar menu shows "Service mode: Pi connected" or "Service mode: Pi disconnected"; this follows only the Pi page's heartbeat (connected only with a heartbeat in the last 25 s), not the service mode switch. Choose "Return to Mac use" to switch back; wake and camera resume per their saved settings. Details and Mac acceptance steps are in the [service mode validation](../../docs/validation/service-mode-2026-11-03.en.md) (**not verified on a real Mac or Pi**).
+While using the Pi, choose "Enter service mode (for the Pi)" in the Mac menu bar: the Mac brain hides, the Mac's microphone, always-on wake and camera stop (settings unchanged), and the core, sign-ins and background tasks keep serving the Pi. The App stays in service mode after a restart. The top of the menu bar menu shows "Service mode: Pi connected" or "Service mode: Pi disconnected"; this follows only the Pi page's heartbeat (connected only with a heartbeat in the last 25 s), not the service mode switch. Choose "Return to Mac use" to switch back; wake and camera resume per their saved settings. The original design and acceptance steps are in the [service mode validation](../../docs/validation/service-mode-2026-11-03.en.md). Service mode and Pi heartbeat were confirmed on the tested Mac/Pi combination on 2026-11-05; see the [hardware record](../../docs/validation/rpi-deployment-fixes-2026-11-05.en.md). The original cloud-test verdict remains unchanged.
 
 <a id="display-performance"></a>
 ## Display performance
 
-If the Pi display is not smooth, open "Settings" → "Display performance on this device" on the Pi page and choose "Full", "Balanced" or "Light". It changes only the brain animation and background blur, not listening, playback or response speed; the choice is stored in the Pi's browser, and the Pi defaults to "Balanced". The same section shows the measured frames per second and draw time per frame. Details are in the [display performance validation](../../docs/validation/pi-performance-2026-11-05.en.md) (**improvement on a real Pi not measured**).
+If the Pi display is not smooth, open "Settings" → "Display performance on this device" on the Pi page and choose "Full", "Balanced" or "Light". It changes only brain animation and background blur, without changing listening, playback, or voice-processing logic. Actual conversation fluency still shares the CPU and memory load. The choice is stored in the Pi's browser, and the Pi defaults to "Balanced". The same section shows the measured frames per second and draw time per frame. Details are in the [display performance validation](../../docs/validation/pi-performance-2026-11-05.en.md) (**improvement on a real Pi not measured**). This session confirmed switching all three options and persistence after reload; the tested device was left on Light. A 1280×720/60 Hz resolution trial gave no user-perceived improvement, so the original 1920×1080/about 55.758 Hz mode was restored. See the [hardware record](../../docs/validation/rpi-deployment-fixes-2026-11-05.en.md).
 
 ## Daily operation
 
@@ -130,6 +132,16 @@ journalctl --user -u aios-tunnel.service -u aios-kiosk.service -n 100
 
 If the Mac core port changes, edit `AIOS_PORT` in `~/.config/aios-terminal/terminal.conf` and restart both services.
 
+On the tested Raspberry Pi OS/labwc desktop, `Ctrl+Alt+Delete` opens the shutdown menu and `Ctrl+Alt+T` opens a terminal. Stop the service to leave the Nous kiosk. `Alt+F4` alone causes it to reopen because the service restarts it.
+
+```bash
+systemctl --user stop aios-kiosk.service
+# Resume Nous after desktop adjustments.
+systemctl --user start aios-kiosk.service
+```
+
+Stopping kiosk manually does not disable autostart at the next desktop login. Shut down through the shutdown menu before moving the Pi, then wait for the display and activity LED to stop before disconnecting power.
+
 ## Uninstall and rollback
 
 ```bash
@@ -140,14 +152,16 @@ bash uninstall.sh --purge
 `uninstall.sh` disables and removes both services, the autostart entry, the command links and the installed scripts, and turns linger back off if the installer turned it on. The config, key and Chromium profile stay unless you pass `--purge`. It does not remove apt packages and does not touch the Mac: it prints the command to remove the packages and the command that deletes the line containing this Pi's public key from the Mac's `~/.ssh/authorized_keys` (matched by key content, not the comment, because every Pi defaults to the hostname `raspberrypi`). To roll back the Mac, turn off Remote Login in Sharing and comment `PORT` out of `.env` again.
 
 <a id="known-limitations"></a>
-## Known limitations (not fixed in RPI-1)
+## Known limitations and device boundaries
 
 - **Encrypted result content and memory management reach only the App main window.** That content travels only over the Electron main window's IPC; SSE and `/api/*` carry only the outer shell. The Pi page can submit tasks, see progress shells and use realtime voice, but cannot see protected result content, manage memory or use memory in typed chat.
-- **Family recognition (from 2026-11-05): the Pi recognises people; enrolment is on the Mac.** The Pi page computes face and voice features with the Pi camera and microphone and sends them to the Mac core through `/api/terminal/identity`; it greets by name, recognises voices at wake and during calls, and shows "Using X's memory" and "Not me". Enrolment, deletion and calibration are only in the Mac App. See the [Pi family recognition validation](../../docs/validation/pi-family-recognition-2026-11-05.en.md) (**not verified on a real Pi**).
-- **The camera is in strict mode.** The App core starts with `cameraEnable: "main_process"`: a page sending `active: true` over HTTP always gets 403. The camera can only be turned on from the App menu on the Mac; once on, every page opens its own camera, so the Pi page opens the same stereo camera model on the Pi (found by `NOUS_CAMERA_LABEL`); Chromium asks once and you click "Allow". The Pi page cannot turn on a camera over HTTP (corrected 2026-11-05: previously said only the Mac camera opens).
+- **Family recognition runs on the Pi; enrolment stays on the Mac.** The Pi page computes features with its own camera and microphone and sends them to the Mac core through `/api/terminal/identity`. Enrolment, deletion, and calibration remain in the Mac App. Face naming and voice-only naming while looking away and saying the wake word were confirmed on this device; see the [hardware record](../../docs/validation/rpi-deployment-fixes-2026-11-05.en.md). The [original Pi recognition validation](../../docs/validation/pi-family-recognition-2026-11-05.en.md) keeps its cloud-fixture scope.
+- **Pi camera preferences apply only to that Pi.** With no App preload and exactly one `terminal=rpi4` parameter, `terminal-camera.ts` saves camera preferences in that Chromium profile's `localStorage`, initially off. Users can switch the Pi camera locally, with Chromium still requesting permission. The core still supplies installation enablement, camera label, and geometry. Native Mac enablement and HTTP `active: true` returning 403 remain. The Pi-local switch does not call the global enable API or require the Mac camera to be on.
+- **Recognition availability follows the source page.** Pi recognition is no longer blocked by the Mac camera's off state. HTTP settings responses and SSE initial/update events retain the source. Switching the Pi-local camera off still stops face recognition. Terminal ambient evidence uses a 2000 ms gap and freshness limit, while Mac/management retain 500/1000 ms. Three same-person frames remain required, without lower similarity thresholds.
+- **Test voice enrolment with the microphone that will be used.** In this session, enrolment from the Mac reSpeaker repeatedly returned `unknown` on the Pi EMEET. Re-enrolling and self-testing with the same USB EMEET on the Mac, then returning it to the Pi, produced successful voice-only wake naming. Back up encrypted family data first. The existing flow replaces that person's voice enrolment; it does not add a second simultaneous device template. See the [procedure and evidence](../../docs/validation/rpi-deployment-fixes-2026-11-05.en.md).
 - **The wake listening switch is only in the Mac App menu**, but each page listens with its own microphone (corrected 2026-11-05): the switch is stored in the core and pushed to every page through settings events, so the Pi page then detects "Hello Nous" / "Hey Nous" locally on the Pi with the Pi microphone and starts the call on the Pi after waking. From 2026-11-05 the Pi page also recognises voices at wake through `/api/terminal/identity` (see family recognition above).
 - **The Mac main window and the Pi page connect to the same core at the same time** (from reading the code, not confirmed on hardware):
-  - SSE: the core broadcasts through a client map, so both pages receive the same task and settings events and update their own screens.
+  - SSE: task events are broadcast to both pages; settings events project identity status for their source, and each page updates independently.
   - Realtime voice depends on the route:
     - While a ChatGPT plan call is active, any call started from the other side is refused; the start response is HTTP 200 with `ok: false` and "busy" (`session_busy`).
     - While an API key call with memory rules is active, the same refusal applies.

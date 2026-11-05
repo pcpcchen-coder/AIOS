@@ -4,11 +4,11 @@
 
 # Raspberry Pi 4 終端套件（RPI-1）
 
-狀態：**有套件，未經 Pi 實機驗證**（2026-11-03）。腳本只在 Linux 容器內以假的 `systemctl`、`ssh`、`apt-get` 等指令跑過 dry-run 測試與 shellcheck；Pi 上的安裝、開機自動啟動、聲音與鏡頭都還沒有實測紀錄。
+狀態：**已有指定 Pi 4 的部署與實機紀錄**（2026-11-05）。已確認 SSH 通道、全螢幕、USB 聲音、鏡頭預覽、看著說話、臉部稱名與純聲紋喚醒稱名。這是單一裝置的觀察，不代表其他硬體或長時間穩定度通過。開機自動啟動最近一次實測是 2026-11-03；本晚沒有重測開機。詳見[部署修正與實機驗證](../../docs/validation/rpi-deployment-fixes-2026-11-05.md)。
 
 ## 這是什麼
 
-Mac mini 照常開 **Nous App**（Electron），Agent、即時語音後端與資料都留在 Mac 的 App 核心。Raspberry Pi 4 只當終端：螢幕、麥克風、喇叭，之後再加鏡頭。
+Mac mini 照常開 **Nous App**（Electron），Agent、即時語音後端與資料都留在 Mac 的 App 核心。Raspberry Pi 4 只當終端，使用自己的螢幕、麥克風、喇叭與鏡頭。
 
 ```text
 Pi Chromium ──http://localhost:<AIOS_PORT>──> Pi 127.0.0.1:<AIOS_PORT>
@@ -100,7 +100,7 @@ AIOS_MAC_HOSTKEY_SHA256='SHA256:...' bash install.sh --non-interactive
 
 ### Chromium 旗標
 
-kiosk 用 `--kiosk --app=http://localhost:<AIOS_PORT>/?terminal=rpi4`（`terminal=rpi4` 讓頁面每 10 秒向核心送心跳，Mac 選單列據此顯示 Pi 是否連線）、獨立 profile（`~/.local/share/aios-terminal/chromium-profile`），以及 `--autoplay-policy=no-user-gesture-required`，讓提示音與回覆不必先點一下就能播放。套件**不使用** `--use-fake-ui-for-media-stream` 之類自動允許鏡頭／麥克風的旗標。第一次使用麥克風時，Chromium 會問一次，請用滑鼠按「允許」；選擇存在獨立 profile 裡。
+kiosk 用 `--kiosk --app=http://localhost:<AIOS_PORT>/?terminal=rpi4`（`terminal=rpi4` 讓頁面每 10 秒向核心送心跳，Mac 選單列據此顯示 Pi 是否連線）、獨立 profile（`~/.local/share/aios-terminal/chromium-profile`），以及 `--autoplay-policy=no-user-gesture-required`，讓提示音與回覆不必先點一下就能播放。另加 `--disable-features=WebRtcPipeWireCamera`，避開本次 Wayland／Chromium 的鏡頭列舉卡住問題；這只改攝影機後端，不關閉 PipeWire 音訊，也不自動授權媒體。套件**不使用** `--use-fake-ui-for-media-stream` 之類自動允許鏡頭／麥克風的旗標。第一次使用麥克風時，Chromium 會問一次，請用滑鼠按「允許」；選擇存在獨立 profile 裡。
 
 ## 診斷
 
@@ -113,12 +113,12 @@ aios-doctor
 <a id="service-mode"></a>
 ## Mac 服務模式
 
-用 Pi 時，在 Mac 選單列選「進入服務模式（給 Pi 使用）」：Mac 電子腦隱藏，Mac 的麥克風、常駐喚醒與鏡頭停止（設定不變），核心、登入與背景任務繼續給 Pi 使用。App 重開後仍維持服務模式。選單列最上面顯示「服務模式：Pi 已連線」或「服務模式：Pi 已斷線」；這只看 Pi 頁面的心跳（25 秒內有心跳才算連線），不看服務模式開關。選「返回 Mac 使用」切回本機，喚醒與鏡頭照原本設定恢復。細節與 Mac 驗收步驟見[服務模式驗證](../../docs/validation/service-mode-2026-11-03.md)（**未經 Mac 與 Pi 實機驗證**）。
+用 Pi 時，在 Mac 選單列選「進入服務模式（給 Pi 使用）」：Mac 電子腦隱藏，Mac 的麥克風、常駐喚醒與鏡頭停止（設定不變），核心、登入與背景任務繼續給 Pi 使用。App 重開後仍維持服務模式。選單列最上面顯示「服務模式：Pi 已連線」或「服務模式：Pi 已斷線」；這只看 Pi 頁面的心跳（25 秒內有心跳才算連線），不看服務模式開關。選「返回 Mac 使用」切回本機，喚醒與鏡頭照原本設定恢復。原始設計與驗收步驟見[服務模式驗證](../../docs/validation/service-mode-2026-11-03.md)。2026-11-05 已在指定 Mac／Pi 組合確認服務模式與 Pi 心跳，見[本次實機紀錄](../../docs/validation/rpi-deployment-fixes-2026-11-05.md)；原始文件的雲端測試結論維持原樣。
 
 <a id="display-performance"></a>
 ## 畫面效能
 
-Pi 畫面不順時，在 Pi 頁面打開「設定」→「這台裝置的畫面效能」，選「完整」「平衡」或「省電」。只調整電子腦動畫與背景模糊，不影響收音、播放與回應速度；選擇存在 Pi 的瀏覽器裡，Pi 預設「平衡」。同一段會顯示實測每秒格數與每格繪製時間。細節見[畫面效能驗證](../../docs/validation/pi-performance-2026-11-05.md)（**Pi 實機改善未量測**）。
+Pi 畫面不順時，在 Pi 頁面打開「設定」→「這台裝置的畫面效能」，選「完整」「平衡」或「省電」。只調整電子腦動畫與背景模糊，沒有改動收音、播放或語音處理邏輯；實際對話流暢度仍受共同的 CPU 與記憶體負載影響。選擇存在 Pi 的瀏覽器裡，Pi 預設「平衡」。同一段會顯示實測每秒格數與每格繪製時間。細節見[畫面效能驗證](../../docs/validation/pi-performance-2026-11-05.md)（**Pi 實機改善未量測**）。本次已確認三個選項能切換且重新載入後保留，測試裝置最後選擇「省電」。1280×720／60 Hz 的解析度試驗沒有使用者感受到的改善，已恢復原本 1920×1080／約 55.758 Hz，見[實機紀錄](../../docs/validation/rpi-deployment-fixes-2026-11-05.md)。
 
 ## 日常操作
 
@@ -130,6 +130,16 @@ journalctl --user -u aios-tunnel.service -u aios-kiosk.service -n 100
 
 Mac 核心 port 改了：編輯 `~/.config/aios-terminal/terminal.conf` 的 `AIOS_PORT`，再重啟兩個服務。
 
+在本次 Raspberry Pi OS／labwc 桌面，`Ctrl+Alt+Delete` 會開關機選單，`Ctrl+Alt+T` 會開終端機。要離開 Nous 全螢幕，先執行以下指令；只按 `Alt+F4` 會因服務重啟設定而再開啟。
+
+```bash
+systemctl --user stop aios-kiosk.service
+# Resume Nous after desktop adjustments.
+systemctl --user start aios-kiosk.service
+```
+
+手動停止 kiosk 不會取消下次桌面登入的自動啟動。搬動前從關機選單正常關機，等畫面熄滅與活動燈停止閃爍後再斷電。
+
 ## 解除安裝與回復
 
 ```bash
@@ -140,14 +150,16 @@ bash uninstall.sh --purge
 `uninstall.sh` 停用並移除兩個服務、自動啟動檔、指令連結與安裝的腳本；若 linger 是安裝程式開的就關回去。設定、key 與 Chromium profile 預設保留，`--purge` 才刪除。它不移除 apt 套件，也不碰 Mac：畫面會印出移除套件的指令，以及從 Mac 的 `~/.ssh/authorized_keys` 刪掉含這台 Pi 公鑰那一行的指令（以公鑰內容比對，不用註解，因為每台 Pi 預設主機名都是 `raspberrypi`）。Mac 端要回復，另外在「共享」關掉遠端登入，並把 `.env` 的 `PORT` 改回註解。
 
 <a id="known-limitations"></a>
-## 已知限制（RPI-1 不修）
+## 已知限制與裝置邊界
 
 - **加密成果內容、記憶管理只給 App 主視窗。** 這些內容只經 Electron 主視窗的 IPC 傳送；SSE 與 `/api/*` 只給外殼。Pi 頁面可以交辦任務、看到進度外殼與即時語音，但看不到受保護成果的內容，也不能管理記憶或打字聊天帶記憶。
-- **家人辨識（2026-11-05 起）：Pi 能認人，登記在 Mac。** Pi 頁面用 Pi 的鏡頭與麥克風算臉部與聲音特徵，經 `/api/terminal/identity` 送 Mac 核心比對，會叫名字、喚醒時與通話中認聲音，並顯示「正在用 X 的記憶」與「不是我」。登記、刪除、校正只在 Mac 的 App。見 [Pi 家人辨識驗證](../../docs/validation/pi-family-recognition-2026-11-05.md)（**未經 Pi 實機驗證**）。
-- **鏡頭是嚴格模式。** App 核心以 `cameraEnable: "main_process"` 啟動：頁面經 HTTP 送 `active: true` 一律 403，鏡頭只能在 Mac 的 App 選單打開；打開後每個頁面各自開自己的鏡頭，所以 Pi 頁面會開 Pi 上同款的立體鏡頭（依 `NOUS_CAMERA_LABEL` 找），Chromium 第一次會詢問，按一次「允許」。Pi 頁面不能經 HTTP 打開鏡頭（2026-11-05 更正：之前寫成只開 Mac 的鏡頭）。
+- **家人辨識：Pi 能認人，登記在 Mac。** Pi 頁面用 Pi 的鏡頭與麥克風算特徵，經 `/api/terminal/identity` 送 Mac 核心比對。登記、刪除與校正仍只在 Mac 的 App。本次指定裝置已確認臉部稱名，以及不看鏡頭、只喊喚醒詞的純聲紋稱名，見[部署實機紀錄](../../docs/validation/rpi-deployment-fixes-2026-11-05.md)。[原始 Pi 家人辨識驗證](../../docs/validation/pi-family-recognition-2026-11-05.md)保留其雲端 fixture 範圍。
+- **Pi 鏡頭設定只作用在這台 Pi。** 沒有 App preload 且網址只有一個 `terminal=rpi4` 時，`terminal-camera.ts` 在該 Chromium profile 的 `localStorage` 保存鏡頭偏好，初次預設關閉。使用者可在 Pi 開關自己的鏡頭，Chromium 仍負責權限提示。Mac 的安裝啟用狀態、鏡頭標籤與幾何設定仍由核心提供。Mac 的原生開啟限制與 HTTP `active: true` 的 403 保留；Pi 的本機開關不呼叫全域開啟 API，也不要求打開 Mac 鏡頭。
+- **辨識可用性依來源頁面判斷。** Pi 的辨識不再被 Mac 的鏡頭關閉狀態擋住；設定的 HTTP 回應及 SSE 初始／更新事件都保留來源。Pi 本機關閉鏡頭仍停止臉部辨識。終端 ambient 證據間隔與有效期限各為 2000 ms，Mac／管理流程維持 500／1000 ms；仍需三格同人物證據，沒有降低相似度門檻。
+- **聲紋登記要用實際使用的麥克風試認。** 本次原有聲紋在 Mac 的 reSpeaker 登記，Pi 的 EMEET 一直回 `unknown`；用同一支 USB EMEET 在 Mac 重錄並試認後，接回 Pi 的純聲紋喚醒稱名成功。重錄前先備份加密家人資料；現有流程會替換該人物的聲紋，不是同時新增第二組裝置模板。操作與證據見[實機紀錄](../../docs/validation/rpi-deployment-fixes-2026-11-05.md)。
 - **喚醒聆聽的開關只在 Mac 的 App 選單**，但每個頁面各自用自己的麥克風聽（2026-11-05 更正）：開關存在核心，經設定事件推給所有頁面，Pi 頁面收到後就用 Pi 的麥克風在 Pi 本機偵測「Hello Nous」／「Hey Nous」，喚醒後在 Pi 開始通話。2026-11-05 起 Pi 頁面喚醒時也會經 `/api/terminal/identity` 認聲音（見上面的家人辨識）。
 - **Mac 主視窗與 Pi 頁面同時連同一個核心**（依程式碼閱讀，未經實機確認）：
-  - SSE：核心以 client 對照表廣播，兩個頁面都收到同樣的任務與設定事件，各自更新畫面。
+  - SSE：任務事件廣播給兩邊；設定事件依來源投影辨識狀態，各自更新畫面。
   - 即時語音，依路徑不同：
     - ChatGPT 方案的通話進行中：另一邊開始任何通話都會被拒絕，開始的回應是 HTTP 200 加上 `ok: false` 與「忙線」（`session_busy`）。
     - 帶記憶規則的 API key 通話進行中：同樣拒絕。
