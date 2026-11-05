@@ -838,6 +838,32 @@ body.listening .subtitle {
   }
 }
 
+/* 這台裝置的畫面效能（src/performance.ts）：關閉背景模糊時底色加深，字仍看得清楚。 */
+:root.perf-no-blur {
+  --panel: rgba(9, 16, 30, 0.94);
+}
+
+:root.perf-no-blur :is(.status-line, .command-bar, .surface, .voice-pill, .subtitle, .conversation-reply, .sensor-preview) {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+:root.perf-no-blur .voice-pill {
+  background: rgba(40, 8, 14, 0.9);
+}
+
+:root.perf-no-blur .voice-pill[data-state="speaking"] {
+  background: rgba(24, 14, 48, 0.9);
+}
+
+:root.perf-no-blur .subtitle {
+  background: rgba(3, 5, 11, 0.88);
+}
+
+:root.perf-no-blur .conversation-reply {
+  background: rgba(3, 5, 11, 0.94);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .surface,
   .command-bar {
@@ -1221,6 +1247,10 @@ body[data-camera-preview="open"] .subtitle {
 .language-settings label { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .language-settings select { color: var(--text, #e8eaf0); background: #141b2b; border: 1px solid #39445a; border-radius: 8px; padding: 7px 10px; font: inherit; }
 .language-settings select:focus-visible { outline: 2px solid #8aa4ff; outline-offset: 3px; }
+
+/* 這台裝置的畫面效能：三個選項各帶一行說明，觸控也好按。 */
+.perf-choices { flex-direction: column; }
+.perf-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 44px; border-radius: 12px; text-align: left; }
 
 /* 記憶（docs/16 MEM-1）：按需卡片與輸入列的「本次人物」；不建常駐側欄。 */
 .memory-line { margin: 4px 0 0; font-size: 12px; opacity: 0.8; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }

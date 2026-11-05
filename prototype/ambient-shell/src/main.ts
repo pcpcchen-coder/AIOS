@@ -24,6 +24,7 @@ import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts"
 import { greetingFor, idleSession, newInteractionId, openRealtime, wakeTriggerAction, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
 import type { CallAnswer, LiveCoreEvent, LiveMemoryReason, RealtimeServerEvent, RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
+import { applyProfile, loadProfile, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
 import { CUE_TIMING, ProcessingCue, processingSource } from "./processing-cue.ts";
 import { browserProcessingSound } from "./processing-sound.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
@@ -60,6 +61,7 @@ import {
   renderSettings,
   renderConfirm,
   refreshCountdowns,
+  refreshPerformanceReadout,
   updateLiveCounts,
   type ConfirmDetail,
   type ViewActions,
@@ -190,6 +192,10 @@ let conversationEpoch = 0;
 let pendingProviderSelection: { epoch: number; account: string } | null = null;
 
 const brain = new Brain(canvas);
+// 這台裝置的畫面效能（George 2026-11-05）：只改電子腦的繪製與背景模糊，存在這個頁面；Pi 終端機預設「平衡」。
+const performanceTargets = { setRenderBudget: (budget: RenderBudget) => brain.setRenderBudget(budget), root: document.documentElement };
+let performanceProfile: PerformanceProfile = loadProfile({ search: location.search, desktop: !!window.nousDesktop });
+applyProfile(performanceProfile, performanceTargets);
 brain.start();
 
 /**
@@ -2656,6 +2662,12 @@ const actions: ViewActions = {
     });
   },
   openCameraPreview: () => openPreview(userRequest()),
+  setPerformance(profile) {
+    performanceProfile = profile;
+    applyProfile(profile, performanceTargets);
+    saveProfile(profile);
+    render();
+  },
   updateAudio(patch) {
     const requestId = userRequest();
     void updateAudioPrefs(patch).then((error) => {
@@ -3188,7 +3200,7 @@ function renderSurface(): void {
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
-      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
@@ -3217,7 +3229,7 @@ function renderSurface(): void {
     ensureIntegrationStatus();
     // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
     ensureVoiceRelay();
-    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null });
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats() } });
   }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));
@@ -3300,6 +3312,7 @@ function renderVaultPrompt(): void {
 setInterval(() => {
   refreshTimers(surfaceRoot);
   refreshCountdowns(surfaceRoot);
+  if (shell.surface?.kind === "settings") refreshPerformanceReadout(surfaceRoot, brain.frameStats());
 }, 1000);
 
 // ───────────── 輸入 ─────────────

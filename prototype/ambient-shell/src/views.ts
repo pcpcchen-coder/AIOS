@@ -15,6 +15,7 @@ import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
 import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
 import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, VoiceRelayProfileBody, VoiceRelaySlots, VoiceRelayTargetBody, VoiceRelayTrialBody, VoiceRelayUnadoptBody } from "./api.ts";
+import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, type FrameStats, type PerformanceProfile } from "./performance.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -53,6 +54,8 @@ export interface ViewActions {
   codexLogout(): void;
   /** 進度卡的「搜尋全部成果」（HIST-1）：打開成果紀錄。 */
   openHistory(): void;
+  /** 這台裝置的畫面效能：立即套用並保存在這個頁面。 */
+  setPerformance?(profile: PerformanceProfile): void;
 }
 
 export const MAX_LISTED = 8;
@@ -373,6 +376,14 @@ export interface SettingsRenderOptions {
   integrations?: IntegrationPanelState | null;
   /** VCR-2：語音中繼診斷區的按需狀態（只有核心註冊了 voice_relay、settings.voice_relay 為 true 時才畫）。 */
   voiceRelay?: VoiceRelayPanelState | null;
+  /** 這台裝置的畫面效能（src/performance.ts）；沒有時不畫。 */
+  performance?: PerformancePanelState | null;
+}
+
+export interface PerformancePanelState {
+  profile: PerformanceProfile;
+  /** 電子腦實測的格數與繪製時間；設定頁開著時每秒由 refreshPerformanceReadout 更新。 */
+  stats: FrameStats | null;
 }
 
 /** SP-1：設定頁「App 整合」段的狀態（打開設定頁時才向核心查，不在背景輪詢）。 */
@@ -412,7 +423,7 @@ export function renderSettings(
   options: SettingsRenderOptions = {},
 ): HTMLElement {
   if (!settings) return surfaceShell("settings", h("p", { class: "muted" }, t("正在讀取設定…")), footer(actions));
-  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null, options.integrations ?? null, options.voiceRelay ?? null);
+  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null, options.integrations ?? null, options.voiceRelay ?? null, options.performance ?? null);
   const g = settings.chatgpt;
 
   const list = h("ul", { class: "provider-list" });
@@ -446,6 +457,7 @@ export function renderSettings(
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
+    options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
     settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
@@ -459,7 +471,7 @@ export function renderSettings(
  * macOS App 內的設定頁：只有帳號與登入（ChatGPT 引擎帳號、即時語音用的 Codex 帳號）和狀態。
  * 引擎選擇、即時語音路徑與聲音、秒數、鏡頭與手勢都在選單列，這裡不重複畫。
  */
-function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null, voiceRelay: VoiceRelayPanelState | null): HTMLElement {
+function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null, voiceRelay: VoiceRelayPanelState | null, performance: PerformancePanelState | null): HTMLElement {
   const g = settings.chatgpt;
   const account = chatgptAccount(settings, actions, true);
   // 瀏覽器版的「Continue with ChatGPT」在引擎清單裡；這頁沒有引擎清單，未登入時直接放登入按鈕。
@@ -483,6 +495,7 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.realtime && renderRealtimeSettings(settings.realtime, actions, { desktop: true }),
     // 聲音輸入／輸出（George 2026-11-01）：選單列「聲音」與這裡都能選，寫入同一個 audio.json。
     settings.audio && renderAudioSettings(settings.audio.prefs, audio, actions),
+    performance && renderPerformanceSettings(performance, actions),
     // PRO-1：選單列「主動提醒」與這裡都能改，寫入同一個 proactive.json。
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
@@ -490,6 +503,44 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
     footer(actions),
   );
+}
+
+/**
+ * 這台裝置的畫面效能（George 2026-11-05，Pi 4 終端機）：完整／平衡／省電，選了立即套用、只存在這個頁面。
+ * 只改電子腦的繪製與背景模糊；收音、播放與即時語音不受影響。實測數字來自電子腦每一格的計時。
+ */
+export function renderPerformanceSettings(state: PerformancePanelState, actions: ViewActions): HTMLElement {
+  const choices = h("div", { class: "actions perf-choices", role: "radiogroup", "aria-label": PERFORMANCE_TEXT.group });
+  for (const profile of PERFORMANCE_PROFILES) {
+    const selected = state.profile === profile;
+    const choice = h(
+      "button",
+      { type: "button", class: `btn perf-choice${selected ? " btn--primary" : ""}`, role: "radio", "aria-checked": String(selected) },
+      h("strong", {}, t(PERFORMANCE_TEXT.label[profile])),
+      h("span", { class: "small" }, t(PERFORMANCE_TEXT.detail[profile])),
+    );
+    choice.addEventListener("click", () => actions.setPerformance?.(profile));
+    choice.disabled = !actions.setPerformance;
+    choices.append(choice);
+  }
+  return h(
+    "section",
+    { class: "camera-settings performance-settings" },
+    h("h3", {}, t(PERFORMANCE_TEXT.title)),
+    choices,
+    h("p", { class: "muted small" }, t(PERFORMANCE_TEXT.note)),
+    h("p", { class: "muted small", "data-perf-readout": "" }, performanceReadout(state.stats)),
+  );
+}
+
+function performanceReadout(stats: FrameStats | null): string {
+  const { source, values } = frameStatsText(stats);
+  return t(source, ...values);
+}
+
+/** 設定頁開著時每秒更新實測數字（只改文字，不重建設定頁）。 */
+export function refreshPerformanceReadout(root: ParentNode, stats: FrameStats | null): void {
+  root.querySelectorAll<HTMLElement>("[data-perf-readout]").forEach((el) => { el.textContent = performanceReadout(stats); });
 }
 
 /** ChatGPT 引擎帳號：登入中、已登入（重新授權／用量／其他帳號／登出）、需要重新登入。 */
