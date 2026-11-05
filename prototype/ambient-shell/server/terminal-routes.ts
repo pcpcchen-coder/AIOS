@@ -7,15 +7,17 @@
 // - 記憶的回應用 allow-list 投影（presenceStatus）：只回「正在用 X 的記憶」「不是我」與本次人物選單用到的（狀態、本次人物、
 //   人物的 ID 與名字、回條）；卡片內容、要送的聊天、記憶建議、記憶筆數、未成年與連結旗標、服務帳號與同意都不給。
 // - 請求以終端機識別碼為來源交給核心（ctx.source）：記憶候選與「暫停本次人物」只作用在這個頁面。
+// - 認人請求的信封可以帶 page（頁面的鏡頭回報，四個 boolean，多一個或少一個欄位都 400）：Pi 本機的看著說話三個設定與鏡頭是否在跑。
+//   放在信封而不是請求裡，因為請求的形狀和 Mac App 的 IPC 共用。
 
 import type { IdentityResponse } from "../shared/identity.ts";
 import type { MemoryPresenceResponse, MemoryPresenceStatus, MemoryResponse, MemoryStatusView } from "../shared/memory.ts";
 import { validateIdentityRequest } from "../shared/identity-validate.mjs";
 import { validateMemoryRequest } from "../shared/memory-validate.mjs";
-import { isTerminalId, TERMINAL_IDENTITY_OPS, TERMINAL_MEMORY_OPS } from "../shared/terminal.ts";
+import { isTerminalId, parseTerminalPageReport, TERMINAL_IDENTITY_OPS, TERMINAL_MEMORY_OPS, type TerminalPageReport } from "../shared/terminal.ts";
 
 export interface TerminalIdentityPort {
-  handle(request: unknown, ctx: { userInitiated?: boolean; source?: string }): Promise<IdentityResponse>;
+  handle(request: unknown, ctx: { userInitiated?: boolean; source?: string; page?: TerminalPageReport }): Promise<IdentityResponse>;
 }
 
 export interface TerminalMemoryPort {
@@ -28,6 +30,7 @@ export type TerminalRouteResult<T> = { status: 200; body: T } | { status: 400 | 
 
 const TERMINAL_INVALID = "terminal must be a lowercase id (a-z, 0-9, -; up to 32 characters)";
 const REFUSED = "這個操作只在 Mac 的 Nous App 提供";
+const PAGE_INVALID = "page must be an object with exactly the booleans camera_active, look_to_talk, look_to_talk_greet, look_to_talk_greet_name";
 
 function terminalOf(body: Record<string, unknown>): string | null {
   return isTerminalId(body.terminal) ? body.terminal : null;
@@ -38,16 +41,18 @@ function requestOf(body: Record<string, unknown>): Record<string, unknown> | nul
   return req && typeof req === "object" && !Array.isArray(req) ? (req as Record<string, unknown>) : null;
 }
 
-/** POST /api/terminal/identity 的 body：{ terminal, request }。 */
+/** POST /api/terminal/identity 的 body：{ terminal, request, page? }；page 是頁面的鏡頭回報（shared/terminal.ts TerminalPageReport）。 */
 export async function terminalIdentity(port: TerminalIdentityPort, body: Record<string, unknown>): Promise<TerminalRouteResult<IdentityResponse>> {
   const terminal = terminalOf(body);
   if (terminal === null) return { status: 400, error: TERMINAL_INVALID };
   // 先擋操作再驗形狀：管理操作不論形狀對不對一律 403。
   const op = requestOf(body)?.op;
   if (!(TERMINAL_IDENTITY_OPS as readonly unknown[]).includes(op)) return { status: 403, error: REFUSED };
+  const page = body.page === undefined ? undefined : parseTerminalPageReport(body.page);
+  if (page === null) return { status: 400, error: PAGE_INVALID };
   const checked = validateIdentityRequest(body.request);
   if (!checked.ok) return { status: 400, error: checked.error };
-  return { status: 200, body: await port.handle(checked.request, { userInitiated: false, source: terminal }) };
+  return { status: 200, body: await port.handle(checked.request, { userInitiated: false, source: terminal, ...(page ? { page } : {}) }) };
 }
 
 /** POST /api/terminal/memory 的 body：{ terminal, request }。 */

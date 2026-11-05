@@ -1,9 +1,12 @@
 import { CAMERA_PREF_KEYS, DEFAULT_CAMERA_PREFS, parseCameraPatch, type CameraPrefs, type CameraPrefsPatch } from "../shared/sense.ts";
 import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/seconds-menu.ts";
 import type { SettingsView } from "../shared/types.ts";
+import { isTerminalId } from "../shared/terminal.ts";
 import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
 
-export const TERMINAL_CAMERA_KEY = "nous.terminal.rpi4.camera.v1";
+export function terminalCameraKey(terminal: string): string {
+  return `nous.terminal.${terminal}.camera.v1`;
+}
 export const TERMINAL_CAMERA_SCOPE = "鏡頭設定只套用到這台 Pi。影像在 Pi 本機處理，不保存、不上傳；鏡頭權限由 Chromium 詢問。";
 export const TERMINAL_CAMERA_SAVE_ERROR = "Pi 鏡頭設定沒有保存，請確認瀏覽器允許本機儲存。";
 export const TERMINAL_CAMERA_STOP_ERROR = "鏡頭已在這個視窗關閉，但設定沒有保存；重新開啟頁面可能沿用上次設定。";
@@ -26,13 +29,15 @@ export interface TerminalCameraUpdate {
 
 export class TerminalCameraPrefs {
   readonly local: boolean;
+  private readonly key: string;
   private remote: SettingsView | null = null;
   private prefs: CameraPrefs | null = null;
   private stopped = false;
 
   constructor(private readonly options: TerminalCameraOptions) {
     const terminal = new URLSearchParams(options.search).getAll("terminal");
-    this.local = !options.desktop && terminal.length === 1 && terminal[0] === "rpi4";
+    this.local = !options.desktop && terminal.length === 1 && isTerminalId(terminal[0]);
+    this.key = this.local ? terminalCameraKey(terminal[0]!) : "";
   }
 
   receive(remote: SettingsView): SettingsView {
@@ -42,7 +47,7 @@ export class TerminalCameraPrefs {
       const camera = remote.camera;
       this.prefs = { ...DEFAULT_CAMERA_PREFS, ...parseCameraPatch(Object.fromEntries(CAMERA_PREF_KEYS.map((key) => [key, camera[key]]))), active: false };
       try {
-        const value = JSON.parse(this.options.storage().getItem(TERMINAL_CAMERA_KEY) ?? "null");
+        const value = JSON.parse(this.options.storage().getItem(this.key) ?? "null");
         if (value?.version === 1 && CAMERA_PREF_KEYS.every((key) => Object.hasOwn(value.prefs ?? {}, key))) {
           const parsed = parseCameraPatch(value.prefs);
           this.prefs = { ...DEFAULT_CAMERA_PREFS, ...parsed };
@@ -60,7 +65,7 @@ export class TerminalCameraPrefs {
     const next = { ...this.prefs, ...patch };
     if (this.stopped && patch.active !== true) next.active = false;
     try {
-      this.options.storage().setItem(TERMINAL_CAMERA_KEY, JSON.stringify({ version: 1, prefs: next }));
+      this.options.storage().setItem(this.key, JSON.stringify({ version: 1, prefs: next }));
       this.prefs = next;
       if (patch.active !== undefined || !next.active) this.stopped = false;
       return { settings: this.project(), error: null };

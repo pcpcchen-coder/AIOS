@@ -5,7 +5,7 @@ import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
 import { cameraShouldRun } from "../src/sense/controller.ts";
 import { startTerminalHeartbeat } from "../src/terminal-heartbeat.ts";
 import { TERMINAL_HEARTBEAT_MS } from "../shared/terminal.ts";
-import { TERMINAL_CAMERA_KEY, TERMINAL_CAMERA_SAVE_ERROR, TERMINAL_CAMERA_STOP_ERROR, TerminalCameraPrefs } from "../src/terminal-camera.ts";
+import { TERMINAL_CAMERA_SAVE_ERROR, TERMINAL_CAMERA_STOP_ERROR, TerminalCameraPrefs, terminalCameraKey } from "../src/terminal-camera.ts";
 
 function source(prefs: Partial<CameraPrefs> = {}): SettingsView {
   return {
@@ -22,16 +22,17 @@ function source(prefs: Partial<CameraPrefs> = {}): SettingsView {
 }
 
 class Storage {
+  constructor(readonly key = "nous.terminal.rpi4.camera.v1") {}
   value: string | null = null;
   failRead = false;
   failWrite = false;
   getItem(key: string): string | null {
-    expect(key).toBe(TERMINAL_CAMERA_KEY);
+    expect(key).toBe(this.key);
     if (this.failRead) throw new Error("blocked");
     return this.value;
   }
   setItem(key: string, value: string): void {
-    expect(key).toBe(TERMINAL_CAMERA_KEY);
+    expect(key).toBe(this.key);
     if (this.failWrite) throw new Error("full");
     this.value = value;
   }
@@ -42,13 +43,27 @@ function terminal(storage = new Storage(), search = "?terminal=rpi4", desktop = 
 }
 
 describe("terminal camera ownership", () => {
-  it.each(["", "?terminal=other", "?terminal=RPI4", "?terminal=rpi4&terminal=other", "?terminal=rpi4&terminal=rpi4"])("leaves shared-page settings untouched for %s", (search) => {
+  it.each(["", "?terminal=main", "?terminal=RPI4", "?terminal=rpi4&terminal=other", "?terminal=rpi4&terminal=rpi4"])("leaves shared-page settings untouched for %s", (search) => {
     const { owner, storage } = terminal(undefined, search);
     storage.failRead = true;
     const remote = source({ active: true });
     expect(owner.local).toBe(false);
     expect(owner.receive(remote)).toBe(remote);
     expect(storage.value).toBeNull();
+  });
+
+  it("owns any single valid terminal id under its own key and keeps existing rpi4 data", () => {
+    expect(terminalCameraKey("rpi4")).toBe("nous.terminal.rpi4.camera.v1");
+    const kitchen = terminal(new Storage("nous.terminal.kitchen.camera.v1"), "?terminal=kitchen");
+    expect(kitchen.owner.local).toBe(true);
+    kitchen.owner.receive(source());
+    expect(kitchen.owner.update({ active: true, look_to_talk_greet_name: false }).error).toBeNull();
+    expect(JSON.parse(kitchen.storage.value!).prefs).toMatchObject({ active: true, look_to_talk_greet_name: false });
+
+    const stored = new Storage();
+    stored.value = JSON.stringify({ version: 1, prefs: { ...DEFAULT_CAMERA_PREFS, active: true, look_to_talk_greet_name: false } });
+    const pi = terminal(stored, "?terminal=rpi4");
+    expect(pi.owner.receive(source({ look_to_talk_greet_name: true })).camera).toMatchObject({ active: true, look_to_talk_greet_name: false });
   });
 
   it("never selects terminal ownership in the desktop main window", () => {

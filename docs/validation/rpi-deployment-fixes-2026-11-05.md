@@ -17,13 +17,20 @@
 
 | 問題 | 最後行為 |
 |---|---|
-| Pi 頁面沿用 Mac 全域鏡頭開關 | `terminal-camera.ts` 只在沒有 App preload 且網址只有一個 `terminal=rpi4` 時持有本機偏好。資料存在該 Chromium profile 的 `localStorage`，初次預設關閉；安裝啟用、標籤與幾何仍由核心提供。Pi 開關不呼叫全域開啟 API，Mac 原生限制保留。關閉保存失敗時，當前頁面仍保持停止 |
+| Pi 頁面沿用 Mac 全域鏡頭開關 | `terminal-camera.ts` 只在沒有 App preload 且網址只有一個合法 `terminal=<id>` 時持有本機偏好。資料以 `nous.terminal.<id>.camera.v1` 存在該 Chromium profile 的 `localStorage`（既有 `rpi4` 資料沿用），初次預設關閉；安裝啟用、標籤與幾何仍由核心提供。Pi 開關不呼叫全域開啟 API，Mac 原生限制保留。關閉保存失敗時，當前頁面仍保持停止 |
 | Chromium 已有權限卻卡在鏡頭列舉 | kiosk 加入 `--disable-features=WebRtcPipeWireCamera`。保留 PipeWire 音訊、既有 profile 與 Chromium 權限提示，不使用自動允許媒體旗標 |
 | Mac 鏡頭關閉讓 Pi 辨識回 `ready=false` | 核心依來源頁面判斷鏡頭資格。GET／POST 設定回應，以及 SSE hello／settings.updated 都保留來源；Mac 管理仍用主視窗規則，Pi 本機關閉鏡頭仍停止臉部辨識 |
 | Pi 至少每 500 ms 取樣，核心超過 500 ms 就清空證據 | 終端 ambient 證據的相鄰間隔與最新有效期限各為 2000 ms。Mac／管理流程保留 500／1000 ms。仍需三格同人物與同 scope 的證據，換人、品質失敗、多臉或追蹤／epoch／gallery 改變仍重設，沒有降低相似度門檻 |
 | 未認出人時語音把助手名稱加進問候 | 中英文指示明確說明 Hello／Hey Nous 是呼叫助手，不是使用者自我介紹；開場姓名只來自核心指定句。`live:greeting_mismatch` 以正規化後的完整相等比較記偏差，原本對話過濾的寬鬆比較保留。標記不含句子、姓名或音訊，也不阻擋已播出的聲音；中斷、改寫或全形／半形等逐字稿字形差異也可能觸發，提示修正不是確定性的音訊控制 |
 
 SSE 的終端名稱仍只是來源標記，不是新配對或驗證機制。模型、加密、管理 session 與 Mac 原生開啟檢查保留。
+
+### 審查後修正
+
+- 稱名設定跟著 Pi：Pi 本機保存的「看著說話」「看著說話時先打招呼」「稱名」原本不影響核心，核心仍讀 Mac 的 `camera.json`。現在 Pi 頁面在 `POST /api/terminal/identity` 的信封（不是和 Mac IPC 共用的請求）附上 `page`：這四個 boolean 是頁面實際套用的三個設定與鏡頭是否真的在跑，多欄位、少欄位或型別不對回 400。核心依各終端最近一次回報決定該終端的同步辨識與稱名；還沒回報的終端視為設定全關、鏡頭沒開。Mac 主視窗照舊用 `camera.json`。頁面在設定或鏡頭狀態改變時主動送一次，心跳時重送（核心重啟後恢復）。
+- 鏡頭狀態不再一律算可用：終端的 `settings.identity` 與 `ambient_status` 原本只看 Mac 的鏡頭功能是否啟用，Pi 鏡頭關著也顯示可用。現在要該終端回報鏡頭正在跑；鏡頭開關改變時通知設定更新。
+- 終端識別碼不再寫死 `rpi4`：任一合法終端識別碼都可持有本機鏡頭偏好，各自存放。
+- 測試是 fixture（合成特徵、假時鐘、假 fetch）：Pi 關稱名而 Mac 開時不稱名、Pi 開而 Mac 關時可稱名、沒有回報不稱名也不就緒、鏡頭關閉時狀態受限、Mac 不受終端回報影響、信封驗證，以及 `kitchen` 識別碼與既有 `rpi4` 資料。尚未在 Pi 實機重測。
 
 ## 指定裝置觀察
 

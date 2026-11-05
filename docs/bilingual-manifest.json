@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "5c680f3caf1b8e37a6ed618e18ca9c1b3adaec74525e6150101d0cc80070b723",
-      "translationSha256": "2acd94d83142698ad41c44a63a1fc8f5525c53f560af3cfd4370ead716fad40d"
+      "sourceSha256": "009fb1aa21b0201c880d183f08f68e4c4f5ce4e175ec0fbd50fedbf6d458d582",
+      "translationSha256": "b208ed6881a72a74746976c0f1b8b5ea267005777ae33f8f54dfa40987a1fd51"
     },
     {
       "source": "docs/README.md",
@@ -620,8 +620,8 @@
       "source": "docs/validation/rpi-deployment-fixes-2026-11-05.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/rpi-deployment-fixes-2026-11-05.en.md",
-      "sourceSha256": "6aec5719fd05b5df2610f12cbccf2a3707470510c4017c378905ddd9f1c5add4",
-      "translationSha256": "854ae5ad00723deb01978ddcd8d87c43bd2201b7a85daa8640630ec9d67fd69a"
+      "sourceSha256": "68e317a71f845de61abc44070258d07d05cb417374d02292708e2fe80e14cbff",
+      "translationSha256": "07aaf3f28f695c083df97dd4497500434308ade573763ea4e80f27d4bd284bd1"
     },
     {
       "source": "docs/validation/service-mode-2026-11-03.md",

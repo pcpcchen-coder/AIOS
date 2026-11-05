@@ -59,7 +59,7 @@ import { liveGreetingText, strictGreetingInstructions } from "../shared/sense.ts
 import { appendBriefing } from "../shared/proactive.ts";
 import { fitBriefing, fitsLiveAppend, type BriefingPort, type BriefingSubject, type PendingBriefing } from "./proactive.ts";
 import { WAKE_ID } from "../shared/wake.ts";
-import { isTerminalId, MAIN_SOURCE, TERMINAL_EVIDENCE_TIMING } from "../shared/terminal.ts";
+import { isTerminalId, MAIN_SOURCE, TERMINAL_EVIDENCE_TIMING, type TerminalPageReport } from "../shared/terminal.ts";
 import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
 import type { SpeakerRuntimeCheck } from "./speaker-runtime.ts";
@@ -98,6 +98,8 @@ import type { CalibrationFileData, GalleryStore, GalleryVersions, StoredCalibrat
 //   Pi 看到的臉不會替 Mac 的打字聊天選人。所有終端機另有一份合計的取樣限速（等於分頁前的全核心上限），換識別碼繞不過；
 //   主視窗的證據不會因為終端機太多被擠掉。問候決策的互動 ID 與限速仍是全核心一份（一次互動只問候一次）；
 //   Mac 開著家人辨識管理畫面時，所有來源的同步辨識一樣停止。終端機只送頁面算好的特徵向量，從不送影像或錄音。
+// - 終端機的「看著說話」三個設定與鏡頭開關保存在 Pi 本機，所以核心用那個頁面最近一次的回報（ctx.page），不讀 Mac 的 camera.json；
+//   還沒回報的終端機當成設定全關、鏡頭沒開。Mac 主視窗照舊用 options.ambient／options.camera。
 //
 // SP-02a（喚醒時認聲音，docs/17 §4、§7.2、§7.3）：
 // - voice_probe：頁面在喚醒後送來這次喚醒（wake_id）的聲音特徵：喚醒詞那一段（keyword，只和喚醒詞模板比）與問候前說的話
@@ -179,7 +181,7 @@ const round3 = (x: number) => Math.round(x * 1000) / 1000;
 /** 給記憶層的臉部候選只保留這麼久（docs/16 §4：只是候選，確認後才選定）。 */
 export const MEMORY_CANDIDATE_MS = 60_000;
 
-/** 看著說話時同步辨識需要的使用者設定（camera.json；核心每次都重新讀，改了立即生效）。 */
+/** 看著說話時同步辨識需要的使用者設定（Mac 是 camera.json，核心每次都重新讀；終端機是頁面的回報）。 */
 export interface AmbientPrefs {
   look_to_talk: boolean;
   look_to_talk_greet: boolean;
@@ -189,9 +191,9 @@ export interface AmbientPrefs {
 export interface IdentityServiceOptions {
   store: GalleryStore;
   confirm: ConfirmFn;
-  /** 這個頁面來源是否可使用鏡頭辨識。 */
+  /** 這個頁面來源是否可使用鏡頭辨識（終端機另外要它最近的回報說鏡頭正在跑）。 */
   camera: (source: string) => boolean;
-  /** 看著說話與稱名的設定；未提供時（舊的組裝、測試）視為全部關閉，不做同步辨識也不稱名。 */
+  /** Mac 主視窗的看著說話與稱名設定；未提供時（舊的組裝、測試）視為全部關閉，不做同步辨識也不稱名。 */
   ambient?: () => AmbientPrefs;
   /**
    * 核心發出的互動 ID 換成真的工作階段（RealtimeSessions.claimGreeting）：沒提供或回 null 時不稱名。
@@ -243,6 +245,8 @@ export interface IdentityContext {
   userInitiated?: boolean;
   /** 送來這個請求的頁面：Mac 主視窗（IPC）是 "main"（未提供時同），終端機（HTTP）是它的識別碼。只用來分開各頁面的證據。 */
   source?: string;
+  /** 終端機頁面的鏡頭回報（server/terminal-routes.ts 已驗證）；主視窗的請求不看這個。 */
+  page?: TerminalPageReport;
 }
 
 export { MAIN_SOURCE };
@@ -373,14 +377,17 @@ interface PageEvidence {
   lastMatch: { person_id: string; track: number; at: number } | null;
   /** 記憶預設選人（2026-11-02）：最近一次看到多張臉的時間（多臉時不用聲音候選）。 */
   multiFaceAt: number | null;
+  /** 終端機最近一次的鏡頭回報；主視窗永遠是 null。 */
+  report: TerminalPageReport | null;
 }
 
 type PageRate = "ambientCalls" | "voiceCalls" | "callVoiceCalls";
 
 function emptyPage(): PageEvidence {
-  return { ambient: null, ambientCalls: [], wakeVoice: null, voiceCalls: [], callVoice: null, callVoiceCalls: [], lastMatch: null, multiFaceAt: null };
+  return { ambient: null, ambientCalls: [], wakeVoice: null, voiceCalls: [], callVoice: null, callVoiceCalls: [], lastMatch: null, multiFaceAt: null, report: null };
 }
 
+const AMBIENT_OFF: AmbientPrefs = { look_to_talk: false, look_to_talk_greet: false, look_to_talk_greet_name: false };
 const AMBIENT_REFUSED = "目前不能取樣";
 const VOICE_REFUSED = "目前不能辨認聲音";
 
@@ -454,7 +461,7 @@ export class IdentityService {
   /** 已做過問候決策的互動 ID。 */
   private readonly decided: string[] = [];
   /** live 路徑：已組好、等 server/live-route.ts 取用的短句（一次只有一個互動）。 */
-  private pendingLive: { locale: Locale; interaction: string; session_id: string; named: boolean; text: string; sentence: string; at: number; briefing: PendingBriefing | null } | null = null;
+  private pendingLive: { source: string; locale: Locale; interaction: string; session_id: string; named: boolean; text: string; sentence: string; at: number; briefing: PendingBriefing | null } | null = null;
   private readonly picker: GreetingPicker;
   /** SP-03a：聲音校準資料（第一次需要時才讀；undefined＝還沒讀）。 */
   private calibration: CalibrationFileData | null | undefined = undefined;
@@ -497,7 +504,7 @@ export class IdentityService {
     const runtime = this.options.runtime.state;
     if (runtime === "missing" || runtime === "not_configured") return LIMIT_MODELS_MISSING;
     if (runtime === "hash_mismatch") return LIMIT_MODELS_BAD;
-    if (!this.options.camera(source)) return LIMIT_CAMERA;
+    if (!this.options.camera(source) || (source !== MAIN_SOURCE && this.pages.get(source)?.report?.camera_active !== true)) return LIMIT_CAMERA;
     return null;
   }
 
@@ -555,8 +562,8 @@ export class IdentityService {
   }
 
   /**
-   * 這個來源的證據（沒有就建一份）；同時把它標成最近使用，超過上限時丟掉最久沒用的終端機。只在請求的欄位驗證過之後呼叫，
-   * 格式錯誤的請求不會建出頁面。
+   * 這個來源的證據（沒有就建一份）；同時把它標成最近使用，超過上限時丟掉最久沒用的終端機。只在請求的欄位（或已驗證的鏡頭回報）
+   * 驗證過之後呼叫，格式錯誤的請求不會建出頁面。
    */
   private page(source: string): PageEvidence {
     let page = this.pages.get(source);
@@ -647,6 +654,7 @@ export class IdentityService {
     if (op === "open_session") return this.openSession(ctx);
     const source = ctx.source ?? MAIN_SOURCE;
     if (source !== MAIN_SOURCE && !isTerminalId(source)) throw new RequestError("bad_request", "source 格式不對");
+    if (source !== MAIN_SOURCE && ctx.page) this.receiveReport(source, ctx.page);
     if (op === "ambient_status") return this.ambientStatus(source);
     if (op === "ambient_probe") return this.ambientProbe(req, source);
     if (op === "greeting") return this.greeting(req, source);
@@ -826,8 +834,20 @@ export class IdentityService {
 
   // ─────────────── ID-02：看著說話時同步辨識與問候決策 ───────────────
 
-  private ambientPrefs(): AmbientPrefs {
-    return this.options.ambient?.() ?? { look_to_talk: false, look_to_talk_greet: false, look_to_talk_greet_name: false };
+  private ambientPrefs(source: string): AmbientPrefs {
+    if (source !== MAIN_SOURCE) {
+      const report = this.pages.get(source)?.report;
+      return report ? { look_to_talk: report.look_to_talk, look_to_talk_greet: report.look_to_talk_greet, look_to_talk_greet_name: report.look_to_talk_greet_name } : AMBIENT_OFF;
+    }
+    return this.options.ambient?.() ?? AMBIENT_OFF;
+  }
+
+  /** 終端機的鏡頭回報；鏡頭開關改變時通知 settings（那個終端機的 settings.identity 會跟著變）。 */
+  private receiveReport(source: string, report: TerminalPageReport): void {
+    const page = this.page(source);
+    const wasActive = page.report?.camera_active === true;
+    page.report = { ...report };
+    if (wasActive !== report.camera_active) this.options.onChange?.();
   }
 
   /**
@@ -835,7 +855,7 @@ export class IdentityService {
    * viaWake（WK-02）：喚醒開始的互動不需要「看著說話」「看著說話時先打招呼」；其他條件不變。
    */
   private ambientBlock(source: string, viaWake = false): string | null {
-    const prefs = this.ambientPrefs();
+    const prefs = this.ambientPrefs(source);
     if (!viaWake && (!prefs.look_to_talk || !prefs.look_to_talk_greet)) return "看著說話或打招呼關閉";
     if (!prefs.look_to_talk_greet_name) return "稱名關閉";
     const st = this.status(source);
@@ -969,7 +989,7 @@ export class IdentityService {
       }
       return { ok: true, op: "greeting", text: strictGreetingInstructions(sentence, locale) };
     }
-    this.pendingLive = session ? { locale, interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence, locale), sentence, at: this.now(), briefing } : null;
+    this.pendingLive = session ? { source, locale, interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence, locale), sentence, at: this.now(), briefing } : null;
     return { ok: true, op: "greeting", text: null };
   }
 
@@ -1001,7 +1021,7 @@ export class IdentityService {
     // 認不出臉（不是看到別人）時，測試開關開著就改用聲音（只限喚醒開始的通話）。
     // SP-03a：校準驗證通過的片段，不需要測試開關也可以只憑聲音稱名。
     const faceMissing = (reason: GreetingNameReason): GreetingDecision => (wakeId !== null ? (this.voiceOnly(page, base, wakeId, track) ?? plain(reason)) : plain(reason));
-    if (!this.ambientPrefs().look_to_talk_greet_name) return plain("naming_off");
+    if (!this.ambientPrefs(source).look_to_talk_greet_name) return plain("naming_off");
     if (!claimed) return plain("no_session");
     if (!this.options.store.namingNoticeSeen()) return plain("notice_unseen");
     if (!eligible) return faceMissing("not_eligible");
@@ -1378,7 +1398,7 @@ export class IdentityService {
         } else {
           if (!v || now - v.at > MEMORY_CANDIDATE_MS) page.callVoice = { person_id: obs.person_id, at: now };
           note = "，沒有本次人物，提出聲音候選";
-          const named = this.ambientPrefs().look_to_talk_greet_name && this.options.store.namingNoticeSeen();
+          const named = this.ambientPrefs(source).look_to_talk_greet_name && this.options.store.namingNoticeSeen();
           try {
             memory?.offerVoiceCandidate?.(named, source);
           } catch {
@@ -1412,7 +1432,7 @@ export class IdentityService {
     this.pendingLive = null;
     if (!pending || pending.interaction !== interaction || pending.session_id !== sessionId || this.now() - pending.at > LIVE_GREETING_PICKUP_MS) return null;
     // use=false：使用者先開口，這次不打招呼，只丟掉；主動提醒沒有說出，不記。
-    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) {
+    if (pending.named && !this.ambientPrefs(pending.source).look_to_talk_greet_name) {
       const plain = this.picker.plainLive(pending.locale, pending.briefing?.sentence ?? null);
       if (use && pending.briefing) this.commitBriefing(pending.briefing, { sessionId, spoken: plain.sentence });
       return { ...plain, named: false };

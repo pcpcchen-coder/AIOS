@@ -358,10 +358,12 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     ? new IdentityService({
         store: new GalleryStore({ dir: options.identity.dir, secretBox: options.identity.secretBox, excludeFromBackup: options.identity.excludeFromBackup, log }),
         confirm: options.identity.confirm,
+        // 終端機的鏡頭在 Pi 本機開關：這裡只看 Mac 的鏡頭功能有沒有啟用，鏡頭是否真的在跑由 IdentityService 依那個頁面的回報判斷。
         camera: (source) => {
           const cam = camera.view();
           return cam.enabled && (isTerminalId(source) || cam.active);
         },
+        // 只給 Mac 主視窗；終端機的三個設定用頁面的回報（IdentityService）。
         ambient: () => {
           const cam = camera.view();
           return { look_to_talk: cam.look_to_talk, look_to_talk_greet: cam.look_to_talk_greet, look_to_talk_greet_name: cam.look_to_talk_greet_name };
