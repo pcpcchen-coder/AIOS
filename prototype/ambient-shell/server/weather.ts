@@ -72,7 +72,8 @@ export interface WeatherServiceOptions {
 export class WeatherService {
   private cached: WeatherToday | null = null;
   private inflight: { place: WeatherPlaceId; promise: Promise<WeatherToday | null> } | null = null;
-  private lastState: { state: Exclude<WeatherFetchState, "no_place">; at: number | null } = { state: "none", at: null };
+  /** 最近一次查詢（哪個地點、成功或失敗）；顯示用的狀態由 status() 依快取推導。 */
+  private last: { place: WeatherPlaceId; ok: boolean; at: number } | null = null;
   private readonly fetch: typeof fetch;
   private readonly now: () => number;
 
@@ -91,41 +92,55 @@ export class WeatherService {
     return c;
   }
 
-  /** 快取超過 30 分鐘（或沒有、或換了地點）才查；同時只有一個請求。失敗回 null（狀態記成 failed）。 */
+  /**
+   * 快取超過 30 分鐘（或沒有、或換了地點）才查；同時只有一個請求。失敗回 null。
+   * signal 只中止這個呼叫者的等待，不中止共用的請求（工具呼叫被打斷不會讓招呼的預先查詢一起失敗）。
+   */
   async refresh(placeId: WeatherPlaceId, signal?: AbortSignal): Promise<WeatherToday | null> {
     const c = this.current(placeId);
     if (c && this.now() - c.fetched_at < WEATHER_TTL_MS) return c;
-    if (this.inflight?.place === placeId) return this.inflight.promise;
-    const promise = this.load(placeId, signal).finally(() => {
-      if (this.inflight?.promise === promise) this.inflight = null;
-    });
-    this.inflight = { place: placeId, promise };
-    return promise;
+    let shared = this.inflight?.place === placeId ? this.inflight.promise : null;
+    if (!shared) {
+      const promise = this.load(placeId).finally(() => {
+        if (this.inflight?.promise === promise) this.inflight = null;
+      });
+      this.inflight = { place: placeId, promise };
+      shared = promise;
+    }
+    if (!signal) return shared;
+    if (signal.aborted) return null;
+    return Promise.race([shared, new Promise<null>((resolve) => signal.addEventListener("abort", () => resolve(null), { once: true }))]);
   }
 
-  /** 最近一次查詢的狀態（設定頁顯示；不含內容）。 */
-  state(): { state: Exclude<WeatherFetchState, "no_place">; at: number | null } {
-    return this.lastState;
+  /**
+   * 這個地點的狀態（設定頁與 Adapter 健康狀態；不含內容）：快取裡有今天可用的資料 → ok（就算之後重查失敗，招呼仍用這份）；
+   * 沒有可用資料而這個地點最近一次查詢失敗 → failed；其餘 none。
+   */
+  status(placeId: WeatherPlaceId): { state: Exclude<WeatherFetchState, "no_place">; at: number | null } {
+    const c = this.current(placeId);
+    if (c) return { state: "ok", at: c.fetched_at };
+    if (this.last?.place === placeId && !this.last.ok) return { state: "failed", at: this.last.at };
+    return { state: "none", at: null };
   }
 
-  private async load(placeId: WeatherPlaceId, signal?: AbortSignal): Promise<WeatherToday | null> {
+  private async load(placeId: WeatherPlaceId): Promise<WeatherToday | null> {
     const place = weatherPlace(placeId);
     if (!place) return null;
     const timeout = AbortSignal.timeout(WEATHER_TIMEOUT_MS);
     const started = this.now();
     try {
-      const res = await this.fetch(forecastUrl(place), { signal: signal ? AbortSignal.any([signal, timeout]) : timeout, headers: { accept: "application/json" } });
+      const res = await this.fetch(forecastUrl(place), { signal: timeout, headers: { accept: "application/json" } });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       if (text.length > MAX_BODY_BYTES) throw new Error("回覆太大");
       const parsed = parseForecast(JSON.parse(text), placeId, localToday(new Date(this.now()), place.timeZone), this.now());
       if (!parsed) throw new Error("回覆看不懂或不是今天的資料");
       this.cached = parsed;
-      this.lastState = { state: "ok", at: this.now() };
+      this.last = { place: placeId, ok: true, at: this.now() };
       this.options.log?.(`天氣：Open-Meteo ${placeId} 已更新（${this.now() - started} ms）`);
       return parsed;
     } catch (err) {
-      this.lastState = { state: "failed", at: this.now() };
+      this.last = { place: placeId, ok: false, at: this.now() };
       this.options.log?.(`天氣：Open-Meteo ${placeId} 查詢失敗（${err instanceof Error ? err.message.slice(0, 120) : "unknown"}），這次不說天氣`);
       return null;
     }

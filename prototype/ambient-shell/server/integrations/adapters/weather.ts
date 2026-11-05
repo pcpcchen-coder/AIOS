@@ -39,8 +39,9 @@ export class WeatherAdapter implements IntegrationAdapter {
   }
 
   async health(): Promise<HealthReport> {
-    if (!this.options.place()) return { health: "unavailable", reason: "not_configured" };
-    const s = this.options.service.state();
+    const place = this.options.place();
+    if (!place) return { health: "unavailable", reason: "not_configured" };
+    const s = this.options.service.status(place);
     if (s.state === "ok") return { health: "available", reason: "ok" };
     if (s.state === "failed") return { health: "unavailable", reason: "error" };
     return { health: "unknown", reason: "not_ready" };

@@ -48,7 +48,7 @@ import type { TasksResponse } from "../shared/protected-tasks.ts";
 import { TerminalPresence } from "./terminal-presence.ts";
 import type { TerminalStatus } from "../shared/terminal.ts";
 import { WeatherService } from "./weather.ts";
-import { ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
+import { fitsLiveAppend, ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
 
@@ -369,7 +369,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）。
         wakeGreetingOpen: () => server.realtimeSessions?.wakeGreetingOpen() ?? false,
         // MEM-3：API key 路徑的問候決策（有沒有稱名）交給那通的旁路，問候結束後才問臉部候選。
-        apiKeyGreeted: (sessionId, named) => server.realtimeSessions?.greeted(sessionId, named),
+        apiKeyGreeted: (sessionId, named, spoken) => server.realtimeSessions?.greeted(sessionId, named, spoken),
         picker: greetings,
         // PRO-1：招呼後接的主動提醒（只有稱名的家人算認出；其餘用這台裝置今天第一次的規則）。
         briefing: proactive,
@@ -540,9 +540,16 @@ export function liveGreetingSource(identity: () => IdentityService | null, picke
     const decided = identity()?.takeLiveGreeting(interaction, sessionId, use);
     if (decided) return decided;
     // PRO-1：沒有決策（瀏覽器版、決策逾時）：沒認出是誰，用這台裝置今天第一次的規則；真的要送出才組句與記下。
-    const briefing = use ? (proactive?.compose(null, normalizeLocale(locale)) ?? null) : null;
-    if (briefing) proactive?.commit(briefing);
-    return picker.plainLive(locale, briefing?.sentence ?? null);
+    let briefing = use ? (proactive?.compose(null, normalizeLocale(locale)) ?? null) : null;
+    const greeting = picker.plainLive(locale, briefing?.sentence ?? null);
+    if (!briefing) return greeting;
+    // 放不進一段 sideband append：不接天氣（不記成說過）。
+    if (!fitsLiveAppend(greeting.text)) {
+      briefing = null;
+      return picker.plainLive(locale);
+    }
+    proactive?.commit(briefing);
+    return greeting;
   };
 }
 

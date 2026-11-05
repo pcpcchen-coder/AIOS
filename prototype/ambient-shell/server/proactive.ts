@@ -23,6 +23,12 @@ import {
 import { localHour } from "../shared/sense.ts";
 import { localToday, systemTimeZone } from "./local-date.ts";
 import { PrefsFile } from "./prefs-file.ts";
+import { chunkForAppend } from "../shared/frameless.ts";
+
+/** ChatGPT 方案路徑的整段招呼放得進一段 session.context.append（「（開場）」標記只在第一段）。 */
+export function fitsLiveAppend(text: string): boolean {
+  return chunkForAppend(text).length === 1;
+}
 import type { WeatherService } from "./weather.ts";
 
 // PRO-1（George 2026-11-05）：主動提醒（招呼後接今天的天氣）。
@@ -210,14 +216,14 @@ export class ProactiveBriefing implements BriefingPort {
   view(): ProactiveSettingsView {
     const prefs = this.options.settings.view();
     const place = this.place(prefs);
-    const fetched = this.options.weather.state();
+
     return {
       prefs,
       place: place ? { ...place, label: weatherPlace(place.id)!.zh } : null,
       places: WEATHER_PLACES.map((p) => ({ id: p.id, label: p.zh })),
       start_hours: START_HOUR_OPTIONS,
       end_hours: END_HOUR_OPTIONS,
-      weather: place ? fetched : { state: "no_place", at: null },
+      weather: place ? this.options.weather.status(place.id) : { state: "no_place", at: null },
       attribution: WEATHER_ATTRIBUTION,
       write_path: "/api/settings/proactive",
     };

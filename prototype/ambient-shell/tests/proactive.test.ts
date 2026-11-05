@@ -126,7 +126,7 @@ describe("Open-Meteo client (fake responses; no network)", () => {
     clock.now += 2;
     await svc.refresh("taipei");
     expect(f.urls).toHaveLength(2);
-    expect(svc.state()).toEqual({ state: "ok", at: clock.now });
+    expect(svc.status("taipei")).toEqual({ state: "ok", at: clock.now });
   });
 
   it("a failed lookup returns null and records failed (no fake data); stale or other-place data is not used", async () => {
@@ -140,7 +140,7 @@ describe("Open-Meteo client (fake responses; no network)", () => {
     expect(svc.current("taipei")).toBeNull();
     fail = true;
     expect(await svc.refresh("taipei")).toBeNull();
-    expect(svc.state().state).toBe("failed");
+    expect(svc.status("taipei").state).toBe("failed");
   });
 });
 
@@ -473,5 +473,67 @@ describe("greeting decision + briefing (both voice paths)", () => {
     // George 今天還沒聽過自己的：仍會說。
     await c.see(3);
     expect(await c.greet(3, 3, "api_key")).toMatch(new RegExp(`George[^」。]*。${WEATHER_ZH}」`));
+  });
+});
+
+describe("review fixes", () => {
+  it("status is per place and per day: another place or yesterday's data is not 'ok'; a failed refresh with usable cache stays 'ok' (the greeting still uses it)", async () => {
+    const clock = { now: MORNING };
+    let fail = false;
+    const svc = new WeatherService({ fetch: fakeFetch(() => (fail ? new Error("x") : fixtureBody())).fetch, now: () => clock.now });
+    await svc.refresh("taipei");
+    expect(svc.status("taipei").state).toBe("ok");
+    expect(svc.status("kaohsiung").state).toBe("none");
+    clock.now += WEATHER_TTL_MS + 1;
+    fail = true;
+    await svc.refresh("taipei");
+    expect(svc.current("taipei")).not.toBeNull();
+    expect(svc.status("taipei").state).toBe("ok");
+    clock.now = Date.parse("2026-11-05T21:00:00Z"); // 隔天 05:00 台北
+    expect(svc.status("taipei").state).toBe("failed");
+  });
+
+  it("an aborted caller does not abort the shared lookup for other waiters", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const f = (async () => {
+      await gate;
+      return new Response(JSON.stringify(fixtureBody()), { status: 200 });
+    }) as unknown as typeof fetch;
+    const svc = new WeatherService({ fetch: f, now: () => MORNING });
+    const ac = new AbortController();
+    const tool = svc.refresh("taipei", ac.signal);
+    const greeting = svc.refresh("taipei");
+    ac.abort();
+    expect(await tool).toBeNull();
+    release();
+    expect(await greeting).not.toBeNull();
+    expect(svc.status("taipei").state).toBe("ok");
+  });
+
+  it("live: a greeting + weather that would not fit one 500-byte sideband append drops the weather and does not record it", async () => {
+    const r = await rig();
+    // 很長的英文招呼：用 GreetingPicker 不會出現，這裡直接用 plainLive 的保底以外的方式模擬：把地點換成最長的、天氣最長的情況。
+    const long = "x".repeat(400);
+    const picker = { plainLive: (_l?: unknown, extra: string | null = null) => ({ id: "p0", sentence: extra ? `${long}. ${extra}` : long, text: `（開場）${extra ? `${long}. ${extra}` : long}` }) } as unknown as GreetingPicker;
+    const source = liveGreetingSource(() => null, picker, r.briefing);
+    expect(source("int_0000000000000001", "rt_1", "en").sentence).toBe(long);
+    expect(r.briefing.compose(null, "en")).not.toBeNull(); // 沒有記成說過
+  });
+
+  it("API key: recorded only when the call reports the greeting turn started (spoken), not at the decision", async () => {
+    const c = await identityRig();
+    // 替換通知：記下 spoken，晚一點才呼叫（模擬旁路看到 response.created）。
+    const pending: (() => void)[] = [];
+    (c.svc as unknown as { options: { apiKeyGreeted: unknown } }).options.apiKeyGreeted = (_s: string, _n: boolean, spoken?: () => void) => spoken && pending.push(spoken);
+    await c.see(1);
+    expect(await c.greet(1, 1, "api_key")).toContain(WEATHER_ZH);
+    expect(pending).toHaveLength(1);
+    // 頁面丟掉了問候（使用者先開口）：沒有 spoken，今天仍會說。
+    await c.see(2);
+    expect(await c.greet(2, 2, "api_key")).toContain(WEATHER_ZH);
+    pending[1]!();
+    await c.see(3);
+    expect(await c.greet(3, 3, "api_key")).not.toContain("今天台北");
   });
 });

@@ -471,8 +471,12 @@ describe.skipIf(!realLockAvailable)("MEM-3 memory default after the page's greet
     candidate = { person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now };
     const t = await startCall(h, { lookToTalk: true });
     expect(t.call.memoryStatus?.()).toMatchObject({ reason: "waiting_candidate" });
-    t.call.greetingDecided!(true);
+    // PRO-1：問候那一輪真的開始（response.created）才呼叫 spoken（記下主動提醒說過）。
+    let spoken = 0;
+    t.call.greetingDecided!(true, () => spoken++);
+    expect(spoken).toBe(0);
     await t.hear("嗨，George");
+    expect(spoken).toBe(1);
     expect(t.said().at(-1)).toBe(quoted("我要用 George 的記憶，好嗎？"));
     expect(t.probe.events.some((e) => e.kind === "memory_card")).toBe(false);
     expect(t.probe.events).toContainEqual(expect.objectContaining({ kind: "memory_default", phase: "proposed" }));

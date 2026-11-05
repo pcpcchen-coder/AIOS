@@ -793,3 +793,18 @@ describe("PRO-1：weather prefetch when a greeting call starts", () => {
     expect(starts).toBe(1);
   });
 });
+
+describe("PRO-1 review fix：greeted(spoken)", () => {
+  it("a call without a core sideband records the briefing at once; an unknown session never does", async () => {
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: () => true });
+    const d = sessions.start("sse_a", "look_to_talk");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    let spoken = 0;
+    sessions.greeted("rt_other", false, () => spoken++);
+    expect(spoken).toBe(0);
+    sessions.greeted(d.session_id, false, () => spoken++);
+    expect(spoken).toBe(1);
+  });
+});

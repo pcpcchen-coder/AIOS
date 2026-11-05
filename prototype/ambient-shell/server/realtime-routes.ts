@@ -107,7 +107,8 @@ export interface RouteCall {
   /** MEM-3：這通記憶的初始狀態（/call 回應用；只有筆數與原因代碼）。 */
   memoryStatus?(): { used: number; reason: LiveMemoryReason | null } | null;
   /** MEM-3：API key 路徑的問候決策已做出（IdentityService）：問候那一輪結束後才問臉部候選。 */
-  greetingDecided?(named: boolean): void;
+  /** spoken：問候那一輪真的開始時呼叫（PRO-1 記下主動提醒說過）。 */
+  greetingDecided?(named: boolean, spoken?: () => void): void;
   /** MEM-3：頁面回報播放結束（只會把語音確認的時窗往後延）。 */
   playback?(): void;
   /**
@@ -577,8 +578,12 @@ export class RealtimeSessions {
   }
 
   /** MEM-3：API key 路徑的問候決策已做出（IdentityService）：交給這通的旁路，問候那一輪結束後才問臉部候選。 */
-  greeted(sessionId: string, named: boolean): void {
-    if (this.ga?.id === sessionId && !this.ga.closed) this.ga.call?.greetingDecided?.(named);
+  greeted(sessionId: string, named: boolean, spoken?: () => void): void {
+    if (this.ga?.id !== sessionId || this.ga.closed) return;
+    const call = this.ga.call;
+    // 有核心旁路（帶記憶的通話）時等問候那一輪開始；沒有旁路時核心看不到，交回頁面就算說過。
+    if (call?.greetingDecided) call.greetingDecided(named, spoken);
+    else spoken?.();
   }
 
   /** MEM-3：POST /api/realtime/playback：頁面在資料通道收到播放結束（只會把語音確認時窗往後延）。 */

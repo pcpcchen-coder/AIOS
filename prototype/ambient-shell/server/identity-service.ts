@@ -57,7 +57,7 @@ import {
 } from "../shared/identity.ts";
 import { liveGreetingText, strictGreetingInstructions } from "../shared/sense.ts";
 import { appendBriefing } from "../shared/proactive.ts";
-import type { BriefingPort, PendingBriefing } from "./proactive.ts";
+import { fitsLiveAppend, type BriefingPort, type PendingBriefing } from "./proactive.ts";
 import { WAKE_ID } from "../shared/wake.ts";
 import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
@@ -204,7 +204,7 @@ export interface IdentityServiceOptions {
    * MEM-3：API key 路徑的問候決策做出後通知（RealtimeSessions.greeted）：這次問候有沒有稱名。帶記憶的通話等問候那一輪
    * 結束後才問臉部候選（只有稱名過，問句才帶名字）。只有互動 ID 換得到真的工作階段時才呼叫。
    */
-  apiKeyGreeted?: (sessionId: string, named: boolean) => void;
+  apiKeyGreeted?: (sessionId: string, named: boolean, spoken?: () => void) => void;
   /** 開場句挑選（固定清單、依時段、避開上一次）；未提供時建一個（Math.random、這台電腦的時區）。 */
   picker?: GreetingPicker;
   /**
@@ -869,7 +869,9 @@ export class IdentityService {
     const locale = normalizeLocale(session?.locale);
     const picked = this.picker.pick(name, locale);
     // PRO-1：招呼後接的主動提醒（確定性的模板；沒有就只打招呼）。
-    const briefing = this.composeBriefing(name !== null ? decision.person_id : null, locale);
+    let briefing = this.composeBriefing(name !== null ? decision.person_id : null, locale);
+    // live：整段要放得進一段 sideband append（≤500 bytes），否則第二段沒有「（開場）」標記、可能被念出指示；放不下就不接。
+    if (briefing && route === "live" && !fitsLiveAppend(liveGreetingText(appendBriefing(picked.sentence, briefing.sentence, locale), locale))) briefing = null;
     const sentence = appendBriefing(picked.sentence, briefing?.sentence ?? null, locale);
     // 只有原因與數字（給 Mac 實測對照時序）：證據格數、跨度與最新一格多久以前；不記姓名、person_id 或分數。
     const ev = this.ambient?.track === track ? this.ambient.evidence.frames : [];
@@ -886,9 +888,15 @@ export class IdentityService {
     this.lastMatch = decision.person_id && decision.reason === null && this.lastFusion !== "voice_only_test" && this.lastFusion !== "voice_only_calibrated" ? { person_id: decision.person_id, track, at: this.now() } : null;
     if (route === "api_key") {
       if (session) {
-        try { this.options.apiKeyGreeted?.(session.session_id, name !== null); } catch { /* 通知失敗不影響問候 */ }
+        // PRO-1：有核心旁路時，等問候那一輪真的開始（response.created）才記下說過；沒有旁路時旁路會立刻呼叫 spoken。
+        const b = briefing;
+        if (this.options.apiKeyGreeted) {
+          try { this.options.apiKeyGreeted(session.session_id, name !== null, b ? () => this.commitBriefing(b) : undefined); } catch { /* 通知失敗不影響問候 */ }
+        } else if (b) this.commitBriefing(b);
+      } else if (briefing) {
+        // 換不到工作階段（核心看不到這通）：交回頁面就算說過。
+        this.commitBriefing(briefing);
       }
-      if (briefing) this.commitBriefing(briefing);
       return { ok: true, op: "greeting", text: strictGreetingInstructions(sentence, locale) };
     }
     this.pendingLive = session ? { locale, interaction, session_id: session.session_id, named: name !== null, text: liveGreetingText(sentence, locale), sentence, at: this.now(), briefing } : null;
