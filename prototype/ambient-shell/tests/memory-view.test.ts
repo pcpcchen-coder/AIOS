@@ -116,6 +116,17 @@ describe("memory cards", () => {
   });
 });
 
+describe("RPI-ID terminal page", () => {
+  it("memory management says it is done on the Mac (zh-TW and English)", () => {
+    const view = new mod.MemoryView({ bridge: null, unavailableMessage: "記憶：管理請在 Mac 的 Nous App 進行（這台終端機只顯示正在用誰的記憶）。", dismiss: () => {}, resolved: () => {}, changed: () => {} });
+    view.openManager();
+    expect((view.element as unknown as El).textContent).toContain("記憶：管理請在 Mac 的 Nous App 進行（這台終端機只顯示正在用誰的記憶）。");
+    setLocale("en");
+    view.openManager();
+    expect((view.element as unknown as El).textContent).toContain("Memory: manage memory in the Nous App on the Mac (this terminal only shows whose memory is in use).");
+  });
+});
+
 describe("setup card cancel (Minor 4)", () => {
   it("cancel goes back to the core so the held question is still sent", async () => {
     const t = make(() => ({ ok: true, op: "card_answer", ...turnView, status }));

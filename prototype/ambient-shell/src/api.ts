@@ -4,6 +4,8 @@ import type { ProactivePrefsPatch } from "../shared/proactive.ts";
 import { getLocale, type Locale } from "./i18n.ts";
 import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
+import type { IdentityRequest, IdentityResponse } from "../shared/identity.ts";
+import type { MemoryRequest, MemoryResponse } from "../shared/memory.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { WakePrefsPatch } from "../shared/wake.ts";
 import type { PageEndReason, VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
@@ -78,6 +80,9 @@ export const api = {
   redoTask: (taskId: string, request_id: string) => call<Task>("POST", `/api/tasks/${encodeURIComponent(taskId)}/retry`, { request_id, redo: true }),
   /** 服務模式：終端機（Pi kiosk）頁面的心跳；只有識別碼。 */
   terminalHeartbeat: (terminal: string) => call<{ ok: true }>("POST", "/api/terminal/heartbeat", { terminal }),
+  /** RPI-ID：終端機頁面的認人（只有特徵向量與和 IPC 相同的欄位）與「正在用 X 的記憶」；核心只放行列出的操作。 */
+  terminalIdentity: (terminal: string, request: IdentityRequest) => call<IdentityResponse>("POST", "/api/terminal/identity", { terminal, request }),
+  terminalMemory: (terminal: string, request: MemoryRequest) => call<MemoryResponse>("POST", "/api/terminal/memory", { terminal, request }),
   selectProvider: (provider: ExecutorMode) => call<SettingsView>("POST", "/api/settings/provider", { provider }),
   /** 鏡頭使用者設定（保存在本機 camera.json）；回傳更新後的設定。 */
   updateCamera: (patch: CameraPrefsPatch) => call<SettingsView>("POST", "/api/settings/camera", patch),

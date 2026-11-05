@@ -83,6 +83,25 @@ async function make() {
   return { pipeline, events, states };
 }
 
+describe("SensePipeline loop interval (RPI-ID)", () => {
+  it("defaults to 80 ms; a terminal page passes its longer interval and the loop uses it", async () => {
+    const { pipeline } = await make();
+    expect(pipeline.frameIntervalMs).toBe(80);
+    const { SensePipeline } = await import("../src/sense/pipeline.ts");
+    const slow = new SensePipeline({ enabled: true, label: "CCB Camera", left_first: true, screen_width_mm: 398, screen_offset_mm: 140 }, () => {}, { frameIntervalMs: 160 });
+    expect(slow.frameIntervalMs).toBe(160);
+    const spy = vi.spyOn(globalThis, "setInterval");
+    try {
+      await slow.start();
+      expect(spy.mock.calls.map((c) => c[1])).toContain(160);
+      expect(spy.mock.calls.map((c) => c[1])).not.toContain(80);
+    } finally {
+      slow.stop();
+      spy.mockRestore();
+    }
+  });
+});
+
 describe("SensePipeline start/stop (fixture camera)", () => {
   it("repeated start while starting or running emits nothing; stop reports off once", async () => {
     const { pipeline, states } = await make();

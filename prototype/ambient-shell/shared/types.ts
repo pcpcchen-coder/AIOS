@@ -196,6 +196,8 @@ export type ServerEvent =
   | { type: "settings.updated"; sequence: number; settings: SettingsView }
   /** HIST-1：使用者在成果紀錄裡確認刪除了一個任務（與它的成果）。 */
   | { type: "task.deleted"; sequence: number; task_id: string; artifact_id: string | null }
+  /** RPI-ID：記憶的本次人物世代改變（換人、暫停、撤銷）。不含內容；頁面再用記憶的 status 讀新狀態。 */
+  | { type: "memory.presence_changed"; sequence: number }
   | RealtimeServerEvent;
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";

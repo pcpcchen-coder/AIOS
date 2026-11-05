@@ -962,5 +962,7 @@
   "「可用」只代表 Mac 上的 gog 能執行；有沒有登入 Gmail，要看寄信的結果。": "“Available” only means gog runs on the Mac; whether it is signed in to Gmail shows in the result of sending.",
   "武陵居家電（中控）": "Wuling home devices (hub)",
   "Google 日曆（gog）": "Google Calendar (gog)",
-  "「可用」只代表 Mac 上的 gog 能執行；有沒有授權 Google 日曆，要看查行程的結果。": "“Available” only means gog runs on the Mac; whether Google Calendar is authorized shows in the result of reading events."
+  "「可用」只代表 Mac 上的 gog 能執行；有沒有授權 Google 日曆，要看查行程的結果。": "“Available” only means gog runs on the Mac; whether Google Calendar is authorized shows in the result of reading events.",
+  "家人辨識：登記與管理請在 Mac 的 Nous App 進行（這台終端機只用來認人）。": "Family recognition: enroll and manage family members in the Nous App on the Mac (this terminal only recognizes people).",
+  "記憶：管理請在 Mac 的 Nous App 進行（這台終端機只顯示正在用誰的記憶）。": "Memory: manage memory in the Nous App on the Mac (this terminal only shows whose memory is in use)."
 }

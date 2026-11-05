@@ -205,6 +205,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const port = options.fallbackPort ? await freePort(config.port) : config.port;
 
   let notify = () => {};
+  let notifyPresence = () => {};
   const auth = new ChatGPTAuth({ dir: config.configDir, callbackPort: config.oauthPort, onChange: () => notify() });
   const providers = new ProviderManager({
     claude: config.apiKey
@@ -421,7 +422,11 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         // 上次執行時記憶是否開著：加密檔外只留這一個布林值（不含內容），讓重啟後第一次打字就能取用記憶，
         // 而記憶沒開時查狀態、一般聊天都不碰 Keychain。
         enabledHint: memoryEnabledHint(hintFile),
-        onPresence: memoryOpts.onPresence,
+        // RPI-ID：Mac 主視窗照舊經 IPC 通知；另外經 SSE 廣播一個不含內容的事件，Pi 等終端機頁面也會重讀狀態。
+        onPresence: () => {
+          memoryOpts.onPresence?.();
+          notifyPresence();
+        },
         log,
         onChange: () => notify(),
       })
@@ -471,6 +476,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     distDir: options.distDir,
   });
   notify = server.notifySettings;
+  notifyPresence = server.notifyMemoryPresence;
 
   // 只綁本機位址，不對區域網路開放。
   await new Promise<void>((resolve, reject) => {

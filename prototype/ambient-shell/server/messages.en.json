@@ -560,5 +560,6 @@
   "今天的天氣。": "Today's weather.",
   "還沒有設定天氣的地點（選單列「主動提醒」可以選）。": "No weather location is set yet (choose one under “Proactive briefing” in the menu bar).",
   "查不到今天的天氣（Open-Meteo 沒有回應或回覆看不懂）。": "Today's weather could not be retrieved (Open-Meteo did not respond or the reply could not be understood).",
-  "沒有這個工具。": "No such tool."
+  "沒有這個工具。": "No such tool.",
+  "這個操作只在 Mac 的 Nous App 提供": "This action is only available in the Nous App on the Mac"
 }

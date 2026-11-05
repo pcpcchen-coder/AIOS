@@ -91,6 +91,10 @@ import type { CalibrationFileData, GalleryStore, GalleryVersions, StoredCalibrat
 //   期間（wakeGreetingOpen），ambient_status／ambient_probe 同樣不需要那兩個設定。
 // - ambient_status／ambient_probe 被拒時不說原因（原因可能透露有沒有登記家人）。
 // - 身分只用於稱呼：GreetingDecision 不給任何授權流程使用。
+// - RPI-ID（George 2026-11-05）：頁面各自累積證據。Mac 主視窗（IPC）的來源是 "main"，Pi 等終端機頁面（HTTP，
+//   server/terminal-routes.ts）的來源是終端機識別碼；看著說話的追蹤世代、比對成功的人、喚醒與通話中的聲音、取樣限速都依來源分開，
+//   兩個頁面的 track 計數器互不干擾，一邊的證據不能讓另一邊稱名。問候決策的互動 ID 與限速仍是全核心一份（一次互動只問候一次）；
+//   Mac 開著家人辨識管理畫面時，所有來源的同步辨識一樣停止。終端機只送頁面算好的特徵向量，從不送影像或錄音。
 //
 // SP-02a（喚醒時認聲音，docs/17 §4、§7.2、§7.3）：
 // - voice_probe：頁面在喚醒後送來這次喚醒（wake_id）的聲音特徵：喚醒詞那一段（keyword，只和喚醒詞模板比）與問候前說的話
@@ -231,7 +235,14 @@ export interface IdentityServiceOptions {
 export interface IdentityContext {
   /** 主程序確認：這次 open_session 是使用者 10 秒內在選單列點的。 */
   userInitiated?: boolean;
+  /** 送來這個請求的頁面：Mac 主視窗（IPC）是 "main"（未提供時同），終端機（HTTP）是它的識別碼。只用來分開各頁面的證據。 */
+  source?: string;
 }
+
+/** IPC（Mac 主視窗）的證據來源。 */
+export const MAIN_SOURCE = "main";
+/** 最多同時記幾個頁面的證據（主視窗＋幾台終端機）；超過時丟掉最久沒用的。 */
+const PAGE_SOURCES_MAX = 8;
 
 interface Session {
   id: string;
@@ -342,6 +353,27 @@ interface AmbientTrack {
   mixed: boolean;
 }
 
+/** 一個頁面（Mac 主視窗或一台終端機）的證據與限速；頁面之間互不影響。 */
+interface PageEvidence {
+  /** 看著說話的同步辨識（ID-02）。 */
+  ambient: AmbientTrack | null;
+  ambientCalls: number[];
+  /** SP-02a：這次喚醒的聲音證據。 */
+  wakeVoice: WakeVoice | null;
+  voiceCalls: number[];
+  /** SP-02b：通話中聲音認出的人（給記憶層當候選；同一人只記第一次的時間，候選卡才對得上）。 */
+  callVoice: { person_id: string; at: number } | null;
+  callVoiceCalls: number[];
+  /** 最近一次比對成功、沒有多臉的問候決策（給記憶層當人物候選；同一追蹤世代、60 秒內）。 */
+  lastMatch: { person_id: string; track: number; at: number } | null;
+  /** 記憶預設選人（2026-11-02）：最近一次看到多張臉的時間（多臉時不用聲音候選）。 */
+  multiFaceAt: number | null;
+}
+
+function emptyPage(): PageEvidence {
+  return { ambient: null, ambientCalls: [], wakeVoice: null, voiceCalls: [], callVoice: null, callVoiceCalls: [], lastMatch: null, multiFaceAt: null };
+}
+
 const AMBIENT_REFUSED = "目前不能取樣";
 const VOICE_REFUSED = "目前不能辨認聲音";
 
@@ -406,9 +438,8 @@ export class IdentityService {
   private mutating = false;
   /** 核心關閉中（shutdown）：之後的請求一律拒絕，等待中的確認回來也不寫。 */
   private closed = false;
-  /** 看著說話的同步辨識（ID-02）。 */
-  private ambient: AmbientTrack | null = null;
-  private readonly ambientCalls: number[] = [];
+  /** 各頁面的證據（RPI-ID：Mac 主視窗與終端機分開；Map 的順序＝最近使用）。 */
+  private readonly pages = new Map<string, PageEvidence>();
   private readonly greetingCalls: number[] = [];
   private readonly greetingMinute: number[] = [];
   /** 已做過問候決策的互動 ID。 */
@@ -416,20 +447,10 @@ export class IdentityService {
   /** live 路徑：已組好、等 server/live-route.ts 取用的短句（一次只有一個互動）。 */
   private pendingLive: { locale: Locale; interaction: string; session_id: string; named: boolean; text: string; sentence: string; at: number; briefing: PendingBriefing | null } | null = null;
   private readonly picker: GreetingPicker;
-  /** SP-02a：這次喚醒的聲音證據。 */
-  private wakeVoice: WakeVoice | null = null;
-  private readonly voiceCalls: number[] = [];
-  /** SP-02b：通話中聲音認出的人（給記憶層當候選；同一人只記第一次的時間，候選卡才對得上）。 */
-  private callVoice: { person_id: string; at: number } | null = null;
-  private readonly callVoiceCalls: number[] = [];
   /** SP-03a：聲音校準資料（第一次需要時才讀；undefined＝還沒讀）。 */
   private calibration: CalibrationFileData | null | undefined = undefined;
   /** 最近一次問候決策的臉聲融合結果（只給 log）。 */
   private lastFusion: VoiceFusion | null = null;
-  /** 最近一次比對成功、沒有多臉的問候決策（給記憶層當人物候選；同一追蹤世代、60 秒內）。 */
-  private lastMatch: { person_id: string; track: number; at: number } | null = null;
-  /** 記憶預設選人（2026-11-02）：最近一次看到多張臉的時間（多臉時不用聲音候選）。 */
-  private multiFaceAt: number | null = null;
 
   constructor(private readonly options: IdentityServiceOptions) {
     this.now = options.now ?? Date.now;
@@ -516,10 +537,22 @@ export class IdentityService {
 
   /** 登記資料改變或核心關閉：撤銷看著說話的證據與等待取用的短句（docs/14 §3 條件 4、ADR-0001 §2.2）。 */
   private dropAmbient(): void {
-    this.ambient = null;
+    for (const page of this.pages.values()) {
+      page.ambient = null;
+      page.lastMatch = null;
+      page.multiFaceAt = null;
+    }
     this.pendingLive = null;
-    this.lastMatch = null;
-    this.multiFaceAt = null;
+  }
+
+  /** 這個來源的證據（沒有就建一份）；同時把它標成最近使用，超過上限時丟掉最久沒用的頁面。 */
+  private page(source: string): PageEvidence {
+    let page = this.pages.get(source);
+    if (page) this.pages.delete(source);
+    else page = emptyPage();
+    this.pages.set(source, page);
+    while (this.pages.size > PAGE_SOURCES_MAX) this.pages.delete(this.pages.keys().next().value!);
+    return page;
   }
 
   /**
@@ -529,24 +562,33 @@ export class IdentityService {
   memoryCandidate(): { person_id: string; name: string; at: number; source: "face" | "voice" } | null {
     const face = this.memoryFaceCandidate();
     if (face) return face;
-    // SP-02b：沒有臉的候選時，用通話中聲音認出的人。記憶預設選人（2026-11-02）：畫面裡有多張臉時不用聲音候選。
-    const v = this.callVoice;
-    if (!v || this.now() - v.at > MEMORY_CANDIDATE_MS || this.multiFaceRecent()) return null;
-    const person = this.comparableVoice().find((p) => p.person_id === v.person_id);
-    return person ? { person_id: person.person_id, name: person.name, at: v.at, source: "voice" } : null;
+    // SP-02b：沒有臉的候選時，用通話中聲音認出的人。記憶預設選人（2026-11-02）：那個頁面的畫面裡有多張臉時不用聲音候選。
+    // RPI-ID：記憶的本次人物是全核心一份；各頁面的候選取最新的一個。
+    let best: { person_id: string; name: string; at: number; source: "voice" } | null = null;
+    for (const page of this.pages.values()) {
+      const v = page.callVoice;
+      if (!v || this.now() - v.at > MEMORY_CANDIDATE_MS || this.multiFaceRecent(page) || (best && best.at >= v.at)) continue;
+      const person = this.comparableVoice().find((p) => p.person_id === v.person_id);
+      if (person) best = { person_id: person.person_id, name: person.name, at: v.at, source: "voice" };
+    }
+    return best;
   }
 
   /** 只給記憶層：只有臉的候選（打字聊天的記憶預設選人只用臉，不退回通話中的聲音）。 */
   memoryFaceCandidate(): { person_id: string; name: string; at: number; source: "face" } | null {
-    const m = this.lastMatch;
-    if (!m || this.now() - m.at > MEMORY_CANDIDATE_MS || (this.ambient && this.ambient.track !== m.track)) return null;
-    const person = this.comparable().find((p) => p.person_id === m.person_id);
-    return person ? { person_id: person.person_id, name: person.name, at: m.at, source: "face" } : null;
+    let best: { person_id: string; name: string; at: number; source: "face" } | null = null;
+    for (const page of this.pages.values()) {
+      const m = page.lastMatch;
+      if (!m || this.now() - m.at > MEMORY_CANDIDATE_MS || (page.ambient && page.ambient.track !== m.track) || (best && best.at >= m.at)) continue;
+      const person = this.comparable().find((p) => p.person_id === m.person_id);
+      if (person) best = { person_id: person.person_id, name: person.name, at: m.at, source: "face" };
+    }
+    return best;
   }
 
-  /** 最近（候選有效期間內）看到多張臉。 */
-  private multiFaceRecent(): boolean {
-    return (this.ambient?.mixed ?? false) || (this.multiFaceAt !== null && this.now() - this.multiFaceAt <= MEMORY_CANDIDATE_MS);
+  /** 這個頁面最近（候選有效期間內）看到多張臉。 */
+  private multiFaceRecent(page: PageEvidence): boolean {
+    return (page.ambient?.mixed ?? false) || (page.multiFaceAt !== null && this.now() - page.multiFaceAt <= MEMORY_CANDIDATE_MS);
   }
 
   /** 只給記憶層：已登記的家人（連結到既有人物用）；家人資料還沒載入時回 null，不在這裡碰 Keychain。 */
@@ -555,7 +597,10 @@ export class IdentityService {
     return this.people.map((p) => ({ person_id: p.person_id, name: p.name, minor: p.minor }));
   }
 
-  /** IPC 進來的請求（已由 desktop/identity-ipc.mjs 過濾形狀；這裡仍完整驗證，核心為權威）。 */
+  /**
+   * IPC 或終端機 HTTP 進來的請求（已由 shared/identity-validate.mjs 過濾形狀；這裡仍完整驗證，核心為權威）。
+   * ctx.source 分開各頁面的證據（未提供時是 Mac 主視窗）。
+   */
   async handle(raw: unknown, ctx: IdentityContext = {}): Promise<IdentityResponse> {
     const started = this.now();
     let op = "unknown";
@@ -584,10 +629,11 @@ export class IdentityService {
   private async dispatch(op: string, req: Record<string, unknown>, ctx: IdentityContext): Promise<IdentityResponse> {
     if (op === "open_session") return this.openSession(ctx);
     if (op === "ambient_status") return this.ambientStatus();
-    if (op === "ambient_probe") return this.ambientProbe(req);
-    if (op === "greeting") return this.greeting(req);
-    if (op === "voice_probe") return this.voiceProbe(req);
-    if (op === "call_voice") return this.callVoiceProbe(req);
+    const source = ctx.source ?? MAIN_SOURCE;
+    if (op === "ambient_probe") return this.ambientProbe(req, this.page(source));
+    if (op === "greeting") return this.greeting(req, this.page(source));
+    if (op === "voice_probe") return this.voiceProbe(req, this.page(source));
+    if (op === "call_voice") return this.callVoiceProbe(req, this.page(source));
     if (op === "close_session") {
       this.closeSession(req.session);
       return { ok: true, op: "close_session" };
@@ -812,8 +858,8 @@ export class IdentityService {
    * 看著說話的面向等待期間的一格。回應一律只有 ok（不回 matched／unknown），頁面拿不到結果；
    * 證據留在核心，送出問候前由 greeting 讀取。第一次（gallery 檔存在時）才載入 gallery。
    */
-  private ambientProbe(req: Record<string, unknown>): IdentityResponse {
-    this.ambientRate(this.ambientCalls, SESSION_RATE_PER_S);
+  private ambientProbe(req: Record<string, unknown>, page: PageEvidence): IdentityResponse {
+    this.ambientRate(page.ambientCalls, SESSION_RATE_PER_S);
     // 被拒時不說原因：「沒有可比對的家人」之類的原因會透露有沒有登記家人。
     if (this.ambientBlock(this.wakeOpen())) throw new RequestError("unavailable", AMBIENT_REFUSED);
     this.ensureLoaded();
@@ -823,13 +869,13 @@ export class IdentityService {
     if (typeof track !== "number" || !Number.isInteger(track) || track < 0) throw new RequestError("bad_request", "track 格式不對");
     const match = this.matchFrame(req);
     const now = this.now();
-    if (!this.ambient || this.ambient.track !== track) this.ambient = { track, evidence: EMPTY_EVIDENCE, firstMatch: null, mixed: false };
-    if (this.lastMatch && this.lastMatch.track !== track) this.lastMatch = null;
-    const a = this.ambient;
+    if (!page.ambient || page.ambient.track !== track) page.ambient = { track, evidence: EMPTY_EVIDENCE, firstMatch: null, mixed: false };
+    if (page.lastMatch && page.lastMatch.track !== track) page.lastMatch = null;
+    const a = page.ambient;
     if (match.kind === "ambiguous" && match.reason === "multi_face") {
       a.mixed = true;
-      this.lastMatch = null;
-      this.multiFaceAt = now;
+      page.lastMatch = null;
+      page.multiFaceAt = now;
       // 多人入鏡：記憶的本次人物暫停（只降權）。
       this.options.memory?.()?.suspend("multi_face");
     }
@@ -846,7 +892,7 @@ export class IdentityService {
    * 只有一張臉、辨識沒有出錯）；核心負責其餘：同一追蹤世代、沒有混到別人、證據 ≥3 格且最新 ≤1 秒、person 仍存在且
    * gallery 版本沒變、稱名設定仍開。任一項不符就不帶名字（仍說「我在」）。每個互動 ID 最多決策一次。
    */
-  private greeting(req: Record<string, unknown>): IdentityResponse {
+  private greeting(req: Record<string, unknown>, page: PageEvidence): IdentityResponse {
     const interaction = req.interaction;
     if (typeof interaction !== "string" || !INTERACTION_ID.test(interaction)) throw new RequestError("bad_request", "interaction 格式不對");
     const track = req.track;
@@ -864,7 +910,7 @@ export class IdentityService {
     const claim = this.options.claimGreeting?.(interaction) ?? null;
     const session = claim && claim.route === route ? claim : null;
     const wakeId = session?.source === "wake_word" ? (session.wake_id ?? null) : null;
-    const decision = this.decide(interaction, track, req.eligible, session !== null, session?.source === "wake_word", wakeId);
+    const decision = this.decide(page, interaction, track, req.eligible, session !== null, session?.source === "wake_word", wakeId);
     const person = decision.person_id ? this.people.find((p) => p.person_id === decision.person_id) : undefined;
     const name = person ? speakableName(person.name) : null;
     // 從固定清單挑一句（依時段、避開上一次）；log 只記模板編號，不記句子。
@@ -878,18 +924,18 @@ export class IdentityService {
     if (briefing && route === "live") briefing = fitBriefing(briefing, (extra) => fitsLiveAppend(liveGreetingText(appendBriefing(picked.sentence, extra, locale), locale)));
     const sentence = appendBriefing(picked.sentence, briefing?.sentence ?? null, locale);
     // 只有原因與數字（給 Mac 實測對照時序）：證據格數、跨度與最新一格多久以前；不記姓名、person_id 或分數。
-    const ev = this.ambient?.track === track ? this.ambient.evidence.frames : [];
+    const ev = page.ambient?.track === track ? page.ambient.evidence.frames : [];
     const span = ev.length ? Math.round(ev.at(-1)!.t - ev[0]!.t) : 0;
     const age = decision.evidence_at === null ? "—" : `${Math.round(decision.decided_at - decision.evidence_at)} ms`;
-    const voice = wakeId !== null ? `，聲音 ${voiceSummary(this.voiceFor(wakeId))}，融合 ${this.lastFusion ?? "—"}` : "";
+    const voice = wakeId !== null ? `，聲音 ${voiceSummary(this.voiceFor(page, wakeId))}，融合 ${this.lastFusion ?? "—"}` : "";
     this.log(`identity: 問候決策（${route}，${decision.reason ?? "ok"}，世代 ${track}，連續證據 ${ev.length} 格／${span} ms，最新 ${age} 前${voice}，模板 ${picked.id}${briefing ? "＋天氣" : ""}，${decision.calibrated ? "聲音門檻已校準" : "門檻未校準"}）`);
     // 證據只為這一次問候存在：決策後丟掉，晚到的推論不能讓下一次互動沿用。
-    this.ambient = null;
-    if (wakeId !== null && this.wakeVoice?.wake_id === wakeId) this.wakeVoice = null;
+    page.ambient = null;
+    if (wakeId !== null && page.wakeVoice?.wake_id === wakeId) page.wakeVoice = null;
     // 新的互動：上一通的聲音候選不沿用。
-    this.callVoice = null;
+    page.callVoice = null;
     // 記憶的臉部候選只來自臉（只憑聲音的測試開關不算）。
-    this.lastMatch = decision.person_id && decision.reason === null && this.lastFusion !== "voice_only_test" && this.lastFusion !== "voice_only_calibrated" ? { person_id: decision.person_id, track, at: this.now() } : null;
+    page.lastMatch = decision.person_id && decision.reason === null && this.lastFusion !== "voice_only_test" && this.lastFusion !== "voice_only_calibrated" ? { person_id: decision.person_id, track, at: this.now() } : null;
     if (route === "api_key") {
       if (session) {
         // PRO-1：有核心旁路時，等問候那一輪真的開始（response.created）才記下說過；沒有旁路時旁路會立刻呼叫 spoken。
@@ -926,22 +972,22 @@ export class IdentityService {
   }
 
   /** 建立 GreetingDecision（只在核心）。名稱驗證不過時改成不稱名。 */
-  private decide(interaction: string, track: number, eligible: boolean, claimed: boolean, viaWake = false, wakeId: string | null = null): GreetingDecision {
+  private decide(page: PageEvidence, interaction: string, track: number, eligible: boolean, claimed: boolean, viaWake = false, wakeId: string | null = null): GreetingDecision {
     const now = this.now();
     // 先記「沒有臉的結果時」的融合（只給 log）；臉認出人時下面會改寫。
-    this.lastFusion = wakeId === null ? null : combineVoice(this.voiceFor(wakeId)?.obs ?? {}).state === "matched" ? "voice_only" : "none";
+    this.lastFusion = wakeId === null ? null : combineVoice(this.voiceFor(page, wakeId)?.obs ?? {}).state === "matched" ? "voice_only" : "none";
     const base = { interaction_id: interaction, track_generation: track, gallery_version: this.versions.gallery_version, decided_at: now, calibrated: CALIBRATED };
-    const last = this.ambient?.track === track ? this.ambient.evidence.frames.at(-1) : undefined;
+    const last = page.ambient?.track === track ? page.ambient.evidence.frames.at(-1) : undefined;
     const plain = (reason: GreetingNameReason): GreetingDecision => ({ ...base, person_id: null, evidence_at: last?.t ?? null, reason });
     // 認不出臉（不是看到別人）時，測試開關開著就改用聲音（只限喚醒開始的通話）。
     // SP-03a：校準驗證通過的片段，不需要測試開關也可以只憑聲音稱名。
-    const faceMissing = (reason: GreetingNameReason): GreetingDecision => (wakeId !== null ? (this.voiceOnly(base, wakeId, track) ?? plain(reason)) : plain(reason));
+    const faceMissing = (reason: GreetingNameReason): GreetingDecision => (wakeId !== null ? (this.voiceOnly(page, base, wakeId, track) ?? plain(reason)) : plain(reason));
     if (!this.ambientPrefs().look_to_talk_greet_name) return plain("naming_off");
     if (!claimed) return plain("no_session");
     if (!this.options.store.namingNoticeSeen()) return plain("notice_unseen");
     if (!eligible) return faceMissing("not_eligible");
     if (this.ambientBlock(viaWake)) return faceMissing("unavailable");
-    const a = this.ambient;
+    const a = page.ambient;
     if (!a) return faceMissing("no_evidence");
     if (a.track !== track) return faceMissing("track_changed");
     if (a.mixed) return plain("multi_face");
@@ -955,7 +1001,7 @@ export class IdentityService {
     if (!person) return plain("person_gone");
     if (!speakableName(person.name)) return plain("bad_name");
     if (wakeId !== null) {
-      const fusion = this.fuse(person, this.voiceFor(wakeId));
+      const fusion = this.fuse(person, this.voiceFor(page, wakeId));
       this.lastFusion = fusion;
       if (fusion === "conflict") return plain("voice_conflict");
       if (fusion === "voice_unsupported") return plain("voice_unsupported");
@@ -977,8 +1023,8 @@ export class IdentityService {
    * 測試開關：這次喚醒的聲音認出一人（兩段沒有互相矛盾）、名稱可念，就以聲音叫名字；否則 null。
    * 這個追蹤世代出現過多張臉，或臉曾認出另一位家人，就不用聲音（頁面的 not_eligible 也可能是多張臉）。
    */
-  private voiceOnly(base: Omit<GreetingDecision, "person_id" | "evidence_at" | "reason">, wakeId: string, track: number): GreetingDecision | null {
-    const voice = this.voiceFor(wakeId);
+  private voiceOnly(page: PageEvidence, base: Omit<GreetingDecision, "person_id" | "evidence_at" | "reason">, wakeId: string, track: number): GreetingDecision | null {
+    const voice = this.voiceFor(page, wakeId);
     const v = combineVoice(voice?.obs ?? {});
     if (v.state !== "matched" || v.conflict) return null;
     const test = this.voiceNameTestOn();
@@ -986,7 +1032,7 @@ export class IdentityService {
     const calibrated = this.calibratedSegments();
     const byCalibrated = VOICE_SEGMENTS.some((seg) => calibrated[seg] && voice?.obs[seg]?.state === "matched" && voice.obs[seg]?.person_id === v.person_id);
     if (!test && !byCalibrated) return null;
-    const a = this.ambient?.track === track ? this.ambient : null;
+    const a = page.ambient?.track === track ? page.ambient : null;
     if (a && (a.mixed || (a.firstMatch !== null && a.firstMatch !== v.person_id))) return null;
     const person = this.comparableVoice().find((p) => p.person_id === v.person_id);
     if (!person || !speakableName(person.name)) return null;
@@ -1179,11 +1225,11 @@ export class IdentityService {
   }
 
   /** 這次喚醒還有效的聲音證據（同一個 wake_id、gallery 沒改版、沒逾時）。 */
-  private voiceFor(wakeId: string): WakeVoice | null {
-    const v = this.wakeVoice;
+  private voiceFor(page: PageEvidence, wakeId: string): WakeVoice | null {
+    const v = page.wakeVoice;
     if (!v || v.wake_id !== wakeId) return null;
     if (v.gallery_version !== this.versions.gallery_version || this.now() - v.at > VOICE_EVIDENCE_MS) {
-      this.wakeVoice = null;
+      page.wakeVoice = null;
       return null;
     }
     return v;
@@ -1223,8 +1269,8 @@ export class IdentityService {
   }
 
   /** 喚醒時的一段聲音。回應只有 ok；被拒時不說原因（原因可能透露有沒有登記家人）。 */
-  private voiceProbe(req: Record<string, unknown>): IdentityResponse {
-    this.ambientRate(this.voiceCalls, VOICE_PROBE_RATE_PER_S);
+  private voiceProbe(req: Record<string, unknown>, page: PageEvidence): IdentityResponse {
+    this.ambientRate(page.voiceCalls, VOICE_PROBE_RATE_PER_S);
     const wakeId = req.wake_id;
     if (typeof wakeId !== "string" || !WAKE_ID.test(wakeId)) throw new RequestError("bad_request", "wake_id 格式不對");
     const segment = this.segmentOf(req.segment);
@@ -1243,18 +1289,18 @@ export class IdentityService {
       feature.fill(0);
     }
     const now = this.now();
-    const current = this.voiceFor(wakeId);
+    const current = this.voiceFor(page, wakeId);
     const v: WakeVoice = current ?? { wake_id: wakeId, at: now, gallery_version: this.versions.gallery_version, obs: {} };
     v.obs[segment] = obs;
-    this.wakeVoice = v;
+    page.wakeVoice = v;
     return { ok: true, op: "voice_probe" };
   }
 
   /**
    * SP-02b 通話中的一段話。回應只有 ok；被拒時不說原因。結果只用在記憶人物候選與 log（不撤銷、不打斷，George 2026-11-01）。
    */
-  private callVoiceProbe(req: Record<string, unknown>): IdentityResponse {
-    this.ambientRate(this.callVoiceCalls, 2);
+  private callVoiceProbe(req: Record<string, unknown>, page: PageEvidence): IdentityResponse {
+    this.ambientRate(page.callVoiceCalls, 2);
     const voiced = req.voiced_ms;
     if (typeof voiced !== "number" || !Number.isInteger(voiced) || voiced < 0 || voiced > 60_000) throw new RequestError("bad_request", "voiced_ms 格式不對");
     let on = false;
@@ -1291,19 +1337,19 @@ export class IdentityService {
             // 記憶層自己處理
           }
         }
-      } else if (this.multiFaceRecent()) {
+      } else if (this.multiFaceRecent(page)) {
         // 記憶預設選人（2026-11-02）：多張臉時不提聲音候選（只降權）。
-        this.callVoice = null;
+        page.callVoice = null;
         note = "，沒有本次人物，畫面有多張臉，不提候選";
       } else {
-        const v = this.callVoice;
-        const faceAgainst = !!this.ambient && (this.ambient.mixed || (this.ambient.firstMatch !== null && this.ambient.firstMatch !== obs.person_id));
+        const v = page.callVoice;
+        const faceAgainst = !!page.ambient && (page.ambient.mixed || (page.ambient.firstMatch !== null && page.ambient.firstMatch !== obs.person_id));
         // 記憶預設選人（2026-11-02）：問候決策認出的臉（記憶的候選）是另一位家人。
-        const lastFace = this.lastMatch && now - this.lastMatch.at <= MEMORY_CANDIDATE_MS ? this.lastMatch.person_id : null;
+        const lastFace = page.lastMatch && now - page.lastMatch.at <= MEMORY_CANDIDATE_MS ? page.lastMatch.person_id : null;
         const faceOther = lastFace !== null && lastFace !== obs.person_id;
         if (faceAgainst || faceOther || (v && now - v.at <= MEMORY_CANDIDATE_MS && v.person_id !== obs.person_id)) {
           // 臉或前一段話指向別人：不提候選；還在等選定的記憶預設選人也作廢（改用全家共用）。
-          this.callVoice = null;
+          page.callVoice = null;
           note = "，沒有本次人物，和其他證據不一致，不提候選";
           try {
             memory?.voiceDisagrees?.();
@@ -1311,7 +1357,7 @@ export class IdentityService {
             // 記憶層自己處理
           }
         } else {
-          if (!v || now - v.at > MEMORY_CANDIDATE_MS) this.callVoice = { person_id: obs.person_id, at: now };
+          if (!v || now - v.at > MEMORY_CANDIDATE_MS) page.callVoice = { person_id: obs.person_id, at: now };
           note = "，沒有本次人物，提出聲音候選";
           const named = this.ambientPrefs().look_to_talk_greet_name && this.options.store.namingNoticeSeen();
           try {

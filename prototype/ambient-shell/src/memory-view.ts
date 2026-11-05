@@ -32,8 +32,10 @@ export interface MemoryBridge {
 }
 
 export interface MemoryViewDeps {
-  /** macOS App 的 IPC；瀏覽器版為 null。 */
+  /** macOS App 的 IPC；瀏覽器版與終端機頁面為 null。 */
   bridge: MemoryBridge | null;
+  /** bridge 為 null 時顯示的說明；未提供時是瀏覽器版的說明（RPI-ID 的終端機改說管理在 Mac 進行）。 */
+  unavailableMessage?: string;
   /** 收起（dispatch dismiss）；只關畫面。 */
   dismiss(): void;
   /** 卡片處理完的結果（回條、下一張卡、要送的聊天）交回主程式。requestId 是原本那一輪。 */
@@ -163,7 +165,7 @@ export class MemoryView {
     this.editing = null;
     this.filter = "all";
     if (!this.deps.bridge) {
-      this.mode = { kind: "unavailable", message: MEMORY_BROWSER_UNAVAILABLE };
+      this.mode = { kind: "unavailable", message: this.deps.unavailableMessage ?? MEMORY_BROWSER_UNAVAILABLE };
       this.render();
       return;
     }

@@ -2136,6 +2136,18 @@ export class MemoryService implements LiveMemoryService {
     return this.writeTarget(state.segment, target, card.text, via, card.requestId);
   }
 
+  /**
+   * RPI-ID：卡片的種類（只讀；不開 store、不改卡片）。終端機的 HTTP 只能看與回答人物候選卡（face_candidate），先用這個擋掉其他卡。
+   * 記憶建議是 "suggestion"；不存在、過期或不是這個世代的卡是 null。
+   */
+  cardKind(id: unknown): string | null {
+    if (typeof id !== "string" || !CARD_ID.test(id)) return null;
+    if (this.suggestions.has(id)) return "suggestion";
+    const card = this.cards.get(id);
+    if (!card || card.expires <= this.now() || card.epoch !== this.presence.epoch) return null;
+    return card.state.kind;
+  }
+
   /** IPC card_view：SSE 只送卡片 ID；可信主視窗用它取內容（只有這個世代、還沒過期的卡）。 */
   private cardView(req: Record<string, unknown>): MemoryResponse {
     const id = req.card;
