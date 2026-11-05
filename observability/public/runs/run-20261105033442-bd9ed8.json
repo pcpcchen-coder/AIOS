@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-05T03:34:42.737Z",
-  "updated_at": "2026-11-05T03:46:49.684Z",
+  "updated_at": "2026-11-05T03:46:53.136Z",
   "ended_at": null,
   "steps": [
     {
@@ -32,10 +32,10 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-11-05T03:46:53.135Z",
+      "ended_at": "2026-11-05T03:46:53.136Z",
+      "note": "PRO-1 architect done in session",
       "evidence": []
     },
     {
@@ -105,6 +105,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "PRO-1 checkpoint done in session"
+    },
+    {
+      "at": "2026-11-05T03:46:53.136Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "passed",
+      "note": "PRO-1 architect done in session"
     }
   ],
   "provenance": "Agent self-reported"
