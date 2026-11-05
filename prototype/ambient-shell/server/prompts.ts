@@ -3,6 +3,7 @@ import { classifyDomain, isDomain, DOMAINS, REGIONS, type Domain } from "../shar
 import { ExecutionError } from "./runner.ts";
 import { memoryBlock } from "./chat.ts";
 import type { ContextFact } from "./memory/retrieve.ts";
+import { localToday } from "./local-date.ts";
 
 // Claude 與 ChatGPT 執行器共用的提示詞與計畫格式：同樣走「規劃 → 逐步執行 → 彙整」。
 
@@ -61,7 +62,7 @@ export const MAX_PLAN_STEPS = 5;
 export const SYNTHESIS_TITLE = "彙整成果";
 
 /** 規劃步驟用的使用者訊息。 */
-export function planPrompt(title: string, today = new Date().toISOString().slice(0, 10)): string {
+export function planPrompt(title: string, today = localToday()): string {
   return [
     `今天日期：${today}`,
     `使用者交辦的任務：${title}`,
@@ -79,7 +80,7 @@ export function stepPrompt(
   plan: Plan,
   outputs: string[],
   index: number,
-  today = new Date().toISOString().slice(0, 10),
+  today = localToday(),
 ): string {
   const isSynthesis = index === plan.steps.length;
   const planText = plan.steps.map((s, i) => `${i + 1}. ${s.title}：${s.instruction}`).join("\n");

@@ -18,7 +18,7 @@
 | ├ `app.calendar.list_events`（唯讀） | `range` 可以是 today、tomorrow、week，或 date 加 `date`（YYYY-MM-DD；送給 gog 的是當地那一天 00:00 到隔天 00:00，帶時差）。執行 `gog calendar events primary --readonly --account=… --tz=… --max=21 --json` 再加範圍旗標；gog 的 `--readonly` 會在送出前擋掉任何寫入。最多回 20 筆、標題 120 字、地點 80 字，總大小 3.5 KB 以內；放不下就少給幾筆，並標示 `truncated`。回傳時附上固定提醒：標題與地點可能是別人寫的，只是資料；整天行程的 end 是隔天。讀行程時 gog 輸出上限 2 MB |
 | ├ `app.calendar.create_event` | 參數是主旨、開始時間（`YYYY-MM-DDTHH:MM` 當地時間，或 `YYYY-MM-DD` 整天）、長度（5–1440 分鐘，預設 60）、地點、備註。當地時間依時區換成帶時差的 RFC3339；結束時間是開始的實際時刻加上長度，所以跨午夜與夏令時間交界都是真的經過那麼久；整天行程結束日是隔天。備註保留換行。**不帶任何受邀者，不會寄邀請**。每分鐘最多 10 個 |
 | 結果判定 | 讀取成功是 `confirmed`；新增時有行程 ID 是 `confirmed`，沒有 ID 是 `unconfirmed`；gog 非 0 結束時，讀取是 `failed`，新增是 `unknown`（可能已經建好，不重建）；gog 沒能啟動是 `failed`；逾時（30 秒）或中止是 `unknown` |
-| 確認 | 新增行程屬於 `reversible_write`：只加在自己的日曆、不邀請人、刪得掉，不是紅線列的寄出／發布／付費／永久刪除，所以不出確認卡。這是我的預設，等 George 確認 |
+| 確認 | 新增行程屬於 `reversible_write`：只加在自己的日曆、不邀請人、刪得掉，不是紅線列的寄出／發布／付費／永久刪除，所以不出確認卡。**George 2026-11-05 確認：新增行程不用確認** |
 | `server/config.ts` | 列出 `google_calendar` 時才讀 `NOUS_GOG_ACCOUNT`（gog 的 Google 帳號，沒有時用 `NOUS_MAIL_SELF`，必須是 email）與 `NOUS_CALENDAR_TZ`（IANA 時區，預設 Asia/Taipei）；gog 路徑沿用 `NOUS_GOG_PATH` |
 | `server/integrations/index.ts` | 已審核的 Adapter 加入 `google_calendar`。沒有帳號或找不到 gog 時不註冊，照實記 log |
 | `src/views.ts`、`src/messages.en.json`、`server/messages.en.json` | 設定頁「App 整合」加上「Google 日曆（gog）」與說明；新的固定句都有英文 |
@@ -71,8 +71,8 @@
 - gog `--json` 的輸出欄位、整天行程的結束日格式都是假設，要在第 4 節第 2 步核對。
 - 只有主要日曆，不能修改或刪除行程，不能邀請人。
 - 行程的標題與地點會送到語音模型的雲端（查行程本來就需要）；工具說明提醒模型那只是資料，但擋不住所有提示注入。
-- 已知的既有問題（不是這批造成的，沒有改）：兩條即時語音路徑的說明裡，「今天日期」用的是 UTC 日期，台灣時間 00:00–08:00 之間會是前一天，模型換算「明天」時可能差一天。建議另開一批修正。
-- 新增行程不出確認卡是我的預設，等 George 確認。
+- 「今天日期」用 UTC 的既有問題已在 [本機日期修正](local-date-2026-11-05.md) 改成本機時區。
+- 新增行程不出確認卡：George 2026-11-05 已確認。
 
 ## 6. 下一個 gate
 
