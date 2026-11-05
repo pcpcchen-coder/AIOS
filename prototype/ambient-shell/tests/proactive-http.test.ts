@@ -53,7 +53,7 @@ describe("PRO-1 settings over HTTP", () => {
     const fetched: string[] = [];
     const h = await boot(fetched);
     const view = (await (await fetch(`${h.url}/api/settings`)).json()) as SettingsView;
-    expect(view.proactive?.prefs).toEqual({ enabled: true, weather: true, start_hour: 5, end_hour: 11, place: null });
+    expect(view.proactive?.prefs).toEqual({ enabled: true, weather: true, calendar: true, start_hour: 5, end_hour: 11, place: null });
     expect(view.proactive?.write_path).toBe("/api/settings/proactive");
     expect(view.integrations?.tools).toContain("app__weather__today");
 

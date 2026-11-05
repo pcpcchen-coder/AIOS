@@ -52,6 +52,11 @@ export interface ProactivePrefs {
   enabled: boolean;
   /** 招呼後接今天的天氣（預設開）。 */
   weather: boolean;
+  /**
+   * PRO-2：認出行程擁有者時說今天的行程（預設開）：有行程先問「要不要我念今天的行程？」，說好才念；
+   * 沒有行程直接說「今天沒有排行程」（George 2026-11-05）。
+   */
+  calendar: boolean;
   /** 時段開始（本機整點，含）。 */
   start_hour: number;
   /** 時段結束（本機整點，不含）。 */
@@ -62,7 +67,7 @@ export interface ProactivePrefs {
 
 export type ProactivePrefsPatch = Partial<ProactivePrefs>;
 
-export const DEFAULT_PROACTIVE_PREFS: ProactivePrefs = { enabled: true, weather: true, start_hour: 5, end_hour: 11, place: null };
+export const DEFAULT_PROACTIVE_PREFS: ProactivePrefs = { enabled: true, weather: true, calendar: true, start_hour: 5, end_hour: 11, place: null };
 
 /** 選單與設定頁可以選的整點（不能輸入數字）。 */
 export const START_HOUR_OPTIONS = [4, 5, 6, 7, 8, 9] as const;
@@ -77,7 +82,7 @@ export function parseProactivePatch(input: unknown): ProactivePrefsPatch {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new ProactivePatchError("主動提醒設定必須是 JSON 物件");
   const patch: ProactivePrefsPatch = {};
   for (const [key, value] of Object.entries(input)) {
-    if (key === "enabled" || key === "weather") {
+    if (key === "enabled" || key === "weather" || key === "calendar") {
       if (typeof value !== "boolean") throw new ProactivePatchError(`${key} 必須是 true 或 false`);
       patch[key] = value;
     } else if (key === "start_hour") {
@@ -112,12 +117,17 @@ export interface ProactiveSettingsView {
   end_hours: readonly number[];
   /** 最近一次查天氣的結果（只有狀態，不含天氣內容）。 */
   weather: { state: WeatherFetchState; at: number | null };
+  /** PRO-2：行事曆（CAL-1）的狀態（只有狀態，不含行程內容）。 */
+  calendar: { state: CalendarFetchState };
   attribution: string;
   write_path: "/api/settings/proactive";
 }
 
 /** ok：有今天的資料；failed：查詢失敗或回覆看不懂；none：還沒查過；no_place：沒有地點。 */
 export type WeatherFetchState = "ok" | "failed" | "none" | "no_place";
+
+/** ok：有今天的行程資料；failed：讀行程失敗；none：還沒讀過；not_connected：CAL-1 沒有設定（NOUS_AIL_SERVICES 沒有 google_calendar）。 */
+export type CalendarFetchState = "ok" | "failed" | "none" | "not_connected";
 
 /** 設定頁與選單列共用的文字（中文是翻譯表的鍵；desktop/settings-menu.mjs 有同一份，tests/proactive.test.ts 核對兩邊一致）。 */
 export const PROACTIVE_TEXT = {
@@ -137,6 +147,12 @@ export const PROACTIVE_TEXT = {
   stateFailed: "天氣：上次查詢失敗，這次招呼不說天氣",
   stateNone: "天氣：還沒查過（看著說話或喚醒時會先查）",
   stateNoPlace: "天氣：沒有地點",
+  calendar: "認出 George 時說今天的行程",
+  calendarNote: "有行程先問「要不要我念今天的行程？」，說好才念；沒有行程直接說「今天沒有排行程」",
+  calOk: "行事曆：已讀到今天的行程",
+  calFailed: "行事曆：上次讀取失敗，這次不提行程",
+  calNone: "行事曆：還沒讀過（看著說話或喚醒時會先讀）",
+  calNotConnected: "行事曆：沒有連上 Google 日曆（CAL-1）",
 } as const;
 
 // ───────────── 今天的天氣（核心從 Open-Meteo 回覆整理；只留念句子需要的欄位） ─────────────
@@ -207,6 +223,53 @@ export function weatherSentence(w: WeatherToday, locale: Locale): string {
   return s;
 }
 
+// ───────────── 今天的行程（PRO-2；資料來自 CAL-1，只在核心記憶體裡） ─────────────
+
+/** 念行程用的最小欄位（CAL-1 的 EventSummary）。 */
+export interface TodayEvent {
+  summary: string;
+  start: string;
+  all_day: boolean;
+  location?: string;
+}
+
+export const CALENDAR_ASK = { zh: "要不要我念今天的行程？", en: "Shall I read today's schedule?" } as const;
+export const CALENDAR_EMPTY = { zh: "今天沒有排行程", en: "Nothing is on your calendar today." } as const;
+/** 一次最多念幾個行程（其餘說「還有 N 個」）。 */
+export const SCHEDULE_MAX = 5;
+const TITLE_MAX = 40;
+
+const cut = (t: string, n: number) => ([...t].length > n ? `${[...t].slice(0, n).join("")}…` : t);
+function startTime(e: TodayEvent): string | null {
+  const m = /T(\d{2}):(\d{2})/.exec(e.start);
+  return m ? `${Number(m[1])}:${m[2]}` : null;
+}
+
+/**
+ * 念出今天行程的那一句（確定性的模板）：「今天有 2 個行程：9:30 開會；整天 生日。」標題來自日曆（可能是別人寫的），只當資料。
+ */
+export function scheduleSentence(events: readonly TodayEvent[], locale: Locale): string {
+  const en = locale === "en";
+  if (!events.length) return en ? CALENDAR_EMPTY.en : `${CALENDAR_EMPTY.zh}。`;
+  const items = events.slice(0, SCHEDULE_MAX).map((e) => {
+    const time = e.all_day ? (en ? "all day" : "整天") : (startTime(e) ?? (en ? "today" : "今天"));
+    const title = cut(e.summary, TITLE_MAX) || (en ? "(untitled)" : "（沒有標題）");
+    const where = e.location ? (en ? ` at ${cut(e.location, TITLE_MAX)}` : `，在${cut(e.location, TITLE_MAX)}`) : "";
+    return `${time} ${title}${where}`;
+  });
+  const rest = events.length - items.length;
+  if (en) return `You have ${events.length} ${events.length === 1 ? "event" : "events"} today: ${items.join("; ")}${rest > 0 ? `; and ${rest} more` : ""}.`;
+  return `今天有 ${events.length} 個行程：${items.join("；")}${rest > 0 ? `；還有 ${rest} 個` : ""}。`;
+}
+
+/** 主動提醒的幾段（天氣、行程問句或「今天沒有排行程」）接成一段：中文以句號分開，英文以空白分開（各段自帶標點）。 */
+export function joinBriefing(parts: readonly string[], locale: Locale): string | null {
+  const list = parts.filter((p) => p.length > 0);
+  if (!list.length) return null;
+  if (locale === "en") return list.join(" ");
+  return list.map((p, i) => (i < list.length - 1 && !/[。？！]$/u.test(p) ? `${p}。` : p)).join("");
+}
+
 /** 招呼句後面接主動提醒（招呼句本身沒有句尾標點）。 */
 export function appendBriefing(greeting: string, extra: string | null, locale: Locale): string {
   if (!extra) return greeting;
@@ -215,8 +278,8 @@ export function appendBriefing(greeting: string, extra: string | null, locale: L
 
 // ───────────── 每日一次 ─────────────
 
-/** 每日紀錄的鍵：認出的家人（person:<id>）或這台裝置（device）。 */
-export type BriefingKey = "device" | `person:${string}`;
+/** 每日紀錄的鍵：認出的家人（person:<id>）、這台裝置（device），或 PRO-2 已經問過／說過行程的人（calendar:<id>）。 */
+export type BriefingKey = "device" | `person:${string}` | `calendar:${string}`;
 
 /**
  * 今天要不要主動說（純函式）：認出的人看自己的鍵；沒認出是誰看 device（這台裝置今天有沒有對任何人說過）。

@@ -57,7 +57,7 @@ import {
 } from "../shared/identity.ts";
 import { liveGreetingText, strictGreetingInstructions } from "../shared/sense.ts";
 import { appendBriefing } from "../shared/proactive.ts";
-import { fitsLiveAppend, type BriefingPort, type PendingBriefing } from "./proactive.ts";
+import { fitBriefing, fitsLiveAppend, type BriefingPort, type BriefingSubject, type PendingBriefing } from "./proactive.ts";
 import { WAKE_ID } from "../shared/wake.ts";
 import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
@@ -205,6 +205,8 @@ export interface IdentityServiceOptions {
    * 結束後才問臉部候選（只有稱名過，問句才帶名字）。只有互動 ID 換得到真的工作階段時才呼叫。
    */
   apiKeyGreeted?: (sessionId: string, named: boolean, spoken?: () => void) => void;
+  /** PRO-2：這通 API key 工作階段有核心旁路（核心聽得到使用者的回答）；沒有時不問行程。 */
+  apiKeyListens?: (sessionId: string) => boolean;
   /** 開場句挑選（固定清單、依時段、避開上一次）；未提供時建一個（Math.random、這台電腦的時區）。 */
   picker?: GreetingPicker;
   /**
@@ -869,9 +871,11 @@ export class IdentityService {
     const locale = normalizeLocale(session?.locale);
     const picked = this.picker.pick(name, locale);
     // PRO-1：招呼後接的主動提醒（確定性的模板；沒有就只打招呼）。
-    let briefing = this.composeBriefing(name !== null ? decision.person_id : null, locale);
+    // PRO-2：核心聽得到這通的回答才問行程：live 一律有 sideband；API key 要有核心旁路（apiKeyListens）。
+    const listens = session !== null && (route === "live" || this.options.apiKeyListens?.(session.session_id) === true);
+    let briefing = this.composeBriefing({ personId: name !== null ? decision.person_id : null, name, listens }, locale);
     // live：整段要放得進一段 sideband append（≤500 bytes），否則第二段沒有「（開場）」標記、可能被念出指示；放不下就不接。
-    if (briefing && route === "live" && !fitsLiveAppend(liveGreetingText(appendBriefing(picked.sentence, briefing.sentence, locale), locale))) briefing = null;
+    if (briefing && route === "live") briefing = fitBriefing(briefing, (extra) => fitsLiveAppend(liveGreetingText(appendBriefing(picked.sentence, extra, locale), locale)));
     const sentence = appendBriefing(picked.sentence, briefing?.sentence ?? null, locale);
     // 只有原因與數字（給 Mac 實測對照時序）：證據格數、跨度與最新一格多久以前；不記姓名、person_id 或分數。
     const ev = this.ambient?.track === track ? this.ambient.evidence.frames : [];
@@ -891,7 +895,8 @@ export class IdentityService {
         // PRO-1：有核心旁路時，等問候那一輪真的開始（response.created）才記下說過；沒有旁路時旁路會立刻呼叫 spoken。
         const b = briefing;
         if (this.options.apiKeyGreeted) {
-          try { this.options.apiKeyGreeted(session.session_id, name !== null, b ? () => this.commitBriefing(b) : undefined); } catch { /* 通知失敗不影響問候 */ }
+          const call = { sessionId: session.session_id, spoken: sentence };
+          try { this.options.apiKeyGreeted(session.session_id, name !== null, b ? () => this.commitBriefing(b, call) : undefined); } catch { /* 通知失敗不影響問候 */ }
         } else if (b) this.commitBriefing(b);
       } else if (briefing) {
         // 換不到工作階段（核心看不到這通）：交回頁面就算說過。
@@ -903,18 +908,18 @@ export class IdentityService {
     return { ok: true, op: "greeting", text: null };
   }
 
-  private composeBriefing(personId: string | null, locale: Locale): PendingBriefing | null {
+  private composeBriefing(subject: BriefingSubject, locale: Locale): PendingBriefing | null {
     try {
-      return this.options.briefing?.compose(personId, locale) ?? null;
+      return this.options.briefing?.compose(subject, locale) ?? null;
     } catch (err) {
       this.log(`主動提醒：組句失敗，這次只打招呼（${(err as Error).message}）`);
       return null;
     }
   }
 
-  private commitBriefing(b: PendingBriefing): void {
+  private commitBriefing(b: PendingBriefing, call?: { sessionId: string; spoken: string }): void {
     try {
-      this.options.briefing?.commit(b);
+      this.options.briefing?.commit(b, call);
     } catch {
       // 紀錄寫不進去不影響問候
     }
@@ -1342,8 +1347,12 @@ export class IdentityService {
     this.pendingLive = null;
     if (!pending || pending.interaction !== interaction || pending.session_id !== sessionId || this.now() - pending.at > LIVE_GREETING_PICKUP_MS) return null;
     // use=false：使用者先開口，這次不打招呼，只丟掉；主動提醒沒有說出，不記。
-    if (use && pending.briefing) this.commitBriefing(pending.briefing);
-    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) return { ...this.picker.plainLive(pending.locale, pending.briefing?.sentence ?? null), named: false };
+    if (pending.named && !this.ambientPrefs().look_to_talk_greet_name) {
+      const plain = this.picker.plainLive(pending.locale, pending.briefing?.sentence ?? null);
+      if (use && pending.briefing) this.commitBriefing(pending.briefing, { sessionId, spoken: plain.sentence });
+      return { ...plain, named: false };
+    }
+    if (use && pending.briefing) this.commitBriefing(pending.briefing, { sessionId, spoken: pending.sentence });
     // named：MEM-2 臉部候選的問句只有在問候已經稱名時才帶名字。
     return { text: pending.text, sentence: pending.sentence, named: pending.named };
   }

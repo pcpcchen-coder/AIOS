@@ -113,12 +113,13 @@ describe("English and Chinese App/web views", () => {
 
 describe("PRO-1 proactive settings section", () => {
   const view = {
-    prefs: { enabled: true, weather: true, start_hour: 5, end_hour: 11, place: null },
+    prefs: { enabled: true, weather: true, calendar: true, start_hour: 5, end_hour: 11, place: null },
     place: { id: "taipei", label: "台北", auto: true },
     places: [{ id: "taipei", label: "台北" }, { id: "kaohsiung", label: "高雄" }],
     start_hours: [4, 5, 6, 7, 8, 9],
     end_hours: [9, 10, 11, 12, 13, 14],
     weather: { state: "ok", at: 1 },
+    calendar: { state: "not_connected" },
     attribution: "Open-Meteo.com（CC BY 4.0）",
     write_path: "/api/settings/proactive",
   } as const;
@@ -131,6 +132,8 @@ describe("PRO-1 proactive settings section", () => {
     expect(text).not.toMatch(/[一-鿿]/);
     expect(text).toContain("Weather data: Open-Meteo.com (CC BY 4.0)");
     expect(text).toContain("From system time zone (Taipei)");
+    expect(text).toContain("Tell George today's schedule when recognised");
+    expect(text).toContain("Calendar: not connected to Google Calendar (CAL-1)");
     const select = el.all().find((n) => n.tagName === "select" && n.getAttribute("aria-label") === "Weather location")!;
     select.value = "kaohsiung";
     select.listeners.get("change")![0]!();

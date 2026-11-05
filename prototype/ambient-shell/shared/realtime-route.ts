@@ -247,6 +247,8 @@ export type LiveCoreEvent =
   /** sideband 收到的逐字稿（資料通道沒有送時頁面用這份；依 item_id 去重）。 */
   | { kind: "transcript"; role: "user" | "assistant"; text: string; final: boolean; item_id: string | null }
   | { kind: "delegation"; id: string; state: "started" | "finished" | "failed" | "unknown" }
+  /** PRO-2：核心真的讀了今天的行程、請模型念出（只有這個代碼，不含行程內容）；頁面用它點亮規劃區。 */
+  | { kind: "briefing"; part: "schedule" }
   /** 有副作用的工具沒有在時限內回覆：照實說結果不明。 */
   | { kind: "tool_unknown"; name: HostToolName; message: string }
   /** MEM-2：這通通話送出的記憶筆數（累計）與沒有用到的原因；只有數字與代碼，人物名稱由頁面經 IPC 取得。 */
