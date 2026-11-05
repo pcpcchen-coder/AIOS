@@ -2,6 +2,7 @@
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import manifest from "../shared/speaker-runtime.json" with { type: "json" };
 import face from "../shared/face-runtime.json" with { type: "json" };
@@ -75,7 +76,7 @@ describe("enrollment prompts", () => {
 });
 
 describe("src/speaker privacy (static)", () => {
-  const dir = new URL("../src/speaker/", import.meta.url).pathname;
+  const dir = fileURLToPath(new URL("../src/speaker/", import.meta.url));
   const sources = readdirSync(dir).map((f) => ({ file: f, text: readFileSync(join(dir, f), "utf8") }));
 
   it("has exactly these files", () => {
@@ -99,7 +100,7 @@ describe("src/speaker privacy (static)", () => {
   });
 
   it("only family-view and main.ts reach src/speaker", () => {
-    const app = new URL("..", import.meta.url).pathname;
+    const app = fileURLToPath(new URL("..", import.meta.url));
     const walk = (d: string): string[] => readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
     const importers = ["src", "server", "shared", "desktop"]
       .flatMap((d) => walk(join(app, d)))
