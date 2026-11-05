@@ -87,7 +87,7 @@ export interface LiveRouteOptions {
    * 看著說話的問候（ID-02）：頁面 POST greeting 帶來的文字只當成互動 ID，交給這個函式取核心已組好的短句
    * （IdentityService.takeLiveGreeting）。沒有提供或取不到時送「我在」（LIVE_GREETING_TEXT）。頁面的文字永遠不會成為內容。
    */
-  greeting?: (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting | null;
+  greeting?: (interaction: string, sessionId: string, locale?: Locale, use?: boolean) => LiveGreeting | null;
   /** MEM-2：每通通話的記憶（MemoryService.openLive）；沒有記憶層（瀏覽器版）時不提供。 */
   memory?: (ctx: SessionContext) => LiveMemoryPort | null;
   /**
@@ -420,7 +420,7 @@ class LiveCall implements RouteCall, LiveCallPort {
     callerFor: (ctx: SessionContext, memory?: LiveCallerMemory | null, voice?: VoiceDelegatePort | null) => DelegationRunner,
     private readonly memory: LiveMemoryPort | null,
     private readonly log?: (line: string) => void,
-    private readonly greetingText?: (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting | null,
+    private readonly greetingText?: (interaction: string, sessionId: string, locale?: Locale, use?: boolean) => LiveGreeting | null,
     private readonly palmQuietDelegation = false,
   ) {
     this.closed = new Promise<void>((resolve) => (this.resolveClosed = resolve));
@@ -661,7 +661,7 @@ class LiveCall implements RouteCall, LiveCallPort {
       if (this.userSpoke) {
         this.greeted = true;
         // 核心已經挑好的開場句（IdentityService 的 pendingLive）取走丟掉，不留到之後。
-        this.greetingText?.(text, this.ctx.sessionId, this.ctx.locale);
+        this.greetingText?.(text, this.ctx.sessionId, this.ctx.locale, false);
         this.log?.("即時語音（ChatGPT 方案）：使用者先開口，略過問候");
         return;
       }

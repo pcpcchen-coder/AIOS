@@ -49,6 +49,7 @@ import type { VoiceRoute } from "./memory/live.ts";
 import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
+import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
 import { isTerminalId } from "../shared/terminal.ts";
 import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
 import { VoiceRelayStoreError } from "./integrations/voice-relay/store.ts";
@@ -184,6 +185,11 @@ export interface AppOptions {
    * 服務模式：終端機（Pi kiosk）頁面的心跳（server/terminal-presence.ts）。未提供時 POST /api/terminal/heartbeat 落到 404。
    */
   terminals?: { heartbeat(id: string): void };
+  /**
+   * PRO-1：主動提醒（招呼後接今天的天氣）。view 給 settings.proactive；prefetch 在看著說話或喚醒開始時先取天氣。
+   * 未提供時（舊的組裝、測試）settings 沒有 proactive、POST /api/settings/proactive 回 404。
+   */
+  proactive?: { view(): ProactiveSettingsView; update(patch: ProactivePrefsPatch): ProactivePrefs; prefetch(): void };
   port: number;
   devPort: number;
   distDir: string | null;
@@ -257,6 +263,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         dropStopReport: options.dropStopReport,
         hideRevokeFromPage: options.hideRevokeFromPage,
         costLog: options.voiceCostLog,
+        // PRO-1：看著說話或喚醒開始（會打招呼的通話）時先取天氣，招呼決策時已在快取裡。
+        ...(options.proactive ? { onGreetingStart: () => options.proactive?.prefetch() } : {}),
       })
     : null;
   const tasksFor = (target: ChatTarget | null) => tasksForTarget(store, options.memory ?? null, target);
@@ -279,6 +287,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         memory: options.memory?.settingsStatus() ?? BROWSER_MEMORY_STATUS,
         audio: { prefs: options.audio?.view() ?? { ...DEFAULT_AUDIO_PREFS }, write_path: AUDIO_WRITE_PATH },
         ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
+        ...(options.proactive ? { proactive: options.proactive.view() } : {}),
         ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name) } } : {}),
         // VCR-2：只有註冊了 voice_relay 才有這個鍵（沒有時輸出和之前完全相同）。
         ...(options.integrations?.voiceRelay ? { voice_relay: true } : {}),
@@ -449,6 +458,22 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         // 寫檔失敗：記憶體沒有改（仍是保存前的值），回報真實原因，不顯示假成功。
         throw new HttpError(500, `常駐喚醒聆聽設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (options.proactive && method === "POST" && path === "/api/settings/proactive") {
+      let patch: ProactivePrefsPatch;
+      try {
+        patch = parseProactivePatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof ProactivePatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      try {
+        options.proactive.update(patch);
+      } catch (err) {
+        if (err instanceof ProactivePatchError) throw new HttpError(400, err.message);
+        throw new HttpError(500, `主動提醒設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }

@@ -5,6 +5,7 @@ import { createVoiceRelayAdapter, VoiceRelayAdapter } from "./adapters/voice-rel
 import { GmailGogAdapter, resolveGogPath } from "./adapters/gmail-gog.ts";
 import { HomeAdapter, type HomeBridgePort } from "./adapters/home.ts";
 import { GoogleCalendarAdapter } from "./adapters/google-calendar.ts";
+import { WeatherAdapter, type WeatherAdapterOptions } from "./adapters/weather.ts";
 import type { IntegrationAdapter } from "./contracts.ts";
 import { IntegrationDispatcher, type AuditEntry } from "./dispatcher.ts";
 import { IntegrationRegistry } from "./registry.ts";
@@ -24,6 +25,8 @@ export interface Integrations {
 /** 核心已經建立、要交給 Adapter 包裝的既有模組（AIL-2：HomeBridge）。 */
 export interface AdapterDeps {
   home?: HomeBridgePort;
+  /** PRO-1：天氣快取與主動提醒設定的地點（核心一定建立；測試可以不給）。 */
+  weather?: WeatherAdapterOptions;
 }
 
 /** 已審核的 Adapter（ID → 建立方式，只拿核心設定與既有模組）。回 null＝這次設定下不啟用（不註冊）。 */
@@ -56,6 +59,14 @@ export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
       return null;
     }
     return new GoogleCalendarAdapter({ account, gogPath, timeZone: config.calendar?.timeZone });
+  },
+  // PRO-1：今天的天氣（Open-Meteo，唯讀、沒有參數；地點只來自主動提醒設定）。
+  weather: (_config, log, deps) => {
+    if (!deps.weather) {
+      log("整合層：weather 需要核心的天氣快取，略過");
+      return null;
+    }
+    return new WeatherAdapter(deps.weather);
   },
   // MAIL-1：用 gog 寄信給自己（收件人只來自 NOUS_MAIL_SELF）。沒有信箱或找不到 gog 時不註冊，照實記 log。
   gmail_gog: (config, log) => {

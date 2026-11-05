@@ -93,7 +93,7 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
   /** MEM-4b 審查 minor 4：核心送出的 response.create 的標記（response.metadata.nous_trigger）→ 它沿用的觸發項目。 */
   private readonly coreTags = new Map<string, string | null>();
   /** 問候（頁面送出）之後才問臉部候選：armed＝核心知道要問候了；inflight＝問候那一輪已開始。 */
-  private greeting: { named: boolean; phase: "armed" | "inflight" } | null = null;
+  private greeting: { named: boolean; phase: "armed" | "inflight"; spoken?: () => void } | null = null;
   private readonly unhandled = new Set<string>();
   /** F7：使用者的第幾輪（旁路的 speech_started、打字或通知項目各算一輪）；沒有 response_id 的工具呼叫才用它判斷。 */
   private turn = 0;
@@ -211,7 +211,10 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
             if (event.response_id) this.quietResponses.add(event.response_id);
             this.send({ type: "response.cancel", ...(event.response_id ? { response_id: event.response_id } : {}) });
           }
-          if (this.greeting?.phase === "armed") this.greeting.phase = "inflight";
+          if (this.greeting?.phase === "armed") {
+            this.greeting.phase = "inflight";
+            try { this.greeting.spoken?.(); } catch { /* 紀錄失敗不影響通話 */ }
+          }
         } else {
           this.responding = false;
           this.awaiting = null;
@@ -437,9 +440,9 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
   }
 
   /** IdentityService 的 api_key 問候決策：頁面接著會送問候，問候那一輪結束後才問臉部候選（只有稱名過，問句才帶名字）。 */
-  greetingDecided(named: boolean): void {
+  greetingDecided(named: boolean, spoken?: () => void): void {
     if (this.ended || this.revoked) return;
-    this.greeting = { named, phase: "armed" };
+    this.greeting = { named, phase: "armed", ...(spoken ? { spoken } : {}) };
   }
 
   /** 頁面在資料通道收到 output_audio_buffer.stopped 後補報（POST /api/realtime/playback）：只會把確認時窗往後延。 */
