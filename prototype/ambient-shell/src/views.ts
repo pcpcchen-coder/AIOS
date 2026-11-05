@@ -10,7 +10,7 @@ import { formatNumberPref, formatSeconds, stepPref } from "../shared/prefs.ts";
 import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
-import { PROACTIVE_TEXT, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView, type WeatherFetchState } from "../shared/proactive.ts";
+import { PROACTIVE_TEXT, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView, type WeatherFetchState, type CalendarFetchState } from "../shared/proactive.ts";
 import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
 import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
@@ -755,6 +755,7 @@ export function renderAudioSettings(prefs: AudioPrefs, report: AudioReport | nul
 }
 
 const PROACTIVE_STATE: Record<WeatherFetchState, string> = { ok: PROACTIVE_TEXT.stateOk, failed: PROACTIVE_TEXT.stateFailed, none: PROACTIVE_TEXT.stateNone, no_place: PROACTIVE_TEXT.stateNoPlace };
+const CALENDAR_STATE: Record<CalendarFetchState, string> = { ok: PROACTIVE_TEXT.calOk, failed: PROACTIVE_TEXT.calFailed, none: PROACTIVE_TEXT.calNone, not_connected: PROACTIVE_TEXT.calNotConnected };
 
 /**
  * PRO-1「主動提醒」：總開關、天氣開關、時段與地點（下拉選單）、最近一次查天氣的狀態（不含天氣內容）與資料出處。
@@ -789,6 +790,7 @@ export function renderProactiveSettings(view: ProactiveSettingsView, actions: Vi
   };
   toggle(PROACTIVE_TEXT.enabled, PROACTIVE_TEXT.enabledNote, prefs.enabled, { enabled: !prefs.enabled });
   toggle(PROACTIVE_TEXT.weather, PROACTIVE_TEXT.weatherNote, prefs.weather, { weather: !prefs.weather }, prefs.enabled);
+  if (view.calendar) toggle(PROACTIVE_TEXT.calendar, PROACTIVE_TEXT.calendarNote, prefs.calendar !== false, { calendar: prefs.calendar === false }, prefs.enabled);
   const hour = (n: number) => t(PROACTIVE_TEXT.hour, n);
   select(PROACTIVE_TEXT.start, view.start_hours.map((n) => ({ value: String(n), label: hour(n), disabled: n >= prefs.end_hour })), String(prefs.start_hour), (v) => ({ start_hour: Number(v) }));
   select(PROACTIVE_TEXT.end, view.end_hours.map((n) => ({ value: String(n), label: hour(n), disabled: n <= prefs.start_hour })), String(prefs.end_hour), (v) => ({ end_hour: Number(v) }));
@@ -801,6 +803,7 @@ export function renderProactiveSettings(view: ProactiveSettingsView, actions: Vi
     list,
     !view.place && h("p", { class: "muted small" }, t(PROACTIVE_TEXT.noPlace)),
     h("p", { class: "muted small", role: "status" }, t(PROACTIVE_STATE[view.weather.state])),
+    view.calendar && h("p", { class: "muted small", role: "status" }, t(CALENDAR_STATE[view.calendar.state])),
   );
 }
 

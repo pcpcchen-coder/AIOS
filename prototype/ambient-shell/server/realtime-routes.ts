@@ -1,4 +1,5 @@
 import { normalizeLocale, type Locale } from "../shared/i18n.mjs";
+import type { CallFollowUp } from "./proactive-calendar.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { RealtimeBaseInfo, RealtimeInfo, Task } from "../shared/types.ts";
 import {
@@ -586,6 +587,11 @@ export class RealtimeSessions {
     else spoken?.();
   }
 
+  /** PRO-2：這通 API key 工作階段有核心旁路（聽得到使用者的回答）。 */
+  apiKeyListens(sessionId: string): boolean {
+    return this.ga?.id === sessionId && !this.ga.closed && typeof this.ga.call?.greetingDecided === "function";
+  }
+
   /** MEM-3：POST /api/realtime/playback：頁面在資料通道收到播放結束（只會把語音確認時窗往後延）。 */
   playback(sessionId: string, owner: string): void {
     const session = this.owned(sessionId, owner);
@@ -1062,6 +1068,8 @@ export interface ApiKeyRouteOptions {
    */
   memory?: (ctx: SessionContext) => LiveMemoryPort | null;
   log?: (line: string) => void;
+  /** PRO-2：主動提醒的行程問句（核心旁路聽回答）。 */
+  followUp?: (sessionId: string) => CallFollowUp | null;
   /** 等 session.updated 的時限（測試用；預設 3 秒）。 */
   updateAckMs?: number;
 }
@@ -1101,7 +1109,7 @@ export class ApiKeyRoute implements RealtimeRoute {
     // 記憶工作階段需要 SSE 串流（核心送事件、工具呼叫與撤銷給頁面）；沒有時不帶記憶。
     const memory = ctx.events ? this.options.memory?.(ctx) ?? null : null;
     try {
-      return await connectApiKey(this.bridge, offerSdp, ctx, memory, { log: this.options.log, updateAckMs: this.options.updateAckMs });
+      return await connectApiKey(this.bridge, offerSdp, ctx, memory, { log: this.options.log, updateAckMs: this.options.updateAckMs, ...(this.options.followUp ? { followUp: this.options.followUp } : {}) });
     } catch (err) {
       if (err instanceof RouteStartError) throw err;
       if (err instanceof RealtimeError) throw new RouteStartError(err.status === 409 ? "no_api_key" : "api_key_rejected", err.status, err.message, false);

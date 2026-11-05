@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { CalendarAsk, SCHEDULE_MARKER, type CallFollowUp } from "../server/proactive-calendar.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,9 +69,9 @@ async function unpinned(): Promise<Harness> {
   return h;
 }
 
-async function startCall(h: Harness, options: { lookToTalk?: boolean; rebuild?: boolean } = {}) {
+async function startCall(h: Harness, options: { lookToTalk?: boolean; rebuild?: boolean; followUp?: (sessionId: string) => CallFollowUp | null } = {}) {
   const probe = makeCtx(h.clock, options);
-  const { route, bindings, logs } = gaRoute(server, h);
+  const { route, bindings, logs } = gaRoute(server, h, options.followUp ? { followUp: options.followUp } : {});
   const call = (await route.connect("v=0 offer", probe.ctx)) as GaCall;
   const conn = await server.next();
   await conn.waitFor((e) => e.type === "session.update");
@@ -679,5 +680,20 @@ describe.skipIf(!realLockAvailable)("MEM-3 cross-route consistency (live ↔ API
     const update = (await t.conn.waitFor((e) => e.type === "session.update")) as { session: { instructions: string } };
     expect(live.block).not.toBeNull();
     expect(update.session.instructions.endsWith(live.block!)).toBe(true);
+  });
+});
+
+describe("PRO-2：calendar question on the API key sideband", () => {
+  it("after the greeting turn, a yes heard on the sideband makes the core request a response that reads the schedule, and emits a briefing event", async () => {
+    const h = await george();
+    let ask: CalendarAsk | null = null;
+    const t = await startCall(h, { lookToTalk: true, followUp: () => ask });
+    ask = new CalendarAsk({ greeting: "早安，George。要不要我念今天的行程？", events: [{ summary: "牙醫", start: "2026-11-05T14:00:00+08:00", all_day: false }], locale: "zh-TW", startedAt: h.clock.now });
+    await t.hear("早安，George。要不要我念今天的行程？");
+    advance(h, 2_000);
+    await t.user("好");
+    await until(() => t.said().some((x) => x.includes("牙醫")));
+    expect(t.said().at(-1)).toBe(speakInstructions(`${SCHEDULE_MARKER}今天有 1 個行程：14:00 牙醫。`));
+    expect(t.probe.events).toContainEqual({ kind: "briefing", part: "schedule" });
   });
 });

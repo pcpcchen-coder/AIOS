@@ -301,9 +301,16 @@ export const PROACTIVE_TEXT = {
   stateFailed: "天氣：上次查詢失敗，這次招呼不說天氣",
   stateNone: "天氣：還沒查過（看著說話或喚醒時會先查）",
   stateNoPlace: "天氣：沒有地點",
+  calendar: "認出 George 時說今天的行程",
+  calendarNote: "有行程先問「要不要我念今天的行程？」，說好才念；沒有行程直接說「今天沒有排行程」",
+  calOk: "行事曆：已讀到今天的行程",
+  calFailed: "行事曆：上次讀取失敗，這次不提行程",
+  calNone: "行事曆：還沒讀過（看著說話或喚醒時會先讀）",
+  calNotConnected: "行事曆：沒有連上 Google 日曆（CAL-1）",
 };
 
 const PROACTIVE_STATE_TEXT = { ok: PROACTIVE_TEXT.stateOk, failed: PROACTIVE_TEXT.stateFailed, none: PROACTIVE_TEXT.stateNone, no_place: PROACTIVE_TEXT.stateNoPlace };
+const CALENDAR_STATE_TEXT = { ok: PROACTIVE_TEXT.calOk, failed: PROACTIVE_TEXT.calFailed, none: PROACTIVE_TEXT.calNone, not_connected: PROACTIVE_TEXT.calNotConnected };
 
 /** 「主動提醒」分段：總開關、天氣開關、時段（開始／結束）、地點與天氣狀態。點選後 setProactive(patch) POST 到 proactive.write_path。 */
 export function proactiveMenu(proactive, { setProactive, translate = (source) => source }) {
@@ -319,6 +326,7 @@ export function proactiveMenu(proactive, { setProactive, translate = (source) =>
     { label: translate(PROACTIVE_TEXT.group), enabled: false },
     { label: translate(PROACTIVE_TEXT.enabled), type: "checkbox", checked: prefs.enabled, sublabel: translate(PROACTIVE_TEXT.enabledNote), click: set({ enabled: !prefs.enabled }) },
     { label: translate(PROACTIVE_TEXT.weather), type: "checkbox", checked: prefs.weather, enabled: prefs.enabled, sublabel: translate(PROACTIVE_TEXT.weatherNote), click: set({ weather: !prefs.weather }) },
+    ...(proactive.calendar ? [{ label: translate(PROACTIVE_TEXT.calendar), type: "checkbox", checked: prefs.calendar !== false, enabled: prefs.enabled, sublabel: translate(PROACTIVE_TEXT.calendarNote), click: set({ calendar: prefs.calendar === false }) }] : []),
     {
       label: `${translate(PROACTIVE_TEXT.start)}${translate("：")}${hour(prefs.start_hour)}`,
       submenu: proactive.start_hours.map((n) => radio(hour(n), n === prefs.start_hour, set({ start_hour: n }), n < prefs.end_hour)),
@@ -336,6 +344,7 @@ export function proactiveMenu(proactive, { setProactive, translate = (source) =>
       ],
     },
     { label: translate(PROACTIVE_STATE_TEXT[proactive.weather.state] ?? PROACTIVE_TEXT.stateNone), enabled: false },
+    ...(proactive.calendar ? [{ label: translate(CALENDAR_STATE_TEXT[proactive.calendar.state] ?? PROACTIVE_TEXT.calNone), enabled: false }] : []),
   ];
 }
 

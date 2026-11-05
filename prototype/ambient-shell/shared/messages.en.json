@@ -278,5 +278,12 @@
   "時段的開始要早於結束": "The window must start before it ends",
   "主動提醒設定沒有保存（無法寫入設定檔：{0}）": "Proactive briefing settings were not saved (cannot write the settings file: {0})",
   "主動提醒設定沒有保存：{0}": "Proactive briefing settings were not saved: {0}",
-  "主動提醒設定沒有保存": "Proactive briefing settings were not saved"
+  "主動提醒設定沒有保存": "Proactive briefing settings were not saved",
+  "認出 George 時說今天的行程": "Tell George today's schedule when recognised",
+  "有行程先問「要不要我念今天的行程？」，說好才念；沒有行程直接說「今天沒有排行程」": "With events, first ask “Shall I read today's schedule?” and read them only after a yes; with none, just say “Nothing is on your calendar today.”",
+  "行事曆：已讀到今天的行程": "Calendar: today's events received",
+  "行事曆：上次讀取失敗，這次不提行程": "Calendar: the last read failed, so the schedule is skipped",
+  "行事曆：還沒讀過（看著說話或喚醒時會先讀）": "Calendar: not read yet (read when look-to-talk or the wake word starts)",
+  "行事曆：沒有連上 Google 日曆（CAL-1）": "Calendar: not connected to Google Calendar (CAL-1)",
+  "calendar 必須是 true 或 false": "calendar must be true or false"
 }

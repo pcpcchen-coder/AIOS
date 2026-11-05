@@ -11,6 +11,7 @@ import { requestText, type DelegationRequest, type DelegationResult } from "../s
 import { scriptedFetch, SECRET_TOKEN_MARK, writeCredentials, type Recorded } from "./fixtures/fake-chatgpt.ts";
 import { startFakeSideband, type FakeSideband } from "./fixtures/fake-sideband.ts";
 import { randomBytes } from "node:crypto";
+import { CalendarAsk, SCHEDULE_MARKER, type CallFollowUp } from "../server/proactive-calendar.ts";
 import { rmSync } from "node:fs";
 import type { LiveMemoryPort } from "../server/memory/live.ts";
 import { realLockAvailable } from "./fixtures/memory-lock.ts";
@@ -32,7 +33,7 @@ function answer(headers: Record<string, string> = { Location: "/v1/realtime/call
   return new Response("v=0 live-answer", { status: 201, headers });
 }
 
-async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest, signal: AbortSignal) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string, sessionId: string) => LiveGreeting | null; memory?: (ctx: SessionContext) => LiveMemoryPort | null; ctx?: Partial<SessionContext>; palmQuiet?: boolean } = {}) {
+async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest, signal: AbortSignal) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string, sessionId: string) => LiveGreeting | null; memory?: (ctx: SessionContext) => LiveMemoryPort | null; ctx?: Partial<SessionContext>; palmQuiet?: boolean; followUp?: (sessionId: string) => CallFollowUp | null } = {}) {
   sideband = await startFakeSideband();
   const dir = mkdtempSync(join(tmpdir(), "nous-live-"));
   const creds = writeCredentials(dir);
@@ -70,6 +71,7 @@ async function setup(options: { model?: string | null; handler?: (req: Recorded)
     ...(options.greeting ? { greeting: options.greeting } : {}),
     ...(options.memory ? { memory: options.memory } : {}),
     ...(options.palmQuiet ? { palmQuietDelegation: true } : {}),
+    ...(options.followUp ? { followUp: options.followUp } : {}),
   });
   return { route, ctx, events, requests, delegations, creds, setOutstanding: (n: number) => (outstanding = n) };
 }
@@ -859,5 +861,27 @@ describe("PRO-1：the morning weather after the greeting on the live wire (fixtu
     call.control!.input("notice", "x");
     await conn.waitFor((e) => e.type === "session.context.append");
     expect(uses).toEqual([false]);
+  });
+});
+
+describe("PRO-2：calendar question on the live wire (fixture sideband)", () => {
+  it("after the greeting turn, a yes from the sideband transcript makes the core append the schedule (speakable) and emit a briefing event; core reads the yes", async () => {
+    const greeting = "早安，George。要不要我念今天的行程？";
+    const ask = new CalendarAsk({ greeting, events: [{ summary: "牙醫", start: "2026-11-05T14:00:00+08:00", all_day: false }], locale: "zh-TW", startedAt: Date.now() });
+    const t = await setup({ greeting: () => ({ text: liveGreetingText(greeting), sentence: greeting }), followUp: (sid) => (sid === "rt_test" ? ask : null) });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    await conn.waitFor((e) => e.type === "session.context.append");
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: greeting, id: "a1" } });
+    conn.send({ type: "output_audio_buffer.stopped" });
+    await new Promise((r) => setTimeout(r, 30));
+    conn.send({ type: "input_audio_buffer.speech_started" });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "好", id: "u1" } });
+    await conn.waitFor((e) => e.type === "session.context.append" && JSON.stringify(e).includes(SCHEDULE_MARKER));
+    const texts = conn.received.filter((e) => e.type === "session.context.append").map((e) => (e.content as { text: string }[])[0].text);
+    expect(texts.at(-1)).toBe(`${SCHEDULE_MARKER}今天有 1 個行程：14:00 牙醫。`);
+    expect(t.events).toContainEqual({ kind: "briefing", part: "schedule" });
   });
 });

@@ -8,6 +8,7 @@ import { CodexAuthError, CodexUnauthorized, NOUS_ORIGINATOR, type CodexAuth, typ
 import { redact } from "./codex-responses.ts";
 import type { DelegationRequest, DelegationResult, LiveCallerMemory, TranscriptTurn } from "./live-tool-caller.ts";
 import { confirmLine, type LiveCallPort, type LiveMemoryPort, type RevokeWhy, type VoiceDelegatePort } from "./memory/live.ts";
+import type { CallFollowUp } from "./proactive-calendar.ts";
 import { taiwanTranscript, warmTaiwan } from "../shared/zh-tw-opencc.ts";
 import { convertsLocale } from "../shared/zh-tw.ts";
 import { RouteStartError, type ApprovalSnapshot, type LiveControl, type Readiness, type RealtimeRoute, type RouteCall, type SessionContext } from "./realtime-routes.ts";
@@ -88,6 +89,8 @@ export interface LiveRouteOptions {
    * （IdentityService.takeLiveGreeting）。沒有提供或取不到時送「我在」（LIVE_GREETING_TEXT）。頁面的文字永遠不會成為內容。
    */
   greeting?: (interaction: string, sessionId: string, locale?: Locale, use?: boolean) => LiveGreeting | null;
+  /** PRO-2：這通還在等回答的主動提醒問句（行程）；語音事件照順序交給它，它回傳的內容以 speakable 送出。 */
+  followUp?: (sessionId: string) => CallFollowUp | null;
   /** MEM-2：每通通話的記憶（MemoryService.openLive）；沒有記憶層（瀏覽器版）時不提供。 */
   memory?: (ctx: SessionContext) => LiveMemoryPort | null;
   /**
@@ -272,7 +275,7 @@ export class LiveRoute implements RealtimeRoute {
       void this.hangup(urls.sideband(created.callId), ids);
       throw new RouteStartError("upstream", 502, unavailableText("upstream", { message: "接不上控制連線（sideband）" }), true);
     }
-    const call = new LiveCall(created.answer, this.options.model.display, socket, ctx, this.options.caller, memory, this.options.log, this.options.greeting, this.options.palmQuietDelegation === true);
+    const call = new LiveCall(created.answer, this.options.model.display, socket, ctx, this.options.caller, memory, this.options.log, this.options.greeting, this.options.palmQuietDelegation === true, this.options.followUp);
     memory?.bind(call);
     return call;
   }
@@ -422,6 +425,7 @@ class LiveCall implements RouteCall, LiveCallPort {
     private readonly log?: (line: string) => void,
     private readonly greetingText?: (interaction: string, sessionId: string, locale?: Locale, use?: boolean) => LiveGreeting | null,
     private readonly palmQuietDelegation = false,
+    private readonly followUpFor?: (sessionId: string) => CallFollowUp | null,
   ) {
     this.closed = new Promise<void>((resolve) => (this.resolveClosed = resolve));
     // 中文：先建好台灣繁體轉換的字典（約 0.15 秒），第一則逐字稿不必等。
@@ -495,15 +499,22 @@ class LiveCall implements RouteCall, LiveCallPort {
             this.inUserTurn = false;
             this.lastUserFinal = { text: event.text.trim(), used: false };
             this.memory?.onUserFinal(event.text, this.ctx.now());
+            const reply = this.followUp()?.onUserFinal(event.text, this.ctx.now());
+            if (reply) {
+              this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: reply.text }] });
+              if (reply.schedule) this.ctx.emit({ kind: "briefing", part: "schedule" });
+            }
           } else {
             // 助理回了話：之後使用者再開口一定是新的一輪（沒有結尾的雜音逐字稿不會把輪次卡住）。
             this.inUserTurn = false;
             this.memory?.onAssistantFinal(event.text, this.ctx.now());
+            this.followUp()?.onAssistantFinal(event.text, this.ctx.now());
           }
         } else if (!event.final && event.role === "user" && event.text.trim()) {
           // 這一句第一則未完成的使用者逐字稿：當成開口時間（語音確認要晚於問句播完）。
           this.userStarted();
           this.memory?.onUserSpeechStart(this.ctx.now());
+          this.followUp()?.onUserSpeechStart(this.ctx.now());
         }
         this.ctx.emit({ kind: "transcript", role: event.role, text: event.text, final: event.final, item_id: event.item_id });
         break;
@@ -518,9 +529,11 @@ class LiveCall implements RouteCall, LiveCallPort {
         this.inUserTurn = false;
         this.userStarted();
         this.memory?.onUserSpeechStart(this.ctx.now());
+        this.followUp()?.onUserSpeechStart(this.ctx.now());
         break;
       case "audio.done":
         this.memory?.onAssistantAudioDone(this.ctx.now());
+        this.followUp()?.onAssistantAudioDone(this.ctx.now());
         break;
       case "error":
         if (event.fatal) {
@@ -694,8 +707,14 @@ class LiveCall implements RouteCall, LiveCallPort {
     return this.started && !this.ended && !this.revoked;
   }
 
+  private followUp(): CallFollowUp | null {
+    return this.followUpFor?.(this.ctx.sessionId) ?? null;
+  }
+
   /** 核心送出的一句話（session.context.append）。 */
   inject(channel: "speakable" | "commentary", text: string): void {
+    // PRO-2：記憶在這通又問了別的：行程問句結束（之後的「好」是回答記憶的）。
+    if (channel === "speakable") this.followUp()?.superseded();
     for (const piece of chunkForAppend(text)) this.send({ type: "session.context.append", channel, content: [{ type: "input_text", text: piece }] });
   }
 

@@ -808,3 +808,15 @@ describe("PRO-1 review fix：greeted(spoken)", () => {
     expect(spoken).toBe(1);
   });
 });
+
+describe("PRO-2：apiKeyListens", () => {
+  it("false without a core sideband (plain call) or for an unknown session", async () => {
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: () => true });
+    const d = sessions.start("sse_a", "look_to_talk");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    expect(sessions.apiKeyListens("rt_other")).toBe(false);
+    expect(sessions.apiKeyListens(d.session_id)).toBe(false);
+  });
+});

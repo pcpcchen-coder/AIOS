@@ -148,7 +148,7 @@ describe("settings (proactive.json)", () => {
   it("defaults: on, weather on, 5–11, place from the system time zone", () => {
     const store = new ProactiveSettingsStore({ dir: root, onChange: () => {} });
     expect(store.view()).toEqual(DEFAULT_PROACTIVE_PREFS);
-    expect(DEFAULT_PROACTIVE_PREFS).toEqual({ enabled: true, weather: true, start_hour: 5, end_hour: 11, place: null });
+    expect(DEFAULT_PROACTIVE_PREFS).toEqual({ enabled: true, weather: true, calendar: true, start_hour: 5, end_hour: 11, place: null });
   });
 
   it("validates keys, hours from the fixed options, listed places, and start before end", () => {
@@ -241,7 +241,7 @@ describe("once per person per day, in the morning window", () => {
   it("weather not in the cache: skip this time (not marked), kick a lookup, and say it on the next greeting", async () => {
     const r = await rig({ prefetch: false });
     expect(r.briefing.compose(PERSON, "zh-TW")).toBeNull();
-    expect(r.log).toContain("主動提醒：天氣還沒取到，這次只打招呼");
+    expect(r.log).toContain("主動提醒：天氣還沒取到，這次不說天氣");
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(r.fetched).toHaveLength(1);
     expect(r.briefing.compose(PERSON, "zh-TW")).not.toBeNull();
@@ -361,12 +361,12 @@ describe("menu bar and translations", () => {
     const r = await rig();
     const patches: unknown[] = [];
     const items = proactiveMenu(r.briefing.view(), { setProactive: (p) => patches.push(p) });
-    expect(items.map((i) => i.label)).toEqual([undefined, "主動提醒", "早上招呼後主動提醒", "說今天的天氣", "時段開始：5 點", "時段結束：11 點", "天氣地點：依系統時區（台北）", "天氣：已取得今天的資料"]);
+    expect(items.map((i) => i.label)).toEqual([undefined, "主動提醒", "早上招呼後主動提醒", "說今天的天氣", "認出 George 時說今天的行程", "時段開始：5 點", "時段結束：11 點", "天氣地點：依系統時區（台北）", "天氣：已取得今天的資料", "行事曆：沒有連上 Google 日曆（CAL-1）"]);
     items[2]!.click!();
-    items[6]!.submenu!.find((i) => i.label === "高雄")!.click!();
+    items[7]!.submenu!.find((i) => i.label === "高雄")!.click!();
     // 結束 ≤ 開始的選項停用。
-    expect(items[4]!.submenu!.filter((i) => i.enabled === false).map((i) => i.label)).toEqual([]);
     expect(items[5]!.submenu!.filter((i) => i.enabled === false).map((i) => i.label)).toEqual([]);
+    expect(items[6]!.submenu!.filter((i) => i.enabled === false).map((i) => i.label)).toEqual([]);
     expect(patches).toEqual([{ enabled: false }, { place: "kaohsiung" }]);
     const full = settingsMenu({ seconds: [], proactive: r.briefing.view() } as never, { command: () => {}, setMenuPref: () => {}, setProactive: () => {} });
     expect(full.some((i) => i.label === "主動提醒")).toBe(true);

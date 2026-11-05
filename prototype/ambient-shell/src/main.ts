@@ -2288,6 +2288,8 @@ function onServerEvent(event: ServerEvent): void {
         return;
       }
     }
+    // PRO-2：核心真的念今天的行程（真實事件）：點亮規劃區。
+    if (event.type === "realtime.live" && event.event.kind === "briefing") brain.pulse("step", "planning");
     if (event.type === "realtime.live" && event.event.kind === "memory_notice" && event.session_id !== realtimeTicket?.session_id) {
       showSubtitle(t(event.event.message), true);
       return;

@@ -3,6 +3,10 @@ import { join } from "node:path";
 import type { Locale } from "../shared/i18n.mjs";
 import {
   briefingKeys,
+  CALENDAR_ASK,
+  CALENDAR_EMPTY,
+  joinBriefing,
+  type TodayEvent,
   defaultPlaceFor,
   DEFAULT_PROACTIVE_PREFS,
   inWindow,
@@ -30,6 +34,7 @@ export function fitsLiveAppend(text: string): boolean {
   return chunkForAppend(text).length === 1;
 }
 import type { WeatherService } from "./weather.ts";
+import { CalendarAsk, CalendarToday, type CalendarReader, type CallFollowUp } from "./proactive-calendar.ts";
 
 // PRO-1（George 2026-11-05）：主動提醒（招呼後接今天的天氣）。
 // - 設定：configDir/proactive.json（只有 ProactiveSettingsStore 寫入）。
@@ -119,7 +124,7 @@ export class ProactiveDailyLog {
       const data = JSON.parse(readFileSync(this.path, "utf8")) as { schema_version?: unknown; date?: unknown; keys?: unknown };
       if (data.schema_version !== 1 || typeof data.date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(data.date) || !Array.isArray(data.keys)) throw new Error("格式不對");
       this.date = data.date;
-      this.keys = new Set(data.keys.filter((k): k is string => typeof k === "string" && /^(device|person:fam_[0-9a-f]{24})$/.test(k)));
+      this.keys = new Set(data.keys.filter((k): k is string => typeof k === "string" && /^(device|(person|calendar):fam_[0-9a-f]{24})$/.test(k)));
     } catch (err) {
       this.options.log?.(`主動提醒：每日紀錄讀不懂（${(err as Error).message}），當成今天還沒說過`);
     }
@@ -132,29 +137,82 @@ export interface PendingBriefing {
   today: string;
   keys: readonly string[];
   person: boolean;
+  /** 說了哪幾段（只給 log）。 */
+  parts: readonly ("weather" | "calendar_ask" | "calendar_empty")[];
+  locale: Locale;
+  /** PRO-2：問了「要不要我念今天的行程？」：送出後要聽回答（行程只在記憶體裡）。 */
+  ask: { events: readonly TodayEvent[] } | null;
+  /** 組成的各段（fitBriefing 放不下時拿掉其中一段）。 */
+  segments: readonly Segment[];
 }
 
-/** 招呼決策用到的兩個方法（IdentityService、live 保底）。 */
+interface Segment {
+  part: PendingBriefing["parts"][number];
+  text: string;
+  keys: readonly string[];
+  ask?: { events: readonly TodayEvent[] };
+}
+
+function assemble(segments: readonly Segment[], base: Pick<PendingBriefing, "today" | "person" | "locale">): PendingBriefing | null {
+  const sentence = joinBriefing(segments.map((x) => x.text), base.locale);
+  if (!sentence) return null;
+  return { ...base, sentence, keys: [...new Set(segments.flatMap((x) => x.keys))], parts: segments.map((x) => x.part), ask: segments.find((x) => x.ask)?.ask ?? null, segments };
+}
+
+/**
+ * 整段放不下時（例如 ChatGPT 方案一段 append 500 bytes）依序試：全部、拿掉天氣、拿掉行程；都放不下回 null。
+ * 拿掉的那段不記成說過。
+ */
+export function fitBriefing(b: PendingBriefing, fits: (sentence: string) => boolean): PendingBriefing | null {
+  if (fits(b.sentence)) return b;
+  for (const drop of ["weather", "calendar"] as const) {
+    const rest = b.segments.filter((x) => (drop === "weather" ? x.part !== "weather" : x.part === "weather"));
+    if (rest.length === b.segments.length || !rest.length) continue;
+    const next = assemble(rest, b);
+    if (next && fits(next.sentence)) return next;
+  }
+  return null;
+}
+
+/** 這次問候的對象：認出並稱名的家人（personId、name），以及這條路徑的核心聽不聽得到回答（listens）。 */
+export interface BriefingSubject {
+  personId: string | null;
+  name?: string | null;
+  listens?: boolean;
+}
+
+/** 招呼決策用到的方法（IdentityService、live 保底）。 */
 export interface BriefingPort {
-  compose(personId: string | null, locale: Locale): PendingBriefing | null;
-  commit(b: PendingBriefing): void;
+  compose(subject: BriefingSubject | string | null, locale: Locale): PendingBriefing | null;
+  /** 問候真的送出：記下今天說過；有行程問句時開始聽這通的回答（sessionId 是這通工作階段；spoken 是整段招呼）。 */
+  commit(b: PendingBriefing, call?: { sessionId: string; spoken: string }): void;
 }
 
 export interface ProactiveBriefingOptions {
   settings: { view(): ProactivePrefs };
   log: ProactiveDailyLog;
   weather: WeatherService;
+  /** PRO-2：讀今天的行程（CAL-1）；沒有設定 google_calendar 時為 null。 */
+  calendar?: CalendarReader | null;
+  /** PRO-2：行事曆擁有者的家人名稱（認出這位才問行程；George 2026-11-05：George）。 */
+  calendarOwner?: string;
   now?: () => number;
   /** 未指定時用這台電腦的時區（同招呼的時段）。 */
   timeZone?: string;
   logLine?: (line: string) => void;
 }
 
+export const DEFAULT_CALENDAR_OWNER = "George";
+const ASKS_KEEP = 8;
+
 export class ProactiveBriefing implements BriefingPort {
   private readonly now: () => number;
+  readonly calendar: CalendarToday;
+  private readonly asks = new Map<string, CalendarAsk>();
 
   constructor(private readonly options: ProactiveBriefingOptions) {
     this.now = options.now ?? Date.now;
+    this.calendar = new CalendarToday({ read: options.calendar ?? null, now: this.now, today: () => localToday(new Date(this.now()), this.timeZone()), log: options.logLine });
   }
 
   private timeZone(): string {
@@ -168,49 +226,82 @@ export class ProactiveBriefing implements BriefingPort {
     return auto ? { id: auto, auto: true } : null;
   }
 
-  private active(prefs: ProactivePrefs): boolean {
-    return prefs.enabled && prefs.weather && inWindow(localHour(this.now(), this.options.timeZone), prefs);
+  private inWindowNow(prefs: ProactivePrefs, aheadMs = 0): boolean {
+    return inWindow(localHour(this.now() + aheadMs, this.options.timeZone), prefs);
+  }
+
+  private isOwner(name: string | null | undefined): boolean {
+    const owner = (this.options.calendarOwner ?? DEFAULT_CALENDAR_OWNER).trim().toLowerCase();
+    return !!name && !!owner && name.trim().toLowerCase() === owner;
   }
 
   /**
-   * 招呼前預先取天氣（看著說話或喚醒開始時、核心啟動時）：在時段內、開關開著、有地點才查。不等結果。
-   * 時段開始前 30 分鐘也先查，早上第一次招呼就有資料。
+   * 招呼前預先取天氣與行程（看著說話或喚醒開始時）：在時段內（或開始前 30 分鐘）、開關開著才查。不等結果。
    */
   prefetch(): void {
     const prefs = this.options.settings.view();
-    if (!prefs.enabled || !prefs.weather) return;
-    const soon = localHour(this.now() + 30 * 60_000, this.options.timeZone);
-    if (!inWindow(localHour(this.now(), this.options.timeZone), prefs) && !inWindow(soon, prefs)) return;
-    const place = this.place(prefs);
+    if (!prefs.enabled || (!this.inWindowNow(prefs) && !this.inWindowNow(prefs, 30 * 60_000))) return;
+    const place = prefs.weather ? this.place(prefs) : null;
     if (place) void this.options.weather.refresh(place.id);
+    if (prefs.calendar && this.calendar.connected) void this.calendar.refresh();
   }
 
   /**
-   * 招呼句後面要接的一句（確定性的模板），或 null。personId：認出並稱名的家人（沒稱名就當沒認出）。
-   * 這裡不記紀錄：真的送出時呼叫 commit（使用者先開口、問候沒送出時，今天之後的招呼仍會說）。
-   * 天氣不在快取裡時順便再查一次（給下一次招呼）。
+   * 招呼句後面要接的話（確定性的模板），或 null：天氣（每人每天一次）、PRO-2 行程（只有行程擁有者：有行程問一句、
+   * 沒有行程直接說「今天沒有排行程」；每天一次）。這裡不記紀錄：真的送出時呼叫 commit。資料不在快取裡時順便再查一次。
    */
-  compose(personId: string | null, locale: Locale): PendingBriefing | null {
+  compose(subject: BriefingSubject | string | null, locale: Locale): PendingBriefing | null {
+    const who: BriefingSubject = typeof subject === "object" && subject !== null ? subject : { personId: subject };
+    const personId = who.personId;
     const prefs = this.options.settings.view();
-    if (!this.active(prefs)) return null;
-    const place = this.place(prefs);
-    if (!place) return null;
+    if (!prefs.enabled || !this.inWindowNow(prefs)) return null;
     const today = localToday(new Date(this.now()), this.timeZone());
-    const keys = briefingKeys(personId, this.options.log.done(today));
-    if (!keys) return null;
-    const weather = this.options.weather.current(place.id);
-    if (!weather) {
-      void this.options.weather.refresh(place.id);
-      this.options.logLine?.("主動提醒：天氣還沒取到，這次只打招呼");
-      return null;
+    const done = this.options.log.done(today);
+    const segments: Segment[] = [];
+    const place = prefs.weather ? this.place(prefs) : null;
+    const weatherKeys = place ? briefingKeys(personId, done) : null;
+    if (place && weatherKeys) {
+      const weather = this.options.weather.current(place.id);
+      if (weather) segments.push({ part: "weather", text: weatherSentence(weather, locale), keys: weatherKeys });
+      else {
+        void this.options.weather.refresh(place.id);
+        this.options.logLine?.("主動提醒：天氣還沒取到，這次不說天氣");
+      }
     }
-    return { sentence: weatherSentence(weather, locale), today, keys, person: personId !== null };
+    const calKey = personId ? `calendar:${personId}` : null;
+    if (prefs.calendar && calKey && this.isOwner(who.name) && this.calendar.connected && !done.has(calKey)) {
+      const events = this.calendar.current();
+      if (events === null) {
+        void this.calendar.refresh();
+        this.options.logLine?.("主動提醒：行程還沒讀到，這次不提行程");
+      } else if (events.length === 0) {
+        segments.push({ part: "calendar_empty", text: locale === "en" ? CALENDAR_EMPTY.en : CALENDAR_EMPTY.zh, keys: [calKey] });
+      } else if (who.listens === true) {
+        segments.push({ part: "calendar_ask", text: locale === "en" ? CALENDAR_ASK.en : CALENDAR_ASK.zh, keys: [calKey], ask: { events } });
+      } else {
+        this.options.logLine?.("主動提醒：這通的核心聽不到回答（API key 路徑沒有旁路），不問行程");
+      }
+    }
+    return assemble(segments, { today, person: personId !== null, locale });
   }
 
-  /** 問候真的送出：記下今天說過（同一份只記一次也沒關係，鍵是集合）。 */
-  commit(b: PendingBriefing): void {
+  commit(b: PendingBriefing, call?: { sessionId: string; spoken: string }): void {
     this.options.log.mark(b.today, b.keys);
-    this.options.logLine?.(`主動提醒：招呼後接天氣（${b.person ? "認出的家人" : "這台裝置"}今天第一次）`);
+    this.options.logLine?.(`主動提醒：招呼後接 ${b.parts.join("＋")}（${b.person ? "認出的家人" : "這台裝置"}）`);
+    if (!b.ask || !call) return;
+    this.asks.set(call.sessionId, new CalendarAsk({ greeting: call.spoken, events: b.ask.events, locale: b.locale, startedAt: this.now(), log: this.options.logLine }));
+    while (this.asks.size > ASKS_KEEP) this.asks.delete(this.asks.keys().next().value!);
+  }
+
+  /** 這通還在等行程回答的對話（LiveCall、ApiKeyCall 把語音事件交給它）；沒有回 null。 */
+  followUp(sessionId: string): CallFollowUp | null {
+    const ask = this.asks.get(sessionId);
+    if (!ask) return null;
+    if (!ask.open(this.now())) {
+      this.asks.delete(sessionId);
+      return null;
+    }
+    return ask;
   }
 
   view(): ProactiveSettingsView {
@@ -224,6 +315,7 @@ export class ProactiveBriefing implements BriefingPort {
       start_hours: START_HOUR_OPTIONS,
       end_hours: END_HOUR_OPTIONS,
       weather: place ? this.options.weather.status(place.id) : { state: "no_place", at: null },
+      calendar: { state: this.calendar.state() },
       attribution: WEATHER_ATTRIBUTION,
       write_path: "/api/settings/proactive",
     };
