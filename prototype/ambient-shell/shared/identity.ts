@@ -33,6 +33,11 @@ export const CALIBRATED = false;
  */
 export const MATCH_THRESHOLDS = { match: 0.5, margin: 0.08, consistency: 0.5, consistency_pair: 0.4 } as const;
 
+export interface EvidenceTiming {
+  gap_ms: number;
+  fresh_ms: number;
+}
+
 /** 證據規則（docs/14 §4 起點值）。 */
 export const EVIDENCE_RULES = {
   /** 至少幾個不同畫格一致指向同一人。 */
@@ -280,9 +285,9 @@ function sameMatch(a: FrameMatch, b: FrameMatch): boolean {
  * 加入一格證據（純函式）。範圍改變、時間倒退或與上一格相隔超過 gap_ms 時清空重來；
  * 結果與上一格不同（換人、變成未知、品質不足…）時也從這一格重新累積，所以「都指向同一人」只看連續的同一人。
  */
-export function pushEvidence(state: EvidenceState, frame: EvidenceFrame, scope: EvidenceScope): EvidenceState {
+export function pushEvidence(state: EvidenceState, frame: EvidenceFrame, scope: EvidenceScope, timing: EvidenceTiming = EVIDENCE_RULES): EvidenceState {
   const last = state.frames.at(-1);
-  const fresh = !sameScope(state.scope, scope) || frame.gen !== scope.gen || !last || frame.t < last.t || frame.t - last.t > EVIDENCE_RULES.gap_ms;
+  const fresh = !sameScope(state.scope, scope) || frame.gen !== scope.gen || !last || frame.t < last.t || frame.t - last.t > timing.gap_ms;
   if (fresh || !sameMatch(last.match, frame.match)) return { scope, frames: [frame] };
   const frames = [...state.frames, frame];
   return { scope, frames: frames.slice(-EVIDENCE_RULES.max_frames) };
@@ -290,14 +295,14 @@ export function pushEvidence(state: EvidenceState, frame: EvidenceFrame, scope: 
 
 /**
  * 依目前證據決定辨識結果（純函式，時間由呼叫端給，測試用假時鐘）。
- * matched 的條件：同一範圍（世代、epoch、gallery_version）內至少 3 格、跨至少 500 ms、全部指向同一人，且最新一格不超過 1 秒。
+ * matched 的條件：同一範圍（世代、epoch、gallery_version）內至少 3 格、跨至少 500 ms、全部指向同一人，且最新一格不超過 timing.fresh_ms（預設 1 秒）。
  * 其他情況都不帶姓名：未知、多張臉、品質不足、關鏡頭與追蹤遺失都不沿用上一位。
  */
-export function decideIdentity(state: EvidenceState, now: number, scope: EvidenceScope): IdentityObservation {
+export function decideIdentity(state: EvidenceState, now: number, scope: EvidenceScope, timing: EvidenceTiming = EVIDENCE_RULES): IdentityObservation {
   const base = { gen: scope.gen, epoch: scope.epoch, gallery_version: scope.gallery_version, observed_at: now, calibrated: CALIBRATED };
   const last = state.frames.at(-1);
   if (!last) return { ...base, state: "unavailable", reason: "no_face" };
-  if (!sameScope(state.scope, scope) || last.gen !== scope.gen || now - last.t > EVIDENCE_RULES.fresh_ms || now < last.t) {
+  if (!sameScope(state.scope, scope) || last.gen !== scope.gen || now - last.t > timing.fresh_ms || now < last.t) {
     return { ...base, state: "unavailable", reason: "stale" };
   }
   const m = last.match;

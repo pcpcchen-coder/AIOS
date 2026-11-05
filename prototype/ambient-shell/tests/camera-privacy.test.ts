@@ -179,7 +179,7 @@ describe("family recognition privacy boundary (static)", () => {
     expect(routes).toEqual(["/api/terminal/identity"]);
     expect(appTs).not.toMatch(/person_id|\.handle\(|enroll|probe|gallery/);
     expect([...appTs.matchAll(/options\.identity\b[^\n]*/g)].map((m) => m[0])).toEqual([
-      "options.identity?.status() ?? BROWSER_IDENTITY_STATUS,",
+      "options.identity?.status(source) ?? BROWSER_IDENTITY_STATUS,",
       'options.identity?.handle) {',
       "options.identity as TerminalIdentityPort, await readJson(req));",
     ]);

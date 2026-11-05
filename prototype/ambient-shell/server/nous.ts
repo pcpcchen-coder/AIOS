@@ -48,7 +48,7 @@ import { createTaskIpc } from "./task-ipc.ts";
 import { createIntegrations } from "./integrations/index.ts";
 import type { TasksResponse } from "../shared/protected-tasks.ts";
 import { TerminalPresence } from "./terminal-presence.ts";
-import type { TerminalStatus } from "../shared/terminal.ts";
+import { isTerminalId, type TerminalStatus } from "../shared/terminal.ts";
 import { WeatherService } from "./weather.ts";
 import { calendarReaderFrom } from "./proactive-calendar.ts";
 import { fitBriefing, fitsLiveAppend, ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
@@ -358,9 +358,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     ? new IdentityService({
         store: new GalleryStore({ dir: options.identity.dir, secretBox: options.identity.secretBox, excludeFromBackup: options.identity.excludeFromBackup, log }),
         confirm: options.identity.confirm,
-        camera: () => {
+        camera: (source) => {
           const cam = camera.view();
-          return cam.enabled && cam.active;
+          return cam.enabled && (isTerminalId(source) || cam.active);
         },
         ambient: () => {
           const cam = camera.view();

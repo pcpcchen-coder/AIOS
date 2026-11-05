@@ -157,7 +157,7 @@ export interface AppOptions {
    * POST /api/terminal/identity 用不需要管理 session 的認人操作（server/terminal-routes.ts）。未提供（瀏覽器版）時回報不可用、
    * 終端機路由 404。
    */
-  identity?: { status(): IdentityStatus } & Partial<TerminalIdentityPort>;
+  identity?: { status(source?: string): IdentityStatus } & Partial<TerminalIdentityPort>;
   /** 家人辨識模型與 onnxruntime wasm 的資料夾（只提供清單上的檔名）；未提供時 /face-runtime/ 一律 404。 */
   faceRuntimeDir?: string | null;
   /** SP-01 講者模型與 onnxruntime wasm 的資料夾（只提供清單上的檔名）；未提供時 /speaker-runtime/ 一律 404。 */
@@ -244,7 +244,7 @@ class HttpError extends Error {
 export function createApp(options: AppOptions): Server & { notifySettings(): void; notifyMemoryPresence(): void; realtimeSessions: RealtimeSessions | null } {
   const { store, runner, auth, chat, realtime, webSearch, home, codexAuth } = options;
   /** SSE 串流：client_id → 回應。工具呼叫只送到擁有工作階段的那一條。 */
-  const clients = new Map<string, ServerResponse>();
+  const clients = new Map<string, { response: ServerResponse; source: string }>();
   let sequence = 0;
   const routes = options.realtimeRoutes ?? (realtime ? { api_key: new ApiKeyRoute(realtime, realtime.info().available, "") } : null);
   const sessions = routes && (routes.api_key || routes.live)
@@ -255,7 +255,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         tasks: (route) => tasksFor(route ? options.memory?.routeTarget?.(route as VoiceRoute) ?? null : null),
         liveAccount: codexAuth ? () => codexAuth.info() : undefined,
         send: (clientId, event) => {
-          const res = clients.get(clientId);
+          const res = clients.get(clientId)?.response;
           if (!res) return false;
           res.write(`data: ${JSON.stringify({ ...event, sequence: ++sequence })}\n\n`);
           return true;
@@ -272,7 +272,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
   const tasksFor = (target: ChatTarget | null) => tasksForTarget(store, options.memory ?? null, target);
   const cameraEnableStrict = options.cameraEnable === "main_process";
   const settings = {
-    view: (): SettingsView => {
+    view: (source = pageSource(undefined)): SettingsView => {
       const live = sessions?.info();
       const cameraView = options.camera?.view();
       const camera = cameraView && cameraEnableStrict ? { ...cameraView, enable_via: "app" as const } : cameraView;
@@ -285,7 +285,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         voice,
         seconds: describeMenuPrefs({ camera, voice, voiceWritable: !!options.voice, realtime: live }),
         camera_preview_disabled_reason: cameraPreviewDisabledReason(camera),
-        identity: options.identity?.status() ?? BROWSER_IDENTITY_STATUS,
+        identity: options.identity?.status(source) ?? BROWSER_IDENTITY_STATUS,
         memory: options.memory?.settingsStatus() ?? BROWSER_MEMORY_STATUS,
         audio: { prefs: options.audio?.view() ?? { ...DEFAULT_AUDIO_PREFS }, write_path: AUDIO_WRITE_PATH },
         ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
@@ -301,7 +301,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
 
   const broadcast = (event: ServerEvent) => {
     const frame = `data: ${JSON.stringify(event)}\n\n`;
-    for (const res of clients.values()) res.write(frame);
+    for (const { response } of clients.values()) response.write(frame);
   };
   // 加密模式下 subscribe 收到的已經是外殼（TaskStore.commit）。
   store.subscribe((task) => broadcast({ type: "task.updated", sequence: ++sequence, task }));
@@ -320,7 +320,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
   ];
 
   const heartbeat = setInterval(() => {
-    for (const res of clients.values()) res.write(": keep-alive\n\n");
+    for (const { response } of clients.values()) response.write(": keep-alive\n\n");
   }, 25_000);
   heartbeat.unref();
 
@@ -360,7 +360,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
 
   async function handleApi(req: IncomingMessage, res: ServerResponse, path: string, params: URLSearchParams): Promise<void> {
     const method = req.method ?? "GET";
-    if (method === "GET" && path === "/api/settings") return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+    if (method === "GET" && path === "/api/settings") return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     if (method === "POST" && path === "/api/settings/provider") {
       const body = await readJson(req);
       const provider = body.provider;
@@ -370,7 +370,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         throw new HttpError(409, (err as Error).message);
       }
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/settings/camera") {
       if (!options.camera) throw new HttpError(409, "鏡頭未設定");
@@ -392,7 +392,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         // 寫檔失敗：伺服器記憶體沒有改，回報真實原因，不顯示假成功。
         throw new HttpError(500, `鏡頭設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/settings/camera-tuning") {
       if (!options.faceTuning || !options.camera?.view().enabled) throw new HttpError(409, "鏡頭未啟用");
@@ -407,7 +407,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         if (err instanceof FaceTuningError) throw new HttpError(400, err.message);
         throw new HttpError(500, `校正值沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/settings/voice") {
       if (!options.voice) throw new HttpError(409, "語音設定未設定");
@@ -423,7 +423,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         throw new HttpError(500, `語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === AUDIO_WRITE_PATH) {
       if (!options.audio) throw new HttpError(409, "聲音裝置設定未設定");
@@ -440,7 +440,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         throw new HttpError(500, `聲音裝置設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (options.wake && method === "POST" && path === "/api/settings/wake") {
       let patch: WakePrefsPatch;
@@ -461,7 +461,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         // 寫檔失敗：記憶體沒有改（仍是保存前的值），回報真實原因，不顯示假成功。
         throw new HttpError(500, `常駐喚醒聆聽設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (options.proactive && method === "POST" && path === "/api/settings/proactive") {
       let patch: ProactivePrefsPatch;
@@ -477,7 +477,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         if (err instanceof ProactivePatchError) throw new HttpError(400, err.message);
         throw new HttpError(500, `主動提醒設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/settings/realtime") {
       if (!options.realtimePrefs) throw new HttpError(409, "即時語音路徑設定未設定");
@@ -494,7 +494,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         throw new HttpError(500, `即時語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/chat") return streamChat(req, res);
     if (method === "POST" && path === "/api/realtime/start") {
@@ -719,13 +719,13 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (method === "POST" && path === "/api/auth/codex/cancel") {
       await readJson(req);
       codexAuth?.cancel();
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/auth/codex/logout") {
       await readJson(req);
       if (!codexAuth) throw new HttpError(409, "ChatGPT 方案即時語音未設定");
       const result = await codexAuth.logout();
-      return sendJson(res, 200, { ...result, settings: settings.view() });
+      return sendJson(res, 200, { ...result, settings: settings.view(pageSource(req.headers["x-nous-terminal"])) });
     }
     if (method === "POST" && path === "/api/home/status") {
       const body = await readJson(req);
@@ -764,17 +764,17 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (method === "POST" && path === "/api/auth/chatgpt/cancel") {
       await readJson(req);
       auth.cancelPending();
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/auth/chatgpt/logout") {
       await readJson(req);
       const result = await auth.logout();
-      return sendJson(res, 200, { ...result, settings: settings.view() });
+      return sendJson(res, 200, { ...result, settings: settings.view(pageSource(req.headers["x-nous-terminal"])) });
     }
     if (method === "POST" && path === "/api/auth/chatgpt/welcome-ack") {
       await readJson(req);
       auth.ackWelcome();
-      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "GET" && path === "/api/tasks") return sendJson(res, 200, store.publicList());
     if (method === "GET" && path === "/api/events") return openEvents(req, res);
@@ -992,9 +992,10 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       Connection: "keep-alive",
     });
     const clientId = `sse_${randomUUID().replaceAll("-", "")}`;
-    const hello: ServerEvent = { type: "hello", sequence: ++sequence, settings: settings.view(), tasks: store.publicList(), client_id: clientId };
+    const source = pageSource(new URL(req.url ?? "/", "http://localhost").searchParams.get("terminal"));
+    const hello: ServerEvent = { type: "hello", sequence: ++sequence, settings: settings.view(source), tasks: store.publicList(), client_id: clientId };
     res.write(`data: ${JSON.stringify(hello)}\n\n`);
-    clients.set(clientId, res);
+    clients.set(clientId, { response: res, source });
     req.on("close", () => {
       clients.delete(clientId);
       // 這條串流擁有的 live 工作階段立刻結束（不假裝重連）。
@@ -1005,7 +1006,13 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
   return Object.assign(server, {
     realtimeSessions: sessions,
     /** 設定或登入狀態改變時呼叫，推送給所有畫面。 */
-    notifySettings: () => broadcast({ type: "settings.updated", sequence: ++sequence, settings: settings.view() }),
+    notifySettings: () => {
+      const updateSequence = ++sequence;
+      for (const { response, source } of clients.values()) {
+        const event: ServerEvent = { type: "settings.updated", sequence: updateSequence, settings: settings.view(source) };
+        response.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+    },
     /** RPI-ID：本次人物世代改變（不含內容）；每個頁面（含 Pi）自己用 status 重讀。Mac 主視窗另有 IPC 通知。 */
     notifyMemoryPresence: () => broadcast({ type: "memory.presence_changed", sequence: ++sequence }),
   });

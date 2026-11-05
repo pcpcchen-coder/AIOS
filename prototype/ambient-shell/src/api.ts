@@ -271,7 +271,8 @@ export interface EventHandlers {
 
 /** 以 SSE 接收真實任務事件；斷線時 EventSource 會自動重連，重連後收到完整快照。 */
 export function subscribeEvents(handlers: EventHandlers): () => void {
-  const source = new EventSource("/api/events");
+  const terminal = pageHeaders()[TERMINAL_HEADER];
+  const source = new EventSource(terminal ? `/api/events?terminal=${encodeURIComponent(terminal)}` : "/api/events");
   source.onopen = () => handlers.onConnectionChange(true);
   source.onerror = () => handlers.onConnectionChange(false);
   source.onmessage = (msg) => {

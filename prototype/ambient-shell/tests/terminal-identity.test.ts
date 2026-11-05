@@ -46,7 +46,7 @@ afterEach(() => {
 
 // ─────────────── 核心：證據依頁面分開 ───────────────
 
-function core() {
+function core(camera: (source?: string) => boolean = () => true, runtime: ConstructorParameters<typeof IdentityService>[0]["runtime"] = { state: "ok", problems: [] }) {
   const clock = { now: 1_000_000 };
   const prefs: AmbientPrefs = { look_to_talk: true, look_to_talk_greet: true, look_to_talk_greet_name: true };
   const claims = new Map<string, { route: "api_key" | "live"; session_id: string }>();
@@ -58,9 +58,9 @@ function core() {
     },
     store: new GalleryStore({ dir: join(root, "identity"), secretBox: fakeSecretBox() }),
     confirm: async () => true,
-    camera: () => true,
+    camera,
     ambient: () => prefs,
-    runtime: { state: "ok", problems: [] },
+    runtime,
     model: MODEL,
     now: () => clock.now,
   });
@@ -81,10 +81,10 @@ async function enroll(c: Core, people: [string, Float32Array][]): Promise<void> 
 }
 
 /** 兩個頁面交錯送畫格（各自的 track 計數器都從 1 開始）。 */
-async function frames(c: Core, shots: { source: string; track: number; face: Float32Array | "multi" }[], rounds: number): Promise<void> {
+async function frames(c: Core, shots: { source: string; track: number; face: Float32Array | "multi" }[], rounds: number, stepMs = 150): Promise<void> {
   for (let i = 0; i < rounds; i++) {
     for (const s of shots) {
-      c.clock.now += 150;
+      c.clock.now += stepMs;
       const body = s.face === "multi" ? { face_count: 2, quality: "multi_face" } : { face_count: 1, quality: "ok", feature: Array.from(near(s.face, (i * 7 + s.track) % 997, 0.03)) };
       const res = await c.svc.handle({ op: "ambient_probe", track: s.track, model: MODEL, ...body }, { source: s.source });
       expect(res).toEqual({ ok: true, op: "ambient_probe" });
@@ -99,6 +99,40 @@ async function greet(c: Core, interaction: string, track: number, source?: strin
 const named = (res: IdentityResponse, name: string) => res.ok && res.op === "greeting" && typeof res.text === "string" && res.text.includes(name);
 
 describe("IdentityService keeps evidence per page (Mac main window vs. terminal)", () => {
+  it("terminal ambient recognition tolerates bounded slow frames while Mac retains its cadence", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE]]);
+    await frames(c, [{ source: "rpi4", track: 1, face: GEORGE }, { source: "main", track: 1, face: GEORGE }], 3, 600);
+    expect(named(await greet(c, id(92), 1, "rpi4"), "George")).toBe(true);
+    expect(named(await greet(c, id(93), 1), "George")).toBe(false);
+  });
+
+  it("terminal camera independence does not bypass missing models or a disabled camera feature", async () => {
+    for (const runtime of [{ state: "missing" as const, problems: ["missing"] }, { state: "hash_mismatch" as const, problems: ["hash"] }]) {
+      const c = core(() => true, runtime);
+      expect(c.svc.status("rpi4").limited_reason).not.toBeNull();
+      expect(await c.svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+    }
+    const c = core(() => false);
+    expect(c.svc.status("rpi4").limited_reason).not.toBeNull();
+    expect(await c.svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+  });
+
+  it("Pi recognition stays ready when its camera is local and the Mac camera is off", async () => {
+    let macActive = true;
+    const c = core((source = "main") => source !== "main" || macActive);
+    await enroll(c, [["George", GEORGE]]);
+    macActive = false;
+    expect(c.svc.status().limited_reason).not.toBeNull();
+    expect(c.svc.status("rpi4").limited_reason).toBeNull();
+    expect(await c.svc.handle({ op: "ambient_status" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+    expect(await c.svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: true });
+    await frames(c, [{ source: "rpi4", track: 1, face: GEORGE }], 6);
+    expect(named(await greet(c, id(91), 1, "rpi4"), "George")).toBe(true);
+    expect((await c.svc.handle({ op: "open_session" }, { userInitiated: true })).ok).toBe(true);
+    expect(await c.svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+  });
+
   it("the same track number on two pages does not collide: each page is greeted by its own face", async () => {
     const c = core();
     await enroll(c, [["George", GEORGE], ["Mary", MARY]]);
@@ -503,7 +537,7 @@ describe("POST /api/terminal/memory (server/terminal-routes.ts)", () => {
 
 // ─────────────── HTTP（createApp） ───────────────
 
-let server: (Server & { notifyMemoryPresence(): void }) | null = null;
+let server: (Server & { notifyMemoryPresence(): void; notifySettings(): void }) | null = null;
 afterEach(async () => {
   if (server) await new Promise((r) => server!.close(r));
   server = null;
@@ -528,6 +562,25 @@ const post = (base: string, path: string, body: unknown) => fetch(`${base}${path
 const AVAILABLE = { available: true, disabled_reason: null, limited_reason: null };
 
 describe("HTTP routes", () => {
+  it("HTTP and SSE settings preserve each page's identity availability", async () => {
+    const base = await startApp({ identity: { status: (source = "main") => ({ ...AVAILABLE, limited_reason: source === "rpi4" ? null : "camera off" }) } });
+    const status = async (headers = {}) => (await (await fetch(`${base}/api/settings`, { headers })).json()).identity.limited_reason;
+    expect(await status()).toBe("camera off");
+    expect(await status({ "X-Nous-Terminal": "rpi4" })).toBeNull();
+    const updated = await fetch(`${base}/api/settings/provider`, { method: "POST", headers: { "Content-Type": "application/json", "X-Nous-Terminal": "rpi4" }, body: JSON.stringify({ provider: "mock" }) });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).identity.limited_reason).toBeNull();
+    for (const [query, expected] of [["", "camera off"], ["?terminal=rpi4", null], ["?terminal=bad!", "camera off"]]) {
+      const res = await fetch(`${base}/api/events${query}`);
+      const reader = res.body!.getReader();
+      const event = async () => JSON.parse(new TextDecoder().decode((await reader.read()).value).replace(/^data: /, "").trim());
+      expect((await event()).settings.identity.limited_reason).toBe(expected);
+      server!.notifySettings();
+      expect((await event()).settings.identity.limited_reason).toBe(expected);
+      await reader.cancel();
+    }
+  });
+
   it("404 when this core has no identity or memory (browser `npm start`), same as before", async () => {
     const base = await startApp({ identity: { status: () => AVAILABLE } });
     expect((await post(base, "/api/terminal/identity", { terminal: "rpi4", request: { op: "ambient_status" } })).status).toBe(404);

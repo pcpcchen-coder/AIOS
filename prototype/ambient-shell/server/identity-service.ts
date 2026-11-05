@@ -59,7 +59,7 @@ import { liveGreetingText, strictGreetingInstructions } from "../shared/sense.ts
 import { appendBriefing } from "../shared/proactive.ts";
 import { fitBriefing, fitsLiveAppend, type BriefingPort, type BriefingSubject, type PendingBriefing } from "./proactive.ts";
 import { WAKE_ID } from "../shared/wake.ts";
-import { isTerminalId, MAIN_SOURCE } from "../shared/terminal.ts";
+import { isTerminalId, MAIN_SOURCE, TERMINAL_EVIDENCE_TIMING } from "../shared/terminal.ts";
 import { GreetingPicker } from "./greeting-picker.ts";
 import type { FaceRuntimeCheck } from "./face-runtime.ts";
 import type { SpeakerRuntimeCheck } from "./speaker-runtime.ts";
@@ -189,8 +189,8 @@ export interface AmbientPrefs {
 export interface IdentityServiceOptions {
   store: GalleryStore;
   confirm: ConfirmFn;
-  /** 鏡頭是否啟用且開著（NOUS_CAMERA=on 且使用者沒關）。 */
-  camera: () => boolean;
+  /** 這個頁面來源是否可使用鏡頭辨識。 */
+  camera: (source: string) => boolean;
   /** 看著說話與稱名的設定；未提供時（舊的組裝、測試）視為全部關閉，不做同步辨識也不稱名。 */
   ambient?: () => AmbientPrefs;
   /**
@@ -493,19 +493,19 @@ export class IdentityService {
   }
 
   /** 鏡頭與模型造成的限制（不看 gallery）。 */
-  private runtimeLimit(): string | null {
+  private runtimeLimit(source = MAIN_SOURCE): string | null {
     const runtime = this.options.runtime.state;
     if (runtime === "missing" || runtime === "not_configured") return LIMIT_MODELS_MISSING;
     if (runtime === "hash_mismatch") return LIMIT_MODELS_BAD;
-    if (!this.options.camera()) return LIMIT_CAMERA;
+    if (!this.options.camera(source)) return LIMIT_CAMERA;
     return null;
   }
 
   /** settings.identity：只有選單列需要的欄位，不含人數、世代、姓名或 person_id。 */
-  status(): IdentityStatus {
+  status(source = MAIN_SOURCE): IdentityStatus {
     if (this.closed) return { available: false, disabled_reason: "核心重新啟動中", limited_reason: null };
     if (!this.encryptionAvailable()) return { available: false, disabled_reason: "此 Mac 無法加密保存（safeStorage 不可用），家人辨識停用", limited_reason: null };
-    return { available: true, disabled_reason: null, limited_reason: this.runtimeLimit() };
+    return { available: true, disabled_reason: null, limited_reason: this.runtimeLimit(source) };
   }
 
   /** 管理畫面的狀態（只經 IPC 給已開 session 的頁面）。 */
@@ -834,11 +834,11 @@ export class IdentityService {
    * 看著說話時同步辨識不能做的原因；null＝可以。不載入 gallery（不碰 Keychain）。
    * viaWake（WK-02）：喚醒開始的互動不需要「看著說話」「看著說話時先打招呼」；其他條件不變。
    */
-  private ambientBlock(viaWake = false): string | null {
+  private ambientBlock(source: string, viaWake = false): string | null {
     const prefs = this.ambientPrefs();
     if (!viaWake && (!prefs.look_to_talk || !prefs.look_to_talk_greet)) return "看著說話或打招呼關閉";
     if (!prefs.look_to_talk_greet_name) return "稱名關閉";
-    const st = this.status();
+    const st = this.status(source);
     if (!st.available) return st.disabled_reason ?? "家人辨識不可用";
     if (st.limited_reason) return st.limited_reason;
     if (this.session) return "家人辨識畫面開著";
@@ -848,7 +848,7 @@ export class IdentityService {
   }
 
   private ambientStatus(source: string): IdentityResponse {
-    return { ok: true, op: "ambient_status", ready: this.ambientBlock(this.wakeOpen(source)) === null };
+    return { ok: true, op: "ambient_status", ready: this.ambientBlock(source, this.wakeOpen(source)) === null };
   }
 
   private wakeOpen(source: string): boolean {
@@ -881,7 +881,7 @@ export class IdentityService {
     if (typeof track !== "number" || !Number.isInteger(track) || track < 0) throw new RequestError("bad_request", "track 格式不對");
     const page = this.pageRate(source, "ambientCalls", SESSION_RATE_PER_S);
     // 被拒時不說原因：「沒有可比對的家人」之類的原因會透露有沒有登記家人。
-    if (this.ambientBlock(this.wakeOpen(source))) throw new RequestError("unavailable", AMBIENT_REFUSED);
+    if (this.ambientBlock(source, this.wakeOpen(source))) throw new RequestError("unavailable", AMBIENT_REFUSED);
     this.ensureLoaded();
     if (this.gallery !== "ready") throw new RequestError("unavailable", AMBIENT_REFUSED);
     this.requireModel(req);
@@ -901,13 +901,13 @@ export class IdentityService {
       a.firstMatch ??= match.person_id;
       if (a.firstMatch !== match.person_id) a.mixed = true;
     }
-    a.evidence = pushEvidence(a.evidence, { t: now, gen: track, match }, this.ambientScope(track));
+    a.evidence = pushEvidence(a.evidence, { t: now, gen: track, match }, this.ambientScope(track), isTerminalId(source) ? TERMINAL_EVIDENCE_TIMING : undefined);
     return { ok: true, op: "ambient_probe" };
   }
 
   /**
    * 送出問候前的決策（docs/14 §3）。頁面負責它看得到的條件（eligible：同一互動與追蹤世代、仍在近距離面向、
-   * 只有一張臉、辨識沒有出錯）；核心負責其餘：同一追蹤世代、沒有混到別人、證據 ≥3 格且最新 ≤1 秒、person 仍存在且
+   * 只有一張臉、辨識沒有出錯）；核心負責其餘：同一追蹤世代、沒有混到別人、證據 ≥3 格且仍在來源的有效時窗內、person 仍存在且
    * gallery 版本沒變、稱名設定仍開。任一項不符就不帶名字（仍說「我在」）。每個互動 ID 最多決策一次。
    */
   private greeting(req: Record<string, unknown>, source: string): IdentityResponse {
@@ -929,7 +929,7 @@ export class IdentityService {
     const claim = this.options.claimGreeting?.(interaction) ?? null;
     const session = claim && claim.route === route ? claim : null;
     const wakeId = session?.source === "wake_word" ? (session.wake_id ?? null) : null;
-    const decision = this.decide(page, interaction, track, req.eligible, session !== null, session?.source === "wake_word", wakeId);
+    const decision = this.decide(source, page, interaction, track, req.eligible, session !== null, session?.source === "wake_word", wakeId);
     const person = decision.person_id ? this.people.find((p) => p.person_id === decision.person_id) : undefined;
     const name = person ? speakableName(person.name) : null;
     // 從固定清單挑一句（依時段、避開上一次）；log 只記模板編號，不記句子。
@@ -991,7 +991,7 @@ export class IdentityService {
   }
 
   /** 建立 GreetingDecision（只在核心）。名稱驗證不過時改成不稱名。 */
-  private decide(page: PageEvidence, interaction: string, track: number, eligible: boolean, claimed: boolean, viaWake = false, wakeId: string | null = null): GreetingDecision {
+  private decide(source: string, page: PageEvidence, interaction: string, track: number, eligible: boolean, claimed: boolean, viaWake = false, wakeId: string | null = null): GreetingDecision {
     const now = this.now();
     // 先記「沒有臉的結果時」的融合（只給 log）；臉認出人時下面會改寫。
     this.lastFusion = wakeId === null ? null : combineVoice(this.voiceFor(page, wakeId)?.obs ?? {}).state === "matched" ? "voice_only" : "none";
@@ -1005,12 +1005,12 @@ export class IdentityService {
     if (!claimed) return plain("no_session");
     if (!this.options.store.namingNoticeSeen()) return plain("notice_unseen");
     if (!eligible) return faceMissing("not_eligible");
-    if (this.ambientBlock(viaWake)) return faceMissing("unavailable");
+    if (this.ambientBlock(source, viaWake)) return faceMissing("unavailable");
     const a = page.ambient;
     if (!a) return faceMissing("no_evidence");
     if (a.track !== track) return faceMissing("track_changed");
     if (a.mixed) return plain("multi_face");
-    const obs = decideIdentity(a.evidence, now, this.ambientScope(track));
+    const obs = decideIdentity(a.evidence, now, this.ambientScope(track), isTerminalId(source) ? TERMINAL_EVIDENCE_TIMING : undefined);
     if (obs.state !== "matched" || !obs.person_id) {
       const reason: GreetingNameReason = obs.state === "unknown" ? "unknown" : obs.state === "ambiguous" ? (obs.reason === "multi_face" ? "multi_face" : "ambiguous") : ((obs.reason ?? "collecting") as GreetingNameReason);
       // 看到陌生臉（unknown）或分不出是哪一位（ambiguous）是臉在反對，不改用聲音；只有證據不足才算「認不出臉」。

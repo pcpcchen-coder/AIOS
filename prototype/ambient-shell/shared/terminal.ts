@@ -1,3 +1,5 @@
+import type { EvidenceTiming } from "./identity.ts";
+
 // 終端機（例如 Raspberry Pi kiosk）連線狀態的共用常數與型別。
 // SSH 轉發的 TCP 連線在 Pi 消失後仍可能在 Mac 這端保持「開著」，SSE 連線狀態不能當成連線證據；
 // 只以頁面每 TERMINAL_HEARTBEAT_MS 送一次的應用層心跳為準，超過 TERMINAL_STALE_MS 沒收到就算斷線。
@@ -47,6 +49,8 @@ export const TERMINAL_IDENTITY_OPS = ["ambient_status", "ambient_probe", "greeti
  * 回應不含記憶內容（卡片、要送的聊天與建議都拿掉）。
  */
 export const TERMINAL_MEMORY_OPS = ["status", "suspend", "select", "card_view", "card_answer"] as const;
+
+export const TERMINAL_EVIDENCE_TIMING: Readonly<EvidenceTiming> = { gap_ms: 2000, fresh_ms: 2000 };
 
 /**
  * 終端機頁面（Pi）的效能保護（對話流暢優先）：感知迴圈與看著說話的取樣頻率減半。Mac 主視窗與一般瀏覽器照舊。
