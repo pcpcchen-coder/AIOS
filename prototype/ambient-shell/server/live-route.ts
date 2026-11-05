@@ -488,6 +488,7 @@ class LiveCall implements RouteCall, LiveCallPort {
           let greeting = false;
           if (event.role === "assistant" && this.greetingSentence !== null) {
             greeting = isGreetingTurn(event.text, this.greetingSentence);
+            if (normalizeSpoken(event.text) !== normalizeSpoken(this.greetingSentence)) this.log?.("live:greeting_mismatch");
             this.greetingSentence = null;
           }
           this.transcript.push({ role: event.role, text: event.text.trim(), ...(greeting ? { greeting: true } : {}) });

@@ -150,6 +150,19 @@ describe("look_to_talk_greet pref", () => {
     expect(Buffer.byteLength(LIVE_GREETING_TEXT)).toBeLessThanOrEqual(500);
   });
 
+  it("wake words address the assistant and cannot supply a greeting name in either locale", () => {
+    for (const locale of ["zh-TW", "en"] as const) {
+      const text = greetingInstructions(locale === "en" ? "Good evening" : "晚上好", locale);
+      expect(text).toContain("Hello Nous");
+      expect(text).toContain("Hey Nous");
+      expect(text).toContain(locale === "en" ? "not a self-introduction" : "不是自我介紹");
+      expect(text).toContain(locale === "en" ? "no name" : "不稱名");
+      expect(Buffer.byteLength(`（開場）${text}`)).toBeLessThanOrEqual(500);
+      const session = buildLiveInstructions([], new Date(), { mcp: [] }, locale);
+      expect(session).toContain(locale === "en" ? "not a self-introduction" : "不是自我介紹");
+    }
+  });
+
   it("審查修正：the live voice layer is told what a 「（開場）」 message is and not to read it out", () => {
     expect(GREETING_MARKER).toBe("（開場）");
     expect(buildLiveInstructions([], new Date(), { mcp: [] }).split("\n")).toContain(

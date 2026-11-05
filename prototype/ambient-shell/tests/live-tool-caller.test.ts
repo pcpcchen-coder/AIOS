@@ -113,7 +113,9 @@ describe("tool registry and rules are the GA ones", () => {
     expect(bystanders).toContain("旁人之間的對話");
     expect(script).toContain("不能用簡體字");
     // 英文介面說英文：不加繁體規則。
-    expect(voicePersonaRules("en")).toEqual([identity, bystanders]);
+    expect(voicePersonaRules("en").slice(0, 2)).toEqual([identity, bystanders]);
+    expect(voicePersonaRules("en").at(-1)).toContain("not a self-introduction");
+    expect(voicePersonaRules("zh-TW").at(-1)).toContain("不是自我介紹");
     // 規則緊接在語言那一行之後，排在工具與交辦規則前面。
     const live = buildLiveInstructions([], new Date(), { mcp: [] }).split("\n");
     expect(live.indexOf(identity!)).toBe(live.findIndex((line) => line.startsWith("一律用繁體中文")) + 1);

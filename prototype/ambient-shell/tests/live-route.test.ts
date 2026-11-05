@@ -33,7 +33,7 @@ function answer(headers: Record<string, string> = { Location: "/v1/realtime/call
   return new Response("v=0 live-answer", { status: 201, headers });
 }
 
-async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest, signal: AbortSignal) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string, sessionId: string) => LiveGreeting | null; memory?: (ctx: SessionContext) => LiveMemoryPort | null; ctx?: Partial<SessionContext>; palmQuiet?: boolean; followUp?: (sessionId: string) => CallFollowUp | null } = {}) {
+async function setup(options: { model?: string | null; handler?: (req: Recorded) => Response | Promise<Response>; runner?: (req: DelegationRequest, signal: AbortSignal) => Promise<DelegationResult>; approval?: () => ApprovalSnapshot; greeting?: (interaction: string, sessionId: string) => LiveGreeting | null; memory?: (ctx: SessionContext) => LiveMemoryPort | null; ctx?: Partial<SessionContext>; palmQuiet?: boolean; log?: (line: string) => void; followUp?: (sessionId: string) => CallFollowUp | null } = {}) {
   sideband = await startFakeSideband();
   const dir = mkdtempSync(join(tmpdir(), "nous-live-"));
   const creds = writeCredentials(dir);
@@ -68,6 +68,7 @@ async function setup(options: { model?: string | null; handler?: (req: Recorded)
     fetch,
     urls: { call: "https://chatgpt.fixture/backend-api/codex/realtime/calls?intent=quicksilver&architecture=avas", sideband: (id) => sideband!.url(id) },
     sleep: async () => {},
+    log: options.log,
     ...(options.greeting ? { greeting: options.greeting } : {}),
     ...(options.memory ? { memory: options.memory } : {}),
     ...(options.palmQuiet ? { palmQuietDelegation: true } : {}),
@@ -883,5 +884,35 @@ describe("PRO-2：calendar question on the live wire (fixture sideband)", () => 
     const texts = conn.received.filter((e) => e.type === "session.context.append").map((e) => (e.content as { text: string }[])[0].text);
     expect(texts.at(-1)).toBe(`${SCHEDULE_MARKER}今天有 1 個行程：14:00 牙醫。`);
     expect(t.events).toContainEqual({ kind: "briefing", part: "schedule" });
+  });
+});
+
+
+describe("greeting deviation metadata (fixture sideband)", () => {
+  it("logs an added assistant name without storing greeting text or names in the log", async () => {
+    const logs: string[] = [];
+    const t = await setup({ log: (line) => logs.push(line), greeting: () => ({ text: liveGreetingText("晚上好"), sentence: "晚上好" }) });
+    const call = await t.route.connect("v=0 offer", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "session.created" });
+    call.control!.input("greeting", "int_0123456789abcdef");
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: "晚上好 Nous", id: "g1" } });
+    await vi.waitFor(() => expect(logs).toContain("live:greeting_mismatch"));
+    expect(logs.join("\n")).not.toContain("晚上好");
+    expect(logs.join("\n")).not.toContain("Nous");
+  });
+
+  it.each(["晚上好", "晚上好，Nous"])("does not flag the exact authored greeting %s", async (sentence) => {
+    const logs: string[] = [];
+    const t = await setup({ log: (line) => logs.push(line), greeting: () => ({ text: liveGreetingText(sentence), sentence }) });
+    const call = await t.route.connect("v=0 offer", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "session.created" });
+    call.control!.input("greeting", "int_0123456789abcdef");
+    conn.send({ type: "turn.done", turn: { role: "assistant", transcript: `${sentence}。`, id: "g1" } });
+    await vi.waitFor(() => expect(t.events.some((event) => event.kind === "transcript")).toBe(true));
+    expect(logs).not.toContain("live:greeting_mismatch");
   });
 });
