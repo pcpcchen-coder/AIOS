@@ -82,7 +82,7 @@ async function baseline(options: { mcp?: typeof MCP } = {}) {
 
 /** 這次送出的請求（去掉主機、日期正規化），和基準快照比對。 */
 function sent() {
-  return ga.snapshot().map((r) => ({ ...r, body: r.body.replace(/今天日期：\d{4}-\d{2}-\d{2}。/, "今天日期：<DATE>。") }));
+  return ga.snapshot().map((r) => ({ ...r, body: r.body.replace(/今天日期：\d{4}-\d{2}-\d{2}（星期[日一二三四五六]，[A-Za-z_/+-]+）。/, "今天日期：<DATE>。") }));
 }
 
 describe("MEM-3 memory off: the request is byte-for-byte unchanged and no sideband opens", () => {

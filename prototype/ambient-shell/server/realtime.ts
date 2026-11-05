@@ -6,6 +6,7 @@ import type { RealtimeBaseInfo, Task } from "../shared/types.ts";
 import type { McpServerConfig } from "./config.ts";
 import type { IntegrationFunctionSpec } from "./integrations/contracts.ts";
 import { callIdFrom, openSidebandSocket, type SidebandSocket, type SidebandSocketCtor } from "./sideband.ts";
+import { todayLine } from "./local-date.ts";
 
 // 即時語音的 API key 路徑（OpenAI Realtime GA，語音直接對語音），也是兩條路徑共用的工具表與規則文字。
 // 瀏覽器用 WebRTC 直接和 OpenAI 串流音訊，但連線建立（SDP 交換）經過本機核心：用 .env 的 OPENAI_API_KEY
@@ -280,7 +281,7 @@ export function buildRealtimeInstructions(
       "核心要你照念的句子（「（記憶確認）」開頭）只說其中「」裡的那一句，一字不改，不加字、不提問。",
       "使用者說「確認記住」「確認更正」「確認忘記」或在確認問句之後說「取消」時，不要呼叫工具，也不要說已保存；結果由核心另外送來。",
     ] : []),
-    `今天日期：${now.toISOString().slice(0, 10)}。`,
+    todayLine(now),
     list.length ? `目前的任務：\n${list.join("\n")}` : "目前沒有交辦的任務。",
   ].join("\n");
 }
@@ -311,7 +312,7 @@ export function buildLiveInstructions(tasks: Iterable<Task>, now: Date, caps: { 
       "使用者說「確認記住」「確認更正」「確認忘記」或在確認問句之後說「取消」時，不要交辦，也不要說已保存；結果由核心另外送來。",
     ] : []),
     ...(caps.mcp.length ? ["外部服務（MCP）在 ChatGPT 方案路徑不能用；使用者要求時照實說，需要時請他到設定（macOS App：選單列「即時語音」）把路徑切換到 API key。"] : []),
-    `今天日期：${now.toISOString().slice(0, 10)}。`,
+    todayLine(now),
     list.length ? `目前的任務：\n${list.join("\n")}` : "目前沒有交辦的任務。",
   ].join("\n");
 }

@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "099bd97c05ad6032895bba33dd030e03e227a227bc6f88469cc265272ae2ca80",
-      "translationSha256": "5cd72f23266f88389c6b395049c46377f5139df918e6ccbd14cfd421f64ea8d1"
+      "sourceSha256": "fbff436880ff5a37a60ec25e2846511e3fb83c12a9f0467686c291a141384bb6",
+      "translationSha256": "033f827cdae21f51d2af5e11d758358d2c7acd457e3ffae6e3728763bca9850d"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -340,8 +340,8 @@
       "source": "docs/validation/cal-1-google-calendar-2026-11-05.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/cal-1-google-calendar-2026-11-05.en.md",
-      "sourceSha256": "677cae2b1eab5b2926d397b939ad18cc90235eb5902ffdf87354d8b6b98a3566",
-      "translationSha256": "b11d14537057cd18c00a07fb30e4b4361cbba26e122eaff86283f82075d4f41b"
+      "sourceSha256": "c7ee84e592b5b36b47f1cc2d065b89871190ce9fb157004d435b3d86735adbc8",
+      "translationSha256": "5f783647bc56383bf96e6661fe9d3a2388ca86b9b0a98bf9b721f434d65f5e65"
     },
     {
       "source": "docs/validation/camera-enable-main-only-2026-10-31.md",
@@ -475,6 +475,13 @@
       "translation": "docs/validation/live-voice-2026-10-23.en.md",
       "sourceSha256": "426c0e701d6c98201df658a813e0473849e81545f8b155ae067c6424797d9513",
       "translationSha256": "9385b8a115a4e6db9f6d3a00bd414ff90972e86534d3941f2570e0c2a597c49e"
+    },
+    {
+      "source": "docs/validation/local-date-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/local-date-2026-11-05.en.md",
+      "sourceSha256": "0573793227cee22602e0e44db81c44b2147b8fdeba2514d5d75d7fee8790754d",
+      "translationSha256": "40d6600fff7c8b3f441bbcf3e900ae3576df359d24bd2b3307dcceb932a59717"
     },
     {
       "source": "docs/validation/look-to-talk-greet-2026-10-23.md",

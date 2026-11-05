@@ -8,6 +8,7 @@ import { delegatePolicy, DELEGATE_ONCE_OUTPUT, exactVoiceConfirm, MAX_RECALLS, t
 import { HOST_TIMEOUT_MS, HostGone, type ApprovalSnapshot, type ToolHost } from "./realtime-routes.ts";
 import { fromWireName } from "../shared/integrations.ts";
 import { toModelOutput, type IntegrationDispatcher } from "./integrations/dispatcher.ts";
+import { todayLine } from "./local-date.ts";
 
 // gpt-live-1-codex 不能呼叫函式；它把使用者的請求用文字交辦（delegation.created）。
 // LiveToolCaller 用同一個 Codex 登入的 Codex Responses，把這段文字變成 API key 路徑的語音模型會做的
@@ -108,7 +109,7 @@ export function buildCallerInstructions(caps: RealtimeCapabilities, tasks: Itera
     "needs_confirmation：說要對哪台設備做什麼，請使用者按畫面上的確認卡或說「確認執行」；你不能確認。",
     "一般聊天或不需要工具的問題，直接簡短回答，不要呼叫工具。",
     "使用者要結束對話時呼叫 end_conversation，最後一則訊息寫一句道別。",
-    `今天日期：${now.toISOString().slice(0, 10)}。`,
+    todayLine(now),
     list.length ? `目前的任務：\n${list.join("\n")}` : "目前沒有交辦的任務。",
   ].join("\n");
 }

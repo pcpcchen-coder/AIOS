@@ -231,6 +231,7 @@ const TOOLS: readonly ToolDefinition[] = [
       additionalProperties: false,
     },
     // 加在自己的日曆、不邀請任何人、可以刪掉：不是紅線列的寄出／發布／付費／永久刪除。
+    // George 2026-11-05 確認：新增行程不用確認。
     effect: "reversible_write",
     enabled: true,
     timeoutMs: CALENDAR_LIMITS.timeoutMs,
