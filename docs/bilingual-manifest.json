@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "096fc3e833a16a1cda9c2d90eebdca885977a14d15863fc3486cb67715672dfb",
-      "translationSha256": "499834be8dc681fc31c51b6ac4b7011bd963d9a856513cc991cc9ce48fa3fc2c"
+      "sourceSha256": "ae468a3610a4fa690c3526378ed0a1cd59b0ce4b3b7f2af5ce479cf346cca91b",
+      "translationSha256": "c3390f0bedf39e240a86ef76e9df9087fb4f743ce067f3e6735e33cad01478e1"
     },
     {
       "source": "docs/README.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "11842073cf32c65932a89581256d06b5b471012efe0088ac0f7764fe589d166d",
-      "translationSha256": "5cd1d0ad52faa794d357e03888516a1fbf76d48eae64dcf7924984902857aa5a"
+      "sourceSha256": "2238c508b1278912b099df718fa77e08a9895b60745e499d86638c214a42de23",
+      "translationSha256": "f082f59ee1b7ceb92870f77d72e2c282717fcf78c9203e94bb28e74c3a7bac0c"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -286,6 +286,13 @@
       "translation": "docs/validation/ail-1-2026-11-03.en.md",
       "sourceSha256": "a50d26fd6bf07887c9a398e208146828a7c32be7443ff0fc6d773778ab4f0e49",
       "translationSha256": "dc1652b0e638ad029e8e37d5112b5308f70294680367fcadc4061c0f29fd470d"
+    },
+    {
+      "source": "docs/validation/ail-2-home-facade-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/ail-2-home-facade-2026-11-05.en.md",
+      "sourceSha256": "8c02bed91d3364bb168d7ed874c8dd8a2349ad857ad095381b91ad784faca687",
+      "translationSha256": "eb0501b937e0bbd19c10fc6c083f5bf2a678819855870203e2e21375e2f984eb"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
@@ -328,6 +335,13 @@
       "translation": "docs/validation/brain-regions-2026-10-20.en.md",
       "sourceSha256": "95eef9f81c59320b87f49ff48752de96c9b373dc8368166cb0c49631840e69f2",
       "translationSha256": "cb0c81a39f7a2f05961f02b4b5194766e0e8bceb35cef9f668ce926ec3855bba"
+    },
+    {
+      "source": "docs/validation/cal-1-google-calendar-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/cal-1-google-calendar-2026-11-05.en.md",
+      "sourceSha256": "c7ee84e592b5b36b47f1cc2d065b89871190ce9fb157004d435b3d86735adbc8",
+      "translationSha256": "5f783647bc56383bf96e6661fe9d3a2388ca86b9b0a98bf9b721f434d65f5e65"
     },
     {
       "source": "docs/validation/camera-enable-main-only-2026-10-31.md",
@@ -463,6 +477,13 @@
       "translationSha256": "9385b8a115a4e6db9f6d3a00bd414ff90972e86534d3941f2570e0c2a597c49e"
     },
     {
+      "source": "docs/validation/local-date-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/local-date-2026-11-05.en.md",
+      "sourceSha256": "0573793227cee22602e0e44db81c44b2147b8fdeba2514d5d75d7fee8790754d",
+      "translationSha256": "40d6600fff7c8b3f441bbcf3e900ae3576df359d24bd2b3307dcceb932a59717"
+    },
+    {
       "source": "docs/validation/look-to-talk-greet-2026-10-23.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/look-to-talk-greet-2026-10-23.en.md",
@@ -573,6 +594,20 @@
       "translation": "docs/validation/pi-performance-2026-11-05.en.md",
       "sourceSha256": "00d48e06614dfbaf401ae974ce13908de650c0372ce3acb882f37db5d0a70e66",
       "translationSha256": "15be886d3bc85c92816c9e79645aea8b8addc3cd605c581b7dfb289f581dd4e7"
+    },
+    {
+      "source": "docs/validation/pro-1-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pro-1-2026-11-05.en.md",
+      "sourceSha256": "2f03cb26e3ed6fcf764617ed058aa7c8e25f1ca9bc82fe68a9191feac9b55074",
+      "translationSha256": "682dd152817d3a6bede5dfca339ed6b633df6c2b9ec3a3e2d8f7139f065c9e69"
+    },
+    {
+      "source": "docs/validation/pro-2-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pro-2-2026-11-05.en.md",
+      "sourceSha256": "ccd5df2b7bdeb23bb607ef13a74987b96eb91dd381ee38122223bd968e3b0490",
+      "translationSha256": "93d89c63a0bf10e294d075261af4d1872b0237b761776eec38a8bf44d8d8b950"
     },
     {
       "source": "docs/validation/service-mode-2026-11-03.md",

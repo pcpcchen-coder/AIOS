@@ -970,5 +970,8 @@
   "省電": "Light",
   "最多每秒 30 格、最高 2 倍解析度、完整光暈與背景模糊": "Up to 30 frames per second, up to 2× resolution, full glow and background blur",
   "最多每秒 20 格、1 倍解析度、較少光脈衝、聆聽光環不模糊、關閉背景模糊": "Up to 20 frames per second, 1× resolution, fewer light pulses, no blur on the listening ring, background blur off",
-  "最多每秒 12 格、0.75 倍解析度、較少光脈衝、簡化光暈、關閉背景模糊": "Up to 12 frames per second, 0.75× resolution, fewer light pulses, simplified glow, background blur off"
+  "最多每秒 12 格、0.75 倍解析度、較少光脈衝、簡化光暈、關閉背景模糊": "Up to 12 frames per second, 0.75× resolution, fewer light pulses, simplified glow, background blur off",
+  "武陵居家電（中控）": "Wuling home devices (hub)",
+  "Google 日曆（gog）": "Google Calendar (gog)",
+  "「可用」只代表 Mac 上的 gog 能執行；有沒有授權 Google 日曆，要看查行程的結果。": "“Available” only means gog runs on the Mac; whether Google Calendar is authorized shows in the result of reading events."
 }

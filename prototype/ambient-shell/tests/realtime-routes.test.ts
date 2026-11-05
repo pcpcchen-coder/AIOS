@@ -781,3 +781,42 @@ describe("WK-02 POST /api/realtime/start: wake_word only with NOUS_WAKE on", () 
     expect(records.records).toHaveLength(1);
   });
 });
+
+describe("PRO-1：weather prefetch when a greeting call starts", () => {
+  it("onGreetingStart fires for look-to-talk and wake-word starts only (not user starts or rebuilds); a throwing hook does not block the start", () => {
+    let starts = 0;
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: () => true, onGreetingStart: () => { starts++; throw new Error("boom"); } });
+    expect(sessions.start("sse_a", "user")).toMatchObject({ ok: true });
+    expect(starts).toBe(0);
+    expect(sessions.start("sse_a", "look_to_talk")).toMatchObject({ ok: true });
+    expect(starts).toBe(1);
+  });
+});
+
+describe("PRO-1 review fix：greeted(spoken)", () => {
+  it("a call without a core sideband records the briefing at once; an unknown session never does", async () => {
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: () => true });
+    const d = sessions.start("sse_a", "look_to_talk");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    let spoken = 0;
+    sessions.greeted("rt_other", false, () => spoken++);
+    expect(spoken).toBe(0);
+    sessions.greeted(d.session_id, false, () => spoken++);
+    expect(spoken).toBe(1);
+  });
+});
+
+describe("PRO-2：apiKeyListens", () => {
+  it("false without a core sideband (plain call) or for an unknown session", async () => {
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: () => true });
+    const d = sessions.start("sse_a", "look_to_talk");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    expect(sessions.apiKeyListens("rt_other")).toBe(false);
+    expect(sessions.apiKeyListens(d.session_id)).toBe(false);
+  });
+});

@@ -2294,6 +2294,8 @@ function onServerEvent(event: ServerEvent): void {
         return;
       }
     }
+    // PRO-2：核心真的念今天的行程（真實事件）：點亮規劃區。
+    if (event.type === "realtime.live" && event.event.kind === "briefing") brain.pulse("step", "planning");
     if (event.type === "realtime.live" && event.event.kind === "memory_notice" && event.session_id !== realtimeTicket?.session_id) {
       showSubtitle(t(event.event.message), true);
       return;
@@ -2671,6 +2673,16 @@ const actions: ViewActions = {
     void updateAudioPrefs(patch).then((error) => {
       if (error) dispatch({ type: "show.settings", request_id: requestId, message: error });
     });
+  },
+  updateProactive(patch) {
+    const requestId = userRequest();
+    void api.updateProactive(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`主動提醒設定沒有保存：${(err as Error).message}` }),
+    );
   },
   updateRealtime(patch) {
     const requestId = userRequest();

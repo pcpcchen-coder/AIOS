@@ -1,4 +1,5 @@
 import { normalizeLocale, type Locale } from "../shared/i18n.mjs";
+import type { CallFollowUp } from "./proactive-calendar.ts";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { RealtimeBaseInfo, RealtimeInfo, Task } from "../shared/types.ts";
 import {
@@ -107,7 +108,8 @@ export interface RouteCall {
   /** MEM-3：這通記憶的初始狀態（/call 回應用；只有筆數與原因代碼）。 */
   memoryStatus?(): { used: number; reason: LiveMemoryReason | null } | null;
   /** MEM-3：API key 路徑的問候決策已做出（IdentityService）：問候那一輪結束後才問臉部候選。 */
-  greetingDecided?(named: boolean): void;
+  /** spoken：問候那一輪真的開始時呼叫（PRO-1 記下主動提醒說過）。 */
+  greetingDecided?(named: boolean, spoken?: () => void): void;
   /** MEM-3：頁面回報播放結束（只會把語音確認的時窗往後延）。 */
   playback?(): void;
   /**
@@ -266,6 +268,8 @@ export interface RealtimeSessionsOptions {
    */
   hideRevokeFromPage?: boolean;
   /** WK-02（F6）：每通工作階段結束時寫一筆費用紀錄（server/voice-cost-log.ts）；沒有時不記。 */
+  /** PRO-1：發出看著說話或喚醒的互動 ID 時呼叫（核心先取天氣）；不等結果、失敗不影響開始。 */
+  onGreetingStart?: () => void;
   costLog?: {
     record(record: VoiceCostRecord): void;
     /** 改寫同一個 session_id 最後一筆（頁面的 no_voice／usage 晚於核心的結束才到時）。 */
@@ -509,6 +513,11 @@ export class RealtimeSessions {
   private issueInteraction(source: "look_to_talk" | "wake_word"): string {
     const id = `int_${randomBytes(8).toString("hex")}`;
     this.interactions.set(id, { id, source, issuedAt: this.now(), session: null, used: false });
+    try {
+      this.options.onGreetingStart?.();
+    } catch {
+      // 預先取天氣失敗不影響開始
+    }
     return id;
   }
 
@@ -570,8 +579,17 @@ export class RealtimeSessions {
   }
 
   /** MEM-3：API key 路徑的問候決策已做出（IdentityService）：交給這通的旁路，問候那一輪結束後才問臉部候選。 */
-  greeted(sessionId: string, named: boolean): void {
-    if (this.ga?.id === sessionId && !this.ga.closed) this.ga.call?.greetingDecided?.(named);
+  greeted(sessionId: string, named: boolean, spoken?: () => void): void {
+    if (this.ga?.id !== sessionId || this.ga.closed) return;
+    const call = this.ga.call;
+    // 有核心旁路（帶記憶的通話）時等問候那一輪開始；沒有旁路時核心看不到，交回頁面就算說過。
+    if (call?.greetingDecided) call.greetingDecided(named, spoken);
+    else spoken?.();
+  }
+
+  /** PRO-2：這通 API key 工作階段有核心旁路（聽得到使用者的回答）。 */
+  apiKeyListens(sessionId: string): boolean {
+    return this.ga?.id === sessionId && !this.ga.closed && typeof this.ga.call?.greetingDecided === "function";
   }
 
   /** MEM-3：POST /api/realtime/playback：頁面在資料通道收到播放結束（只會把語音確認時窗往後延）。 */
@@ -1050,6 +1068,8 @@ export interface ApiKeyRouteOptions {
    */
   memory?: (ctx: SessionContext) => LiveMemoryPort | null;
   log?: (line: string) => void;
+  /** PRO-2：主動提醒的行程問句（核心旁路聽回答）。 */
+  followUp?: (sessionId: string) => CallFollowUp | null;
   /** 等 session.updated 的時限（測試用；預設 3 秒）。 */
   updateAckMs?: number;
 }
@@ -1089,7 +1109,7 @@ export class ApiKeyRoute implements RealtimeRoute {
     // 記憶工作階段需要 SSE 串流（核心送事件、工具呼叫與撤銷給頁面）；沒有時不帶記憶。
     const memory = ctx.events ? this.options.memory?.(ctx) ?? null : null;
     try {
-      return await connectApiKey(this.bridge, offerSdp, ctx, memory, { log: this.options.log, updateAckMs: this.options.updateAckMs });
+      return await connectApiKey(this.bridge, offerSdp, ctx, memory, { log: this.options.log, updateAckMs: this.options.updateAckMs, ...(this.options.followUp ? { followUp: this.options.followUp } : {}) });
     } catch (err) {
       if (err instanceof RouteStartError) throw err;
       if (err instanceof RealtimeError) throw new RouteStartError(err.status === 409 ? "no_api_key" : "api_key_rejected", err.status, err.message, false);

@@ -49,9 +49,12 @@ import type { VoiceRoute } from "./memory/live.ts";
 import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
+import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
 import { isTerminalId } from "../shared/terminal.ts";
 import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
 import { VoiceRelayStoreError } from "./integrations/voice-relay/store.ts";
+import { HOME_TOOL } from "./integrations/adapters/home.ts";
+import type { IntegrationToolId } from "../shared/integrations.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
@@ -182,6 +185,11 @@ export interface AppOptions {
    * 服務模式：終端機（Pi kiosk）頁面的心跳（server/terminal-presence.ts）。未提供時 POST /api/terminal/heartbeat 落到 404。
    */
   terminals?: { heartbeat(id: string): void };
+  /**
+   * PRO-1：主動提醒（招呼後接今天的天氣）。view 給 settings.proactive；prefetch 在看著說話或喚醒開始時先取天氣。
+   * 未提供時（舊的組裝、測試）settings 沒有 proactive、POST /api/settings/proactive 回 404。
+   */
+  proactive?: { view(): ProactiveSettingsView; update(patch: ProactivePrefsPatch): ProactivePrefs; prefetch(): void };
   port: number;
   devPort: number;
   distDir: string | null;
@@ -255,6 +263,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         dropStopReport: options.dropStopReport,
         hideRevokeFromPage: options.hideRevokeFromPage,
         costLog: options.voiceCostLog,
+        // PRO-1：看著說話或喚醒開始（會打招呼的通話）時先取天氣，招呼決策時已在快取裡。
+        ...(options.proactive ? { onGreetingStart: () => options.proactive?.prefetch() } : {}),
       })
     : null;
   const tasksFor = (target: ChatTarget | null) => tasksForTarget(store, options.memory ?? null, target);
@@ -277,6 +287,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         memory: options.memory?.settingsStatus() ?? BROWSER_MEMORY_STATUS,
         audio: { prefs: options.audio?.view() ?? { ...DEFAULT_AUDIO_PREFS }, write_path: AUDIO_WRITE_PATH },
         ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
+        ...(options.proactive ? { proactive: options.proactive.view() } : {}),
         ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name) } } : {}),
         // VCR-2：只有註冊了 voice_relay 才有這個鍵（沒有時輸出和之前完全相同）。
         ...(options.integrations?.voiceRelay ? { voice_relay: true } : {}),
@@ -447,6 +458,22 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         // 寫檔失敗：記憶體沒有改（仍是保存前的值），回報真實原因，不顯示假成功。
         throw new HttpError(500, `常駐喚醒聆聽設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (options.proactive && method === "POST" && path === "/api/settings/proactive") {
+      let patch: ProactivePrefsPatch;
+      try {
+        patch = parseProactivePatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof ProactivePatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      try {
+        options.proactive.update(patch);
+      } catch (err) {
+        if (err instanceof ProactivePatchError) throw new HttpError(400, err.message);
+        throw new HttpError(500, `主動提醒設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, localizeSettings(settings.view(), normalizeLocale(req.headers["x-nous-locale"])));
     }
@@ -691,7 +718,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const metric = typeof body.metric === "string" ? body.metric.trim() : null;
       if (!target) throw new HttpError(400, "target is required");
       if (target.length > 100 || (metric?.length ?? 0) > 40) throw new HttpError(400, "target or metric is too long");
-      return sendJson(res, 200, await homeCall(() => home!.status(target, metric)));
+      return sendJson(res, 200, await homeCall(() => home!.status(target, metric), HOME_TOOL.status, { target, ...(metric !== null ? { metric } : {}) }));
     }
     if (method === "POST" && path === "/api/home/control") {
       const body = await readJson(req);
@@ -703,7 +730,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (!(value === null || typeof value === "boolean" || typeof value === "number" || (typeof value === "string" && value.length <= 40))) {
         throw new HttpError(400, "value must be a short string, a number or a boolean");
       }
-      return sendJson(res, 200, await homeCall(() => home!.control({ target, command, value: value as ControlRequest["value"] })));
+      return sendJson(res, 200, await homeCall(() => home!.control({ target, command, value: value as ControlRequest["value"] }), HOME_TOOL.control, { target, command, ...(value !== null ? { value } : {}) }));
     }
     if (method === "POST" && path === "/api/home/confirm") {
       const body = await readJson(req);
@@ -712,7 +739,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         throw new HttpError(400, "confirm_id and approve are required");
       }
       const approve = body.approve;
-      return sendJson(res, 200, await homeCall(() => home!.confirm(id, approve)));
+      return sendJson(res, 200, await homeCall(() => home!.confirm(id, approve), HOME_TOOL.confirm, { confirm_id: id, approve }));
     }
     if (method === "POST" && path === "/api/auth/chatgpt/login") {
       const body = await readJson(req);
@@ -824,8 +851,25 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
   }
 
   /** 武陵居中控的呼叫：未設定時 409；連不上、權杖被拒等照實轉成 HTTP 錯誤。 */
-  async function homeCall<T>(run: () => Promise<T>): Promise<T> {
+  /**
+   * 家電 API。AIL-2：整合層註冊了 home Facade（NOUS_AIL=on、NOUS_AIL_SERVICES 有 home、中控已設定）時改經 Dispatcher 呼叫 HomeBridge，
+   * HTTP 回應（狀態碼、內容）和直接呼叫完全相同；沒有 Facade 時照原本直接呼叫。
+   */
+  async function homeCall<T>(run: () => Promise<T>, tool: string, args: Record<string, unknown>): Promise<T> {
     if (!home?.available) throw new HttpError(409, "尚未設定武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）");
+    const ail = options.integrations;
+    if (ail && ail.registry.status(tool as IntegrationToolId, "page") === "available") {
+      const result = await ail.dispatcher.execute({ tool, args, route: "page", actor: tool === HOME_TOOL.confirm ? "user" : "agent", sessionId: "page" });
+      const data = result.data as { legacy?: T; http_error?: { status: number; message: string }; rethrow?: unknown } | undefined;
+      if (data?.legacy !== undefined) return data.legacy;
+      if (data && "rethrow" in data) throw data.rethrow;
+      if (data?.http_error) throw new HttpError(data.http_error.status, data.http_error.message);
+      // Dispatcher 自己的結果（參數不合、逾時、Adapter 出錯）：頁面原本只會收到 HTTP 錯誤，照樣回錯誤；
+      // 控制指令逾時或出錯時，HomeBridge 可能已經送出，所以說不確定有沒有執行。
+      if (result.status === "refused") throw new HttpError(400, result.message);
+      if (tool !== HOME_TOOL.status && result.status === "unknown") throw new HttpError(504, "武陵居中控沒有在時限內回覆，不確定有沒有執行，請看一下設備。");
+      throw new HttpError(502, result.message);
+    }
     try {
       return await run();
     } catch (err) {

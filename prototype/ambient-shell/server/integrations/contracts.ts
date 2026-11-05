@@ -18,6 +18,12 @@ export interface ToolDefinition {
   timeoutMs: number;
   /** 這個工具接受的呼叫來源。 */
   supportedRoutes: readonly IntegrationRoute[];
+  /**
+   * AIL-2：既有工具的 Facade（例如 home_status）。模型看到的仍是 server/realtime.ts 原本的工具定義（一個位元組都不變），
+   * 所以這種工具**不會**出現在 functionSpecs；Adapter 的結果放在 data 原封不動交回（不截大小、不套 Dispatcher 的頻率限制，
+   * 由原本的模組自己控管），可以用 scalar 參數，時限可到 90 秒。
+   */
+  legacyName?: string;
 }
 
 export interface ExecutionContext {

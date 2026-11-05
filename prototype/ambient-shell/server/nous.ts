@@ -1,4 +1,6 @@
-import { type Locale } from "../shared/i18n.mjs";
+import { normalizeLocale, type Locale } from "../shared/i18n.mjs";
+import { appendBriefing } from "../shared/proactive.ts";
+import { liveGreetingText } from "../shared/sense.ts";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createServer } from "node:net";
@@ -47,6 +49,9 @@ import { createIntegrations } from "./integrations/index.ts";
 import type { TasksResponse } from "../shared/protected-tasks.ts";
 import { TerminalPresence } from "./terminal-presence.ts";
 import type { TerminalStatus } from "../shared/terminal.ts";
+import { WeatherService } from "./weather.ts";
+import { calendarReaderFrom } from "./proactive-calendar.ts";
+import { fitBriefing, fitsLiveAppend, ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
 
@@ -92,6 +97,8 @@ export interface NousOptions {
    * 「服務模式：Pi 已連線／已斷線」。
    */
   onTerminalChange?: (status: TerminalStatus) => void;
+  /** PRO-1：查天氣用的 fetch（測試注入假的 Open-Meteo；未提供時用全域 fetch）。 */
+  weatherFetch?: typeof fetch;
 }
 
 export interface TasksInjection {
@@ -238,7 +245,14 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   });
   const home = new HomeBridge({ url: config.smarthomeUrl, token: config.smarthomeToken });
   // AIL-1（docs/18）：NOUS_AIL=on 才建立整合層；關閉時 ail 為 null，工具表、說明與 HTTP 路由都和之前相同。
-  const ail = createIntegrations(config.ail, log);
+  // AIL-2：HomeBridge 交給整合層包成 Facade（NOUS_AIL_SERVICES 列出 home 才註冊）。
+  // PRO-1：主動提醒（招呼後接今天的天氣）。天氣快取一份，招呼與整合層的 app.weather.today 共用。
+  const weather = new WeatherService({ log, ...(options.weatherFetch ? { fetch: options.weatherFetch } : {}) });
+  const proactiveSettings = new ProactiveSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } });
+  // PRO-2：CAL-1 有註冊時，認出行程擁有者（George）才說今天的行程（核心自己讀，不經模型）。
+  const calendarReader = calendarReaderFrom(ail?.registry);
+  const proactive = new ProactiveBriefing({ settings: proactiveSettings, log: new ProactiveDailyLog({ dir: config.configDir, log }), weather, calendar: calendarReader, logLine: log });
   const realtime = new RealtimeBridge({
     apiKey: config.openaiApiKey,
     model: config.realtimeModel,
@@ -248,6 +262,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     taskWebSearch: config.taskWebSearch,
     home: home.available,
     ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("api_key", locale) } : {}),
+    ...(calendarReader ? { calendarBriefing: true } : {}),
   });
   const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available, ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("live", locale) } : {}) });
   // MEM-2：ChatGPT 方案即時語音的記憶同意鍵（provider codex，獨立於 chatgpt）；沒有 Codex 登入時為 null。
@@ -261,7 +276,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     clientVersion: config.nousVersion,
     capabilities: () => ({ webSearch: true, home: home.available }),
     // memoryOn：這通記憶開著而且有 codex 同意（LiveMemoryBinding.memoryActive）才加記憶規則；否則和 MEM-2 之前一樣。
-    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp, memory: !!memoryOn }, ctx.locale),
+    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp, memory: !!memoryOn, ...(calendarReader ? { calendarBriefing: true } : {}) }, ctx.locale),
+    // PRO-2：行程問句的回答（核心從 sideband 聽）。
+    followUp: (sessionId: string) => proactive.followUp(sessionId),
     // MEM-4b：voice（受保護的語音交辦）只改 delegate_task 的處理，不影響說明與工具表。
     caller: (ctx, mem, voice) =>
       new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}), ...(ail ? { integrations: { dispatcher: ail.dispatcher, sessionId: ctx.sessionId } } : {}) }),
@@ -269,7 +286,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     // MEM-3：頁面的確認卡（MCP、家電）開著時不開語音記憶卡（兩條路徑一致）。
     ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
     // 看著說話的問候（ID-02）：頁面只帶互動 ID，短句由家人辨識的核心決策組成；瀏覽器版（沒有 identity）一律「我在」。
-    greeting: liveGreetingSource(() => identity, greetings),
+    greeting: liveGreetingSource(() => identity, greetings, proactive),
     palmQuietDelegation: config.palmQuietDelegation,
     log,
   });
@@ -280,6 +297,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const apiKeyRoute = new ApiKeyRoute(realtime, !!config.openaiApiKey, config.realtimeVoice, {
     ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openVoice("api_key", { lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
     log,
+    followUp: (sessionId: string) => proactive.followUp(sessionId),
   });
   const camera = new CameraSettingsStore({ base: config.camera, dir: config.configDir, onChange: () => notify(), log });
   const voice = new VoiceSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
@@ -360,8 +378,12 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）。
         wakeGreetingOpen: () => server.realtimeSessions?.wakeGreetingOpen() ?? false,
         // MEM-3：API key 路徑的問候決策（有沒有稱名）交給那通的旁路，問候結束後才問臉部候選。
-        apiKeyGreeted: (sessionId, named) => server.realtimeSessions?.greeted(sessionId, named),
+        apiKeyGreeted: (sessionId, named, spoken) => server.realtimeSessions?.greeted(sessionId, named, spoken),
         picker: greetings,
+        // PRO-1：招呼後接的主動提醒（只有稱名的家人算認出；其餘用這台裝置今天第一次的規則）。
+        briefing: proactive,
+        // PRO-2：API key 通話有核心旁路才問行程（聽得到回答）。
+        apiKeyListens: (sessionId) => server.realtimeSessions?.apiKeyListens(sessionId) ?? false,
         log,
         onChange: () => notify(),
         memory: (): IdentityMemoryLink | null => memory,
@@ -434,6 +456,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     faceTuning,
     voice,
     audio,
+    proactive: { view: () => proactive.view(), update: (patch) => proactiveSettings.update(patch), prefetch: () => proactive.prefetch() },
     ...(config.earlySpeechRms !== null ? { earlySpeechRms: config.earlySpeechRms } : {}),
     identity: identity ?? undefined,
     memory: memory ?? undefined,
@@ -523,8 +546,23 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
  * live 路徑的問候文字來源（ID-02）：頁面 POST greeting 的文字只當互動 ID，連同這個 live 工作階段的 ID 交給
  * IdentityService.takeLiveGreeting；沒有家人辨識（瀏覽器版）或取不到時，由核心從固定清單挑一句不含名字的（例如「我在」「早安」）。
  */
-export function liveGreetingSource(identity: () => IdentityService | null, picker: GreetingPicker): (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting {
-  return (interaction, sessionId, locale) => identity()?.takeLiveGreeting(interaction, sessionId) ?? picker.plainLive(locale);
+export function liveGreetingSource(identity: () => IdentityService | null, picker: GreetingPicker, proactive?: BriefingPort): (interaction: string, sessionId: string, locale?: Locale, use?: boolean) => LiveGreeting {
+  return (interaction, sessionId, locale, use = true) => {
+    const decided = identity()?.takeLiveGreeting(interaction, sessionId, use);
+    if (decided) return decided;
+    // PRO-1：沒有決策（瀏覽器版、決策逾時）：沒認出是誰，用這台裝置今天第一次的規則；真的要送出才組句與記下。
+    const composed = use ? (proactive?.compose(null, normalizeLocale(locale)) ?? null) : null;
+    // 放不進一段 sideband append：拿掉放不下的段落（不記成說過）。
+    const loc = normalizeLocale(locale);
+    const plain = picker.plainLive(locale);
+    const base = plain.sentence;
+    const briefing = composed ? fitBriefing(composed, (extra) => fitsLiveAppend(liveGreetingText(appendBriefing(base, extra, loc), loc))) : null;
+    if (!briefing) return plain;
+    const sentence = appendBriefing(base, briefing.sentence, loc);
+    const greeting = { id: plain.id, sentence, text: liveGreetingText(sentence, loc) };
+    proactive?.commit(briefing, { sessionId, spoken: greeting.sentence });
+    return greeting;
+  };
 }
 
 /** IdentityService 的 claimGreeting：把核心發出的互動 ID 換成真的連上的工作階段（RealtimeSessions.claimGreeting）。 */

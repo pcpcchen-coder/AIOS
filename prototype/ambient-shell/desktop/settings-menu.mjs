@@ -280,14 +280,83 @@ export function audioMenu(audio, report, { setAudio, translate = (source) => sou
   ];
 }
 
+// ───────────── 主動提醒（PRO-1；核心給了 settings.proactive 才畫） ─────────────
+// 文字和 shared/proactive.ts 的 PROACTIVE_TEXT 相同（這個檔案由 App 直接執行，不能載入 .ts；tests/proactive.test.ts 核對兩邊一致）。
+// 地點、整點選項與天氣狀態都由核心給；勾選只代表保存的設定，天氣狀態只說最近一次查詢的結果（不含天氣內容）。
+
+export const PROACTIVE_TEXT = {
+  group: "主動提醒",
+  enabled: "早上招呼後主動提醒",
+  enabledNote: "每人每天在時段內第一次打招呼時，接一句今天的天氣；關掉就只打招呼",
+  weather: "說今天的天氣",
+  weatherNote: "天氣資料：Open-Meteo.com（CC BY 4.0）",
+  start: "時段開始",
+  end: "時段結束",
+  hour: "{0} 點",
+  place: "天氣地點",
+  auto: "依系統時區（{0}）",
+  autoNone: "依系統時區（推不出地點）",
+  noPlace: "還沒有地點：請選一個，否則不說天氣",
+  stateOk: "天氣：已取得今天的資料",
+  stateFailed: "天氣：上次查詢失敗，這次招呼不說天氣",
+  stateNone: "天氣：還沒查過（看著說話或喚醒時會先查）",
+  stateNoPlace: "天氣：沒有地點",
+  calendar: "認出 George 時說今天的行程",
+  calendarNote: "有行程先問「要不要我念今天的行程？」，說好才念；沒有行程直接說「今天沒有排行程」",
+  calOk: "行事曆：已讀到今天的行程",
+  calFailed: "行事曆：上次讀取失敗，這次不提行程",
+  calNone: "行事曆：還沒讀過（看著說話或喚醒時會先讀）",
+  calNotConnected: "行事曆：沒有連上 Google 日曆（CAL-1）",
+};
+
+const PROACTIVE_STATE_TEXT = { ok: PROACTIVE_TEXT.stateOk, failed: PROACTIVE_TEXT.stateFailed, none: PROACTIVE_TEXT.stateNone, no_place: PROACTIVE_TEXT.stateNoPlace };
+const CALENDAR_STATE_TEXT = { ok: PROACTIVE_TEXT.calOk, failed: PROACTIVE_TEXT.calFailed, none: PROACTIVE_TEXT.calNone, not_connected: PROACTIVE_TEXT.calNotConnected };
+
+/** 「主動提醒」分段：總開關、天氣開關、時段（開始／結束）、地點與天氣狀態。點選後 setProactive(patch) POST 到 proactive.write_path。 */
+export function proactiveMenu(proactive, { setProactive, translate = (source) => source }) {
+  const fill = (source, ...values) => translate(source, ...values).replace(/\{(\d+)\}/g, (match, i) => (Number(i) < values.length ? String(values[Number(i)]) : match));
+  const prefs = proactive.prefs;
+  const hour = (n) => fill(PROACTIVE_TEXT.hour, n);
+  const set = (patch) => () => void setProactive?.(patch);
+  const placeLabel = proactive.place ? translate(proactive.place.label) : null;
+  const autoLabel = proactive.place?.auto ? fill(PROACTIVE_TEXT.auto, placeLabel) : translate(PROACTIVE_TEXT.autoNone);
+  const current = prefs.place === null ? (proactive.place ? autoLabel : translate(PROACTIVE_TEXT.noPlace)) : placeLabel;
+  return [
+    { type: "separator" },
+    { label: translate(PROACTIVE_TEXT.group), enabled: false },
+    { label: translate(PROACTIVE_TEXT.enabled), type: "checkbox", checked: prefs.enabled, sublabel: translate(PROACTIVE_TEXT.enabledNote), click: set({ enabled: !prefs.enabled }) },
+    { label: translate(PROACTIVE_TEXT.weather), type: "checkbox", checked: prefs.weather, enabled: prefs.enabled, sublabel: translate(PROACTIVE_TEXT.weatherNote), click: set({ weather: !prefs.weather }) },
+    ...(proactive.calendar ? [{ label: translate(PROACTIVE_TEXT.calendar), type: "checkbox", checked: prefs.calendar !== false, enabled: prefs.enabled, sublabel: translate(PROACTIVE_TEXT.calendarNote), click: set({ calendar: prefs.calendar === false }) }] : []),
+    {
+      label: `${translate(PROACTIVE_TEXT.start)}${translate("：")}${hour(prefs.start_hour)}`,
+      submenu: proactive.start_hours.map((n) => radio(hour(n), n === prefs.start_hour, set({ start_hour: n }), n < prefs.end_hour)),
+    },
+    {
+      label: `${translate(PROACTIVE_TEXT.end)}${translate("：")}${hour(prefs.end_hour)}`,
+      submenu: proactive.end_hours.map((n) => radio(hour(n), n === prefs.end_hour, set({ end_hour: n }), n > prefs.start_hour)),
+    },
+    {
+      label: `${translate(PROACTIVE_TEXT.place)}${translate("：")}${current}`,
+      submenu: [
+        radio(autoLabel, prefs.place === null, set({ place: null })),
+        { type: "separator" },
+        ...proactive.places.map((p) => radio(translate(p.label), p.id === prefs.place, set({ place: p.id }))),
+      ],
+    },
+    { label: translate(PROACTIVE_STATE_TEXT[proactive.weather.state] ?? PROACTIVE_TEXT.stateNone), enabled: false },
+    ...(proactive.calendar ? [{ label: translate(CALENDAR_STATE_TEXT[proactive.calendar.state] ?? PROACTIVE_TEXT.calNone), enabled: false }] : []),
+  ];
+}
+
 /**
  * @param settings GET /api/settings 的回應（還沒讀到時是 null）
  * @param handlers command(name)：把選單動作交給頁面；setMenuPref(row, value)：POST { [row.key]: value } 到 row.write_path；
  *   openFamily(mode?)：「家人辨識…」與「校正人臉辨識…」（mode "calibrate"）。主程序先記下點擊時間，10 秒內頁面才能開管理 session，再交給頁面打開畫面；
  *   setWakeListen(value)、wakeReport：常駐喚醒聆聽（只有 settings.wake 存在時用到）；setVoiceNameTest(value)：SP-02a 只憑聲音叫名字的測試開關；
  *   setAudio(patch)、audioReport：「聲音」分段（settings.audio 存在時畫；patch 送到 settings.audio.write_path）
+ *   setProactive(patch)：「主動提醒」分段（settings.proactive 存在時畫；patch 送到 settings.proactive.write_path）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -359,6 +428,7 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
   closeGroup();
   if (settings.audio) items.push(...audioMenu(settings.audio, audioReport, { setAudio, translate }));
   if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused, translate }));
+  if (settings.proactive) items.push(...proactiveMenu(settings.proactive, { setProactive, translate }));
   return items;
 }
 

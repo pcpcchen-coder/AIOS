@@ -3,6 +3,9 @@ import { MockAdapter } from "./adapters/mock.ts";
 import { SpotifySoloistAdapter } from "./adapters/spotify-soloist.ts";
 import { createVoiceRelayAdapter, VoiceRelayAdapter } from "./adapters/voice-relay.ts";
 import { GmailGogAdapter, resolveGogPath } from "./adapters/gmail-gog.ts";
+import { HomeAdapter, type HomeBridgePort } from "./adapters/home.ts";
+import { GoogleCalendarAdapter } from "./adapters/google-calendar.ts";
+import { WeatherAdapter, type WeatherAdapterOptions } from "./adapters/weather.ts";
 import type { IntegrationAdapter } from "./contracts.ts";
 import { IntegrationDispatcher, type AuditEntry } from "./dispatcher.ts";
 import { IntegrationRegistry } from "./registry.ts";
@@ -19,15 +22,52 @@ export interface Integrations {
   voiceRelay?: VoiceRelayAdapter;
 }
 
-/** 已審核的 Adapter（ID → 建立方式，只拿核心設定）。回 null＝這次設定下不啟用（不註冊）。 */
-export type AdapterFactory = (config: Config["ail"], log: (line: string) => void) => IntegrationAdapter | null;
+/** 核心已經建立、要交給 Adapter 包裝的既有模組（AIL-2：HomeBridge）。 */
+export interface AdapterDeps {
+  home?: HomeBridgePort;
+  /** PRO-1：天氣快取與主動提醒設定的地點（核心一定建立；測試可以不給）。 */
+  weather?: WeatherAdapterOptions;
+}
+
+/** 已審核的 Adapter（ID → 建立方式，只拿核心設定與既有模組）。回 null＝這次設定下不啟用（不註冊）。 */
+export type AdapterFactory = (config: Config["ail"], log: (line: string) => void, deps: AdapterDeps) => IntegrationAdapter | null;
 
 export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
   mock: () => new MockAdapter(),
+  // AIL-2：武陵居家電的 Facade（/api/home/* 改經整合層，行為不變）。中控沒設定時不註冊，/api/home/* 照原本的路徑回 409。
+  home: (_config, log, deps) => {
+    if (!deps.home?.available) {
+      log("整合層：home 需要已設定的武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN），略過");
+      return null;
+    }
+    return new HomeAdapter(deps.home);
+  },
   // SP-1：只有本機健康狀態，沒有模型工具（SP-2 BLOCKED）。
   spotify_soloist: (config) => new SpotifySoloistAdapter({ port: config.soloistPort }),
   // VCR-0／VCR-1／VCR-2（docs/19）：NOUS_VCR=fake（假輸出，mock）或 mac（say 實際發聲，只限 macOS）才建立；否則回 null。
   voice_relay: (config, log) => createVoiceRelayAdapter(config, log),
+  // CAL-1：用 gog 讀寫自己的 Google 日曆（帳號只來自設定）。沒有帳號或找不到 gog 時不註冊，照實記 log。
+  google_calendar: (config, log) => {
+    const account = config.calendar?.account ?? null;
+    if (!account) {
+      log("整合層：google_calendar 需要 NOUS_GOG_ACCOUNT（或 NOUS_MAIL_SELF），略過");
+      return null;
+    }
+    const gogPath = resolveGogPath(config.calendar?.gogPath ?? null);
+    if (!gogPath) {
+      log("整合層：找不到 gog（/opt/homebrew/bin、/usr/local/bin；或設定 NOUS_GOG_PATH），google_calendar 略過");
+      return null;
+    }
+    return new GoogleCalendarAdapter({ account, gogPath, timeZone: config.calendar?.timeZone });
+  },
+  // PRO-1：今天的天氣（Open-Meteo，唯讀、沒有參數；地點只來自主動提醒設定）。
+  weather: (_config, log, deps) => {
+    if (!deps.weather) {
+      log("整合層：weather 需要核心的天氣快取，略過");
+      return null;
+    }
+    return new WeatherAdapter(deps.weather);
+  },
   // MAIL-1：用 gog 寄信給自己（收件人只來自 NOUS_MAIL_SELF）。沒有信箱或找不到 gog 時不註冊，照實記 log。
   gmail_gog: (config, log) => {
     const self = config.mail?.self ?? null;
@@ -44,7 +84,7 @@ export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
   },
 };
 
-export function createIntegrations(config: Config["ail"], log: (line: string) => void = () => undefined, known: Record<string, AdapterFactory> = KNOWN_ADAPTERS): Integrations | null {
+export function createIntegrations(config: Config["ail"], log: (line: string) => void = () => undefined, known: Record<string, AdapterFactory> = KNOWN_ADAPTERS, deps: AdapterDeps = {}): Integrations | null {
   if (!config.enabled) return null;
   const enabled = new Set(config.services.filter((id) => Object.hasOwn(known, id)));
   for (const id of config.services) if (!enabled.has(id)) log(`整合層：NOUS_AIL_SERVICES 的 ${id} 不是已審核的 Adapter，略過`);
@@ -53,7 +93,7 @@ export function createIntegrations(config: Config["ail"], log: (line: string) =>
   for (const id of enabled) {
     let adapter: IntegrationAdapter | null;
     try {
-      adapter = known[id]!(config, log);
+      adapter = known[id]!(config, log, deps);
     } catch (err) {
       // 建立失敗：記錄並略過這個 Adapter（fail closed），不讓 Nous 啟動失敗。
       log(`整合層：${id} 建立失敗，略過（${err instanceof Error ? err.message.slice(0, 200) : "unknown error"}）`);
