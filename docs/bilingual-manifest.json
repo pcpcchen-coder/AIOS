@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "ae468a3610a4fa690c3526378ed0a1cd59b0ce4b3b7f2af5ce479cf346cca91b",
-      "translationSha256": "c3390f0bedf39e240a86ef76e9df9087fb4f743ce067f3e6735e33cad01478e1"
+      "sourceSha256": "399475dc5c74fe36ebab4d8644f3f1c082c9317765f2cf1458257ff4245691ea",
+      "translationSha256": "546f21789aa1b6a41a9ad750c60437e3476ee5792c66b59e509eae7d9f73a640"
     },
     {
       "source": "docs/README.md",
@@ -249,15 +249,15 @@
       "source": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.md",
       "sourceLanguage": "en",
       "translation": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.zh-TW.md",
-      "sourceSha256": "6c5be41b222a467f60cf1bd60e23cd0b7bcc9674804aedaac30826c5c4fa5780",
-      "translationSha256": "84c4f0662cee2b2a4f3723e60c92011883fe4f5b57b36a0382bd7c28ffb717bf"
+      "sourceSha256": "d3ab75fbc22f2ab71fa7d9e5825cf2eb51e33e67eca18661e907d3002a04d534",
+      "translationSha256": "39eabcb49506f1bd1e703be377fcf0b67b03632300dd984571322a73f4ab304d"
     },
     {
       "source": "docs/experiments/RPI4_REMOTE_TERMINAL_TEST_PLAN.md",
       "sourceLanguage": "en",
       "translation": "docs/experiments/RPI4_REMOTE_TERMINAL_TEST_PLAN.zh-TW.md",
-      "sourceSha256": "6046331c64222478e1c212e2c4193247851d7eb28b510a967b1c820fe645148d",
-      "translationSha256": "ca84d6083aaf6265358330b4bcb43a814d805398fa13b3d56754c9c6b497726c"
+      "sourceSha256": "9b4595e7d3603f00fe2182d403b9b6bbf8289f8e62b0d214c1f9e3ff6daecc15",
+      "translationSha256": "59b9ec7e8cf6e5201b442652527f593b884e30db4471ea8a562a5670de73b1ee"
     },
     {
       "source": "docs/experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.md",
@@ -753,8 +753,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "64cf6f962f973ac4e47f8fa4f5f354159532942328cf1c76e8413c6533351d74",
-      "translationSha256": "6dca721280188f4469fe46e2d3b1a695e40092adfb2399a7e7940dd11d8ae2e7"
+      "sourceSha256": "9e5929d9c777b523506d58c7789958c29b51e07e9e4365e75ea937fe72ea490a",
+      "translationSha256": "16c0fd9e1380a3d1268f55b53bd1528663ec72bf94fae2a761b6da965bd13966"
     }
   ]
 }

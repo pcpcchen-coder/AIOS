@@ -42,7 +42,7 @@ Branch / commit: __________ (kit in `terminals/rpi4/`)
 - [ ] Phase 2 Mac peripherals remain unused
 - [ ] Phase 2 concurrent call from Mac window: message recorded
 - [ ] Phase 3 camera from Pi page: PASS / FAIL / NOT SUPPORTED
-- [ ] Phase 3 wake word on Pi: PASS / FAIL / NOT SUPPORTED
+- [ ] Phase 3 wake word on Pi (Pi microphone, Mac in service mode): PASS / FAIL
 - [ ] Phase 3 memory and family recognition on Pi: PASS / FAIL / NOT SUPPORTED
 
 ## aios-doctor output
@@ -59,7 +59,8 @@ Paste the full output at idle, with private IP addresses and user names removed.
 | Camera + Realtime 10 min | | | | | | | |
 
 Tunnel recovery: after kill ___ s; after cable unplug ___ s.  
-Wake word (only if supported): successes ___ / 20; false triggers ___ / 20 negative utterances.  
+Wake word on Pi: successes ___ / 20; false triggers ___ / 20 negative utterances.
+
 Audio: first response delay ___ s; dropouts ___; reconnections ___.
 
 ## Defects
