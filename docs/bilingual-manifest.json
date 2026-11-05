@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "3686e7803991d9939ce2e69bfdb48bc308f62ac3b40cdf0a36906e2cb6a08841",
-      "translationSha256": "ea4500c69747092a37e6536ab55c91b84f1ecf777336deb4901c2069abdc5763"
+      "sourceSha256": "009fb1aa21b0201c880d183f08f68e4c4f5ce4e175ec0fbd50fedbf6d458d582",
+      "translationSha256": "b208ed6881a72a74746976c0f1b8b5ea267005777ae33f8f54dfa40987a1fd51"
     },
     {
       "source": "docs/README.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "9d27f89bdbb3830a486bdf043f8fa8dd20aab8b49f5a1ab09fb0ef5e6504d86e",
-      "translationSha256": "d9a36a44dc00ab25d8a54c826c273c8b90fd0955f9cf1f50cdbee2bc1aaedf37"
+      "sourceSha256": "4ee9df7d9833277ed4e6abdd2bfd9f7a9f1b089a738a3ab9789ba7a7d7bececd",
+      "translationSha256": "a3e9218a038f2525e84e73a88c68cc1ea1461df82852886a9898d92c048e9740"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -617,6 +617,13 @@
       "translationSha256": "93d89c63a0bf10e294d075261af4d1872b0237b761776eec38a8bf44d8d8b950"
     },
     {
+      "source": "docs/validation/rpi-deployment-fixes-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/rpi-deployment-fixes-2026-11-05.en.md",
+      "sourceSha256": "68e317a71f845de61abc44070258d07d05cb417374d02292708e2fe80e14cbff",
+      "translationSha256": "07aaf3f28f695c083df97dd4497500434308ade573763ea4e80f27d4bd284bd1"
+    },
+    {
       "source": "docs/validation/service-mode-2026-11-03.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/service-mode-2026-11-03.en.md",
@@ -760,8 +767,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "6afc894c855fd84190943c1f228e8bed6436074703e7907022aa6c4473cf0826",
-      "translationSha256": "2393bd1948e011dbd29283035c903ccbebbdc3bbda2c67165f567e04e1eb4820"
+      "sourceSha256": "329e2da40df079e10c486a19e4374edb18ac5639c4876ee0f37a5ef098c377aa",
+      "translationSha256": "aa139208aa2a3a5d3eb12514d6773c04b3398eaa9edf99a10c5d52fecd7bcc75"
     }
   ]
 }

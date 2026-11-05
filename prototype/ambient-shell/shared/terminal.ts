@@ -1,3 +1,5 @@
+import type { EvidenceTiming } from "./identity.ts";
+
 // 終端機（例如 Raspberry Pi kiosk）連線狀態的共用常數與型別。
 // SSH 轉發的 TCP 連線在 Pi 消失後仍可能在 Mac 這端保持「開著」，SSE 連線狀態不能當成連線證據；
 // 只以頁面每 TERMINAL_HEARTBEAT_MS 送一次的應用層心跳為準，超過 TERMINAL_STALE_MS 沒收到就算斷線。
@@ -47,6 +49,30 @@ export const TERMINAL_IDENTITY_OPS = ["ambient_status", "ambient_probe", "greeti
  * 回應不含記憶內容（卡片、要送的聊天與建議都拿掉）。
  */
 export const TERMINAL_MEMORY_OPS = ["status", "suspend", "select", "card_view", "card_answer"] as const;
+
+/**
+ * 終端機頁面在 POST /api/terminal/identity 的信封（不是 IPC 的請求本身）回報的鏡頭狀態：頁面實際套用的「看著說話」三個設定
+ * （Pi 本機保存，src/terminal-camera.ts）與鏡頭是否真的在跑。核心依它決定這個終端機的同步辨識與稱名；Mac 主視窗照舊讀 camera.json。
+ */
+export interface TerminalPageReport {
+  camera_active: boolean;
+  look_to_talk: boolean;
+  look_to_talk_greet: boolean;
+  look_to_talk_greet_name: boolean;
+}
+
+export const TERMINAL_PAGE_KEYS = ["camera_active", "look_to_talk", "look_to_talk_greet", "look_to_talk_greet_name"] as const;
+
+/** 嚴格解析：四個欄位都要是 boolean、不能有別的欄位；不合格回 null。 */
+export function parseTerminalPageReport(value: unknown): TerminalPageReport | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length !== TERMINAL_PAGE_KEYS.length || !TERMINAL_PAGE_KEYS.every((key) => typeof record[key] === "boolean")) return null;
+  return { camera_active: record.camera_active as boolean, look_to_talk: record.look_to_talk as boolean, look_to_talk_greet: record.look_to_talk_greet as boolean, look_to_talk_greet_name: record.look_to_talk_greet_name as boolean };
+}
+
+export const TERMINAL_EVIDENCE_TIMING: Readonly<EvidenceTiming> = { gap_ms: 2000, fresh_ms: 2000 };
 
 /**
  * 終端機頁面（Pi）的效能保護（對話流暢優先）：感知迴圈與看著說話的取樣頻率減半。Mac 主視窗與一般瀏覽器照舊。

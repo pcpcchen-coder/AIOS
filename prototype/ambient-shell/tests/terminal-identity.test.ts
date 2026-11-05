@@ -21,7 +21,7 @@ import { validateIdentityRequest as ipcValidateIdentity } from "../desktop/ident
 import { validateMemoryRequest as ipcValidateMemory } from "../desktop/memory-ipc.mjs";
 import { IDENTITY_OPS, type FaceModelVersion, type IdentityResponse } from "../shared/identity.ts";
 import { MEMORY_OPS, type MemoryPresenceResponse, type MemoryRequest, type MemoryResponse, type MemoryStatusView } from "../shared/memory.ts";
-import { isTerminalId, MAIN_SOURCE, PAGE_PACE, pageSource, pageTerminal, TERMINAL_IDENTITY_OPS, TERMINAL_MEMORY_OPS } from "../shared/terminal.ts";
+import { isTerminalId, MAIN_SOURCE, PAGE_PACE, pageSource, pageTerminal, TERMINAL_IDENTITY_OPS, TERMINAL_MEMORY_OPS, type TerminalPageReport } from "../shared/terminal.ts";
 import { selectBridges } from "../src/identity-bridge.ts";
 import { fakeSecretBox, near, unitFeature } from "./fixtures/identity.ts";
 import { enable, harness, selectProfile, type Harness } from "./fixtures/memory-service.ts";
@@ -46,7 +46,9 @@ afterEach(() => {
 
 // ─────────────── 核心：證據依頁面分開 ───────────────
 
-function core() {
+const PI_ON: TerminalPageReport = { camera_active: true, look_to_talk: true, look_to_talk_greet: true, look_to_talk_greet_name: true };
+
+function core(camera: (source?: string) => boolean = () => true, runtime: ConstructorParameters<typeof IdentityService>[0]["runtime"] = { state: "ok", problems: [] }) {
   const clock = { now: 1_000_000 };
   const prefs: AmbientPrefs = { look_to_talk: true, look_to_talk_greet: true, look_to_talk_greet_name: true };
   const claims = new Map<string, { route: "api_key" | "live"; session_id: string }>();
@@ -58,13 +60,16 @@ function core() {
     },
     store: new GalleryStore({ dir: join(root, "identity"), secretBox: fakeSecretBox() }),
     confirm: async () => true,
-    camera: () => true,
+    camera,
     ambient: () => prefs,
-    runtime: { state: "ok", problems: [] },
+    runtime,
     model: MODEL,
     now: () => clock.now,
   });
-  return { svc, clock, claims };
+  // 和真的終端機頁面一樣（src/identity-bridge.ts）：每個終端機請求都附上頁面的鏡頭回報；預設鏡頭開、三個設定都開。
+  const handle = svc.handle.bind(svc);
+  svc.handle = (request, ctx = {}) => handle(request, ctx.source && ctx.source !== MAIN_SOURCE && !ctx.page ? { ...ctx, page: PI_ON } : ctx);
+  return { svc, clock, claims, prefs };
 }
 type Core = ReturnType<typeof core>;
 
@@ -81,10 +86,10 @@ async function enroll(c: Core, people: [string, Float32Array][]): Promise<void> 
 }
 
 /** 兩個頁面交錯送畫格（各自的 track 計數器都從 1 開始）。 */
-async function frames(c: Core, shots: { source: string; track: number; face: Float32Array | "multi" }[], rounds: number): Promise<void> {
+async function frames(c: Core, shots: { source: string; track: number; face: Float32Array | "multi" }[], rounds: number, stepMs = 150): Promise<void> {
   for (let i = 0; i < rounds; i++) {
     for (const s of shots) {
-      c.clock.now += 150;
+      c.clock.now += stepMs;
       const body = s.face === "multi" ? { face_count: 2, quality: "multi_face" } : { face_count: 1, quality: "ok", feature: Array.from(near(s.face, (i * 7 + s.track) % 997, 0.03)) };
       const res = await c.svc.handle({ op: "ambient_probe", track: s.track, model: MODEL, ...body }, { source: s.source });
       expect(res).toEqual({ ok: true, op: "ambient_probe" });
@@ -99,6 +104,122 @@ async function greet(c: Core, interaction: string, track: number, source?: strin
 const named = (res: IdentityResponse, name: string) => res.ok && res.op === "greeting" && typeof res.text === "string" && res.text.includes(name);
 
 describe("IdentityService keeps evidence per page (Mac main window vs. terminal)", () => {
+  it("terminal ambient recognition tolerates bounded slow frames while Mac retains its cadence", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE]]);
+    await frames(c, [{ source: "rpi4", track: 1, face: GEORGE }, { source: "main", track: 1, face: GEORGE }], 3, 600);
+    expect(named(await greet(c, id(92), 1, "rpi4"), "George")).toBe(true);
+    expect(named(await greet(c, id(93), 1), "George")).toBe(false);
+  });
+
+  it("terminal camera independence does not bypass missing models or a disabled camera feature", async () => {
+    for (const runtime of [{ state: "missing" as const, problems: ["missing"] }, { state: "hash_mismatch" as const, problems: ["hash"] }]) {
+      const c = core(() => true, runtime);
+      expect(c.svc.status("rpi4").limited_reason).not.toBeNull();
+      expect(await c.svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+    }
+    const c = core(() => false);
+    expect(c.svc.status("rpi4").limited_reason).not.toBeNull();
+    expect(await c.svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+  });
+
+  it("Pi recognition stays ready when its camera is local and the Mac camera is off", async () => {
+    let macActive = true;
+    const c = core((source = "main") => source !== "main" || macActive);
+    await enroll(c, [["George", GEORGE]]);
+    macActive = false;
+    await c.svc.handle({ op: "ambient_status" }, { source: "rpi4" });
+    expect(c.svc.status().limited_reason).not.toBeNull();
+    expect(c.svc.status("rpi4").limited_reason).toBeNull();
+    expect(await c.svc.handle({ op: "ambient_status" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+    expect(await c.svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: true });
+    await frames(c, [{ source: "rpi4", track: 1, face: GEORGE }], 6);
+    expect(named(await greet(c, id(91), 1, "rpi4"), "George")).toBe(true);
+    expect((await c.svc.handle({ op: "open_session" }, { userInitiated: true })).ok).toBe(true);
+    expect(await c.svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+  });
+
+  it("a terminal's naming follows its own page report, not the Mac's camera.json; the Mac ignores terminal reports", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE]]);
+    await frames(c, [{ source: "rpi4", track: 1, face: GEORGE }, { source: "main", track: 1, face: GEORGE }], 6);
+    const piOff: TerminalPageReport = { ...PI_ON, look_to_talk_greet_name: false };
+    c.claims.set(id(20), { route: "api_key", session_id: "rt_20" });
+    const off = await c.svc.handle({ op: "greeting", interaction: id(20), track: 1, eligible: true, route: "api_key" }, { source: "rpi4", page: piOff });
+    expect(off.ok).toBe(true);
+    expect(named(off, "George")).toBe(false);
+    expect(await c.svc.handle({ op: "ambient_status" }, { source: "rpi4", page: piOff })).toEqual({ ok: true, op: "ambient_status", ready: false });
+    // 終端機的回報不影響 Mac：Mac 照 camera.json 稱名。
+    expect(named(await greet(c, id(21), 1), "George")).toBe(true);
+
+    c.clock.now += 61_000;
+    c.prefs.look_to_talk_greet_name = false;
+    await frames(c, [{ source: "rpi4", track: 2, face: GEORGE }], 6);
+    expect(named(await greet(c, id(22), 2, "rpi4"), "George")).toBe(true);
+    expect(await c.svc.handle({ op: "ambient_probe", track: 2, model: MODEL, face_count: 1, quality: "ok", feature: Array.from(near(GEORGE, 1)) })).toMatchObject({ ok: false, code: "unavailable" });
+    expect(named(await greet(c, id(23), 2), "George")).toBe(false);
+    expect(await c.svc.handle({ op: "ambient_status" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+  });
+
+  it("a pending live greeting drops the name when that terminal's report turns naming off before pickup", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE]]);
+    await frames(c, [{ source: "rpi4", track: 1, face: GEORGE }], 6);
+    c.claims.set(id(40), { route: "live", session_id: "rt_40" });
+    expect(await c.svc.handle({ op: "greeting", interaction: id(40), track: 1, eligible: true, route: "live" }, { source: "rpi4" })).toEqual({ ok: true, op: "greeting", text: null });
+    await c.svc.handle({ op: "ambient_status" }, { source: "rpi4", page: { ...PI_ON, look_to_talk_greet_name: false } });
+    const taken = c.svc.takeLiveGreeting(id(40), "rt_40");
+    expect(taken?.named).toBe(false);
+    expect(taken?.text).not.toContain("George");
+  });
+
+  it("a terminal without a report is not ready and never named; its camera report decides settings and ambient readiness", async () => {
+    const changes = vi.fn();
+    const clock = { now: 1_000_000 };
+    const svc = new IdentityService({
+      store: new GalleryStore({ dir: join(root, "identity"), secretBox: fakeSecretBox() }),
+      confirm: async () => true,
+      camera: () => true,
+      ambient: () => ({ look_to_talk: true, look_to_talk_greet: true, look_to_talk_greet_name: true }),
+      claimGreeting: (interaction) => ({ route: "api_key", session_id: `rt_${interaction.slice(4)}` }),
+      runtime: { state: "ok", problems: [] },
+      model: MODEL,
+      now: () => clock.now,
+      onChange: changes,
+    });
+    const opened = await svc.handle({ op: "open_session" }, { userInitiated: true });
+    if (!opened.ok || !("session" in opened)) throw new Error(JSON.stringify(opened));
+    await svc.handle({ op: "enroll", session: opened.session, name: "George", minor: false, guardian_confirmed: false, consent: true, model: MODEL, samples: Array.from({ length: 6 }, (_, i) => Array.from(near(GEORGE, i + 1))) });
+    await svc.handle({ op: "close_session", session: opened.session });
+    changes.mockClear();
+
+    expect(svc.status("kitchen").limited_reason).not.toBeNull();
+    expect(await svc.handle({ op: "ambient_status" }, { source: "kitchen" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+    expect(await svc.handle({ op: "ambient_probe", track: 1, model: MODEL, face_count: 1, quality: "ok", feature: Array.from(near(GEORGE, 1)) }, { source: "kitchen" })).toMatchObject({ ok: false, code: "unavailable" });
+    const unreported = await svc.handle({ op: "greeting", interaction: id(30), track: 1, eligible: true, route: "api_key" }, { source: "kitchen" });
+    expect(named(unreported, "George")).toBe(false);
+
+    const cameraOff: TerminalPageReport = { ...PI_ON, camera_active: false };
+    expect(await svc.handle({ op: "ambient_status" }, { source: "kitchen", page: cameraOff })).toEqual({ ok: true, op: "ambient_status", ready: false });
+    expect(svc.status("kitchen").limited_reason).toContain("鏡頭");
+    expect(changes).not.toHaveBeenCalled();
+
+    expect(await svc.handle({ op: "ambient_status" }, { source: "kitchen", page: PI_ON })).toEqual({ ok: true, op: "ambient_status", ready: true });
+    expect(svc.status("kitchen").limited_reason).toBeNull();
+    expect(changes).toHaveBeenCalledTimes(1);
+    await svc.handle({ op: "ambient_status" }, { source: "kitchen", page: PI_ON });
+    expect(changes).toHaveBeenCalledTimes(1);
+
+    // Mac 主視窗的請求帶了回報也不看；其他終端機仍是沒回報。
+    expect(await svc.handle({ op: "ambient_status" }, { page: cameraOff })).toEqual({ ok: true, op: "ambient_status", ready: true });
+    expect(svc.status().limited_reason).toBeNull();
+    expect(svc.status("rpi4").limited_reason).not.toBeNull();
+
+    await svc.handle({ op: "ambient_status" }, { source: "kitchen", page: cameraOff });
+    expect(changes).toHaveBeenCalledTimes(2);
+    expect(svc.status("kitchen").limited_reason).not.toBeNull();
+  });
+
   it("the same track number on two pages does not collide: each page is greeted by its own face", async () => {
     const c = core();
     await enroll(c, [["George", GEORGE], ["Mary", MARY]]);
@@ -220,7 +341,8 @@ describe("IdentityService keeps evidence per page (Mac main window vs. terminal)
     await svc.handle({ op: "enroll", session: opened.session, name: "George", minor: false, guardian_confirmed: false, consent: true, model: MODEL, samples: Array.from({ length: 6 }, (_, i) => Array.from(near(GEORGE, i + 1))) });
     await svc.handle({ op: "close_session", session: opened.session });
     wakeOn.add("rpi4");
-    expect(await svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: true });
+    const page: TerminalPageReport = { camera_active: true, look_to_talk: false, look_to_talk_greet: false, look_to_talk_greet_name: true };
+    expect(await svc.handle({ op: "ambient_status" }, { source: "rpi4", page })).toEqual({ ok: true, op: "ambient_status", ready: true });
     expect(await svc.handle({ op: "ambient_status" })).toEqual({ ok: true, op: "ambient_status", ready: false });
     expect(await svc.handle({ op: "ambient_probe", track: 1, model: MODEL, face_count: 0, quality: "no_face" })).toMatchObject({ ok: false, code: "unavailable" });
   });
@@ -401,6 +523,25 @@ describe("POST /api/terminal/identity (server/terminal-routes.ts)", () => {
       expect(port.calls).toEqual([]);
     }
   });
+
+  it("the envelope's page report is passed to the core as-is; only exactly four booleans are accepted", async () => {
+    const port = identityPort();
+    expect((await terminalIdentity(port, { terminal: "kitchen", request: { op: "ambient_status" }, page: PI_ON })).status).toBe(200);
+    expect(port.calls).toEqual([{ request: { op: "ambient_status" }, ctx: { userInitiated: false, source: "kitchen", page: PI_ON } }]);
+    const bad: unknown[] = [
+      null, [], "on", true,
+      { ...PI_ON, camera_active: "true" },
+      { ...PI_ON, look_to_talk_greet_name: 1 },
+      { ...PI_ON, extra: false },
+      { camera_active: true, look_to_talk: true, look_to_talk_greet: true },
+    ];
+    for (const page of bad) {
+      const refused = identityPort();
+      const out = await terminalIdentity(refused, { terminal: "rpi4", request: { op: "ambient_status" }, page });
+      expect(out.status, JSON.stringify(page)).toBe(400);
+      expect(refused.calls).toEqual([]);
+    }
+  });
 });
 
 const presence = { state: "selected" as const, epoch: 3, select_card: "mc_000000000000000000000003", profile: "profile_0123456789abcdef", name: "George", reason: null };
@@ -503,7 +644,7 @@ describe("POST /api/terminal/memory (server/terminal-routes.ts)", () => {
 
 // ─────────────── HTTP（createApp） ───────────────
 
-let server: (Server & { notifyMemoryPresence(): void }) | null = null;
+let server: (Server & { notifyMemoryPresence(): void; notifySettings(): void }) | null = null;
 afterEach(async () => {
   if (server) await new Promise((r) => server!.close(r));
   server = null;
@@ -528,6 +669,25 @@ const post = (base: string, path: string, body: unknown) => fetch(`${base}${path
 const AVAILABLE = { available: true, disabled_reason: null, limited_reason: null };
 
 describe("HTTP routes", () => {
+  it("HTTP and SSE settings preserve each page's identity availability", async () => {
+    const base = await startApp({ identity: { status: (source = "main") => ({ ...AVAILABLE, limited_reason: source === "rpi4" ? null : "camera off" }) } });
+    const status = async (headers = {}) => (await (await fetch(`${base}/api/settings`, { headers })).json()).identity.limited_reason;
+    expect(await status()).toBe("camera off");
+    expect(await status({ "X-Nous-Terminal": "rpi4" })).toBeNull();
+    const updated = await fetch(`${base}/api/settings/provider`, { method: "POST", headers: { "Content-Type": "application/json", "X-Nous-Terminal": "rpi4" }, body: JSON.stringify({ provider: "mock" }) });
+    expect(updated.status).toBe(200);
+    expect((await updated.json()).identity.limited_reason).toBeNull();
+    for (const [query, expected] of [["", "camera off"], ["?terminal=rpi4", null], ["?terminal=bad!", "camera off"]]) {
+      const res = await fetch(`${base}/api/events${query}`);
+      const reader = res.body!.getReader();
+      const event = async () => JSON.parse(new TextDecoder().decode((await reader.read()).value).replace(/^data: /, "").trim());
+      expect((await event()).settings.identity.limited_reason).toBe(expected);
+      server!.notifySettings();
+      expect((await event()).settings.identity.limited_reason).toBe(expected);
+      await reader.cancel();
+    }
+  });
+
   it("404 when this core has no identity or memory (browser `npm start`), same as before", async () => {
     const base = await startApp({ identity: { status: () => AVAILABLE } });
     expect((await post(base, "/api/terminal/identity", { terminal: "rpi4", request: { op: "ambient_status" } })).status).toBe(404);
@@ -584,14 +744,39 @@ describe("page bridges (src/identity-bridge.ts)", () => {
     expect(pi.terminal).toBe("rpi4");
     await pi.identity!({ op: "ambient_status" });
     await pi.memory!({ op: "select", profile: null, card: presence.select_card });
-    expect(h.identity).toHaveBeenCalledWith("rpi4", { op: "ambient_status" });
+    expect(h.identity).toHaveBeenCalledWith("rpi4", { op: "ambient_status" }, undefined);
     expect(h.memory).toHaveBeenCalledWith("rpi4", { op: "select", profile: null, card: presence.select_card });
 
     for (const search of ["", "?terminal=", "?terminal=RPI4", "?lang=en"]) {
-      expect(selectBridges({ desktop: undefined, search, http: h }), search).toEqual({ terminal: null, identity: null, memory: null });
+      expect(selectBridges({ desktop: undefined, search, http: h }), search).toEqual({ terminal: null, identity: null, memory: null, syncPage: null });
     }
     // 舊版 App 沒有 identity／memory：仍是 null（不改走 HTTP）。
-    expect(selectBridges({ desktop: {}, search: "?terminal=rpi4", http: h })).toEqual({ terminal: null, identity: null, memory: null });
+    expect(selectBridges({ desktop: {}, search: "?terminal=rpi4", http: h })).toEqual({ terminal: null, identity: null, memory: null, syncPage: null });
+  });
+
+  it("a terminal page attaches its camera report to every identity request and re-sends it only when it changes (or on force)", async () => {
+    const h = http();
+    let page: TerminalPageReport = { ...PI_ON, camera_active: false };
+    const pi = selectBridges({ desktop: undefined, search: "?terminal=kitchen", page: () => page, http: h });
+    await pi.identity!({ op: "ambient_status" });
+    expect(h.identity).toHaveBeenLastCalledWith("kitchen", { op: "ambient_status" }, { ...PI_ON, camera_active: false });
+    pi.syncPage!();
+    expect(h.identity).toHaveBeenCalledTimes(1);
+    page = PI_ON;
+    pi.syncPage!();
+    expect(h.identity).toHaveBeenCalledTimes(2);
+    expect(h.identity).toHaveBeenLastCalledWith("kitchen", { op: "ambient_status" }, PI_ON);
+    pi.syncPage!();
+    expect(h.identity).toHaveBeenCalledTimes(2);
+    pi.syncPage!(true);
+    expect(h.identity).toHaveBeenCalledTimes(3);
+
+    const failing = vi.fn(async () => { throw new Error("offline"); });
+    const down = selectBridges({ desktop: undefined, search: "?terminal=rpi4", page: () => PI_ON, http: { identity: failing, memory: h.memory } });
+    expect(await down.identity!({ op: "ambient_status" })).toMatchObject({ ok: false, code: "unavailable" });
+    down.syncPage!();
+    expect(failing).toHaveBeenCalledTimes(2);
+    expect(selectBridges({ desktop: { identity: vi.fn() }, search: "?terminal=rpi4", page: () => PI_ON, http: h }).syncPage).toBeNull();
   });
 
   it("an HTTP failure becomes an honest unavailable response instead of a thrown error", async () => {
@@ -613,6 +798,11 @@ describe("page bridges (src/identity-bridge.ts)", () => {
         ["/api/terminal/identity", "POST", { terminal: "rpi4", request: { op: "ambient_status" } }],
         ["/api/terminal/memory", "POST", { terminal: "rpi4", request: { op: "card_answer", card: CARD, choice: "decline" } }],
       ]);
+      fetch.mockClear();
+      const reporting = selectBridges({ desktop: undefined, search: "?terminal=rpi4", page: () => PI_ON, http: { identity: api.terminalIdentity, memory: api.terminalMemory } });
+      await reporting.identity!({ op: "ambient_status" });
+      const [path, init] = (fetch.mock.calls as unknown as [string, RequestInit][])[0]!;
+      expect([path, JSON.parse(String(init.body))]).toEqual(["/api/terminal/identity", { terminal: "rpi4", request: { op: "ambient_status" }, page: PI_ON }]);
     } finally {
       vi.unstubAllGlobals();
     }
@@ -656,7 +846,11 @@ describe("page bridges (src/identity-bridge.ts)", () => {
 
   it("main.ts wires the bridges: ambient, wake voice, presence notice, person picker and presence label use them; enrollment and memory management stay desktop-only", () => {
     const main = readFileSync(join(src, "main.ts"), "utf8");
-    expect(main).toContain("const bridges = selectBridges({ desktop: window.nousDesktop, search: location.search, http: { identity: api.terminalIdentity, memory: api.terminalMemory } });");
+    expect(main).toContain("const bridges = selectBridges({ desktop: window.nousDesktop, search: location.search, page: terminalPageReport, http: { identity: api.terminalIdentity, memory: api.terminalMemory } });");
+    expect(main).toMatch(/function terminalPageReport\(\): TerminalPageReport \{\n {2}const cam = settings\?\.camera;\n {2}return \{ camera_active: pipeline\?\.running === true,/);
+    expect(main).toContain('if (event.type === "sensor") bridges.syncPage?.();');
+    expect(main).toMatch(/applyFacingTuning\(\);\n {2}bridges\.syncPage\?\.\(\);/);
+    expect(main).toContain("bridges.syncPage?.(true);\n  return api.terminalHeartbeat(terminal);");
     expect(main).toMatch(/const ambient = new AmbientIdentity\(\{\n {2}bridge: identityBridge \? \{ identity: identityBridge \} : null,/);
     expect(main).toMatch(/return !!identityBridge && !!cam\?\.enabled/);
     expect(main).toMatch(/const sendIdentity = identityBridge;\n {4}if \(sendIdentity && !wakeVoice\) \{/);
@@ -682,7 +876,7 @@ describe("page bridges (src/identity-bridge.ts)", () => {
     const main = readFileSync(join(src, "main.ts"), "utf8");
     expect(main).toContain("const pagePace = bridges.terminal !== null ? PAGE_PACE.terminal : PAGE_PACE.main;");
     expect(main).toContain("intervalMs: pagePace.identitySampleMs,");
-    expect(main).toContain("new SensePipeline(settings.camera, (event) => sense.handle(event), { frameIntervalMs: pagePace.senseFrameMs })");
+    expect(main).toMatch(/new SensePipeline\(settings\.camera, \(event\) => \{\n {4}sense\.handle\(event\);\n[^\n]*\n {2}\}, \{ frameIntervalMs: pagePace\.senseFrameMs \}\)/);
   });
 });
 

@@ -1,3 +1,4 @@
+import { TERMINAL_CAMERA_SCOPE } from "./terminal-camera.ts";
 import { WITHDRAWN_TEXT } from "./protected-tasks.ts";
 import { t, msg, getLocale, setLocale, useLocale, uiText } from "./i18n.ts";
 import DOMPurify from "dompurify";
@@ -365,6 +366,7 @@ export function renderError(task: Task, actions: ViewActions): HTMLElement {
 // ───────────── 設定（AI 引擎） ─────────────
 
 export interface SettingsRenderOptions {
+  terminalCamera?: boolean;
   /**
    * 在 macOS App 裡（頁面有 window.nousDesktop）：設定以選單列為主體，這頁只留帳號與登入和狀態，
    * 不畫和選單列重複的引擎選擇、即時語音路徑與聲音、語音秒數、鏡頭與手勢。瀏覽器版（false）畫完整的設定畫面。
@@ -455,7 +457,7 @@ export function renderSettings(
     settings.realtime && renderRealtimeSettings(settings.realtime, actions),
     h("p", { class: "muted small" }, t("新交辦的任務會用目前選擇的引擎；已在執行的任務不受影響。")),
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
-    settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
+    settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions, !!options.terminalCamera),
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
@@ -859,7 +861,7 @@ export function renderProactiveSettings(view: ProactiveSettingsView, actions: Vi
 }
 
 /** 鏡頭與手勢：逐項走 CAMERA_PREFS（順序、標籤、提示、範圍都從那裡來）。 */
-function renderCameraSettings(camera: CameraSettings, realtimeAvailable: boolean, actions: ViewActions): HTMLElement {
+function renderCameraSettings(camera: CameraSettings, realtimeAvailable: boolean, actions: ViewActions, terminal = false): HTMLElement {
   const title = h("h3", {}, t("鏡頭與手勢"));
   if (!camera.enabled) {
     return h("section", { class: "camera-settings" }, title, h("p", { class: "muted small" }, t("鏡頭未啟用（.env 設定 NOUS_CAMERA=on 後重新啟動）。")));
@@ -900,6 +902,7 @@ function renderCameraSettings(camera: CameraSettings, realtimeAvailable: boolean
     "section",
     { class: "camera-settings" },
     title,
+    terminal && h("p", { class: "muted small" }, t(TERMINAL_CAMERA_SCOPE)),
     list,
     h("div", { class: "actions" }, button(t("顯示鏡頭畫面"), actions.openCameraPreview)),
     h(

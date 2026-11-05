@@ -975,5 +975,8 @@
   "Google 日曆（gog）": "Google Calendar (gog)",
   "「可用」只代表 Mac 上的 gog 能執行；有沒有授權 Google 日曆，要看查行程的結果。": "“Available” only means gog runs on the Mac; whether Google Calendar is authorized shows in the result of reading events.",
   "家人辨識：登記與管理請在 Mac 的 Nous App 進行（這台終端機只用來認人）。": "Family recognition: enroll and manage family members in the Nous App on the Mac (this terminal only recognizes people).",
-  "記憶：管理請在 Mac 的 Nous App 進行（這台終端機只顯示正在用誰的記憶）。": "Memory: manage memory in the Nous App on the Mac (this terminal only shows whose memory is in use)."
+  "記憶：管理請在 Mac 的 Nous App 進行（這台終端機只顯示正在用誰的記憶）。": "Memory: manage memory in the Nous App on the Mac (this terminal only shows whose memory is in use).",
+  "鏡頭設定只套用到這台 Pi。影像在 Pi 本機處理，不保存、不上傳；鏡頭權限由 Chromium 詢問。": "Camera settings apply only to this Pi. Images are processed on this Pi without saving or upload. Chromium asks for camera permission.",
+  "Pi 鏡頭設定沒有保存，請確認瀏覽器允許本機儲存。": "Pi camera settings were not saved. Check that the browser allows local storage.",
+  "鏡頭已在這個視窗關閉，但設定沒有保存；重新開啟頁面可能沿用上次設定。": "The camera is off in this window, but the setting was not saved. Reopening the page may restore the previous setting."
 }

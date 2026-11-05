@@ -208,7 +208,15 @@ describe("speakableName (I11：名稱注入)", () => {
     expect(greetingSentence(null)).toBe("我在");
     const longest = "王".repeat(16);
     expect(speakableName(longest)).toBe(longest);
-    for (const t of GREETING_TEMPLATES.filter((x) => x.named)) expect(Buffer.byteLength(liveGreetingText(t.render(longest)))).toBeLessThanOrEqual(500);
+    for (const locale of ["zh-TW", "en"] as const) {
+      for (const name of [longest, "𠀀".repeat(16)]) {
+        expect(speakableName(name)).toBe(name);
+        for (const template of GREETING_TEMPLATES.filter((x) => x.named)) {
+          const sentence = locale === "en" ? `Good evening, ${name}` : template.render(name);
+          expect(Buffer.byteLength(liveGreetingText(sentence, locale))).toBeLessThanOrEqual(500);
+        }
+      }
+    }
   });
 
   it("time slots (this computer's time zone, as home-bridge): 5–11 morning, 11–18 afternoon, 18+ evening; others none", () => {

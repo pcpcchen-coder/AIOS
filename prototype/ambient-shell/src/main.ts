@@ -8,6 +8,7 @@ import { ConversationSession } from "./conversation.ts";
 import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf, type SenseSnapshot } from "./sense/controller.ts";
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
+import { TerminalCameraPrefs } from "./terminal-camera.ts";
 import { formatSeconds } from "../shared/prefs.ts";
 import { DEFAULT_VOICE_PREFS, idleTimeoutsMs, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import {
@@ -36,7 +37,7 @@ import { matchVoiceCommand, RealtimeLocalCommands } from "./voice-command.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { startTerminalHeartbeat } from "./terminal-heartbeat.ts";
 import { selectBridges } from "./identity-bridge.ts";
-import { PAGE_PACE } from "../shared/terminal.ts";
+import { PAGE_PACE, type TerminalPageReport } from "../shared/terminal.ts";
 import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
 import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
@@ -135,7 +136,12 @@ declare global {
  * RPI-ID：家人辨識與記憶的傳輸。Mac 主視窗是 IPC；Pi 等終端機頁面是 HTTP（只有認人與「正在用 X 的記憶」「不是我」）；
  * 一般瀏覽器是 null。登記、校準、記憶管理、打字聊天的記憶與記憶建議仍只看 window.nousDesktop。
  */
-const bridges = selectBridges({ desktop: window.nousDesktop, search: location.search, http: { identity: api.terminalIdentity, memory: api.terminalMemory } });
+const bridges = selectBridges({ desktop: window.nousDesktop, search: location.search, page: terminalPageReport, http: { identity: api.terminalIdentity, memory: api.terminalMemory } });
+/** 終端機頁面給核心的鏡頭回報：這個頁面實際套用的設定（Pi 本機的鏡頭設定）與鏡頭是否真的在跑。 */
+function terminalPageReport(): TerminalPageReport {
+  const cam = settings?.camera;
+  return { camera_active: pipeline?.running === true, look_to_talk: cam?.look_to_talk === true, look_to_talk_greet: cam?.look_to_talk_greet === true, look_to_talk_greet_name: cam?.look_to_talk_greet_name === true };
+}
 const identityBridge = bridges.identity;
 const presenceBridge = bridges.memory;
 /** Pi 的效能保護（對話流暢優先）：終端機頁面的感知迴圈與同步辨識取樣頻率減半。 */
@@ -243,6 +249,7 @@ const artifactErrors = new Map<string, string>();
 const userRequestIds = new Set<string>();
 let shell: ShellState = initialShell;
 let settings: SettingsView | null = null;
+const terminalCamera = new TerminalCameraPrefs({ search: location.search, desktop: !!window.nousDesktop, storage: () => localStorage });
 /** applySettings 收到不同的設定就加一；連同每次載入頁面不同的 pageLoadId 回報給 App（重新整理後版本重算也不會撞號）。 */
 let settingsRevision = 0;
 const pageLoadId = Math.random().toString(36).slice(2, 10);
@@ -814,6 +821,10 @@ function accountKey(value: SettingsView): string {
 }
 
 function applySettings(value: SettingsView, preserveEntry = false): void {
+  applyEffectiveSettings(terminalCamera.receive(value), preserveEntry);
+}
+
+function applyEffectiveSettings(value: SettingsView, preserveEntry = false): void {
   if (settings && (settings.provider !== value.provider || accountKey(settings) !== accountKey(value))) {
     const expectedSelection = settings.provider !== "chatgpt" && value.provider === "chatgpt"
       && pendingProviderSelection?.epoch === conversationEpoch
@@ -834,6 +845,7 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
   if (value.camera && wasActive !== undefined && value.camera.active !== wasActive) cameraFailed = false;
   syncCamera();
   applyFacingTuning();
+  bridges.syncPage?.();
   // 設定或家人辨識狀態改變：看著說話時的同步辨識重新向核心確認（不中斷正在進行的取樣）。
   ambient.refresh();
   syncWake(value.wake);
@@ -1783,7 +1795,10 @@ async function startCamera(): Promise<void> {
   const { SensePipeline } = await import("./sense/pipeline.ts");
   // 載入模組期間可能已收到「鏡頭關掉」。
   if (servicePaused || !settings?.camera || !cameraShouldRun(settings.camera, cameraOffPending, cameraFailed)) return;
-  pipeline ??= new SensePipeline(settings.camera, (event) => sense.handle(event), { frameIntervalMs: pagePace.senseFrameMs });
+  pipeline ??= new SensePipeline(settings.camera, (event) => {
+    sense.handle(event);
+    if (event.type === "sensor") bridges.syncPage?.();
+  }, { frameIntervalMs: pagePace.senseFrameMs });
   applyFacingTuning();
   await pipeline.start();
   if (servicePaused) pipeline.stop();
@@ -1794,6 +1809,24 @@ async function startCamera(): Promise<void> {
  * 「關掉」先在本機釋放鏡頭再送出，不等網路。回傳失敗說明；成功時為 null。
  */
 async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null> {
+  if (terminalCamera.local) {
+    if (patch.active === false) {
+      cameraOffPending = true;
+      pipeline?.stop();
+    }
+    try {
+      const result = terminalCamera.update(patch);
+      if (patch.active === true && !result.error) {
+        cameraOffPending = false;
+        cameraFailed = false;
+      }
+      applyEffectiveSettings(result.settings);
+      render();
+      return result.error;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  }
   if (patch.active === true && settings?.camera?.enable_via === "app") {
     // App：打開不經 HTTP（核心回 403）。其他鍵照常保存，鏡頭交給 App 主程序的原生說明。
     const { active: _active, ...rest } = patch;
@@ -1832,6 +1865,7 @@ async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null
  * 在核心保存之前不在本機啟動鏡頭：syncCamera 只看核心回報的設定，取消時什麼都不變。
  */
 async function enableCamera(): Promise<string | null> {
+  if (terminalCamera.local) return updateCameraPrefs({ active: true });
   if (settings?.camera?.active && !cameraOffPending) {
     // 已經是開：不必再問，只在上次啟動失敗時重試。
     cameraFailed = false;
@@ -3242,7 +3276,7 @@ function renderSurface(): void {
     ensureIntegrationStatus();
     // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
     ensureVoiceRelay();
-    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats() } });
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats() } });
   }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));
@@ -3457,7 +3491,11 @@ window.nousDesktop?.onService?.((event) => {
   render();
 });
 // 終端機（Pi kiosk，網址帶 ?terminal=）的心跳：Mac 選單列的「Pi 已連線」只以這個為準。
-startTerminalHeartbeat({ desktop: !!window.nousDesktop, search: location.search, send: (terminal) => api.terminalHeartbeat(terminal) });
+// 心跳時也重送鏡頭回報：核心重新啟動後會忘記回報，頁面的設定卻沒變。
+startTerminalHeartbeat({ desktop: !!window.nousDesktop, search: location.search, send: (terminal) => {
+  bridges.syncPage?.(true);
+  return api.terminalHeartbeat(terminal);
+} });
 onSpeechActivity((speaking) => {
   if (speaking) wake?.begin("speech");
   else wake?.end("speech");
