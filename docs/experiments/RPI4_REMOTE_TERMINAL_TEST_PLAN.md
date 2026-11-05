@@ -83,9 +83,9 @@ Note: cloud model compute remains remote; local audio capture/encoding and the b
 
 1. Attach a USB camera to the Pi; `aios-doctor` lists it (or run `v4l2-ctl --list-devices`).
 2. Try to turn on the camera from the Pi page (the doctor ignores the Pi's built-in codec nodes, so it lists only real cameras). Expected from code: refused (HTTP 403) because the App core uses strict camera mode. Record PASS / FAIL / NOT SUPPORTED, and do not bypass it.
-3. Check whether wake controls appear on the Pi page. Expected: wake can only be turned on from the App menu and listens on the Mac's microphone. Record the outcome.
+3. Wake word on the Pi (corrected 2026-11-05). The switch is in the Mac App menu, but the Pi page listens with the Pi microphone. With the Mac in service mode, say "Hello Nous" near the Pi 20 times from varied positions and 20 negative utterances; record hits, false triggers, and that the call starts on the Pi. Then leave service mode and say it once to record whether both devices wake.
 4. Check memory and family recognition on the Pi page. Expected: not available in the browser page. Record the outcome.
-5. Only if something above unexpectedly works, test it properly: 20 wake attempts plus 20 negative utterances; camera + voice for 10 min.
+5. Only if the camera unexpectedly works, test camera + voice for 10 min.
 
 **Pass:** each item recorded explicitly as PASS / FAIL / NOT SUPPORTED. No downgrade of privacy or plaintext fallback. These gaps belong to RPI-2 (trusted terminal pairing).
 
