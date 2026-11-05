@@ -103,23 +103,23 @@ async function core(facade: boolean, opts: { configured?: boolean; mode?: () => 
   servers.push(server);
   await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
   const base = `http://localhost:${port}`;
-  const post = async (path: string, body: unknown) => {
-    const res = await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const post = async (path: string, body: unknown, locale?: string) => {
+    const res = await fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", ...(locale ? { "X-Nous-Locale": locale } : {}) }, body: JSON.stringify(body) });
     return { status: res.status, body: (await res.json()) as unknown };
   };
   return { post, hub, ail, audit, base, advance: (ms: number) => void (clock += ms) };
 }
 
-type Step = [path: string, body: unknown] | ["advance", number];
+type Step = [path: string, body: unknown, locale?: string] | ["advance", number];
 
 /** 同一組步驟在 facade 關、開各跑一次：每一步的狀態碼與內容、中控收到的請求都要相同。 */
 async function sameBothWays(steps: Step[], opts: Parameters<typeof core>[1] = {}) {
   const run = async (facade: boolean) => {
     const c = await core(facade, opts);
     const out: unknown[] = [];
-    for (const [path, body] of steps) {
+    for (const [path, body, locale] of steps) {
       if (path === "advance") c.advance(body as number);
-      else out.push(await c.post(path, body));
+      else out.push(await c.post(path, body, locale));
     }
     return { out, hub: c.hub.seen, ail: c.ail, audit: c.audit.filter((l) => l.includes("app.home.")) };
   };
@@ -212,6 +212,29 @@ describe("AIL-2 home Facade: HTTP responses and hub traffic identical with and w
     await sameBothWays([["/api/home/status", { target: "客廳" }], ["/api/home/control", { target: "書桌燈", command: "power", value: true }]], { mode: () => "unreachable" });
   });
 
+  it("edge values pass through unchanged: value null / 0 / \"\" / false, metric with spaces, English error bodies", async () => {
+    await sameBothWays([
+      ["/api/home/control", { target: "書桌燈", command: "power", value: null }],
+      ["/api/home/control", { target: "書桌燈", command: "brightness", value: 0 }],
+      ["/api/home/control", { target: "書桌燈", command: "brightness", value: "" }],
+      ["/api/home/control", { target: "書桌燈", command: "power", value: false }],
+      ["/api/home/control", { target: "  書桌燈  ", command: " power ", value: "true" }],
+      ["/api/home/status", { target: "客廳", metric: "   " }],
+      ["/api/home/status", { target: "客廳", metric: 5 }],
+      ["/api/home/status", { target: "客廳" }, "en"],
+      ["/api/home/control", { target: "x".repeat(101), command: "power" }, "en"],
+    ]);
+    await sameBothWays([["/api/home/status", { target: "客廳" }, "en"], ["/api/home/control", { target: "書桌燈", command: "power", value: true }, "en"]], { mode: () => "unauthorized" });
+  });
+
+  it("an unexpected (non-HomeBridgeError) throw keeps the original 500 and message", async () => {
+    const policy: HomeBridgeOptions["policyFor"] = () => {
+      throw new Error("policy bug (fixture)");
+    };
+    const { after } = await sameBothWays([["/api/home/control", { target: "書桌燈", command: "power", value: true }]], { policy });
+    expect(after.out[0]).toEqual({ status: 500, body: { error: "policy bug (fixture)" } });
+  });
+
   it("input validation and not-configured hub are unchanged (400 / 409), and the Facade is not registered without a hub", async () => {
     const steps: Step[] = [
       ["/api/home/status", { target: "" }],
@@ -259,6 +282,38 @@ describe("AIL-2 home Facade: model-facing tools and settings unchanged", () => {
   });
 });
 
+describe("AIL-2 home Facade: the integration layer's own safety timeout", () => {
+  it("a HomeBridge that never finishes: control → 504 'unclear whether it ran' (English page gets English), status → 502", async () => {
+    class HangingBridge extends HomeBridge {
+      override control(): Promise<never> {
+        return new Promise(() => undefined);
+      }
+      override status(): Promise<never> {
+        return new Promise(() => undefined);
+      }
+    }
+    const bridge = new HangingBridge({ url: "http://hub.fixture", token: "hub-secret", fetch: fakeHub(() => "normal").fetch });
+    const ail = createIntegrations({ enabled: true, services: ["home"], soloistPort: 19090 }, () => undefined, { home: (_c, _l, d) => new HomeAdapter(d.home!, { control: 150, status: 150 }) }, { home: bridge })!;
+    const store = new TaskStore(null);
+    const dir = mkdtempSync(join(tmpdir(), "nous-home-hang-"));
+    const auth = new ChatGPTAuth({ dir, callbackPort: 0, onChange: () => {} });
+    const providers = new ProviderManager({ claude: null, chatgpt: new ChatGPTExecutor(auth, { model: null }), mock: new MockExecutor(1), auth, dir, preferred: "mock", onChange: () => {} });
+    const port = await freePort();
+    const server = createApp({ store, runner: new TaskRunner(store, providers), settings: providers, auth, chat: providers, home: bridge, integrations: ail, port, devPort: 5173, distDir: null });
+    servers.push(server);
+    await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
+    const post = (path: string, body: unknown, locale?: string) => fetch(`http://localhost:${port}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...(locale ? { "X-Nous-Locale": locale } : {}) }, body: JSON.stringify(body) });
+    const zh = await post("/api/home/control", { target: "書桌燈", command: "power", value: true });
+    expect(zh.status).toBe(504);
+    expect(await zh.json()).toEqual({ error: "武陵居中控沒有在時限內回覆，不確定有沒有執行，請看一下設備。" });
+    const en = await post("/api/home/control", { target: "書桌燈", command: "power", value: true }, "en");
+    expect(await en.json()).toEqual({ error: "The Wuling home hub did not reply in time; it is unclear whether the command ran, so please check the device." });
+    const status = await post("/api/home/status", { target: "客廳" }, "en");
+    expect(status.status).toBe(502);
+    expect(((await status.json()) as { error: string }).error).toMatch(/did not reply in time/);
+  });
+});
+
 describe("HomeAdapter unit", () => {
   const port = (patch: Partial<HomeBridgePort>): HomeBridgePort => ({
     available: true,
@@ -280,7 +335,10 @@ describe("HomeAdapter unit", () => {
   it("health: not configured / reachable / rejected / other errors", async () => {
     expect(await new HomeAdapter(port({ available: false })).health()).toEqual({ health: "unavailable", reason: "not_configured" });
     expect(await new HomeAdapter(port({})).health()).toEqual({ health: "available", reason: "ok" });
-    expect(await new HomeAdapter(port({ probe: async () => { throw new HomeBridgeError("x", 502); } })).health()).toEqual({ health: "unavailable", reason: "connection_refused" });
+    expect(await new HomeAdapter(port({ probe: async () => { throw new HomeBridgeError("無法連線到武陵居中控，請確認中控有在執行、位址正確。", 502); } })).health()).toEqual({ health: "unavailable", reason: "connection_refused" });
+    expect(await new HomeAdapter(port({ probe: async () => { throw new HomeBridgeError("武陵居中控沒有回應（逾時）。", 502); } })).health()).toEqual({ health: "unknown", reason: "timeout" });
+    expect(await new HomeAdapter(port({ probe: async () => { throw new HomeBridgeError("武陵居中控拒絕了權杖（401），請到中控「系統接入」重新核發後更新 SMARTHOME_TOKEN。", 502); } })).health()).toEqual({ health: "unavailable", reason: "error" });
+    expect(await new HomeAdapter(port({ probe: async () => { throw new HomeBridgeError("武陵居中控回傳的資料格式不符，無法讀取。", 502); } })).health()).toEqual({ health: "unknown", reason: "bad_reply" });
     expect(await new HomeAdapter(port({ probe: async () => { throw new HomeBridgeError("x", 409); } })).health()).toEqual({ health: "unavailable", reason: "not_configured" });
     expect(await new HomeAdapter(port({ probe: async () => { throw new Error("boom"); } })).health()).toEqual({ health: "unknown", reason: "error" });
   });
@@ -305,6 +363,11 @@ describe("HomeAdapter unit", () => {
     const scalarModelTool = { ...MOCK_TOOLS[0]!, id: "app.mock.scalar" as const, inputSchema: { type: "object" as const, properties: { v: { type: "scalar" as const } }, additionalProperties: false as const } };
     const r2 = new IntegrationRegistry({ enabled: new Set(["mock"]) });
     expect(() => r2.register(new MockAdapter({ extraTools: [scalarModelTool] }))).toThrow(/scalar/);
+    // legacyName ⇔ 只走 page：模型工具不能借 page 路徑，legacy 工具也不能開放給語音路徑。
+    const pageModelTool = { ...MOCK_TOOLS[0]!, id: "app.mock.page" as const, supportedRoutes: ["page"] as const };
+    expect(() => new IntegrationRegistry({ enabled: new Set(["mock"]) }).register(new MockAdapter({ extraTools: [pageModelTool as never] }))).toThrow(/page/);
+    const legacyOnLive = { ...MOCK_TOOLS[0]!, id: "app.mock.legacy" as const, legacyName: "legacy_tool", supportedRoutes: ["live"] as const };
+    expect(() => new IntegrationRegistry({ enabled: new Set(["mock"]) }).register(new MockAdapter({ extraTools: [legacyOnLive as never] }))).toThrow(/page/);
     const slowModelTool = { ...MOCK_TOOLS[0]!, id: "app.mock.slow" as const, timeoutMs: 80_000 };
     expect(() => new IntegrationRegistry({ enabled: new Set(["mock"]) }).register(new MockAdapter({ extraTools: [slowModelTool] }))).toThrow(/timeoutMs/);
   });

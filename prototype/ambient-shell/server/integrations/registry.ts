@@ -45,6 +45,9 @@ export class IntegrationRegistry {
       const maxTimeout = def.legacyName ? LEGACY_TIMEOUT_MAX_MS : TIMEOUT_RANGE_MS.max;
       if (!Number.isInteger(def.timeoutMs) || def.timeoutMs < TIMEOUT_RANGE_MS.min || def.timeoutMs > maxTimeout) throw new RegistryError(`工具 ${def.id} 的 timeoutMs 必須在 ${TIMEOUT_RANGE_MS.min}–${maxTimeout}`);
       if (def.legacyName !== undefined && !/^[a-z][a-z0-9_]{0,63}$/.test(def.legacyName)) throw new RegistryError(`工具 ${def.id} 的 legacyName 不合法`);
+      // legacy Facade 只走 page 路徑；page 路徑也只給 legacy Facade（模型工具不能借這條路避開限速與大小上限）。
+      const pageOnly = def.supportedRoutes.length === 1 && def.supportedRoutes[0] === "page";
+      if (def.legacyName ? !pageOnly : def.supportedRoutes.includes("page")) throw new RegistryError(`工具 ${def.id}：legacyName 工具只能走 page 路徑，page 路徑也只給 legacyName 工具`);
       if (!def.legacyName && Object.values(def.inputSchema?.properties ?? {}).some((p) => (p as { type?: unknown }).type === "scalar")) throw new RegistryError(`工具 ${def.id} 不能用 scalar 參數（只限 legacy Facade）`);
       if (!def.supportedRoutes.length || !def.supportedRoutes.every((r) => (INTEGRATION_ROUTES as readonly string[]).includes(r))) throw new RegistryError(`工具 ${def.id} 的 supportedRoutes 不合法`);
       if (typeof def.description !== "string" || !def.description.trim()) throw new RegistryError(`工具 ${def.id} 缺少說明`);

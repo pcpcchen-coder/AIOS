@@ -22,7 +22,7 @@ Date: 2026-11-05 (Asia/Taipei). Branch: `claude/ail-2-home-facade` (based on mai
 
 ## 2. Regression tests (fixtures)
 
-New test file `tests/integration-home-facade.test.ts`, 15 tests. The core method: the same requests run once with the Facade on and once with it off (direct calls as before), each against an identical fake hub with fixed IDs and time. For every step, the HTTP status code and response body, and every request sent to the hub (method, path, idempotency key, body), must be exactly equal.
+New test file `tests/integration-home-facade.test.ts`, 18 tests. The core method: the same requests run once with the Facade on and once with it off (direct calls as before), each against an identical fake hub with fixed IDs and time. For every step, the HTTP status code and response body, and every request sent to the hub (method, path, idempotency key, body), must be exactly equal.
 
 | Scenario | Result |
 |---|---|
@@ -34,20 +34,27 @@ New test file `tests/integration-home-facade.test.ts`, 15 tests. The core method
 | H1b AIFA air conditioner swing, temperature, off; infrared volume key and power | Identical (one-way, `unconfirmed`) |
 | Rate limit | HomeBridge still refuses the 7th command; 35 queries in a row all succeed, proving the integration layer adds no limit |
 | Hub errors: token rejected, unreachable | Same status codes and messages |
+| Edge values: `value` null, 0, empty string, false; target and command with surrounding spaces; a reading that is only spaces or not a string; English-page error bodies | Identical |
+| HomeBridge throws an unexpected (programming) error | Same 500 and message |
 | Input validation and unconfigured hub | Same 400/409; with no hub configured the Facade is not registered |
+| The integration layer's own safety timeout (HomeBridge never finishes; the test shortens the limit) | Control returns 504 "unclear whether it ran", in English for an English page; queries return 502 |
 | Model tools | With the Facade on, the tool lists for both routes, the realtime instructions and the ChatGPT plan route's tool list are byte-identical to the Facade-off case in both languages; the settings `integrations.tools` is empty; a model call to `app__home__control` is refused (route not supported) and the hub receives nothing |
 | Audit | Records contain no device names, commands, values or tokens |
-| Adapter unit | Status mapping, four health outcomes, raw results and HomeBridgeError passed back unchanged, other errors become "result unknown" for control, `scalar` and 90 s are Facade-only |
+| Adapter unit | Status mapping, health checks (not configured, available, unreachable, timeout, token rejected, bad format, other errors), raw results and HomeBridgeError passed back unchanged, other errors become "result unknown" for control, `scalar` and 90 s are Facade-only; `legacyName` tools may only use `page`, and `page` is only for `legacyName` tools |
 
 The existing H0/H1/H1b tests in `tests/home-bridge.test.ts` and `tests/http.test.ts` still pass unchanged.
 
 Commands and results (2026-11-05, Linux cloud, Node.js 22):
 
 - `npm run typecheck`: pass.
-- `npx vitest run`: 135 files, 2,470 passed and 5 skipped.
+- `npx vitest run`: 135 files, 2,473 passed and 5 skipped.
 - `node scripts/verify-aios.mjs`: PASS; `git diff --check`: pass.
 
-## 3. Validation steps on the Mac (not yet run)
+## 3. Independent review and fixes
+
+An independent review by the same model (not a cross-model review) found no blockers. Fixed: English for the 504 message; an unexpected HomeBridge error returns the original 500 again (no longer 502/504); the Registry enforces that `legacyName` tools use only `page` and that `page` is only for `legacyName` tools; the health check now separates timeout, token rejected and bad format; tests for edge values, English error bodies, unexpected errors and the safety timeout were added. Not changed: the 502/504 that appear only when the integration layer's safety limit (45 s for queries, 80 s for control) is reached are responses that did not exist before the Facade; they are recorded in section 5.
+
+## 4. Validation steps on the Mac (not yet run)
 
 1. Add `home` to `NOUS_AIL_SERVICES` in `.env` (for example `home,gmail_gog`) and restart Nous.
 2. The settings page's "App integrations" should show "Wuling home devices (hub): Available".
@@ -55,13 +62,13 @@ Commands and results (2026-11-05, Linux cloud, Node.js 22):
 4. Nous's log should gain lines like "integration layer: … app.home.control page → …" that contain no device names or values.
 5. Roll back: remove `home` from `NOUS_AIL_SERVICES` and restart to return to direct calls.
 
-## 4. Limits and open items
+## 5. Limits and open items
 
 - Nothing has run on a Mac or the real hub.
 - The page's calls to the home API carry no session, so the audit can only record `page` and cannot tell which voice route was used.
 - Only when the integration layer itself misbehaves (for example, HomeBridge not finishing within 80 s) does the Facade return an error that did not exist before: 502 for queries and 504 for control, saying it is unclear whether the command ran. HomeBridge always finishes within 60 s on its own, so this should not happen in normal use.
 - Confirmation cards remain in the page; the integration layer's `external_commit` confirmation card is still not connected.
 
-## 5. Next gate
+## 6. Next gate
 
-Only after George completes section 3 on the Mac can we claim "home devices behave the same on real hardware through the integration layer". The next batch is Google Calendar (CAL-1).
+Only after George completes section 4 on the Mac can we claim "home devices behave the same on real hardware through the integration layer". The next batch is Google Calendar (CAL-1).

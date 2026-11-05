@@ -105,10 +105,16 @@ export class HomeAdapter implements IntegrationAdapter {
   readonly version = 1;
   readonly mock = false;
 
-  constructor(private readonly bridge: HomeBridgePort) {}
+  constructor(
+    private readonly bridge: HomeBridgePort,
+    /** 測試用：縮短 Dispatcher 的保險時限。 */
+    private readonly timeoutsMs: Partial<Record<keyof typeof HOME_TIMEOUTS_MS, number>> = {},
+  ) {}
 
   tools(): readonly ToolDefinition[] {
-    return TOOLS;
+    if (!Object.keys(this.timeoutsMs).length) return TOOLS;
+    const key = (id: string) => (id === HOME_TOOL.status ? "status" : id === HOME_TOOL.control ? "control" : "confirm") as keyof typeof HOME_TIMEOUTS_MS;
+    return TOOLS.map((t) => ({ ...t, timeoutMs: this.timeoutsMs[key(t.id)] ?? t.timeoutMs }));
   }
 
   /** 讀一次中控快照：讀得到才是可用；權杖被拒或設定不對是不可用；連不上或逾時是不可用／狀態不明。 */
@@ -118,7 +124,14 @@ export class HomeAdapter implements IntegrationAdapter {
       await this.bridge.probe();
       return { health: "available", reason: "ok" };
     } catch (err) {
-      if (err instanceof HomeBridgeError) return err.status === 409 ? { health: "unavailable", reason: "not_configured" } : { health: "unavailable", reason: "connection_refused" };
+      if (err instanceof HomeBridgeError) {
+        if (err.status === 409) return { health: "unavailable", reason: "not_configured" };
+        // HomeBridgeError 都是 502，只能從固定訊息分辨：逾時、權杖或權限被拒、其他（連不上、格式不符、回應錯誤）。
+        if (err.message.includes("逾時")) return { health: "unknown", reason: "timeout" };
+        if (/權杖|權限/.test(err.message)) return { health: "unavailable", reason: "error" };
+        if (err.message.includes("格式不符")) return { health: "unknown", reason: "bad_reply" };
+        return { health: "unavailable", reason: "connection_refused" };
+      }
       return { health: "unknown", reason: "error" };
     }
   }
@@ -138,7 +151,8 @@ export class HomeAdapter implements IntegrationAdapter {
     } catch (err) {
       // 和中控完全無法溝通（HomeBridgeError）：HTTP 照原本的狀態碼與訊息回（行為和 Facade 之前相同）。
       if (err instanceof HomeBridgeError) return toolResult("failed", "home", { reason: "unavailable", data: { http_error: { status: err.status, message: err.message } } });
-      throw err;
+      // 其他錯誤（程式錯誤）：原樣交回，由 HTTP 層照原本的方式處理（500），和 Facade 之前相同。
+      return toolResult(toolId === HOME_TOOL.status ? "failed" : "unknown", "home", { reason: "adapter_error", data: { rethrow: err } });
     }
   }
 }

@@ -835,8 +835,9 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     const ail = options.integrations;
     if (ail && ail.registry.status(tool as IntegrationToolId, "page") === "available") {
       const result = await ail.dispatcher.execute({ tool, args, route: "page", actor: tool === HOME_TOOL.confirm ? "user" : "agent", sessionId: "page" });
-      const data = result.data as { legacy?: T; http_error?: { status: number; message: string } } | undefined;
+      const data = result.data as { legacy?: T; http_error?: { status: number; message: string }; rethrow?: unknown } | undefined;
       if (data?.legacy !== undefined) return data.legacy;
+      if (data && "rethrow" in data) throw data.rethrow;
       if (data?.http_error) throw new HttpError(data.http_error.status, data.http_error.message);
       // Dispatcher 自己的結果（參數不合、逾時、Adapter 出錯）：頁面原本只會收到 HTTP 錯誤，照樣回錯誤；
       // 控制指令逾時或出錯時，HomeBridge 可能已經送出，所以說不確定有沒有執行。

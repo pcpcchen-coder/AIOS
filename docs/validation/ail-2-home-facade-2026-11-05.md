@@ -22,7 +22,7 @@
 
 ## 2. 回歸測試（fixture）
 
-新測試檔 `tests/integration-home-facade.test.ts`，15 項。核心做法：同一組請求在「Facade 開著」和「關著（原本直接呼叫）」各跑一次，各自用一模一樣的假中控、固定的 ID 與時間；比對每一步的 HTTP 狀態碼與回應內容，以及送到中控的每一個請求（方法、路徑、idempotency key、內容），必須完全相同。
+新測試檔 `tests/integration-home-facade.test.ts`，18 項。核心做法：同一組請求在「Facade 開著」和「關著（原本直接呼叫）」各跑一次，各自用一模一樣的假中控、固定的 ID 與時間；比對每一步的 HTTP 狀態碼與回應內容，以及送到中控的每一個請求（方法、路徑、idempotency key、內容），必須完全相同。
 
 | 情境 | 結果 |
 |---|---|
@@ -34,20 +34,27 @@
 | H1b AIFA 冷氣擺風、溫度、關機；紅外線音量鍵、電源 | 相同（單向，`unconfirmed`） |
 | 速率限制 | HomeBridge 的第 7 個指令照樣被拒；連續 35 次查詢都成功，證明整合層沒有另外限速 |
 | 中控錯誤：權杖被拒、連不上 | 相同的狀態碼與訊息 |
+| 邊界值：`value` 為 null、0、空字串、false，前後有空白的目標與指令，只有空白或不是字串的讀值；英文頁面的錯誤內容 | 相同 |
+| HomeBridge 拋出非預期的錯誤（程式錯誤） | 相同的 500 與訊息 |
 | 輸入驗證與中控未設定 | 相同的 400／409；中控沒設定時 Facade 不註冊 |
+| 整合層自己的保險時限（HomeBridge 一直不結束，測試把時限縮短） | 控制回 504「不確定有沒有執行」，英文頁面收到英文；查詢回 502 |
 | 模型工具 | Facade 開著時，兩條路徑的工具表、即時語音說明與 ChatGPT 方案路徑的工具表，中英文都和關著時逐位元組相同；設定的 `integrations.tools` 是空的；模型用 `app__home__control` 叫會被拒（路徑不支援），中控沒有收到任何請求 |
 | 稽核 | 紀錄沒有設備名、指令、數值或權杖 |
-| Adapter 單元 | 狀態對應、健康檢查四種結果、原始結果與 HomeBridgeError 原樣交回、其他錯誤在控制時變成「結果不明」、`scalar` 和 90 秒只限 Facade |
+| Adapter 單元 | 狀態對應、健康檢查（未設定、可用、連不上、逾時、權杖被拒、格式不符、其他錯誤）、原始結果與 HomeBridgeError 原樣交回、其他錯誤在控制時變成「結果不明」、`scalar` 和 90 秒只限 Facade；`legacyName` 工具只能走 `page`，`page` 也只給 `legacyName` 工具 |
 
 另外，`tests/home-bridge.test.ts`、`tests/http.test.ts` 既有的 H0／H1／H1b 測試全部照舊通過，沒有修改。
 
 指令與結果（2026-11-05，Linux 雲端、Node.js 22）：
 
 - `npm run typecheck`：通過。
-- `npx vitest run`：135 個檔案，2,470 項通過、5 項跳過。
+- `npx vitest run`：135 個檔案，2,473 項通過、5 項跳過。
 - `node scripts/verify-aios.mjs`：PASS；`git diff --check`：通過。
 
-## 3. 在 Mac 上的驗證步驟（尚未執行）
+## 3. 獨立審查與修正
+
+同一個模型的獨立審查（不是跨模型審查）：沒有阻擋項。修了：504 訊息補上英文；HomeBridge 拋出非預期錯誤時照原本回 500（不再變成 502／504）；Registry 強制 `legacyName` 工具只走 `page`、`page` 也只給 `legacyName` 工具；健康檢查分出逾時、權杖被拒與格式不符；補上邊界值、英文錯誤內容、非預期錯誤與保險時限的測試。沒有改：只有在整合層的保險時限（查詢 45 秒、控制 80 秒）到了才會出現的 502／504，是 Facade 之前沒有的回應，記在第 5 節。
+
+## 4. 在 Mac 上的驗證步驟（尚未執行）
 
 1. `.env` 的 `NOUS_AIL_SERVICES` 加上 `home`（例如 `home,gmail_gog`），重新啟動 Nous。
 2. 設定頁「App 整合」應該顯示「武陵居家電（中控）：可用」。
@@ -55,13 +62,13 @@
 4. Nous 的 log 應該多出「整合層：… app.home.control page → …」的紀錄，裡面沒有設備名或數值。
 5. 回退：從 `NOUS_AIL_SERVICES` 拿掉 `home`，重新啟動，就回到原本直接呼叫。
 
-## 4. 限制與未完成
+## 5. 限制與未完成
 
 - 沒有在 Mac 或真實中控上執行。
 - 頁面呼叫家電 API 時沒有帶工作階段，所以稽核只能記 `page`，分不出是哪條語音路徑。
 - 只在整合層自己出狀況（例如 HomeBridge 80 秒都沒結束）時，Facade 才會回原本沒有的錯誤：查詢回 502，控制回 504，並說「不確定有沒有執行」。HomeBridge 自己在 60 秒內一定會結束，正常不會走到這裡。
 - 確認卡仍在頁面，整合層的 `external_commit` 確認卡還沒接上。
 
-## 5. 下一個 gate
+## 6. 下一個 gate
 
-George 在 Mac 完成第 3 節之後，才能宣稱「家電經整合層在實機上和原本一樣」。下一批是 Google Calendar（CAL-1）。
+George 在 Mac 完成第 4 節之後，才能宣稱「家電經整合層在實機上和原本一樣」。下一批是 Google Calendar（CAL-1）。

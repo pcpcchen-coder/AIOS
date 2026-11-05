@@ -542,5 +542,6 @@
   "gog 說已送出，但沒有回傳郵件 ID；請看一下信箱。": "gog says it was sent but returned no message ID; please check your inbox.",
   "gog 沒能啟動，信沒有寄出。": "gog could not start, so the email was not sent.",
   "gog 回報錯誤，不確定信有沒有寄出；請看一下信箱，也可以在 Mac 上檢查 gog 的登入。": "gog reported an error, so it is unclear whether the email was sent; please check your inbox, and you can check gog's sign-in on the Mac.",
-  "這一分鐘寄太多封了，這封沒有寄出；請稍後再說一次。": "Too many emails were sent this minute, so this one was not sent; please try again shortly."
+  "這一分鐘寄太多封了，這封沒有寄出；請稍後再說一次。": "Too many emails were sent this minute, so this one was not sent; please try again shortly.",
+  "武陵居中控沒有在時限內回覆，不確定有沒有執行，請看一下設備。": "The Wuling home hub did not reply in time; it is unclear whether the command ran, so please check the device."
 }
