@@ -6,7 +6,10 @@ import { loadConfig } from "../server/config.ts";
 import {
   CALENDAR_LIMITS,
   CALENDAR_TOOL,
+  cleanMultiline,
   cleanText,
+  EVENTS_NOTE,
+  instantToRfc3339,
   eventRange,
   findEventId,
   GoogleCalendarAdapter,
@@ -57,6 +60,13 @@ describe("time handling", () => {
     expect(localToRfc3339(2026, 7, 15, 9, 0, "Asia/Kolkata")).toBe("2026-07-15T09:00:00+05:30");
   });
 
+  it("duration is real elapsed time across a DST change (New York 2026-11-01: 00:30 + 120 min = 01:30 EST)", () => {
+    const r = eventRange(parseStart("2026-11-01T00:30")!, 120, "America/New_York");
+    expect(r).toEqual({ from: "2026-11-01T00:30:00-04:00", to: "2026-11-01T01:30:00-05:00", allDay: false });
+    expect(Date.parse(r.to) - Date.parse(r.from)).toBe(120 * 60_000);
+    expect(instantToRfc3339(Date.parse("2026-03-08T07:00:00Z"), "America/New_York")).toBe("2026-03-08T03:00:00-04:00");
+  });
+
   it("event range: duration, crossing midnight, all-day end is the next day (month/year rollover)", () => {
     expect(eventRange(parseStart("2026-11-06T15:30")!, 60, "Asia/Taipei")).toEqual({ from: "2026-11-06T15:30:00+08:00", to: "2026-11-06T16:30:00+08:00", allDay: false });
     expect(eventRange(parseStart("2026-11-06T23:30")!, 90, "Asia/Taipei")).toEqual({ from: "2026-11-06T23:30:00+08:00", to: "2026-11-07T01:00:00+08:00", allDay: false });
@@ -64,7 +74,9 @@ describe("time handling", () => {
   });
 
   it("cleanText removes control and bidi characters", () => {
-    expect(cleanText("a\nb‮c\u0085d", 50)).toBe("a b c d");
+    // 換行與 C1 控制字元變成空白；零寬與雙向覆寫字元直接拿掉。
+    expect(cleanText("a\nb\u202ec\u0085d\u200be", 50)).toBe("a bc de");
+    expect(cleanMultiline("第一行\r\n第二行\u202e\n\n\n\n第三行\u0000", 100)).toBe("第一行\n第二行\n\n第三行");
     expect(cleanText("x".repeat(300), 10)).toHaveLength(10);
   });
 });
@@ -77,7 +89,7 @@ describe("parsing gog output (shapes are assumptions until checked on the Mac)",
       { summary: "國定假日", start: "2026-11-07", end: "2026-11-08", all_day: true },
     ]);
     expect(parseEvents(JSON.stringify([{ title: "t", start: "2026-11-06T09:00" }]))).toEqual([{ summary: "t", start: "2026-11-06T09:00", end: null, all_day: false }]);
-    expect(parseEvents(JSON.stringify({ items: [{ start: { date: "2026-11-06" } }] }))).toEqual([{ summary: "（沒有標題）", start: "2026-11-06", end: null, all_day: true }]);
+    expect(parseEvents(JSON.stringify({ items: [{ start: { date: "2026-11-06" } }] }))).toEqual([{ summary: "", start: "2026-11-06", end: null, all_day: true, no_title: true }]);
     expect(parseEvents(JSON.stringify({ count: 0, results: [] }))).toEqual([]);
     expect(parseEvents("not json")).toBeNull();
     expect(parseEvents(JSON.stringify({ nothing: true }))).toBeNull();
@@ -96,14 +108,15 @@ describe("list_events", () => {
   it("always read-only, fixed account and primary calendar, one range flag; returns trimmed events", async () => {
     const { a, calls } = adapter({ code: 0, stdout: JSON.stringify({ events: [{ summary: "牙醫", start: { dateTime: "2026-11-06T15:00:00+08:00" }, end: { dateTime: "2026-11-06T16:00:00+08:00" } }] }) });
     const r = await a.execute(CALENDAR_TOOL.list, { range: "today" }, ctx());
-    expect(r).toEqual({ ok: true, status: "confirmed", message: "這是查到的行程。", data: { range: "today", time_zone: "Asia/Taipei", events: [{ summary: "牙醫", start: "2026-11-06T15:00:00+08:00", end: "2026-11-06T16:00:00+08:00", all_day: false }], truncated: false } });
+    expect(r).toEqual({ ok: true, status: "confirmed", message: "這是查到的行程。", data: { range: "today", time_zone: "Asia/Taipei", note: EVENTS_NOTE, events: [{ summary: "牙醫", start: "2026-11-06T15:00:00+08:00", end: "2026-11-06T16:00:00+08:00", all_day: false }], truncated: false } });
     expect(calls[0]!.args).toEqual(["calendar", "events", "primary", "--readonly", `--account=${ACCOUNT}`, "--tz=Asia/Taipei", "--max=21", "--json", "--today"]);
     for (const [range, flag] of [["tomorrow", "--tomorrow"], ["week", "--week"]] as const) {
       await a.execute(CALENDAR_TOOL.list, { range }, ctx());
       expect(calls.at(-1)!.args.at(-1)).toBe(flag);
     }
-    await a.execute(CALENDAR_TOOL.list, { range: "date", date: "2026-12-25" }, ctx());
-    expect(calls.at(-1)!.args.slice(-2)).toEqual(["--from=2026-12-25", "--days=1"]);
+    // 指定一天：當地 00:00 到隔天 00:00（帶時差），跨月跨年也對；不依賴 gog 的 --days。
+    await a.execute(CALENDAR_TOOL.list, { range: "date", date: "2026-12-31" }, ctx());
+    expect(calls.at(-1)!.args.slice(-2)).toEqual(["--from=2026-12-31T00:00:00+08:00", "--to=2027-01-01T00:00:00+08:00"]);
     expect(calls.every((c) => c.args.includes("--readonly"))).toBe(true);
   });
 
@@ -124,7 +137,8 @@ describe("list_events", () => {
     const data = r.data as { events: { summary: string; location?: string }[]; truncated: boolean };
     expect(data.truncated).toBe(true);
     expect(data.events.length).toBeLessThanOrEqual(20);
-    expect(Buffer.byteLength(JSON.stringify({ events: data.events }), "utf8")).toBeLessThanOrEqual(CALENDAR_LIMITS.dataBytes);
+    // 整包資料（含 range、time_zone、note、truncated）都在上限內。
+    expect(Buffer.byteLength(JSON.stringify(r.data), "utf8")).toBeLessThanOrEqual(CALENDAR_LIMITS.dataBytes);
     expect(data.events[0]!.summary.length).toBeLessThanOrEqual(120);
     expect(data.events[0]!.location!.length).toBeLessThanOrEqual(80);
     expect(r.message).toBe("找到的行程比較多，只列出前面幾個。");
@@ -194,6 +208,18 @@ process.exit(9);
 `,
   );
   chmodSync(script, 0o755);
+
+  it("a busy week with more than 64 KB of gog output is still read (2 MB limit for listing)", async () => {
+    const big = join(dir, "gog-big");
+    writeFileSync(big, `#!/usr/bin/env node
+const events = Array.from({ length: 21 }, (_, i) => ({ summary: "e" + i, description: "x".repeat(10000), start: { dateTime: "2026-11-06T09:00:00+08:00" } }));
+process.stdout.write(JSON.stringify({ events }));
+`);
+    chmodSync(big, 0o755);
+    const r = await new GoogleCalendarAdapter({ account: ACCOUNT, gogPath: big }).execute(CALENDAR_TOOL.list, { range: "week" }, ctx());
+    expect(r).toMatchObject({ status: "confirmed", data: { truncated: true } });
+    expect((r.data as { events: unknown[] }).events.length).toBeGreaterThan(0);
+  });
 
   it("list and create run gog with literal argv; health runs --version", async () => {
     const a = new GoogleCalendarAdapter({ account: ACCOUNT, gogPath: script });
