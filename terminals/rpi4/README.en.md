@@ -139,7 +139,7 @@ bash uninstall.sh --purge
 
 - **Memory, encrypted results and family recognition reach only the App main window.** That content travels only over the Electron main window's IPC; SSE and `/api/*` carry only the outer shell. The Pi browser page can submit tasks, see progress shells and use realtime voice, but cannot see protected result content and has no memory or family recognition features.
 - **The camera is in strict mode.** The App core starts with `cameraEnable: "main_process"`: a page sending `active: true` over HTTP always gets 403. The camera can only be turned on from the App menu on the Mac, and that turns on the Mac main window's camera flow. The Pi page cannot turn on a camera over HTTP.
-- **Wake listening can only be turned on from the App menu**, and it listens on the microphone used by the Mac main window, not the Pi microphone.
+- **The wake listening switch is only in the Mac App menu**, but each page listens with its own microphone (corrected 2026-11-05): the switch is stored in the core and pushed to every page through settings events, so the Pi page then detects "Hello Nous" / "Hey Nous" locally on the Pi with the Pi microphone and starts the call on the Pi after waking. The Pi page does not recognise voices at wake (that needs the Mac App's family recognition), so it does not call anyone by name from their voice.
 - **The Mac main window and the Pi page connect to the same core at the same time** (from reading the code, not confirmed on hardware):
   - SSE: the core broadcasts through a client map, so both pages receive the same task and settings events and update their own screens.
   - Realtime voice depends on the route:
@@ -147,7 +147,7 @@ bash uninstall.sh --purge
     - While an API key call with memory rules is active, the same refusal applies.
     - While an API key call without memory is active, starting another API key call from the other side makes the core **end the existing call** without any busy message; starting a ChatGPT plan call from the other side may run both calls at once.
     - Each call belongs to the page that started it, and reply audio plays only on that page.
-  - Always-on wake or "look to talk" on the Mac may start a call from the Mac while the Pi is in use, taking the only call slot.
+  - When the Mac is not in service mode, the Mac and the Pi both listen for the wake word, so one utterance may wake both and they compete for the same call; "look to talk" on the Mac may also start a call from the Mac.
   - The forced mute on memory revocation applies only to the Mac main window.
   - Recommendation: while using the Pi, put the Mac in [service mode](#service-mode) so the Mac does not listen, wake or start voice.
 - The Pi runs no Agent and stores no task data. If the Mac sleeps or the App quits, the Pi screen has no core to reach. The kiosk waits for the core only before it opens Chromium; once Chromium is open it does not exit by itself, so recovery relies on the page's own reconnection, or run `systemctl --user restart aios-kiosk.service`.
