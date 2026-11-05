@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "claude/pro-1-weather-briefing",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-11-05T03:34:42.737Z",
-  "updated_at": "2026-11-05T03:58:24.823Z",
-  "ended_at": null,
+  "updated_at": "2026-11-05T04:01:52.560Z",
+  "ended_at": "2026-11-05T04:01:52.558Z",
   "steps": [
     {
       "id": "how",
@@ -161,6 +161,13 @@
       "step_id": "pr",
       "status": "passed",
       "note": "PRO-1 pr; PR #97"
+    },
+    {
+      "at": "2026-11-05T04:01:52.560Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
