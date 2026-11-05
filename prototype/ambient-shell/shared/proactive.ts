@@ -248,13 +248,17 @@ function startTime(e: TodayEvent): string | null {
 /**
  * 念出今天行程的那一句（確定性的模板）：「今天有 2 個行程：9:30 開會；整天 生日。」標題來自日曆（可能是別人寫的），只當資料。
  */
-export function scheduleSentence(events: readonly TodayEvent[], locale: Locale): string {
+export function scheduleSentence(events: readonly TodayEvent[], locale: Locale, max: number = SCHEDULE_MAX): string {
   const en = locale === "en";
   if (!events.length) return en ? CALENDAR_EMPTY.en : `${CALENDAR_EMPTY.zh}。`;
-  const items = events.slice(0, SCHEDULE_MAX).map((e) => {
+  // 標題與地點是別人也能寫的資料：拿掉引號「」，不能跳出念行程指示的引號。
+  const clean = (t: string) => cut(t.replace(/[「」『』]/gu, " ").replace(/\s+/gu, " ").trim(), TITLE_MAX);
+  if (max <= 0) return en ? `You have ${events.length} ${events.length === 1 ? "event" : "events"} today.` : `今天有 ${events.length} 個行程。`;
+  const items = events.slice(0, max).map((e) => {
     const time = e.all_day ? (en ? "all day" : "整天") : (startTime(e) ?? (en ? "today" : "今天"));
-    const title = cut(e.summary, TITLE_MAX) || (en ? "(untitled)" : "（沒有標題）");
-    const where = e.location ? (en ? ` at ${cut(e.location, TITLE_MAX)}` : `，在${cut(e.location, TITLE_MAX)}`) : "";
+    const title = clean(e.summary) || (en ? "(untitled)" : "（沒有標題）");
+    const place = e.location ? clean(e.location) : "";
+    const where = place ? (en ? ` at ${place}` : `，在${place}`) : "";
     return `${time} ${title}${where}`;
   });
   const rest = events.length - items.length;

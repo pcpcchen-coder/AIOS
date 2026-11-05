@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { Locale } from "../shared/i18n.mjs";
 import type { IntegrationRegistry } from "./integrations/registry.ts";
-import { scheduleSentence, type CalendarFetchState, type TodayEvent } from "../shared/proactive.ts";
-import { CONFIRM_AFTER_MS, ECHO_WINDOW_MS, exactYesNo, normalizeSpoken } from "./memory/live.ts";
+import { CALENDAR_ASK, SCHEDULE_MAX, scheduleSentence, type CalendarFetchState, type TodayEvent } from "../shared/proactive.ts";
+import { CONFIRM_AFTER_MS, ECHO_WINDOW_MS, exactYesNo, normalizeSpoken, readsQuestion } from "./memory/live.ts";
+import { chunkForAppend } from "../shared/frameless.ts";
 
 // PRO-2（George 2026-11-05）：今天的行程（經 CAL-1 讀）與「要不要我念今天的行程？」的語音是／否。
 // - 行程只在核心記憶體裡（快取 10 分鐘），不寫檔、不進 log；設定頁只看得到狀態。
@@ -68,20 +69,44 @@ export class CalendarToday {
   }
 }
 
-/** 一通通話裡的語音事件（LiveCall、ApiKeyCall 照收到的順序交給它）。onUserFinal 回傳要請模型念的內容（或 null）。 */
+/** 核心要送進通話的一句：schedule＝真的念行程（點亮規劃區）；notice＝沒念的說明。 */
+export interface FollowUpReply {
+  text: string;
+  schedule: boolean;
+}
+
+/** 一通通話裡的語音事件（LiveCall、ApiKeyCall 照收到的順序交給它）。onUserFinal 回傳要送進通話的內容（或 null）。 */
 export interface CallFollowUp {
   onUserSpeechStart(at: number): void;
-  onUserFinal(text: string, at: number): string | null;
+  onUserFinal(text: string, at: number): FollowUpReply | null;
   onAssistantFinal(text: string, at: number): void;
   onAssistantAudioDone(at: number): void;
+  /** 核心在這通又送了別的話（例如記憶的問句）：之後的「好」不知道是回答哪一句，這個問句結束、不念。 */
+  superseded(): void;
 }
 
 /** 請模型念行程的標記：live 路徑的說明（buildLiveInstructions）與 API key 的 speakInstructions 都認得。 */
 export const SCHEDULE_MARKER = "（行程）";
+/** 回答以肯定詞開頭、但不是整句肯定（「好啊念吧」）：不念，照實說一句（避免模型說了「好」之後一片安靜）。 */
+export const NOT_SURE_NOTICE = { zh: "（系統通知）沒有聽清楚要不要念今天的行程，這次先不念。", en: "（系統通知）I couldn't tell whether to read today's schedule, so it was not read this time." } as const;
+
+/**
+ * 念出的行程要放得進一段 sideband append（「（行程）」標記只在第一段，之後的段落沒有「只是資料」的框）：
+ * 放不下就少念幾個（其餘說「還有 N 個」）。
+ */
+export function fittingSchedule(events: readonly TodayEvent[], locale: Locale): string {
+  for (let n = SCHEDULE_MAX; n >= 1; n--) {
+    const text = `${SCHEDULE_MARKER}${scheduleSentence(events, locale, n)}`;
+    if (chunkForAppend(text).length === 1) return text;
+  }
+  return `${SCHEDULE_MARKER}${scheduleSentence(events, locale, 0)}`;
+}
+
+const YES_LEAD = /^(?:好|要|是|對|yes|yeah|sure|ok)/u;
 
 /**
  * 問過「要不要我念今天的行程？」之後的一次是／否（每通最多一次）。
- * 念招呼（含問句）的助理逐字稿到了才開始算；使用者在問句念完前開口的那一句不算（不是回答，也不結束：只是還沒問完）。
+ * 念出問句的助理逐字稿到了才開始算（同記憶的 readsQuestion）；使用者在問句念完前開口的那一句不算（也不結束）。
  */
 export class CalendarAsk implements CallFollowUp {
   private doneAt: number | null = null;
@@ -89,11 +114,13 @@ export class CalendarAsk implements CallFollowUp {
   private speechStart: number | null = null;
   private finished = false;
   private readonly spoken: string;
+  private readonly question: string;
 
   constructor(
     private readonly options: { greeting: string; events: readonly TodayEvent[]; locale: Locale; startedAt: number; log?: (line: string) => void },
   ) {
     this.spoken = normalizeSpoken(options.greeting);
+    this.question = normalizeSpoken(options.locale === "en" ? CALENDAR_ASK.en : CALENDAR_ASK.zh);
   }
 
   /** 還在等回答（沒結束、沒過期）。 */
@@ -118,21 +145,29 @@ export class CalendarAsk implements CallFollowUp {
     return this.audioDone !== null && this.audioDone >= done ? this.audioDone : done + CONFIRM_AFTER_MS;
   }
 
-  /** 送出招呼後的第一則助理逐字稿就是念招呼（含問句）的那一輪：從它算問句念完。 */
-  onAssistantFinal(_text: string, at: number): void {
+  superseded(): void {
+    this.end("核心接著問了別的");
+  }
+
+  /** 助理逐字稿真的念了問句才算問完；招呼被打斷、模型改講別的都等不到，到期結束。 */
+  onAssistantFinal(text: string, at: number): void {
     if (this.finished || this.doneAt !== null) return;
+    if (!readsQuestion(normalizeSpoken(text), this.question)) return;
     this.doneAt = at;
+    // 問句念完前開始的雜音不算這一句的開口時間。
+    this.speechStart = null;
   }
 
   onAssistantAudioDone(at: number): void {
     this.audioDone = this.audioDone === null ? at : Math.max(this.audioDone, at);
+    if (this.doneAt !== null && this.speechStart !== null && this.speechStart < at) this.speechStart = null;
   }
 
   onUserSpeechStart(at: number): void {
     if (this.speechStart === null) this.speechStart = at;
   }
 
-  onUserFinal(text: string, at: number): string | null {
+  onUserFinal(text: string, at: number): FollowUpReply | null {
     const started = this.speechStart ?? at;
     this.speechStart = null;
     if (!this.open(at) || this.doneAt === null) return null;
@@ -141,11 +176,13 @@ export class CalendarAsk implements CallFollowUp {
     if (!norm) return null;
     // 回音：被剛念的招呼／問句包含（一兩個字的話只有和整句相同才算，同記憶的規則）。
     if (at - this.doneAt <= ECHO_WINDOW_MS && (norm === this.spoken || (norm.length >= 3 && this.spoken.includes(norm)))) return null;
-    if (exactYesNo(text) === "yes") {
+    const answer = exactYesNo(text);
+    if (answer === "yes") {
       this.end("說好，念行程");
-      return `${SCHEDULE_MARKER}${scheduleSentence(this.options.events, this.options.locale)}`;
+      return { text: fittingSchedule(this.options.events, this.options.locale), schedule: true };
     }
-    this.end(exactYesNo(text) === "no" ? "說不要" : "回答不是好");
+    this.end(answer === "no" ? "說不要" : "回答不是好");
+    if (answer === null && YES_LEAD.test(norm)) return { text: this.options.locale === "en" ? NOT_SURE_NOTICE.en : NOT_SURE_NOTICE.zh, schedule: false };
     return null;
   }
 }

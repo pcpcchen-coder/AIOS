@@ -501,8 +501,8 @@ class LiveCall implements RouteCall, LiveCallPort {
             this.memory?.onUserFinal(event.text, this.ctx.now());
             const reply = this.followUp()?.onUserFinal(event.text, this.ctx.now());
             if (reply) {
-              this.inject("speakable", reply);
-              this.ctx.emit({ kind: "briefing", part: "schedule" });
+              this.send({ type: "session.context.append", channel: "speakable", content: [{ type: "input_text", text: reply.text }] });
+              if (reply.schedule) this.ctx.emit({ kind: "briefing", part: "schedule" });
             }
           } else {
             // 助理回了話：之後使用者再開口一定是新的一輪（沒有結尾的雜音逐字稿不會把輪次卡住）。
@@ -713,6 +713,8 @@ class LiveCall implements RouteCall, LiveCallPort {
 
   /** 核心送出的一句話（session.context.append）。 */
   inject(channel: "speakable" | "commentary", text: string): void {
+    // PRO-2：記憶在這通又問了別的：行程問句結束（之後的「好」是回答記憶的）。
+    if (channel === "speakable") this.followUp()?.superseded();
     for (const piece of chunkForAppend(text)) this.send({ type: "session.context.append", channel, content: [{ type: "input_text", text: piece }] });
   }
 

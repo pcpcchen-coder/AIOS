@@ -190,8 +190,8 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
             this.memory.onUserFinal(heard, this.ctx.now(), event.item_id);
             const reply = this.followUp()?.onUserFinal(heard, this.ctx.now());
             if (reply) {
-              this.inject("speakable", reply);
-              this.emit({ kind: "briefing", part: "schedule" });
+              this.enqueueSpeak({ response: { instructions: speakInstructions(reply.text) } });
+              if (reply.schedule) this.emit({ kind: "briefing", part: "schedule" });
             }
           }
         }
@@ -467,6 +467,7 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
   playback(): void {
     if (this.ended || this.revoked) return;
     this.memory.onAssistantAudioDone(this.ctx.now());
+    this.followUp()?.onAssistantAudioDone(this.ctx.now());
   }
 
   /** 這通的記憶狀態（/call 回應用）：只有筆數與原因代碼。 */
@@ -486,6 +487,8 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
 
   /** speakable：請模型照念一句（排隊到沒有進行中的回應）；commentary：system 對話項目，不觸發回應。 */
   inject(channel: "speakable" | "commentary", text: string): void {
+    // PRO-2：記憶在這通又問了別的：行程問句結束。
+    if (channel === "speakable") this.followUp()?.superseded();
     if (channel === "commentary") {
       this.send({ type: "conversation.item.create", item: { type: "message", role: "system", content: [{ type: "input_text", text }] } });
       return;
