@@ -17,6 +17,8 @@ export interface GogRunOptions {
   signal: AbortSignal;
   /** 寫進 stdin 的內容（沒有時 stdin 關閉）。 */
   stdin?: string;
+  /** stdout 最多收幾個字元（預設 64 KB；讀行程時 gog 的 JSON 可能比較大）。超過的部分丟掉，呼叫端的 JSON 解析會失敗而照實回報。 */
+  maxStdout?: number;
 }
 export type GogRunner = (file: string, args: string[], opts: GogRunOptions) => Promise<{ code: number | null; stdout: string }>;
 
@@ -39,7 +41,7 @@ export function resolveGogPath(configured: string | null, exists: (path: string)
 }
 
 /** 預設的執行方式：spawn（不經 shell）、stderr 丟掉、stdout 最多 64 KB；中止時送 SIGTERM。 */
-export const defaultGogRunner: GogRunner = (file, args, { signal, stdin }) =>
+export const defaultGogRunner: GogRunner = (file, args, { signal, stdin, maxStdout = 65_536 }) =>
   new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new Error("aborted"));
     const child = spawn(file, args, { shell: false, stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", "ignore"] });
@@ -62,7 +64,7 @@ export const defaultGogRunner: GogRunner = (file, args, { signal, stdin }) =>
     };
     child.stdout?.setEncoding("utf8");
     child.stdout?.on("data", (chunk: string) => {
-      if (stdout.length < 65_536) stdout += chunk;
+      if (stdout.length < maxStdout) stdout += chunk;
     });
     child.stdin?.on("error", () => undefined);
     if (stdin !== undefined) child.stdin?.end(stdin, "utf8");

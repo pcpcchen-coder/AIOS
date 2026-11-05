@@ -863,6 +863,7 @@ const INTEGRATION_LABEL: Record<string, string> = {
   spotify_soloist: "Pi 上的 Spotify 播放器",
   gmail_gog: "寄信給自己（Gmail，gog）",
   home: "武陵居家電（中控）",
+  google_calendar: "Google 日曆（gog）",
   mock: "模擬整合（mock，測試用）",
 };
 
@@ -912,6 +913,7 @@ export function renderIntegrationStatus(state: IntegrationPanelState, actions: V
             time && h("span", { class: "muted small" }, msg`檢查時間：${time}`),
             s.service === "spotify_soloist" && h("span", { class: "muted small" }, t("只顯示狀態；Spotify 語音控制沒有取得授權，沒有開放。")),
             s.service === "gmail_gog" && h("span", { class: "muted small" }, t("「可用」只代表 Mac 上的 gog 能執行；有沒有登入 Gmail，要看寄信的結果。")),
+            s.service === "google_calendar" && h("span", { class: "muted small" }, t("「可用」只代表 Mac 上的 gog 能執行；有沒有授權 Google 日曆，要看查行程的結果。")),
           ),
           h("span", { class: `chip${s.health === "available" ? " chip--running" : ""}` }, t(HEALTH_TEXT[s.health])),
         ),

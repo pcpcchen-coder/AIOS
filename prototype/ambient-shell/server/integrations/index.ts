@@ -4,6 +4,7 @@ import { SpotifySoloistAdapter } from "./adapters/spotify-soloist.ts";
 import { createVoiceRelayAdapter, VoiceRelayAdapter } from "./adapters/voice-relay.ts";
 import { GmailGogAdapter, resolveGogPath } from "./adapters/gmail-gog.ts";
 import { HomeAdapter, type HomeBridgePort } from "./adapters/home.ts";
+import { GoogleCalendarAdapter } from "./adapters/google-calendar.ts";
 import type { IntegrationAdapter } from "./contracts.ts";
 import { IntegrationDispatcher, type AuditEntry } from "./dispatcher.ts";
 import { IntegrationRegistry } from "./registry.ts";
@@ -42,6 +43,20 @@ export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
   spotify_soloist: (config) => new SpotifySoloistAdapter({ port: config.soloistPort }),
   // VCR-0／VCR-1／VCR-2（docs/19）：NOUS_VCR=fake（假輸出，mock）或 mac（say 實際發聲，只限 macOS）才建立；否則回 null。
   voice_relay: (config, log) => createVoiceRelayAdapter(config, log),
+  // CAL-1：用 gog 讀寫自己的 Google 日曆（帳號只來自設定）。沒有帳號或找不到 gog 時不註冊，照實記 log。
+  google_calendar: (config, log) => {
+    const account = config.calendar?.account ?? null;
+    if (!account) {
+      log("整合層：google_calendar 需要 NOUS_GOG_ACCOUNT（或 NOUS_MAIL_SELF），略過");
+      return null;
+    }
+    const gogPath = resolveGogPath(config.calendar?.gogPath ?? null);
+    if (!gogPath) {
+      log("整合層：找不到 gog（/opt/homebrew/bin、/usr/local/bin；或設定 NOUS_GOG_PATH），google_calendar 略過");
+      return null;
+    }
+    return new GoogleCalendarAdapter({ account, gogPath, timeZone: config.calendar?.timeZone });
+  },
   // MAIL-1：用 gog 寄信給自己（收件人只來自 NOUS_MAIL_SELF）。沒有信箱或找不到 gog 時不註冊，照實記 log。
   gmail_gog: (config, log) => {
     const self = config.mail?.self ?? null;

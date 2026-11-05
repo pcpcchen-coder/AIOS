@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "797b537ec02323f470cdd4ac8c0d8d4ef80650c22f0461cb0bf5312245c06346",
-      "translationSha256": "6c9c7576b950a4c84fa2643cd229a96561f579fdd205c9b7a487cf759aa36df3"
+      "sourceSha256": "e2ffd122cf612abf6400eb6ce69f7260c67eb5bbc16d793ca8ed5a3dd7bb9fad",
+      "translationSha256": "b5124b866895c8374b2c54ff58eba4e6eefe479445cd8a09f37056be0143d6c3"
     },
     {
       "source": "docs/README.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "ed3704dafdec4e79a6a6c526d9e6e2ba86e6f8c12e3ac03ff7dd923a402e83bc",
-      "translationSha256": "9f69c14ba62449c635af8db1c17bbd5644a3425e6ddd0cded4446d061a4e2275"
+      "sourceSha256": "099bd97c05ad6032895bba33dd030e03e227a227bc6f88469cc265272ae2ca80",
+      "translationSha256": "5cd72f23266f88389c6b395049c46377f5139df918e6ccbd14cfd421f64ea8d1"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -335,6 +335,13 @@
       "translation": "docs/validation/brain-regions-2026-10-20.en.md",
       "sourceSha256": "95eef9f81c59320b87f49ff48752de96c9b373dc8368166cb0c49631840e69f2",
       "translationSha256": "cb0c81a39f7a2f05961f02b4b5194766e0e8bceb35cef9f668ce926ec3855bba"
+    },
+    {
+      "source": "docs/validation/cal-1-google-calendar-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/cal-1-google-calendar-2026-11-05.en.md",
+      "sourceSha256": "677cae2b1eab5b2926d397b939ad18cc90235eb5902ffdf87354d8b6b98a3566",
+      "translationSha256": "b11d14537057cd18c00a07fb30e4b4361cbba26e122eaff86283f82075d4f41b"
     },
     {
       "source": "docs/validation/camera-enable-main-only-2026-10-31.md",
