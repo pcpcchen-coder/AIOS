@@ -10,6 +10,7 @@ import { formatNumberPref, formatSeconds, stepPref } from "../shared/prefs.ts";
 import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
+import { PROACTIVE_TEXT, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView, type WeatherFetchState } from "../shared/proactive.ts";
 import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
 import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
@@ -38,6 +39,8 @@ export interface ViewActions {
   updateVoice(patch: VoicePrefsPatch): void;
   /** 聲音輸入／輸出裝置（id 與名稱；null＝系統預設）。舊的測試替身沒有這一項時不畫選單。 */
   updateAudio?(patch: AudioPrefsPatch): void;
+  /** PRO-1「主動提醒」。 */
+  updateProactive?(patch: ProactivePrefsPatch): void;
   /** SP-1：重新檢查整合服務狀態。 */
   refreshIntegrations?(): void;
   /** VCR-2：設定頁「語音中繼（實驗）」的按鈕（沒有時只畫狀態、按鈕停用）。 */
@@ -443,6 +446,7 @@ export function renderSettings(
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions),
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
+    settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
     settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
     // 家人辨識只在 macOS App（加密保存需要 safeStorage）；瀏覽器版照實說不可用，不提供任何操作。
@@ -479,6 +483,8 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.realtime && renderRealtimeSettings(settings.realtime, actions, { desktop: true }),
     // 聲音輸入／輸出（George 2026-11-01）：選單列「聲音」與這裡都能選，寫入同一個 audio.json。
     settings.audio && renderAudioSettings(settings.audio.prefs, audio, actions),
+    // PRO-1：選單列「主動提醒」與這裡都能改，寫入同一個 proactive.json。
+    settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
     settings.voice_relay === true && voiceRelay && renderVoiceRelay(voiceRelay, actions),
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
@@ -745,6 +751,56 @@ export function renderAudioSettings(prefs: AudioPrefs, report: AudioReport | nul
     report && !report.labels && h("p", { class: "muted small" }, t(AUDIO_TEXT.needPermission)),
     h("p", { class: "muted small" }, t(AUDIO_TEXT.bluetoothHint)),
     h("p", { class: "muted small" }, t(AUDIO_TEXT.systemSpeechHint)),
+  );
+}
+
+const PROACTIVE_STATE: Record<WeatherFetchState, string> = { ok: PROACTIVE_TEXT.stateOk, failed: PROACTIVE_TEXT.stateFailed, none: PROACTIVE_TEXT.stateNone, no_place: PROACTIVE_TEXT.stateNoPlace };
+
+/**
+ * PRO-1「主動提醒」：總開關、天氣開關、時段與地點（下拉選單）、最近一次查天氣的狀態（不含天氣內容）與資料出處。
+ * 改了就保存（POST /api/settings/proactive）。
+ */
+export function renderProactiveSettings(view: ProactiveSettingsView, actions: ViewActions): HTMLElement {
+  const prefs = view.prefs;
+  const list = h("ul", { class: "pref-list" });
+  const toggle = (label: string, note: string, on: boolean, patch: ProactivePrefsPatch, enabled = true) => {
+    const b = button(on ? "開" : "關", () => actions.updateProactive?.(patch), on ? "btn--primary" : "");
+    b.setAttribute("aria-pressed", String(on));
+    b.setAttribute("aria-label", t("{0}：{1}", t(label), on ? t("開") : t("關")));
+    b.disabled = !actions.updateProactive || !enabled;
+    list.append(h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label)), h("span", { class: "muted small" }, t(note))), b));
+  };
+  const select = (label: string, options: { value: string; label: string; disabled?: boolean }[], current: string, patch: (value: string) => ProactivePrefsPatch) => {
+    const el = h("select", { "aria-label": t(label) }) as HTMLSelectElement;
+    for (const o of options) {
+      const opt = h("option", { value: o.value }, o.label) as HTMLOptionElement;
+      if (o.value === current) {
+        opt.setAttribute("selected", "");
+        opt.selected = true;
+      }
+      opt.disabled = o.disabled === true;
+      el.append(opt);
+    }
+    el.disabled = !actions.updateProactive;
+    el.addEventListener("change", () => {
+      if (el.value !== current) actions.updateProactive?.(patch(el.value));
+    });
+    list.append(h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label))), el));
+  };
+  toggle(PROACTIVE_TEXT.enabled, PROACTIVE_TEXT.enabledNote, prefs.enabled, { enabled: !prefs.enabled });
+  toggle(PROACTIVE_TEXT.weather, PROACTIVE_TEXT.weatherNote, prefs.weather, { weather: !prefs.weather }, prefs.enabled);
+  const hour = (n: number) => t(PROACTIVE_TEXT.hour, n);
+  select(PROACTIVE_TEXT.start, view.start_hours.map((n) => ({ value: String(n), label: hour(n), disabled: n >= prefs.end_hour })), String(prefs.start_hour), (v) => ({ start_hour: Number(v) }));
+  select(PROACTIVE_TEXT.end, view.end_hours.map((n) => ({ value: String(n), label: hour(n), disabled: n <= prefs.start_hour })), String(prefs.end_hour), (v) => ({ end_hour: Number(v) }));
+  const auto = view.place?.auto ? t(PROACTIVE_TEXT.auto, t(view.place.label)) : t(PROACTIVE_TEXT.autoNone);
+  select(PROACTIVE_TEXT.place, [{ value: "", label: auto }, ...view.places.map((p) => ({ value: p.id, label: t(p.label) }))], prefs.place ?? "", (v) => ({ place: (v || null) as ProactivePrefs["place"] }));
+  return h(
+    "section",
+    { class: "camera-settings proactive-settings" },
+    h("h3", {}, t(PROACTIVE_TEXT.group)),
+    list,
+    !view.place && h("p", { class: "muted small" }, t(PROACTIVE_TEXT.noPlace)),
+    h("p", { class: "muted small", role: "status" }, t(PROACTIVE_STATE[view.weather.state])),
   );
 }
 

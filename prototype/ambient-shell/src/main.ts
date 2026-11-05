@@ -2660,6 +2660,16 @@ const actions: ViewActions = {
       if (error) dispatch({ type: "show.settings", request_id: requestId, message: error });
     });
   },
+  updateProactive(patch) {
+    const requestId = userRequest();
+    void api.updateProactive(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`主動提醒設定沒有保存：${(err as Error).message}` }),
+    );
+  },
   updateRealtime(patch) {
     const requestId = userRequest();
     void api.updateRealtime(patch).then(

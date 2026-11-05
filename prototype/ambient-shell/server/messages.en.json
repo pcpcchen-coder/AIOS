@@ -556,5 +556,9 @@
   "gog 沒能啟動，行程沒有新增。": "gog could not start, so the event was not added.",
   "gog 回報錯誤，不確定行程有沒有新增；請看一下日曆。": "gog reported an error, so it is unclear whether the event was added; please check your calendar.",
   "行程已加到你的 Google 日曆。": "The event was added to your Google Calendar.",
-  "gog 說已送出，但沒有回傳行程 ID；請看一下日曆。": "gog says it was sent but returned no event ID; please check your calendar."
+  "gog 說已送出，但沒有回傳行程 ID；請看一下日曆。": "gog says it was sent but returned no event ID; please check your calendar.",
+  "今天的天氣。": "Today's weather.",
+  "還沒有設定天氣的地點（選單列「主動提醒」可以選）。": "No weather location is set yet (choose one under “Proactive briefing” in the menu bar).",
+  "查不到今天的天氣（Open-Meteo 沒有回應或回覆看不懂）。": "Today's weather could not be retrieved (Open-Meteo did not respond or the reply could not be understood).",
+  "沒有這個工具。": "No such tool."
 }

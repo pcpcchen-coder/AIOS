@@ -781,3 +781,15 @@ describe("WK-02 POST /api/realtime/start: wake_word only with NOUS_WAKE on", () 
     expect(records.records).toHaveLength(1);
   });
 });
+
+describe("PRO-1：weather prefetch when a greeting call starts", () => {
+  it("onGreetingStart fires for look-to-talk and wake-word starts only (not user starts or rebuilds); a throwing hook does not block the start", () => {
+    let starts = 0;
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: () => true, onGreetingStart: () => { starts++; throw new Error("boom"); } });
+    expect(sessions.start("sse_a", "user")).toMatchObject({ ok: true });
+    expect(starts).toBe(0);
+    expect(sessions.start("sse_a", "look_to_talk")).toMatchObject({ ok: true });
+    expect(starts).toBe(1);
+  });
+});

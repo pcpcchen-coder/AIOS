@@ -3,6 +3,7 @@ import type { MenuPrefSetting } from "../shared/seconds-menu.ts";
 import type { SettingsView } from "../shared/types.ts";
 import type { WakePrefs, WakeReason, WakeReport, WakeState } from "../shared/wake.ts";
 import type { AudioMenuReport, AudioPrefsPatch, AudioSettingsView } from "../shared/audio-devices.ts";
+import type { ProactivePrefsPatch, ProactiveSettingsView } from "../shared/proactive.ts";
 
 export interface MenuItemTemplate {
   label?: string;
@@ -48,6 +49,12 @@ export function audioMenu(
   handlers: { setAudio?(patch: AudioPrefsPatch): unknown; translate?(source: string, ...values: unknown[]): string },
 ): MenuItemTemplate[];
 
+export const PROACTIVE_TEXT: Record<string, string>;
+export function proactiveMenu(
+  proactive: ProactiveSettingsView,
+  handlers: { setProactive?(patch: ProactivePrefsPatch): unknown; translate?(source: string, ...values: unknown[]): string },
+): MenuItemTemplate[];
+
 export function settingsMenu(
   settings: SettingsView | null,
   handlers: {
@@ -60,6 +67,7 @@ export function settingsMenu(
     wakeCommand?(name: string): void;
     setAudio?(patch: AudioPrefsPatch): unknown;
     audioReport?: AudioMenuReport | null;
+    setProactive?(patch: ProactivePrefsPatch): unknown;
     /** 服務模式：鏡頭與常駐喚醒聆聽的開關、鏡頭畫面與家人辨識停用（保存的設定不變）。 */
     servicePaused?: boolean;
     translate?(source: string, ...values: unknown[]): string;

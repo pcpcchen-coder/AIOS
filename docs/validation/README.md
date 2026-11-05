@@ -10,6 +10,7 @@
 
 | 紀錄 | 證據範圍與限制 |
 |---|---|
+| [主動提醒 PRO-1：招呼後說天氣](pro-1-2026-11-05.md) | 2026-11-05：每人每天早上（本機 5–11 點，可設定）第一次打招呼時，核心在招呼句後接一句今天的天氣（Open-Meteo，CC BY 4.0，12 個固定城市、快取 30 分鐘、看著說話或喚醒開始時先查）；沒認出時用「這台裝置今天第一次」；問候真的送出才記、每日紀錄只有日期與鍵；選單列與設定頁「主動提醒」；AIL 唯讀工具 `app.weather.today`；假時鐘與假 Open-Meteo 的雲端測試；**Mac 與真實 Open-Meteo 未驗證** |
 | [本機日期修正](local-date-2026-11-05.md) | 2026-11-05：給模型的「今天日期」改用本機時區並附星期幾（兩條即時語音、ChatGPT 方案工具層、文字對話、背景任務）；台北凌晨不再差一天；Google 日曆行程不用確認（George 確認）；固定時刻的雲端測試 |
 | [Google 日曆 CAL-1](cal-1-google-calendar-2026-11-05.md) | 2026-11-05：`google_calendar` Adapter：查行程（gog `--readonly`，最多 20 筆、3.5 KB）與新增行程（當地時間換 RFC3339、整天行程、不邀請人、每分鐘 10 個、不出確認卡）；帳號只來自設定；假 gog 與真 spawn 的雲端測試；**Mac 與真實 Google 日曆未驗證** |
 | [家電 Facade AIL-2](ail-2-home-facade-2026-11-05.md) | 2026-11-05：`/api/home/*` 經整合層的 `home` Facade 呼叫 HomeBridge（`legacyName`、`page` 路徑、`scalar`）；Facade 開關兩路逐筆比對 HTTP 回應與中控請求，H0／H1／H1b 完全相同；模型工具逐位元組不變；gog 共用模組；**Mac 與真實中控未驗證** |

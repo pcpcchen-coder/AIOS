@@ -827,3 +827,37 @@ describe("台灣繁體 transcripts on the live route (core sideband)", () => {
     expect(t.delegations.at(-1)!.userText).toBe("帮我写报告");
   });
 });
+
+describe("PRO-1：the morning weather after the greeting on the live wire (fixture sideband)", () => {
+  const later = () => new Promise((r) => setTimeout(r, 40));
+
+  it("the core's greeting plus weather goes out as one speakable append (chunked under 500 bytes) and is recognised as the greeting turn", async () => {
+    const sentence = "早安，George。今天台北多雲，22 到 28 度，下午降雨機率 60%，記得帶傘";
+    const uses: (boolean | undefined)[] = [];
+    const t = await setup({ greeting: (_id, _s, _l?: unknown, use?: boolean) => (uses.push(use), { text: liveGreetingText(sentence), sentence }) });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    await conn.waitFor((e) => e.type === "session.context.append");
+    const appends = conn.received.filter((e) => e.type === "session.context.append");
+    expect(appends.map((e) => (e.content as { text: string }[])[0].text).join("")).toBe(liveGreetingText(sentence));
+    for (const e of appends) expect(Buffer.byteLength((e.content as { text: string }[])[0].text)).toBeLessThanOrEqual(500);
+    expect(uses).toEqual([undefined]);
+    expect(isGreetingTurn("早安 George！今天台北多雲，22到28度，下午降雨機率60%，記得帶傘。", sentence)).toBe(true);
+  });
+
+  it("F10 + PRO-1：when the user spoke first the core is asked to drop the greeting (use=false), so the briefing is not counted as said", async () => {
+    const uses: (boolean | undefined)[] = [];
+    const t = await setup({ greeting: (_id, _s, _l?: unknown, use?: boolean) => (uses.push(use), { text: liveGreetingText("早安"), sentence: "早安" }) });
+    const call = await t.route.connect("v=0", t.ctx);
+    calls.push(call);
+    const conn = await sideband!.next();
+    conn.send({ type: "input_audio_buffer.speech_started" });
+    await later();
+    call.control!.input("greeting", "int_0123456789abcdef");
+    call.control!.input("notice", "x");
+    await conn.waitFor((e) => e.type === "session.context.append");
+    expect(uses).toEqual([false]);
+  });
+});

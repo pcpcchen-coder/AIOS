@@ -266,6 +266,8 @@ export interface RealtimeSessionsOptions {
    */
   hideRevokeFromPage?: boolean;
   /** WK-02（F6）：每通工作階段結束時寫一筆費用紀錄（server/voice-cost-log.ts）；沒有時不記。 */
+  /** PRO-1：發出看著說話或喚醒的互動 ID 時呼叫（核心先取天氣）；不等結果、失敗不影響開始。 */
+  onGreetingStart?: () => void;
   costLog?: {
     record(record: VoiceCostRecord): void;
     /** 改寫同一個 session_id 最後一筆（頁面的 no_voice／usage 晚於核心的結束才到時）。 */
@@ -509,6 +511,11 @@ export class RealtimeSessions {
   private issueInteraction(source: "look_to_talk" | "wake_word"): string {
     const id = `int_${randomBytes(8).toString("hex")}`;
     this.interactions.set(id, { id, source, issuedAt: this.now(), session: null, used: false });
+    try {
+      this.options.onGreetingStart?.();
+    } catch {
+      // 預先取天氣失敗不影響開始
+    }
     return id;
   }
 

@@ -8,6 +8,7 @@ import type { IdentityStatus } from "./identity.ts";
 import type { MemorySettingsStatus } from "./memory.ts";
 import type { WakeSettingsView } from "./wake.ts";
 import type { AudioSettingsView } from "./audio-devices.ts";
+import type { ProactiveSettingsView } from "./proactive.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
 // 這裡先用 TS 型別，schema_version 標為 proto-0.1 以免與正式契約混淆。
@@ -162,6 +163,8 @@ export interface SettingsView {
   integrations?: { tools: string[] };
   /** VCR-2：只有核心註冊了 voice_relay（NOUS_AIL=on 且 NOUS_VCR=fake／mac）時才有（true）；設定頁據此畫「語音中繼（實驗）」診斷區。沒有註冊時沒有這個鍵。 */
   voice_relay?: boolean;
+  /** PRO-1 主動提醒（招呼後接今天的天氣）：設定、實際地點與最近一次查天氣的狀態（不含天氣內容）。 */
+  proactive?: ProactiveSettingsView;
 }
 
 /** API key 路徑（RealtimeBridge.info）提供的欄位；路徑與計費欄位由 RealtimeSessions 補上。 */
