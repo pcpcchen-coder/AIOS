@@ -163,7 +163,7 @@ describe("apply → verify → voice-only naming", () => {
     const g = await c.svc.handle({ op: "greeting", interaction: "int_0000000000000001", track: 1, eligible: true, route: "api_key" });
     expect(g.ok && g.op === "greeting" ? g.text : "", c.log.filter((l) => l.includes("問候決策")).at(-1)).toMatch(NAMED);
     expect(c.log.filter((l) => l.includes("問候決策")).at(-1)).toMatch(/融合 voice_only_calibrated.*聲音門檻已校準/);
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
   }, 30_000);
 
   it("one stranger taken for George during verification → not calibrated → voice alone still unnamed", async () => {

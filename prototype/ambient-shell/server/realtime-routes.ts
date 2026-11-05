@@ -36,6 +36,7 @@ import { connectApiKey, type ApiKeyBridge } from "./apikey-call.ts";
 import type { LiveMemoryPort } from "./memory/live.ts";
 import { WEB_SEARCH_TIMEOUT_MS } from "./web-search.ts";
 import { WAKE_START_RATE } from "../shared/wake.ts";
+import { MAIN_SOURCE } from "../shared/terminal.ts";
 import type { PageEndReason, VoiceCostRecord, VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
 
 // George 要的接縫：一個小的 RealtimeRoute 介面，每條路徑一個模組
@@ -69,6 +70,8 @@ export interface SessionContext {
   readonly lookToTalk?: boolean;
   /** MEM-2：記憶撤銷後自動重建的通話（MEM-3：走被撤銷那通的路徑、不問候、第一句是固定句）。 */
   readonly rebuild?: boolean;
+  /** RPI-ID：開始這通的頁面（Mac 主視窗 "main"，終端機是識別碼）；記憶候選只看這個頁面認出的人。 */
+  readonly page?: string;
   /** MEM-3：開始的頁面有 SSE 串流（核心能送事件與工具呼叫給它）；記憶工作階段需要它。 */
   readonly events?: boolean;
   /** MEM-2：等頁面回報這個工作階段已停播（POST /api/realtime/stopped）；逾時回 null。 */
@@ -299,6 +302,8 @@ interface Interaction {
   id: string;
   /** 看著說話或喚醒（WK-02）：喚醒開始的問候不需要「看著說話」設定（IdentityService 依此放寬）。 */
   source: "look_to_talk" | "wake_word";
+  /** RPI-ID：開始這個互動的頁面。 */
+  page: string;
   issuedAt: number;
   /** 真的連上的工作階段；null＝還沒連上。 */
   session: { id: string; route: RouteId; at: number; locale: Locale; wakeId: string | null } | null;
@@ -315,6 +320,8 @@ interface Decision {
   /** WK-02：開始方式與喚醒識別碼（費用紀錄用；改路徑時沿用）。 */
   source: RealtimeStartSource;
   wakeId: string | null;
+  /** RPI-ID：開始的頁面（改路徑時沿用）。 */
+  page: string;
   plan: Extract<StartPlan, { kind: "start" }>;
   route: RouteId;
   at: number;
@@ -356,6 +363,8 @@ interface VoiceSession {
   owner: string;
   /** api_key 的頁面可能沒有 SSE 串流（null）：那時核心不送事件也不帶記憶。 */
   clientId: string | null;
+  /** RPI-ID：開始的頁面。 */
+  page: string;
   call: RouteCall | null;
   pendingHost: Map<string, PendingHost>;
   /** openUntil：卡片自己的時限；頁面的「結束」回報沒送到時，核心過了這個時間就不再當成卡還開著。 */
@@ -460,7 +469,8 @@ export class RealtimeSessions {
    * POST /api/realtime/start。偏好只在這裡讀一次；之後改偏好只影響下一次開始。
    * clientId：開始的頁面的 SSE 串流；live 路徑一定要有（工具呼叫只送到這條串流）。
    */
-  start(clientId: string | null, source: RealtimeStartSource = "user", locale: Locale = "zh-TW", rebuild = false, wakeId: string | null = null): StartDecision {
+  /** page：送出開始的頁面（X-Nous-Terminal；Mac 主視窗與一般瀏覽器是 "main"）。只用來分開各頁面的記憶候選與喚醒時窗。 */
+  start(clientId: string | null, source: RealtimeStartSource = "user", locale: Locale = "zh-TW", rebuild = false, wakeId: string | null = null, page: string = MAIN_SOURCE): StartDecision {
     this.sweep();
     // WK-02：喚醒開始的通話每個滾動 60 秒最多 3 次（只算被接受的 wake_word 開始；其他來源不算）。
     if (source === "wake_word" && !rebuild) {
@@ -503,16 +513,16 @@ export class RealtimeSessions {
     if (plan.route === "live" && !clientId) {
       return { ok: false, message: "即時語音無法開始：頁面沒有連上本機核心的事件串流，請重新整理後再試。", reasons: {} };
     }
-    const interaction = (source === "look_to_talk" || source === "wake_word") && !rebuild ? this.issueInteraction(source) : null;
-    const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale), rebuild, { source, wakeId: source === "wake_word" ? wakeId : null });
+    const interaction = (source === "look_to_talk" || source === "wake_word") && !rebuild ? this.issueInteraction(source, page) : null;
+    const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale), rebuild, { source, wakeId: source === "wake_word" ? wakeId : null, page });
     if (source === "wake_word" && !rebuild) this.wakeStarts.push(this.now());
     const model = this.options.routes[plan.route]!.describe().model;
     return { ok: true, session_id: decision.id, owner: decision.owner, route: plan.route, model, billing_line: billingLine(plan.route, model), notice: plan.notice, interaction };
   }
 
-  private issueInteraction(source: "look_to_talk" | "wake_word"): string {
+  private issueInteraction(source: "look_to_talk" | "wake_word", page: string): string {
     const id = `int_${randomBytes(8).toString("hex")}`;
-    this.interactions.set(id, { id, source, issuedAt: this.now(), session: null, used: false });
+    this.interactions.set(id, { id, source, page, issuedAt: this.now(), session: null, used: false });
     try {
       this.options.onGreetingStart?.();
     } catch {
@@ -524,12 +534,13 @@ export class RealtimeSessions {
   /**
    * WK-02：有喚醒開始、還沒做過問候決策的互動（核心發出、還在有效時間內）。IdentityService 據此在那段時間接受
    * 同步辨識的取樣，即使「看著說話」設定是關的；稱名仍要「打招呼時稱呼認出的家人」開著。
+   * page：只看這個頁面開始的互動（RPI-ID：Mac 的喚醒不放寬 Pi 的取樣）；未提供時看所有頁面。
    */
-  wakeGreetingOpen(): boolean {
+  wakeGreetingOpen(page?: string): boolean {
     this.sweep();
     const now = this.now();
     for (const it of this.interactions.values()) {
-      if (it.source !== "wake_word" || it.used) continue;
+      if (it.source !== "wake_word" || it.used || (page !== undefined && it.page !== page)) continue;
       if (it.session) {
         // 已連上：和 claimGreeting 同樣的時窗，而且工作階段還在。
         const s = it.session;
@@ -611,12 +622,13 @@ export class RealtimeSessions {
     interaction: string | null = null,
     locale: Locale = "zh-TW",
     rebuild = false,
-    origin: { source: RealtimeStartSource; wakeId: string | null } = { source: "user", wakeId: null },
+    origin: { source: RealtimeStartSource; wakeId: string | null; page?: string } = { source: "user", wakeId: null },
   ): Decision {
     const decision: Decision = {
       rebuild,
       source: origin.source,
       wakeId: origin.wakeId,
+      page: origin.page ?? MAIN_SOURCE,
       locale,
       id: `rt_${randomUUID().replaceAll("-", "")}`,
       owner: `own_${randomBytes(24).toString("base64url")}`,
@@ -643,6 +655,7 @@ export class RealtimeSessions {
       route: decision.route,
       owner: decision.owner,
       clientId: decision.clientId,
+      page: decision.page,
       call: null,
       pendingHost: new Map(),
       approval: { open: false, resolvedAt: null, openUntil: null },
@@ -725,7 +738,7 @@ export class RealtimeSessions {
         throw err;
       }
       // 改路徑：同一個互動 ID（看著說話延續）；api_key 的記憶用 openai_realtime 同意鍵重新判斷，codex 的同意不帶過去。
-      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId, decision.interaction, decision.locale, false, { source: decision.source, wakeId: decision.wakeId });
+      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId, decision.interaction, decision.locale, false, { source: decision.source, wakeId: decision.wakeId, page: decision.page });
       const model = this.options.routes.api_key.describe().model;
       this.options.log?.(`即時語音：ChatGPT 方案路徑開始失敗（${err.reason}），改用 API key（這次依用量計費）`);
       throw new FallbackRequired({
@@ -944,6 +957,7 @@ export class RealtimeSessions {
       locale: session.locale,
       lookToTalk: flags.lookToTalk,
       rebuild: flags.rebuild,
+      page: session.page,
       events: session.clientId !== null,
       tasks: () => this.options.tasks(session.route),
       now: this.now,

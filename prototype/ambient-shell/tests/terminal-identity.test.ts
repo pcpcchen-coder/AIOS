@@ -20,10 +20,14 @@ import { terminalIdentity, terminalMemory, type TerminalIdentityPort, type Termi
 import { validateIdentityRequest as ipcValidateIdentity } from "../desktop/identity-ipc.mjs";
 import { validateMemoryRequest as ipcValidateMemory } from "../desktop/memory-ipc.mjs";
 import { IDENTITY_OPS, type FaceModelVersion, type IdentityResponse } from "../shared/identity.ts";
-import { MEMORY_OPS, type MemoryRequest, type MemoryResponse, type MemoryStatusView } from "../shared/memory.ts";
+import { MEMORY_OPS, type MemoryPresenceResponse, type MemoryRequest, type MemoryResponse, type MemoryStatusView } from "../shared/memory.ts";
 import { PAGE_PACE, pageTerminal, TERMINAL_IDENTITY_OPS, TERMINAL_MEMORY_OPS } from "../shared/terminal.ts";
 import { selectBridges } from "../src/identity-bridge.ts";
 import { fakeSecretBox, near, unitFeature } from "./fixtures/identity.ts";
+import { enable, harness, selectProfile, type Harness } from "./fixtures/memory-service.ts";
+import { realLockAvailable } from "./fixtures/memory-lock.ts";
+import { RealtimeSessions, type RealtimeRoute, type RouteCall, type SessionContext } from "../server/realtime-routes.ts";
+import { billingLine } from "../shared/realtime-route.ts";
 
 const MODEL: FaceModelVersion = { detector: "yunet-2023mar@8f2383e4", recognizer: "sface-2021dec@0ba9fbfa", align: "opencv-aligncrop-5pt@048f050d", preproc: "yunet640-cvlinear-bgr-v1" };
 const GEORGE = unitFeature(1);
@@ -132,20 +136,204 @@ describe("IdentityService keeps evidence per page (Mac main window vs. terminal)
     expect(await c.svc.handle({ op: "ambient_probe", track: 1, model: MODEL, face_count: 0, quality: "no_face" }, { source: "rpi4" })).toMatchObject({ ok: false, code: "rate_limited" });
   });
 
-  it("the memory face candidate is the newest match across pages; a management session on the Mac still blocks every page", async () => {
+  it("memory candidates are scoped to the asking page: a Pi match never selects for the Mac, and the Mac's never for the Pi", async () => {
     const c = core();
     await enroll(c, [["George", GEORGE], ["Mary", MARY]]);
-    await frames(c, [{ source: "main", track: 1, face: GEORGE }], 6);
-    await greet(c, id(7), 1);
-    c.clock.now += 1000;
     await frames(c, [{ source: "rpi4", track: 1, face: MARY }], 6);
-    await greet(c, id(8), 1, "rpi4");
-    expect(c.svc.memoryFaceCandidate()).toMatchObject({ name: "Mary", source: "face" });
+    await greet(c, id(7), 1, "rpi4");
+    expect(c.svc.memoryFaceCandidate("main")).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
+    expect(c.svc.memoryFaceCandidate("rpi4")).toMatchObject({ name: "Mary", source: "face" });
+    c.clock.now += 1000;
+    await frames(c, [{ source: "main", track: 1, face: GEORGE }], 6);
+    await greet(c, id(8), 1);
+    expect(c.svc.memoryFaceCandidate("main")).toMatchObject({ name: "George" });
+    expect(c.svc.memoryCandidate("rpi4")).toMatchObject({ name: "Mary" });
+    expect(c.svc.memoryFaceCandidate("kitchen")).toBeNull();
+  });
+
+  it("a management session on the Mac still blocks every page", async () => {
+    const c = core();
+    await enroll(c, [["Mary", MARY]]);
     const opened = await c.svc.handle({ op: "open_session" }, { userInitiated: true });
     expect(opened.ok).toBe(true);
     c.clock.now += 1000;
     const blocked = await c.svc.handle({ op: "ambient_probe", track: 2, model: MODEL, face_count: 1, quality: "ok", feature: Array.from(near(MARY, 1)) }, { source: "rpi4" });
     expect(blocked).toMatchObject({ ok: false, code: "unavailable" });
+  });
+
+  it("rotating terminal ids cannot exceed the old core-wide sampling limits; the Mac keeps its own", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE]]);
+    const probe = (source: string, n: number) => c.svc.handle({ op: "ambient_probe", track: 1, model: MODEL, face_count: 1, quality: "ok", feature: Array.from(near(GEORGE, n)) }, { source });
+    for (let i = 0; i < 6; i++) expect(await probe(`pi-${i}`, i), `pi-${i}`).toEqual({ ok: true, op: "ambient_probe" });
+    expect(await probe("pi-6", 6)).toMatchObject({ ok: false, code: "rate_limited" });
+    expect(await probe("main", 7)).toEqual({ ok: true, op: "ambient_probe" });
+    // 喚醒聲音（每秒 4 次）與通話中聲音（每秒 2 次）也一樣是所有終端機合計。
+    const voice = (source: string) => c.svc.handle({ op: "voice_probe", wake_id: id(1), segment: "keyword", voiced_ms: 100 }, { source });
+    const calls = (source: string) => c.svc.handle({ op: "call_voice", voiced_ms: 100 }, { source });
+    for (let i = 0; i < 4; i++) expect(await voice(`v-${i}`)).not.toMatchObject({ code: "rate_limited" });
+    expect(await voice("v-4")).toMatchObject({ ok: false, code: "rate_limited" });
+    for (let i = 0; i < 2; i++) expect(await calls(`c-${i}`)).not.toMatchObject({ code: "rate_limited" });
+    expect(await calls("c-2")).toMatchObject({ ok: false, code: "rate_limited" });
+  });
+
+  it("malformed requests and invalid sources are refused before they create a page or use the rate limit", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE]]);
+    for (let i = 0; i < 12; i++) {
+      expect(await c.svc.handle({ op: "ambient_probe", track: -1, model: MODEL, face_count: 1, quality: "ok" }, { source: `bad-${i}` })).toMatchObject({ ok: false, code: "bad_request" });
+    }
+    for (const source of ["RPI4", "", "a b"]) expect(await c.svc.handle({ op: "ambient_status" }, { source })).toMatchObject({ ok: false, code: "bad_request" });
+    for (let i = 0; i < 6; i++) {
+      expect(await c.svc.handle({ op: "ambient_probe", track: 1, model: MODEL, face_count: 1, quality: "ok", feature: Array.from(near(GEORGE, i)) }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_probe" });
+    }
+  });
+
+  it("the Mac's evidence is never evicted by many terminals", async () => {
+    const c = core();
+    await enroll(c, [["George", GEORGE], ["Mary", MARY]]);
+    await frames(c, [{ source: "main", track: 1, face: GEORGE }], 6);
+    await greet(c, id(11), 1);
+    for (let i = 0; i < 12; i++) {
+      c.clock.now += 1000;
+      await frames(c, [{ source: `pi-${i}`, track: 1, face: MARY }], 1);
+    }
+    expect(c.svc.memoryFaceCandidate("main")).toMatchObject({ name: "George" });
+  });
+
+  it("a wake greeting window relaxes look-to-talk sampling only on the page that woke", async () => {
+    const wakeOn = new Set<string>();
+    const clock = { now: 1_000_000 };
+    const svc = new IdentityService({
+      store: new GalleryStore({ dir: join(root, "identity"), secretBox: fakeSecretBox() }),
+      confirm: async () => true,
+      camera: () => true,
+      ambient: () => ({ look_to_talk: false, look_to_talk_greet: false, look_to_talk_greet_name: true }),
+      wakeGreetingOpen: (source) => wakeOn.has(source),
+      runtime: { state: "ok", problems: [] },
+      model: MODEL,
+      now: () => clock.now,
+    });
+    const opened = await svc.handle({ op: "open_session" }, { userInitiated: true });
+    if (!opened.ok || !("session" in opened)) throw new Error(JSON.stringify(opened));
+    await svc.handle({ op: "enroll", session: opened.session, name: "George", minor: false, guardian_confirmed: false, consent: true, model: MODEL, samples: Array.from({ length: 6 }, (_, i) => Array.from(near(GEORGE, i + 1))) });
+    await svc.handle({ op: "close_session", session: opened.session });
+    wakeOn.add("rpi4");
+    expect(await svc.handle({ op: "ambient_status" }, { source: "rpi4" })).toEqual({ ok: true, op: "ambient_status", ready: true });
+    expect(await svc.handle({ op: "ambient_status" })).toEqual({ ok: true, op: "ambient_status", ready: false });
+    expect(await svc.handle({ op: "ambient_probe", track: 1, model: MODEL, face_count: 0, quality: "no_face" })).toMatchObject({ ok: false, code: "unavailable" });
+  });
+});
+
+// ─────────────── 記憶：候選與暫停只作用在發問的頁面 ───────────────
+
+const PERSON = "fam_000000000000000000000001";
+
+describe.skipIf(!realLockAvailable)("MemoryService scopes face candidates and presence to the page", () => {
+  const open: Harness[] = [];
+  afterEach(async () => { await Promise.all(open.splice(0).map((h) => h.close())); });
+
+  /** hits：各頁面目前的臉部候選（替身，代表 IdentityService.memoryCandidate(page)）。 */
+  async function linked(hits: Map<string, { person_id: string; name: string; at: number }>): Promise<Harness> {
+    const identity = { candidate: (page: string) => hits.get(page) ?? null, faceCandidate: (page: string) => hits.get(page) ?? null, people: () => [{ person_id: PERSON, name: "George", minor: false }] };
+    const h = harness({ dir: join(root, "memory"), key: Buffer.alloc(32, 7), identity });
+    open.push(h);
+    await enable(h, "George");
+    const token = await h.call({ op: "list", manage: true }, { userInitiated: true });
+    const george = (token.status as { profiles: { id: string }[] }).profiles[0]!.id;
+    await h.call({ op: "link_face", profile: george, person: PERSON, token: token.manage });
+    await selectProfile(h, null);
+    return h;
+  }
+
+  it("typed chat on the Mac is not auto-selected by a face seen on the Pi; a same-page match still selects", async () => {
+    const hits = new Map<string, { person_id: string; name: string; at: number }>();
+    const h = await linked(hits);
+    hits.set("rpi4", { person_id: PERSON, name: "George", at: h.clock.now });
+    const mac = await h.turn("晚餐吃什麼");
+    expect(mac.auto_selected).toBeUndefined();
+    expect(mac.presence).toMatchObject({ state: "unselected" });
+    hits.set("main", { person_id: PERSON, name: "George", at: h.clock.now + 1 });
+    const same = await h.turn("晚餐吃什麼");
+    expect(same.auto_selected).toBe(true);
+    expect(same.presence).toMatchObject({ state: "selected", name: "George" });
+  });
+
+  it("a live call proposes only its own page's candidate (Pi call ignores the Mac's face, Mac call ignores the Pi's)", async () => {
+    const hits = new Map<string, { person_id: string; name: string; at: number }>();
+    const h = await linked(hits);
+    hits.set("main", { person_id: PERSON, name: "George", at: h.clock.now });
+    expect(h.service.liveFaceCandidate("rpi4")).toBeNull();
+    hits.delete("main");
+    hits.set("rpi4", { person_id: PERSON, name: "George", at: h.clock.now + 1 });
+    expect(h.service.liveFaceCandidate("main")).toBeNull();
+    const card = h.service.liveFaceCandidate("rpi4");
+    expect(card).toMatchObject({ name: "George" });
+    expect(await h.service.answerLiveCandidate(card!.card, true)).toBe("ok");
+    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "selected", name: "George" });
+    const binding = h.service.openLive({ lookToTalk: true, rebuild: false, now: () => h.clock.now, page: "rpi4" });
+    expect(binding.page).toBe("rpi4");
+    expect(h.service.openLive({ lookToTalk: true, rebuild: false, now: () => h.clock.now }).page).toBe("main");
+  });
+
+  it("a suspend from another page does not suspend the current person; the page that selected it can", async () => {
+    const h = await linked(new Map());
+    const st = await h.call({ op: "status" });
+    const george = (st.profiles as { id: string }[])[0]!.id;
+    await selectProfile(h, george);
+    expect(await h.call({ op: "suspend", reason: "tracking_lost" }, { source: "rpi4" })).toMatchObject({ ok: true, op: "suspend", presence: { state: "selected", name: "George" } });
+    h.service.suspend("multi_face", "rpi4");
+    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "selected" });
+    expect(await h.call({ op: "suspend", reason: "multi_face" })).toMatchObject({ presence: { state: "suspended" } });
+    // Pi 選的人：Mac 的鏡頭事件不暫停，Pi 的會。
+    const card = ((await h.call({ op: "status" })).presence as { select_card: string }).select_card;
+    await h.call({ op: "select", profile: george, card }, { source: "rpi4" });
+    expect(await h.call({ op: "suspend", reason: "tracking_lost" })).toMatchObject({ presence: { state: "selected" } });
+    expect(await h.call({ op: "suspend", reason: "tracking_lost" }, { source: "rpi4" })).toMatchObject({ presence: { state: "suspended" } });
+  });
+
+  it("a disagreeing in-call voice on another page does not undo the Mac's default selection", async () => {
+    const hits = new Map<string, { person_id: string; name: string; at: number }>();
+    const h = await linked(hits);
+    hits.set("main", { person_id: PERSON, name: "George", at: h.clock.now });
+    expect((await h.turn("晚餐吃什麼")).auto_selected).toBe(true);
+    h.service.voiceDisagrees("rpi4");
+    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "selected" });
+    h.service.voiceDisagrees("main");
+    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "unselected" });
+  });
+});
+
+describe("RealtimeSessions carries the starting page", () => {
+  function sessions(seen: SessionContext[]) {
+    const route = (id: "live" | "api_key"): RealtimeRoute => ({
+      id,
+      readiness: () => ({ ready: true }),
+      describe: () => ({ id, available: true, reason: null, billing_line: billingLine(id, "m"), model: "m", voice: "cove", voices: [], tools: "", detail: "fixture" }),
+      baseInfo: () => ({ available: true, model: "m", detail: "fixture" }),
+      async connect(_sdp: string, ctx: SessionContext): Promise<RouteCall> {
+        seen.push(ctx);
+        return { route: id, answerSdp: "v=0 answer", model: "m", control: id === "live" ? { input: () => {} } : null, close: async () => {} };
+      },
+    });
+    return new RealtimeSessions({ routes: { live: route("live"), api_key: route("api_key") }, preference: () => "auto", tasks: () => [], send: () => true, now: () => 1_000_000 });
+  }
+
+  it("the session context names the page (memory candidates use it) and the wake window is per page", async () => {
+    const seen: SessionContext[] = [];
+    const s = sessions(seen);
+    const pi = s.start("sse_pi", "wake_word", "zh-TW", false, id(20), "rpi4");
+    if (!pi.ok) throw new Error("start");
+    expect(s.wakeGreetingOpen("rpi4")).toBe(true);
+    expect(s.wakeGreetingOpen("main")).toBe(false);
+    await s.call("v=0", pi.session_id, pi.owner);
+    expect(seen.at(-1)?.page).toBe("rpi4");
+    await s.end(pi.session_id, pi.owner);
+    const mac = s.start("sse_mac", "user");
+    if (!mac.ok) throw new Error("start");
+    await s.call("v=0", mac.session_id, mac.owner);
+    expect(seen.at(-1)?.page).toBe("main");
   });
 });
 
@@ -219,7 +407,9 @@ const presence = { state: "selected" as const, epoch: 3, select_card: "mc_000000
 const status: MemoryStatusView = {
   state: "ready", reason: null, enabled: true, setup_done: true, presence,
   profiles: [{ id: "profile_0123456789abcdef", name: "George", minor: false, linked: true, facts: 2 }],
-  target: null, targets: [], active_facts: 2, limits: { facts: 1000, profiles: 20, value_chars: 512 },
+  target: { provider: "claude", account: "fp0000claude0001", label: "Claude", allowed: true, household_allowed: true },
+  targets: [{ provider: "claude", account: "fp0000claude0001", label: "Claude", allowed: true, household_allowed: true }],
+  active_facts: 2, limits: { facts: 1000, profiles: 20, value_chars: 512 }, suggestions: { available: true, enabled: true },
 };
 
 function memoryPort(kind: string | null = "face_candidate", reply?: (req: Record<string, unknown>) => MemoryResponse): TerminalMemoryPort & { calls: { request: unknown; ctx: unknown }[] } {
@@ -244,7 +434,7 @@ function memoryPort(kind: string | null = "face_candidate", reply?: (req: Record
 }
 
 describe("POST /api/terminal/memory (server/terminal-routes.ts)", () => {
-  it("allows status, suspend, select (household or a profile, with this generation's select_card) and the face-candidate card; userInitiated false", async () => {
+  it("allows status, suspend, select (household or a profile, with this generation's select_card) and the face-candidate card; userInitiated false, the terminal as the source", async () => {
     expect([...TERMINAL_MEMORY_OPS]).toEqual(["status", "suspend", "select", "card_view", "card_answer"]);
     const ok: MemoryRequest[] = [
       { op: "status" },
@@ -258,17 +448,21 @@ describe("POST /api/terminal/memory (server/terminal-routes.ts)", () => {
       const port = memoryPort();
       const out = await terminalMemory(port, { terminal: "rpi4", request });
       expect(out.status, request.op).toBe(200);
-      expect(port.calls, request.op).toEqual([{ request, ctx: { userInitiated: false } }]);
+      expect(port.calls, request.op).toEqual([{ request, ctx: { userInitiated: false, source: "rpi4" } }]);
     }
   });
 
-  it("never returns memory content: cards, chat text and suggestions are stripped from select / card_answer", async () => {
+  it("returns only the presence projection: no memory content, fact counts, minor or face-link flags, accounts, consents or suggestion flags", async () => {
+    const projected = { state: "ready", presence, profiles: [{ id: "profile_0123456789abcdef", name: "George" }] };
+    const st = await terminalMemory(memoryPort(), { terminal: "rpi4", request: { op: "status" } });
+    expect(st).toEqual({ status: 200, body: { ok: true, op: "status", ...projected } });
     for (const request of [{ op: "select", profile: null }, { op: "card_answer", card: CARD, choice: "decline" }]) {
       const out = await terminalMemory(memoryPort(), { terminal: "rpi4", request });
       if (out.status !== 200 || !out.body.ok || (out.body.op !== "select" && out.body.op !== "card_answer")) throw new Error(JSON.stringify(out));
-      expect(out.body).toMatchObject({ card: null, chat: null, suggestion: null, presence });
+      expect(out.body).toEqual({ ok: true, op: request.op, receipts: [], presence, history_reset: false, status: projected });
       expect(JSON.stringify(out.body)).not.toContain("私人內容");
     }
+    expect(await terminalMemory(memoryPort(), { terminal: "rpi4", request: { op: "suspend", reason: "tracking_lost" } })).toEqual({ status: 200, body: { ok: true, op: "suspend", presence } });
     // 核心萬一回了別種卡（例如卡在檢查與取用之間換了），card_view 也不交出去。
     const leaky = memoryPort("face_candidate", () => ({ ok: true, op: "card_view", card: { kind: "suggestion", card: CARD, text: "私人內容", value: "私人內容", subject_name: null }, origin: "typed" }));
     const out = await terminalMemory(leaky, { terminal: "rpi4", request: { op: "card_view", card: CARD } });
@@ -373,7 +567,7 @@ describe("HTTP routes", () => {
 // ─────────────── 頁面：傳輸選擇與效能保護 ───────────────
 
 describe("page bridges (src/identity-bridge.ts)", () => {
-  const http = () => ({ identity: vi.fn(async () => ({ ok: true, op: "ambient_status", ready: true }) as IdentityResponse), memory: vi.fn(async () => ({ ok: true, op: "status", ...status }) as MemoryResponse) });
+  const http = () => ({ identity: vi.fn(async () => ({ ok: true, op: "ambient_status", ready: true }) as IdentityResponse), memory: vi.fn(async () => ({ ok: true, op: "status", state: "ready", presence, profiles: [] }) as MemoryPresenceResponse) });
 
   it("desktop uses IPC (even with ?terminal=), a terminal page uses HTTP, a plain browser gets null", async () => {
     const ipc = { identity: vi.fn(async () => ({ ok: true, op: "ambient_status", ready: false }) as IdentityResponse), memory: vi.fn(async () => ({ ok: true, op: "status", ...status }) as MemoryResponse) };
@@ -487,9 +681,31 @@ describe("「不是我」 on a terminal page", () => {
   beforeAll(() => vi.stubGlobal("document", { createElement: (tag: string) => new El(tag) }));
   afterAll(() => { vi.unstubAllGlobals(); if (originalDocument) globalThis.document = originalDocument; });
 
+  /** 經真的路由投影（server/terminal-routes.ts）：頁面只拿到投影後的欄位也照常顯示。 */
+  function projectedHttp(reply?: (req: Record<string, unknown>) => MemoryResponse) {
+    const port = memoryPort("face_candidate", reply);
+    return {
+      identity: vi.fn(),
+      memory: vi.fn(async (terminal: string, request: MemoryRequest) => {
+        const out = await terminalMemory(port, { terminal, request });
+        if (out.status !== 200) throw new Error(out.error);
+        return out.body;
+      }),
+    };
+  }
+
+  it("shows 「即將用 X 的記憶」 from the projected face-candidate card", async () => {
+    const { PresenceNotice } = await import("../src/memory-view.ts");
+    const pi = selectBridges({ desktop: undefined, search: "?terminal=rpi4", http: projectedHttp() });
+    const n = new PresenceNotice({ bridge: { memory: pi.memory! }, applied: vi.fn(), changed: () => {}, presence: () => presence });
+    await n.propose(CARD);
+    expect((n.render() as unknown as El).textContent).toContain("即將用 George 的記憶");
+  });
+
   it("calls POST /api/terminal/memory with select household and this generation's select_card", async () => {
     const { PresenceNotice } = await import("../src/memory-view.ts");
-    const http = { identity: vi.fn(), memory: vi.fn(async () => ({ ok: true, op: "select", receipts: [], card: null, chat: null, presence: { ...presence, state: "unselected", profile: null, name: null }, history_reset: true, notice: null, suggestion: null, status }) as MemoryResponse) };
+    const unselected = { ...presence, state: "unselected" as const, profile: null, name: null };
+    const http = projectedHttp((req) => ({ ok: true, op: req.op as "select", receipts: [], card: null, chat: null, presence: unselected, history_reset: true, notice: null, suggestion: null, status: { ...status, presence: unselected } }));
     const pi = selectBridges({ desktop: undefined, search: "?terminal=rpi4", http });
     const applied = vi.fn();
     const n = new PresenceNotice({ bridge: { memory: pi.memory! }, applied, changed: () => {}, presence: () => presence });
@@ -500,6 +716,7 @@ describe("「不是我」 on a terminal page", () => {
     for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
     expect(http.memory).toHaveBeenCalledWith("rpi4", { op: "select", profile: null, card: presence.select_card });
     expect(applied).toHaveBeenCalledTimes(1);
+    expect(applied.mock.calls[0]![0]).toMatchObject({ history_reset: true, presence: unselected, status: { profiles: [{ id: "profile_0123456789abcdef", name: "George" }] } });
     expect(n.render()).toBeNull();
   });
 });

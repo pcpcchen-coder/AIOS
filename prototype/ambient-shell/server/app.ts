@@ -50,7 +50,7 @@ import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHist
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
 import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
-import { isTerminalId } from "../shared/terminal.ts";
+import { isTerminalId, pageSource } from "../shared/terminal.ts";
 import { terminalIdentity, terminalMemory, type TerminalIdentityPort, type TerminalMemoryPort } from "./terminal-routes.ts";
 import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
 import { VoiceRelayStoreError } from "./integrations/voice-relay/store.ts";
@@ -507,7 +507,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const wakeId = source === "wake_word" && typeof body.wake_id === "string" && WAKE_ID.test(body.wake_id) ? body.wake_id : null;
       const locale = normalizeLocale(req.headers["x-nous-locale"]);
       // rebuild：MEM-2 記憶撤銷後頁面自動重建（只走 live、不問候）；只是開始方式，不是授權。
-      const decision = sessions.start(clientId, source, locale, body.rebuild === true, wakeId);
+      // RPI-ID：哪個頁面開始的（X-Nous-Terminal），記憶候選與喚醒時窗只看那個頁面；不是授權。
+      const decision = sessions.start(clientId, source, locale, body.rebuild === true, wakeId, pageSource(req.headers["x-nous-terminal"]));
       return sendJson(res, 200, decision.ok
         ? { ...decision, billing_line: localize(decision.billing_line, locale), notice: decision.notice === null ? null : localize(decision.notice, locale) }
         : { ...decision, message: localize(decision.message, locale) });

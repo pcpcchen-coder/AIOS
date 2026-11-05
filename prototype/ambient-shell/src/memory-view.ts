@@ -16,6 +16,8 @@ import type {
   ClarifyChoice,
   MemoryResponse as MemoryResult,
   MemoryCardView,
+  MemoryPresenceResponse,
+  MemoryPresenceStatus,
   MemoryFactView,
   MemoryPresenceView,
   MemoryReceiptView,
@@ -26,6 +28,7 @@ import type {
   MemoryText,
   MemoryTurnView,
 } from "../shared/memory.ts";
+import type { LiveMemoryReason, RouteId } from "../shared/realtime-route.ts";
 
 export interface MemoryBridge {
   memory(request: MemoryRequest): Promise<MemoryResponse>;
@@ -112,6 +115,45 @@ export function presenceLabel(presence: MemoryPresenceView | null): string {
   if (presence.state === "selected" && presence.name) return msg`本次人物：${presence.name}`;
   if (presence.state === "suspended") return t("本次人物：已暫停（請重新選擇）");
   return t("本次人物：未選定（只用全家共用的記憶）");
+}
+
+/**
+ * 對話 Surface（打字或語音聊天的回覆）上的本次人物標示。只有 Mac 的 App 的打字聊天經記憶（memory turn）；終端機頁面的聊天
+ * 從不帶記憶，所以照實寫「未用記憶」，不顯示人物（避免看起來像用了 X 的記憶）。
+ */
+export function conversationPersonLabel(presence: MemoryPresenceView | null, page: { bridge: boolean; enabled: boolean; terminal: boolean }): string {
+  if (!page.bridge || !page.enabled) return "";
+  return page.terminal ? t("未用記憶") : presenceLabel(presence);
+}
+
+/** 即時語音那一行的記憶狀態的輸入（核心回報的這通記憶狀態；不含內容）。 */
+export interface LiveMemoryLine {
+  route: RouteId | null;
+  live: { used: number; reason: LiveMemoryReason | null } | null;
+  presence: MemoryPresenceView | null;
+  /** 這個頁面有本次人物的記憶傳輸（App 的 IPC 或終端機的 HTTP）。 */
+  bridge: boolean;
+  enabled: boolean;
+  reasonText(route: RouteId, reason: LiveMemoryReason): string;
+}
+
+/**
+ * 即時語音那一行：這通的本次人物與記憶筆數（或沒有用到記憶的原因，依路徑）。記憶由核心依這通的路徑處理，所以 Mac 與終端機的頁面
+ * 用同一套規則；沒有記憶傳輸的一般瀏覽器不顯示。
+ */
+export function liveMemoryLabel(x: LiveMemoryLine): string {
+  const { route, live } = x;
+  if (route && live && live.reason === "route_off") return x.bridge && x.enabled ? t("此路徑未啟用記憶｜") : "";
+  if (route && live && x.bridge) {
+    const name = x.presence?.state === "selected" ? x.presence.name : null;
+    const why = t(live.reason ? x.reasonText(route, live.reason) : "未用記憶");
+    return name
+      ? live.used > 0 ? msg`本次人物：${name} · 記憶 ${live.used} 筆｜` : msg`本次人物：${name} · ${why}｜`
+      : live.used > 0 ? msg`本次人物：未選定 · 記憶 ${live.used} 筆｜` : msg`本次人物：未選定 · ${why}｜`;
+  }
+  // API key 路徑沒有記憶狀態（舊的核心或沒有事件串流）而記憶開著：照實標示沒有用到。
+  if (route === "api_key" && !live && x.bridge && x.enabled) return t("此路徑未啟用記憶｜");
+  return "";
 }
 
 const CHOICE_LABEL: Record<ClarifyChoice, string> = { save: "保存", household: "改記全家共用", cancel: "取消" };
@@ -656,9 +698,10 @@ export class SuggestionPrompt {
  * - 不擋聊天；收起只把這一行藏起來（核心的選定照常）；本次人物世代改變就收掉（換人、暫停、撤銷）。
  */
 export interface PresenceNoticeDeps {
-  bridge: MemoryBridge | null;
+  /** App 的 IPC（完整回應）或終端機的 HTTP（只有本次人物的投影）。 */
+  bridge: { memory(request: MemoryRequest): Promise<MemoryResult | MemoryPresenceResponse> } | null;
   /** 核心回的結果（本次人物、歷史清除、回條）交回主程式。 */
-  applied(view: MemoryTurnView & { status?: MemoryStatusView }): void;
+  applied(view: Pick<MemoryTurnView, "receipts" | "presence" | "history_reset"> & { status?: MemoryPresenceStatus }): void;
   /** 目前的本次人物（select 要帶這個世代的 select_card）。 */
   presence(): MemoryPresenceView | null;
   /** 狀態改變：請主程式重畫。 */
@@ -763,7 +806,7 @@ export class PresenceNotice {
     return box;
   }
 
-  private async call(request: MemoryRequest): Promise<MemoryResult> {
+  private async call(request: MemoryRequest): Promise<MemoryResult | MemoryPresenceResponse> {
     try { return await this.deps.bridge!.memory(request); }
     catch (err) { return { ok: false, code: "unavailable", message: `記憶沒有回應：${err instanceof Error ? err.message : String(err)}` }; }
   }

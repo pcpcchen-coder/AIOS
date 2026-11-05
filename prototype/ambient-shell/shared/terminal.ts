@@ -15,8 +15,24 @@ export interface TerminalStatus {
   terminals: { id: string; last_seen_ms_ago: number }[];
 }
 
+/**
+ * Mac 主視窗（IPC，或不帶 X-Nous-Terminal 的 HTTP 請求）的頁面來源。核心依來源分開辨識證據與記憶候選，所以終端機不能叫這個名字。
+ */
+export const MAIN_SOURCE = "main";
+
 export function isTerminalId(value: unknown): value is string {
-  return typeof value === "string" && TERMINAL_ID.test(value);
+  return typeof value === "string" && TERMINAL_ID.test(value) && value !== MAIN_SOURCE;
+}
+
+/**
+ * RPI-ID：終端機頁面在每個 API 請求帶這個標頭（值是 ?terminal= 的識別碼），核心據此知道是哪個頁面在問（記憶候選、即時語音的
+ * 候選與喚醒時窗）。只是分開頁面的標記，不是授權：本機任何 HTTP 用戶端都能帶。
+ */
+export const TERMINAL_HEADER = "X-Nous-Terminal";
+
+/** 請求的頁面來源：合法的終端機識別碼，否則是 Mac 主視窗。 */
+export function pageSource(header: unknown): string {
+  return isTerminalId(header) ? header : MAIN_SOURCE;
 }
 
 /**

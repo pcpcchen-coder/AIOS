@@ -5,7 +5,8 @@ import { getLocale, type Locale } from "./i18n.ts";
 import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
 import type { IdentityRequest, IdentityResponse } from "../shared/identity.ts";
-import type { MemoryRequest, MemoryResponse } from "../shared/memory.ts";
+import type { MemoryPresenceResponse, MemoryRequest } from "../shared/memory.ts";
+import { pageTerminal, TERMINAL_HEADER } from "../shared/terminal.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { WakePrefsPatch } from "../shared/wake.ts";
 import type { PageEndReason, VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
@@ -49,12 +50,22 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * RPI-ID：終端機頁面（沒有 App preload、網址帶合法的 ?terminal=）的每個 API 請求都帶 X-Nous-Terminal，核心才知道是哪個頁面在問
+ * （記憶候選、即時語音的候選與喚醒時窗）。Mac 主視窗與一般瀏覽器不帶。
+ */
+export function pageHeaders(): Record<string, string> {
+  if (typeof location === "undefined") return {};
+  const terminal = pageTerminal(location.search, !!(globalThis as { nousDesktop?: unknown }).nousDesktop);
+  return terminal ? { [TERMINAL_HEADER]: terminal } : {};
+}
+
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown, locale: Locale = getLocale()): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
       method,
-      headers: { "X-Nous-Locale": locale, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      headers: { "X-Nous-Locale": locale, ...pageHeaders(), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -82,7 +93,7 @@ export const api = {
   terminalHeartbeat: (terminal: string) => call<{ ok: true }>("POST", "/api/terminal/heartbeat", { terminal }),
   /** RPI-ID：終端機頁面的認人（只有特徵向量與和 IPC 相同的欄位）與「正在用 X 的記憶」；核心只放行列出的操作。 */
   terminalIdentity: (terminal: string, request: IdentityRequest) => call<IdentityResponse>("POST", "/api/terminal/identity", { terminal, request }),
-  terminalMemory: (terminal: string, request: MemoryRequest) => call<MemoryResponse>("POST", "/api/terminal/memory", { terminal, request }),
+  terminalMemory: (terminal: string, request: MemoryRequest) => call<MemoryPresenceResponse>("POST", "/api/terminal/memory", { terminal, request }),
   selectProvider: (provider: ExecutorMode) => call<SettingsView>("POST", "/api/settings/provider", { provider }),
   /** 鏡頭使用者設定（保存在本機 camera.json）；回傳更新後的設定。 */
   updateCamera: (patch: CameraPrefsPatch) => call<SettingsView>("POST", "/api/settings/camera", patch),
@@ -210,7 +221,7 @@ export async function streamChat(
   try {
     res = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Nous-Locale": locale },
+      headers: { "Content-Type": "application/json", "X-Nous-Locale": locale, ...pageHeaders() },
       body: JSON.stringify({ messages, request_id, ...(memoryTurn ? { memory_turn: memoryTurn } : {}) }),
       signal,
     });

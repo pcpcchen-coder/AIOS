@@ -285,7 +285,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
       new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}), ...(ail ? { integrations: { dispatcher: ail.dispatcher, sessionId: ctx.sessionId } } : {}) }),
     // MEM-2：每通通話一個記憶 binding（server/memory/live.ts）；瀏覽器版沒有記憶層。
     // MEM-3：頁面的確認卡（MCP、家電）開著時不開語音記憶卡（兩條路徑一致）。
-    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
+    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open, page: ctx.page }) ?? null } : {}),
     // 看著說話的問候（ID-02）：頁面只帶互動 ID，短句由家人辨識的核心決策組成；瀏覽器版（沒有 identity）一律「我在」。
     greeting: liveGreetingSource(() => identity, greetings, proactive),
     palmQuietDelegation: config.palmQuietDelegation,
@@ -296,7 +296,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const apiKeyMemoryReleased = config.memoryRoutes.api_key;
   const apiKeyTarget = () => (apiKeyMemoryReleased ? openaiRealtimeTarget(config.openaiApiKey) : null);
   const apiKeyRoute = new ApiKeyRoute(realtime, !!config.openaiApiKey, config.realtimeVoice, {
-    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openVoice("api_key", { lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
+    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openVoice("api_key", { lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open, page: ctx.page }) ?? null } : {}),
     log,
     followUp: (sessionId: string) => proactive.followUp(sessionId),
   });
@@ -376,8 +376,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         speakerInCall: () => wakeStore?.view().speaker_in_call === true,
         // 問候決策只接受 /api/realtime/start 發出、真的連上的互動 ID（server 在下面建立，呼叫時已存在）。
         claimGreeting: greetingClaims(() => server.realtimeSessions),
-        // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）。
-        wakeGreetingOpen: () => server.realtimeSessions?.wakeGreetingOpen() ?? false,
+        // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）；RPI-ID：只看同一個頁面的喚醒。
+        wakeGreetingOpen: (source) => server.realtimeSessions?.wakeGreetingOpen(source) ?? false,
         // MEM-3：API key 路徑的問候決策（有沒有稱名）交給那通的旁路，問候結束後才問臉部候選。
         apiKeyGreeted: (sessionId, named, spoken) => server.realtimeSessions?.greeted(sessionId, named, spoken),
         picker: greetings,
@@ -417,7 +417,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         holdResults: (taskIds) => store.hold(taskIds),
         onPlaintextDrop: (reason) => store.dropPlaintext(reason),
         confirm: memoryOpts.confirm,
-        identity: (): MemoryIdentityHooks | null => identity ? { candidate: () => identity.memoryCandidate(), faceCandidate: () => identity.memoryFaceCandidate(), people: () => identity.memoryPeople(), nameAllowed: () => camera.view().look_to_talk_greet_name } : null,
+        identity: (): MemoryIdentityHooks | null => identity ? { candidate: (page) => identity.memoryCandidate(page), faceCandidate: (page) => identity.memoryFaceCandidate(page), people: () => identity.memoryPeople(), nameAllowed: () => camera.view().look_to_talk_greet_name } : null,
         afterOpen: memoryOpts.excludeFromBackup ? () => memoryOpts.excludeFromBackup!(memoryOpts.dir) : undefined,
         // 上次執行時記憶是否開著：加密檔外只留這一個布林值（不含內容），讓重啟後第一次打字就能取用記憶，
         // 而記憶沒開時查狀態、一般聊天都不碰 Keychain。

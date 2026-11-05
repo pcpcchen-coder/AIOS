@@ -40,7 +40,7 @@ import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
 import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
 import type { TasksRequest, TasksResponse, VaultView } from "../shared/protected-tasks.ts";
-import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, PresenceNotice, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
+import { conversationPersonLabel, liveMemoryLabel, MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, PresenceNotice, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
 import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
 import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
 import { AmbientIdentity } from "./sense/identity-ambient.ts";
@@ -3023,7 +3023,7 @@ function renderConversation(): void {
   conversationReply.dataset.status = reply.kind;
   conversationUser.textContent = msg`你：${reply.user}`;
   // 「本次人物」只在輸入列與這個對話 Surface 顯示（不建常駐側欄）。
-  const person = presenceBridge && settings?.memory?.enabled ? presenceLabel(memoryPresence) : "";
+  const person = conversationPersonLabel(memoryPresence, { bridge: !!presenceBridge, enabled: !!settings?.memory?.enabled, terminal: bridges.terminal !== null });
   conversationPerson.hidden = !person;
   conversationPerson.textContent = person;
   conversationNotice.hidden = !("notice" in reply && reply.notice);
@@ -3132,19 +3132,8 @@ function renderEngineLine(): void {
     const next = rt?.billing_line && rt.billing_line !== activeLine ? msg`（下次開始時改用：${t(rt.billing_line)}）` : "";
     engineLine.append(msg`即時語音：${t(activeLine ?? rt?.billing_line ?? "—")}${next}｜`);
     // MEM-2／MEM-3：這通即時語音通話的本次人物與記憶筆數（或沒有用到記憶的原因，依路徑）；不含內容。
-    const route = realtimeTicket?.route ?? null;
-    if (route && liveMemory && liveMemory.reason === "route_off") {
-      // 這條路徑的記憶還沒放行：記憶開著時照實標示（和 MEM-2 的 API key 路徑一樣）。
-      if (window.nousDesktop?.memory && settings.memory?.enabled) engineLine.append(t("此路徑未啟用記憶｜"));
-    } else if (route && liveMemory && window.nousDesktop?.memory) {
-      const name = memoryPresence?.state === "selected" ? memoryPresence.name : null;
-      const why = t(liveMemory.reason ? memoryReasonText(route, liveMemory.reason) : "未用記憶");
-      engineLine.append(name
-        ? liveMemory.used > 0 ? msg`本次人物：${name} · 記憶 ${liveMemory.used} 筆｜` : msg`本次人物：${name} · ${why}｜`
-        : liveMemory.used > 0 ? msg`本次人物：未選定 · 記憶 ${liveMemory.used} 筆｜` : msg`本次人物：未選定 · ${why}｜`);
-    }
-    // API key 路徑沒有記憶狀態（舊的核心或沒有事件串流）而記憶開著：照實標示沒有用到。
-    else if (route === "api_key" && !liveMemory && window.nousDesktop?.memory && settings.memory?.enabled) engineLine.append(t("此路徑未啟用記憶｜"));
+    const liveMemoryText = liveMemoryLabel({ route: realtimeTicket?.route ?? null, live: liveMemory, presence: memoryPresence, bridge: !!presenceBridge, enabled: !!settings.memory?.enabled, reasonText: memoryReasonText });
+    if (liveMemoryText) engineLine.append(liveMemoryText);
     engineLine.append(t("交辦工作："));
   }
   if (settings.provider === "chatgpt") {
