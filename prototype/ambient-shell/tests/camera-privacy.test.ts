@@ -186,8 +186,7 @@ describe("family recognition privacy boundary (static)", () => {
     // 終端機只能用不需要管理 session 的認人操作；登記、刪除、校準與管理 session 只在 IPC。
     const terminal = readFileSync(join(app, "shared", "terminal.ts"), "utf8");
     expect(terminal).toContain('export const TERMINAL_IDENTITY_OPS = ["ambient_status", "ambient_probe", "greeting", "voice_probe", "call_voice"] as const;');
-    const routesTs = readFileSync(join(app, "server", "terminal-routes.ts"), "utf8");
-    expect(routesTs).toMatch(/port\.handle\(checked\.request, \{ userInitiated: false, source: terminal \}\)/);
+    // userInitiated 一律 false、來源是終端機識別碼：由 tests/terminal-identity.test.ts 的路由行為測試檢查。
     // 頁面端：認人元件只經注入的 bridge；HTTP 只在 main.ts 交給 src/identity-bridge.ts 的那一處（終端機頁面）。
     for (const name of ["family-view.ts", join("sense", "identity-client.ts"), join("sense", "identity-ambient.ts")]) {
       const text = readFileSync(join(src, name), "utf8");

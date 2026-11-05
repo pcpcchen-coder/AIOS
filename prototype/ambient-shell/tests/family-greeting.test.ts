@@ -1220,6 +1220,6 @@ describe("memory presence breaks (M-2)", () => {
     await frame(c, 3, GEORGE);
     expect(suspend).not.toHaveBeenCalled();
     await frame(c, 3, "multi");
-    expect(suspend).toHaveBeenCalledWith("multi_face");
+    expect(suspend).toHaveBeenCalledWith("multi_face", "main");
   });
 });

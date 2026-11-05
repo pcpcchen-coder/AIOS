@@ -21,7 +21,7 @@ import { validateIdentityRequest as ipcValidateIdentity } from "../desktop/ident
 import { validateMemoryRequest as ipcValidateMemory } from "../desktop/memory-ipc.mjs";
 import { IDENTITY_OPS, type FaceModelVersion, type IdentityResponse } from "../shared/identity.ts";
 import { MEMORY_OPS, type MemoryPresenceResponse, type MemoryRequest, type MemoryResponse, type MemoryStatusView } from "../shared/memory.ts";
-import { PAGE_PACE, pageTerminal, TERMINAL_IDENTITY_OPS, TERMINAL_MEMORY_OPS } from "../shared/terminal.ts";
+import { isTerminalId, MAIN_SOURCE, PAGE_PACE, pageSource, pageTerminal, TERMINAL_IDENTITY_OPS, TERMINAL_MEMORY_OPS } from "../shared/terminal.ts";
 import { selectBridges } from "../src/identity-bridge.ts";
 import { fakeSecretBox, near, unitFeature } from "./fixtures/identity.ts";
 import { enable, harness, selectProfile, type Harness } from "./fixtures/memory-service.ts";
@@ -618,6 +618,36 @@ describe("page bridges (src/identity-bridge.ts)", () => {
     }
   });
 
+  it("a terminal page sends X-Nous-Terminal on every API call; the Mac window and plain browsers do not", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      const { api, pageHeaders } = await import("../src/api.ts");
+      vi.stubGlobal("location", { search: "?terminal=rpi4" });
+      expect(pageHeaders()).toEqual({ "X-Nous-Terminal": "rpi4" });
+      await api.realtimeStart("sse_x", "user");
+      await api.terminalHeartbeat("rpi4");
+      const headers = (fetch.mock.calls as unknown as [string, RequestInit][]).map(([, init]) => (init.headers as Record<string, string>)["X-Nous-Terminal"]);
+      expect(headers.length).toBeGreaterThan(0);
+      expect(new Set(headers)).toEqual(new Set(["rpi4"]));
+      vi.stubGlobal("nousDesktop", {});
+      expect(pageHeaders()).toEqual({});
+      vi.stubGlobal("nousDesktop", undefined);
+      vi.stubGlobal("location", { search: "?lang=en" });
+      expect(pageHeaders()).toEqual({});
+      vi.stubGlobal("location", { search: "?terminal=main" });
+      expect(pageHeaders()).toEqual({});
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("pageSource: only a valid terminal id names a page; anything else (including \"main\") is the Mac window", () => {
+    expect(pageSource("rpi4")).toBe("rpi4");
+    for (const h of [undefined, "", "RPI4", "main", ["rpi4"], "a".repeat(33)]) expect(pageSource(h), String(h)).toBe(MAIN_SOURCE);
+    expect(isTerminalId("main")).toBe(false);
+  });
+
   it("pageTerminal: only without the App preload and with a valid id", () => {
     expect(pageTerminal("?terminal=rpi4", false)).toBe("rpi4");
     expect(pageTerminal("?terminal=rpi4", true)).toBeNull();
@@ -653,6 +683,31 @@ describe("page bridges (src/identity-bridge.ts)", () => {
     expect(main).toContain("const pagePace = bridges.terminal !== null ? PAGE_PACE.terminal : PAGE_PACE.main;");
     expect(main).toContain("intervalMs: pagePace.identitySampleMs,");
     expect(main).toContain("new SensePipeline(settings.camera, (event) => sense.handle(event), { frameIntervalMs: pagePace.senseFrameMs })");
+  });
+});
+
+describe("memory labels on a terminal page never imply memory was used when it was not", () => {
+  const george = { ...presence };
+  it("conversation replies on the Pi say 「未用記憶」 instead of the current person (Pi chat never goes through memory)", async () => {
+    const { conversationPersonLabel } = await import("../src/memory-view.ts");
+    expect(conversationPersonLabel(george, { bridge: true, enabled: true, terminal: true })).toBe("未用記憶");
+    expect(conversationPersonLabel(george, { bridge: true, enabled: true, terminal: false })).toBe("本次人物：George");
+    expect(conversationPersonLabel(george, { bridge: true, enabled: false, terminal: true })).toBe("");
+    expect(conversationPersonLabel(george, { bridge: false, enabled: true, terminal: false })).toBe("");
+  });
+
+  it("live-call labels follow the core's per-call memory status, the same on the Pi as on the Mac", async () => {
+    const { liveMemoryLabel } = await import("../src/memory-view.ts");
+    const reasonText = (_route: string, reason: string) => (reason === "no_consent" ? "未用記憶（ChatGPT 方案即時語音尚未允許）" : reason);
+    const base = { route: "live" as const, presence: george, bridge: true, enabled: true, reasonText };
+    expect(liveMemoryLabel({ ...base, live: { used: 2, reason: null } })).toBe("本次人物：George · 記憶 2 筆｜");
+    expect(liveMemoryLabel({ ...base, live: { used: 0, reason: null } })).toBe("本次人物：George · 未用記憶｜");
+    expect(liveMemoryLabel({ ...base, live: { used: 0, reason: "no_consent" } })).toBe("本次人物：George · 未用記憶（ChatGPT 方案即時語音尚未允許）｜");
+    expect(liveMemoryLabel({ ...base, presence: { ...george, state: "unselected", name: null }, live: { used: 0, reason: null } })).toBe("本次人物：未選定 · 未用記憶｜");
+    expect(liveMemoryLabel({ ...base, live: { used: 0, reason: "route_off" } })).toBe("此路徑未啟用記憶｜");
+    expect(liveMemoryLabel({ ...base, route: "api_key", live: null })).toBe("此路徑未啟用記憶｜");
+    expect(liveMemoryLabel({ ...base, bridge: false, live: { used: 2, reason: null } })).toBe("");
+    expect(liveMemoryLabel({ ...base, route: null, live: { used: 2, reason: null } })).toBe("");
   });
 });
 
