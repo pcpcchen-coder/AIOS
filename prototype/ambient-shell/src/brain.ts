@@ -253,7 +253,8 @@ export class Brain {
       const elapsed = now - this.lastFrame;
       // 減少動態時降到約 10 FPS 且不旋轉；效能設定的上限更低時取較低者。
       const minFrame = Math.max(this.reducedMotion.matches ? 100 : 0, 1000 / this.budget.maxFps);
-      if (elapsed < minFrame) return;
+      // 留 2 ms 餘裕：上限剛好是螢幕更新間隔的倍數時，時間戳的微小抖動不會讓這一格多等一次更新（60 Hz 下省電才能真的到 12 格）。
+      if (elapsed < minFrame - 2) return;
       this.lastFrame = now;
       const started = performance.now();
       this.step(Math.min(elapsed, 100) / 1000);
@@ -801,7 +802,7 @@ export class Brain {
       const beat = reduced ? 1 : 0.8 + 0.2 * Math.sin(this.time * 3);
       ctx.strokeStyle = rgba(color, (0.45 + 0.35 * this.liveLevel) * level * beat);
       ctx.lineWidth = 2 + 2 * this.liveLevel;
-      if (this.budget.glow === "full") {
+      if (this.budget.ringBlur) {
         ctx.shadowColor = rgba(color, 0.8 * level);
         ctx.shadowBlur = 18 + 14 * this.liveLevel;
       }

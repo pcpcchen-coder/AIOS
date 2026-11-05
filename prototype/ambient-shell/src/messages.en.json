@@ -962,13 +962,13 @@
   "「可用」只代表 Mac 上的 gog 能執行；有沒有登入 Gmail，要看寄信的結果。": "“Available” only means gog runs on the Mac; whether it is signed in to Gmail shows in the result of sending.",
   "這台裝置的畫面效能": "Display performance on this device",
   "畫面效能": "Display performance",
-  "只調整畫面，不影響對話的收音、播放與回應速度。": "Only the display changes; listening, playback and response speed are not affected.",
-  "實測：每秒 {0} 格，每格繪製 {1} 毫秒": "Measured: {0} frames per second, {1} ms to draw each frame",
+  "只調整畫面，不改動對話的收音、播放與語音處理。": "Only the display changes; listening, playback and voice processing are not touched.",
+  "實測：每秒 {0} 格，每格主執行緒繪製 {1} 毫秒（不含 GPU 與背景模糊）": "Measured: {0} frames per second, {1} ms of main-thread drawing per frame (excluding GPU and background blur)",
   "實測：—": "Measured: —",
   "完整": "Full",
   "平衡": "Balanced",
   "省電": "Light",
-  "最多每秒 30 格、高解析度、完整光暈與背景模糊": "Up to 30 frames per second, high resolution, full glow and background blur",
-  "最多每秒 20 格、標準解析度、較少光脈衝、關閉背景模糊": "Up to 20 frames per second, standard resolution, fewer light pulses, background blur off",
-  "最多每秒 12 格、較低解析度、較少光脈衝、簡化光暈、關閉背景模糊": "Up to 12 frames per second, lower resolution, fewer light pulses, simplified glow, background blur off"
+  "最多每秒 30 格、最高 2 倍解析度、完整光暈與背景模糊": "Up to 30 frames per second, up to 2× resolution, full glow and background blur",
+  "最多每秒 20 格、1 倍解析度、較少光脈衝、聆聽光環不模糊、關閉背景模糊": "Up to 20 frames per second, 1× resolution, fewer light pulses, no blur on the listening ring, background blur off",
+  "最多每秒 12 格、0.75 倍解析度、較少光脈衝、簡化光暈、關閉背景模糊": "Up to 12 frames per second, 0.75× resolution, fewer light pulses, simplified glow, background blur off"
 }

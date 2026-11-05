@@ -12,15 +12,17 @@ export interface RenderBudget {
   maxPulses: number;
   glow: "full" | "reduced";
   backdropBlur: boolean;
+  /** 聆聽／通話光環的 shadowBlur：大面積模糊，通話中每格都畫，代價最高。 */
+  ringBlur: boolean;
 }
 
 export const PERFORMANCE_PROFILES: readonly PerformanceProfile[] = ["full", "balanced", "light"];
 
 /** full 必須和調整前的畫面完全一樣（Mac 預設）。 */
 export const RENDER_BUDGETS: Readonly<Record<PerformanceProfile, RenderBudget>> = {
-  full: { maxFps: 30, pixelRatioCap: 2, maxPulses: 70, glow: "full", backdropBlur: true },
-  balanced: { maxFps: 20, pixelRatioCap: 1, maxPulses: 40, glow: "full", backdropBlur: false },
-  light: { maxFps: 12, pixelRatioCap: 0.75, maxPulses: 20, glow: "reduced", backdropBlur: false },
+  full: { maxFps: 30, pixelRatioCap: 2, maxPulses: 70, glow: "full", backdropBlur: true, ringBlur: true },
+  balanced: { maxFps: 20, pixelRatioCap: 1, maxPulses: 40, glow: "full", backdropBlur: false, ringBlur: false },
+  light: { maxFps: 12, pixelRatioCap: 0.75, maxPulses: 20, glow: "reduced", backdropBlur: false, ringBlur: false },
 };
 
 export const PERFORMANCE_KEY = "nous.performance.v1";
@@ -30,14 +32,14 @@ export const NO_BLUR_CLASS = "perf-no-blur";
 export const PERFORMANCE_TEXT = {
   title: "這台裝置的畫面效能",
   group: "畫面效能",
-  note: "只調整畫面，不影響對話的收音、播放與回應速度。",
-  measured: "實測：每秒 {0} 格，每格繪製 {1} 毫秒",
+  note: "只調整畫面，不改動對話的收音、播放與語音處理。",
+  measured: "實測：每秒 {0} 格，每格主執行緒繪製 {1} 毫秒（不含 GPU 與背景模糊）",
   noSample: "實測：—",
   label: { full: "完整", balanced: "平衡", light: "省電" },
   detail: {
-    full: "最多每秒 30 格、高解析度、完整光暈與背景模糊",
-    balanced: "最多每秒 20 格、標準解析度、較少光脈衝、關閉背景模糊",
-    light: "最多每秒 12 格、較低解析度、較少光脈衝、簡化光暈、關閉背景模糊",
+    full: "最多每秒 30 格、最高 2 倍解析度、完整光暈與背景模糊",
+    balanced: "最多每秒 20 格、1 倍解析度、較少光脈衝、聆聽光環不模糊、關閉背景模糊",
+    light: "最多每秒 12 格、0.75 倍解析度、較少光脈衝、簡化光暈、關閉背景模糊",
   },
 } as const;
 

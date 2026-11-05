@@ -23,9 +23,9 @@ function memoryStorage(initial: Record<string, string> = {}) {
 describe("render budgets", () => {
   it("full is the previous rendering; balanced and light only lower visual cost", () => {
     expect(PERFORMANCE_PROFILES).toEqual(["full", "balanced", "light"]);
-    expect(RENDER_BUDGETS.full).toEqual({ maxFps: 30, pixelRatioCap: 2, maxPulses: 70, glow: "full", backdropBlur: true });
-    expect(RENDER_BUDGETS.balanced).toEqual({ maxFps: 20, pixelRatioCap: 1, maxPulses: 40, glow: "full", backdropBlur: false });
-    expect(RENDER_BUDGETS.light).toEqual({ maxFps: 12, pixelRatioCap: 0.75, maxPulses: 20, glow: "reduced", backdropBlur: false });
+    expect(RENDER_BUDGETS.full).toEqual({ maxFps: 30, pixelRatioCap: 2, maxPulses: 70, glow: "full", backdropBlur: true, ringBlur: true });
+    expect(RENDER_BUDGETS.balanced).toEqual({ maxFps: 20, pixelRatioCap: 1, maxPulses: 40, glow: "full", backdropBlur: false, ringBlur: false });
+    expect(RENDER_BUDGETS.light).toEqual({ maxFps: 12, pixelRatioCap: 0.75, maxPulses: 20, glow: "reduced", backdropBlur: false, ringBlur: false });
   });
 });
 
@@ -97,7 +97,7 @@ describe("applying a profile", () => {
 
   it("the readout is labelled as measured and shows a dash before any sample", () => {
     expect(frameStatsText(null)).toEqual({ source: "實測：—", values: [] });
-    expect(frameStatsText({ fps: 11.94, drawMs: 7.25 })).toEqual({ source: "實測：每秒 {0} 格，每格繪製 {1} 毫秒", values: ["12", "7.3"] });
+    expect(frameStatsText({ fps: 11.94, drawMs: 7.25 })).toEqual({ source: "實測：每秒 {0} 格，每格主執行緒繪製 {1} 毫秒（不含 GPU 與背景模糊）", values: ["12", "7.3"] });
   });
 });
 

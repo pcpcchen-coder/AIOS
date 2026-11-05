@@ -12,7 +12,7 @@ const idle: BrainVisualState = { conversation: "idle", listening: false, working
 function renderer(opts: { reducedMotion?: boolean; devicePixelRatio?: number } = {}) {
   let nextFrame: FrameRequestCallback = () => {};
   let now = 0;
-  const calls = { clearRect: 0, fillText: [] as string[], drawImage: 0, shadowBlur: 0, radialGradients: 0 };
+  const calls = { clearRect: 0, fillText: [] as string[], drawImage: 0, shadowBlur: 0, largeShadowBlur: 0, radialGradients: 0 };
   const gradient = () => ({ addColorStop() {} });
   const target: Record<string, unknown> = {
     createRadialGradient: () => { calls.radialGradients++; return gradient(); },
@@ -26,6 +26,7 @@ function renderer(opts: { reducedMotion?: boolean; devicePixelRatio?: number } =
     get: (t, key) => Reflect.get(t, key) ?? (() => {}),
     set: (t, key, value) => {
       if (key === "shadowBlur" && value > 0) calls.shadowBlur++;
+      if (key === "shadowBlur" && value >= 18) calls.largeShadowBlur++;
       return Reflect.set(t, key, value);
     },
   });
@@ -39,10 +40,16 @@ function renderer(opts: { reducedMotion?: boolean; devicePixelRatio?: number } =
   const canvas = { getContext: () => context, dataset: {}, style: {}, width: 0, height: 0 } as unknown as HTMLCanvasElement;
   const brain = new Brain(canvas);
   brain.start();
-  /** 以 1 ms 的 rAF 間隔模擬 ms 毫秒，回傳真的畫了幾格。 */
+  /** 模擬 60 Hz 螢幕（每次更新 16.67 ms，時間戳抖動 ±0.3 ms）跑 ms 毫秒，回傳真的畫了幾格。 */
+  let tick = 0;
   const run = (ms: number) => {
     const before = calls.clearRect;
-    for (let i = 0; i < ms; i++) nextFrame(now += 1);
+    const end = now + ms;
+    while (now < end) {
+      tick += 1;
+      now += 1000 / 60 + (tick % 3 === 0 ? 0.3 : tick % 3 === 1 ? -0.3 : 0);
+      nextFrame(now);
+    }
     return calls.clearRect - before;
   };
   const pulses = () => (brain as unknown as { pulses: unknown[] }).pulses.length;
@@ -58,23 +65,25 @@ it.each([
   t.brain.setRenderBudget(RENDER_BUDGETS[profile]);
   t.run(100);
   const frames = t.run(3000);
-  expect(frames).toBeLessThanOrEqual(fps * 3);
+  expect(frames).toBeLessThanOrEqual(fps * 3 + 1);
   expect(frames).toBeGreaterThanOrEqual(Math.floor(fps * 3 * 0.95));
   const stats = t.brain.frameStats()!;
-  expect(stats.fps).toBeLessThanOrEqual(fps);
+  expect(stats.fps).toBeLessThanOrEqual(fps * 1.02);
   expect(stats.fps).toBeGreaterThan(fps * 0.95);
   expect(stats.drawMs).toBeGreaterThanOrEqual(0);
 });
 
 it("the default budget is full (unchanged 30 FPS cap), and reduced motion keeps its 10 FPS at every setting", () => {
   const plain = renderer();
-  expect(plain.run(3000)).toBeLessThanOrEqual(90);
+  expect(plain.run(3000)).toBeLessThanOrEqual(91);
   expect(plain.run(3000)).toBeGreaterThanOrEqual(85);
   for (const profile of ["full", "light"] as const) {
     const t = renderer({ reducedMotion: true });
     t.brain.setRenderBudget(RENDER_BUDGETS[profile]);
     t.run(100);
-    expect(t.run(3000)).toBe(30);
+    const frames = t.run(3000);
+    expect(frames).toBeGreaterThanOrEqual(29);
+    expect(frames).toBeLessThanOrEqual(31);
   }
 });
 
@@ -136,4 +145,17 @@ it("light still lights the active region, draws its pulses and its label, withou
   full.run(200);
   expect(full.calls.fillText).toContain(label);
   expect(full.calls.shadowBlur).toBeGreaterThan(0);
+});
+
+it("balanced drops the large listening-ring blur while listening; full keeps it", () => {
+  const balanced = renderer();
+  balanced.brain.setRenderBudget(RENDER_BUDGETS.balanced);
+  balanced.brain.setState({ ...idle, listening: true });
+  balanced.run(500);
+  expect(balanced.calls.largeShadowBlur).toBe(0);
+
+  const full = renderer();
+  full.brain.setState({ ...idle, listening: true });
+  full.run(500);
+  expect(full.calls.largeShadowBlur).toBeGreaterThan(0);
 });

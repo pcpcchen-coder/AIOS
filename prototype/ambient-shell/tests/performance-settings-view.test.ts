@@ -69,8 +69,8 @@ describe.each([false, true])("settings performance section (desktop=%s)", (deskt
     expect(el!.all().find((e) => e.getAttribute("role") === "radiogroup")?.getAttribute("aria-label")).toBe("畫面效能");
     expect(radios.map((r) => r.all().find((e) => e.tagName === "strong")?.textContent)).toEqual(["完整", "平衡", "省電"]);
     expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
-    expect(radios[1].textContent).toContain("最多每秒 20 格、標準解析度");
-    expect(el!.textContent).toContain("只調整畫面，不影響對話的收音、播放與回應速度。");
+    expect(radios[1].textContent).toContain("最多每秒 20 格、1 倍解析度");
+    expect(el!.textContent).toContain("只調整畫面，不改動對話的收音、播放與語音處理。");
     expect(el!.textContent).toContain("實測：—");
   });
 
@@ -79,8 +79,8 @@ describe.each([false, true])("settings performance section (desktop=%s)", (deskt
     const { el, radios } = section(desktop, actions(), { fps: 19.6, drawMs: 4.21 });
     expect(el!.all().find((e) => e.tagName === "h3")?.textContent).toBe("Display performance on this device");
     expect(radios.map((r) => r.all().find((e) => e.tagName === "strong")?.textContent)).toEqual(["Full", "Balanced", "Light"]);
-    expect(el!.textContent).toContain("Only the display changes; listening, playback and response speed are not affected.");
-    expect(el!.textContent).toContain("Measured: 20 frames per second, 4.2 ms to draw each frame");
+    expect(el!.textContent).toContain("Only the display changes; listening, playback and voice processing are not touched.");
+    expect(el!.textContent).toContain("Measured: 20 frames per second, 4.2 ms of main-thread drawing per frame (excluding GPU and background blur)");
     expect(el!.textContent).not.toMatch(/\p{Script=Han}/u);
   });
 
@@ -102,7 +102,7 @@ it("without the performance option the section is not drawn (existing callers un
 it("refreshPerformanceReadout updates only the readout text", () => {
   const { root, el } = section(false);
   views.refreshPerformanceReadout(root as unknown as ParentNode, { fps: 11.9, drawMs: 12.04 });
-  expect(el!.textContent).toContain("實測：每秒 12 格，每格繪製 12.0 毫秒");
+  expect(el!.textContent).toContain("實測：每秒 12 格，每格主執行緒繪製 12.0 毫秒（不含 GPU 與背景模糊）");
   views.refreshPerformanceReadout(root as unknown as ParentNode, null);
   expect(el!.textContent).toContain("實測：—");
 });
