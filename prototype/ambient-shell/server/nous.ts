@@ -419,7 +419,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         holdResults: (taskIds) => store.hold(taskIds),
         onPlaintextDrop: (reason) => store.dropPlaintext(reason),
         confirm: memoryOpts.confirm,
-        identity: (): MemoryIdentityHooks | null => identity ? { candidate: (page) => identity.memoryCandidate(page), faceCandidate: (page) => identity.memoryFaceCandidate(page), people: () => identity.memoryPeople(), nameAllowed: () => camera.view().look_to_talk_greet_name } : null,
+        identity: (): MemoryIdentityHooks | null => identity ? { candidate: (page) => identity.memoryCandidate(page), faceCandidate: (page) => identity.memoryFaceCandidate(page), people: () => identity.memoryPeople(), nameAllowed: (page) => identity.namingAllowed(page) } : null,
         afterOpen: memoryOpts.excludeFromBackup ? () => memoryOpts.excludeFromBackup!(memoryOpts.dir) : undefined,
         // 上次執行時記憶是否開著：加密檔外只留這一個布林值（不含內容），讓重啟後第一次打字就能取用記憶，
         // 而記憶沒開時查狀態、一般聊天都不碰 Keychain。
