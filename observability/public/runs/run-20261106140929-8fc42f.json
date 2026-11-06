@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-06T14:09:29.956Z",
-  "updated_at": "2026-11-06T14:18:07.796Z",
+  "updated_at": "2026-11-06T14:46:33.295Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-11-06T14:18:07.796Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-11-06T14:46:33.295Z",
+      "note": "MEMO-1 implemented by delegate, reviewed",
       "evidence": []
     },
     {
@@ -126,6 +126,13 @@
       "step_id": "implement",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-11-06T14:46:33.295Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "MEMO-1 implemented by delegate, reviewed"
     }
   ],
   "provenance": "Agent self-reported"
