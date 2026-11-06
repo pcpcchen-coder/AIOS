@@ -119,7 +119,7 @@ This is not a Mac or Pi hardware check. Animation smoothness, Pi decoding load a
 
 ## Mac / Pi test steps
 
-1. Put photos and videos in `~/.config/nous/memories/library` on the Mac (or set `NOUS_MEMORIES_DIR` and restart the core).
+1. Put photos and videos in `~/.config/nous/memories/library` on the Mac (or set `NOUS_MEMORIES_DIR` and restart the core). The menu bar "Memories" → "Open memories folder" opens this folder in Finder (creating it first if missing).
 2. Mac: menu bar "Memories mode" → turn on "Play memories when idle". Pi: page "Settings" → "Memories mode" → On. The status line should show the photo and video counts.
 3. Do nothing for 60 s: the brain moves to the lower left, a photo emerges, holds 8 s, recedes, and the next one follows; photos with a time and place have text below.
 4. Say "Hello Nous": the photo collapses at once and the brain returns to its place and starts the call. After the call, wait another 60 s and memories return.
@@ -135,6 +135,10 @@ This is not a Mac or Pi hardware check. Animation smoothness, Pi decoding load a
 ## Not done
 
 - MEMO-2: the Google Photos Picker source (minimal OAuth scope, token kept only in the Mac core, QR-code picking, downloaded cache with a 2 GB cap and clearing).
-- A menu bar shortcut "Open memories folder".
+- ~~A menu bar shortcut "Open memories folder"~~: added 2026-11-06 (see the addendum below).
 - Local folder photos are not resized (large files decode slower on the Pi).
 - Mac and Pi hardware checks.
+
+## Addendum: open memories folder (2026-11-06)
+
+The menu bar "Memories" section gains "Open memories folder" below the folder status. The App main process gets the folder path from the core (`NousHandle.memoriesDir`, never sent to any page), creates it with 0700 when missing, and opens it in Finder; when it cannot, it shows "Could not open the memories folder" with the system's reason. The Pi page has no such item (the Pi cannot open Finder on the Mac). Tests: 1 new test in `tests/memories-menu.test.ts` (shown only when the App gives a handler, clicking calls it, English translation), failing before the change and passing after; overall 153 files, 2844 passed, 5 skipped. Opening Finder on a real Mac is not verified.

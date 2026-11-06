@@ -698,7 +698,7 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, memoriesGoogle, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, servicePaused: prefs.serviceMode, translate: t });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, memoriesGoogle, openMemoriesFolder, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, servicePaused: prefs.serviceMode, translate: t });
 }
 
 /**
@@ -750,6 +750,20 @@ async function setMemories(patch) {
  * MEMO-2「Google 相簿」：pick 等核心建立好挑選連結再用系統瀏覽器開（Google 的挑選頁不能放進視窗）；
  * clear 先問原生確認對話框。失敗時照實說明並重新讀取。
  */
+/** MEMO-1「打開回憶資料夾」：Finder 打開核心的回憶資料夾（不存在時先建立）；打不開時照實說明。 */
+async function openMemoriesFolder() {
+  const dir = core?.memoriesDir;
+  if (!dir) return;
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  } catch (err) {
+    showError("無法打開回憶資料夾", String(err.message ?? err));
+    return;
+  }
+  const failure = await shell.openPath(dir);
+  if (failure) showError("無法打開回憶資料夾", failure);
+}
+
 async function memoriesGoogle(action) {
   const google = settings?.memories?.google;
   if (!google) return;

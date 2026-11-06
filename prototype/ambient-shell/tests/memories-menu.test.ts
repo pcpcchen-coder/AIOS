@@ -147,6 +147,21 @@ const googleView = (over: Partial<MemoriesGoogleView> = {}): MemoriesGoogleView 
 });
 const withGoogle = (g: Partial<MemoriesGoogleView> = {}) => view({ google: googleView(g) });
 
+describe("menu bar: open memories folder", () => {
+  it("appears right after the folder status only when the App gives a handler, and clicking calls it", () => {
+    let opened = 0;
+    const items = memoriesMenu(view(), { openMemoriesFolder: () => void opened++ });
+    const at = items.findIndex((i) => i.label === "打開回憶資料夾");
+    expect(at).toBeGreaterThan(0);
+    expect(items[at - 1]!.enabled).toBe(false);
+    items[at]!.click!();
+    expect(opened).toBe(1);
+    expect(memoriesMenu(view(), {}).some((i) => i.label === "打開回憶資料夾")).toBe(false);
+    expect(memoriesMenu(view(), { openMemoriesFolder: () => undefined, translate: en }).some((i) => i.label === "Open memories folder")).toBe(true);
+    expect(en("無法打開回憶資料夾")).toBe("Could not open the memories folder");
+  });
+});
+
 describe("menu bar: Google Photos", () => {
   it("cache size reads the same in the menu and the shared formatter; small caches keep one decimal", () => {
     for (const bytes of [0, 480_000, 9.94 * 1024 ** 2, 350 * 1024 ** 2, 1.5 * 1024 ** 3]) {

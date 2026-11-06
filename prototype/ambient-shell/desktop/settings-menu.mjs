@@ -365,6 +365,7 @@ export const MEMORIES_TEXT = {
   stateEmpty: "資料夾是空的：把照片放進 Mac 的回憶資料夾",
   stateMissing: "找不到回憶資料夾",
   stateFailed: "讀不到回憶資料夾",
+  openFolder: "打開回憶資料夾",
   googleGroup: "Google 相簿",
   googleStatus: "Google 相簿：照片 {0} 張、影片 {1} 段（{2} / 2 GB）",
   googleUnavailable: "Google 相簿不可用：{0}",
@@ -431,7 +432,7 @@ function googleMenu(g, { memoriesGoogle, fill, translate }) {
  * 「回憶模式」分段：總開關、影片聲音、每張停留、閒置多久開始、來源狀態；核心有 memories.google 時再加「Google 相簿」。
  * 點選後 setMemories(patch) POST 到 memories.write_path。
  */
-export function memoriesMenu(memories, { setMemories, memoriesGoogle, translate = (source) => source }) {
+export function memoriesMenu(memories, { setMemories, memoriesGoogle, openMemoriesFolder, translate = (source) => source }) {
   const fill = (source, ...values) => translate(source, ...values).replace(/\{(\d+)\}/g, (match, i) => (Number(i) < values.length ? String(values[Number(i)]) : match));
   const prefs = memories.prefs;
   const set = (patch) => () => void setMemories?.(patch);
@@ -453,6 +454,8 @@ export function memoriesMenu(memories, { setMemories, memoriesGoogle, translate 
       submenu: memories.idle_options.map((n) => radio(duration(n), n === prefs.idle_s, set({ idle_s: n }))),
     },
     { label: fill(MEMORIES_STATE_TEXT[state] ?? MEMORIES_TEXT.stateMissing, memories.source?.photos ?? 0, memories.source?.videos ?? 0), enabled: false },
+    // 只有 App 主程序知道資料夾在哪裡（不下發頁面），所以只在選單列提供。
+    ...(openMemoriesFolder ? [{ label: translate(MEMORIES_TEXT.openFolder), click: () => void openMemoriesFolder() }] : []),
     ...(memories.google ? googleMenu(memories.google, { memoriesGoogle, fill, translate }) : []),
   ];
 }
@@ -467,7 +470,7 @@ export function memoriesMenu(memories, { setMemories, memoriesGoogle, translate 
  *   setMemories(patch)：「回憶模式」分段（settings.memories 存在時畫；patch 送到 settings.memories.write_path）
  *   memoriesGoogle(action)：MEMO-2「Google 相簿」的 pick／cancel／clear（settings.memories.google 存在時畫）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, memoriesGoogle, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, memoriesGoogle, openMemoriesFolder, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -540,7 +543,7 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
   if (settings.audio) items.push(...audioMenu(settings.audio, audioReport, { setAudio, translate }));
   if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused, translate }));
   if (settings.proactive) items.push(...proactiveMenu(settings.proactive, { setProactive, translate }));
-  if (settings.memories) items.push(...memoriesMenu(settings.memories, { setMemories, memoriesGoogle, translate }));
+  if (settings.memories) items.push(...memoriesMenu(settings.memories, { setMemories, memoriesGoogle, openMemoriesFolder, translate }));
   return items;
 }
 

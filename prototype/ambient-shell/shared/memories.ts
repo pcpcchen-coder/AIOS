@@ -172,6 +172,7 @@ export const MEMORIES_TEXT = {
   stateEmpty: "資料夾是空的：把照片放進 Mac 的回憶資料夾",
   stateMissing: "找不到回憶資料夾",
   stateFailed: "讀不到回憶資料夾",
+  openFolder: "打開回憶資料夾",
   googleGroup: "Google 相簿",
   googleStatus: "Google 相簿：照片 {0} 張、影片 {1} 段（{2} / 2 GB）",
   googleUnavailable: "Google 相簿不可用：{0}",
