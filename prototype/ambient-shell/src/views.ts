@@ -9,6 +9,7 @@ import { CHATGPT_USAGE_URL, type Artifact, type ExecutorMode, type SettingsView,
 import { CAMERA_PREF_KEYS, CAMERA_PREFS, stepCameraPref, type CameraNumberKey, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
 import { formatNumberPref, formatSeconds, stepPref } from "../shared/prefs.ts";
 import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
+import { callMeterText } from "../shared/call-meter.ts";
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
 import { PROACTIVE_TEXT, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView, type WeatherFetchState, type CalendarFetchState } from "../shared/proactive.ts";
@@ -594,8 +595,10 @@ function chatgptWelcome(settings: SettingsView, actions: ViewActions): HTMLEleme
  */
 export function renderRealtimeSettings(rt: RealtimeInfo, actions: ViewActions, options: SettingsRenderOptions = {}): HTMLElement {
   const active = rt.active;
+  // 費用防護：進行中的通話另顯示通話時間／上限與約略 tokens（核心最近一次的設定；頁面報到的 usage，不是帳單）。
+  const meter = active ? callMeterText({ route: active.route, startedAt: active.started_at ?? null, maxMs: (active.max_call_s ?? 0) * 1000, usage: active.usage ?? null }, Date.now(), t) : "";
   const status = active
-    ? msg`進行中：${t(active.billing_line)}${rt.billing_line && rt.billing_line !== active.billing_line ? msg`（下次開始時改用：${t(rt.billing_line)}）` : ""}`
+    ? msg`進行中：${t(active.billing_line)}${rt.billing_line && rt.billing_line !== active.billing_line ? msg`（下次開始時改用：${t(rt.billing_line)}）` : ""}` + (meter && active.max_call_s ? ` · ${meter}` : "")
     : rt.billing_line
       ? msg`下次開始：${t(rt.billing_line)}`
       : msg`不可用：${uiText(rt.detail)}`;
@@ -709,7 +712,7 @@ function renderVoiceSettings(voice: VoicePrefs, realtimeAvailable: boolean, acti
     plus.disabled = value >= spec.max;
     minus.setAttribute("aria-label", msg`${t(spec.label)}減少`);
     plus.setAttribute("aria-label", msg`${t(spec.label)}增加`);
-    const hint = key === "realtime_idle_s" && !realtimeAvailable ? msg`${t(spec.hint)}；即時語音目前不可用` : t(spec.hint);
+    const hint = (key === "realtime_idle_s" || key === "realtime_max_call_s") && !realtimeAvailable ? msg`${t(spec.hint)}；即時語音目前不可用` : t(spec.hint);
     list.append(
       h(
         "li",

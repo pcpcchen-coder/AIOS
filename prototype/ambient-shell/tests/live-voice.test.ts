@@ -401,7 +401,8 @@ describe("openRealtime", () => {
       pendingApproval: null,
       fallbackOffer: fallback ? { error: "額度已用完", fallback: { session_id: "rt_b", owner: "own_b", route: "api_key" as const, model: "gpt-realtime", billing_line: "OpenAI API key 計費 · gpt-realtime", notice: "這次改用 OpenAI API key（依用量計費）：ChatGPT 方案額度已用完" } } : null,
       start: async () => void s.started++,
-      stop() {}, interrupt() {}, stopReply() {}, sendText() {}, addContext() {}, notify() {}, setIdleMs() {}, resolveApproval() {},
+      stop() {}, interrupt() {}, stopReply() {}, sendText() {}, addContext() {}, notify() {}, setIdleMs() {}, setMaxCallMs() {}, resolveApproval() {},
+      callStartedAt: null, maxCallMs: 1_200_000,
     };
     return s;
   }

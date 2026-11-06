@@ -480,3 +480,37 @@ export function serviceTray({ serviceMode, terminal = null, voiceOn = false, sho
     ],
   };
 }
+
+// 費用防護（George 2026-11-06）：選單列「即時語音」那一行的通話時間與約略用量（核心 settings.realtime.active）。
+// 和頁面的 shared/call-meter.ts 同樣格式（main.mjs 不能 import shared/）。Pi 上的通話也在這裡看得到（page 不是 main）。
+export const REALTIME_METER_TEXT = {
+  tokens: "約 {0} tokens",
+  liveUnknown: "ChatGPT 方案：用量不明",
+  terminal: "終端機 {0}",
+};
+
+/** 「3:07」「1:02:05」。 */
+export function formatCallClock(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+/**
+ * 「3:07 / 20:00 · 約 3,400 tokens」或「3:07 / 20:00 · ChatGPT 方案：用量不明」，Pi 的通話前面加「終端機 rpi4 · 」。
+ * 還沒連上（started_at 為 null）或舊的核心沒有這些欄位時回空字串。tokens 是頁面報到的加總（不是帳單）。
+ */
+export function realtimeMeter(active, now, translate = (source, ...values) => values.reduce((text, value, i) => text.replace(`{${i}}`, String(value)), source)) {
+  if (!active || typeof active.started_at !== "number" || typeof active.max_call_s !== "number") return "";
+  const clock = `${formatCallClock(now - active.started_at)} / ${formatCallClock(active.max_call_s * 1000)}`;
+  const usage = active.route === "live"
+    ? ` · ${translate(REALTIME_METER_TEXT.liveUnknown)}`
+    : active.usage && typeof active.usage.total_tokens === "number"
+      ? ` · ${translate(REALTIME_METER_TEXT.tokens, active.usage.total_tokens.toLocaleString("en-US"))}`
+      : "";
+  const page = typeof active.page === "string" && active.page !== "main" ? `${translate(REALTIME_METER_TEXT.terminal, active.page)} · ` : "";
+  return `${page}${clock}${usage}`;
+}

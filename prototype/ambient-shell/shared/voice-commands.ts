@@ -339,6 +339,7 @@ export const CONTROLS: readonly Control[] = [
   { id: "look-cooldown", how: "對話結束後", does: "這段時間內看著說話不再自動開始", seconds: "look_to_talk_cooldown_s" },
   { id: "voice-idle", how: "語音模式沒說話", does: "自動關閉語音模式（Nous 等回覆、念回覆時不計時）", seconds: "voice_idle_s" },
   { id: "realtime-idle", how: "即時語音沒說話", does: "自動結束即時語音，避免持續計費或用掉方案額度（Nous 回覆、查資料、等確認時不計時）", seconds: "realtime_idle_s" },
+  { id: "realtime-max", how: "每通即時語音到上限", does: "從連上算起，到上限前一分鐘字幕加提示音，到了就結束（一直說話也不延長；頁面與本機核心都會結束）", seconds: "realtime_max_call_s" },
   { id: "app-window", how: "⌥⌘N（App）", does: "叫出／收起視窗" },
   { id: "app-voice", how: "⌥⌘V（App）", does: "開始／結束語音對話" },
   { id: "app-commands", how: "⌘/（App）", does: "打開這張語音指令表" },

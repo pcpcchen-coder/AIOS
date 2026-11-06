@@ -10,7 +10,9 @@ import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
 import { TerminalCameraPrefs } from "./terminal-camera.ts";
 import { formatSeconds } from "../shared/prefs.ts";
-import { DEFAULT_VOICE_PREFS, idleTimeoutsMs, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
+import { DEFAULT_VOICE_PREFS, idleTimeoutsMs, maxCallMs, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
+import { CallLifecycle } from "./call-lifecycle.ts";
+import { CALL_METER_TEXT, callMeterText } from "../shared/call-meter.ts";
 import {
   browserRealtimeDeps,
   realtimeSupported,
@@ -23,7 +25,7 @@ import {
 } from "./realtime.ts";
 import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts";
 import { greetingFor, idleSession, newInteractionId, openRealtime, wakeTriggerAction, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
-import type { CallAnswer, LiveCoreEvent, LiveMemoryReason, RealtimeServerEvent, RouteId } from "../shared/realtime-route.ts";
+import { CALL_END_TEXT, type CallAnswer, type LiveCoreEvent, type LiveMemoryReason, type RealtimeServerEvent, type RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
 import { applyProfile, loadProfile, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
 import { CUE_TIMING, ProcessingCue, processingSource } from "./processing-cue.ts";
@@ -363,7 +365,14 @@ const realtimeCallbacks: RealtimeCallbacks = {
   // AIL-1：只有 NOUS_AIL=on（settings.integrations）時才有名稱；關閉時清單為空，行為和之前相同。
   integrationTools: () => settings?.integrations?.tools ?? [],
   onIntegrationTool: integrationFromRealtime,
-  onClosed: (reason) => {
+  // 費用防護：快到每通上限：字幕＋提示音（只提醒一次，到上限頁面與核心都會結束）。
+  onCallWarning: () => {
+    showSubtitle(t(CALL_END_TEXT.warn, Math.round(realtime.maxCallMs / 60_000)), true);
+    playCallWarning();
+  },
+  onClosed: (reason, code) => {
+    // 費用防護自己結束（idle、max_duration）：原因交給 API key 路徑的費用紀錄（live 由 LiveVoice 的 end 帶）。
+    if (code && realtimeTicket?.route === "api_key") noteEndReason(realtimeTicket.session_id, code);
     realtimeCommands.reset();
     wakeGreetingInteraction = null;
     ambient.endInteraction();
@@ -403,6 +412,34 @@ let realtimeStarting = false;
 let realtimeLocale: Locale = getLocale();
 /** 進行中的開始流程；stopRealtime 中止它，之後的 await 回來時不會再開麥克風。 */
 let realtimeStart: AbortController | null = null;
+/** 費用防護：頁面正在關閉（pagehide）：結束通話的請求用 keepalive 送出。 */
+let pageClosing = false;
+/**
+ * 費用防護（src/call-lifecycle.ts）：App 鎖定／睡眠、瀏覽器與 Pi 背景超過 30 秒或關閉時結束通話；通話中每 15 秒向核心報到。
+ */
+const callLifecycle = new CallLifecycle({
+  desktop: !!window.nousDesktop,
+  active: () => realtime.on || realtimeStarting,
+  connected: () => realtimeTicket !== null && realtime.callStartedAt !== null,
+  callKey: () => realtimeTicket?.session_id ?? null,
+  stop: (reason, message, keepalive) => {
+    if (keepalive) pageClosing = true;
+    stopRealtime(reason ?? undefined);
+    showSubtitle(t(message), true);
+  },
+  alive: async (signal) => {
+    const ticket = realtimeTicket;
+    if (!ticket) return "ok";
+    try {
+      await api.realtimeAlive(ticketOf(ticket), ticket.route === "api_key" ? (realtime.usage ?? null) : null, signal);
+      return "ok";
+    } catch (err) {
+      // 報到期間換了一通：舊的結果不影響新的。
+      if (realtimeTicket !== ticket) return "ok";
+      return err instanceof ApiError && err.status === 404 ? "gone" : "error";
+    }
+  },
+});
 /** WK-02：喚醒開始的通話的「沒人出聲就結束」計時（通話結束時停止）與它的麥克風音量來源（租到的那一份）。 */
 let wakeCall: WakeCallWatch | null = null;
 let wakeLevel: { stream: MediaStream; stop(): void } | null = null;
@@ -562,7 +599,7 @@ function endRealtimeTicket(): void {
   presenceNotice.callEnded();
   // WK-02（F6）：結束原因（no_voice）與這通加總的 usage 交給核心的費用紀錄。
   // F6 一律記錄（George 2026-10-31，不綁喚醒開關）：usage 不論旗標都送。
-  if (ticket?.route === "api_key") void api.realtimeEnd(ticketOf(ticket), { reason: takeEndReason(ticket.session_id), usage: realtime.usage ?? null }).catch(() => undefined);
+  if (ticket?.route === "api_key") void api.realtimeEnd(ticketOf(ticket), { reason: takeEndReason(ticket.session_id), usage: realtime.usage ?? null, keepalive: pageClosing }).catch(() => undefined);
   render();
 }
 
@@ -572,12 +609,16 @@ function takeEndReason(sessionId: string): PageEndReason | null {
   return reason;
 }
 
-/** reason：WK-02 喚醒開始的通話沒人出聲而自動結束（no_voice，記入費用紀錄）。 */
+function noteEndReason(sessionId: string, reason: PageEndReason): void {
+  realtimeEndReasons.set(sessionId, reason);
+  if (realtimeEndReasons.size > 8) realtimeEndReasons.delete(realtimeEndReasons.keys().next().value!);
+}
+
+/**
+ * reason：WK-02 喚醒開始的通話沒人出聲而自動結束（no_voice），或費用防護（hidden、os_lock、suspend），記入費用紀錄。
+ */
 function stopRealtime(reason?: PageEndReason): void {
-  if (reason && realtimeTicket) {
-    realtimeEndReasons.set(realtimeTicket.session_id, reason);
-    if (realtimeEndReasons.size > 8) realtimeEndReasons.delete(realtimeEndReasons.keys().next().value!);
-  }
+  if (reason && realtimeTicket) noteEndReason(realtimeTicket.session_id, reason);
   stopWakeCall();
   // 通話在問候決定前就結束：同步辨識不再放寬（ambientEnabled）。
   wakeGreetingInteraction = null;
@@ -594,6 +635,7 @@ function makeRealtimeSession(decision: SessionDecision, greeting: GreetingOnce |
   const next = createRealtimeSession(decision, greeting, rebuild);
   // 和其他計時器一樣：建構時用預設值，再套用目前的設定（applySettings 之後的改動也走 setIdleMs）。
   next.setIdleMs(idleTimeoutsMs(settings?.voice).realtime);
+  next.setMaxCallMs(maxCallMs(settings?.voice));
   return next;
 }
 
@@ -674,6 +716,7 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
           try { globalThis.speechSynthesis?.cancel(); } catch { /* 沒有語音合成 */ }
         },
         speak: (text) => void speakText(text, { locale: realtimeLocale }).catch(() => undefined),
+        quietPowerEnd: !!window.nousDesktop,
         stopReply: async () => void (await api.realtimeStopReply(ticket)),
         memoryEvent: onLiveMemoryEvent,
         revoked: onLiveRevoked,
@@ -693,13 +736,14 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
       input: async (kind, text) => void (await api.realtimeInput(ticket, kind, text)),
       hostResult: async (callId, output) => void (await api.realtimeHostResult(ticket, callId, output)),
       approval: async (report) => void (await api.realtimeApproval(ticket, report)),
-      end: async () => void (await api.realtimeEnd(ticket, { reason: takeEndReason(ticket.session_id) })),
+      end: async (code) => void (await api.realtimeEnd(ticket, { reason: takeEndReason(ticket.session_id) ?? code ?? null, keepalive: pageClosing })),
       subscribe: (handlers) => subscribeSession(ticket.session_id, handlers),
       watchLevel: browserWatchLevel,
       setMuted: (muted) => {
         if (liveAudio) liveAudio.muted = muted;
       },
       speak: (text) => void speakText(text, { locale: realtimeLocale }).catch(() => undefined),
+      quietPowerEnd: !!window.nousDesktop,
       stopReply: async () => void (await api.realtimeStopReply(ticket)),
       stopped: async (evidence) => (await api.realtimeStopped(ticket, evidence)).accepted,
       audioPaused: () => liveAudioPaused && (!liveAudio || liveAudio.paused),
@@ -841,6 +885,7 @@ function applyEffectiveSettings(value: SettingsView, preserveEntry = false): voi
   const idle = idleTimeoutsMs(value.voice);
   conversation.setIdleMs(idle.voice_mode);
   realtime.setIdleMs(idle.realtime);
+  realtime.setMaxCallMs(maxCallMs(value.voice));
   if (value.camera && !value.camera.active) cameraOffPending = false; // 伺服器已保存「關掉」
   if (value.camera && wasActive !== undefined && value.camera.active !== wasActive) cameraFailed = false;
   syncCamera();
@@ -2090,11 +2135,52 @@ function renderRealtimeState(phase: RealtimePhase): void {
   // live 建立失敗、正在改用 API key 時（realtimeStarting）不結束：要記到 API key 路徑的就緒、問候決策與首音。
   else if (phase === "off" && !realtimeStarting) lookTimeline.end();
   voicePill.hidden = phase === "off";
-  if (phase !== "off") voicePill.textContent = msg`${t(REALTIME_STATE_LABEL[phase])}（點此結束）`;
+  if (phase !== "off") renderRealtimePill(phase);
+  syncCallMeter();
   voicePill.dataset.state = phase === "off" ? "off" : phase === "speaking" ? "speaking" : "listening";
   voiceModeButton.classList.toggle("recording", phase !== "off");
   voiceModeButton.setAttribute("aria-label", phase === "off" ? t("開始語音對話") : t("結束即時語音"));
   render();
+}
+
+/**
+ * 即時語音的指示：階段＋（連上之後）通話時間／上限與約略 tokens（API key 路徑頁面加總的 usage，不是帳單；
+ * ChatGPT 方案照實說用量不明）。瀏覽器與 Pi 都看得到。
+ */
+function renderRealtimePill(phase: Exclude<RealtimePhase, "off">): void {
+  const meter = realtimeTicket ? callMeterText({ route: realtimeTicket.route, startedAt: realtime.callStartedAt, maxMs: realtime.maxCallMs, usage: realtime.usage ?? null }, Date.now(), t) : "";
+  voicePill.textContent = t("{0}（點此結束）", t(REALTIME_STATE_LABEL[phase])) + (meter ? ` · ${meter}` : "");
+  if (meter && realtimeTicket?.route === "api_key") voicePill.title = t(CALL_METER_TEXT.tokensNote);
+  else voicePill.removeAttribute("title");
+}
+
+/** 通話中每秒更新一次指示上的時間（只改文字，不重畫整個畫面）。 */
+let callMeterTimer: ReturnType<typeof setInterval> | null = null;
+function syncCallMeter(): void {
+  if (realtime.on && !callMeterTimer) {
+    callMeterTimer = setInterval(() => {
+      if (realtime.current === "off") syncCallMeter();
+      else renderRealtimePill(realtime.current);
+    }, 1_000);
+  } else if (!realtime.on && callMeterTimer) {
+    clearInterval(callMeterTimer);
+    callMeterTimer = null;
+  }
+}
+
+/**
+ * 快到每通上限的提示音：用處理中提示的同一個合成音（經「聲音輸出」選定的裝置，src/processing-sound.ts），響一次就收掉。
+ * 瀏覽器暫停了 AudioContext（沒有使用者手勢）時不出聲，只有字幕。
+ */
+function playCallWarning(): void {
+  try {
+    const sound = browserProcessingSound({ sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) });
+    sound.resume();
+    setTimeout(() => sound.ping(), 100);
+    setTimeout(() => sound.stop(), 2_000);
+  } catch {
+    // 沒有可用的音訊輸出：只有字幕
+  }
 }
 
 /** 模型在即時語音中決定交辦的工作：建立任務、顯示進度，並把真實狀態交還給模型。 */
@@ -2941,8 +3027,10 @@ function render(): void {
 
   renderStatusLine();
   renderEngineLine();
+  // 費用防護：背景計時跟著每一通（通話結束取消；在背景中開始的從開始時算）。
+  callLifecycle.sync(document.visibilityState === "hidden");
   voiceModeButton.setAttribute("aria-label", realtime.current !== "off" ? t("結束即時語音") : conversation.current !== "off" ? t("關閉語音對話模式") : t("開啟語音對話模式"));
-  if (realtime.current !== "off") voicePill.textContent = t("{0}（點此結束）", t(REALTIME_STATE_LABEL[realtime.current]));
+  if (realtime.current !== "off") renderRealtimePill(realtime.current);
   else if (conversation.current !== "off") voicePill.textContent = t("{0}（點此關閉）", t(VOICE_STATE_LABEL[conversation.current]));
   reportDesktopState();
   renderCaption(fg);
@@ -3465,7 +3553,21 @@ render();
 applyStaticTranslations();
 window.nousDesktop?.onLocaleChange?.(setLocale);
 // WK-01a：系統電源事件（只有列舉值）交給常駐喚醒聆聽；念話期間告訴防護（避免 Nous 自己說出喚醒詞時觸發）。
-window.nousDesktop?.onPower?.((event) => wake?.power(event));
+window.nousDesktop?.onPower?.((event) => {
+  wake?.power(event);
+  // 費用防護：螢幕鎖定、睡眠就結束即時語音（視窗隱藏或收起不結束）。
+  callLifecycle.power(event);
+});
+// 費用防護（瀏覽器與 Pi）：頁面在背景超過 30 秒、或頁面關閉，就結束即時語音。
+document.addEventListener("visibilitychange", () => callLifecycle.visibility(document.visibilityState === "hidden"));
+window.addEventListener("pagehide", () => {
+  pageClosing = true;
+  callLifecycle.pageHide();
+});
+window.addEventListener("pageshow", () => {
+  pageClosing = false;
+});
+callLifecycle.startAlive();
 // 服務模式：Mac 交給 Pi 使用。進入時停止即時語音、按下說話與語音模式、常駐喚醒聆聽與鏡頭（不改保存的設定）；
 // 離開時喚醒和解鎖一樣依偏好恢復，鏡頭依保存的設定重新開。
 window.nousDesktop?.onService?.((event) => {

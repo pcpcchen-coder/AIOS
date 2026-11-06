@@ -9,7 +9,7 @@ import { validateMemoryRequest } from "./memory-ipc.mjs";
 import { deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "./tasks-ipc.mjs";
 import { createMemorySecretBox } from "./memory-safe-storage.mjs";
 import { checkTrustedSender, sameOrigin } from "./trusted-sender.mjs";
-import { isWakeReport, radio, sanitizeAudioMenuReport, SERVICE_TEXT, serviceStatusLine, serviceTray, settingsMenu } from "./settings-menu.mjs";
+import { isWakeReport, radio, realtimeMeter, sanitizeAudioMenuReport, SERVICE_TEXT, serviceStatusLine, serviceTray, settingsMenu } from "./settings-menu.mjs";
 import { isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "./localization.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -942,10 +942,16 @@ function rebuildMenu() {
   const liveRoute = realtime?.routes?.find((r) => r.id === "live");
   const liveAccount = realtime?.live_account;
   // 路徑與計費一律照實顯示：進行中的工作階段用它自己的路徑；偏好改了只影響下一次開始。
+  // 費用防護：進行中的通話另顯示通話時間／上限與約略 tokens（核心的設定每 15 秒重讀一次，這一行跟著更新）。
+  const meter = realtime?.active ? realtimeMeter(realtime.active, Date.now(), t) : "";
   const realtimeLine = !realtime
     ? "讀取中…"
     : realtime.active
-      ? `${t(realtime.active.billing_line)}（進行中）${realtime.billing_line && realtime.billing_line !== realtime.active.billing_line ? `；下次：${t(realtime.billing_line)}` : ""}`
+      ? meter
+        ? realtime.billing_line && realtime.billing_line !== realtime.active.billing_line
+          ? t("{0}（進行中） · {1}；下次：{2}", t(realtime.active.billing_line), meter, t(realtime.billing_line))
+          : t("{0}（進行中） · {1}", t(realtime.active.billing_line), meter)
+        : `${t(realtime.active.billing_line)}（進行中）${realtime.billing_line && realtime.billing_line !== realtime.active.billing_line ? `；下次：${t(realtime.billing_line)}` : ""}`
       : t(realtime.billing_line ?? `不可用（${t(realtime.detail)}）`);
 
   const template = [
@@ -1356,6 +1362,10 @@ app.whenReady().then(async () => {
   // 作業系統鎖定：暫停本次人物（記憶撤銷舊世代；解鎖後要重新選擇）。
   // MEM-4c：鎖定與睡眠時，核心也丟棄已結束受保護任務的解密內容與搜尋索引（解鎖後要用時才重新解密）。
   // 核心的 dropPlaintext 會經 onPlaintextDropped 通知主視窗；核心不在時主程序自己通知（頁面的快取一樣要清）。
+  // 費用防護（2026-11-06）：鎖定只結束 App 主視窗開始的即時語音（Pi 與一般瀏覽器的通話不受影響）；睡眠結束全部（核心也要睡了）。
+  // 頁面自己也會依 nous:power 結束；核心這邊是頁面沒照做時的保險（掛斷、記費用原因）。
+  powerMonitor.on("lock-screen", () => void core?.realtime?.endAll("os_lock", "app"));
+  powerMonitor.on("suspend", () => void core?.realtime?.endAll("suspend"));
   powerMonitor.on("lock-screen", () => {
     core?.memory?.suspendAll();
     if (core?.tasks) core.tasks.dropPlaintext("os_lock");

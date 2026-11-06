@@ -85,3 +85,7 @@ export function serviceTray(options: {
   enterService(): void;
   exitService(): void;
 }): { head: MenuItemTemplate[]; actions: MenuItemTemplate[] };
+
+export const REALTIME_METER_TEXT: Record<"tokens" | "liveUnknown" | "terminal", string>;
+export function formatCallClock(ms: number): string;
+export function realtimeMeter(active: NonNullable<SettingsView["realtime"]>["active"] | null | undefined, now: number, translate?: (source: string, ...values: unknown[]) => string): string;

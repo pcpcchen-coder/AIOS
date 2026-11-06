@@ -60,11 +60,14 @@ export function pageHeaders(): Record<string, string> {
   return terminal ? { [TERMINAL_HEADER]: terminal } : {};
 }
 
-async function call<T>(method: "GET" | "POST", path: string, body?: unknown, locale: Locale = getLocale()): Promise<T> {
+async function call<T>(method: "GET" | "POST", path: string, body?: unknown, locale: Locale = getLocale(), keepalive = false, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
       method,
+      // 費用防護：頁面關閉時送出的結束請求（pagehide）要在卸載後仍送達。
+      ...(keepalive ? { keepalive: true } : {}),
+      ...(signal ? { signal } : {}),
       headers: { "X-Nous-Locale": locale, ...pageHeaders(), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
@@ -120,6 +123,8 @@ export const api = {
       ...(source === "look_to_talk" || source === "wake_word" ? { source } : {}),
       ...(source === "wake_word" && wakeId ? { wake_id: wakeId } : {}),
       ...(rebuild ? { rebuild: true } : {}),
+      // 費用防護：macOS App 主視窗開始的通話（Mac 鎖定時核心只結束這些）。
+      ...((globalThis as { nousDesktop?: unknown }).nousDesktop ? { app: true } : {}),
     }, locale),
   /**
    * 即時語音：把 WebRTC SDP offer 交給本機核心，由它代為建立連線（API key 或 ChatGPT 方案）。
@@ -155,8 +160,12 @@ export const api = {
   realtimeHostResult: (ticket: RealtimeTicket, callId: string, output: Record<string, unknown>) =>
     call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/host-result", { ...ticket, call_id: callId, output }),
   /** WK-02（F6）：可選的結束原因（no_voice）與 API key 路徑加總的 usage（核心的費用紀錄）。 */
-  realtimeEnd: (ticket: RealtimeTicket, end: { reason?: PageEndReason | null; usage?: VoiceUsage | null } = {}) =>
-    call<{ ok: true }>("POST", "/api/realtime/end", { ...ticket, ...(end.reason ? { reason: end.reason } : {}), ...(end.usage ? { usage: end.usage } : {}) }),
+  realtimeEnd: (ticket: RealtimeTicket, end: { reason?: PageEndReason | null; usage?: VoiceUsage | null; keepalive?: boolean } = {}) =>
+    call<{ ok: true }>("POST", "/api/realtime/end", { ...ticket, ...(end.reason ? { reason: end.reason } : {}), ...(end.usage ? { usage: end.usage } : {}) }, getLocale(), end.keepalive === true),
+  /** 費用防護：通話中每 15 秒報到（API key 路徑附這通加總的 usage）；核心 45 秒收不到就結束這通（client_lost）。 */
+  /** signal：呼叫端的逾時（src/call-lifecycle.ts 10 秒），卡住的請求不擋之後的報到。 */
+  realtimeAlive: (ticket: RealtimeTicket, usage: VoiceUsage | null, signal?: AbortSignal) =>
+    call<{ ok: true }>("POST", "/api/realtime/alive", { ...ticket, ...(usage ? { usage } : {}) }, getLocale(), false, signal),
   /** MEM-2：記憶撤銷後停播並核對的證據（只有布林值與毫秒數）。 */
   /** MEM-3：API key 路徑的頁面在資料通道收到播放結束（沒有內容、沒有時間戳）。 */
   realtimePlayback: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/playback", { ...ticket }),

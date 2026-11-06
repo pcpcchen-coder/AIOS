@@ -4,7 +4,7 @@ import { parseGaEvent, type GaEvent } from "../shared/realtime-ga.ts";
 import { CORE_TOOLS, LIVE_STOP_REPORT_MS, type CoreToolName, type LiveCoreEvent, type LiveMemoryReason, type StopReplyTurn } from "../shared/realtime-route.ts";
 import { delegatePolicy, MAX_RECALLS, type LiveCallPort, type LiveMemoryPort, type RevokeWhy } from "./memory/live.ts";
 import { APIKEY_TIMEOUTS_MS, type RealtimeBridge } from "./realtime.ts";
-import { RouteStartError, type RouteCall, type SessionContext } from "./realtime-routes.ts";
+import { RouteStartError, type CallCloseReason, type RouteCall, type SessionContext } from "./realtime-routes.ts";
 import type { SidebandSocket } from "./sideband.ts";
 import { taiwanTranscript, warmTaiwan } from "../shared/zh-tw-opencc.ts";
 import { convertsLocale, isPromptEcho } from "../shared/zh-tw.ts";
@@ -567,13 +567,14 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
     void this.close("ended");
   }
 
-  async close(reason: "ended" | "page_gone" | "fallback"): Promise<void> {
+  async close(reason: CallCloseReason): Promise<void> {
     if (this.ended) return;
     this.ended = true;
     this.abort.abort();
     this.settleUpdate("lost");
     // 頁面已不在：媒體跟著頁面結束，但也掛斷，避免沒人服務的通話留著。
-    if (reason === "page_gone") void this.deps.hangup(this.callId);
+    // 費用防護（enforced）：核心自己結束（上限、頁面沒報到、鎖定或睡眠），頁面可能還開著：一定掛斷。
+    if (reason === "page_gone" || reason === "enforced") void this.deps.hangup(this.callId);
     try {
       this.socket.close();
     } catch {
@@ -587,9 +588,31 @@ export class ApiKeyCall implements RouteCall, LiveCallPort {
 /** ApiKeyRoute 用到的 RealtimeBridge 方法（測試可以換成假的）。 */
 export type ApiKeyBridge = Pick<RealtimeBridge, "connect" | "openSideband" | "hangup" | "memorySessionUpdate">;
 
-/** 沒有旁路的通話（記憶沒開、沒有同意、放行旗標沒開、路徑停用，或旁路接不上）：和 MEM-2 之前一樣，close 沒有事要做。 */
-export function plainApiKeyCall(answer: { sdp: string; model: string }, memory: { used: number; reason: LiveMemoryReason | null } | null): RouteCall {
-  return { route: "api_key", answerSdp: answer.sdp, model: answer.model, control: null, coreTools: [], memoryStatus: () => memory, close: async () => {} };
+/**
+ * 沒有旁路的通話（記憶沒開、沒有同意、放行旗標沒開、路徑停用，或旁路接不上）：頁面結束（ended）時和 MEM-2 之前一樣沒有事要做。
+ * 費用防護（2026-11-06）：核心保留 call ID（不交給頁面）；頁面不在（page_gone，例如 Pi 的通道斷了而 WebRTC 還在）或核心自己結束
+ * （enforced：上限、頁面沒報到、鎖定或睡眠）時向 OpenAI 掛斷，沒人管的通話不會一直計費。
+ */
+export function plainApiKeyCall(
+  answer: { sdp: string; model: string; callId?: string | null },
+  memory: { used: number; reason: LiveMemoryReason | null } | null,
+  hangup?: (callId: string) => Promise<boolean>,
+): RouteCall {
+  const callId = answer.callId ?? null;
+  let hungUp = false;
+  return {
+    route: "api_key",
+    answerSdp: answer.sdp,
+    model: answer.model,
+    control: null,
+    coreTools: [],
+    memoryStatus: () => memory,
+    close: async (reason) => {
+      if (hungUp || !callId || !hangup || (reason !== "page_gone" && reason !== "enforced")) return;
+      hungUp = true;
+      await hangup(callId).catch(() => false);
+    },
+  };
 }
 
 const revokedError = () => new RouteStartError("api_key_rejected", 409, "記憶在連線期間更新了，這次即時語音沒有開始；請再開始一次。", false);
@@ -618,14 +641,14 @@ export async function connectApiKey(bridge: ApiKeyBridge, offerSdp: string, ctx:
   const log = options.log;
   if (!memory) {
     const answer = await bridge.connect(offerSdp, ctx.tasks(), ctx.locale);
-    return plainApiKeyCall(answer, null);
+    return plainApiKeyCall(answer, null, (id) => bridge.hangup(id));
   }
   try {
     return await memory.connect(async (block, signal, active) => {
       if (!active) {
         const answer = await bridge.connect(offerSdp, ctx.tasks(), ctx.locale);
         memory.close();
-        return { ...plainApiKeyCall(answer, { used: 0, reason: memory.reason }), closed: Promise.resolve() };
+        return { ...plainApiKeyCall(answer, { used: 0, reason: memory.reason }, (id) => bridge.hangup(id)), closed: Promise.resolve() };
       }
       let answer: Awaited<ReturnType<ApiKeyBridge["connect"]>>;
       try {
@@ -642,7 +665,7 @@ export async function connectApiKey(bridge: ApiKeyBridge, offerSdp: string, ctx:
         log?.(`即時語音（API key）：${why}，這通不帶記憶`);
         memory.noControl();
         memory.close();
-        return { ...plainApiKeyCall(answer, { used: 0, reason: "no_control" }), closed: Promise.resolve() };
+        return { ...plainApiKeyCall(answer, { used: 0, reason: "no_control" }, (id) => bridge.hangup(id)), closed: Promise.resolve() };
       };
       if (!answer.callId) return noControl("回應沒有 call ID");
       let socket: SidebandSocket;

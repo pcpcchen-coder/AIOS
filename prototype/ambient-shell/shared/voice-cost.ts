@@ -81,8 +81,12 @@ export function addResponseUsage(total: VoiceUsage, raw: unknown): VoiceUsage {
   };
 }
 
-/** 頁面可以說明的結束原因（POST /api/realtime/end 的 reason）；其他值一律忽略，由核心記自己的原因。 */
-export const PAGE_END_REASONS = ["no_voice"] as const;
+/**
+ * 頁面可以說明的結束原因（POST /api/realtime/end 的 reason）；其他值一律忽略，由核心記自己的原因。
+ * 費用防護（2026-11-06）：idle（閒置）、max_duration（每通上限）、hidden（瀏覽器／Pi 頁面在背景超過 30 秒或關閉）、
+ * os_lock／suspend（App：螢幕鎖定、睡眠）。client_lost（頁面停止報到）只有核心會記，不收頁面送來的。
+ */
+export const PAGE_END_REASONS = ["no_voice", "idle", "max_duration", "hidden", "os_lock", "suspend"] as const;
 export type PageEndReason = (typeof PAGE_END_REASONS)[number];
 
 export function parsePageEndReason(value: unknown): PageEndReason | null {
@@ -105,7 +109,10 @@ export interface VoiceCostRecord {
   connected: boolean;
   /** 連上到結束的毫秒數；沒連上為 0。 */
   connected_ms: number;
-  /** ended（頁面結束）、no_voice（喚醒後沒人出聲自動結束）、page_gone、connect_failed，或 live 的關閉原因。 */
+  /**
+   * ended（頁面結束）、no_voice（喚醒後沒人出聲自動結束）、page_gone、connect_failed、live 的關閉原因，
+   * 或費用防護的原因（idle、max_duration、hidden、os_lock、suspend、client_lost）。
+   */
   end_reason: string;
   no_voice_auto_end: boolean;
   usage: VoiceUsage | "unknown";

@@ -150,7 +150,7 @@ describe("realtime idle setting", () => {
 
 describe("the page hands settings.voice to the idle timers in milliseconds", () => {
   it("idleTimeoutsMs converts seconds to ms and falls back to the defaults", () => {
-    expect(idleTimeoutsMs({ voice_idle_s: 60, realtime_idle_s: 300 })).toEqual({ voice_mode: 60_000, realtime: 300_000 });
+    expect(idleTimeoutsMs({ voice_idle_s: 60, realtime_idle_s: 300, realtime_max_call_s: 1200 })).toEqual({ voice_mode: 60_000, realtime: 300_000 });
     expect(idleTimeoutsMs(undefined)).toEqual({
       voice_mode: DEFAULT_VOICE_PREFS.voice_idle_s * 1000,
       realtime: DEFAULT_VOICE_PREFS.realtime_idle_s * 1000,

@@ -63,7 +63,8 @@ The latest reply remains readable until dismissal or opening settings/progress/a
 | Setting | Default | Range | Timer pauses while |
 | --- | --- | --- | --- |
 | Voice-mode inactivity before automatic closure | 1 minute 30 seconds | 30–600 seconds, step 10 | Waiting for or reading AI replies |
-| Realtime-voice inactivity before automatic end | 2 minutes | 30–600 seconds, step 10 | Replying, researching, running tools, or waiting for confirmation; realtime voice is usage billed |
+| Realtime-voice inactivity before automatic end | 2 minutes | 30–600 seconds, step 10 | Replying, researching, running tools, or waiting for confirmation; realtime voice is usage billed. Only a transcribed sentence, typing, or tool results restart it; speech-start events do not ([cost guard](../../docs/validation/realtime-cost-guard-2026-11-06.en.md)) |
+| Maximum length of each realtime voice call | 20 minutes | 300–3600 seconds, step 60 (menu 10/20/30/60 minutes, no unlimited) | Never pauses: counted from connection, with a warning 1 minute before; both the page and the local core (limit + 30 s) end the call |
 
 Browser settings use −/+. macOS App uses menu “Camera and voice settings”; the in-window settings page retains accounts/login only. Changes apply immediately: active voice restarts its timer at the change, inactive voice uses the value next start. Save only changed fields in `~/.config/nous/voice.json` through `POST /api/settings/voice`. Like `camera.json`, invalid fields are individually ignored and logged; unreadable files use defaults. Ranges, choices, and labels live only in `shared/voice-prefs.ts`. Core derives menu choices in `GET /api/settings` `seconds`; this historical field now includes factor/camera-toggle rows, distinguished by `kind` (`seconds` / `factor` / `bool`).
 
@@ -194,6 +195,7 @@ These are not fixed phrases. AI decides whether to use tools from meaning.
 | After conversation ends | Look-to-talk pause before automatic restart, default 10 seconds, adjustable in App menu/browser settings |
 | Voice mode without speech | Automatically close, excluding AI wait/playback; default 1 minute 30 seconds, adjustable |
 | Realtime without speech | Automatically end to avoid ongoing billing/quota, excluding reply/research/confirmation wait; default 2 minutes, adjustable |
+| Each realtime voice call reaches its limit | Counted from connection: a caption and cue one minute before the limit, then the call ends (talking does not extend it; both the page and the local core end it); default 20 minutes, adjustable |
 | ⌥⌘N (App) | Show/hide window |
 | ⌥⌘V (App) | Start/end voice conversation |
 | ⌘/ (App) | Open voice-command table |

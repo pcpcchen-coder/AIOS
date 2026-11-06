@@ -265,6 +265,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         dropStopReport: options.dropStopReport,
         hideRevokeFromPage: options.hideRevokeFromPage,
         costLog: options.voiceCostLog,
+        // 費用防護：每通上限讀 voice.json（每次連上時讀，選單列改了下一通生效；進行中的照它連上時的值）。
+        maxCallMs: () => (options.voice?.view() ?? DEFAULT_VOICE_PREFS).realtime_max_call_s * 1000,
         // PRO-1：看著說話或喚醒開始（會打招呼的通話）時先取天氣，招呼決策時已在快取裡。
         ...(options.proactive ? { onGreetingStart: () => options.proactive?.prefetch() } : {}),
       })
@@ -508,7 +510,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const locale = normalizeLocale(req.headers["x-nous-locale"]);
       // rebuild：MEM-2 記憶撤銷後頁面自動重建（只走 live、不問候）；只是開始方式，不是授權。
       // RPI-ID：哪個頁面開始的（X-Nous-Terminal），記憶候選與喚醒時窗只看那個頁面；不是授權。
-      const decision = sessions.start(clientId, source, locale, body.rebuild === true, wakeId, pageSource(req.headers["x-nous-terminal"]));
+      // app：macOS App 主視窗報的（費用防護：Mac 鎖定只結束這些）；不是授權。
+      const decision = sessions.start(clientId, source, locale, body.rebuild === true, wakeId, pageSource(req.headers["x-nous-terminal"]), body.app === true);
       return sendJson(res, 200, decision.ok
         ? { ...decision, billing_line: localize(decision.billing_line, locale), notice: decision.notice === null ? null : localize(decision.notice, locale) }
         : { ...decision, message: localize(decision.message, locale) });
@@ -606,6 +609,14 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const responseId = typeof body.response_id === "string" && STOP_REPLY_RESPONSE_ID.test(body.response_id) ? body.response_id : null;
       const turn = body.scope === "turn" ? { scope: "turn" as const, response_id: responseId } : undefined;
       sessionCall(() => sessions!.stopReply(sessionId, owner, turn));
+      return sendJson(res, 200, { ok: true });
+    }
+    if (method === "POST" && path === "/api/realtime/alive") {
+      // 費用防護：頁面每 15 秒報到（兩條路徑）；API key 路徑附這通加總的 usage（只取認得的數字欄位、截上限；頁面回報，不是帳單）。
+      // 第一次報到之後 45 秒沒有再報到，核心結束這通（client_lost）。
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      sessionCall(() => sessions!.alive(sessionId, owner, parseVoiceUsage(body.usage)));
       return sendJson(res, 200, { ok: true });
     }
     if (method === "POST" && path === "/api/realtime/end") {
