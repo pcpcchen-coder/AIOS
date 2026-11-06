@@ -59,7 +59,7 @@ export function proactiveMenu(
 export const MEMORIES_TEXT: Record<string, string>;
 export function memoriesMenu(
   memories: MemoriesSettingsView,
-  handlers: { setMemories?(patch: MemoriesPrefsPatch): unknown; memoriesGoogle?(action: "pick" | "cancel" | "clear"): unknown; translate?(source: string, ...values: unknown[]): string },
+  handlers: { setMemories?(patch: MemoriesPrefsPatch): unknown; memoriesGoogle?(action: "pick" | "cancel" | "clear"): unknown; openMemoriesFolder?(): unknown; translate?(source: string, ...values: unknown[]): string },
 ): MenuItemTemplate[];
 
 export function settingsMenu(
@@ -78,6 +78,8 @@ export function settingsMenu(
     setMemories?(patch: MemoriesPrefsPatch): unknown;
     /** MEMO-2「Google 相簿」：pick（主程序開 picker_uri）、cancel、clear（主程序先確認）。 */
     memoriesGoogle?(action: "pick" | "cancel" | "clear"): unknown;
+    /** 「打開回憶資料夾」：主程序用 Finder 打開核心的回憶資料夾（路徑不下發頁面）。 */
+    openMemoriesFolder?(): unknown;
     /** 服務模式：鏡頭與常駐喚醒聆聽的開關、鏡頭畫面與家人辨識停用（保存的設定不變）。 */
     servicePaused?: boolean;
     translate?(source: string, ...values: unknown[]): string;

@@ -155,6 +155,8 @@ export interface NousHandle {
   port: number;
   url: string;
   close(): Promise<void>;
+  /** MEMO-1 回憶資料夾的路徑：只給 App 主程序（選單列「打開回憶資料夾」），不下發頁面。 */
+  memoriesDir: string;
   /** 只有注入 identity 時存在；主程序的 IPC 處理器把頁面的請求轉到這裡。 */
   identity?: {
     handle(request: unknown, ctx: IdentityContext): Promise<IdentityResponse>;
@@ -544,6 +546,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   return {
     port,
     url: `http://localhost:${port}`,
+    memoriesDir: config.memoriesDir,
     ...(identity ? { identity: { handle: (request: unknown, ctx: IdentityContext) => identity.handle(request, ctx), closeSessions: () => identity.closeSessions() } } : {}),
     ...(memory ? { memory: { handle: (request: unknown, ctx: { userInitiated?: boolean }) => memory.handle(request, ctx), closeSessions: () => memory.closeSessions(), suspendAll: () => memory.suspendAll() } } : {}),
     ...(wakeStore

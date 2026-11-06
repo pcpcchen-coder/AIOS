@@ -353,5 +353,7 @@
   "Google 相簿快取沒有清除完": "The Google Photos cache was not fully cleared",
   "Google 相簿：{0}": "Google Photos: {0}",
   "NOUS_GOG_PATH 必須是絕對路徑": "NOUS_GOG_PATH must be an absolute path",
-  "NOUS_GOG_ACCOUNT 必須是一個 email 地址": "NOUS_GOG_ACCOUNT must be an email address"
+  "NOUS_GOG_ACCOUNT 必須是一個 email 地址": "NOUS_GOG_ACCOUNT must be an email address",
+  "打開回憶資料夾": "Open memories folder",
+  "無法打開回憶資料夾": "Could not open the memories folder"
 }
