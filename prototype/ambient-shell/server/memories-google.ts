@@ -12,6 +12,7 @@ import {
   type MemoriesGoogleView,
   type MemoriesItem,
   type MemoriesKind,
+  googlePickBusy,
 } from "../shared/memories.ts";
 import type { GogRunner } from "./integrations/gog/runner.ts";
 import { MEMORIES_MAX_BYTES } from "./memories.ts";
@@ -32,6 +33,11 @@ const DEFAULT_POLL_MS = 5_000;
 const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 /** 結束時刪除 session（盡力而為）最多等多久。 */
 const DELETE_TIMEOUT_MS = 10_000;
+/** 每一次 gog 呼叫最多等多久（卡住的 gog 不會讓挑選永遠停在某個階段）；下載含影片，給得比較長。 */
+export const GOG_CALL_TIMEOUT_MS = 60_000;
+export const GOG_DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+/** 查詢挑選結果連續失敗幾次才放棄（偶爾一次網路失敗不結束整個挑選）。 */
+export const GOOGLE_POLL_MAX_FAILURES = 3;
 /** list 的 JSON（300 項，每項約 0.5 KB）；留足空間，超過時 JSON 解析失敗而照實回報。 */
 const LIST_MAX_STDOUT = 4 * 1024 ** 2;
 
@@ -76,7 +82,7 @@ export class GooglePhotosCache {
   private entries: CacheEntry[];
   private readonly cap: number;
 
-  constructor(private readonly options: { dir: string; capBytes?: number; log?(message: string): void }) {
+  constructor(private readonly options: { dir: string; capBytes?: number; log?(message: string): void; onChange?(): void }) {
     this.cap = options.capBytes ?? MEMORIES_CACHE_CAP_BYTES;
     this.entries = this.load();
   }
@@ -87,6 +93,13 @@ export class GooglePhotosCache {
 
   has(mediaIdHash: string): boolean {
     return this.entries.some((e) => e.media_id_hash === mediaIdHash);
+  }
+
+  touch(mediaIdHash: string, pickedAt: number): void {
+    const entry = this.entries.find((e) => e.media_id_hash === mediaIdHash);
+    if (!entry) return;
+    this.entries = this.entries.map((e) => (e === entry ? { ...e, picked_at: pickedAt } : e));
+    this.save();
   }
 
   /** 下載的暫存檔（同一個資料夾，rename 才不跨磁碟）。 */
@@ -151,9 +164,11 @@ export class GooglePhotosCache {
     try {
       names = readdirSync(this.options.dir);
     } catch {
-      return;
+      // 資料夾還不存在：沒有檔案要刪。
     }
     for (const name of names) rmSync(join(this.options.dir, name), { force: true, recursive: true });
+    // 沒有挑選工作時清除也要通知各頁面（Pi 的數量與輪播清單才會更新）。
+    this.options.onChange?.();
   }
 
   private load(): CacheEntry[] {
@@ -166,12 +181,34 @@ export class GooglePhotosCache {
     try {
       const parsed = JSON.parse(raw) as Partial<CacheIndex>;
       if (parsed.version !== 1 || !Array.isArray(parsed.items)) throw new Error("bad index");
-      return parsed.items.filter(validEntry);
+      return this.reconcile(parsed.items.filter(validEntry));
     } catch {
       // 不寫內容到 log（可能是任何東西）；從空的開始，下次清除會刪掉留下的檔案。
       this.options.log?.("Google 相簿快取的索引讀不到，從空的開始");
       return [];
     }
+  }
+
+  /**
+   * 和磁碟對齊（上次在改名與寫索引之間當掉）：索引裡檔案不見的項目丟掉；索引沒有的檔案與留下的暫存檔刪掉。
+   * 有改變時寫回索引。
+   */
+  private reconcile(entries: CacheEntry[]): CacheEntry[] {
+    let names: string[];
+    try {
+      names = readdirSync(this.options.dir);
+    } catch {
+      return entries;
+    }
+    const present = new Set(names);
+    const kept = entries.filter((e) => present.has(e.file));
+    const referenced = new Set(kept.map((e) => e.file));
+    for (const name of names) if (name !== "index.json" && !referenced.has(name)) rmSync(join(this.options.dir, name), { force: true, recursive: true });
+    if (kept.length !== entries.length) {
+      this.entries = kept;
+      this.save();
+    }
+    return kept;
   }
 
   private save(): void {
@@ -252,13 +289,17 @@ function parseSession(stdout: string): PickerSession | null {
   }
 }
 
-function parseList(stdout: string): PickedItem[] | null {
+function parseList(stdout: string): { items: PickedItem[]; dropped: number } | null {
   try {
     const items = (JSON.parse(stdout) as { mediaItems?: unknown }).mediaItems ?? [];
     if (!Array.isArray(items)) return null;
     const out: PickedItem[] = [];
+    let dropped = 0;
     for (const raw of items as Record<string, unknown>[]) {
-      if (!raw || typeof raw.id !== "string" || !GOOGLE_ID.test(raw.id) || (raw.type !== "PHOTO" && raw.type !== "VIDEO")) continue;
+      if (!raw || typeof raw.id !== "string" || !GOOGLE_ID.test(raw.id) || (raw.type !== "PHOTO" && raw.type !== "VIDEO")) {
+        dropped++;
+        continue;
+      }
       const created = typeof raw.createTime === "string" ? Date.parse(raw.createTime) : NaN;
       const file = (raw.mediaFile ?? {}) as { mediaFileMetadata?: { videoMetadata?: { processingStatus?: unknown } } };
       out.push({
@@ -268,7 +309,7 @@ function parseList(stdout: string): PickedItem[] | null {
         ready: raw.type === "PHOTO" || file.mediaFileMetadata?.videoMetadata?.processingStatus === "READY",
       });
     }
-    return out;
+    return { items: out, dropped };
   } catch {
     return null;
   }
@@ -337,6 +378,8 @@ export interface GooglePickerOptions {
    * 轉成長邊 2048 px 的 JPEG，Pi 解碼也比較輕。沒有轉檔器或轉檔失敗時照原檔判斷（HEIC 會被略過）。
    */
   convertPhoto?: (input: string, output: string, signal: AbortSignal) => Promise<boolean>;
+  /** 測試用：每次 gog 呼叫與下載的期限（預設 GOG_CALL_TIMEOUT_MS、GOG_DOWNLOAD_TIMEOUT_MS）。 */
+  timeouts?: { callMs?: number; downloadMs?: number };
 }
 
 /**
@@ -373,17 +416,20 @@ export class GooglePicker {
     const controller = new AbortController();
     let markReady = () => {};
     const ready = new Promise<void>((r) => (markReady = r));
-    const done = this.run(controller.signal, markReady).finally(() => {
+    const session: { id: string | null } = { id: null };
+    const done = this.run(controller.signal, markReady, session).finally(async () => {
       markReady();
+      // 先放開工作再刪 session（最多約 12 秒）：結束後馬上可以再挑，cancel／clear 也不會改寫已結束的結果。
       this.job = null;
       this.options.onChange();
+      if (session.id) await this.deleteSession(session.id);
     });
     this.job = { controller, done };
     return { ready, done };
   }
 
   cancel(): void {
-    if (!this.job || this.job.controller.signal.aborted) return;
+    if (!this.job || this.job.controller.signal.aborted || !googlePickBusy(this.current.phase)) return;
     this.job.controller.abort();
     const progress = this.current.phase === "downloading" ? this.current.progress : null;
     this.set({ phase: "cancelled", progress });
@@ -394,41 +440,54 @@ export class GooglePicker {
     this.options.onChange();
   }
 
-  private gog(args: string[], signal: AbortSignal, maxStdout?: number) {
-    return this.options.runner(this.options.gogPath, [...args, `--account=${this.options.account}`], { signal, ...(maxStdout ? { maxStdout } : {}) });
+  /** 每次呼叫都有自己的期限（和工作的中止信號合併）；期限到時 gog 被中止，呼叫端當成這一步失敗。 */
+  private gog(args: string[], signal: AbortSignal, opts: { maxStdout?: number; timeoutMs?: number } = {}) {
+    const limited = AbortSignal.any([signal, AbortSignal.timeout(opts.timeoutMs ?? this.options.timeouts?.callMs ?? GOG_CALL_TIMEOUT_MS)]);
+    return this.options.runner(this.options.gogPath, [...args, `--account=${this.options.account}`], { signal: limited, ...(opts.maxStdout ? { maxStdout: opts.maxStdout } : {}) });
   }
 
-  private async run(signal: AbortSignal, markReady: () => void): Promise<void> {
-    let sessionId: string | null = null;
+  /** 沒能執行或逾時（工作沒有被取消）時當成非 0 結束，由呼叫端給對應的說明。 */
+  private gogOrFail(args: string[], signal: AbortSignal, opts: { maxStdout?: number } = {}) {
+    return this.gog(args, signal, opts).catch((err) => {
+      if (signal.aborted) throw err;
+      return { code: 1, stdout: "" };
+    });
+  }
+
+  private async run(signal: AbortSignal, markReady: () => void, sessionRef: { id: string | null }): Promise<void> {
     try {
       this.set({ phase: "starting" });
-      const created = await this.gog(["photos", "picker", "create", `--max-items=${MEMORIES_GOOGLE_MAX_PICK}`, "--json"], signal).catch((err) => {
-        if (signal.aborted) throw err;
-        return { code: 1, stdout: "" };
-      });
+      const created = await this.gogOrFail(["photos", "picker", "create", `--max-items=${MEMORIES_GOOGLE_MAX_PICK}`, "--json"], signal);
       const session = created.code === 0 ? parseSession(created.stdout) : null;
       if (!session) throw new PickFailed(MEMORIES_GOOGLE_REASON.auth);
-      sessionId = session.id;
+      sessionRef.id = session.id;
       const start = this.now();
       const deadline = Math.min(start + session.timeoutMs, session.expiresAt ?? Infinity);
       this.set({ phase: "waiting_pick", picker_uri: session.pickerUri, expires_at: Number.isFinite(deadline) ? deadline : start + session.timeoutMs });
       markReady();
 
       const interval = Math.min(GOOGLE_POLL_MAX_MS, Math.max(GOOGLE_POLL_MIN_MS, session.pollMs));
+      let failures = 0;
       for (let picked = session.mediaItemsSet; !picked; ) {
         if (this.now() >= deadline) throw new PickFailed(MEMORIES_GOOGLE_REASON.timeout);
         await this.sleep(interval, signal);
-        const got = await this.gog(["photos", "picker", "get", session.id, "--json"], signal);
+        const got = await this.gogOrFail(["photos", "picker", "get", session.id, "--json"], signal);
         const polled = got.code === 0 ? parseSession(got.stdout) : null;
-        if (!polled) throw new PickFailed(MEMORIES_GOOGLE_REASON.list);
+        if (!polled) {
+          if (++failures >= GOOGLE_POLL_MAX_FAILURES) throw new PickFailed(MEMORIES_GOOGLE_REASON.list);
+          continue;
+        }
+        failures = 0;
         picked = polled.mediaItemsSet;
       }
 
-      const listed = await this.gog(["photos", "picker", "list", session.id, "--all", "--max=100", "--json"], signal, LIST_MAX_STDOUT);
-      const items = listed.code === 0 ? parseList(listed.stdout) : null;
-      if (!items) throw new PickFailed(MEMORIES_GOOGLE_REASON.list);
+      const listed = await this.gogOrFail(["photos", "picker", "list", session.id, "--all", "--max=100", "--json"], signal, { maxStdout: LIST_MAX_STDOUT });
+      const parsed = listed.code === 0 ? parseList(listed.stdout) : null;
+      if (!parsed) throw new PickFailed(MEMORIES_GOOGLE_REASON.list);
+      const items = parsed.items;
 
-      const progress: Progress = { done: 0, total: items.length, skipped: 0 };
+      // 看不懂的項目（不明種類或 id）也算進總數與略過，畫面上的數字才對得上使用者挑的張數。
+      const progress: Progress = { done: parsed.dropped, total: items.length + parsed.dropped, skipped: parsed.dropped };
       this.set({ phase: "downloading", progress: { ...progress } });
       for (const item of items) {
         const ok = await this.download(session.id, item, signal);
@@ -441,19 +500,21 @@ export class GooglePicker {
     } catch (err) {
       // 取消：cancel() 已經把階段設成 cancelled，這裡不覆寫。
       if (!signal.aborted) this.set({ phase: "failed", error: err instanceof PickFailed ? err.reason : MEMORIES_GOOGLE_REASON.download });
-    } finally {
-      if (sessionId) await this.deleteSession(sessionId);
     }
   }
 
   /** 一項：已在快取就略過下載；影片還沒處理好、下載失敗、格式不支援或太大都算略過（回 false）。 */
   private async download(sessionId: string, item: PickedItem, signal: AbortSignal): Promise<boolean> {
     const hash = GooglePhotosCache.hashMediaId(item.id);
-    if (this.options.cache.has(hash)) return true;
+    if (this.options.cache.has(hash)) {
+      // 再挑一次＝使用者還想看：更新挑選時間，不會先被上限淘汰。
+      this.options.cache.touch(hash, this.now());
+      return true;
+    }
     if (!item.ready) return false;
     const part = this.options.cache.partPath(hash);
     try {
-      const res = await this.gog(["photos", "picker", "download", sessionId, item.id, `--out=${part}`, "--overwrite"], signal);
+      const res = await this.gog(["photos", "picker", "download", sessionId, item.id, `--out=${part}`, "--overwrite"], signal, { timeoutMs: this.options.timeouts?.downloadMs ?? GOG_DOWNLOAD_TIMEOUT_MS });
       if (res.code !== 0 || signal.aborted) return false;
       if (item.kind === "photo" && this.options.convertPhoto) {
         const converted = `${part}.jpg`;
@@ -478,7 +539,7 @@ export class GooglePicker {
     const timer = setTimeout(() => controller.abort(), DELETE_TIMEOUT_MS);
     timer.unref?.();
     try {
-      await this.gog(["photos", "picker", "delete", sessionId], controller.signal);
+      await this.gog(["photos", "picker", "delete", sessionId], controller.signal, { timeoutMs: DELETE_TIMEOUT_MS });
     } catch {
       // 盡力而為：session 會在 Google 那邊自己過期。
     } finally {

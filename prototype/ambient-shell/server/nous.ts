@@ -261,7 +261,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const proactiveSettings = new ProactiveSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   // MEMO-1：回憶模式。資料夾不存在時以 0o700 建立（狀態「資料夾是空的」，比「找不到」好處理）。
   // MEMO-2：Google 相簿（經 gog）。找不到 gog 或沒有帳號時仍有快取（之前挑選的照樣播放），挑選回報不可用的原因。
-  const googleCache = new GooglePhotosCache({ dir: join(config.configDir, "memories", "google"), log });
+  const googleCache = new GooglePhotosCache({ dir: join(config.configDir, "memories", "google"), log, onChange: () => notify() });
   const gogPath = config.memoriesGoogle.invalid ? null : resolveGogPath(config.memoriesGoogle.gogPath);
   const googleAccount = config.memoriesGoogle.account;
   const googlePicker = config.memoriesGoogle.invalid ? { unavailable: config.memoriesGoogle.invalid }

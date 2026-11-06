@@ -5,7 +5,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../server/app.ts";
 import { ChatGPTAuth } from "../server/chatgpt-auth.ts";
 import { ChatGPTExecutor } from "../server/chatgpt-executor.ts";
@@ -315,6 +315,97 @@ describe("cache", () => {
     const all = [...folder.items(), ...google.items()].map((i) => i.id);
     expect(all).toHaveLength(2);
     expect(new Set(all).size).toBe(2);
+  });
+});
+
+describe("review fixes", () => {
+  it("a finished job frees the picker before the session delete ends; cancel/clear keep the result", async () => {
+    let releaseDelete!: () => void;
+    const slowDelete = new Promise<void>((r) => (releaseDelete = r));
+    const gog = fakeGog({ items: [photo("a")], onCall: (args) => (args[2] === "delete" ? slowDelete : undefined) });
+    const { picker, google } = setup(gog);
+    const first = picker.pick()!;
+    await vi.waitFor(() => expect(picker.state().phase).toBe("done"));
+    await vi.waitFor(() => expect(gog.commands()).toContain("delete"));
+    picker.cancel();
+    expect(picker.state()).toMatchObject({ phase: "done", progress: { done: 1, total: 1, skipped: 0 } });
+    expect(google.view().phase).toBe("done");
+    expect(picker.busy()).toBe(false);
+    releaseDelete();
+    await first.done;
+  });
+
+  it("a hung download is cut off by its own deadline and counted as skipped", async () => {
+    const gog = fakeGog({
+      items: [photo("hang"), photo("ok")],
+      onCall: (args, signal) => (args[2] === "download" && args[4] === "hang" ? new Promise<void>((r) => signal.addEventListener("abort", () => r(), { once: true })) : undefined),
+    });
+    const cache = new GooglePhotosCache({ dir: join(root, "google") });
+    const c = clock();
+    const picker = new GooglePicker({ gogPath: GOG, account: ACCOUNT, runner: gog.runner, cache, now: c.now, sleep: c.sleep, onChange: () => undefined, timeouts: { downloadMs: 50 } });
+    await picker.pick()!.done;
+    expect(picker.state()).toMatchObject({ phase: "done", progress: { done: 2, total: 2, skipped: 1 } });
+    expect(cache.counts().photos).toBe(1);
+  });
+
+  it("one failed poll is tolerated; three in a row fail with the list reason", async () => {
+    let gets = 0;
+    const flaky = fakeGog({ items: [photo("a")], pollsUntilSet: 2, onCall: (args) => {
+      if (args[2] === "get" && ++gets === 1) throw new Error("spawn");
+    } });
+    // 第一次 get 丟錯（不是取消）：不結束，下一次再查。
+    const one = setup(flaky);
+    await one.picker.pick()!.done;
+    expect(one.picker.state().phase).toBe("done");
+    const broken = fakeGog({ pollsUntilSet: 1_000, onCall: (args) => {
+      if (args[2] === "get") throw new Error("spawn");
+    } });
+    const many = setup(broken);
+    await many.picker.pick()!.done;
+    expect(many.picker.state()).toEqual({ phase: "failed", error: MEMORIES_GOOGLE_REASON.list });
+    expect(broken.commands().filter((c) => c === "get")).toHaveLength(3);
+  });
+
+  it("items gog lists but we cannot read still count in total and skipped", async () => {
+    const gog = fakeGog({ items: [photo("ok"), { ...photo("-flag"), id: "-flag" }] });
+    const { picker } = setup(gog);
+    await picker.pick()!.done;
+    expect(picker.state()).toMatchObject({ phase: "done", progress: { done: 2, total: 2, skipped: 1 } });
+  });
+
+  it("re-picking a cached item refreshes its pick time so it is not evicted first", async () => {
+    const c = clock();
+    const big = (id: string) => photo(id, undefined, JPEG(1000));
+    const a = setup(fakeGog({ items: [big("a"), big("b")], onCall: () => c.advance(1) }), c, 2_100);
+    await a.picker.pick()!.done;
+    // 再挑 a，然後加 c：超過上限時淘汰的是 b（a 剛被再挑過）。
+    const again = new GooglePicker({ gogPath: GOG, account: ACCOUNT, runner: fakeGog({ items: [big("a"), big("c")], onCall: () => c.advance(1) }).runner, cache: a.cache, now: c.now, sleep: c.sleep, onChange: () => undefined });
+    await again.pick()!.done;
+    const kept = (JSON.parse(readFileSync(join(root, "google", "index.json"), "utf8")) as { items: { media_id_hash: string }[] }).items.map((i) => i.media_id_hash).sort();
+    expect(kept).toEqual(["a", "c"].map(GooglePhotosCache.hashMediaId).sort());
+  });
+
+  it("clearing while idle notifies the pages", () => {
+    let changes = 0;
+    const cache = new GooglePhotosCache({ dir: join(root, "google"), onChange: () => void changes++ });
+    googleMemories(cache, { unavailable: "x" }).clear();
+    expect(changes).toBe(1);
+  });
+
+  it("startup reconciles the index with the disk: missing files dropped, orphans and partial files removed", async () => {
+    const { cache, picker } = setup(fakeGog({ items: [photo("a"), photo("b")] }));
+    await picker.pick()!.done;
+    const dir = join(root, "google");
+    const [first] = (JSON.parse(readFileSync(join(dir, "index.json"), "utf8")) as { items: { file: string }[] }).items;
+    rmSync(join(dir, first!.file));
+    writeFileSync(join(dir, "0123456789abcdef0123456789abcdef.jpg"), JPEG());
+    writeFileSync(join(dir, "fedcba9876543210fedcba9876543210.part"), "x");
+    writeFileSync(join(dir, "fedcba9876543210fedcba9876543210.part.jpg"), "x");
+    const reopened = new GooglePhotosCache({ dir });
+    expect(reopened.counts().photos).toBe(1);
+    expect(readdirSync(dir).filter((f) => f !== "index.json")).toHaveLength(1);
+    expect((JSON.parse(readFileSync(join(dir, "index.json"), "utf8")) as { items: unknown[] }).items).toHaveLength(1);
+    expect(cache.counts().photos).toBe(2);
   });
 });
 

@@ -46,10 +46,20 @@ This follows [MEMO-1](memories-mode-2026-11-06.en.md). On 2026-11-06 George chos
 
 | Test file | Coverage | Result |
 |---|---|---|
-| `tests/memories-google.test.ts` | Fake gog and fake clock (mock): the full flow, polling clamped to 3–30 s, timeout, the authorization hint on create failure, video not ready / download failure / HEIC skipped, HEIC converted to JPEG and kept when a converter exists, sips arguments, cancel while waiting and while downloading (the abort reaches gog, the session is deleted), a second pick rejected while busy, gog arguments (no shell, `--account=`, `--json`, `--max-items=300`), re-picks not downloaded again; cache cap, clear, a corrupt index, ids not colliding with folder ids, no raw ids or URLs in the index; HTTP routes | 22 passed |
+| `tests/memories-google.test.ts` | Fake gog and fake clock (mock): the full flow, polling clamped to 3–30 s, timeout, the authorization hint on create failure, video not ready / download failure / HEIC skipped, HEIC converted to JPEG and kept when a converter exists, sips arguments, cancel while waiting and while downloading (the abort reaches gog, the session is deleted), a second pick rejected while busy, gog arguments (no shell, `--account=`, `--json`, `--max-items=300`), re-picks not downloaded again; cache cap, clear, a corrupt index, ids not colliding with folder ids, no raw ids or URLs in the index; HTTP routes | 29 passed |
 | `tests/memories-menu.test.ts` | The Google section in the menu bar and settings page, no Chinese left in English, the Pi page without `nousDesktop` has the QR code and buttons, cache size reads the same in the menu and page | 19 passed |
 
-Overall: `npm run typecheck` passed; `npx vitest run` 153 files, 2836 passed, 5 skipped; `npm run build` passed.
+Overall: `npm run typecheck` passed; `npx vitest run` 153 files, 2843 passed, 5 skipped; `npm run build` passed.
+
+### Fixes after independent review
+
+- After a pick finished, the job stayed busy while the session was deleted (up to about 12 s): an immediate new pick was rejected, and cancel or clear rewrote "done" as "cancelled". The job is now released before the session delete, and cancel only acts while a pick is in progress.
+- Every gog call has a deadline (60 s in general, 10 min for downloads), so a hung gog cannot leave a pick stuck in one phase; a download that times out counts as skipped.
+- Clearing the cache with no pick running did not notify pages. Clearing now always notifies, so the Pi updates its counts and slideshow list. The tests also caught that clearing did not notify when the folder did not exist yet; fixed too.
+- At startup the cache is reconciled with the disk: index entries whose file is missing are dropped, and files the index does not reference plus partial files left by a crash are deleted.
+- Re-picking an item already in the cache refreshes its pick time, so it is not evicted first.
+- One failed check of the pick result no longer ends the pick (three in a row do); when gog cannot run, the right explanation is shown; items that cannot be read still count in the total and skipped.
+- Each fix has a test; the 7 new tests fail before the fix and pass after.
 
 ### Cloud browser check (mock gog)
 
