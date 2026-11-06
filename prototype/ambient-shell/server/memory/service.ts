@@ -103,8 +103,11 @@ export interface MemoryIdentityHooks {
   faceCandidate?(page: string): { person_id: string; name: string; at: number; source?: "face" | "voice" } | null;
   /** 已登記的家人（連結到既有人物用）；家人資料還沒載入時回 null。 */
   people(): { person_id: string; name: string; minor: boolean }[] | null;
-  /** MEM-2：稱名設定（看著說話時用名字問候）是否開著；關著時語音問句不帶人物名。沒有提供時當作開著。 */
-  nameAllowed?(): boolean;
+  /**
+   * MEM-2：page 這個頁面的稱名設定（看著說話時用名字問候）是否開著；關著時語音問句不帶人物名。沒有提供時當作開著。
+   * page 是發問的頁面（Mac 主視窗是 "main"）：Pi 的稱名開關只管 Pi 的通話。
+   */
+  nameAllowed?(page: string): boolean;
 }
 
 export interface MemoryServiceOptions {
@@ -2026,7 +2029,7 @@ export class MemoryService implements LiveMemoryService {
    * 記住、更正、忘記一律只出 voice_confirm 卡（MEM-2 不直接寫入）；「你記得我什麼？」出查看卡。拒絕規則照舊
    * （第三人、引文、假設、玩笑、敏感資料）；未成年仍不准從語音寫入。記憶沒開過時不為語音開 store。
    */
-  async voiceTurn(text: string, route: VoiceRoute = "live"): Promise<VoiceTurnOutcome> {
+  async voiceTurn(text: string, route: VoiceRoute = "live", page: string = this.liveSource()): Promise<VoiceTurnOutcome> {
     const none: VoiceTurnOutcome = { kind: "none" };
     if (this.closed || typeof text !== "string" || !text.trim() || text.length > 2000) return none;
     const segments = parseMemoryText(text);
@@ -2057,7 +2060,7 @@ export class MemoryService implements LiveMemoryService {
         return { card, replaced };
       };
       // 稱名：有這條路徑的同意、稱名設定開著才把人物名交給 binding（沒有同意時不念任何記憶的中繼資料）。
-      const nameOf = (profileId: string | null) => profileId && this.voiceConsented(route) && (this.options.identity?.()?.nameAllowed?.() ?? true) ? this.nameOf(profileId) : null;
+      const nameOf = (profileId: string | null) => profileId && this.voiceConsented(route) && (this.options.identity?.()?.nameAllowed?.(page) ?? true) ? this.nameOf(profileId) : null;
       for (const seg of segments) {
         const data = this.snapshot();
         switch (seg.op) {

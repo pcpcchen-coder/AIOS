@@ -615,6 +615,11 @@ export class IdentityService {
     return (page.ambient?.mixed ?? false) || (page.multiFaceAt !== null && this.now() - page.multiFaceAt <= MEMORY_CANDIDATE_MS);
   }
 
+  /** 只給記憶層：source 這個頁面的稱名設定（Mac 主視窗看 camera.json；終端機看最近一次頁面回報，沒有回報＝不稱名）。 */
+  namingAllowed(source: string): boolean {
+    return this.ambientPrefs(source).look_to_talk_greet_name;
+  }
+
   /** 只給記憶層：已登記的家人（連結到既有人物用）；家人資料還沒載入時回 null，不在這裡碰 Keychain。 */
   memoryPeople(): { person_id: string; name: string; minor: boolean }[] | null {
     if (this.gallery !== "ready") return null;

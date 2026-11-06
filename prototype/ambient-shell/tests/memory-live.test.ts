@@ -63,8 +63,8 @@ class FakeTimers {
   }
 }
 
-async function startLive(h: Harness, options: { lookToTalk?: boolean; rebuild?: boolean; timers?: FakeTimers } = {}) {
-  const binding = h.service.openLive({ lookToTalk: !!options.lookToTalk, rebuild: !!options.rebuild, now: () => h.clock.now, ...(options.timers ? { timer: options.timers.timer } : {}) });
+async function startLive(h: Harness, options: { lookToTalk?: boolean; rebuild?: boolean; timers?: FakeTimers; page?: string } = {}) {
+  const binding = h.service.openLive({ lookToTalk: !!options.lookToTalk, rebuild: !!options.rebuild, now: () => h.clock.now, ...(options.timers ? { timer: options.timers.timer } : {}), ...(options.page ? { page: options.page } : {}) });
   const call = new FakeCall();
   let block: string | null = null;
   let active = false;
@@ -202,6 +202,21 @@ describe.skipIf(!realLockAvailable)("MEM-2 voice remember/correct/forget only cr
     await say(binding, "記住，我不喝咖啡", h);
     expect(call.spoken().at(-1)).toBe("（記憶確認）「要記住：不喝咖啡。請說『確認記住』。」");
     expect(call.spoken().join("")).not.toContain("George");
+  });
+
+  it.each([
+    { mac: true, pi: false, page: "rpi4", names: false },
+    { mac: true, pi: false, page: "main", names: true },
+    { mac: false, pi: true, page: "rpi4", names: true },
+    { mac: false, pi: true, page: "main", names: false },
+  ])("naming follows the calling page's setting (Mac $mac, Pi $pi, call on $page)", async ({ mac, pi, page, names }) => {
+    const asked: string[] = [];
+    const nameAllowed = (p: string) => { asked.push(p); return p === "main" ? mac : pi; };
+    const h = await george({ identity: { candidate: () => null, people: () => [], nameAllowed } });
+    const { call, binding } = await startLive(h, { page });
+    await say(binding, "記住，我不喝咖啡", h);
+    expect(asked).toEqual([page]);
+    expect(call.spoken().join("").includes("George")).toBe(names);
   });
 
   it("memory that is off leaves the call exactly as before MEM-2 (no rules, no recall tool, no cards, no inserted sentences)", async () => {

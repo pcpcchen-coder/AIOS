@@ -331,7 +331,8 @@ export interface LiveMemoryService {
   /** 記憶預設選人：改路徑時暫存還在等選定的候選（handOff）；下一通 started() 取走。 */
   carryDefault(carried: CarriedDefault): void;
   takeCarriedDefault(): CarriedDefault | null;
-  voiceTurn(text: string, route?: VoiceRoute): Promise<VoiceTurnOutcome>;
+  /** page：這通語音所在的頁面（稱名設定看那個頁面的）。 */
+  voiceTurn(text: string, route?: VoiceRoute, page?: string): Promise<VoiceTurnOutcome>;
   voiceConfirm(card: string): Promise<{ status: MemoryReceiptStatus }>;
   voiceCancel(card: string): void;
   clearLive(binding: LiveMemoryBinding): void;
@@ -1283,7 +1284,7 @@ export class LiveMemoryBinding implements LiveMemoryPort {
       return;
     }
     if (this.waitingCandidate && !this.candidate) this.afterGreeting(false);
-    const outcome = await this.service.voiceTurn(text, this.route);
+    const outcome = await this.service.voiceTurn(text, this.route, this.page);
     // 「我是 Y」取代了記憶預設選人、但沒有選到人（同名或不是既有人物）：照常補上目前範圍的記憶。
     if (outcome.kind !== "selected" && !this.lease && !this.waitingCandidate && !this.candidate && this.declined && selfIdentifies(text)) await this.attachNow();
     // MEM-4b：記憶指令（出卡或固定句）、「我是 X」（審查 minor 1）、確認卡開著時的確認或取消都不能當交辦原句；只有一般的話可以。

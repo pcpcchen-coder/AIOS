@@ -104,6 +104,20 @@ async function greet(c: Core, interaction: string, track: number, source?: strin
 const named = (res: IdentityResponse, name: string) => res.ok && res.op === "greeting" && typeof res.text === "string" && res.text.includes(name);
 
 describe("IdentityService keeps evidence per page (Mac main window vs. terminal)", () => {
+  it("memory naming permission follows the asking page: Mac uses camera.json, a terminal its latest page report, no report means no name", async () => {
+    const c = core();
+    c.prefs.look_to_talk_greet_name = false;
+    expect(c.svc.namingAllowed("rpi4")).toBe(false);
+    await c.svc.handle({ op: "ambient_status" }, { source: "rpi4", page: PI_ON });
+    expect(c.svc.namingAllowed("rpi4")).toBe(true);
+    expect(c.svc.namingAllowed(MAIN_SOURCE)).toBe(false);
+    c.prefs.look_to_talk_greet_name = true;
+    await c.svc.handle({ op: "ambient_status" }, { source: "rpi4", page: { ...PI_ON, look_to_talk_greet_name: false } });
+    expect(c.svc.namingAllowed("rpi4")).toBe(false);
+    expect(c.svc.namingAllowed(MAIN_SOURCE)).toBe(true);
+    expect(c.svc.namingAllowed("kitchen")).toBe(false);
+  });
+
   it("terminal ambient recognition tolerates bounded slow frames while Mac retains its cadence", async () => {
     const c = core();
     await enroll(c, [["George", GEORGE]]);
