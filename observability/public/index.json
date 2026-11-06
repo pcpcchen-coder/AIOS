@@ -1,17 +1,17 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-11-06T12:32:05.591Z",
+  "updated_at": "2026-11-06T12:32:08.826Z",
   "runs": [
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261106114753-aa51bb",
       "title": "Realtime cost guard",
       "playbook": "bug-fix",
-      "status": "running",
-      "updated_at": "2026-11-06T12:32:04.137Z",
+      "status": "passed",
+      "updated_at": "2026-11-06T12:32:07.401Z",
       "started_at": "2026-11-06T11:47:53.509Z",
-      "ended_at": null,
+      "ended_at": "2026-11-06T12:32:07.401Z",
       "branch": "",
       "commit_sha": "",
       "passed_steps": 8,
