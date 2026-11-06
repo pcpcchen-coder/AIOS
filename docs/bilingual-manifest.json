@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "4ee9df7d9833277ed4e6abdd2bfd9f7a9f1b089a738a3ab9789ba7a7d7bececd",
-      "translationSha256": "a3e9218a038f2525e84e73a88c68cc1ea1461df82852886a9898d92c048e9740"
+      "sourceSha256": "636052c43c6802671a1a3723db95d11afe0f72af3b6633fc1abc1ee9e056ae60",
+      "translationSha256": "d9c8922dcfe14ff5d585159bc24b7802940969f07319cc81fd89d681850fff8c"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -307,6 +307,13 @@
       "translation": "docs/validation/bilingual-2026-10-26.en.md",
       "sourceSha256": "ebffc2b0d9a5fd5b8367e2a267f6865c2c3d588f09fddc9cb6f45c7acec29d71",
       "translationSha256": "ee8645acdc0d2ff7d9094b31878ba8c600c35d421caf1433f98d27dc1d1dc984"
+    },
+    {
+      "source": "docs/validation/brain-canvas-perf-2026-11-06.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/brain-canvas-perf-2026-11-06.en.md",
+      "sourceSha256": "61e302b3c280c6fcb4eebdae50941150259aa6b9a7abd142a768d4ad3d09da24",
+      "translationSha256": "28f50705312d6564e1457e5e8b1d98fdf63d1c7d74b7ab5722b37ffa370c6ebd"
     },
     {
       "source": "docs/validation/brain-distance-2026-10-22.md",
