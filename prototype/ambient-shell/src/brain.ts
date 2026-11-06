@@ -84,6 +84,9 @@ interface Pulse {
   speed: number;
   color: RGB;
   domain: Domain | null;
+  /** 線色在產生時算一次、染色光點在第一次畫時取一次；淡出用 globalAlpha，不必每格重建字串或查快取。 */
+  stroke: string;
+  sprite: HTMLCanvasElement | null;
 }
 
 type RGB = readonly [number, number, number];
@@ -195,6 +198,18 @@ export class Brain {
   private activation: Record<Domain, number> = regionMap(() => 0);
   private pulses: Pulse[] = [];
   private projected = new Float32Array(0);
+  /** 每個粒子不隨時間變的底色（RGB），與每格畫粒子時重複使用的暫存陣列。 */
+  private nodeBase = new Float64Array(0);
+  private nodeKey = new Int32Array(0);
+  private nodeAlpha = new Float64Array(0);
+  private nodeOrder = new Int32Array(0);
+  private keyCounts = new Map<number, number>();
+  /** 連線兩端的粒子編號（[i0, j0, i1, j1, …]），與每格分組用的暫存陣列。 */
+  private edgeEnds = new Int32Array(0);
+  private edgeBucket = new Uint8Array(0);
+  private edgeOrder = new Int32Array(0);
+  private edgeStarts = new Int32Array(5);
+  private edgeNext = new Int32Array(4);
   private sprite: HTMLCanvasElement;
 
   private state: BrainVisualState = { conversation: "idle", listening: false, working: false, layout: "center", progress: null };
@@ -471,6 +486,17 @@ export class Brain {
       }
     }
     this.projected = new Float32Array(n * 3);
+    this.edgeEnds = Int32Array.from(this.edges.flat());
+    this.edgeBucket = new Uint8Array(this.edges.length);
+    this.edgeOrder = new Int32Array(this.edges.length);
+    this.nodeBase = new Float64Array(n * 3);
+    this.nodeKey = new Int32Array(n);
+    this.nodeAlpha = new Float64Array(n);
+    this.nodeOrder = new Int32Array(n);
+    this.nodes.forEach((node, i) => {
+      const c = node.inner ? VIOLET : (GROUP_COLOR[node.group] ?? mix(CYAN, VIOLET, (node.x + 1) / 2));
+      this.nodeBase.set(c, i * 3);
+    });
     for (const d of DOMAINS) this.regionEdges[d] = [];
     for (const [i, j] of this.edges) {
       const r = this.nodes[i].region;
@@ -586,7 +612,7 @@ export class Brain {
       node = next[Math.floor(Math.random() * next.length)];
       path.push(node);
     }
-    this.pulses.push({ path, t: 0, speed: 5 + Math.random() * 4, color, domain });
+    this.pulses.push({ path, t: 0, speed: 5 + Math.random() * 4, color, domain, stroke: rgbString(rgbKey(color)), sprite: null });
   }
 
   private step(dt: number): void {
@@ -694,55 +720,124 @@ export class Brain {
     return Math.max(0.08, Math.min(1, 0.62 - z * 0.5));
   }
 
+  /** 連線依前後深度分四組，每組一條路徑；分組用重複使用的陣列（counting sort），每格不配置新陣列。 */
   private drawEdges(bright: number): void {
-    const { ctx, projected: p } = this;
-    const buckets: [number, number][][] = [[], [], [], []];
-    for (const edge of this.edges) {
-      const z = (p[edge[0] * 3 + 2] + p[edge[1] * 3 + 2]) / 2;
+    const { ctx, projected: p, edgeEnds: ends, edgeBucket, edgeOrder, edgeStarts: starts, edgeNext: next } = this;
+    const count = ends.length / 2;
+    starts.fill(0);
+    for (let e = 0; e < count; e++) {
+      const z = (p[ends[e * 2] * 3 + 2] + p[ends[e * 2 + 1] * 3 + 2]) / 2;
       const b = Math.min(3, Math.max(0, Math.floor((z + 1.2) / 0.6)));
-      buckets[b].push(edge);
+      edgeBucket[e] = b;
+      starts[b + 1]++;
     }
+    for (let b = 1; b <= 4; b++) starts[b] += starts[b - 1];
+    next.set(starts.subarray(0, 4));
+    for (let e = 0; e < count; e++) edgeOrder[next[edgeBucket[e]]++] = e;
     ctx.lineWidth = 0.7;
-    buckets.forEach((edges, b) => {
+    const color = this.tinted(mix(CYAN, MINT, 0.45 * this.liveLevel));
+    for (let b = 0; b < 4; b++) {
       const z = -0.9 + b * 0.6;
-      ctx.strokeStyle = rgba(this.tinted(mix(CYAN, MINT, 0.45 * this.liveLevel)), this.depthAlpha(z) * (0.4 + 0.15 * this.liveLevel) * bright);
+      ctx.strokeStyle = rgba(color, this.depthAlpha(z) * (0.4 + 0.15 * this.liveLevel) * bright);
       ctx.beginPath();
-      for (const [i, j] of edges) {
-        ctx.moveTo(p[i * 3], p[i * 3 + 1]);
-        ctx.lineTo(p[j * 3], p[j * 3 + 1]);
+      for (let k = starts[b]; k < starts[b + 1]; k++) {
+        const e = edgeOrder[k];
+        const i = ends[e * 2] * 3;
+        const j = ends[e * 2 + 1] * 3;
+        ctx.moveTo(p[i], p[i + 1]);
+        ctx.lineTo(p[j], p[j + 1]);
       }
       ctx.stroke();
-    });
+    }
   }
 
+  /**
+   * 顏色照舊逐粒子算（RGB 取整數），但透明度改用 globalAlpha（數字），粒子依顏色分組後同組只設一次 fillStyle：
+   * 每格不再為每個粒子建立、解析一個 rgba() 字串，這是 profile 裡最大的主執行緒成本。
+   * 這一段在 lighter（相加）合成下畫，換順序不改結果；globalAlpha 與字串裡的透明度捨入不同，
+   * 疊到背景後最多差 2/255（docs/validation/brain-canvas-perf-2026-11-06.md，scripts/bench-brain.mjs 比對像素）。
+   */
   private drawNodes(R: number, bright: number): void {
-    const { ctx, projected: p } = this;
+    const { ctx, projected: p, nodes, nodeKey, nodeAlpha, nodeOrder } = this;
     const size = Math.max(0.6, R / 140);
     const glowEvery = this.budget.glow === "full" ? 4 : 8;
-    for (let i = 0; i < this.nodes.length; i++) {
-      const z = p[i * 3 + 2];
-      const a = this.depthAlpha(z) * bright;
-      const node = this.nodes[i];
-      let color: RGB = node.inner ? VIOLET : (GROUP_COLOR[node.group] ?? mix(CYAN, VIOLET, (node.x + 1) / 2));
+    const live = this.liveLevel > 0.01 ? 0.9 * this.liveLevel : 0;
+    const tint = this.tint.strength > 0 ? this.tint.strength * 0.7 : 0;
+    const [tr, tg, tb] = this.tint.color;
+    const base = this.nodeBase;
+    const counts = this.keyCounts;
+    counts.clear();
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      let r = base[i * 3];
+      let g = base[i * 3 + 1];
+      let b = base[i * 3 + 2];
       // 即時語音接通：各腦區亮出自己的顏色，一眼看得出「腦子活起來了」。
-      if (node.region && this.liveLevel > 0.01) color = mix(color, REGION_COLOR[node.region], 0.9 * this.liveLevel);
-      const act = node.region ? this.activation[node.region] : 0;
-      if (act > 0.01) color = mix(color, REGION_COLOR[node.region!], Math.min(1, act * 1.1));
-      ctx.fillStyle = rgba(this.tinted(color), Math.min(1, a));
-      const r = size * (node.inner ? 0.9 : 1.2) * (1.3 - z * 0.4);
+      const region = node.region;
+      if (region) {
+        const rc = REGION_COLOR[region];
+        if (live > 0) {
+          r += (rc[0] - r) * live;
+          g += (rc[1] - g) * live;
+          b += (rc[2] - b) * live;
+        }
+        const act = this.activation[region];
+        if (act > 0.01) {
+          const t = Math.min(1, act * 1.1);
+          r += (rc[0] - r) * t;
+          g += (rc[1] - g) * t;
+          b += (rc[2] - b) * t;
+        }
+      }
+      if (tint > 0) {
+        r += (tr - r) * tint;
+        g += (tg - g) * tint;
+        b += (tb - b) * tint;
+      }
+      const key = ((r | 0) << 16) | ((g | 0) << 8) | (b | 0);
+      nodeKey[i] = key;
+      nodeAlpha[i] = this.depthAlpha(p[i * 3 + 2]) * bright;
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    // 依顏色分組（counting sort），同一組只設一次 fillStyle。
+    let offset = 0;
+    for (const [key, count] of counts) {
+      counts.set(key, offset);
+      offset += count;
+    }
+    for (let i = 0; i < nodes.length; i++) {
+      const slot = counts.get(nodeKey[i])!;
+      nodeOrder[slot] = i;
+      counts.set(nodeKey[i], slot + 1);
+    }
+    let current = -1;
+    for (let k = 0; k < nodes.length; k++) {
+      const i = nodeOrder[k];
+      const key = nodeKey[i];
+      if (key !== current) {
+        current = key;
+        ctx.fillStyle = rgbString(key);
+      }
+      ctx.globalAlpha = Math.min(1, nodeAlpha[i]);
+      const z = p[i * 3 + 2];
+      const r = size * (nodes[i].inner ? 0.9 : 1.2) * (1.3 - z * 0.4);
       ctx.fillRect(p[i * 3] - r / 2, p[i * 3 + 1] - r / 2, r, r);
-      if (z < -0.55 && !node.inner && i % glowEvery === 0) {
-        const g = size * 7;
-        ctx.globalAlpha = 0.25 * a;
+    }
+    const g = size * 7;
+    for (let i = 0; i < nodes.length; i += glowEvery) {
+      const z = p[i * 3 + 2];
+      if (z < -0.55 && !nodes[i].inner) {
+        ctx.globalAlpha = 0.25 * nodeAlpha[i];
         ctx.drawImage(this.sprite, p[i * 3] - g / 2, p[i * 3 + 1] - g / 2, g, g);
-        ctx.globalAlpha = 1;
       }
     }
+    ctx.globalAlpha = 1;
   }
 
   private drawPulses(R: number): void {
     const { ctx, projected: p } = this;
     const g = Math.max(6, R / 9) * (this.budget.glow === "full" ? 1 : 0.6);
+    ctx.lineWidth = 1.4;
     for (const pulse of this.pulses) {
       const seg = Math.floor(pulse.t);
       const frac = pulse.t - seg;
@@ -751,16 +846,16 @@ export class Brain {
       const x = p[a * 3] + (p[b * 3] - p[a * 3]) * frac;
       const y = p[a * 3 + 1] + (p[b * 3 + 1] - p[a * 3 + 1]) * frac;
       const fade = 1 - pulse.t / (pulse.path.length - 1);
-      ctx.strokeStyle = rgba(pulse.color, 0.55 * fade);
-      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = pulse.stroke;
+      ctx.globalAlpha = 0.55 * fade;
       ctx.beginPath();
       ctx.moveTo(p[a * 3], p[a * 3 + 1]);
       ctx.lineTo(x, y);
       ctx.stroke();
       ctx.globalAlpha = 0.9 * fade;
-      ctx.drawImage(tintSprite(this.sprite, pulse.color), x - g / 2, y - g / 2, g, g);
-      ctx.globalAlpha = 1;
+      ctx.drawImage((pulse.sprite ??= tintSprite(this.sprite, pulse.color)), x - g / 2, y - g / 2, g, g);
     }
+    ctx.globalAlpha = 1;
   }
 
   private drawOrbits(R: number, bright: number): void {
@@ -852,6 +947,21 @@ function mix(a: RGB, b: RGB, t: number): RGB {
 
 function rgba(c: RGB, a: number): string {
   return `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a.toFixed(3)})`;
+}
+
+function rgbKey(c: RGB): number {
+  return ((c[0] | 0) << 16) | ((c[1] | 0) << 8) | (c[2] | 0);
+}
+
+const rgbCache = new Map<number, string>();
+/** key 是 (r << 16) | (g << 8) | b；顏色只有幾百種，字串留著重複使用。 */
+function rgbString(key: number): string {
+  let s = rgbCache.get(key);
+  if (!s) {
+    s = `rgb(${key >>> 16},${(key >>> 8) & 255},${key & 255})`;
+    rgbCache.set(key, s);
+  }
+  return s;
 }
 
 function makeGlowSprite(): HTMLCanvasElement {

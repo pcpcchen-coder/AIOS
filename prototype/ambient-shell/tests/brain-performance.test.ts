@@ -12,7 +12,8 @@ const idle: BrainVisualState = { conversation: "idle", listening: false, working
 function renderer(opts: { reducedMotion?: boolean; devicePixelRatio?: number } = {}) {
   let nextFrame: FrameRequestCallback = () => {};
   let now = 0;
-  const calls = { clearRect: 0, fillText: [] as string[], drawImage: 0, shadowBlur: 0, largeShadowBlur: 0, radialGradients: 0 };
+  const calls = { clearRect: 0, fillText: [] as string[], drawImage: 0, shadowBlur: 0, largeShadowBlur: 0, radialGradients: 0, images: [] as unknown[], particles: 0, fillStyles: 0 };
+  const created: unknown[] = [];
   const gradient = () => ({ addColorStop() {} });
   const target: Record<string, unknown> = {
     createRadialGradient: () => { calls.radialGradients++; return gradient(); },
@@ -20,13 +21,15 @@ function renderer(opts: { reducedMotion?: boolean; devicePixelRatio?: number } =
     measureText: (text: string) => ({ width: text.length * 8 }),
     clearRect: () => { calls.clearRect++; },
     fillText: (text: string) => { calls.fillText.push(text); },
-    drawImage: () => { calls.drawImage++; },
+    drawImage: (image: unknown) => { calls.drawImage++; calls.images.push(image); },
+    fillRect: (_x: number, _y: number, w: number) => { if (w < 10) calls.particles++; },
   };
   const context = new Proxy(target, {
     get: (t, key) => Reflect.get(t, key) ?? (() => {}),
     set: (t, key, value) => {
       if (key === "shadowBlur" && value > 0) calls.shadowBlur++;
       if (key === "shadowBlur" && value >= 18) calls.largeShadowBlur++;
+      if (key === "fillStyle") calls.fillStyles++;
       return Reflect.set(t, key, value);
     },
   });
@@ -34,11 +37,13 @@ function renderer(opts: { reducedMotion?: boolean; devicePixelRatio?: number } =
     innerWidth: 1280, innerHeight: 800, devicePixelRatio: opts.devicePixelRatio ?? 2,
     matchMedia: () => ({ matches: opts.reducedMotion ?? false }), addEventListener() {},
   });
-  vi.stubGlobal("document", { createElement: () => ({ getContext: () => context }), documentElement: { style: { setProperty() {} } } });
+  const createElement = () => { const element = { getContext: () => context }; created.push(element); return element; };
+  vi.stubGlobal("document", { createElement, documentElement: { style: { setProperty() {} } } });
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { nextFrame = callback; return 1; });
   vi.stubGlobal("cancelAnimationFrame", () => {});
   const canvas = { getContext: () => context, dataset: {}, style: {}, width: 0, height: 0 } as unknown as HTMLCanvasElement;
   const brain = new Brain(canvas);
+  const glowSprite = created[0];
   brain.start();
   /** 模擬 60 Hz 螢幕（每次更新 16.67 ms，時間戳抖動 ±0.3 ms）跑 ms 毫秒，回傳真的畫了幾格。 */
   let tick = 0;
@@ -53,7 +58,7 @@ function renderer(opts: { reducedMotion?: boolean; devicePixelRatio?: number } =
     return calls.clearRect - before;
   };
   const pulses = () => (brain as unknown as { pulses: unknown[] }).pulses.length;
-  return { brain, canvas, calls, run, pulses };
+  return { brain, canvas, calls, run, pulses, context: target, glowSprite };
 }
 
 it.each([
@@ -158,4 +163,27 @@ it("balanced drops the large listening-ring blur while listening; full keeps it"
   full.brain.setState({ ...idle, listening: true });
   full.run(500);
   expect(full.calls.largeShadowBlur).toBeGreaterThan(0);
+});
+
+// 2026-11-06 每格成本優化（docs/validation/brain-canvas-perf-2026-11-06.md）：粒子依顏色分組、透明度用 globalAlpha。
+// 每種設定下，亮起的腦區仍要有光暈、光脈衝與標籤，粒子一個都不少。
+it.each(["full", "balanced", "light"] as const)("%s: the batched renderer still draws every particle, the region glow, pulses, node glow and the label", (profile) => {
+  const activity: RegionActivity[] = [{ domain: "language", source: "tts", owner: "speech" }];
+  const t = renderer();
+  t.brain.setRenderBudget(RENDER_BUDGETS[profile]);
+  t.brain.setState({ ...idle, listening: true, voice: "live", activity });
+  t.brain.pulse("step", "language");
+  t.run(100);
+  Object.assign(t.calls, { particles: 0, fillStyles: 0, images: [], radialGradients: 0, fillText: [] });
+  const frames = t.run(200);
+  const nodes = (t.brain as unknown as { nodes: unknown[] }).nodes.length;
+  expect(frames).toBeGreaterThan(0);
+  expect(t.calls.particles).toBe(frames * nodes);
+  expect(t.calls.fillStyles).toBeLessThan(t.calls.particles / 4);
+  expect(t.calls.radialGradients).toBe(frames * 2);
+  expect(t.calls.fillText).toContain(activityDescription(activity[0]));
+  expect(t.calls.images.filter((image) => image === t.glowSprite).length).toBeGreaterThan(0);
+  expect(t.calls.images.filter((image) => image !== t.glowSprite).length).toBeGreaterThan(0);
+  expect(t.pulses()).toBeGreaterThan(0);
+  expect(t.context.globalAlpha).toBe(1);
 });
