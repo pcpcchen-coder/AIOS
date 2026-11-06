@@ -45,6 +45,8 @@ cd prototype/ambient-shell
 node scripts/bench-brain.mjs --runs 5
 ```
 
+Requirements: a loadable Playwright with Chromium (pre-installed in this container; it is not in the ordinary checkout's `package.json`), and full git history containing the baseline commit `d28ce23` (a shallow clone makes `git show` fail). The script is not run by CI or `npm test`.
+
 Environment: x86 cloud container, 4 cores, load average about 0.9 at the start; Chromium 153.0.8010.12 headless, canvas rasterized by SwiftShader (software GPU); Node v22.23.4. **This is a relative comparison under x86 software rasterization, not Pi numbers.**
 
 <a id="結果"></a>

@@ -954,10 +954,13 @@ function rgbKey(c: RGB): number {
 }
 
 const rgbCache = new Map<number, string>();
-/** key 是 (r << 16) | (g << 8) | b；顏色只有幾百種，字串留著重複使用。 */
+/** 長時間運作時 liveLevel／activation／tint 連續變化會累積不同顏色（審查模擬約 3 萬種後持平）；超過上限就整個清掉重建。 */
+const RGB_CACHE_MAX = 50_000;
+/** key 是 (r << 16) | (g << 8) | b；字串留著重複使用。 */
 function rgbString(key: number): string {
   let s = rgbCache.get(key);
   if (!s) {
+    if (rgbCache.size >= RGB_CACHE_MAX) rgbCache.clear();
     s = `rgb(${key >>> 16},${(key >>> 8) & 255},${key & 255})`;
     rgbCache.set(key, s);
   }

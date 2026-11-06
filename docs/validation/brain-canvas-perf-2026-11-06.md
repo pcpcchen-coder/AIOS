@@ -40,6 +40,8 @@ cd prototype/ambient-shell
 node scripts/bench-brain.mjs --runs 5
 ```
 
+執行條件：需要可載入的 Playwright 與 Chromium（本次容器預先安裝；一般 checkout 的 `package.json` 沒有這個依賴），以及包含基準 commit `d28ce23` 的完整 git 歷史（淺層 clone 會讓 `git show` 失敗）。這支腳本不在 CI 或 `npm test` 裡執行。
+
 環境：雲端容器 x86、4 核、開始時 load average 約 0.9；Chromium 153.0.8010.12 無頭模式，畫布由 SwiftShader（軟體 GPU）點陣化；Node v22.23.4。**這是 x86 軟體點陣化下的相對比較，不是 Pi 的數字。**
 
 ## 結果
