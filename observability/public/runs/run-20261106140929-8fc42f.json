@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-06T14:09:29.956Z",
-  "updated_at": "2026-11-06T14:18:04.392Z",
+  "updated_at": "2026-11-06T14:18:07.796Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-11-06T14:18:07.796Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -119,6 +119,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "Page-side pure state machine + core memories.json + folder source"
+    },
+    {
+      "at": "2026-11-06T14:18:07.796Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
