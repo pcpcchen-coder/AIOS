@@ -126,6 +126,8 @@ If the Pi display is not smooth, open "Settings" → "Display performance on thi
 
 On the Pi page, "Settings" → "Memories mode" switches it on or off (the same setting the Mac menu bar writes). When on, the Pi plays photos and videos from the Mac memories folder after it has been idle for a while; it fetches them from the Mac core over the SSH tunnel and never connects to Google directly. While showing, the brain uses the light render budget and at most one video plays at a time; H.264 videos and photos exported at "Large" size are recommended. Saying the wake word, facing the camera or tapping the photo collapses them at once. Details are in the [memories mode validation](../../docs/validation/memories-mode-2026-11-06.en.md) (**not verified on a real Pi**).
 
+Google Photos (MEMO-2): on the Pi page, "Settings" → "Memories" → "Pick from Google Photos…" shows a QR code; scan it with a phone and pick in Google's screen. Photos download to the Mac cache and the Pi reads them only through the Mac core. Run `gog auth add account --services photospicker` on the Mac first. See the [MEMO-2 validation](../../docs/validation/memories-google-2026-11-06.en.md) (**not verified with a real account**).
+
 <a id="realtime-cost-guard"></a>
 ## Realtime voice cost guard
 
