@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-06T14:09:29.956Z",
-  "updated_at": "2026-11-06T14:46:40.940Z",
+  "updated_at": "2026-11-06T14:46:44.742Z",
   "ended_at": null,
   "steps": [
     {
@@ -68,10 +68,10 @@
     {
       "id": "fix",
       "title": "fix",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-11-06T14:46:44.741Z",
+      "ended_at": "2026-11-06T14:46:44.742Z",
+      "note": "All 5 fixed with regression tests; fd leak checked live",
       "evidence": []
     },
     {
@@ -147,6 +147,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "Independent review: 2 high, 2 medium, 1 low"
+    },
+    {
+      "at": "2026-11-06T14:46:44.742Z",
+      "type": "step_updated",
+      "step_id": "fix",
+      "status": "passed",
+      "note": "All 5 fixed with regression tests; fd leak checked live"
     }
   ],
   "provenance": "Agent self-reported"
