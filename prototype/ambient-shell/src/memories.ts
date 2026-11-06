@@ -8,6 +8,8 @@ export const MEMORIES_TIMING = {
   recedeMs: 1000,
   videoMaxMs: 30_000,
   fetchRetryMs: 60_000,
+  /** 照片解碼或影片載入超過這麼久就跳過（SSH 通道卡住、Pi 不支援的編碼只會停住不報錯）。 */
+  loadTimeoutMs: 20_000,
   /** 電子腦縮到角落的時間（CSS 1.2 s）；第一張等它到位才浮現，起點才準。 */
   brainMs: 1200,
   collapseMs: 250,
@@ -183,6 +185,8 @@ export class MemoriesPresenter {
   }
 
   private advance(): void {
+    // 每一張自己的世代：上一張留下的計時器（影片 30 秒上限、載入期限）不會再推進輪播。
+    this.cancel();
     this.teardown();
     const item = this.nextItem();
     if (!item || !this.prefs) return;
@@ -207,9 +211,14 @@ export class MemoriesPresenter {
 
   private showPhoto(item: MemoriesItem): void {
     const generation = this.generation;
+    let settled = false;
+    this.after(MEMORIES_TIMING.loadTimeoutMs, () => {
+      if (!settled) this.skip();
+    });
     this.load(item).then(
       () => {
         if (generation !== this.generation) return;
+        settled = true;
         const img = this.doc.createElement("img");
         img.className = "memories-item";
         img.setAttribute("alt", "");
@@ -220,7 +229,9 @@ export class MemoriesPresenter {
         this.preloaded?.done.catch(() => undefined);
       },
       () => {
-        if (generation === this.generation) this.skip();
+        if (generation !== this.generation) return;
+        settled = true;
+        this.skip();
       },
     );
   }
@@ -237,6 +248,9 @@ export class MemoriesPresenter {
       if (generation !== this.generation || this.current !== video) return;
       this.skip();
     };
+    this.after(MEMORIES_TIMING.loadTimeoutMs, () => {
+      if (!started) fail();
+    });
     video.addEventListener("error", fail);
     video.addEventListener("loadeddata", () => {
       if (started || generation !== this.generation || this.current !== video) return;

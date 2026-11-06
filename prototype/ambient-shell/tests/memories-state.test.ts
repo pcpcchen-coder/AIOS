@@ -99,6 +99,7 @@ describe("memoryCaption", () => {
     ["months", at(2026, 6, 1), null, "五個月前", "5 months ago"],
     ["one year ago today", at(2025, 11, 6), null, "一年前的今天", "A year ago today"],
     ["last year", at(2025, 3, 1), null, "去年", "Last year"],
+    ["a year ago across two calendar years", at(2024, 12, 20), null, "一年前", "A year ago"],
     ["n years ago today", at(2023, 11, 6), null, "三年前的今天", "3 years ago today"],
     ["n years", at(2023, 5, 1), hsinchu, "三年前在新竹", "3 years ago in Hsinchu"],
     ["over ten years", at(2014, 5, 1), null, "12 年前", "12 years ago"],

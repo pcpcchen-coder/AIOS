@@ -63,7 +63,7 @@ George 2026-11-06 要求：設定可開關「回憶模式」；電子腦沒有�
 - 照片：JPEG EXIF 的 DateTimeOriginal（沒有時用 DateTime），只讀前 256 KB；GPS 取緯度經度。
 - 影片：mp4／mov 的 `mvhd` 建立時間（0 視為沒有）；有 `©xyz` 時讀位置。
 - 地點：在核心以固定城市表（天氣的 12 個城市再加 10 個）找最近的城市，25 公里內才用，不連網。
-- 文字：今天、這個星期、N 個星期前、N 個月前、去年、N 年前；同月同日是「N 年前的今天」。十以內用中文數字（「兩年前」「三年前」）。有地點時接「在新竹」；只有地點時「在新竹」；都沒有就不顯示。未來的時間（時鐘不準）不顯示時間。英文如「3 years ago in Hsinchu」。
+- 文字：今天、這個星期、N 個星期前、N 個月前、去年（上一個日曆年；跨兩個日曆年說「一年前」）、N 年前；同月同日是「N 年前的今天」。十以內用中文數字（「兩年前」「三年前」）。有地點時接「在新竹」；只有地點時「在新竹」；都沒有就不顯示。未來的時間（時鐘不準）不顯示時間。英文如「3 years ago in Hsinchu」。
 
 ### 動畫規格（`src/memories.ts`、`src/style.css`）
 
@@ -91,12 +91,20 @@ George 2026-11-06 要求：設定可開關「回憶模式」；電子腦沒有�
 
 | 測試檔 | 內容 | 結果 |
 |---|---|---|
-| `tests/memories-state.test.ts` | 狀態機（假時鐘）：閒置→回憶、有事收起、喚醒重算、沒有照片不播、關閉；時間地點文字中英各分支 | 24 通過 |
+| `tests/memories-state.test.ts` | 狀態機（假時鐘）：閒置→回憶、有事收起、喚醒重算、沒有照片不播、關閉；時間地點文字中英各分支 | 25 通過 |
 | `tests/memories-http.test.ts` | 設定讀寫與 400、清單、媒體、Range 206／416、壞 id 404、不能跳出資料夾、回應沒有路徑與座標、沒提供時 404；合成的 EXIF／GPS JPEG 與 mvhd／©xyz mp4、25 公里界線（mock fixture） | 13 通過 |
-| `tests/memories-presenter.test.ts` | 浮現→停留→退回→下一張（假計時器）、影片預設靜音、只會有一個 `<video>`、收起立即停止影片、減少動態 | 9 通過 |
+| `tests/memories-presenter.test.ts` | 浮現→停留→退回→下一張（假計時器）、影片預設靜音、只會有一個 `<video>`、收起立即停止影片、減少動態 | 11 通過 |
 | `tests/memories-menu.test.ts` | 選單列項目與 patch、選單文字與共用文字一致、英文沒有中文、沒有 `nousDesktop` 的設定頁也有這段 | 9 通過 |
 
-全部：`npm run typecheck` 通過；`npx vitest run` 152 個檔案、2801 通過、5 略過；`npm run build` 通過；`node scripts/check-pstack.mjs`、`node scripts/verify-aios.mjs`、`git diff --check` 通過。
+全部：`npm run typecheck` 通過；`npx vitest run` 152 個檔案、2804 通過、5 略過；`npm run build` 通過；`node scripts/check-pstack.mjs`、`node scripts/verify-aios.mjs`、`git diff --check` 通過。
+
+### 獨立審查後的修正
+
+- 影片播放中出錯時，舊的 30 秒上限仍會推進輪播，造成兩條輪播並行：改成每一張有自己的世代，換下一張時取消上一張的計時器（測試在修正前失敗、修正後通過）。
+- 照片或影片一直載入不完（SSH 通道卡住、Pi 不支援的編碼）會停在空白：加上 20 秒載入期限，到期跳過。
+- 用戶端中途取消影片 Range 請求時，核心沒關檔案：改用 `pipeline`；實測 8 次中途取消後核心沒有殘留的檔案描述符。
+- 資料夾掃描：單一檔案或子資料夾讀不到只略過那一個；每次掃描最多讀 200 個新檔案的中繼資料，其餘 5 秒後再補（大量照片第一次掃描不會長時間卡住核心）。
+- 「去年」只給上一個日曆年；滿一年但跨兩個日曆年說「一年前」。
 
 ### 雲端瀏覽器實測（mock fixture）
 

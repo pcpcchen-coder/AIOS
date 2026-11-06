@@ -6,6 +6,7 @@ import type { MemoryContext } from "./memory/service.ts";
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { pipeline } from "node:stream";
 import { extname, join, normalize, sep } from "node:path";
 import type { ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
 import type { ChatGPTAuth } from "./chatgpt-auth.ts";
@@ -1128,9 +1129,8 @@ function serveMemoriesMedia(req: IncomingMessage, res: ServerResponse, method: s
     res.end();
     return;
   }
-  const stream = createReadStream(file.path, { start, end });
-  stream.on("error", () => res.destroy());
-  stream.pipe(res);
+  // pipeline：用戶端中途斷線（影片 Range 常被 Chromium 取消）時也關掉檔案，不留 fd。
+  pipeline(createReadStream(file.path, { start, end }), res, () => undefined);
 }
 
 /** 家人辨識的模型與 onnxruntime wasm：只給清單上的檔名，沒有 SPA fallback；不存在 404，雜湊不符 503。 */

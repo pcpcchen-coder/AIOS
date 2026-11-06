@@ -149,7 +149,8 @@ function relativeTime(takenAt: number, now: Date, locale: Locale): string | null
     if (years === 1) return en ? "A year ago today" : "一年前的今天";
     return en ? `${years} years ago today` : `${zhCount(years)}年前的今天`;
   }
-  if (years === 1) return en ? "Last year" : "去年";
+  // 「去年」只給上一個日曆年；滿一年但跨了兩個日曆年（例如 2024-12 在 2026-11 看）說「一年前」。
+  if (years === 1) return now.getFullYear() - t.getFullYear() === 1 ? (en ? "Last year" : "去年") : (en ? "A year ago" : "一年前");
   return en ? `${years} years ago` : `${zhCount(years)}年前`;
 }
 

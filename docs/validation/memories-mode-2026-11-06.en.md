@@ -63,7 +63,7 @@ Conclusion: the official path cannot do "a chosen album, kept in sync". George c
 - Photos: JPEG EXIF DateTimeOriginal (DateTime when missing), reading only the first 256 KB; GPS latitude and longitude.
 - Videos: mp4/mov `mvhd` creation time (0 means none); location from `©xyz` when present.
 - Place: the core finds the nearest city in a fixed table (the 12 weather cities plus 10 more) and uses it only within 25 km. No network.
-- Text: Today, This week, N weeks ago, N months ago, Last year, N years ago; the same month and day gives "N years ago today". Chinese uses Chinese numerals up to ten (「兩年前」, 「三年前」). With a place it adds "in Hsinchu"; place only gives "In Hsinchu"; with neither there is no text. A future time (clock skew) shows no time.
+- Text: Today, This week, N weeks ago, N months ago, Last year (previous calendar year; "A year ago" when it spans two), N years ago; the same month and day gives "N years ago today". Chinese uses Chinese numerals up to ten (「兩年前」, 「三年前」). With a place it adds "in Hsinchu"; place only gives "In Hsinchu"; with neither there is no text. A future time (clock skew) shows no time.
 
 ### Animation spec (`src/memories.ts`, `src/style.css`)
 
@@ -91,12 +91,20 @@ Conclusion: the official path cannot do "a chosen album, kept in sync". George c
 
 | Test file | Coverage | Result |
 |---|---|---|
-| `tests/memories-state.test.ts` | State machine (fake clock): idle → memories, busy collapses, wake restarts, no photos never shows, off; every time-and-place branch in Chinese and English | 24 passed |
+| `tests/memories-state.test.ts` | State machine (fake clock): idle → memories, busy collapses, wake restarts, no photos never shows, off; every time-and-place branch in Chinese and English | 25 passed |
 | `tests/memories-http.test.ts` | Settings read/write and 400, list, media, Range 206/416, bad id 404, no escaping the folder, no paths or coordinates in responses, 404 when not provided; synthetic EXIF/GPS JPEG and mvhd/©xyz mp4, the 25 km cutoff (mock fixture) | 13 passed |
-| `tests/memories-presenter.test.ts` | Emerge → hold → recede → next (fake timers), video muted by default, never more than one `<video>`, collapse stops video at once, reduced motion | 9 passed |
+| `tests/memories-presenter.test.ts` | Emerge → hold → recede → next (fake timers), video muted by default, never more than one `<video>`, collapse stops video at once, reduced motion | 11 passed |
 | `tests/memories-menu.test.ts` | Menu bar items and patches, menu text equals shared text, no Chinese left in English, the settings page without `nousDesktop` has the section | 9 passed |
 
-Overall: `npm run typecheck` passed; `npx vitest run` 152 files, 2801 passed, 5 skipped; `npm run build` passed; `node scripts/check-pstack.mjs`, `node scripts/verify-aios.mjs` and `git diff --check` passed.
+Overall: `npm run typecheck` passed; `npx vitest run` 152 files, 2804 passed, 5 skipped; `npm run build` passed; `node scripts/check-pstack.mjs`, `node scripts/verify-aios.mjs` and `git diff --check` passed.
+
+### Fixes after independent review
+
+- A video error mid-playback left the old 30 s limit running, so two slideshow loops ran in parallel. Each slide now has its own generation, and moving on cancels the previous slide's timers (the test fails before the fix and passes after).
+- A photo or video that never finishes loading (a stalled SSH tunnel, a codec the Pi cannot play) left a blank stage. A 20 s load deadline now skips it.
+- When a client cancelled a video Range request mid-response, the core kept the file open. It now uses `pipeline`; after 8 cancelled requests the core held no leftover file descriptors.
+- Folder scan: one unreadable file or subfolder is skipped on its own. Each scan reads metadata for at most 200 new files and fills in the rest 5 s later, so a large first scan does not block the core for long.
+- "Last year" is used only for the previous calendar year; a photo a year old that spans two calendar years says "A year ago".
 
 ### Cloud browser check (mock fixture)
 

@@ -73,6 +73,12 @@ const MEDIA_TYPES: Record<string, { kind: MemoriesKind; type: string }> = {
 
 export const MEMORIES_MAX_BYTES: Record<MemoriesKind, number> = { photo: 30 * 1024 ** 2, video: 200 * 1024 ** 2 };
 export const MEMORIES_RESCAN_MS = 60_000;
+/**
+ * 每次掃描最多讀幾個新檔案的中繼資料（每個最多 256 KB、同步讀）：大量照片第一次掃描時不會卡住核心的 HTTP／SSE。
+ * 還沒讀到的先沒有說明文字，MEMORIES_PENDING_RESCAN_MS 後再掃描補上。
+ */
+export const MEMORIES_META_PER_SCAN = 200;
+export const MEMORIES_PENDING_RESCAN_MS = 5_000;
 
 interface Entry {
   item: MemoriesItem;
@@ -91,6 +97,8 @@ export class FolderMemoriesSource implements MemoriesSource {
   private meta = new Map<string, Pick<MemoriesItem, "taken_at" | "place">>();
   private state: MemoriesSourceStatus["state"] = "missing";
   private scannedAt: number | null = null;
+  private metaBudget = MEMORIES_META_PER_SCAN;
+  private metaPending = false;
   private readonly now: () => number;
 
   constructor(private readonly options: { dir: string; create?: boolean; now?: () => number; log?(message: string): void }) {
@@ -126,8 +134,10 @@ export class FolderMemoriesSource implements MemoriesSource {
 
   private refresh(): void {
     const now = this.now();
-    if (this.scannedAt !== null && now - this.scannedAt < MEMORIES_RESCAN_MS) return;
+    if (this.scannedAt !== null && now - this.scannedAt < (this.metaPending ? MEMORIES_PENDING_RESCAN_MS : MEMORIES_RESCAN_MS)) return;
     this.scannedAt = now;
+    this.metaBudget = MEMORIES_META_PER_SCAN;
+    this.metaPending = false;
     const next = new Map<string, Entry>();
     let root: string;
     try {
@@ -153,8 +163,26 @@ export class FolderMemoriesSource implements MemoriesSource {
   }
 
   private scan(root: string, dir: string, depth: number, out: Map<string, Entry>): void {
-    for (const name of readdirSync(dir).sort()) {
+    let names: string[];
+    try {
+      names = readdirSync(dir).sort();
+    } catch (err) {
+      // 最上層讀不到＝整個來源失敗；子資料夾讀不到（權限）只略過那一個。
+      if (depth === 0) throw err;
+      return;
+    }
+    for (const name of names) {
       if (name.startsWith(".")) continue;
+      try {
+        this.scanEntry(root, dir, name, depth, out);
+      } catch {
+        // 掃描途中被刪掉或讀不到的檔案：略過這一個，其餘照用。
+      }
+    }
+  }
+
+  private scanEntry(root: string, dir: string, name: string, depth: number, out: Map<string, Entry>): void {
+    {
       let path = join(dir, name);
       let stat = lstatSync(path);
       if (stat.isSymbolicLink()) {
@@ -162,26 +190,28 @@ export class FolderMemoriesSource implements MemoriesSource {
         try {
           path = realpathSync(path);
         } catch {
-          continue;
+          return;
         }
-        if (!path.startsWith(root + sep)) continue;
+        if (!path.startsWith(root + sep)) return;
         stat = statSync(path);
       }
       if (stat.isDirectory()) {
         if (depth < 1) this.scan(root, path, depth + 1, out);
-        continue;
+        return;
       }
       const media = MEDIA_TYPES[extname(name).toLowerCase()];
-      if (!stat.isFile() || !media || stat.size > MEMORIES_MAX_BYTES[media.kind]) continue;
+      if (!stat.isFile() || !media || stat.size > MEMORIES_MAX_BYTES[media.kind]) return;
       const rel = relative(root, path);
       const id = createHash("sha256").update(`${rel}\0${stat.size}\0${stat.mtimeMs}`).digest("hex").slice(0, 32);
       let meta = this.meta.get(id);
-      if (!meta) {
+      if (!meta && this.metaBudget <= 0) this.metaPending = true;
+      else if (!meta) {
+        this.metaBudget--;
         const raw = readMediaMeta(path, extname(name).toLowerCase(), stat.size);
         meta = { taken_at: raw.taken_at, place: raw.lat !== null && raw.lon !== null ? nearestPlace(raw.lat, raw.lon) : null };
         this.meta.set(id, meta);
       }
-      out.set(id, { item: { id, kind: media.kind, url: `${MEMORIES_MEDIA_PREFIX}${id}`, ...meta }, path, type: media.type });
+      out.set(id, { item: { id, kind: media.kind, url: `${MEMORIES_MEDIA_PREFIX}${id}`, ...(meta ?? { taken_at: null, place: null }) }, path, type: media.type });
     }
   }
 }

@@ -193,6 +193,35 @@ describe("video", () => {
   });
 });
 
+describe("stalls and errors", () => {
+  it("a video error mid-playback moves on once; its old 30 s limit does not cut the next photo short", async () => {
+    const r = rig();
+    r.presenter.show([video(1), photo(1), photo(2)], prefs({ dwell_s: 60 as MemoriesPrefs["dwell_s"] }));
+    await tick(MEMORIES_TIMING.brainMs);
+    const v = r.media()!;
+    v.emit("loadeddata");
+    await tick(MEMORIES_TIMING.emergeMs + 1000);
+    v.emit("error");
+    await tick(0);
+    const p1 = r.media()!;
+    expect(p1.getAttribute("src")).toBe("/api/memories/media/p1");
+    // 舊影片的 videoMaxMs 到期的時刻：p1 仍在停留，沒有被推到 p2。
+    await tick(MEMORIES_TIMING.videoMaxMs);
+    expect(r.media()).toBe(p1);
+    expect(p1.dataset.phase).toBe("holding");
+  });
+
+  it("a video that never loads is skipped after loadTimeoutMs", async () => {
+    const r = rig();
+    r.presenter.show([video(1), photo(2)], prefs());
+    await tick(MEMORIES_TIMING.brainMs);
+    expect(r.media()!.tagName).toBe("VIDEO");
+    await tick(MEMORIES_TIMING.loadTimeoutMs);
+    expect(r.media()!.getAttribute("src")).toBe("/api/memories/media/p2");
+    expect(r.root.all().filter((e) => e.tagName === "VIDEO")).toEqual([]);
+  });
+});
+
 describe("hide", () => {
   it("is immediate: timers cancelled, video stopped and its src removed, collapsed within 250 ms", async () => {
     const r = rig();
