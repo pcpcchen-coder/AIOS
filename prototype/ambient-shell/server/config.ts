@@ -22,6 +22,8 @@ export interface Config {
   chatgptModel: string | null;
   /** 憑證與設定目錄（預設 ~/.config/nous），不放在 repo 內。 */
   configDir: string;
+  /** MEMO-1 回憶模式的本機資料夾（NOUS_MEMORIES_DIR，預設 <configDir>/memories/library）；只從這裡來，不接受 HTTP 指定。 */
+  memoriesDir: string;
   /** Sign in with ChatGPT 的 loopback 回呼埠。 */
   oauthPort: number;
   maxConcurrent: number;
@@ -119,6 +121,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     fallbacks: (env.NOUS_FALLBACKS ?? "on").trim().toLowerCase() !== "off",
     chatgptModel: env.NOUS_CHATGPT_MODEL?.trim() || null,
     configDir: env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"),
+    memoriesDir: env.NOUS_MEMORIES_DIR?.trim() || join(env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"), "memories", "library"),
     oauthPort: intOr(env.NOUS_OAUTH_PORT, 1455),
     maxConcurrent: Math.max(1, intOr(env.NOUS_MAX_CONCURRENT, DEFAULT_MAX_CONCURRENT)),
     openaiApiKey: env.OPENAI_API_KEY?.trim() || null,

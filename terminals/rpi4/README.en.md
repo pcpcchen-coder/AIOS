@@ -122,6 +122,10 @@ While using the Pi, choose "Enter service mode (for the Pi)" in the Mac menu bar
 
 If the Pi display is not smooth, open "Settings" → "Display performance on this device" on the Pi page and choose "Full", "Balanced" or "Light". It changes only brain animation and background blur, without changing listening, playback, or voice-processing logic. Actual conversation fluency still shares the CPU and memory load. The choice is stored in the Pi's browser, and the Pi defaults to "Balanced". The same section shows the measured frames per second and draw time per frame. Details are in the [display performance validation](../../docs/validation/pi-performance-2026-11-05.en.md) (**improvement on a real Pi not measured**). This session confirmed switching all three options and persistence after reload; the tested device was left on Light. A 1280×720/60 Hz resolution trial gave no user-perceived improvement, so the original 1920×1080/about 55.758 Hz mode was restored. See the [hardware record](../../docs/validation/rpi-deployment-fixes-2026-11-05.en.md).
 
+## Memories mode
+
+On the Pi page, "Settings" → "Memories mode" switches it on or off (the same setting the Mac menu bar writes). When on, the Pi plays photos and videos from the Mac memories folder after it has been idle for a while; it fetches them from the Mac core over the SSH tunnel and never connects to Google directly. While showing, the brain uses the light render budget and at most one video plays at a time; H.264 videos and photos exported at "Large" size are recommended. Saying the wake word, facing the camera or tapping the photo collapses them at once. Details are in the [memories mode validation](../../docs/validation/memories-mode-2026-11-06.en.md) (**not verified on a real Pi**).
+
 <a id="realtime-cost-guard"></a>
 ## Realtime voice cost guard
 

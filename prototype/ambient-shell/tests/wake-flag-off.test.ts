@@ -86,7 +86,9 @@ describe("NOUS_WAKE off is byte-identical to the pre-wake build", () => {
     expect(parsed.audio).toEqual({ prefs: { input_device_id: null, input_label: null, output_device_id: null, output_label: null, processing_cue: true }, write_path: "/api/settings/audio" });
     // 第三個刻意的例外（George 2026-11-05 PRO-1「主動提醒」）：settings.proactive 不綁旗標（預設開），一定存在；拿掉後其餘逐位元組相同。
     expect(parsed.proactive?.prefs).toEqual({ enabled: true, weather: true, calendar: true, start_hour: 5, end_hour: 11, place: null });
-    const { audio: _audio, proactive: _proactive, ...rest } = parsed;
+    // 第四個刻意的例外（George 2026-11-06 MEMO-1「回憶模式」）：settings.memories 不綁旗標（預設關），一定存在；拿掉後其餘逐位元組相同。
+    expect(parsed.memories?.prefs).toEqual({ enabled: false, dwell_s: 8, idle_s: 60, video_sound: false });
+    const { audio: _audio, proactive: _proactive, memories: _memories, ...rest } = parsed;
     const body = JSON.stringify(rest);
     expect(body).toMatchSnapshot();
     expect(menuJson(rest as SettingsView)).toMatchSnapshot();

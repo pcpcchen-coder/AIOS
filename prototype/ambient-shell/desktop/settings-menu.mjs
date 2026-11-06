@@ -348,6 +348,53 @@ export function proactiveMenu(proactive, { setProactive, translate = (source) =>
   ];
 }
 
+// ───────────── 回憶模式（MEMO-1；核心給了 settings.memories 才畫） ─────────────
+// 文字和 shared/memories.ts 的 MEMORIES_TEXT 相同（這個檔案不能載入 .ts；tests/memories-menu.test.ts 核對兩邊一致）。
+
+export const MEMORIES_TEXT = {
+  group: "回憶模式",
+  enabled: "閒置時播放回憶",
+  enabledNote: "電子腦沒事一段時間後，照片與影片從電子腦浮現；有人喚醒、看著說話或有任務就立即收起",
+  videoSound: "影片播放聲音",
+  videoSoundNote: "預設靜音",
+  dwell: "每張停留",
+  idle: "閒置多久開始",
+  seconds: "{0} 秒",
+  minutes: "{0} 分鐘",
+  stateOk: "照片來源：Mac 上的回憶資料夾，照片 {0} 張、影片 {1} 段",
+  stateEmpty: "資料夾是空的：把照片放進 Mac 的回憶資料夾",
+  stateMissing: "找不到回憶資料夾",
+  stateFailed: "讀不到回憶資料夾",
+};
+
+const MEMORIES_STATE_TEXT = { ok: MEMORIES_TEXT.stateOk, empty: MEMORIES_TEXT.stateEmpty, missing: MEMORIES_TEXT.stateMissing, failed: MEMORIES_TEXT.stateFailed };
+
+/** 「回憶模式」分段：總開關、影片聲音、每張停留、閒置多久開始、來源狀態。點選後 setMemories(patch) POST 到 memories.write_path。 */
+export function memoriesMenu(memories, { setMemories, translate = (source) => source }) {
+  const fill = (source, ...values) => translate(source, ...values).replace(/\{(\d+)\}/g, (match, i) => (Number(i) < values.length ? String(values[Number(i)]) : match));
+  const prefs = memories.prefs;
+  const set = (patch) => () => void setMemories?.(patch);
+  const duration = (n) => (n >= 60 && n % 60 === 0 ? fill(MEMORIES_TEXT.minutes, n / 60) : fill(MEMORIES_TEXT.seconds, n));
+  const state = memories.source?.state ?? "missing";
+  return [
+    { type: "separator" },
+    { label: translate(MEMORIES_TEXT.group), enabled: false },
+    { label: translate(MEMORIES_TEXT.enabled), type: "checkbox", checked: prefs.enabled, sublabel: translate(MEMORIES_TEXT.enabledNote), click: set({ enabled: !prefs.enabled }) },
+    { label: translate(MEMORIES_TEXT.videoSound), type: "checkbox", checked: prefs.video_sound, enabled: prefs.enabled, sublabel: translate(MEMORIES_TEXT.videoSoundNote), click: set({ video_sound: !prefs.video_sound }) },
+    {
+      label: `${translate(MEMORIES_TEXT.dwell)}${translate("：")}${duration(prefs.dwell_s)}`,
+      enabled: prefs.enabled,
+      submenu: memories.dwell_options.map((n) => radio(duration(n), n === prefs.dwell_s, set({ dwell_s: n }))),
+    },
+    {
+      label: `${translate(MEMORIES_TEXT.idle)}${translate("：")}${duration(prefs.idle_s)}`,
+      enabled: prefs.enabled,
+      submenu: memories.idle_options.map((n) => radio(duration(n), n === prefs.idle_s, set({ idle_s: n }))),
+    },
+    { label: fill(MEMORIES_STATE_TEXT[state] ?? MEMORIES_TEXT.stateMissing, memories.source?.photos ?? 0, memories.source?.videos ?? 0), enabled: false },
+  ];
+}
+
 /**
  * @param settings GET /api/settings 的回應（還沒讀到時是 null）
  * @param handlers command(name)：把選單動作交給頁面；setMenuPref(row, value)：POST { [row.key]: value } 到 row.write_path；
@@ -355,8 +402,9 @@ export function proactiveMenu(proactive, { setProactive, translate = (source) =>
  *   setWakeListen(value)、wakeReport：常駐喚醒聆聽（只有 settings.wake 存在時用到）；setVoiceNameTest(value)：SP-02a 只憑聲音叫名字的測試開關；
  *   setAudio(patch)、audioReport：「聲音」分段（settings.audio 存在時畫；patch 送到 settings.audio.write_path）
  *   setProactive(patch)：「主動提醒」分段（settings.proactive 存在時畫；patch 送到 settings.proactive.write_path）
+ *   setMemories(patch)：「回憶模式」分段（settings.memories 存在時畫；patch 送到 settings.memories.write_path）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -429,6 +477,7 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
   if (settings.audio) items.push(...audioMenu(settings.audio, audioReport, { setAudio, translate }));
   if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused, translate }));
   if (settings.proactive) items.push(...proactiveMenu(settings.proactive, { setProactive, translate }));
+  if (settings.memories) items.push(...memoriesMenu(settings.memories, { setMemories, translate }));
   return items;
 }
 

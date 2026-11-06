@@ -9,6 +9,7 @@ import type { MemorySettingsStatus } from "./memory.ts";
 import type { WakeSettingsView } from "./wake.ts";
 import type { AudioSettingsView } from "./audio-devices.ts";
 import type { ProactiveSettingsView } from "./proactive.ts";
+import type { MemoriesSettingsView } from "./memories.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
 // 這裡先用 TS 型別，schema_version 標為 proto-0.1 以免與正式契約混淆。
@@ -165,6 +166,8 @@ export interface SettingsView {
   voice_relay?: boolean;
   /** PRO-1 主動提醒（招呼後接今天的天氣）：設定、實際地點與最近一次查天氣的狀態（不含天氣內容）。 */
   proactive?: ProactiveSettingsView;
+  /** MEMO-1 回憶模式：設定與來源狀態（只有數量，不含檔名或路徑）。 */
+  memories?: MemoriesSettingsView;
 }
 
 /** API key 路徑（RealtimeBridge.info）提供的欄位；路徑與計費欄位由 RealtimeSessions 補上。 */

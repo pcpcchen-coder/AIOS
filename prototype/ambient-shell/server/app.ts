@@ -5,7 +5,8 @@ import type { ChatTarget } from "./memory/retrieve.ts";
 import type { MemoryContext } from "./memory/service.ts";
 import { randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
+import { pipeline } from "node:stream";
 import { extname, join, normalize, sep } from "node:path";
 import type { ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
 import type { ChatGPTAuth } from "./chatgpt-auth.ts";
@@ -50,6 +51,8 @@ import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHist
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
 import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
+import { MEMORIES_ITEMS_PATH, MEMORIES_MEDIA_PREFIX, MEMORIES_WRITE_PATH, MemoriesPatchError, parseMemoriesPatch, type MemoriesItem, type MemoriesPrefs, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
+import { parseByteRange } from "./memories.ts";
 import { isTerminalId, pageSource } from "../shared/terminal.ts";
 import { terminalIdentity, terminalMemory, type TerminalIdentityPort, type TerminalMemoryPort } from "./terminal-routes.ts";
 import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
@@ -192,6 +195,11 @@ export interface AppOptions {
    * 未提供時（舊的組裝、測試）settings 沒有 proactive、POST /api/settings/proactive 回 404。
    */
   proactive?: { view(): ProactiveSettingsView; update(patch: ProactivePrefsPatch): ProactivePrefs; prefetch(): void };
+  /**
+   * MEMO-1：回憶模式（設定與本機資料夾的照片、影片）。未提供時 settings 沒有 memories，相關路由 404。
+   * file() 回傳的路徑只在核心內使用，不出現在任何回應。
+   */
+  memories?: { view(): MemoriesSettingsView; update(patch: MemoriesPrefsPatch): MemoriesPrefs; items(): MemoriesItem[]; file(id: string): { path: string; type: string } | null };
   port: number;
   devPort: number;
   distDir: string | null;
@@ -292,6 +300,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         audio: { prefs: options.audio?.view() ?? { ...DEFAULT_AUDIO_PREFS }, write_path: AUDIO_WRITE_PATH },
         ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
         ...(options.proactive ? { proactive: options.proactive.view() } : {}),
+        ...(options.memories ? { memories: options.memories.view() } : {}),
         ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name) } } : {}),
         // VCR-2：只有註冊了 voice_relay 才有這個鍵（沒有時輸出和之前完全相同）。
         ...(options.integrations?.voiceRelay ? { voice_relay: true } : {}),
@@ -480,6 +489,26 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         throw new HttpError(500, `主動提醒設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (options.memories && method === "POST" && path === MEMORIES_WRITE_PATH) {
+      let patch: MemoriesPrefsPatch;
+      try {
+        patch = parseMemoriesPatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof MemoriesPatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      try {
+        options.memories.update(patch);
+      } catch (err) {
+        throw new HttpError(500, `回憶模式設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (options.memories && method === "GET" && path === MEMORIES_ITEMS_PATH) return sendJson(res, 200, { items: options.memories.items() });
+    if (options.memories && path.startsWith(MEMORIES_MEDIA_PREFIX)) {
+      if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");
+      return serveMemoriesMedia(req, res, method, options.memories.file(path.slice(MEMORIES_MEDIA_PREFIX.length)));
     }
     if (method === "POST" && path === "/api/settings/realtime") {
       if (!options.realtimePrefs) throw new HttpError(409, "即時語音路徑設定未設定");
@@ -1076,6 +1105,32 @@ function serveStatic(res: ServerResponse, pathname: string, distDir: string | nu
   if (type.startsWith("text/javascript")) Object.assign(headers, scriptHeaders());
   res.writeHead(200, headers);
   res.end(readFileSync(file));
+}
+
+/** MEMO-1：回憶的照片與影片。支援單一 Range（影片拖曳與 Chromium 播放需要）；回應與錯誤都不含檔案路徑。 */
+function serveMemoriesMedia(req: IncomingMessage, res: ServerResponse, method: string, file: { path: string; type: string } | null): void {
+  if (!file) throw new HttpError(404, "not found");
+  let size: number;
+  try {
+    size = statSync(file.path).size;
+  } catch {
+    throw new HttpError(404, "not found");
+  }
+  const headers: Record<string, string> = { "Content-Type": file.type, "Cache-Control": "private, max-age=3600", "X-Content-Type-Options": "nosniff", "Accept-Ranges": "bytes" };
+  const range = parseByteRange(req.headers.range, size);
+  if (range === "invalid") {
+    res.writeHead(416, { ...headers, "Content-Range": `bytes */${size}` });
+    res.end();
+    return;
+  }
+  const { start, end } = range ?? { start: 0, end: size - 1 };
+  res.writeHead(range ? 206 : 200, { ...headers, "Content-Length": String(Math.max(0, end - start + 1)), ...(range ? { "Content-Range": `bytes ${start}-${end}/${size}` } : {}) });
+  if (method === "HEAD" || size === 0) {
+    res.end();
+    return;
+  }
+  // pipeline：用戶端中途斷線（影片 Range 常被 Chromium 取消）時也關掉檔案，不留 fd。
+  pipeline(createReadStream(file.path, { start, end }), res, () => undefined);
 }
 
 /** 家人辨識的模型與 onnxruntime wasm：只給清單上的檔名，沒有 SPA fallback；不存在 404，雜湊不符 503。 */

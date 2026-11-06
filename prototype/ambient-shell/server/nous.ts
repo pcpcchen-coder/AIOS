@@ -51,6 +51,7 @@ import { TerminalPresence } from "./terminal-presence.ts";
 import { isTerminalId, type TerminalStatus } from "../shared/terminal.ts";
 import { WeatherService } from "./weather.ts";
 import { calendarReaderFrom } from "./proactive-calendar.ts";
+import { FolderMemoriesSource, memoriesFeature, MemoriesSettingsStore } from "./memories.ts";
 import { fitBriefing, fitsLiveAppend, ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
@@ -255,6 +256,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   // PRO-1：主動提醒（招呼後接今天的天氣）。天氣快取一份，招呼與整合層的 app.weather.today 共用。
   const weather = new WeatherService({ log, ...(options.weatherFetch ? { fetch: options.weatherFetch } : {}) });
   const proactiveSettings = new ProactiveSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  // MEMO-1：回憶模式。資料夾不存在時以 0o700 建立（狀態「資料夾是空的」，比「找不到」好處理）。
+  const memories = memoriesFeature(new MemoriesSettingsStore({ dir: config.configDir, onChange: () => notify(), log }), new FolderMemoriesSource({ dir: config.memoriesDir, create: true, log }));
   const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } });
   // PRO-2：CAL-1 有註冊時，認出行程擁有者（George）才說今天的行程（核心自己讀，不經模型）。
   const calendarReader = calendarReaderFrom(ail?.registry);
@@ -469,6 +472,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     voice,
     audio,
     proactive: { view: () => proactive.view(), update: (patch) => proactiveSettings.update(patch), prefetch: () => proactive.prefetch() },
+    memories,
     ...(config.earlySpeechRms !== null ? { earlySpeechRms: config.earlySpeechRms } : {}),
     identity: identity ?? undefined,
     memory: memory ?? undefined,

@@ -27,7 +27,9 @@ import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts"
 import { greetingFor, idleSession, newInteractionId, openRealtime, wakeTriggerAction, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
 import { CALL_END_TEXT, type CallAnswer, type LiveCoreEvent, type LiveMemoryReason, type RealtimeServerEvent, type RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
-import { applyProfile, loadProfile, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
+import { applyProfile, loadProfile, RENDER_BUDGETS, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
+import { MEMORIES_OFF, memoryCaption, stepMemories, wakeMemories, type MemoriesItem, type MemoriesState } from "../shared/memories.ts";
+import { MEMORIES_TIMING, MemoriesPresenter } from "./memories.ts";
 import { CUE_TIMING, ProcessingCue, processingSource } from "./processing-cue.ts";
 import { browserProcessingSound } from "./processing-sound.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
@@ -216,10 +218,36 @@ let pendingProviderSelection: { epoch: number; account: string } | null = null;
 
 const brain = new Brain(canvas);
 // 這台裝置的畫面效能（George 2026-11-05）：只改電子腦的繪製與背景模糊，存在這個頁面；Pi 終端機預設「平衡」。
-const performanceTargets = { setRenderBudget: (budget: RenderBudget) => brain.setRenderBudget(budget), root: document.documentElement };
+// MEMO-1：播放回憶時電子腦降到「省電」的繪製，把 Pi 4 的 GPU／CPU 留給照片與影片解碼；收起後回到原本的設定。
+let memoriesDimmed = false;
+const performanceTargets = { setRenderBudget: (budget: RenderBudget) => brain.setRenderBudget(memoriesDimmed ? RENDER_BUDGETS.light : budget), root: document.documentElement };
 let performanceProfile: PerformanceProfile = loadProfile({ search: location.search, desktop: !!window.nousDesktop });
 applyProfile(performanceProfile, performanceTargets);
 brain.start();
+
+/**
+ * MEMO-1 回憶模式：電子腦閒置 idle_s 後照片與影片從電子腦浮現；任何喚醒立即收起（shared/memories.ts 的狀態機）。
+ * 斷線時視為關閉（核心不在就沒有照片可讀，也不留著過時的清單）。照片不點亮任何腦區。
+ */
+const memoriesRoot = document.createElement("div");
+memoriesRoot.id = "memories";
+document.body.append(memoriesRoot);
+const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)") ?? null;
+const memoriesPresenter = new MemoriesPresenter({
+  root: memoriesRoot,
+  reducedMotion: () => reducedMotion?.matches ?? false,
+  origin: () => {
+    const rect = canvas.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2 - window.innerWidth / 2, y: rect.top + rect.height * 0.47 - window.innerHeight / 2 };
+  },
+  caption: (item) => memoryCaption(item, new Date(), getLocale()),
+  onWake: () => wakeMemoriesNow(),
+});
+let memoriesState: MemoriesState = MEMORIES_OFF;
+let memoriesItems: MemoriesItem[] = [];
+let memoriesFetchedAt: number | null = null;
+let memoriesFetching = false;
+let memoriesTicker: ReturnType<typeof setInterval> | null = null;
 
 /**
  * 背景處理中的提示（George 2026-11-02；docs/validation/brain-processing-cue-2026-11-02.md）：電子腦的「處理中」樣子與輕聲的聲納提示音。
@@ -802,6 +830,7 @@ function stopWakeCall(): void {
  * 即時語音不能用時照實說原因。路徑、計費通知、改路徑與同意說明都沿用 startRealtime／openRealtime。
  */
 function onWakeTrigger(trigger: WakeTrigger): void {
+  wakeMemoriesNow();
   const now = performance.now();
   const action = wakeTriggerAction({
     callActive: realtime.on || realtimeStarting,
@@ -1587,6 +1616,7 @@ const sense = new SenseController({
   },
   setFacing: (facing) => {
     document.body.dataset.facing = facing ? "yes" : "no";
+    if (facing) wakeMemoriesNow();
     if (facing) lookTimeline.mark("facing");
   },
   pointTo: (zone) => {
@@ -1978,6 +2008,7 @@ function realtimeReady(): boolean {
  * wake：WK-02 這次喚醒（wake_id 交給核心的費用紀錄；限速時暫停喚醒聆聽）。
  */
 function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean; wake?: WakeTrigger } = {}): void {
+  wakeMemoriesNow();
   if (servicePaused || realtime.on || realtimeStarting) return;
   if (!hasVoiceConsent("realtime")) {
     // 不是喚醒開始的同意說明：同意後照舊以 user 開始。
@@ -2395,6 +2426,7 @@ function dispatch(event: ShellEvent): void {
   const leftMemory = shell.surface?.kind === "memory" && next.surface?.surface_id !== shell.surface.surface_id;
   const enteredFamily = next.surface?.kind === "family" && next.surface.surface_id !== shell.surface?.surface_id;
   shell = next;
+  wakeMemoriesNow();
   // 收起只關畫面：停止取樣並丟掉記憶體中的樣本與 session，不刪已存的家人資料。
   if (leftFamily) familyView.close();
   if (leftMemory && next.surface?.kind !== "memory") memoryView.close();
@@ -2829,6 +2861,16 @@ const actions: ViewActions = {
       (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`主動提醒設定沒有保存：${(err as Error).message}` }),
     );
   },
+  updateMemories(patch) {
+    const requestId = userRequest();
+    void api.updateMemories(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`回憶模式設定沒有保存：${(err as Error).message}` }),
+    );
+  },
   updateRealtime(patch) {
     const requestId = userRequest();
     void api.updateRealtime(patch).then(
@@ -3036,6 +3078,63 @@ function render(): void {
   renderCaption(fg);
   renderSurface();
   applyDistanceScale();
+  syncMemories();
+}
+
+// ───────────── 回憶模式（MEMO-1） ─────────────
+
+/** 電子腦有沒有事：任務、通話、對話、收音、念話、處理中、畫面、輸入列、看著說話。 */
+function memoriesBusy(): boolean {
+  return [...tasks.values()].some(isActive)
+    || realtime.on || realtimeStarting
+    || conversation.current !== "off"
+    || voice.active || voice.capturing
+    || session.view.reply.kind === "pending"
+    || processingCue.active
+    || shell.surface !== null || shell.listening
+    || speechActive > 0
+    || document.body.dataset.facing === "yes";
+}
+
+function wakeMemoriesNow(): void {
+  memoriesState = wakeMemories(memoriesState, performance.now());
+  syncMemories();
+}
+
+function syncMemories(): void {
+  const prefs = settings?.memories?.prefs ?? null;
+  const enabled = !!prefs?.enabled && connected;
+  const now = performance.now();
+  const was = memoriesState.phase;
+  memoriesState = stepMemories(memoriesState, { now, enabled, busy: memoriesBusy(), hasItems: memoriesItems.length > 0, idleMs: (prefs?.idle_s ?? 60) * 1000 });
+  const phase = memoriesState.phase;
+  document.body.dataset.memories = phase;
+  if (phase === "showing" && prefs) memoriesPresenter.show(memoriesItems, prefs);
+  else memoriesPresenter.hide();
+  if ((phase === "showing") !== memoriesDimmed) {
+    memoriesDimmed = phase === "showing";
+    applyProfile(performanceProfile, performanceTargets);
+  }
+  if (!enabled) {
+    if (memoriesTicker !== null) clearInterval(memoriesTicker);
+    memoriesTicker = null;
+    if (was !== "off") memoriesItems = [];
+    memoriesFetchedAt = null;
+    return;
+  }
+  memoriesTicker ??= setInterval(syncMemories, 1000);
+  // 清單：開啟時讀一次；之後不在播放時每 fetchRetryMs 重讀（資料夾放了新照片、或之前是空的）。
+  if (!memoriesFetching && phase !== "showing" && (memoriesFetchedAt === null || now - memoriesFetchedAt >= MEMORIES_TIMING.fetchRetryMs)) {
+    memoriesFetching = true;
+    memoriesFetchedAt = now;
+    void api.memoriesItems().then(
+      ({ items }) => { memoriesItems = items; },
+      () => { memoriesItems = []; },
+    ).finally(() => {
+      memoriesFetching = false;
+      syncMemories();
+    });
+  }
 }
 
 /**
@@ -3454,6 +3553,7 @@ setInterval(() => {
 
 form.addEventListener("submit", (e) => {
   e.preventDefault();
+  wakeMemoriesNow();
   commandError.hidden = true;
   void handleCommand(input.value);
 });

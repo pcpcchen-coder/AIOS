@@ -4,6 +4,7 @@ import type { SettingsView } from "../shared/types.ts";
 import type { WakePrefs, WakeReason, WakeReport, WakeState } from "../shared/wake.ts";
 import type { AudioMenuReport, AudioPrefsPatch, AudioSettingsView } from "../shared/audio-devices.ts";
 import type { ProactivePrefsPatch, ProactiveSettingsView } from "../shared/proactive.ts";
+import type { MemoriesPrefsPatch, MemoriesSettingsView } from "../shared/memories.ts";
 
 export interface MenuItemTemplate {
   label?: string;
@@ -55,6 +56,12 @@ export function proactiveMenu(
   handlers: { setProactive?(patch: ProactivePrefsPatch): unknown; translate?(source: string, ...values: unknown[]): string },
 ): MenuItemTemplate[];
 
+export const MEMORIES_TEXT: Record<string, string>;
+export function memoriesMenu(
+  memories: MemoriesSettingsView,
+  handlers: { setMemories?(patch: MemoriesPrefsPatch): unknown; translate?(source: string, ...values: unknown[]): string },
+): MenuItemTemplate[];
+
 export function settingsMenu(
   settings: SettingsView | null,
   handlers: {
@@ -68,6 +75,7 @@ export function settingsMenu(
     setAudio?(patch: AudioPrefsPatch): unknown;
     audioReport?: AudioMenuReport | null;
     setProactive?(patch: ProactivePrefsPatch): unknown;
+    setMemories?(patch: MemoriesPrefsPatch): unknown;
     /** 服務模式：鏡頭與常駐喚醒聆聽的開關、鏡頭畫面與家人辨識停用（保存的設定不變）。 */
     servicePaused?: boolean;
     translate?(source: string, ...values: unknown[]): string;

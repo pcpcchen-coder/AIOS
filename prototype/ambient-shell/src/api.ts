@@ -1,6 +1,7 @@
 import type { FaceTuning } from "../shared/face-tuning.ts";
 import { AUDIO_WRITE_PATH, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import type { ProactivePrefsPatch } from "../shared/proactive.ts";
+import { MEMORIES_ITEMS_PATH, MEMORIES_WRITE_PATH, type MemoriesItem, type MemoriesPrefsPatch } from "../shared/memories.ts";
 import { getLocale, type Locale } from "./i18n.ts";
 import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
@@ -107,6 +108,9 @@ export const api = {
   updateAudio: (patch: AudioPrefsPatch) => call<SettingsView>("POST", AUDIO_WRITE_PATH, patch),
   /** PRO-1「主動提醒」（招呼後接今天的天氣）。 */
   updateProactive: (patch: ProactivePrefsPatch) => call<SettingsView>("POST", "/api/settings/proactive", patch),
+  /** MEMO-1「回憶模式」。 */
+  updateMemories: (patch: MemoriesPrefsPatch) => call<SettingsView>("POST", MEMORIES_WRITE_PATH, patch),
+  memoriesItems: () => call<{ items: MemoriesItem[] }>("GET", MEMORIES_ITEMS_PATH),
   /** 人臉辨識校正值（face-tuning.json）：calibrated 表示這次是「校正人臉辨識」的套用；reset 還原預設。 */
   updateFaceTuning: (change: Partial<FaceTuning> | "reset", calibrated = false) =>
     call<SettingsView>("POST", "/api/settings/camera-tuning", change === "reset" ? { reset: true } : { ...change, ...(calibrated ? { calibrated: true } : {}) }),
