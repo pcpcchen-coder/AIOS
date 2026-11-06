@@ -52,6 +52,9 @@ import { isTerminalId, type TerminalStatus } from "../shared/terminal.ts";
 import { WeatherService } from "./weather.ts";
 import { calendarReaderFrom } from "./proactive-calendar.ts";
 import { FolderMemoriesSource, memoriesFeature, MemoriesSettingsStore } from "./memories.ts";
+import { GooglePhotosCache, googleMemories, GooglePicker, SIPS_PATH, sipsConverter } from "./memories-google.ts";
+import { defaultGogRunner, resolveGogPath } from "./integrations/gog/runner.ts";
+import { MEMORIES_GOOGLE_REASON } from "../shared/memories.ts";
 import { fitBriefing, fitsLiveAppend, ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
@@ -257,7 +260,23 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const weather = new WeatherService({ log, ...(options.weatherFetch ? { fetch: options.weatherFetch } : {}) });
   const proactiveSettings = new ProactiveSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   // MEMO-1：回憶模式。資料夾不存在時以 0o700 建立（狀態「資料夾是空的」，比「找不到」好處理）。
-  const memories = memoriesFeature(new MemoriesSettingsStore({ dir: config.configDir, onChange: () => notify(), log }), new FolderMemoriesSource({ dir: config.memoriesDir, create: true, log }));
+  // MEMO-2：Google 相簿（經 gog）。找不到 gog 或沒有帳號時仍有快取（之前挑選的照樣播放），挑選回報不可用的原因。
+  const googleCache = new GooglePhotosCache({ dir: join(config.configDir, "memories", "google"), log });
+  const gogPath = config.memoriesGoogle.invalid ? null : resolveGogPath(config.memoriesGoogle.gogPath);
+  const googleAccount = config.memoriesGoogle.account;
+  const googlePicker = config.memoriesGoogle.invalid ? { unavailable: config.memoriesGoogle.invalid }
+    : !gogPath ? { unavailable: MEMORIES_GOOGLE_REASON.noGog }
+    : !googleAccount ? { unavailable: MEMORIES_GOOGLE_REASON.noAccount }
+    : new GooglePicker({
+      gogPath, account: googleAccount, runner: defaultGogRunner, cache: googleCache, onChange: () => notify(),
+      // macOS 才有 sips：HEIC 轉 JPEG、縮到長邊 2048 px。其他系統不轉（HEIC 會被略過）。
+      ...(process.platform === "darwin" && existsSync(SIPS_PATH) ? { convertPhoto: sipsConverter(defaultGogRunner) } : {}),
+    });
+  const memories = memoriesFeature(
+    new MemoriesSettingsStore({ dir: config.configDir, onChange: () => notify(), log }),
+    new FolderMemoriesSource({ dir: config.memoriesDir, create: true, log }),
+    googleMemories(googleCache, googlePicker),
+  );
   const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } });
   // PRO-2：CAL-1 有註冊時，認出行程擁有者（George）才說今天的行程（核心自己讀，不經模型）。
   const calendarReader = calendarReaderFrom(ail?.registry);

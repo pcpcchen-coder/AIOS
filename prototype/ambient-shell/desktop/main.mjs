@@ -9,7 +9,7 @@ import { validateMemoryRequest } from "./memory-ipc.mjs";
 import { deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "./tasks-ipc.mjs";
 import { createMemorySecretBox } from "./memory-safe-storage.mjs";
 import { checkTrustedSender, sameOrigin } from "./trusted-sender.mjs";
-import { isWakeReport, radio, realtimeMeter, sanitizeAudioMenuReport, SERVICE_TEXT, serviceStatusLine, serviceTray, settingsMenu } from "./settings-menu.mjs";
+import { isWakeReport, radio, realtimeMeter, sanitizeAudioMenuReport, SERVICE_TEXT, serviceStatusLine, serviceTray, settingsMenu, MEMORIES_TEXT } from "./settings-menu.mjs";
 import { isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "./localization.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -698,7 +698,7 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, servicePaused: prefs.serviceMode, translate: t });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, memoriesGoogle, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, servicePaused: prefs.serviceMode, translate: t });
 }
 
 /**
@@ -743,6 +743,30 @@ async function setMemories(patch) {
     await refreshSettings();
     return;
   }
+  rebuildMenu();
+}
+
+/**
+ * MEMO-2「Google 相簿」：pick 等核心建立好挑選連結再用系統瀏覽器開（Google 的挑選頁不能放進視窗）；
+ * clear 先問原生確認對話框。失敗時照實說明並重新讀取。
+ */
+async function memoriesGoogle(action) {
+  const google = settings?.memories?.google;
+  if (!google) return;
+  if (action === "clear") {
+    const { response } = await showMessage({ type: "warning", buttons: [MEMORIES_TEXT.googleClearButton, "取消"], defaultId: 1, cancelId: 1, message: MEMORIES_TEXT.googleClearAsk, detail: MEMORIES_TEXT.googleClearDetail }, dialogParent());
+    if (response !== 0) return;
+  }
+  try {
+    settings = await api(google.paths[action], {});
+  } catch (err) {
+    showError("Google 相簿", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  const after = settings?.memories?.google;
+  if (action === "pick" && after?.phase === "failed" && after.error) showError("Google 相簿", after.error);
+  else if (action === "pick" && typeof after?.picker_uri === "string" && /^https:\/\//.test(after.picker_uri)) void shell.openExternal(after.picker_uri);
   rebuildMenu();
 }
 

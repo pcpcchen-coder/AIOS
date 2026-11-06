@@ -1,7 +1,7 @@
 import type { FaceTuning } from "../shared/face-tuning.ts";
 import { AUDIO_WRITE_PATH, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import type { ProactivePrefsPatch } from "../shared/proactive.ts";
-import { MEMORIES_ITEMS_PATH, MEMORIES_WRITE_PATH, type MemoriesItem, type MemoriesPrefsPatch } from "../shared/memories.ts";
+import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_WRITE_PATH, type MemoriesItem, type MemoriesPrefsPatch } from "../shared/memories.ts";
 import { getLocale, type Locale } from "./i18n.ts";
 import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
@@ -111,6 +111,10 @@ export const api = {
   /** MEMO-1「回憶模式」。 */
   updateMemories: (patch: MemoriesPrefsPatch) => call<SettingsView>("POST", MEMORIES_WRITE_PATH, patch),
   memoriesItems: () => call<{ items: MemoriesItem[] }>("GET", MEMORIES_ITEMS_PATH),
+  /** MEMO-2：Google 相簿。pick 等到挑選連結建立好才回應（設定裡有 picker_uri）。 */
+  googlePick: () => call<SettingsView>("POST", MEMORIES_GOOGLE_PATHS.pick, {}),
+  googleCancel: () => call<SettingsView>("POST", MEMORIES_GOOGLE_PATHS.cancel, {}),
+  googleClear: () => call<SettingsView>("POST", MEMORIES_GOOGLE_PATHS.clear, {}),
   /** 人臉辨識校正值（face-tuning.json）：calibrated 表示這次是「校正人臉辨識」的套用；reset 還原預設。 */
   updateFaceTuning: (change: Partial<FaceTuning> | "reset", calibrated = false) =>
     call<SettingsView>("POST", "/api/settings/camera-tuning", change === "reset" ? { reset: true } : { ...change, ...(calibrated ? { calibrated: true } : {}) }),

@@ -1604,3 +1604,9 @@ body[data-memories="showing"] #brain {
     transform: none;
   }
 }
+
+/* MEMO-2：設定頁「Google 相簿」（QR code 給手機掃描；SVG 自帶白底） */
+.memories-google { margin-top: 12px; }
+.memories-google h4 { margin: 0 0 4px; font-size: 13px; }
+.memories-google-pick img { display: block; width: 200px; height: 200px; border-radius: 8px; }
+.memories-google-pick code { word-break: break-all; user-select: all; }

@@ -24,6 +24,11 @@ export interface Config {
   configDir: string;
   /** MEMO-1 回憶模式的本機資料夾（NOUS_MEMORIES_DIR，預設 <configDir>/memories/library）；只從這裡來，不接受 HTTP 指定。 */
   memoriesDir: string;
+  /**
+   * MEMO-2 Google 相簿：gog 的路徑（NOUS_GOG_PATH）與帳號（NOUS_GOG_ACCOUNT，沒有時 NOUS_MAIL_SELF）。不綁 NOUS_AIL。
+   * 設定值格式不對時不讓核心啟動失敗：invalid 帶原因（設定頁顯示為不可用的原因）。
+   */
+  memoriesGoogle: { gogPath: string | null; account: string | null; invalid: string | null };
   /** Sign in with ChatGPT 的 loopback 回呼埠。 */
   oauthPort: number;
   maxConcurrent: number;
@@ -122,6 +127,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     chatgptModel: env.NOUS_CHATGPT_MODEL?.trim() || null,
     configDir: env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"),
     memoriesDir: env.NOUS_MEMORIES_DIR?.trim() || join(env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"), "memories", "library"),
+    memoriesGoogle: parseMemoriesGoogle(env.NOUS_GOG_PATH, env.NOUS_GOG_ACCOUNT, env.NOUS_MAIL_SELF),
     oauthPort: intOr(env.NOUS_OAUTH_PORT, 1455),
     maxConcurrent: Math.max(1, intOr(env.NOUS_MAX_CONCURRENT, DEFAULT_MAX_CONCURRENT)),
     openaiApiKey: env.OPENAI_API_KEY?.trim() || null,
@@ -297,4 +303,13 @@ export function parseAil(flag: string | undefined, services: string | undefined,
   };
   // VCR-0／VCR-2（docs/19）：NOUS_VCR=fake（假輸出，mock）或 mac（say 發聲）才加上 vcr；目錄固定在 <configDir>/voice-relay，不來自模型。
   return vcrMode === "fake" || vcrMode === "mac" ? { ...base, vcr: { mode: vcrMode, dir: join(configDir ?? join(homedir(), ".config", "nous"), "voice-relay") } } : base;
+}
+
+/** MEMO-2：Google 相簿用的 gog 路徑與帳號；格式不對時 invalid 帶原因（只是回憶模式的一個來源，不擋核心啟動）。 */
+export function parseMemoriesGoogle(gogPath: string | undefined, account: string | undefined, mailSelf: string | undefined): Config["memoriesGoogle"] {
+  try {
+    return { gogPath: parseGogPath(gogPath), account: parseGogAccount(account, mailSelf), invalid: null };
+  } catch (err) {
+    return { gogPath: null, account: null, invalid: (err as Error).message };
+  }
 }

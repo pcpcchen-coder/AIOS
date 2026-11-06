@@ -365,12 +365,73 @@ export const MEMORIES_TEXT = {
   stateEmpty: "資料夾是空的：把照片放進 Mac 的回憶資料夾",
   stateMissing: "找不到回憶資料夾",
   stateFailed: "讀不到回憶資料夾",
+  googleGroup: "Google 相簿",
+  googleStatus: "Google 相簿：照片 {0} 張、影片 {1} 段（{2} / 2 GB）",
+  googleUnavailable: "Google 相簿不可用：{0}",
+  googlePick: "從 Google 相簿挑選…",
+  googleCancel: "取消",
+  googleCancelPick: "取消挑選",
+  googleClear: "清除 Google 快取",
+  googleClearMenu: "清除 Google 快取…",
+  googleClearConfirm: "再按一次確認清除",
+  googleClearAsk: "要清除 Google 相簿的快取嗎？",
+  googleClearDetail: "Mac 上下載的 Google 照片與影片都會刪除；Google 相簿裡的原檔不受影響。",
+  googleClearButton: "清除",
+  googleOpen: "在瀏覽器開啟",
+  googleQrAlt: "Google 相簿挑選連結的 QR code",
+  googleScanHint: "用手機掃描，在 Google 相簿搜尋相簿名稱後選取照片，按完成",
+  googleExpires: "連結在 {0} 前有效",
+  googleStarting: "正在建立挑選連結…",
+  googleWaiting: "等待在 Google 相簿挑選…",
+  googleProgress: "正在下載 {0}/{1}",
+  googleDone: "已加入 Google 相簿的照片：處理 {0} 項，略過 {1} 項",
+  googleCancelled: "已取消挑選",
+  googleNoSync: "Google 只讓 App 讀你挑選的照片，不能自動同步整本相簿；有新照片時再挑一次。",
+  googleNoPlace: "Google 下載的照片沒有地點，只顯示時間。",
 };
 
 const MEMORIES_STATE_TEXT = { ok: MEMORIES_TEXT.stateOk, empty: MEMORIES_TEXT.stateEmpty, missing: MEMORIES_TEXT.stateMissing, failed: MEMORIES_TEXT.stateFailed };
 
-/** 「回憶模式」分段：總開關、影片聲音、每張停留、閒置多久開始、來源狀態。點選後 setMemories(patch) POST 到 memories.write_path。 */
-export function memoriesMenu(memories, { setMemories, translate = (source) => source }) {
+/** 和 shared/memories.ts 的 formatCacheSize 相同：1 GB 以下用 MB（整數），以上用 GB（一位小數）。 */
+// 和 shared/memories.ts 的 formatCacheSize 相同（這個檔案不能載入 .ts；tests/memories-menu.test.ts 核對）。
+const formatCacheSize = (bytes) => {
+  const mb = bytes / 1024 ** 2;
+  if (bytes < 1024 ** 3) return mb < 10 ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+};
+const GOOGLE_BUSY = new Set(["starting", "waiting_pick", "downloading"]);
+
+/**
+ * MEMO-2「Google 相簿」：快取狀態、目前階段、挑選、取消挑選、清除快取。
+ * memoriesGoogle("pick")：主程序 POST pick 後用系統瀏覽器開回應裡的 picker_uri；("clear")：主程序先問原生確認對話框。
+ */
+function googleMenu(g, { memoriesGoogle, fill, translate }) {
+  const busy = GOOGLE_BUSY.has(g.phase);
+  const phase =
+    g.phase === "starting" ? translate(MEMORIES_TEXT.googleStarting)
+    : g.phase === "waiting_pick" ? translate(MEMORIES_TEXT.googleWaiting)
+    : g.phase === "downloading" && g.progress ? fill(MEMORIES_TEXT.googleProgress, g.progress.done, g.progress.total)
+    : g.phase === "done" && g.progress ? fill(MEMORIES_TEXT.googleDone, g.progress.done, g.progress.skipped)
+    : g.phase === "cancelled" ? translate(MEMORIES_TEXT.googleCancelled)
+    : g.phase === "failed" && g.error ? translate(g.error)
+    : null;
+  return [
+    {
+      label: g.available ? fill(MEMORIES_TEXT.googleStatus, g.photos, g.videos, formatCacheSize(g.bytes)) : fill(MEMORIES_TEXT.googleUnavailable, translate(g.unavailable_reason ?? "")),
+      enabled: false,
+    },
+    ...(phase ? [{ label: phase, enabled: false }] : []),
+    { label: translate(MEMORIES_TEXT.googlePick), enabled: !!memoriesGoogle && g.available && !busy, click: () => void memoriesGoogle?.("pick") },
+    ...(busy ? [{ label: translate(MEMORIES_TEXT.googleCancelPick), enabled: !!memoriesGoogle, click: () => void memoriesGoogle?.("cancel") }] : []),
+    { label: translate(MEMORIES_TEXT.googleClearMenu), enabled: !!memoriesGoogle && g.photos + g.videos > 0, click: () => void memoriesGoogle?.("clear") },
+  ];
+}
+
+/**
+ * 「回憶模式」分段：總開關、影片聲音、每張停留、閒置多久開始、來源狀態；核心有 memories.google 時再加「Google 相簿」。
+ * 點選後 setMemories(patch) POST 到 memories.write_path。
+ */
+export function memoriesMenu(memories, { setMemories, memoriesGoogle, translate = (source) => source }) {
   const fill = (source, ...values) => translate(source, ...values).replace(/\{(\d+)\}/g, (match, i) => (Number(i) < values.length ? String(values[Number(i)]) : match));
   const prefs = memories.prefs;
   const set = (patch) => () => void setMemories?.(patch);
@@ -392,6 +453,7 @@ export function memoriesMenu(memories, { setMemories, translate = (source) => so
       submenu: memories.idle_options.map((n) => radio(duration(n), n === prefs.idle_s, set({ idle_s: n }))),
     },
     { label: fill(MEMORIES_STATE_TEXT[state] ?? MEMORIES_TEXT.stateMissing, memories.source?.photos ?? 0, memories.source?.videos ?? 0), enabled: false },
+    ...(memories.google ? googleMenu(memories.google, { memoriesGoogle, fill, translate }) : []),
   ];
 }
 
@@ -403,8 +465,9 @@ export function memoriesMenu(memories, { setMemories, translate = (source) => so
  *   setAudio(patch)、audioReport：「聲音」分段（settings.audio 存在時畫；patch 送到 settings.audio.write_path）
  *   setProactive(patch)：「主動提醒」分段（settings.proactive 存在時畫；patch 送到 settings.proactive.write_path）
  *   setMemories(patch)：「回憶模式」分段（settings.memories 存在時畫；patch 送到 settings.memories.write_path）
+ *   memoriesGoogle(action)：MEMO-2「Google 相簿」的 pick／cancel／clear（settings.memories.google 存在時畫）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, memoriesGoogle, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -477,7 +540,7 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
   if (settings.audio) items.push(...audioMenu(settings.audio, audioReport, { setAudio, translate }));
   if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused, translate }));
   if (settings.proactive) items.push(...proactiveMenu(settings.proactive, { setProactive, translate }));
-  if (settings.memories) items.push(...memoriesMenu(settings.memories, { setMemories, translate }));
+  if (settings.memories) items.push(...memoriesMenu(settings.memories, { setMemories, memoriesGoogle, translate }));
   return items;
 }
 
