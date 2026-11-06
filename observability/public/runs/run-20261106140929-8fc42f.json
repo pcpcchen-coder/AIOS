@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "claude/memories-mode",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-11-06T14:09:29.956Z",
-  "updated_at": "2026-11-06T14:47:11.936Z",
-  "ended_at": null,
+  "updated_at": "2026-11-06T14:47:15.858Z",
+  "ended_at": "2026-11-06T14:47:15.857Z",
   "steps": [
     {
       "id": "how",
@@ -161,6 +161,13 @@
       "step_id": "pr",
       "status": "passed",
       "note": "https://github.com/pcpcchen-coder/AIOS/pull/106"
+    },
+    {
+      "at": "2026-11-06T14:47:15.858Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
