@@ -158,13 +158,14 @@ describe("wake trigger → call (pure parts of src/main.ts)", () => {
     // 倒數秒數來自選單列「喚醒後等你開口」（settings.wake.wake_silence_s），沒讀到設定時用預設
     expect(main).toContain("timeoutMs: (settings?.wake?.wake_silence_s ?? DEFAULT_WAKE_SILENCE_S) * 1000,");
     // F6 一律記錄（不綁喚醒開關）：/end 一律帶結束原因，API key 路徑一律帶 usage
-    expect(main).toMatch(/end: async \(\) => void \(await api\.realtimeEnd\(ticket, \{ reason: takeEndReason\(ticket\.session_id\) \}\)\)/);
-    expect(main).toMatch(/api\.realtimeEnd\(ticketOf\(ticket\), \{ reason: takeEndReason\(ticket\.session_id\), usage: realtime\.usage \?\? null \}\)/);
+    // 費用防護（2026-11-06）：LiveVoice 自己結束時帶 idle／max_duration；頁面關閉時用 keepalive 送出。
+    expect(main).toMatch(/end: async \(code\) => void \(await api\.realtimeEnd\(ticket, \{ reason: takeEndReason\(ticket\.session_id\) \?\? code \?\? null, keepalive: pageClosing \}\)\)/);
+    expect(main).toMatch(/api\.realtimeEnd\(ticketOf\(ticket\), \{ reason: takeEndReason\(ticket\.session_id\), usage: realtime\.usage \?\? null, keepalive: pageClosing \}\)/);
     // 通話在問候決定前結束：同步辨識不再放寬
     const stop = main.slice(main.indexOf("function stopRealtime("), main.indexOf("function makeRealtimeSession("));
     expect(stop).toContain("wakeGreetingInteraction = null;");
     const callbacks = main.slice(main.indexOf("const realtimeCallbacks: RealtimeCallbacks = {"));
-    const closed = callbacks.slice(callbacks.indexOf("onClosed: (reason) => {"), callbacks.indexOf("onClosed: (reason) => {") + 200);
+    const closed = callbacks.slice(callbacks.indexOf("onClosed: (reason, code) => {"), callbacks.indexOf("onClosed: (reason, code) => {") + 400);
     expect(closed).toContain("wakeGreetingInteraction = null;");
     // 喚醒打開的同意說明：同意後以 wake_word 開始
     expect(main).toContain('startRealtime(wakeTrigger ? "wake_word" : "user", wakeTrigger ? { wake: wakeTrigger } : {})');

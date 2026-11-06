@@ -30,6 +30,7 @@ import {
   type CallAnswer,
   type CoreToolName,
   type LiveMemoryReason,
+  CALL_END_TEXT,
 } from "../shared/realtime-route.ts";
 import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { connectApiKey, type ApiKeyBridge } from "./apikey-call.ts";
@@ -38,6 +39,7 @@ import { WEB_SEARCH_TIMEOUT_MS } from "./web-search.ts";
 import { WAKE_START_RATE } from "../shared/wake.ts";
 import { MAIN_SOURCE } from "../shared/terminal.ts";
 import type { PageEndReason, VoiceCostRecord, VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
+import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
 
 // George 要的接縫：一個小的 RealtimeRoute 介面，每條路徑一個模組
 // （ApiKeyRoute＝包住不改的 RealtimeBridge；server/live-route.ts＝Codex／gpt-live-1-codex），
@@ -104,8 +106,10 @@ export interface RouteCall {
   /**
    * 可重複呼叫。live：sideband 送 session.close、中止進行中的交辦。api_key：沒有旁路時沒有事要做；
    * MEM-3 有旁路時關旁路（頁面離開時另外掛斷）。
+   * enforced（費用防護，2026-11-06）：核心自己結束（每通上限、頁面沒報到、Mac 鎖定或睡眠）：頁面可能還開著，
+   * 所以 api_key 一律向 OpenAI 掛斷（有 call ID 時）；live 和 ended 一樣送 session.close。
    */
-  close(reason: "ended" | "page_gone" | "fallback"): Promise<void>;
+  close(reason: CallCloseReason): Promise<void>;
   /** MEM-3：頁面略過、由核心處理的工具（API key 路徑帶記憶規則時）。 */
   readonly coreTools?: readonly CoreToolName[];
   /** MEM-3：這通記憶的初始狀態（/call 回應用；只有筆數與原因代碼）。 */
@@ -121,6 +125,16 @@ export interface RouteCall {
    */
   stopReply?(turn?: StopReplyTurn): void;
 }
+
+export type CallCloseReason = "ended" | "page_gone" | "fallback" | "enforced";
+
+/** 費用防護：核心自己結束通話的原因（寫進費用紀錄，也是送給頁面的 closed 原因）。 */
+export type EnforcedEndReason = "max_duration" | "client_lost" | "os_lock" | "suspend";
+
+/** 核心的每通上限比頁面多等這麼久（頁面先結束、先寫自己的原因；頁面卡住或已不在時才由核心掛斷）。 */
+export const CORE_CAP_GRACE_MS = 30_000;
+/** 頁面第一次報到之後，多久沒有再報到就結束這通（client_lost）。頁面每 15 秒報到一次。 */
+export const ALIVE_TIMEOUT_MS = 45_000;
 
 /** live 路徑上頁面 → 模型的輸入；sideband 是唯一寫給模型的管道。 */
 export interface LiveControl {
@@ -273,6 +287,10 @@ export interface RealtimeSessionsOptions {
   /** WK-02（F6）：每通工作階段結束時寫一筆費用紀錄（server/voice-cost-log.ts）；沒有時不記。 */
   /** PRO-1：發出看著說話或喚醒的互動 ID 時呼叫（核心先取天氣）；不等結果、失敗不影響開始。 */
   onGreetingStart?: () => void;
+  /** 費用防護：每通上限（毫秒；voice.json 的 realtime_max_call_s，每次連上與 view() 時讀）。沒有時用預設 20 分鐘。 */
+  maxCallMs?: () => number;
+  /** 測試用：頁面停止報到多久後結束（預設 ALIVE_TIMEOUT_MS）。 */
+  aliveTimeoutMs?: number;
   costLog?: {
     record(record: VoiceCostRecord): void;
     /** 改寫同一個 session_id 最後一筆（頁面的 no_voice／usage 晚於核心的結束才到時）。 */
@@ -322,6 +340,8 @@ interface Decision {
   wakeId: string | null;
   /** RPI-ID：開始的頁面（改路徑時沿用）。 */
   page: string;
+  /** 費用防護：macOS App 主視窗開始的（頁面報的；只決定 Mac 鎖定時要不要結束，不是授權）。改路徑時沿用。 */
+  app: boolean;
   plan: Extract<StartPlan, { kind: "start" }>;
   route: RouteId;
   at: number;
@@ -365,6 +385,10 @@ interface VoiceSession {
   clientId: string | null;
   /** RPI-ID：開始的頁面。 */
   page: string;
+  /** 費用防護：macOS App 主視窗開始的（Mac 鎖定只結束這些）。 */
+  app: boolean;
+  /** 費用防護：頁面報到過（之後 SSE 斷了不馬上掛斷，交給報到逾時決定）。 */
+  checkedIn: boolean;
   call: RouteCall | null;
   pendingHost: Map<string, PendingHost>;
   /** openUntil：卡片自己的時限；頁面的「結束」回報沒送到時，核心過了這個時間就不再當成卡還開著。 */
@@ -380,6 +404,14 @@ interface VoiceSession {
   pageEnd: { reason: PageEndReason | null; usage: VoiceUsage | null } | null;
   /** WK-02：這通綁的互動 ID（看著說話或喚醒；連線中也知道，wakeGreetingOpen 用）。 */
   interaction: string | null;
+  /** 費用防護：核心的每通上限計時（連上後）。 */
+  capTimer: ReturnType<typeof setTimeout> | null;
+  /** 費用防護：頁面第一次報到之後才有；每次報到重新倒數 ALIVE_TIMEOUT_MS。 */
+  aliveTimer: ReturnType<typeof setTimeout> | null;
+  /** 費用防護：API key 路徑頁面最近一次報到的 usage（頁面回報，不是帳單）；頁面不在時費用紀錄用它。 */
+  usage: VoiceUsage | null;
+  /** 這通的上限（毫秒；連上時讀設定）。 */
+  maxMs: number;
 }
 
 /** WK-02：頁面的 no_voice／usage 比核心看到結束（closed）晚到時，多久內還可以補進同一筆費用紀錄。 */
@@ -433,8 +465,10 @@ export class RealtimeSessions {
     const options = [this.options.routes.live?.describe(), this.options.routes.api_key?.describe()].filter((o): o is RouteOption => !!o);
     const routeModel = (id: RouteId) => this.options.routes[id]?.describe().model ?? "";
     let active: RealtimeRouteFields["active"] = null;
-    if (this.live?.call) active = { session_id: this.live.id, route: "live", billing_line: billingLine("live", this.live.call.model) };
-    else if (this.ga) active = { session_id: this.ga.id, route: "api_key", billing_line: billingLine("api_key", routeModel("api_key")) };
+    // 費用防護：連上的時間、這通的上限與頁面最近一次報到的 usage（選單列顯示通話時間與約略 tokens）。
+    const meter = (s: VoiceSession) => ({ started_at: s.connectedAt, max_call_s: Math.round(s.maxMs / 1000), usage: s.route === "api_key" ? s.usage : null, page: s.page });
+    if (this.live?.call) active = { session_id: this.live.id, route: "live", billing_line: billingLine("live", this.live.call.model), ...meter(this.live) };
+    else if (this.ga) active = { session_id: this.ga.id, route: "api_key", billing_line: billingLine("api_key", routeModel("api_key")), ...meter(this.ga) };
     return {
       preference: this.options.preference(),
       route,
@@ -470,7 +504,8 @@ export class RealtimeSessions {
    * clientId：開始的頁面的 SSE 串流；live 路徑一定要有（工具呼叫只送到這條串流）。
    */
   /** page：送出開始的頁面（X-Nous-Terminal；Mac 主視窗與一般瀏覽器是 "main"）。只用來分開各頁面的記憶候選與喚醒時窗。 */
-  start(clientId: string | null, source: RealtimeStartSource = "user", locale: Locale = "zh-TW", rebuild = false, wakeId: string | null = null, page: string = MAIN_SOURCE): StartDecision {
+  /** app：macOS App 主視窗送出的開始（費用防護：Mac 鎖定只結束這些）。 */
+  start(clientId: string | null, source: RealtimeStartSource = "user", locale: Locale = "zh-TW", rebuild = false, wakeId: string | null = null, page: string = MAIN_SOURCE, app = false): StartDecision {
     this.sweep();
     // WK-02：喚醒開始的通話每個滾動 60 秒最多 3 次（只算被接受的 wake_word 開始；其他來源不算）。
     if (source === "wake_word" && !rebuild) {
@@ -514,7 +549,7 @@ export class RealtimeSessions {
       return { ok: false, message: "即時語音無法開始：頁面沒有連上本機核心的事件串流，請重新整理後再試。", reasons: {} };
     }
     const interaction = (source === "look_to_talk" || source === "wake_word") && !rebuild ? this.issueInteraction(source, page) : null;
-    const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale), rebuild, { source, wakeId: source === "wake_word" ? wakeId : null, page });
+    const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale), rebuild, { source, wakeId: source === "wake_word" ? wakeId : null, page, app });
     if (source === "wake_word" && !rebuild) this.wakeStarts.push(this.now());
     const model = this.options.routes[plan.route]!.describe().model;
     return { ok: true, session_id: decision.id, owner: decision.owner, route: plan.route, model, billing_line: billingLine(plan.route, model), notice: plan.notice, interaction };
@@ -622,13 +657,14 @@ export class RealtimeSessions {
     interaction: string | null = null,
     locale: Locale = "zh-TW",
     rebuild = false,
-    origin: { source: RealtimeStartSource; wakeId: string | null; page?: string } = { source: "user", wakeId: null },
+    origin: { source: RealtimeStartSource; wakeId: string | null; page?: string; app?: boolean } = { source: "user", wakeId: null },
   ): Decision {
     const decision: Decision = {
       rebuild,
       source: origin.source,
       wakeId: origin.wakeId,
       page: origin.page ?? MAIN_SOURCE,
+      app: origin.app === true,
       locale,
       id: `rt_${randomUUID().replaceAll("-", "")}`,
       owner: `own_${randomBytes(24).toString("base64url")}`,
@@ -656,6 +692,8 @@ export class RealtimeSessions {
       owner: decision.owner,
       clientId: decision.clientId,
       page: decision.page,
+      app: decision.app,
+      checkedIn: false,
       call: null,
       pendingHost: new Map(),
       approval: { open: false, resolvedAt: null, openUntil: null },
@@ -667,7 +705,83 @@ export class RealtimeSessions {
       connectedAt: null,
       pageEnd: null,
       interaction: decision.interaction,
+      capTimer: null,
+      aliveTimer: null,
+      usage: null,
+      maxMs: this.maxCallMs(),
     };
+  }
+
+  private maxCallMs(): number {
+    const ms = this.options.maxCallMs?.();
+    return typeof ms === "number" && Number.isFinite(ms) && ms > 0 ? ms : DEFAULT_VOICE_PREFS.realtime_max_call_s * 1000;
+  }
+
+  /**
+   * 費用防護：連上之後開始核心的每通上限（比頁面多 CORE_CAP_GRACE_MS）。時間到時重讀設定：通話中把上限改長了，
+   * 就照新的上限再等（頁面也照新的值）；改短了由頁面照新的值結束，核心仍照連上時的值當最後防線。
+   */
+  private armCap(session: VoiceSession): void {
+    if (session.capTimer) clearTimeout(session.capTimer);
+    session.maxMs = this.maxCallMs();
+    const since = session.connectedAt ?? this.now();
+    const left = Math.max(0, since + session.maxMs + CORE_CAP_GRACE_MS - this.now());
+    const timer = setTimeout(() => {
+      session.capTimer = null;
+      if (session.closed) return;
+      const max = this.maxCallMs();
+      if (max > session.maxMs && since + max + CORE_CAP_GRACE_MS > this.now()) {
+        this.armCap(session);
+        return;
+      }
+      void this.enforce(session, "max_duration");
+    }, left);
+    timer.unref?.();
+    session.capTimer = timer;
+  }
+
+  /**
+   * 費用防護：核心自己結束一通（每通上限、頁面停止報到、Mac 鎖定或睡眠）。先告訴開始它的頁面（SSE closed，頁面拆掉通話並顯示原因），
+   * 寫費用紀錄，再掛斷（api_key 向 OpenAI hangup；live 送 session.close）。
+   */
+  private async enforce(session: VoiceSession, reason: EnforcedEndReason): Promise<void> {
+    if (session.closed) return;
+    this.options.log?.(`即時語音：${ROUTE_LOG_LABEL[session.route]}工作階段由核心結束（${reason}）`);
+    if (session.clientId) this.options.send(session.clientId, { type: "realtime.live", session_id: session.id, event: { kind: "closed", reason, message: CALL_END_TEXT[reason] } });
+    const call = session.call;
+    this.finish(session, reason);
+    await call?.close("enforced").catch(() => undefined);
+  }
+
+  /**
+   * POST /api/realtime/alive：頁面每 15 秒報到（兩條路徑；API key 路徑附這通加總的 usage）。第一次報到之後，
+   * ALIVE_TIMEOUT_MS 內沒有再報到就結束這通（client_lost）。舊的頁面從不報到，所以不會被這個檢查結束。
+   */
+  alive(sessionId: string, owner: string, usage: VoiceUsage | null = null): void {
+    const session = this.owned(sessionId, owner);
+    if (session.closed) return;
+    if (usage && session.route === "api_key") session.usage = usage;
+    session.checkedIn = true;
+    if (session.aliveTimer) clearTimeout(session.aliveTimer);
+    const timer = setTimeout(() => void this.enforce(session, "client_lost"), this.options.aliveTimeoutMs ?? ALIVE_TIMEOUT_MS);
+    timer.unref?.();
+    session.aliveTimer = timer;
+  }
+
+  /**
+   * 費用防護：Mac 鎖定或睡眠時（desktop/main.mjs 的 powerMonitor）結束通話。scope "app"：只結束 macOS App 主視窗開始的
+   * （鎖定：Mac 前的人離開了；Pi 或 Mac 上一般瀏覽器開的通話不受影響）；"all"：全部（睡眠：核心也要睡了，沒人管的通話不能留著計費）。
+   */
+  async endAll(reason: "os_lock" | "suspend", scope: "app" | "all" = "all"): Promise<void> {
+    const hit = (x: { app: boolean }) => scope === "all" || x.app;
+    for (const id of [...this.decisions.keys()]) {
+      const d = this.decisions.get(id)!;
+      if (hit(d)) {
+        this.decisions.delete(id);
+        this.retire(d.interaction);
+      }
+    }
+    await Promise.all([this.live, this.ga].filter((x): x is VoiceSession => !!x && !x.closed && hit(x)).map((x) => this.enforce(x, reason)));
   }
 
   private answer(call: RouteCall, session: VoiceSession): CallAnswer {
@@ -702,6 +816,7 @@ export class RealtimeSessions {
         }
         session.call = call;
         session.connectedAt = this.now();
+        this.armCap(session);
         this.connected(decision);
         return this.answer(call, session);
       } catch (err) {
@@ -724,6 +839,7 @@ export class RealtimeSessions {
       }
       session.call = call;
       session.connectedAt = this.now();
+      this.armCap(session);
       this.connected(decision);
       return this.answer(call, session);
     } catch (err) {
@@ -738,7 +854,7 @@ export class RealtimeSessions {
         throw err;
       }
       // 改路徑：同一個互動 ID（看著說話延續）；api_key 的記憶用 openai_realtime 同意鍵重新判斷，codex 的同意不帶過去。
-      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId, decision.interaction, decision.locale, false, { source: decision.source, wakeId: decision.wakeId, page: decision.page });
+      const next = this.decide({ kind: "start", route: "api_key", fallback: null, notice: fallback.notice }, "api_key", decision.clientId, decision.interaction, decision.locale, false, { source: decision.source, wakeId: decision.wakeId, page: decision.page, app: decision.app });
       const model = this.options.routes.api_key.describe().model;
       this.options.log?.(`即時語音：ChatGPT 方案路徑開始失敗（${err.reason}），改用 API key（這次依用量計費）`);
       throw new FallbackRequired({
@@ -827,7 +943,7 @@ export class RealtimeSessions {
   }
 
   /**
-   * POST /api/realtime/end。可重複呼叫。info：頁面說明的結束原因（只有 no_voice）與 API key 路徑加總的 usage（費用紀錄用；
+   * POST /api/realtime/end。可重複呼叫。info：頁面說明的結束原因（no_voice，費用防護起另有 idle、max_duration、hidden、os_lock、suspend）與 API key 路徑加總的 usage（費用紀錄用；
    * live 路徑的 usage 頁面拿不到，一律記 unknown）。
    */
   async end(sessionId: string, owner: string, info: { reason?: PageEndReason | null; usage?: VoiceUsage | null } = {}): Promise<void> {
@@ -855,9 +971,12 @@ export class RealtimeSessions {
     if (!recent || recent.owner !== owner || this.now() - recent.at > COST_AMEND_GRACE_MS) return;
     const record = recent.record;
     const noVoice = info.reason === "no_voice" && !record.no_voice_auto_end;
+    // 費用防護：頁面說明的原因（idle、max_duration、hidden…）只取代核心的一般原因（ended、page_gone）；核心自己的原因
+    // （max_duration、client_lost、os_lock、connection_lost…）照實保留。
+    const pageReason = info.reason && info.reason !== "no_voice" && (record.end_reason === "ended" || record.end_reason === "page_gone") ? info.reason : null;
     const usage = record.route === "api_key" && record.usage === "unknown" && info.usage ? info.usage : null;
-    if (!noVoice && !usage) return;
-    const next: VoiceCostRecord = { ...record, ...(noVoice ? { end_reason: "no_voice", no_voice_auto_end: true } : {}), ...(usage ? { usage } : {}) };
+    if (!noVoice && !usage && !pageReason) return;
+    const next: VoiceCostRecord = { ...record, ...(pageReason ? { end_reason: pageReason } : {}), ...(noVoice ? { end_reason: "no_voice", no_voice_auto_end: true } : {}), ...(usage ? { usage } : {}) };
     recent.record = next;
     try {
       this.options.costLog?.amend?.(next);
@@ -876,6 +995,13 @@ export class RealtimeSessions {
     for (const r of this.revoked.values()) if (r.clientId === clientId) r.settled = true;
     for (const session of [this.ga, this.live]) {
       if (session && session.clientId === clientId) {
+        // 費用防護：沒有旁路的 API key 通話（媒體直接在頁面和 OpenAI 之間）已經報到過：SSE 斷線可能只是瞬斷
+        // （Wi-Fi、Pi 的 autossh 重連），不馬上掛斷；頁面還在就會繼續報到，真的不在了由 45 秒的報到逾時（client_lost）掛斷。
+        if (session.route === "api_key" && session.checkedIn && !session.closed && (session.call?.coreTools?.length ?? 0) === 0) {
+          this.options.log?.("即時語音：開始它的頁面的事件串流斷了，API key 工作階段交給報到逾時決定");
+          session.clientId = null;
+          continue;
+        }
         this.options.log?.(`即時語音：開始它的頁面已離開，結束${ROUTE_LOG_LABEL[session.route]}工作階段`);
         void this.close(session, "page_gone");
       }
@@ -905,6 +1031,9 @@ export class RealtimeSessions {
   private finish(session: VoiceSession, reason = "ended"): void {
     if (session.closed) return;
     session.closed = true;
+    if (session.capTimer) clearTimeout(session.capTimer);
+    if (session.aliveTimer) clearTimeout(session.aliveTimer);
+    session.capTimer = session.aliveTimer = null;
     this.recordCost(session, reason);
     // 通話結束：綁在這通的互動 ID 不能再問候（喚醒問候期間的放寬也隨之結束）。
     for (const it of this.interactions.values()) if (it.session?.id === session.id) it.used = true;
@@ -936,9 +1065,11 @@ export class RealtimeSessions {
         ended_at: new Date(now).toISOString(),
         connected: session.connectedAt !== null,
         connected_ms: session.connectedAt === null ? 0 : Math.max(0, Math.round(now - session.connectedAt)),
-        end_reason: noVoice ? "no_voice" : reason,
+        // 費用防護：頁面說明的原因（idle、max_duration、hidden、os_lock…）優先，否則核心自己的原因。
+        end_reason: noVoice ? "no_voice" : (session.pageEnd?.reason ?? reason),
         no_voice_auto_end: noVoice,
-        usage: session.route === "api_key" && session.pageEnd?.usage ? session.pageEnd.usage : "unknown",
+        // 頁面在 /end 交的加總；頁面沒說（不在了、被核心結束）時用最近一次報到的加總。
+        usage: session.route === "api_key" ? (session.pageEnd?.usage ?? session.usage ?? "unknown") : "unknown",
         cost: "unknown",
       };
       this.recentCosts.set(session.id, { owner: session.owner, at: now, record });

@@ -122,6 +122,11 @@ While using the Pi, choose "Enter service mode (for the Pi)" in the Mac menu bar
 
 If the Pi display is not smooth, open "Settings" → "Display performance on this device" on the Pi page and choose "Full", "Balanced" or "Light". It changes only brain animation and background blur, without changing listening, playback, or voice-processing logic. Actual conversation fluency still shares the CPU and memory load. The choice is stored in the Pi's browser, and the Pi defaults to "Balanced". The same section shows the measured frames per second and draw time per frame. Details are in the [display performance validation](../../docs/validation/pi-performance-2026-11-05.en.md) (**improvement on a real Pi not measured**). This session confirmed switching all three options and persistence after reload; the tested device was left on Light. A 1280×720/60 Hz resolution trial gave no user-perceived improvement, so the original 1920×1080/about 55.758 Hz mode was restored. See the [hardware record](../../docs/validation/rpi-deployment-fixes-2026-11-05.en.md).
 
+<a id="realtime-cost-guard"></a>
+## Realtime voice cost guard
+
+Since 2026-11-06 ([validation](../../docs/validation/realtime-cost-guard-2026-11-06.en.md), **cloud fixtures only, not verified on a Pi**): the Pi page has no Mac App power events, so on the Pi realtime voice ends when the page is in the background for more than 30 s (switching to another window, minimizing Chromium) or the page is closed or reloaded; after a period without speech (menu bar "Realtime voice idle timeout", default 2 minutes); or at the per-call limit (default 20 minutes, with a warning 1 minute before). The page checks in with the Mac core over the tunnel every 15 s; if the tunnel drops, the core ends the call and hangs up within 45 s. **Turning off the Pi monitor does not end the call** (Chromium does not go into the background), so keep screen blanking off as recommended above and rely on idle and the limit. Locking the Mac does not end a Pi call; Mac sleep does. The Pi's top-right indicator and the Mac menu bar both show call time and approximate tokens (page-reported, not a bill).
+
 ## Daily operation
 
 ```bash

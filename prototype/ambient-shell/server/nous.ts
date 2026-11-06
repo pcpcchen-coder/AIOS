@@ -187,6 +187,11 @@ export interface NousHandle {
   };
   /** 終端機（Pi kiosk）心跳的連線狀態；不是服務模式開關。 */
   terminals: { status(): TerminalStatus };
+  /**
+   * 費用防護（2026-11-06）：App 主程序在 Mac 鎖定（scope "app"：只結束 App 主視窗開始的通話）或睡眠（全部）時結束即時語音
+   * （通知頁面、寫費用原因、向上游掛斷）。沒有即時語音時什麼都不做。
+   */
+  realtime: { endAll(reason: "os_lock" | "suspend", scope?: "app" | "all"): Promise<void> };
 }
 
 const LABEL = { claude: "Claude", chatgpt: "ChatGPT（Sign in with ChatGPT）", mock: "模擬（mock）" } as const;
@@ -529,6 +534,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
       },
     },
     terminals: { status: () => terminals.status() },
+    // 費用防護：Mac 鎖定（只結束 App 主視窗的通話）或睡眠（全部）時，desktop/main.mjs 經這裡結束即時語音。
+    realtime: { endAll: (reason: "os_lock" | "suspend", scope?: "app" | "all") => server.realtimeSessions?.endAll(reason, scope) ?? Promise.resolve() },
     ...(options.tasks ? { tasks: (() => {
       const ipc = createTaskIpc({ store, runner, memory, confirmDeleteBackups: options.tasks.confirmDeleteBackups, log });
       // MEM-4c：dropPlaintext＝OS 鎖定與睡眠（desktop/main.mjs 的 powerMonitor）時丟棄解密內容。

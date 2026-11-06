@@ -11,7 +11,7 @@ import { confirmLine, type LiveCallPort, type LiveMemoryPort, type RevokeWhy, ty
 import type { CallFollowUp } from "./proactive-calendar.ts";
 import { taiwanTranscript, warmTaiwan } from "../shared/zh-tw-opencc.ts";
 import { convertsLocale } from "../shared/zh-tw.ts";
-import { RouteStartError, type ApprovalSnapshot, type LiveControl, type Readiness, type RealtimeRoute, type RouteCall, type SessionContext } from "./realtime-routes.ts";
+import { RouteStartError, type ApprovalSnapshot, type CallCloseReason, type LiveControl, type Readiness, type RealtimeRoute, type RouteCall, type SessionContext } from "./realtime-routes.ts";
 
 // 即時語音的 ChatGPT 方案路徑：gpt-live-1-codex，用 Nous 自己的 Codex 登入。負責 chatgpt.com 的通話建立與
 // api.openai.com 的 sideband；網址、標頭與 frameless 的線路事件只在這個檔案（與共用的 shared/frameless.ts 解析器）。
@@ -777,7 +777,8 @@ class LiveCall implements RouteCall, LiveCallPort {
     void this.close("ended");
   }
 
-  async close(reason: "ended" | "page_gone" | "fallback"): Promise<void> {
+  /** enforced（費用防護：核心的每通上限、頁面沒報到、Mac 鎖定或睡眠）和 ended 一樣送 session.close 結束上游通話。 */
+  async close(reason: CallCloseReason): Promise<void> {
     if (this.ended) return;
     // 記憶預設選人：改路徑時還在等選定的候選交給下一通（不默默丟掉）。
     if (reason === "fallback") this.memory?.handOff?.();

@@ -8,7 +8,8 @@ import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
 import { getLocale } from "./i18n.ts";
 import { taiwanText } from "./zh-tw.ts";
 import { isPromptEcho } from "../shared/zh-tw.ts";
-import { addResponseUsage, emptyVoiceUsage, type VoiceUsage } from "../shared/voice-cost.ts";
+import { addResponseUsage, emptyVoiceUsage, type PageEndReason, type VoiceUsage } from "../shared/voice-cost.ts";
+import { CALL_MAX_TEXT, CallGuard } from "./call-guard.ts";
 
 // 即時語音模式（OpenAI Realtime）：像 ChatGPT 語音模式，語音直接對語音。
 // 麥克風音訊經 WebRTC 串流到 OpenAI，由伺服器端 VAD 判斷你何時說完；你一開口，
@@ -62,8 +63,12 @@ export interface RealtimeCallbacks {
   onIntegrationTool?(name: string, rawArgs: string): Promise<Record<string, unknown>>;
   /** 工具活動的短說明（例如「上網查詢：新竹天氣」），顯示在字幕。 */
   onToolActivity(text: string): void;
-  /** 模式因錯誤或閒置而關閉。 */
-  onClosed(reason: string): void;
+  /**
+   * 模式因錯誤、閒置或上限而關閉。code：費用防護自己結束時的原因（idle、max_duration），交給核心的費用紀錄；其他結束沒有。
+   */
+  onClosed(reason: string, code?: PageEndReason): void;
+  /** 費用防護：快到每通上限（剩下的毫秒數）；主程式顯示字幕並提示一聲。 */
+  onCallWarning?(remainingMs: number): void;
 }
 
 export type ApprovalOutcome = "said_approve" | "said_reject" | "timeout" | "dismissed" | "closed";
@@ -115,6 +120,8 @@ export interface RealtimeCoreDeps {
   cancelSpeech(): void;
   /** 說出結束原因（瀏覽器語音合成）。 */
   speak(text: string): void;
+  /** 費用防護：macOS App 主視窗：Mac 鎖定或睡眠結束時不念出原因（Mac 前沒有人）；Pi 與瀏覽器照念（可能有人在旁邊）。 */
+  quietPowerEnd?: boolean;
   /** F7：POST /api/realtime/stop-reply：手掌停止，核心旁路上這一輪還沒回來的工具結果不再請模型念出。 */
   /** turn：HIST-1 Mac F1 的本機畫面指令，只有這一輪（審查 M1）；沒有時是手掌停止。 */
   stopReply?(turn?: StopReplyTurn): Promise<void>;
@@ -130,8 +137,10 @@ export interface RealtimeCoreDeps {
 export const REBUILD_LINE = "好，已經更新了。";
 
 interface RealtimeOptions {
-  /** 多久沒有任何說話就自動結束（毫秒），避免忘記關而持續計費；之後可用 setIdleMs 改。 */
+  /** 多久沒有使用者的一輪就自動結束（毫秒），避免忘記關而持續計費；之後可用 setIdleMs 改。 */
   idleMs: number;
+  /** 每通上限（毫秒；預設 20 分鐘）；之後可用 setMaxCallMs 改。 */
+  maxCallMs?: number;
   /** 確認卡多久沒回應就自動取消（毫秒），預設 60 秒。 */
   approvalMs?: number;
   /**
@@ -158,7 +167,11 @@ export class RealtimeVoice {
   private channel: RTCDataChannel | null = null;
   private mic: MediaStream | null = null;
   private stopAudio: (() => void) | null = null;
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 費用防護：閒置（只算真的使用者一輪）與每通上限（src/call-guard.ts）。 */
+  private readonly guard: CallGuard;
+  /** 費用防護：回答真的使用者一輪的回應 ID（它們的工具結果才算一輪）。 */
+  private readonly creditedResponses = new Set<string>();
+  private lastResponseCredited = false;
   /** 一輪回覆中呼叫的工具：全部回覆後才請模型接著說。 */
   private pendingTools = 0;
   /** 本機執行的 function 工具（含 home_control）交回了結果：不用等 OpenAI 端的 MCP。 */
@@ -185,7 +198,6 @@ export class RealtimeVoice {
   /** 等待使用者語音確認的請求：一次只顯示一張確認卡，其餘排隊（兩條路徑共用的佇列）。 */
   private readonly approvals: ApprovalQueue;
 
-  private idleMs: number;
   private readonly greeting: GreetingOnce | null;
   /** session.created 之後等 GREETING_SETTLE_MS 才送招呼；使用者開口、打字、收起都會取消。 */
   private greetTimer: ReturnType<typeof setTimeout> | null = null;
@@ -240,7 +252,15 @@ export class RealtimeVoice {
     private readonly deps: RealtimeDeps,
     options: RealtimeOptions,
   ) {
-    this.idleMs = options.idleMs;
+    this.guard = new CallGuard(
+      {
+        busy: () => this.responding || this.phase === "speaking" || this.pendingTools > 0 || this.mcpPending > 0 || this.homePending > 0 || this.hostCalls > 0,
+        idle: () => this.close("一段時間沒有說話，即時語音已結束（避免持續計費）。", "idle"),
+        warn: (ms) => this.callbacks.onCallWarning?.(ms),
+        max: () => this.close(CALL_MAX_TEXT, "max_duration"),
+      },
+      { idleMs: options.idleMs, maxMs: options.maxCallMs },
+    );
     this.greeting = options.greeting ?? null;
     this.rebuild = options.rebuild === true;
     this.rebuildLine = options.rebuildLine ?? REBUILD_LINE;
@@ -251,7 +271,7 @@ export class RealtimeVoice {
         generation: () => this.generation,
         notify: (text) => this.notify(text),
         addContext: (text) => this.addContext(text),
-        resetIdle: () => this.resetIdle(),
+        resetIdle: () => this.guard.activity(),
         pendingChanged: (kind, delta) => {
           if (kind === "mcp") this.mcpPending = delta > 0 ? this.mcpPending + 1 : Math.max(0, this.mcpPending - 1);
           else this.homePending = delta > 0 ? this.homePending + 1 : Math.max(0, this.homePending - 1);
@@ -292,9 +312,21 @@ export class RealtimeVoice {
    * 同樣的值不延長倒數；沒開著時只記下來，下次連線才用。
    */
   setIdleMs(ms: number): void {
-    if (ms === this.idleMs) return;
-    this.idleMs = ms;
-    if (this.on && this.idleTimer) this.resetIdle();
+    this.guard.setIdleMs(ms);
+  }
+
+  /** 每通上限改了（voice.json）：進行中的通話從連上的時間重新算。 */
+  setMaxCallMs(ms: number): void {
+    this.guard.setMaxMs(ms);
+  }
+
+  /** 費用防護：連上的時間（epoch ms）；沒在通話或還在連線時為 null。 */
+  get callStartedAt(): number | null {
+    return this.guard.startedAt;
+  }
+
+  get maxCallMs(): number {
+    return this.guard.maxCallMs;
   }
 
   get current(): RealtimePhase {
@@ -370,7 +402,8 @@ export class RealtimeVoice {
       const answer = await this.deps.exchange(offer.sdp ?? "");
       if (generation !== this.generation) return;
       await peer.setRemoteDescription({ type: "answer", sdp: answer });
-      this.resetIdle();
+      // 連上：開始閒置倒數與每通上限。
+      this.guard.start();
     } catch (err) {
       if (generation !== this.generation) return;
       const name = (err as { name?: string }).name;
@@ -464,7 +497,7 @@ export class RealtimeVoice {
       return;
     }
     if (!this.channel) return;
-    this.resetIdle();
+    this.guard.activity();
     if (this.responding) this.interrupt();
     this.newTurn();
     this.send({ type: "conversation.item.create", item: { type: "message", role: "user", content: [{ type: "input_text", text }] } });
@@ -563,9 +596,9 @@ export class RealtimeVoice {
       }
       case "input_audio_buffer.speech_started":
         // 使用者先開口：這次不打招呼（已經送出的招呼照一般插話處理）。
+        // 費用防護：開口事件不重新倒數（電視、旁人的聲音也會觸發）；要等真的逐字稿。
         this.skipGreeting();
         this.newTurn();
-        this.resetIdle();
         this.setPhase("hearing");
         break;
       case "input_audio_buffer.speech_stopped":
@@ -578,6 +611,8 @@ export class RealtimeVoice {
           // 雜音時上游把語音辨識的 prompt 當逐字稿吐回來：不是使用者說的話，丟掉。
           if (isPromptEcho(heard)) break;
           const transcript = heard.trim();
+          // 費用防護：真的使用者一輪（非空、不是 prompt 回吐）才重新倒數。
+          this.guard.activity();
           this.callbacks.onUserTranscript(transcript);
           // HIST-1 Mac F1：本機已執行畫面指令：這一輪不讓模型回答（伺服器 VAD 已建立或正要建立的回應一併取消）。
           if (this.callbacks.onLocalCommand?.(transcript)) this.quietLocalCommand();
@@ -678,7 +713,15 @@ export class RealtimeVoice {
         this.usageTotal = addResponseUsage(this.usageTotal ?? emptyVoiceUsage(), (event.response as { usage?: unknown } | undefined)?.usage);
         this.responding = false;
         this.currentResponse = null;
-        this.resetIdle();
+        // 費用防護：只有真的使用者一輪之後的第一個回覆結束才重新倒數（雜音觸發的回覆不延長）。
+        // 記下回答真的使用者一輪的回覆：它的工具結果才算一輪。
+        {
+          const answered = this.guard.replyDone();
+          const doneId = (event.response as { id?: unknown } | undefined)?.id;
+          if (answered && typeof doneId === "string") this.creditedResponses.add(doneId);
+          this.lastResponseCredited = answered;
+          while (this.creditedResponses.size > 64) this.creditedResponses.delete(this.creditedResponses.values().next().value!);
+        }
         if (this.phase === "thinking") this.setPhase("listening");
         if (this.endRequested) {
           // 道別的語音可能還在播放；播完（output_audio_buffer.stopped）就結束，沒有聲音時稍等後結束。
@@ -738,11 +781,21 @@ export class RealtimeVoice {
         if (generation !== this.generation) return;
         this.send({ type: "conversation.item.create", item: { type: "function_call_output", call_id: callId, output: JSON.stringify(output) } });
         this.pendingTools -= 1;
+        // 工具結果回來：只有回答真的使用者一輪的回覆（或還在進行、正在回答使用者的回覆）的工具才算一輪；
+        // 雜音觸發的回覆呼叫的工具不延長通話。
+        if (this.responseCredited(responseId)) this.guard.activity();
         // F7：手掌停止之後才回來：結果已交回模型當背景，不請模型念出（functionsCalled 已在 stopReply 清掉）；排隊的通知照常。
         if (epoch !== this.replyEpoch || this.isStopped(responseId)) console.info("[realtime] 停止回覆之後才回來的工具結果：只交回、不念出");
         this.continueAfterTools();
       },
     });
+  }
+
+  /** 費用防護：這個回應是在回答真的使用者一輪？沒有 response_id 時看最近一個結束的回應。 */
+  private responseCredited(responseId: string | null): boolean {
+    if (responseId && this.creditedResponses.has(responseId)) return true;
+    if (responseId && responseId === this.currentResponse) return this.guard.credited;
+    return responseId === null && (this.lastResponseCredited || (this.responding && this.guard.credited));
   }
 
   /** F7：這個回應被手掌停止了？有 response_id 時看 stoppedResponses（不受開口先後影響）；沒有時退回 quietTurn。 */
@@ -821,7 +874,8 @@ export class RealtimeVoice {
           break;
         }
         // 旁路斷線：核心已經掛斷；結束、說出原因。不改路徑。
-        if (event.reason !== "ended") core.speak(event.message);
+        // 費用防護：App 主視窗在 Mac 鎖定或睡眠時不念出原因（Mac 前沒有人）；Pi 與瀏覽器、其他原因照舊念出。
+        if (event.reason !== "ended" && !(core.quietPowerEnd && (event.reason === "os_lock" || event.reason === "suspend"))) core.speak(event.message);
         this.close(event.message);
         break;
       case "started":
@@ -839,7 +893,7 @@ export class RealtimeVoice {
     const post = (output: Record<string, unknown>) => {
       this.hostCalls = Math.max(0, this.hostCalls - 1);
       if (generation !== this.generation) return;
-      this.resetIdle();
+      this.guard.activity();
       void this.approvalSync.then(() => (generation === this.generation ? core.hostResult(call.call_id, output) : undefined)).catch(() => undefined);
     };
     void executeRealtimeTool(call.name, call.arguments, {
@@ -922,28 +976,19 @@ export class RealtimeVoice {
     stop?.();
   }
 
-  private resetIdle(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => {
-      if (this.responding || this.phase === "speaking" || this.pendingTools > 0 || this.mcpPending > 0 || this.homePending > 0 || this.hostCalls > 0) {
-        this.resetIdle();
-        return;
-      }
-      this.close("一段時間沒有說話，即時語音已結束（避免持續計費）。");
-    }, this.idleMs);
-  }
-
-  private close(reason: string): void {
+  private close(reason: string, code?: PageEndReason): void {
     if (!this.on) return;
     this.generation++;
     this.teardown();
     this.setPhase("off");
-    this.callbacks.onClosed(reason);
+    if (code) this.callbacks.onClosed(reason, code);
+    else this.callbacks.onClosed(reason);
   }
 
   private teardown(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = null;
+    this.guard.stop();
+    this.creditedResponses.clear();
+    this.lastResponseCredited = false;
     if (this.endTimer) clearTimeout(this.endTimer);
     this.endTimer = null;
     this.endRequested = false;

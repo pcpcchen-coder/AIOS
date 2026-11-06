@@ -5,6 +5,9 @@ import { CONNECTING_SPEECH_HINT, EARLY_SPEECH_RMS, EarlySpeech, earlySpeechLogLi
 import type { GreetingOnce, RealtimeSession } from "./realtime-session.ts";
 import { FallbackOfferError, GREETING_SETTLE_MS } from "./realtime-session.ts";
 import { ApprovalQueue, executeRealtimeTool } from "./realtime-tools.ts";
+import { CALL_MAX_TEXT, CallGuard } from "./call-guard.ts";
+import { isPromptEcho } from "../shared/zh-tw.ts";
+import type { PageEndReason } from "../shared/voice-cost.ts";
 import { normalizeSpeech } from "./echo.ts";
 import { getLocale } from "./i18n.ts";
 import { taiwanText } from "./zh-tw.ts";
@@ -24,7 +27,8 @@ export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "releaseM
   hostResult(callId: string, output: Record<string, unknown>): Promise<void>;
   /** POST /api/realtime/approval；失敗時 LiveVoice 會再試一次。 */
   approval(report: ApprovalReport): Promise<void>;
-  end(): Promise<void>;
+  /** POST /api/realtime/end；reason：費用防護自己結束時的原因（idle、max_duration），交給核心的費用紀錄。 */
+  end(reason?: PageEndReason): Promise<void>;
   /** 只收這個工作階段的 SSE realtime.host／realtime.live。回傳取消訂閱。 */
   subscribe(handlers: { host(call: HostCall): void; core(event: LiveCoreEvent): void }): () => void;
   /**
@@ -39,6 +43,8 @@ export interface LiveDeps extends Pick<RealtimeDeps, "getMicrophone" | "releaseM
   setMuted(muted: boolean): void;
   /** 說出結束原因（瀏覽器語音合成）。 */
   speak(text: string): void;
+  /** 費用防護：macOS App 主視窗：Mac 鎖定或睡眠結束時不念出原因（Mac 前沒有人）；Pi 與瀏覽器照念。 */
+  quietPowerEnd?: boolean;
   /** MEM-2：記憶撤銷後的停播回報（POST /api/realtime/stopped）；回傳核心是否採用。 */
   stopped?(evidence: StopEvidence): Promise<boolean>;
   /** MEM-2：播放元素在停播後是不是已暫停（核對用）。 */
@@ -82,7 +88,10 @@ export class LiveVoice implements RealtimeSession {
   private stopAudio: (() => void) | null = null;
   private stopLevel: (() => void) | null = null;
   private unsubscribe: (() => void) | null = null;
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 費用防護：閒置（只算真的使用者一輪）與每通上限（src/call-guard.ts）。 */
+  private readonly guard: CallGuard;
+  /** 費用防護：這個回覆的助理整句逐字稿已到、聲音還在播：說完時算回覆結束。 */
+  private replyFinished = false;
   private endTimer: ReturnType<typeof setTimeout> | null = null;
   private generation = 0;
   /** 逐字稿轉台灣繁體用的語言：開始這次通話時固定。 */
@@ -126,7 +135,6 @@ export class LiveVoice implements RealtimeSession {
   private readonly unmatched: Record<TranscriptSource, Map<string, number[]>> = { channel: new Map(), core: new Map() };
   /** 確認卡狀態的回報要先於工具結果到達核心。 */
   private approvalSync: Promise<void> = Promise.resolve();
-  private idleMs: number;
   /** 看著說話開始的工作階段：進入聆聽後請核心送一句招呼（核心組句，用 session.context.append speakable，同 OpenClaw triggerGreeting）。 */
   private readonly greeting: GreetingOnce | null;
   /** 進入聆聽之後等 GREETING_SETTLE_MS 才送招呼；使用者逐字稿（含未完成的）、打字、收起都會取消。 */
@@ -143,9 +151,17 @@ export class LiveVoice implements RealtimeSession {
   constructor(
     private readonly callbacks: RealtimeCallbacks,
     private readonly deps: LiveDeps,
-    options: { idleMs: number; approvalMs?: number; greeting?: GreetingOnce | null; earlySpeechRms?: number },
+    options: { idleMs: number; maxCallMs?: number; approvalMs?: number; greeting?: GreetingOnce | null; earlySpeechRms?: number },
   ) {
-    this.idleMs = options.idleMs;
+    this.guard = new CallGuard(
+      {
+        busy: () => this.speaking || this.delegations.size > 0 || this.hostCalls > 0 || this.homePending > 0,
+        idle: () => this.close("一段時間沒有說話，即時語音已結束（避免持續使用額度）。", true, "idle"),
+        warn: (ms) => this.callbacks.onCallWarning?.(ms),
+        max: () => this.close(CALL_MAX_TEXT, true, "max_duration"),
+      },
+      { idleMs: options.idleMs, maxMs: options.maxCallMs },
+    );
     this.earlySpeechRms = options.earlySpeechRms ?? EARLY_SPEECH_RMS;
     this.greeting = options.greeting ?? null;
     // 審查 M2：確認卡（Action Gate）出現時要聽得到模型說明：本機指令的靜音結束。
@@ -161,7 +177,7 @@ export class LiveVoice implements RealtimeSession {
         generation: () => this.generation,
         notify: (text) => this.notify(text),
         addContext: (text) => this.addContext(text),
-        resetIdle: () => this.resetIdle(),
+        resetIdle: () => this.guard.activity(),
         pendingChanged: (kind, delta) => {
           if (kind === "home") this.homePending = Math.max(0, this.homePending + delta);
         },
@@ -200,9 +216,20 @@ export class LiveVoice implements RealtimeSession {
   }
 
   setIdleMs(ms: number): void {
-    if (ms === this.idleMs) return;
-    this.idleMs = ms;
-    if (this.on && this.idleTimer) this.resetIdle();
+    this.guard.setIdleMs(ms);
+  }
+
+  setMaxCallMs(ms: number): void {
+    this.guard.setMaxMs(ms);
+  }
+
+  /** 費用防護：連上的時間（epoch ms）；沒在通話或還在連線時為 null。 */
+  get callStartedAt(): number | null {
+    return this.guard.startedAt;
+  }
+
+  get maxCallMs(): number {
+    return this.guard.maxCallMs;
   }
 
   /** 和 RealtimeVoice.start 一樣：麥克風 → peer → oai-events → offer → 核心 → answer；再加上核心事件與音量。 */
@@ -267,7 +294,8 @@ export class LiveVoice implements RealtimeSession {
       const answer = await this.deps.exchange(offer.sdp ?? "");
       if (generation !== this.generation) return;
       await peer.setRemoteDescription({ type: "answer", sdp: answer });
-      this.resetIdle();
+      // 連上：開始閒置倒數與每通上限。
+      this.guard.start();
     } catch (err) {
       if (generation !== this.generation) return;
       if (err instanceof FallbackOfferError && err.offer.fallback) {
@@ -326,7 +354,7 @@ export class LiveVoice implements RealtimeSession {
       this.queuedText.push(text);
       return;
     }
-    this.resetIdle();
+    this.guard.activity();
     this.endQuiet();
     this.approvals.check(text);
     void this.deps.input("user_text", text).catch(() => undefined);
@@ -404,8 +432,8 @@ export class LiveVoice implements RealtimeSession {
       if (role === "user") {
         // 使用者又開口（不是本機指令那一句晚到的片段）：靜音結束，新的一輪照常念。
         if (this.quiet && !this.quiet.text.includes(normalizeSpeech(clean))) this.endQuiet();
+        // 費用防護：未完成的逐字稿不重新倒數（要等完整的一句）。
         this.noteUserStart();
-        this.resetIdle();
         if (this.phase === "listening") this.setPhase("hearing");
       } else {
         // HIST-1 Mac F1（審查 M3）：助理說到一半的文字（回音判斷用；使用者逐字稿可能比助理的整句先到）。
@@ -429,7 +457,8 @@ export class LiveVoice implements RealtimeSession {
       this.callbacks.onUserTranscript(clean);
       const local = this.callbacks.onLocalCommand?.(clean) === true;
       this.approvals.check(clean);
-      this.resetIdle();
+      // 費用防護：完整、不是 prompt 回吐的使用者逐字稿才算一輪。
+      if (!isPromptEcho(clean)) this.guard.activity();
       if (local) this.quietLocalCommand(clean);
       else if (this.phase === "hearing" || this.phase === "listening") this.setPhase("thinking");
       if (isLocalGoodbye(clean)) this.requestEnd();
@@ -437,6 +466,9 @@ export class LiveVoice implements RealtimeSession {
     }
     // HIST-1 Mac F1：本機指令那一輪的模型回覆已靜音：字幕也不顯示（否則畫面上像是回答了兩次）。審查 M2：只有這一輪的回覆；
     // 之後的（等聲音尾巴時又來一則）照常顯示並恢復聲音。這一輪自己的交辦還沒結束時，等它的結果也念完。
+    // 費用防護：這個回覆的整句到了：聲音已經停了就馬上算回覆結束，還在說就等說完。
+    if (this.speaking) this.replyFinished = true;
+    else this.guard.replyDone();
     if (this.quiet === null) this.callbacks.onAssistantTranscript(clean);
     else if (this.quiet.draining) {
       this.endQuiet();
@@ -481,9 +513,11 @@ export class LiveVoice implements RealtimeSession {
         // F10：上游的開口事件（資料通道有送時）：和 API key 路徑的 speech_started 一樣，這次不打招呼。
         this.skipGreeting();
         this.noteUserStart();
-        // HIST-1 Mac F1：使用者又開口：本機指令的靜音結束。
+        // HIST-1 Mac F1：使用者又開口：本機指令的靜音結束。費用防護：開口事件不重新倒數（電視、旁人的聲音也會觸發），
+        // 上一輪的 credit 也作廢（真的使用者會再有完整逐字稿）。
+        this.guard.dropCredit();
+        this.replyFinished = false;
         this.endQuiet();
-        this.resetIdle();
         if (this.phase === "listening") this.setPhase("hearing");
         break;
       case "audio.cleared":
@@ -525,7 +559,7 @@ export class LiveVoice implements RealtimeSession {
           if (this.quiet && !this.quiet.own.has(event.id)) this.endQuiet();
           this.delegations.delete(event.id);
           this.delegationStartedAt.delete(event.id);
-          this.resetIdle();
+          this.guard.activity();
         }
         break;
       case "tool_unknown":
@@ -554,7 +588,8 @@ export class LiveVoice implements RealtimeSession {
           break;
         }
         // sideband 斷線、登入失效、時間到：結束、拆掉 peer、顯示並說出原因。不改路徑。
-        if (event.reason !== "ended") this.deps.speak(event.message);
+        // 費用防護：App 主視窗在 Mac 鎖定或睡眠時不念出原因（Mac 前沒有人）；Pi 與瀏覽器、其他原因照舊念出。
+        if (event.reason !== "ended" && !(this.deps.quietPowerEnd && (event.reason === "os_lock" || event.reason === "suspend"))) this.deps.speak(event.message);
         this.close(event.message, false);
         break;
     }
@@ -603,7 +638,7 @@ export class LiveVoice implements RealtimeSession {
     const post = (output: Record<string, unknown>) => {
       this.hostCalls = Math.max(0, this.hostCalls - 1);
       if (generation !== this.generation) return;
-      this.resetIdle();
+      this.guard.activity();
       // 確認卡的狀態先送到，核心才知道「確認執行」是在回答這張卡。
       void this.approvalSync
         .then(() => (generation === this.generation ? this.deps.hostResult(call.call_id, output) : undefined))
@@ -651,7 +686,12 @@ export class LiveVoice implements RealtimeSession {
         if (loud) {
           if (this.phase !== "connecting") this.setPhase("speaking");
         } else {
-          this.resetIdle();
+          // 費用防護：回答真的使用者一輪的回覆，每段說完都重新倒數（長回覆中間的停頓不會讓閒置在回覆中途到期）；
+          // 助理的整句逐字稿到了才算這個回覆結束（用掉 credit）。
+          if (this.replyFinished) {
+            this.replyFinished = false;
+            this.guard.replyDone();
+          } else this.guard.replyGap();
           if (this.phase === "speaking") this.setPhase(this.delegations.size ? "thinking" : "listening");
         }
       }
@@ -688,30 +728,20 @@ export class LiveVoice implements RealtimeSession {
     stop?.();
   }
 
-  private resetIdle(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => {
-      if (this.speaking || this.delegations.size > 0 || this.hostCalls > 0 || this.homePending > 0) {
-        this.resetIdle();
-        return;
-      }
-      this.close("一段時間沒有說話，即時語音已結束（避免持續使用額度）。");
-    }, this.idleMs);
-  }
-
-  /** ended：核心已經知道（closed 事件）時不用再叫 end。 */
-  private close(reason: string, tellCore = true): void {
+  /** ended：核心已經知道（closed 事件）時不用再叫 end。code：費用防護自己結束時的原因。 */
+  private close(reason: string, tellCore = true, code?: PageEndReason): void {
     if (!this.on) return;
     this.generation++;
     this.teardown();
     this.setPhase("off");
-    if (tellCore) void this.deps.end().catch(() => undefined);
-    this.callbacks.onClosed(reason);
+    if (tellCore) void (code ? this.deps.end(code) : this.deps.end()).catch(() => undefined);
+    if (code) this.callbacks.onClosed(reason, code);
+    else this.callbacks.onClosed(reason);
   }
 
   private teardown(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = null;
+    this.guard.stop();
+    this.replyFinished = false;
     if (this.endTimer) clearTimeout(this.endTimer);
     this.endTimer = null;
     this.endRequested = false;

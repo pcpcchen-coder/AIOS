@@ -2,6 +2,7 @@
 // 這裡沒有任何線路格式、權杖或帳號 ID；線路細節只在 server/live-route.ts 與 server/codex-responses.ts。
 
 import type { Task } from "./types.ts";
+import type { VoiceUsage } from "./voice-cost.ts";
 
 /** 兩條路徑。標籤、計費、聲音的表都以這份清單為鍵。 */
 export const ROUTE_IDS = ["live", "api_key"] as const;
@@ -123,8 +124,12 @@ export interface RealtimeRouteFields {
   routes: RouteOption[];
   /** 沒有接上 ChatGPT 方案路徑（測試或舊設定）時為 null。 */
   live_account: LiveAccountInfo | null;
-  /** 正在進行的工作階段（偏好改了也維持到它結束）。 */
-  active: null | { session_id: string; route: RouteId; billing_line: string };
+  /**
+   * 正在進行的工作階段（偏好改了也維持到它結束）。費用防護（2026-11-06）另帶：started_at（連上的時間，epoch ms；連線中為 null）、
+   * max_call_s（這通的上限秒數）、usage（API key 路徑頁面最近一次報到的加總，不是帳單；ChatGPT 方案與還沒報到時為 null）、
+   * page（開始的頁面：Mac 主視窗與一般瀏覽器是 "main"，終端機是識別碼）。
+   */
+  active: null | { session_id: string; route: RouteId; billing_line: string; started_at?: number | null; max_call_s?: number; usage?: VoiceUsage | null; page?: string };
 }
 
 /** POST /api/realtime/start 的回答：開麥克風前就決定好。 */
@@ -277,7 +282,25 @@ export type LiveCoreEvent =
   /** rebuild：MEM-2 撤銷記憶後頁面要自動開一通新的（MEM-3：走被撤銷那通的路徑、沒有備援、不問候、第一句是固定句）。 */
   | { kind: "closed"; reason: LiveCloseReason; message: string; rebuild?: boolean };
 
-export type LiveCloseReason = "ended" | "expired" | "connection_lost" | "auth" | "usage_limit" | "error" | "page_gone" | "memory_revoked";
+/**
+ * 費用防護（2026-11-06）：max_duration（核心的每通上限）、client_lost（頁面停止報到）、os_lock／suspend（App 螢幕鎖定、睡眠）。
+ * 頁面把不認得的原因當成一般結束（說出並顯示訊息）。
+ */
+export type LiveCloseReason = "ended" | "expired" | "connection_lost" | "auth" | "usage_limit" | "error" | "page_gone" | "memory_revoked" | "max_duration" | "client_lost" | "os_lock" | "suspend";
+
+/**
+ * 費用防護結束通話時的字幕（頁面與核心共用；英文在 shared/messages.en.json）。兩條路徑都用，所以不說「計費」或「額度」。
+ * warn：快到上限時（{0}＝上限分鐘數）。
+ */
+export const CALL_END_TEXT = {
+  max_duration: "已達通話上限，即時語音已結束。",
+  client_lost: "開始通話的頁面沒有回應，即時語音已結束。",
+  os_lock: "螢幕鎖定，即時語音已結束。",
+  suspend: "電腦進入睡眠，即時語音已結束。",
+  hidden: "頁面已在背景超過 30 秒，即時語音已結束。",
+  gone: "本機核心已結束這通即時語音。",
+  warn: "通話快滿 {0} 分鐘，一分鐘後會自動結束",
+} as const;
 
 /** realtime.host／realtime.live：MEM-3 起兩條路徑都會用（API key 路徑只在帶記憶規則、旁路接上時才有）。 */
 export type RealtimeServerEvent =
