@@ -12,6 +12,7 @@ import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } f
 import { callMeterText } from "../shared/call-meter.ts";
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
+import { durationLabel, MEMORIES_STATE_TEXT, MEMORIES_TEXT, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
 import { PROACTIVE_TEXT, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView, type WeatherFetchState, type CalendarFetchState } from "../shared/proactive.ts";
 import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
@@ -44,6 +45,8 @@ export interface ViewActions {
   updateAudio?(patch: AudioPrefsPatch): void;
   /** PRO-1「主動提醒」。 */
   updateProactive?(patch: ProactivePrefsPatch): void;
+  /** MEMO-1「回憶模式」。 */
+  updateMemories?(patch: MemoriesPrefsPatch): void;
   /** SP-1：重新檢查整合服務狀態。 */
   refreshIntegrations?(): void;
   /** VCR-2：設定頁「語音中繼（實驗）」的按鈕（沒有時只畫狀態、按鈕停用）。 */
@@ -462,6 +465,7 @@ export function renderSettings(
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
+    settings.memories && renderMemoriesSettings(settings.memories, actions),
     settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
     settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
     // 家人辨識只在 macOS App（加密保存需要 safeStorage）；瀏覽器版照實說不可用，不提供任何操作。
@@ -501,6 +505,8 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     performance && renderPerformanceSettings(performance, actions),
     // PRO-1：選單列「主動提醒」與這裡都能改，寫入同一個 proactive.json。
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
+    // MEMO-1：選單列「回憶模式」與這裡都能改，寫入同一個 memories.json。
+    settings.memories && renderMemoriesSettings(settings.memories, actions),
     settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
     settings.voice_relay === true && voiceRelay && renderVoiceRelay(voiceRelay, actions),
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
@@ -860,6 +866,47 @@ export function renderProactiveSettings(view: ProactiveSettingsView, actions: Vi
     !view.place && h("p", { class: "muted small" }, t(PROACTIVE_TEXT.noPlace)),
     h("p", { class: "muted small", role: "status" }, t(PROACTIVE_STATE[view.weather.state])),
     view.calendar && h("p", { class: "muted small", role: "status" }, t(CALENDAR_STATE[view.calendar.state])),
+  );
+}
+
+/** MEMO-1「回憶模式」：總開關、影片聲音、停留與閒置秒數、來源狀態（只有數量）。改了就保存（POST /api/settings/memories）。 */
+export function renderMemoriesSettings(view: MemoriesSettingsView, actions: ViewActions): HTMLElement {
+  const prefs = view.prefs;
+  const list = h("ul", { class: "pref-list" });
+  const toggle = (label: string, note: string, on: boolean, patch: MemoriesPrefsPatch, enabled = true) => {
+    const b = button(on ? "開" : "關", () => actions.updateMemories?.(patch), on ? "btn--primary" : "");
+    b.setAttribute("aria-pressed", String(on));
+    b.setAttribute("aria-label", t("{0}：{1}", t(label), on ? t("開") : t("關")));
+    b.disabled = !actions.updateMemories || !enabled;
+    list.append(h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label)), h("span", { class: "muted small" }, t(note))), b));
+  };
+  const select = (label: string, options: readonly number[], current: number, patch: (value: number) => MemoriesPrefsPatch) => {
+    const el = h("select", { "aria-label": t(label) }) as HTMLSelectElement;
+    for (const n of options) {
+      const d = durationLabel(n);
+      const opt = h("option", { value: String(n) }, t(d.text, d.value)) as HTMLOptionElement;
+      if (n === current) {
+        opt.setAttribute("selected", "");
+        opt.selected = true;
+      }
+      el.append(opt);
+    }
+    el.disabled = !actions.updateMemories || !prefs.enabled;
+    el.addEventListener("change", () => {
+      if (Number(el.value) !== current) actions.updateMemories?.(patch(Number(el.value)));
+    });
+    list.append(h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label))), el));
+  };
+  toggle(MEMORIES_TEXT.enabled, MEMORIES_TEXT.enabledNote, prefs.enabled, { enabled: !prefs.enabled });
+  toggle(MEMORIES_TEXT.videoSound, MEMORIES_TEXT.videoSoundNote, prefs.video_sound, { video_sound: !prefs.video_sound }, prefs.enabled);
+  select(MEMORIES_TEXT.dwell, view.dwell_options, prefs.dwell_s, (v) => ({ dwell_s: v as MemoriesSettingsView["prefs"]["dwell_s"] }));
+  select(MEMORIES_TEXT.idle, view.idle_options, prefs.idle_s, (v) => ({ idle_s: v as MemoriesSettingsView["prefs"]["idle_s"] }));
+  return h(
+    "section",
+    { class: "camera-settings memories-settings" },
+    h("h3", {}, t(MEMORIES_TEXT.group)),
+    list,
+    h("p", { class: "muted small", role: "status" }, t(MEMORIES_STATE_TEXT[view.source.state], view.source.photos, view.source.videos)),
   );
 }
 

@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "6ec228724a49781cf29917abebcb382a7386aab8a841c31eb1831e475f63a7df",
-      "translationSha256": "a1329224651c7b1329bdf5243b1edf7ef92d1655741e9c82f33c5343d82f4c82"
+      "sourceSha256": "d29f86368089519ec63b1a33b03b5477432929828661229878756ec0941c1c57",
+      "translationSha256": "1a78e59de5677e012baf5c8a8a768dfcedb30547c8b0b5a62a5313a332fad650"
     },
     {
       "source": "docs/README.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "0e1d74954efdfb79f0b368c3e0f23d54eecaa0c92d61032397dbef6bb747c19d",
-      "translationSha256": "66e478f614ecec31ab0d6dd3670edbead9a305b1e3f70ad945974bd53369f9bd"
+      "sourceSha256": "0d42d009c0a762bad2197ac1a3cfde65a935f950943c18509bc778e6ee9ab72a",
+      "translationSha256": "5496b30d6424d6957aaa262e7b318b11e34c814cbe202058484cc4e63ade9342"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -510,6 +510,13 @@
       "translation": "docs/validation/mail-1-gog-self-2026-11-04.en.md",
       "sourceSha256": "8a008ab721ee167c28d7d4cbfa85065a3c2f016d04c7c2aa68ccf33bf933130c",
       "translationSha256": "24095f7bd33eebbce91a00ba5236c03132a292e746b0a49ff3867c399b7e43b5"
+    },
+    {
+      "source": "docs/validation/memories-mode-2026-11-06.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/memories-mode-2026-11-06.en.md",
+      "sourceSha256": "761318a0e06384c3f43ca9958b76528ae85584dbc0344b874af3e114c554ad4a",
+      "translationSha256": "0c0c15444389ab55c897dff14dbc1d1c55283e3f050a0cbc44ce2f29e89653ea"
     },
     {
       "source": "docs/validation/memory-mem0-2026-10-26.md",
@@ -781,8 +788,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "4a3278b9c370259a8905dd1c35844e70f9fb90849c2eebba9ab42f230ff5588c",
-      "translationSha256": "0944dbc38a8be8c7cba02de72be06d55895d5151d9c58d02e33d6fae618020ef"
+      "sourceSha256": "bc539ee1fc2ed7aabf36206598eb070e368667e39991051290698e9c53a17761",
+      "translationSha256": "b4c230e5495e3204f0416f1f3d996db81cb48e372e3a7d47f9da11761748aa39"
     }
   ]
 }

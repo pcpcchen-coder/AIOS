@@ -1476,3 +1476,131 @@ body.history-page {
 .voice-relay-intent input[type="number"] {
   width: 6em;
 }
+
+/* ───── 回憶模式（MEMO-1）：電子腦縮到左下角變暗，照片從電子腦的位置浮現 ───── */
+
+#brain {
+  transform-origin: 6% 94%;
+  transition: transform 1.2s ease, opacity 1.2s ease;
+}
+body[data-memories="showing"] #brain {
+  transform: scale(0.32);
+  opacity: 0.45;
+}
+
+.memories {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: opacity 250ms ease;
+}
+.memories[data-state="collapsing"] {
+  opacity: 0;
+  pointer-events: none;
+}
+.memories-stage {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+.memories-slot {
+  display: grid;
+  place-items: center;
+}
+.memories-item {
+  display: block;
+  max-width: 86vw;
+  max-height: 78vh;
+  object-fit: contain;
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(92, 225, 255, 0.22), 0 0 42px rgba(92, 225, 255, 0.18);
+  transform-origin: center;
+}
+.memories-item[data-phase="loading"] {
+  opacity: 0;
+}
+.memories-item[data-phase="emerging"] {
+  animation: memories-emerge 1.4s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.memories-item[data-phase="holding"] {
+  animation: memories-hold var(--memories-dwell, 8s) linear both;
+}
+.memories-item[data-phase="receding"] {
+  animation: memories-recede 1s ease-in both;
+}
+@keyframes memories-emerge {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translate(var(--memories-origin-x, 0), var(--memories-origin-y, 0)) scale(0.06);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+}
+@keyframes memories-hold {
+  from { transform: scale(1); }
+  to { transform: scale(1.03); }
+}
+@keyframes memories-recede {
+  from {
+    opacity: 1;
+    transform: scale(1.03);
+  }
+  to {
+    opacity: 0;
+    transform: translate(var(--memories-origin-x, 0), var(--memories-origin-y, 0)) scale(0.06);
+  }
+}
+.memories-caption {
+  min-height: 1.3em;
+  max-width: 86vw;
+  text-align: center;
+  font-size: clamp(2.2rem, 4.2vw, 3.4rem);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.75), 0 0 28px rgba(92, 225, 255, 0.25);
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+.memories-caption[data-visible="yes"] {
+  opacity: 1;
+}
+
+/* 減少動態效果：電子腦只在原地變暗，照片只淡入淡出，說明直接出現。 */
+.memories[data-motion="reduced"] .memories-item[data-phase="emerging"] {
+  animation: memories-fade-in 400ms ease both;
+}
+.memories[data-motion="reduced"] .memories-item[data-phase="holding"] {
+  animation: none;
+}
+.memories[data-motion="reduced"] .memories-item[data-phase="receding"] {
+  animation: memories-fade-out 400ms ease both;
+}
+.memories[data-motion="reduced"] .memories-caption {
+  transition: none;
+}
+@keyframes memories-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes memories-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #brain {
+    transition: opacity 400ms ease;
+  }
+  body[data-memories="showing"] #brain {
+    transform: none;
+  }
+}
