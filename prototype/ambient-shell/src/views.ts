@@ -12,7 +12,7 @@ import { VOICE_PREF_KEYS, VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } f
 import { callMeterText } from "../shared/call-meter.ts";
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
-import { durationLabel, MEMORIES_STATE_TEXT, MEMORIES_TEXT, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
+import { durationLabel, formatCacheSize, googlePickBusy, MEMORIES_STATE_TEXT, MEMORIES_TEXT, type MemoriesGoogleView, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
 import { PROACTIVE_TEXT, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView, type WeatherFetchState, type CalendarFetchState } from "../shared/proactive.ts";
 import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
@@ -47,6 +47,10 @@ export interface ViewActions {
   updateProactive?(patch: ProactivePrefsPatch): void;
   /** MEMO-1「回憶模式」。 */
   updateMemories?(patch: MemoriesPrefsPatch): void;
+  /** MEMO-2：Google 相簿的挑選、取消與清除快取。 */
+  memoriesGoogle?(action: "pick" | "cancel" | "clear"): void;
+  /** macOS App：用系統瀏覽器開外部網址（Google 相簿挑選頁不能放進 iframe）。 */
+  openExternal?(url: string): void;
   /** SP-1：重新檢查整合服務狀態。 */
   refreshIntegrations?(): void;
   /** VCR-2：設定頁「語音中繼（實驗）」的按鈕（沒有時只畫狀態、按鈕停用）。 */
@@ -465,7 +469,7 @@ export function renderSettings(
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
-    settings.memories && renderMemoriesSettings(settings.memories, actions),
+    settings.memories && renderMemoriesSettings(settings.memories, actions, false),
     settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
     settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
     // 家人辨識只在 macOS App（加密保存需要 safeStorage）；瀏覽器版照實說不可用，不提供任何操作。
@@ -506,7 +510,7 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     // PRO-1：選單列「主動提醒」與這裡都能改，寫入同一個 proactive.json。
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     // MEMO-1：選單列「回憶模式」與這裡都能改，寫入同一個 memories.json。
-    settings.memories && renderMemoriesSettings(settings.memories, actions),
+    settings.memories && renderMemoriesSettings(settings.memories, actions, true),
     settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
     settings.voice_relay === true && voiceRelay && renderVoiceRelay(voiceRelay, actions),
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
@@ -870,7 +874,7 @@ export function renderProactiveSettings(view: ProactiveSettingsView, actions: Vi
 }
 
 /** MEMO-1「回憶模式」：總開關、影片聲音、停留與閒置秒數、來源狀態（只有數量）。改了就保存（POST /api/settings/memories）。 */
-export function renderMemoriesSettings(view: MemoriesSettingsView, actions: ViewActions): HTMLElement {
+export function renderMemoriesSettings(view: MemoriesSettingsView, actions: ViewActions, desktop: boolean): HTMLElement {
   const prefs = view.prefs;
   const list = h("ul", { class: "pref-list" });
   const toggle = (label: string, note: string, on: boolean, patch: MemoriesPrefsPatch, enabled = true) => {
@@ -907,6 +911,71 @@ export function renderMemoriesSettings(view: MemoriesSettingsView, actions: View
     h("h3", {}, t(MEMORIES_TEXT.group)),
     list,
     h("p", { class: "muted small", role: "status" }, t(MEMORIES_STATE_TEXT[view.source.state], view.source.photos, view.source.videos)),
+    view.google && renderMemoriesGoogle(view.google, actions, desktop),
+  );
+}
+
+/** 「清除 Google 快取」按第一次後的確認期限（重新繪製時保留）。 */
+let googleClearArmedUntil = 0;
+const GOOGLE_CLEAR_CONFIRM_MS = 5_000;
+
+/** MEMO-2「Google 相簿」：快取狀態、挑選（QR code 給手機掃描）、下載進度、取消與清除。Pi 頁面與 Mac 頁面都能挑選。 */
+function renderMemoriesGoogle(g: MemoriesGoogleView, actions: ViewActions, desktop: boolean): HTMLElement {
+  const busy = googlePickBusy(g.phase);
+  const status = g.available
+    ? t(MEMORIES_TEXT.googleStatus, g.photos, g.videos, formatCacheSize(g.bytes))
+    : t(MEMORIES_TEXT.googleUnavailable, t(g.unavailable_reason ?? ""));
+  const pick = button(MEMORIES_TEXT.googlePick, () => actions.memoriesGoogle?.("pick"), "btn--primary");
+  pick.disabled = !actions.memoriesGoogle || !g.available || busy;
+  const armed = () => Date.now() < googleClearArmedUntil;
+  const clear = button(armed() ? MEMORIES_TEXT.googleClearConfirm : MEMORIES_TEXT.googleClear, () => {
+    if (armed()) {
+      googleClearArmedUntil = 0;
+      actions.memoriesGoogle?.("clear");
+      return;
+    }
+    googleClearArmedUntil = Date.now() + GOOGLE_CLEAR_CONFIRM_MS;
+    clear.textContent = t(MEMORIES_TEXT.googleClearConfirm);
+    setTimeout(() => {
+      if (!armed()) clear.textContent = t(MEMORIES_TEXT.googleClear);
+    }, GOOGLE_CLEAR_CONFIRM_MS);
+  });
+  clear.disabled = !actions.memoriesGoogle || g.photos + g.videos === 0;
+  const buttons = h("div", { class: "actions" }, pick, busy && button(MEMORIES_TEXT.googleCancel, () => actions.memoriesGoogle?.("cancel")), clear);
+
+  let phaseLine: string | null = null;
+  if (g.phase === "starting") phaseLine = t(MEMORIES_TEXT.googleStarting);
+  else if (g.phase === "downloading" && g.progress) phaseLine = t(MEMORIES_TEXT.googleProgress, g.progress.done, g.progress.total);
+  else if (g.phase === "done" && g.progress) phaseLine = t(MEMORIES_TEXT.googleDone, g.progress.done, g.progress.skipped);
+  else if (g.phase === "cancelled") phaseLine = t(MEMORIES_TEXT.googleCancelled);
+
+  let waiting: HTMLElement | null = null;
+  if (g.phase === "waiting_pick" && g.picker_uri) {
+    const uri = g.picker_uri;
+    const expires = g.expires_at === null ? null
+      : new Date(g.expires_at).toLocaleTimeString(getLocale() === "en" ? "en-US" : "zh-TW", { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    waiting = h(
+      "div",
+      { class: "memories-google-pick" },
+      h("img", { src: g.paths.qr, alt: t(MEMORIES_TEXT.googleQrAlt), width: "200", height: "200" }),
+      h("p", { class: "muted small" }, t(MEMORIES_TEXT.googleScanHint)),
+      // 網址是資料（可選取複製），不翻譯。
+      h("p", { class: "small" }, h("code", {}, uri)),
+      expires && h("p", { class: "muted small" }, t(MEMORIES_TEXT.googleExpires, expires)),
+      desktop && actions.openExternal && button(MEMORIES_TEXT.googleOpen, () => actions.openExternal?.(uri)),
+    );
+  }
+  return h(
+    "div",
+    { class: "memories-google" },
+    h("h4", {}, t(MEMORIES_TEXT.googleGroup)),
+    h("p", { class: "muted small", role: "status" }, status),
+    phaseLine && h("p", { class: "muted small", role: "status" }, phaseLine),
+    g.error && h("p", { class: "error-text" }, t(g.error)),
+    waiting,
+    buttons,
+    h("p", { class: "muted small" }, t(MEMORIES_TEXT.googleNoSync)),
+    h("p", { class: "muted small" }, t(MEMORIES_TEXT.googleNoPlace)),
   );
 }
 

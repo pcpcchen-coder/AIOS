@@ -85,6 +85,67 @@ export interface MemoriesSourceStatus {
   videos: number;
 }
 
+// ───────────── MEMO-2：Google 相簿（Picker API，經 gog） ─────────────
+// Google 只讓 App 讀使用者在 Google 的畫面裡挑選的項目（不能讀整本相簿、不能持續同步）；挑選的項目下載到 Mac 的快取。
+
+/**
+ * 挑選工作的階段：idle → starting（建立挑選連結）→ waiting_pick（等使用者在 Google 挑選）→ downloading → done。
+ * 任何階段可以 cancelled；建立、讀取挑選結果失敗或逾時是 failed。
+ */
+export type GooglePickPhase = "idle" | "starting" | "waiting_pick" | "downloading" | "done" | "failed" | "cancelled";
+
+export const MEMORIES_GOOGLE_PATHS = {
+  pick: "/api/memories/google/pick",
+  cancel: "/api/memories/google/cancel",
+  clear: "/api/memories/google/clear",
+  qr: "/api/memories/google/qr.svg",
+} as const;
+
+/** 錯誤與不可用的原因：只用這些固定的中文（翻譯表的鍵），不放 gog 的輸出（可能含帳號或網址）。 */
+export const MEMORIES_GOOGLE_REASON = {
+  noGog: "Mac 上找不到 gog",
+  noAccount: "沒有設定 Google 帳號（NOUS_GOG_ACCOUNT）",
+  // 建立挑選連結失敗最常見的原因是還沒授權 photospicker，但 gog 的錯誤不外傳，所以只能說「可能」。
+  auth: "無法建立 Google 相簿挑選連結（可能尚未授權）：在 Mac 執行 gog auth add 帳號 --services photospicker",
+  timeout: "挑選逾時",
+  list: "讀不到 Google 相簿的挑選結果",
+  download: "下載失敗",
+} as const;
+
+export interface MemoriesGoogleView {
+  /** gog 找得到而且有設定帳號。 */
+  available: boolean;
+  /** MEMORIES_GOOGLE_REASON 的其中一個（或設定檔的錯誤訊息）；available 時 null。 */
+  unavailable_reason: string | null;
+  phase: GooglePickPhase;
+  /** 只在 waiting_pick 時有值。 */
+  picker_uri: string | null;
+  /** epoch ms；只在 waiting_pick 時有值。 */
+  expires_at: number | null;
+  /** downloading、done（取消時保留到取消前）：done＝已處理（含略過）、skipped＝略過（影片還沒處理好、下載失敗、格式不支援或太大）。 */
+  progress: { done: number; total: number; skipped: number } | null;
+  /** failed 時 MEMORIES_GOOGLE_REASON 的其中一個。 */
+  error: string | null;
+  photos: number;
+  videos: number;
+  bytes: number;
+  cap_bytes: number;
+  paths: typeof MEMORIES_GOOGLE_PATHS;
+}
+
+/** 正在進行的階段（挑選按鈕停用、顯示「取消」）。 */
+export function googlePickBusy(phase: GooglePickPhase): boolean {
+  return phase === "starting" || phase === "waiting_pick" || phase === "downloading";
+}
+
+/** 快取大小：1 GB 以下用 MB（整數），以上用 GB（一位小數）。 */
+export function formatCacheSize(bytes: number): string {
+  const mb = bytes / 1024 ** 2;
+  // 10 MB 以下留一位小數：幾張照片（數百 KB）不會顯示成「0 MB」。
+  if (bytes < 1024 ** 3) return mb < 10 ? `${mb.toFixed(1)} MB` : `${Math.round(mb)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
 /** settings.memories：設定頁與選單列照這個畫（只有數量與狀態，不含檔名或路徑）。 */
 export interface MemoriesSettingsView {
   prefs: MemoriesPrefs;
@@ -92,6 +153,8 @@ export interface MemoriesSettingsView {
   dwell_options: readonly number[];
   idle_options: readonly number[];
   write_path: typeof MEMORIES_WRITE_PATH;
+  /** MEMO-2：核心有接上 Google 相簿時才有（不可用時 available=false 並說明原因）。 */
+  google?: MemoriesGoogleView;
 }
 
 /** 設定頁與選單列共用的文字（中文是翻譯表的鍵；desktop/settings-menu.mjs 有同一份，tests/memories-menu.test.ts 核對兩邊一致）。 */
@@ -109,6 +172,29 @@ export const MEMORIES_TEXT = {
   stateEmpty: "資料夾是空的：把照片放進 Mac 的回憶資料夾",
   stateMissing: "找不到回憶資料夾",
   stateFailed: "讀不到回憶資料夾",
+  googleGroup: "Google 相簿",
+  googleStatus: "Google 相簿：照片 {0} 張、影片 {1} 段（{2} / 2 GB）",
+  googleUnavailable: "Google 相簿不可用：{0}",
+  googlePick: "從 Google 相簿挑選…",
+  googleCancel: "取消",
+  googleCancelPick: "取消挑選",
+  googleClear: "清除 Google 快取",
+  googleClearMenu: "清除 Google 快取…",
+  googleClearConfirm: "再按一次確認清除",
+  googleClearAsk: "要清除 Google 相簿的快取嗎？",
+  googleClearDetail: "Mac 上下載的 Google 照片與影片都會刪除；Google 相簿裡的原檔不受影響。",
+  googleClearButton: "清除",
+  googleOpen: "在瀏覽器開啟",
+  googleQrAlt: "Google 相簿挑選連結的 QR code",
+  googleScanHint: "用手機掃描，在 Google 相簿搜尋相簿名稱後選取照片，按完成",
+  googleExpires: "連結在 {0} 前有效",
+  googleStarting: "正在建立挑選連結…",
+  googleWaiting: "等待在 Google 相簿挑選…",
+  googleProgress: "正在下載 {0}/{1}",
+  googleDone: "已加入 Google 相簿的照片：處理 {0} 項，略過 {1} 項",
+  googleCancelled: "已取消挑選",
+  googleNoSync: "Google 只讓 App 讀你挑選的照片，不能自動同步整本相簿；有新照片時再挑一次。",
+  googleNoPlace: "Google 下載的照片沒有地點，只顯示時間。",
 } as const;
 
 /** 秒數選項的標籤：一分鐘以上用分鐘。 */

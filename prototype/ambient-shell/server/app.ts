@@ -51,8 +51,9 @@ import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHist
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
 import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
-import { MEMORIES_ITEMS_PATH, MEMORIES_MEDIA_PREFIX, MEMORIES_WRITE_PATH, MemoriesPatchError, parseMemoriesPatch, type MemoriesItem, type MemoriesPrefs, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
+import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_MEDIA_PREFIX, MEMORIES_WRITE_PATH, MemoriesPatchError, parseMemoriesPatch, type MemoriesItem, type MemoriesPrefs, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
 import { parseByteRange } from "./memories.ts";
+import type { MemoriesGooglePart } from "./memories-google.ts";
 import { isTerminalId, pageSource } from "../shared/terminal.ts";
 import { terminalIdentity, terminalMemory, type TerminalIdentityPort, type TerminalMemoryPort } from "./terminal-routes.ts";
 import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
@@ -199,7 +200,7 @@ export interface AppOptions {
    * MEMO-1：回憶模式（設定與本機資料夾的照片、影片）。未提供時 settings 沒有 memories，相關路由 404。
    * file() 回傳的路徑只在核心內使用，不出現在任何回應。
    */
-  memories?: { view(): MemoriesSettingsView; update(patch: MemoriesPrefsPatch): MemoriesPrefs; items(): MemoriesItem[]; file(id: string): { path: string; type: string } | null };
+  memories?: { view(): MemoriesSettingsView; update(patch: MemoriesPrefsPatch): MemoriesPrefs; items(): MemoriesItem[]; file(id: string): { path: string; type: string } | null; google?: MemoriesGooglePart };
   port: number;
   devPort: number;
   distDir: string | null;
@@ -504,6 +505,32 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         throw new HttpError(500, `回憶模式設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    // MEMO-2：Google 相簿挑選。回應是整份設定（含 picker_uri），選單列與頁面直接套用。
+    const google = options.memories?.google;
+    if (google && method === "POST" && path === MEMORIES_GOOGLE_PATHS.pick) {
+      const result = await google.pick();
+      if (result === "unavailable") throw new HttpError(409, google.view().unavailable_reason ?? "Google 相簿不可用");
+      if (result === "busy") throw new HttpError(409, "已經在挑選 Google 相簿");
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (google && method === "POST" && (path === MEMORIES_GOOGLE_PATHS.cancel || path === MEMORIES_GOOGLE_PATHS.clear)) {
+      if (path === MEMORIES_GOOGLE_PATHS.cancel) google.cancel();
+      else {
+        try {
+          google.clear();
+        } catch {
+          throw new HttpError(500, "Google 相簿快取沒有清除完");
+        }
+      }
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (google && method === "GET" && path === MEMORIES_GOOGLE_PATHS.qr) {
+      const svg = google.qrSvg();
+      if (!svg) throw new HttpError(404, "not found");
+      res.writeHead(200, { "Content-Type": "image/svg+xml", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+      res.end(svg);
+      return;
     }
     if (options.memories && method === "GET" && path === MEMORIES_ITEMS_PATH) return sendJson(res, 200, { items: options.memories.items() });
     if (options.memories && path.startsWith(MEMORIES_MEDIA_PREFIX)) {

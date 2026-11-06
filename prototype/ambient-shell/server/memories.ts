@@ -19,6 +19,7 @@ import {
 } from "../shared/memories.ts";
 import { PrefsFile } from "./prefs-file.ts";
 import { nearestPlace, readMediaMeta } from "./memories-meta.ts";
+import type { MemoriesGooglePart } from "./memories-google.ts";
 
 // MEMO-1：回憶模式的設定（memories.json）與本機資料夾來源。資料夾路徑只來自 NOUS_MEMORIES_DIR 或預設值，
 // 不接受 HTTP 指定；回應只有不透明的 id，不含檔名或路徑。
@@ -216,8 +217,8 @@ export class FolderMemoriesSource implements MemoriesSource {
   }
 }
 
-/** settings.memories 與 HTTP 路由用的組合（AppOptions.memories）。 */
-export function memoriesFeature(settings: MemoriesSettingsStore, source: MemoriesSource) {
+/** settings.memories 與 HTTP 路由用的組合（AppOptions.memories）。MEMO-2：google 有接上時，項目是資料夾加上 Google 快取。 */
+export function memoriesFeature(settings: MemoriesSettingsStore, source: MemoriesSource, google?: MemoriesGooglePart) {
   return {
     view: (): MemoriesSettingsView => ({
       prefs: settings.view(),
@@ -225,10 +226,12 @@ export function memoriesFeature(settings: MemoriesSettingsStore, source: Memorie
       dwell_options: DWELL_OPTIONS_S,
       idle_options: IDLE_OPTIONS_S,
       write_path: MEMORIES_WRITE_PATH,
+      ...(google ? { google: google.view() } : {}),
     }),
     update: (patch: MemoriesPrefsPatch) => settings.update(patch),
-    items: () => source.items(),
-    file: (id: string) => source.file(id),
+    items: () => [...source.items(), ...(google?.items() ?? [])],
+    file: (id: string) => source.file(id) ?? google?.file(id) ?? null,
+    ...(google ? { google } : {}),
   };
 }
 

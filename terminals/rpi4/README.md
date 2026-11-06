@@ -124,6 +124,8 @@ Pi 畫面不順時，在 Pi 頁面打開「設定」→「這台裝置的畫面�
 
 Pi 頁面「設定」→「回憶模式」可以開關（和 Mac 選單列寫入同一個設定）。開啟後 Pi 閒置一段時間會播放 Mac 回憶資料夾裡的照片與影片；照片經 SSH 通道向 Mac 核心取得，Pi 不直接連 Google。播放時電子腦用省電繪製，同時最多一段影片；建議影片用 H.264、照片匯出「大」尺寸。說喚醒詞、面向鏡頭或點照片會立即收起。細節見[回憶模式驗證](../../docs/validation/memories-mode-2026-11-06.md)（**Pi 實機未驗證**）。
 
+Google 相簿（MEMO-2）：在 Pi 頁面「設定」→「回憶模式」按「從 Google 相簿挑選…」，畫面顯示 QR code，用手機掃描後在 Google 的畫面挑選。照片下載到 Mac 的快取，Pi 只經 Mac 核心取用。需要先在 Mac 執行 `gog auth add 帳號 --services photospicker`。見 [MEMO-2 驗證](../../docs/validation/memories-google-2026-11-06.md)（**未以真實帳號驗證**）。
+
 <a id="realtime-cost-guard"></a>
 ## 即時語音費用防護
 

@@ -2871,6 +2871,20 @@ const actions: ViewActions = {
       (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`回憶模式設定沒有保存：${(err as Error).message}` }),
     );
   },
+  memoriesGoogle(action) {
+    const requestId = userRequest();
+    const call = action === "pick" ? api.googlePick : action === "cancel" ? api.googleCancel : api.googleClear;
+    void call().then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`Google 相簿：${(err as Error).message}` }),
+    );
+  },
+  openExternal(url) {
+    if (/^https:\/\//.test(url)) window.nousDesktop?.openExternal(url);
+  },
   updateRealtime(patch) {
     const requestId = userRequest();
     void api.updateRealtime(patch).then(
