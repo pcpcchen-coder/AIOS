@@ -10,6 +10,8 @@ import {
   COOLDOWN_WAIT_MS,
   H1B_TIMEOUTS_MS,
   HomeBridge,
+  isTvName,
+  TV_MOVED,
   HomeBridgeError,
   IR_SYNONYMS,
   keyNorm,
@@ -1278,6 +1280,22 @@ describe("H1b: Tuya IR appliances", () => {
     expect(await b.control({ target: "客房空調遙控", command: "press", value: "temp 加" })).toMatchObject({ key: "Temp+" });
     expect(hub.sends()).toHaveLength(0);
     expect(hub.irs()).toHaveLength(1);
+  });
+
+  it("LGTV-1: with tvHandledElsewhere, the living-room TV is refused (nothing sent); 臥室電視 and other devices still go through the hub", async () => {
+    const home = { ...H1B_HOME, devices: [...H1B_HOME.devices, irDevice("ir-tv2", "臥室電視", null, irKeys("Power", "Vol+"))] };
+    const hub = await h1bHub({ home });
+    const b = h1bController(hub.url, { tvHandledElsewhere: true });
+    const moved = { status: "refused", reason: "unsupported", message: TV_MOVED };
+    for (const target of ["電視", "客廳電視", "客廳的電視", "LG 電視", "電視的"]) expect(await b.control({ target, command: "power", value: true })).toMatchObject(moved);
+    expect(await b.control({ target: "電視", command: "press", value: "volume_up" })).toMatchObject(moved);
+    expect(hub.irs()).toHaveLength(0);
+    expect(await b.control({ target: "臥室電視", command: "press", value: "volume_up" })).toMatchObject({ status: "unconfirmed", key: "Vol+" });
+    expect(hub.irs()).toHaveLength(1);
+    expect(isTvName("電視櫃燈")).toBe(false);
+    expect(isTvName("臥室電視")).toBe(false);
+    // 旗標關閉：照舊經中控按鍵。
+    expect(await h1bController(hub.url).control({ target: "電視", command: "power", value: true })).toMatchObject({ status: "unconfirmed", key: "Power" });
   });
 
   it("review: an intent never falls back to part of a key name — 音量▲／頻道▼ beside Up／Down; no volume key is refused, not Up", async () => {

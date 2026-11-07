@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "bff9b5ca70a4562167c98dcb2e0d4ee00b72eed8ea4d23f58b3fce76a8551acb",
-      "translationSha256": "c83a480d562ce5ffc5c815022af9051a413fc4cc50ce6c883a985b16b60d6507"
+      "sourceSha256": "ea82dab68a68bf541fbbf4c24175c9c55d7477b66da770f1dc84f48712d8457c",
+      "translationSha256": "9f885d08decb41e02d2b458d11d04dfe661defa9626ece5e63a78345664d29f1"
     },
     {
       "source": "docs/README.md",
@@ -284,8 +284,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "5eeba9488ece3ad01e00a26d908ab49e3f02f607f9a666605c501d0a52bee59f",
-      "translationSha256": "61d2817ca592ff66a5b3e475a8738ea433abd8617196539a93623de23a2f82d1"
+      "sourceSha256": "686c0fb99a98f4c3a6c2ec62776bdfc93e925cfb264b5c4efa7b10e13ea724c2",
+      "translationSha256": "438ecf1f8e38b1ac015f555ce66693466a7a8f175dfad87af6dd4518de2f4c46"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -510,6 +510,13 @@
       "translation": "docs/validation/implementation-review-2026-10-24.en.md",
       "sourceSha256": "58da4c3c4db15b03cf4b51cead71238052edd0a4ea8c902c4ef46348b179185d",
       "translationSha256": "b332c8718ad567559c65638a030805fbe3a1aa52b4467c497a6481a37db22e70"
+    },
+    {
+      "source": "docs/validation/lgtv-1-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/lgtv-1-2026-11-07.en.md",
+      "sourceSha256": "5db120eb4b13f076d218aba49df3c499109769b44f06e14b5c19a1a84bb6852d",
+      "translationSha256": "7e41358fd4ca06bf43f5510ba05f2e02fc90ccb7ae7fdadb1c0139c667dfa589"
     },
     {
       "source": "docs/validation/live-voice-2026-10-23.md",

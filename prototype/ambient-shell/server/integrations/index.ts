@@ -5,6 +5,7 @@ import { createVoiceRelayAdapter, VoiceRelayAdapter } from "./adapters/voice-rel
 import { GmailGogAdapter, resolveGogPath } from "./adapters/gmail-gog.ts";
 import { HomeAdapter, type HomeBridgePort } from "./adapters/home.ts";
 import { GoogleCalendarAdapter } from "./adapters/google-calendar.ts";
+import { LgTvAdapter } from "./adapters/lg-tv.ts";
 import { WeatherAdapter, type WeatherAdapterOptions } from "./adapters/weather.ts";
 import type { IntegrationAdapter } from "./contracts.ts";
 import { IntegrationDispatcher, type AuditEntry } from "./dispatcher.ts";
@@ -67,6 +68,15 @@ export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
       return null;
     }
     return new WeatherAdapter(deps.weather);
+  },
+  // LGTV-1：客廳的 LG 電視（區網 SSAP＋Wake-on-LAN）。沒有 NOUS_LGTV_HOST 時不註冊；沒有配對時註冊，但工具回 refused 並提示配對。
+  lg_tv: (config, log) => {
+    const tv = config.tv;
+    if (!tv?.host) {
+      log("整合層：lg_tv 需要 NOUS_LGTV_HOST（電視的區網 IP），略過");
+      return null;
+    }
+    return new LgTvAdapter({ host: tv.host, pairingFile: tv.pairingFile, mac: tv.mac, broadcast: tv.broadcast });
   },
   // MAIL-1：用 gog 寄信給自己（收件人只來自 NOUS_MAIL_SELF）。沒有信箱或找不到 gog 時不註冊，照實記 log。
   gmail_gog: (config, log) => {

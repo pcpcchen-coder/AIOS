@@ -97,6 +97,11 @@ export interface HomeBridgeOptions {
    * （George 的決定）。H2 改讀中控每台設備的 voice 設定後刪掉。
    */
   policyFor?: (device: HubDevice) => VoicePolicy;
+  /**
+   * LGTV-1（George 2026-11-07）：電視改由 lg_tv（app.tv.*）直接控制時為 true。home_control 不再控制中控裡的電視
+   * （說「電視」「客廳電視」「LG 電視」，或客廳裡名稱以電視結尾的設備），回 refused；其他房間的電視（例如臥室電視）與查詢（home_status）不受影響。
+   */
+  tvHandledElsewhere?: boolean;
   /** 毫秒；速率限制與確認卡期限用，測試可替換。 */
   now?: () => number;
   /** 指令 ID（Idempotency-Key）與確認卡 ID 的來源，測試可替換。 */
@@ -516,6 +521,23 @@ const TAGGED_NOTE = "使用者選了之後，target 照候選名稱一字不差�
  * AIFA 冷氣與紅外線家電一律加上路徑（「冷氣（AIFA）」「客廳的冷氣（紅外線遙控）」）：同名的設備一台有房間、
  * 一台沒有時（AIFA 冷氣常常沒有房間），只看名稱分不出來，照著說也選不到。有路徑時 note 請模型照抄候選名稱。
  */
+/** LGTV-1：電視改用 app.tv.* 時，home_control 對電視的固定回覆。 */
+export const TV_MOVED = "電視改由 Nous 直接控制（app__tv__ 工具），中控這條不再控制電視；這個指令沒有送出，請改用電視工具。";
+
+const LIVING_TV = new Set(["電視", "tv", "客廳電視", "客廳的電視", "lg電視", "lgtv", "客廳tv"]);
+
+/** 使用者說的是客廳那台電視：「電視」「客廳電視」「LG 電視」；「臥室電視」「電視櫃燈」不算。 */
+export function isTvName(text: string): boolean {
+  return LIVING_TV.has(norm(text).replace(/[的裡]+$/, ""));
+}
+
+/** 中控裡的客廳電視：名稱或別名是上面的說法，或在「客廳」且名稱以電視／TV 結尾。 */
+function isTvDevice(home: HubSnapshot, d: HubDevice): boolean {
+  if ([d.name, ...d.aliases].some(isTvName)) return true;
+  const room = home.rooms.find((r) => r.id === d.roomId)?.name ?? "";
+  return norm(room) === "客廳" && /(電視|tv)$/i.test(norm(d.name));
+}
+
 function ambiguous(home: HubSnapshot, devices: HubDevice[]): { ok: true; status: "ambiguous"; candidates: string[]; note?: string } {
   const shown = devices.slice(0, 5);
   const labels = shown.map((d) => {
@@ -986,8 +1008,17 @@ export class HomeBridge {
     const startedAt = this.now();
     const command = parseCommand(req.command, req.value ?? null);
     if ("error" in command) return { ok: true, status: "refused", reason: "invalid_value", message: command.error };
+    if (this.options.tvHandledElsewhere && isTvName(req.target)) return { ok: true, status: "refused", reason: "unsupported", message: TV_MOVED };
     const home = await this.snapshot();
-    const resolved = resolveTarget(home, req.target);
+    let resolved = resolveTarget(home, req.target);
+    if (this.options.tvHandledElsewhere) {
+      if (resolved.kind === "match" && resolved.devices.length === 1 && isTvDevice(home, resolved.devices[0])) return { ok: true, status: "refused", reason: "unsupported", message: TV_MOVED };
+      // 候選裡的電視拿掉（不會問「是電視還是音響」）；只剩一台時就是那一台。
+      if (resolved.kind === "ambiguous") {
+        const rest = resolved.candidates.filter((d) => !isTvDevice(home, d));
+        if (rest.length !== resolved.candidates.length) resolved = rest.length === 1 ? { kind: "match", scope: rest[0].name, devices: rest, metric: null } : rest.length ? { kind: "ambiguous", candidates: rest } : { kind: "not_found" };
+      }
+    }
     if (resolved.kind === "not_found") {
       return home.aifa === "unavailable" ? { ok: true, status: "not_found", target: req.target, note: "AIFA 冷氣清單讀不到" } : { ok: true, status: "not_found", target: req.target };
     }

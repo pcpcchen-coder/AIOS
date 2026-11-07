@@ -1261,6 +1261,7 @@ const INTEGRATION_LABEL: Record<string, string> = {
   gmail_gog: "寄信給自己（Gmail，gog）",
   home: "武陵居家電（中控）",
   google_calendar: "Google 日曆（gog）",
+  lg_tv: "客廳 LG 電視",
   mock: "模擬整合（mock，測試用）",
 };
 
@@ -1282,6 +1283,8 @@ const HEALTH_REASON_TEXT: Record<IntegrationServiceStatus["reason"], string> = {
   taken_over: "已登入，但不是目前使用中的 Spotify 播放裝置",
   not_ready: "Soloist 沒有登入 Spotify",
   error: "檢查時出錯",
+  unreachable: "連不上（電視可能關機待機或不在網路上）",
+  not_paired: "還沒配對（在 Mac 上執行 npm run tv:pair）",
 };
 
 /**
@@ -1311,6 +1314,7 @@ export function renderIntegrationStatus(state: IntegrationPanelState, actions: V
             s.service === "spotify_soloist" && h("span", { class: "muted small" }, t("只顯示狀態；Spotify 語音控制沒有取得授權，沒有開放。")),
             s.service === "gmail_gog" && h("span", { class: "muted small" }, t("「可用」只代表 Mac 上的 gog 能執行；有沒有登入 Gmail，要看寄信的結果。")),
             s.service === "google_calendar" && h("span", { class: "muted small" }, t("「可用」只代表 Mac 上的 gog 能執行；有沒有授權 Google 日曆，要看查行程的結果。")),
+            s.service === "lg_tv" && h("span", { class: "muted small" }, t("電視待機時連不上是正常的；說「開電視」會用網路喚醒。")),
           ),
           h("span", { class: `chip${s.health === "available" ? " chip--running" : ""}` }, t(HEALTH_TEXT[s.health])),
         ),
