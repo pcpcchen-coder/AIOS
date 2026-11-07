@@ -14,6 +14,7 @@ import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText
 import type { RealtimeInfo } from "../shared/types.ts";
 import { durationLabel, formatCacheSize, googlePickBusy, MEMORIES_STATE_TEXT, MEMORIES_TEXT, type MemoriesGoogleView, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
 import { CLOCK_TEXT, type ClockPrefsPatch, type ClockSettingsView } from "../shared/clock.ts";
+import { HOME_CORNER_TEXT, type HomeCornerPrefsPatch, type HomeCornerSettingsView } from "../shared/home-corner.ts";
 import { PROACTIVE_TEXT, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView, type WeatherFetchState, type CalendarFetchState } from "../shared/proactive.ts";
 import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
@@ -48,6 +49,7 @@ export interface ViewActions {
   updateProactive?(patch: ProactivePrefsPatch): void;
   /** CLK-1「右上角時鐘與天氣」的兩個顯示開關。 */
   updateClock?(patch: ClockPrefsPatch): void;
+  updateHomeCorner?(patch: HomeCornerPrefsPatch): void;
   /** MEMO-1「回憶模式」。 */
   updateMemories?(patch: MemoriesPrefsPatch): void;
   /** MEMO-2：Google 相簿的挑選、取消與清除快取。 */
@@ -479,6 +481,7 @@ export function renderSettings(
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.clock && renderClockSettings(settings.clock, actions),
+    settings.home_corner && renderHomeCornerSettings(settings.home_corner, actions),
     settings.memories && renderMemoriesSettings(settings.memories, actions, false),
     settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
     settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
@@ -521,6 +524,8 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     // CLK-1：選單列「右上角時鐘與天氣」與這裡都能改，寫入同一個 clock.json。
     settings.clock && renderClockSettings(settings.clock, actions),
+    // HOME-1：選單列「左上角家中狀態」與這裡都能改，寫入同一個 home-corner.json。
+    settings.home_corner && renderHomeCornerSettings(settings.home_corner, actions),
     // MEMO-1：選單列「回憶模式」與這裡都能改，寫入同一個 memories.json。
     settings.memories && renderMemoriesSettings(settings.memories, actions, true),
     settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
@@ -913,6 +918,21 @@ export function renderClockSettings(view: ClockSettingsView, actions: ViewAction
   toggle(CLOCK_TEXT.main, CLOCK_TEXT.mainNote, view.prefs.main, { main: !view.prefs.main });
   toggle(CLOCK_TEXT.terminal, CLOCK_TEXT.terminalNote, view.prefs.terminal, { terminal: !view.prefs.terminal });
   return h("section", { class: "camera-settings clock-settings" }, h("h3", {}, t(CLOCK_TEXT.group)), list, h("p", { class: "muted small" }, t(CLOCK_TEXT.note)));
+}
+
+/** HOME-1「左上角家中狀態」：Mac 視窗與 Pi 終端機各一個開關；改了就保存（POST /api/settings/home-corner）。 */
+export function renderHomeCornerSettings(view: HomeCornerSettingsView, actions: ViewActions): HTMLElement {
+  const list = h("ul", { class: "pref-list" });
+  const toggle = (label: string, note: string, on: boolean, patch: HomeCornerPrefsPatch) => {
+    const b = button(on ? "開" : "關", () => actions.updateHomeCorner?.(patch), on ? "btn--primary" : "");
+    b.setAttribute("aria-pressed", String(on));
+    b.setAttribute("aria-label", t("{0}：{1}", t(label), on ? t("開") : t("關")));
+    b.disabled = !actions.updateHomeCorner;
+    list.append(h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label)), h("span", { class: "muted small" }, t(note))), b));
+  };
+  toggle(HOME_CORNER_TEXT.main, HOME_CORNER_TEXT.mainNote, view.prefs.main, { main: !view.prefs.main });
+  toggle(HOME_CORNER_TEXT.terminal, HOME_CORNER_TEXT.terminalNote, view.prefs.terminal, { terminal: !view.prefs.terminal });
+  return h("section", { class: "camera-settings home-corner-settings" }, h("h3", {}, t(HOME_CORNER_TEXT.group)), list, h("p", { class: "muted small" }, t(HOME_CORNER_TEXT.note)));
 }
 
 /** MEMO-1「回憶模式」：總開關、影片聲音、停留與閒置秒數、來源狀態（只有數量）。改了就保存（POST /api/settings/memories）。 */

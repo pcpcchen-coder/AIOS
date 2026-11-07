@@ -31,6 +31,7 @@ import { applyProfile, loadGpuDrawing, loadProfile, memoriesRenderBudget, saveGp
 import { MEMORIES_OFF, memoryCaption, stepMemories, wakeMemories, type MemoriesItem, type MemoriesState } from "../shared/memories.ts";
 import { MEMORIES_TIMING, MemoriesPresenter } from "./memories.ts";
 import { ClockCorner } from "./clock-corner.ts";
+import { HomeCorner } from "./home-corner.ts";
 import { CUE_TIMING, ProcessingCue, processingSource } from "./processing-cue.ts";
 import { browserProcessingSound } from "./processing-sound.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
@@ -242,6 +243,12 @@ brain.start();
 /** CLK-1：右上角的時間、日期與天氣（設定 settings.clock.enabled 打開時才有；被動讀數，不能點）。 */
 const clockCorner = new ClockCorner({
   fetchWeather: (signal) => api.weatherNow(signal),
+  locale: () => getLocale(),
+  enlarged: isPi4,
+});
+/** HOME-1：左上角的家中狀態（設定 settings.home_corner.enabled 打開時才有；被動讀數，不能點、不能控制）。 */
+const homeCorner = new HomeCorner({
+  fetchOverview: (signal) => api.homeOverview(signal),
   locale: () => getLocale(),
   enlarged: isPi4,
 });
@@ -942,6 +949,7 @@ function applyEffectiveSettings(value: SettingsView, preserveEntry = false): voi
   syncWake(value.wake);
   syncAudioPrefs(value);
   clockCorner.setEnabled(value.clock?.enabled === true);
+  homeCorner.setEnabled(value.home_corner?.enabled === true);
 }
 
 /**
@@ -2324,6 +2332,7 @@ async function homeControlFromRealtime(args: HomeControlArgs): Promise<HomeResul
   try {
     const result = await api.homeControl(args);
     showSubtitle(homeControlLine(result, getLocale()));
+    homeCorner.refreshSoon();
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -2339,6 +2348,7 @@ async function homeConfirmFromRealtime(confirmId: string, approve: boolean): Pro
   try {
     const result = await api.homeConfirm(confirmId, approve);
     if (approve) showSubtitle(homeControlLine(result, getLocale()));
+    if (approve) homeCorner.refreshSoon();
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -2893,6 +2903,16 @@ const actions: ViewActions = {
         render();
       },
       (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`時鐘設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  updateHomeCorner(patch) {
+    const requestId = userRequest();
+    void api.updateHomeCorner(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`家中狀態設定沒有保存：${(err as Error).message}` }),
     );
   },
   updateMemories(patch) {
@@ -3785,5 +3805,6 @@ onLocaleChange(() => {
   sensorIndicator.textContent = sensorState === "ok" ? t("鏡頭") : sensorState === "starting" ? t("鏡頭啟動中") : t("鏡頭：{0}", t(sensorDetail));
   renderWakeIndicator();
   clockCorner.refreshLocale();
+  homeCorner.refreshLocale();
   render();
 });

@@ -401,3 +401,29 @@ describe("renderSettings: 聲音 before the device list is read", () => {
     }
   });
 });
+
+describe("renderSettings: 左上角家中狀態 (HOME-1)", () => {
+  const homeCorner = { enabled: false, prefs: { main: false, terminal: true }, write_path: "/api/settings/home-corner" as const };
+
+  it.each([false, true])("desktop=%s: one switch per page that saves the opposite value; absent when the core does not send it", async (desktop) => {
+    const a = { ...actions(), updateHomeCorner: vi.fn() };
+    const r = render(view({ home_corner: homeCorner }), desktop, a);
+    expect(r.headings).toContain("左上角家中狀態");
+    const section = r.el.all().find((e) => e.getAttribute("class")?.includes("home-corner-settings"))!;
+    const toggles = section.all().filter((e) => e.tagName === "button");
+    expect(toggles.map((b) => b.getAttribute("aria-label"))).toEqual(["Mac 視窗：關", "Pi 終端機：開"]);
+    toggles[0].click();
+    toggles[1].click();
+    expect(a.updateHomeCorner.mock.calls).toEqual([[{ main: true }], [{ terminal: false }]]);
+    expect(render(view(), desktop).headings).not.toContain("左上角家中狀態");
+    const { setLocale } = await import("../src/i18n.ts");
+    setLocale("en");
+    try {
+      const en = render(view({ home_corner: homeCorner }), desktop);
+      expect(en.headings).toContain("Home status corner");
+      expect(en.text).toContain("Shows only what the Wuling home controller reports");
+    } finally {
+      setLocale("zh-TW");
+    }
+  });
+});

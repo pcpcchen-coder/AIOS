@@ -377,6 +377,51 @@ export function clockMenu(clock, { setClock, translate = (source) => source }) {
   ];
 }
 
+// ───────────── 左上角家中狀態（HOME-1；核心給了 settings.home_corner 才畫） ─────────────
+// 文字和 shared/home-corner.ts 的 HOME_CORNER_TEXT 相同（這個檔案不能載入 .ts；tests/home-corner.test.ts 核對兩邊一致）。
+
+export const HOME_CORNER_TEXT = {
+  group: "左上角家中狀態",
+  main: "Mac 視窗",
+  mainNote: "在 Mac 的 Nous 視窗左上角顯示室內溫濕度、開著的燈與冷氣",
+  terminal: "Pi 終端機",
+  terminalNote: "在 Pi 等終端機畫面左上角顯示室內溫濕度、開著的燈與冷氣",
+  note: "只顯示武陵居中控回報的狀態，不能點、不能控制；中控沒有回報的開關顯示「—」",
+  aria: "家中狀態：{0}",
+  notConfigured: "智慧家庭未設定",
+  unreachable: "讀不到中控",
+  coreDown: "核心沒有回應",
+  timeout: "中控沒有回應（逾時）",
+  refused: "連不上中控",
+  auth: "中控拒絕了權杖",
+  badResponse: "中控回應錯誤",
+  empty: "中控沒有可顯示的設備",
+  age: "{0} 分鐘前",
+  ageHours: "{0} 小時前",
+  snapshot: "快照",
+  stale: "過期資料",
+  lights: "燈 {0}／{1} 開著",
+  lightsUnknown: "燈 —／{0}",
+  switches: "插座開關 {0}／{1} 開著",
+  switchesUnknown: "插座開關 —／{0}",
+  unknownCount: "{0} 個未知",
+  acOn: "開",
+  acOff: "關",
+  acReported: "控制器回報 · {0}",
+  humidity: "濕度",
+};
+
+/** 「左上角家中狀態」分段：Mac 視窗、Pi 終端機兩個開關。點選後 setHomeCorner(patch) POST 到 home_corner.write_path。 */
+export function homeCornerMenu(homeCorner, { setHomeCorner, translate = (source) => source }) {
+  const set = (patch) => () => void setHomeCorner?.(patch);
+  return [
+    { type: "separator" },
+    { label: translate(HOME_CORNER_TEXT.group), enabled: false },
+    { label: translate(HOME_CORNER_TEXT.main), type: "checkbox", checked: homeCorner.prefs.main, sublabel: translate(HOME_CORNER_TEXT.mainNote), click: set({ main: !homeCorner.prefs.main }) },
+    { label: translate(HOME_CORNER_TEXT.terminal), type: "checkbox", checked: homeCorner.prefs.terminal, sublabel: translate(HOME_CORNER_TEXT.terminalNote), click: set({ terminal: !homeCorner.prefs.terminal }) },
+  ];
+}
+
 // ───────────── 回憶模式（MEMO-1；核心給了 settings.memories 才畫） ─────────────
 // 文字和 shared/memories.ts 的 MEMORIES_TEXT 相同（這個檔案不能載入 .ts；tests/memories-menu.test.ts 核對兩邊一致）。
 
@@ -497,10 +542,11 @@ export function memoriesMenu(memories, { setMemories, memoriesGoogle, openMemori
  *   setAudio(patch)、audioReport：「聲音」分段（settings.audio 存在時畫；patch 送到 settings.audio.write_path）
  *   setProactive(patch)：「主動提醒」分段（settings.proactive 存在時畫；patch 送到 settings.proactive.write_path）
  *   setClock(patch)：CLK-1「右上角時鐘與天氣」分段（settings.clock 存在時畫；patch 送到 settings.clock.write_path）
+ *   setHomeCorner(patch)：HOME-1「左上角家中狀態」分段（settings.home_corner 存在時畫；patch 送到 settings.home_corner.write_path）
  *   setMemories(patch)：「回憶模式」分段（settings.memories 存在時畫；patch 送到 settings.memories.write_path）
  *   memoriesGoogle(action)：MEMO-2「Google 相簿」的 pick／cancel／clear（settings.memories.google 存在時畫）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setClock, setMemories, memoriesGoogle, openMemoriesFolder, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setClock, setHomeCorner, setMemories, memoriesGoogle, openMemoriesFolder, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -574,6 +620,7 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
   if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused, translate }));
   if (settings.proactive) items.push(...proactiveMenu(settings.proactive, { setProactive, translate }));
   if (settings.clock) items.push(...clockMenu(settings.clock, { setClock, translate }));
+  if (settings.home_corner) items.push(...homeCornerMenu(settings.home_corner, { setHomeCorner, translate }));
   if (settings.memories) items.push(...memoriesMenu(settings.memories, { setMemories, memoriesGoogle, openMemoriesFolder, translate }));
   return items;
 }

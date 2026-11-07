@@ -174,6 +174,8 @@ export interface HubDevice {
   fresh: boolean;
   /** 只有 AIFA 子設備有：available 是哪一次讀 AIFA 清單得到的（queried_at，中控時鐘的秒；沒有時 null）。離線要連時間一起說，不說成現在。 */
   listedAt?: number | null;
+  /** HOME-1：中控 /home 的 state.power（布林）；中控沒給時 null，不從其他欄位猜。 */
+  power?: boolean | null;
   route: DeviceRoute;
   telemetry: { metrics: HubMetric[]; status: HubDataStatus; receivedAt: number | null; source: string } | null;
 }
@@ -190,11 +192,25 @@ export interface HubSnapshot {
   aifa?: AifaListState;
 }
 
+/** HOME-1：讀中控失敗的類別（右上角以外的呼叫端只看 message 與 status）。 */
+export type HomeBridgeErrorCode = "not_configured" | "timeout" | "unreachable" | "auth" | "bad_response";
+
 export class HomeBridgeError extends Error {
-  constructor(message: string, readonly status: number, options?: ErrorOptions) {
+  readonly code: HomeBridgeErrorCode | null;
+  constructor(message: string, readonly status: number, options?: ErrorOptions & { code?: HomeBridgeErrorCode }) {
     super(message, options);
+    this.code = options?.code ?? null;
   }
 }
+
+/** HOME-1：HomeBridge 最近一次看到的冷氣控制器回報（at：這台電腦的毫秒）。 */
+export interface RememberedReport {
+  report: ControllerReport;
+  at: number;
+}
+
+/** HOME-1：左上角每台冷氣最多多久向中控讀一次控制器回報（POST …/status，唯讀、沒有冷卻、不算速率限制）。 */
+export const AC_REPORT_POLL_MS = 5 * 60_000;
 
 /** 語音可能說的讀值名稱 → 中控的 metric key。 */
 const METRICS: Record<string, string[]> = {
@@ -908,6 +924,12 @@ export class HomeBridge {
    * 同 key 重送、冷卻後重送、重新讀取清單後重送、重新讀取設備、/discover、/status 也都不算。
    */
   private sent: number[] = [];
+  /** HOME-1：冷氣控制器回報（AIFA 子設備 id → 最近一次）；只來自中控的回覆，不從送出的指令推算。 */
+  private readonly reports = new Map<string, RememberedReport>();
+  private readonly reportTried = new Map<string, number>();
+  private reportPolling = false;
+  /** HOME-1：每次控制結束加一；左上角的快取看到變化就重讀。 */
+  private controlCount = 0;
 
   constructor(private readonly options: HomeBridgeOptions) {
     this.fetch = options.fetch ?? fetch;
@@ -936,6 +958,42 @@ export class HomeBridge {
    */
   async probe(): Promise<void> {
     await this.snapshot();
+  }
+
+  /** HOME-1：左上角家中狀態讀的中控快照（GET /home 與 GET /integrations/aifa，和 status() 同一份）。 */
+  readSnapshot(): Promise<HubSnapshot> {
+    return this.snapshot();
+  }
+
+  get changes(): number {
+    return this.controlCount;
+  }
+
+  controllerReports(): ReadonlyMap<string, RememberedReport> {
+    return this.reports;
+  }
+
+  /**
+   * HOME-1：在背景讀一台冷氣的控制器回報（不等結果，下一次快照才用得到）。一次只讀一台；同一台 AC_REPORT_POLL_MS 內不重讀，
+   * 回報較舊或沒有回報的優先。失敗、清單過期或權杖被拒都只是這次沒有新回報。
+   */
+  pollControllerReports(devices: HubDevice[]): void {
+    if (this.reportPolling || !this.available) return;
+    const now = this.now();
+    const due = devices
+      .filter((d): d is HubDevice & { route: Extract<DeviceRoute, { kind: "aifa" }> } => d.route.kind === "aifa")
+      .filter((d) => now - (this.reportTried.get(d.id) ?? -Infinity) >= AC_REPORT_POLL_MS && now - (this.reports.get(d.id)?.at ?? -Infinity) >= AC_REPORT_POLL_MS)
+      .sort((a, b) => (this.reports.get(a.id)?.at ?? -Infinity) - (this.reports.get(b.id)?.at ?? -Infinity));
+    const next = due[0];
+    if (!next) return;
+    this.reportPolling = true;
+    this.reportTried.set(next.id, now);
+    const ref: AifaRef = { hubId: next.route.hubId, childId: next.route.childId, freshUntil: Infinity };
+    void this.readAifaStatus(ref, this.timeouts.aifaStatus + MIN_SEND_WINDOW_MS)
+      .catch(() => null)
+      .finally(() => {
+        this.reportPolling = false;
+      });
   }
 
   async status(target: string, metric?: string | null): Promise<HomeStatusResult> {
@@ -1027,6 +1085,14 @@ export class HomeBridge {
 
   /** 送出一個使用者意圖：依計畫的路徑送出。速率限制在各路徑第一次控制 POST 之前（見 sent）。deadline 只用在 AIFA／紅外線。 */
   private async submit(p: Entry, deadline: number): Promise<HomeControlResult> {
+    try {
+      return await this.route(p, deadline);
+    } finally {
+      this.controlCount++;
+    }
+  }
+
+  private async route(p: Entry, deadline: number): Promise<HomeControlResult> {
     const plan = p.plan;
     switch (plan.route) {
       case "commands": {
@@ -1168,6 +1234,7 @@ export class HomeBridge {
         ...(state.discovered === "cooldown" ? { retryAfterS: 60 } : {}),
       };
     }
+    if (reply.kind === "result" && reply.controller) this.reports.set(aifaId(ref.hubId, ref.childId), { report: reply.controller, at: this.now() });
     const reported = reply.kind === "result" ? reportedText(reply.controller) : undefined;
     if (reported) facts.controller_reported = reported;
     if (plan.route === "aifa_power" && !plan.power) {
@@ -1341,7 +1408,9 @@ export class HomeBridge {
     const data: unknown = await res.json().catch(() => null);
     if (res.status === 409 && isRecord(data) && data.detail === AIFA_STALE) return "stale";
     if (!res.ok || !isRecord(data)) return null;
-    return parseReport(data.status);
+    const report = parseReport(data.status);
+    if (report) this.reports.set(aifaId(ref.hubId, ref.childId), { report, at: this.now() });
+    return report;
   }
 
   /** POST /integrations/aifa/discover 一次。429（一分鐘內有人讀過）不算失敗：照樣送出，由中控決定。 */
@@ -1374,8 +1443,8 @@ export class HomeBridge {
   }
 
   private checkAuth(res: Response, what: string): void {
-    if (res.status === 401) throw new HomeBridgeError("武陵居中控拒絕了權杖（401），請到中控「系統接入」重新核發後更新 SMARTHOME_TOKEN。", 502);
-    if (res.status === 403) throw new HomeBridgeError(`這把中控權杖沒有${what}的權限（403）。`, 502);
+    if (res.status === 401) throw new HomeBridgeError("武陵居中控拒絕了權杖（401），請到中控「系統接入」重新核發後更新 SMARTHOME_TOKEN。", 502, { code: "auth" });
+    if (res.status === 403) throw new HomeBridgeError(`這把中控權杖沒有${what}的權限（403）。`, 502, { code: "auth" });
   }
 
   /** GET /home 與 GET /integrations/aifa 同時讀；AIFA 讀不到不影響 /home 的設備（燈照樣能控制）。 */
@@ -1405,7 +1474,7 @@ export class HomeBridge {
   }
 
   private async home(): Promise<HubSnapshot> {
-    if (!this.base || !this.options.token) throw new HomeBridgeError("尚未設定武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）。", 409);
+    if (!this.base || !this.options.token) throw new HomeBridgeError("尚未設定武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）。", 409, { code: "not_configured" });
     let res: Response;
     try {
       res = await this.fetch(`${this.base}/api/v1/home`, {
@@ -1418,15 +1487,15 @@ export class HomeBridge {
       throw new HomeBridgeError(
         timedOut ? "武陵居中控沒有回應（逾時）。" : "無法連線到武陵居中控，請確認中控有在執行、位址正確。",
         502,
-        { cause: err },
+        { cause: err, code: timedOut ? "timeout" : "unreachable" },
       );
     }
     this.checkAuth(res, "讀取設備");
-    if (!res.ok) throw new HomeBridgeError(`武陵居中控回應錯誤（HTTP ${res.status}）。`, 502);
+    if (!res.ok) throw new HomeBridgeError(`武陵居中控回應錯誤（HTTP ${res.status}）。`, 502, { code: "bad_response" });
     try {
       return parseHome(await res.json());
     } catch (err) {
-      throw new HomeBridgeError("武陵居中控回傳的資料格式不符，無法讀取。", 502, { cause: err });
+      throw new HomeBridgeError("武陵居中控回傳的資料格式不符，無法讀取。", 502, { cause: err, code: "bad_response" });
     }
   }
 }
@@ -1517,6 +1586,7 @@ export function parseHome(body: unknown): HubSnapshot {
       roomId: str(placement.room_id) || null,
       available: typeof state.available === "boolean" ? state.available : null,
       fresh: state.fresh === true,
+      power: typeof state.power === "boolean" ? state.power : null,
       route,
       telemetry: t
         ? { metrics, status: dataStatus(str(t.status), metrics), receivedAt: num(t.received_at), source: str(t.source_label) }
