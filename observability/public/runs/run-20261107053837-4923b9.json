@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-07T05:38:37.855Z",
-  "updated_at": "2026-11-07T06:13:37.794Z",
+  "updated_at": "2026-11-07T06:13:41.357Z",
   "ended_at": null,
   "steps": [
     {
@@ -50,10 +50,10 @@
     {
       "id": "verify",
       "title": "verify",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-11-07T06:13:41.357Z",
+      "ended_at": "2026-11-07T06:13:41.357Z",
+      "note": "done",
       "evidence": []
     },
     {
@@ -117,6 +117,13 @@
       "at": "2026-11-07T06:13:37.794Z",
       "type": "step_updated",
       "step_id": "implement",
+      "status": "passed",
+      "note": "done"
+    },
+    {
+      "at": "2026-11-07T06:13:41.357Z",
+      "type": "step_updated",
+      "step_id": "verify",
       "status": "passed",
       "note": "done"
     }
