@@ -1669,6 +1669,10 @@ body[data-memories="showing"]::before {
   user-select: none;
   transition: opacity 400ms ease, background-color 600ms ease;
 }
+.clock-corner--enlarged {
+  transform: scale(1.5);
+  transform-origin: top right;
+}
 body.listening .clock-corner,
 body.has-surface .clock-corner,
 body.has-conversation .clock-corner {

@@ -217,7 +217,8 @@ let developmentProvider: ExecutorMode | null = null;
 let conversationEpoch = 0;
 let pendingProviderSelection: { epoch: number; account: string } | null = null;
 
-const brain = new Brain(canvas);
+const isPi4 = bridges.terminal === "rpi4";
+const brain = new Brain(canvas, isPi4 ? 1.5 : 1);
 // 這台裝置的畫面效能（George 2026-11-05）：只改電子腦的繪製與背景模糊，存在這個頁面；Pi 終端機預設「平衡」。
 // MEMO-1：播放回憶時電子腦降到「省電」的每秒格數與光暈，把 Pi 4 的 GPU／CPU 留給照片與影片解碼；收起後回到原本的設定。
 // 2026-11-07：解析度維持這台裝置原本的設定（memoriesRenderBudget）。退到角落的那 1.2 秒仍用原本的每秒格數，移動才順，到位後才降。
@@ -239,7 +240,11 @@ brain.start();
  * 斷線時視為關閉（核心不在就沒有照片可讀，也不留著過時的清單）。照片不點亮任何腦區。
  */
 /** CLK-1：右上角的時間、日期與天氣（設定 settings.clock.enabled 打開時才有；被動讀數，不能點）。 */
-const clockCorner = new ClockCorner({ fetchWeather: (signal) => api.weatherNow(signal), locale: () => getLocale() });
+const clockCorner = new ClockCorner({
+  fetchWeather: (signal) => api.weatherNow(signal),
+  locale: () => getLocale(),
+  enlarged: isPi4,
+});
 
 const memoriesRoot = document.createElement("div");
 memoriesRoot.id = "memories";

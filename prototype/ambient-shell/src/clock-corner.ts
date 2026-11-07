@@ -16,6 +16,7 @@ export interface ClockCornerOptions {
   locale(): Locale;
   /** 預設 document.body。 */
   host?: HTMLElement;
+  enlarged?: boolean;
 }
 
 export class ClockCorner {
@@ -53,6 +54,7 @@ export class ClockCorner {
   private mount(): void {
     const root = document.createElement("div");
     root.className = "clock-corner";
+    root.classList.toggle("clock-corner--enlarged", this.options.enlarged === true);
     root.id = "clock-corner";
     root.dataset.visibilityReason = "user_setting:clock_corner";
     root.setAttribute("role", "group");
