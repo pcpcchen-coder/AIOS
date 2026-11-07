@@ -1,5 +1,7 @@
 import type { HomeControlResult } from "../shared/home.ts";
 import { audioDevices } from "./audio-devices.ts";
+import { voiceVolume } from "./voice-volume.ts";
+import type { VoiceVolumeRequest } from "../shared/voice-volume.ts";
 import { RESULT_UNKNOWN_TEXT, type ApprovalReport, type HostCall, type LiveCoreEvent, type StopEvidence, type StopReplyTurn } from "../shared/realtime-route.ts";
 import type { HomeControlArgs } from "./api.ts";
 import { CONNECTING_SPEECH_HINT, EARLY_SPEECH_RMS, EarlySpeech, earlySpeechLogLine } from "./early-speech.ts";
@@ -43,6 +45,8 @@ export interface RealtimeCallbacks {
   /** 模型決定交辦工作；回傳的內容會交還給模型，讓它用一句話告訴使用者。 */
   onDelegate(title: string): Promise<Record<string, unknown>>;
   onGetTasks(): Promise<Record<string, unknown>>;
+  /** VOL-1：模型要調這台裝置的對話音量（同步）；沒有提供時工具回報這個畫面不能調。 */
+  onVoiceVolume?(request: VoiceVolumeRequest): Record<string, unknown>;
   /** 模型要上網查詢；回傳答案與來源，交還給模型。 */
   onWebSearch(query: string): Promise<Record<string, unknown>>;
   /** 模型要查家電狀態（唯讀）；回傳中控的真實讀值，交還給模型。 */
@@ -1052,6 +1056,7 @@ export function browserRealtimeDeps(exchange: (sdp: string) => Promise<string>):
     playRemote(stream) {
       const audio = new Audio();
       void audioDevices.sink(audio);
+      const detachVolume = voiceVolume.attach(audio);
       audio.autoplay = true;
       audio.srcObject = stream;
       void audio.play().catch(() => {});
@@ -1059,6 +1064,7 @@ export function browserRealtimeDeps(exchange: (sdp: string) => Promise<string>):
         audio.pause();
         audio.srcObject = null;
         audioDevices.release(audio);
+        detachVolume();
       };
     },
     exchange,

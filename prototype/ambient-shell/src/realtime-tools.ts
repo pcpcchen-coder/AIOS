@@ -3,6 +3,7 @@ import { matchApproval } from "../shared/approval.ts";
 import type { ApprovalReport } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, HomeResult, RealtimeCallbacks } from "./realtime.ts";
 import { taiwanText } from "./zh-tw.ts";
+import { parseVoiceVolumeArgs } from "../shared/voice-volume.ts";
 
 // 兩條即時語音路徑共用的工具執行器與確認卡佇列，從 RealtimeVoice（src/realtime.ts）原樣搬出：
 //   API key：RealtimeVoice 收到 response.function_call_arguments.done → executeRealtimeTool → function_call_output
@@ -145,7 +146,7 @@ export interface ToolContext {
 }
 
 /**
- * 驗證參數、呼叫既有的 callbacks（onDelegate、onWebSearch、onHomeStatus、onHomeControl、onGetTasks），
+ * 驗證參數、呼叫既有的 callbacks（onDelegate、onWebSearch、onHomeStatus、onHomeControl、onGetTasks、onVoiceVolume），
  * 並透過 approvals 套用 needs_confirmation → 確認卡／busy 的規則。分支與搬出前的 runTool 完全相同。
  */
 export async function executeRealtimeTool(name: string, rawArgs: string, ctx: ToolContext): Promise<void> {
@@ -199,6 +200,13 @@ export async function executeRealtimeTool(name: string, rawArgs: string, ctx: To
             approvals.queue({ kind: "home", id: result.confirm_id, device: result.device, room: result.room, action: result.action, expiresAt });
           }
         }
+      }
+    } else if (name === "set_voice_volume") {
+      if (!callbacks.onVoiceVolume) {
+        output = { ok: false, error: "這個畫面不能調對話音量" };
+      } else {
+        output = callbacks.onVoiceVolume(parseVoiceVolumeArgs(args as Record<string, unknown>));
+        if (output.ok === true && typeof output.volume === "number") callbacks.onToolActivity(`對話音量：${output.volume}`);
       }
     } else if (name === "get_tasks") {
       output = await callbacks.onGetTasks();

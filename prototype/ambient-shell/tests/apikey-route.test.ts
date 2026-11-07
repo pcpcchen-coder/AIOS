@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ApiKeyCall } from "../server/apikey-call.ts";
 import { RouteStartError } from "../server/realtime-routes.ts";
-import { voicePersonaRules, ZH_TW_TRANSCRIPTION_PROMPT } from "../server/realtime.ts";
+import { REALTIME_TOOLS, voicePersonaRules, voiceVolumeRule, ZH_TW_TRANSCRIPTION_PROMPT } from "../server/realtime.ts";
 import { loadConfig } from "../server/config.ts";
 import { claudeAccountKey, openaiRealtimeAccountKey, openaiRealtimeTarget } from "../server/providers.ts";
 import { CORE_TOOLS } from "../shared/realtime-route.ts";
@@ -65,6 +65,8 @@ async function george(extra: Partial<Parameters<typeof harness>[0]> = {}, allow 
  *  1. F11 的身分、旁人對話與繁體規則（voicePersonaRules），接在語言那一行之後。
  *  2. 台灣繁體逐字稿（2026-10-31，HIST-1 F1／ID-02 F3）：中文介面的 audio.input.transcription 在 language 之後多一個
  *     prompt（ZH_TW_TRANSCRIPTION_PROMPT），請 gpt-4o-mini-transcribe 用台灣繁體；快照都是 zh-TW，英文介面不帶（另有測試）。
+ *  3. VOL-1 對話音量（2026-11-07）：工具 set_voice_volume 插在 end_conversation 之前；規則 voiceVolumeRule(false)
+ *     插在「需要較長時間產出的工作」那一行之前（快照沒有中控）。
  */
 async function baseline(options: { mcp?: typeof MCP } = {}) {
   const requests = (STORED.requests as Record<string, { body: string }[]>)[options.mcp ? "mcp" : "plain"]!;
@@ -73,7 +75,10 @@ async function baseline(options: { mcp?: typeof MCP } = {}) {
     const body = JSON.parse(request.body) as { session: { instructions: string; audio: { input: { transcription: Record<string, string> } } } };
     const lines = body.session.instructions.split("\n");
     lines.splice(lines.findIndex((line) => line.startsWith("一律用繁體中文")) + 1, 0, ...voicePersonaRules("zh-TW"));
+    lines.splice(lines.findIndex((line) => line.startsWith("需要較長時間產出的工作")), 0, voiceVolumeRule(false));
     body.session.instructions = lines.join("\n");
+    const tools = (body.session as unknown as { tools: { name?: string }[] }).tools;
+    tools.splice(tools.findIndex((tool) => tool.name === "end_conversation"), 0, REALTIME_TOOLS.find((tool) => tool.name === "set_voice_volume")!);
     expect(body.session.audio.input.transcription).toEqual({ model: "gpt-4o-mini-transcribe", language: "zh" });
     body.session.audio.input.transcription = { ...body.session.audio.input.transcription, prompt: ZH_TW_TRANSCRIPTION_PROMPT };
     return { ...request, body: JSON.stringify(body) };
