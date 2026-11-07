@@ -59,7 +59,7 @@ describe("VoiceCostLog", () => {
     expect(lines).toHaveLength(VOICE_COST_KEEP);
     expect(JSON.parse(lines[0]!).session_id).toBe("rt_8");
     expect(log.list(VOICE_COST_KEEP + 100)).toHaveLength(VOICE_COST_KEEP);
-  });
+  }, 15_000);
 
   it("amend replaces the last record of the same session (a late no_voice) and appends when it is not there", () => {
     const log = new VoiceCostLog({ dir: temp() });

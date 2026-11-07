@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "a27e709fd11550529963485179bd3c6e06a12816ceab27f14545c5a876958916",
-      "translationSha256": "ef824280a4483cc88cf67feb7110e0993ea34bb8236bae8b18c2d03397345d35"
+      "sourceSha256": "b54617959e2a1e34bf55c5c2939463995933879d106d4fe26e78110a5390b160",
+      "translationSha256": "5a72f1eb2c07ee9abbe01bdecbc3e6ba914de52ed27b01ab707e2da2449aa9e0"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -517,6 +517,13 @@
       "translation": "docs/validation/memories-google-2026-11-06.en.md",
       "sourceSha256": "7608acc6f0ed6c3bc451979fa37127f2e45ceec6c28699cbb77ff98684e25c22",
       "translationSha256": "d00f0568949e0d135acd1cd72f7bf5ad4845d90b8664f487a4517dac2585f029"
+    },
+    {
+      "source": "docs/validation/memories-idle-after-call-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/memories-idle-after-call-2026-11-07.en.md",
+      "sourceSha256": "208d32a7ed7a50043add0510d0ed5d7bff26e0cd6730ac6e30959aa50bfed902",
+      "translationSha256": "9d304d12303dfced24096b233f95ef5ca0ff86af4703b18d8b4f4239e52df4fd"
     },
     {
       "source": "docs/validation/memories-mode-2026-11-06.md",

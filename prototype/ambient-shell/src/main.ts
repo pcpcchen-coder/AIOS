@@ -216,7 +216,7 @@ let developmentProvider: ExecutorMode | null = null;
 let conversationEpoch = 0;
 let pendingProviderSelection: { epoch: number; account: string } | null = null;
 
-const brain = new Brain(canvas);
+const brain = new Brain(canvas, !window.nousDesktop && new URLSearchParams(location.search).get("terminal") === "rpi4" ? 1.5 : 1);
 // 這台裝置的畫面效能（George 2026-11-05）：只改電子腦的繪製與背景模糊，存在這個頁面；Pi 終端機預設「平衡」。
 // MEMO-1：播放回憶時電子腦降到「省電」的繪製，把 Pi 4 的 GPU／CPU 留給照片與影片解碼；收起後回到原本的設定。
 let memoriesDimmed = false;
@@ -407,6 +407,10 @@ const realtimeCallbacks: RealtimeCallbacks = {
     endRealtimeTicket();
     sense.conversationEnded();
     showSubtitle(reason);
+    if ((code === "idle" || code === "max_duration") && !input.value.trim() && shell.surface === null) {
+      dispatch({ type: "input.close" });
+      return;
+    }
     dispatch({ type: "input.open" });
     showCommandError(reason);
   },

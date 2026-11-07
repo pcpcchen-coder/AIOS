@@ -10,7 +10,7 @@ afterEach(() => vi.unstubAllGlobals());
 // 頂端縮略圖仍跟字級。下面「靠近變大」「重設」「starting」「視窗邊界」「resize」「不合法輸入」幾項原本寫的是
 // 舊的共用比例（1.5 m 縮小、3 m 放大），已改成新的規則。
 
-function renderer(width = 1280, height = 900, opts: { reducedMotion?: boolean; prefs?: SenseTuning } = {}) {
+function renderer(width = 1280, height = 900, opts: { reducedMotion?: boolean; prefs?: SenseTuning; baseScale?: number } = {}) {
   let nextFrame: FrameRequestCallback = () => {};
   let now = 0;
   let center = { x: 0, y: 0 };
@@ -36,7 +36,7 @@ function renderer(width = 1280, height = 900, opts: { reducedMotion?: boolean; p
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { nextFrame = callback; return 1; });
   vi.stubGlobal("cancelAnimationFrame", () => {});
   const canvas = { getContext: () => context, dataset: {}, style: {}, width: 0, height: 0 } as unknown as HTMLCanvasElement;
-  const brain = new Brain(canvas);
+  const brain = new Brain(canvas, opts.baseScale);
   brain.start();
   const frame = (ms = 120) => {
     particles = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity };
@@ -386,4 +386,13 @@ it.each([NaN, Infinity, -1, 0])("invalid renderer input %s recovers neutral geom
   t.frame();
   t.brain.setDistanceScale(scale);
   expect(t.frame().r).toBeCloseTo(top.r);
+});
+
+it("terminal base scale enlarges the brain and published layout radius together", () => {
+  const normal = renderer(1920, 1080).frame();
+  const scaled = renderer(1920, 1080, { baseScale: 1.5 });
+  const frame = scaled.frame();
+  expect(frame.r / normal.r).toBeCloseTo(1.5);
+  expect(Number.parseFloat(scaled.css.get("--brain-r")!)).toBeCloseTo(frame.r);
+  expect(scaled.brain.hitTest(frame.cx, frame.cy)).toBe(true);
 });

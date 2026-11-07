@@ -247,7 +247,7 @@ export class Brain {
   /** 最近約 2 秒每一格的時間（rAF 時間戳）與 step＋draw 花的毫秒。 */
   private frameSamples: { at: number; ms: number }[] = [];
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(private readonly canvas: HTMLCanvasElement, private readonly baseScale = 1) {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("canvas 2D 不可用");
     this.ctx = ctx;
@@ -376,7 +376,7 @@ export class Brain {
   }
 
   private target(layout = this.state.layout): { cx: number; cy: number; r: number } {
-    return brainGeometry(this.width, this.height, layout, this.zoom, this.distanceScale, this.state.progress !== null);
+    return brainGeometry(this.width, this.height, layout, this.zoom * this.baseScale, this.distanceScale * this.baseScale, this.state.progress !== null);
   }
 
   /**
