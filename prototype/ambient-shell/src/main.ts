@@ -85,6 +85,8 @@ import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts
 import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
 import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
+import { voiceVolume } from "./voice-volume.ts";
+import { voiceVolumeOutput } from "../shared/voice-volume.ts";
 import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import {
   PushToTalk,
@@ -405,6 +407,12 @@ const realtimeCallbacks: RealtimeCallbacks = {
     showTranscript("assistant", text);
   },
   onDelegate: delegateFromRealtime,
+  // VOL-1：說「你講話大聲一點」「音量 60」：調這台裝置的對話音量（立即套用、保存在這個頁面）。
+  onVoiceVolume: (request) => {
+    const output = voiceVolumeOutput(voiceVolume.apply(request));
+    if (shell.surface?.kind === "settings") render();
+    return output;
+  },
   // MEM-4a：App 裡由核心依這條路徑的記憶同意給真實標題或外殼（George 2026-10-30）；瀏覽器版照舊。
   onGetTasks: async () => ({ ok: true, tasks: protectedTasks.available ? taskSummary(await protectedTasks.voiceTasks(realtimeTicket?.route === "live" ? "live" : "api_key")) : taskSummary() }),
   onWebSearch: webSearchFromRealtime,
@@ -705,6 +713,8 @@ function trackedPlayRemote(stream: MediaStream): () => void {
   const audio = new Audio();
   // 「聲音輸出」選定的裝置（系統預設時不呼叫 setSinkId）；改設定或裝置中斷時 audioDevices 重新套用到這個元素。
   void audioDevices.sink(audio);
+  // VOL-1：對話音量（說「你講話大聲一點」或設定頁），改了立即套用到這個元素。
+  const detachVolume = voiceVolume.attach(audio);
   audio.autoplay = true;
   audio.srcObject = stream;
   liveAudio = audio;
@@ -718,6 +728,7 @@ function trackedPlayRemote(stream: MediaStream): () => void {
     liveAudioPaused = audio.paused;
     if (liveAudio === audio) liveAudio = null;
     audioDevices.release(audio);
+    detachVolume();
     endGuard();
   };
 }
@@ -2873,6 +2884,10 @@ const actions: ViewActions = {
     saveProfile(profile);
     render();
   },
+  setVoiceVolume(request) {
+    voiceVolume.apply(request);
+    render();
+  },
   setGpuDrawing(on) {
     gpuDrawing = on;
     saveGpuDrawing(on);
@@ -3544,7 +3559,7 @@ function renderSurface(): void {
     ensureIntegrationStatus();
     // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
     ensureVoiceRelay();
-    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats(), gpu: gpuDrawing, renderer: brain.rendererStatus() } });
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats(), gpu: gpuDrawing, renderer: brain.rendererStatus() }, voiceVolume: voiceVolume.current });
   }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));

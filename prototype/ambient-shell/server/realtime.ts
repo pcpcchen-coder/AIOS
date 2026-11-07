@@ -159,6 +159,20 @@ export const REALTIME_TOOLS = [
   },
   {
     type: "function",
+    name: "set_voice_volume",
+    description:
+      "調整這台裝置上你（Nous）說話的音量，立即生效，這台裝置會記住。使用者說「你講話大聲一點」「小聲一點」「音量調到 60」「音量恢復預設」時呼叫。不是用來調家電（電視、音響、電風扇）的音量。最大 100 等於這台裝置的系統音量，不能比系統更大聲。",
+    parameters: {
+      type: "object",
+      properties: {
+        change: { type: "string", enum: ["up", "down", "reset"], description: "up 大聲一點、down 小聲一點（一次 20）、reset 恢復預設（100）" },
+        level: { type: "integer", minimum: 10, maximum: 100, description: "使用者說了數字時填（10 到 100）；有 level 時不用填 change" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    type: "function",
     name: "end_conversation",
     description: "使用者要結束對話（說再見、結束對話、先這樣、不用了）時呼叫；呼叫的同時用一句話道別。",
     parameters: { type: "object", properties: {}, additionalProperties: false },
@@ -210,6 +224,13 @@ export function taskLines(tasks: Iterable<Task>): string[] {
     });
 }
 
+/**
+ * VOL-1：對話音量的說話規則（兩條路徑相同）。沒有接中控時不提家電工具（沒有中控的工作階段，說明裡不出現 home_）。
+ */
+export function voiceVolumeRule(home: boolean): string {
+  return `使用者要你講話大聲或小聲一點、或說音量調到幾時，呼叫 set_voice_volume，調的是你在這台裝置上說話的音量；沒有指名設備的「大聲一點」「小聲一點」「音量 60」都是指你的聲音。${home ? "說出設備名稱（電視、音響、電風扇）才是家電，用 home_control。" : ""}結果回來後說現在的音量（volume）；有 note 時照說。`;
+}
+
 /** AIL-1：整合工具（app__ 開頭）的說話規則；兩條路徑相同。 */
 export const INTEGRATION_RULE =
   "名稱以 app__ 開頭的工具由 Nous 核心的整合層執行。依回傳的 status 說話：confirmed 才說已經完成；unconfirmed 是已送出但沒有確認，請使用者看一下；unknown 只能說「結果不明，請確認」，不能說失敗或沒做；refused 表示沒有送出，照 message 說原因；failed 照 message 說沒有成功。工具說明寫著「模擬」的是測試用，不是真的 App，要照實說是模擬。沒有出現在工具清單上的 App 功能就是目前不能用，照實說，不要用其他工具代替。";
@@ -229,7 +250,7 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
     abilities.push(
       "你可以查武陵居家裡的狀態：使用者問室內溫度、濕度、空氣品質或設備在不在線時呼叫 home_status，不要用猜的。回答講房間、數字和單位；readings 的 value 是 null 就說「沒有讀值」，不要說 0；data 是「快照」或「過期資料」時，依 time 與 minutes_ago 說是什麼時候、多久前的資料，不要說成現在的值。status 是 ambiguous 時問使用者是哪一個，使用者選了之後 target 照候選名稱一字不差填（包括「（AIFA）」「（紅外線遙控）」）；not_found 就說家裡找不到這個名字；no_such_reading 就說那裡沒有能量這項的設備。",
       "你也可以控制武陵居的家電：使用者要開關或調整一台設備（燈、插座、音響、窗簾）時，先說一句「好，我請中控處理」，再呼叫 home_control，一次一台。依回傳的 status 說話：confirmed 才說已經做好；unconfirmed 是已送出但設備還沒確認，請使用者看一下有沒有反應，不要說成功（why 是 no_reply 時說不確定有沒有執行）；failed 照 message 說沒有成功的原因；refused 表示指令沒有送出，照 message 說；ambiguous 問是哪一台，使用者選了之後 target 照候選名稱一字不差填（包括「（AIFA）」「（紅外線遙控）」），不要自己改寫；not_found 說家裡找不到這個名字。needs_confirmation 時用一句話說要對哪台設備做什麼，請使用者說「確認執行」或「取消」；不要再呼叫 home_control，也不能替使用者確認，結果會用系統通知送來。busy 表示另一張確認卡還沒處理完，這個指令沒有送出：請使用者先回答那張卡，之後再說一次。整個房間或全家一起控制還不支援，請使用者指定一台。color_temperature 是燈的色溫（K），不是冷氣溫度。",
-      "AIFA 冷氣：開關用 power；設定溫度用 ac_temperature（「冷氣調 26 度」是 target「冷氣」、value「26」）；模式 ac_mode、風量 ac_fan（「風量調小」是 down）、擺風 ac_swing。「開冷氣 26 度」要呼叫兩次：先 power true，等結果回來再 ac_temperature 26，兩個結果都照說。紅外線家電（電視、電風扇等）：開關用 power、靜音用 mute，其他鍵用 press（「大聲一點」是 press volume_up）；一次只按一下，使用者要按好幾下時，按一下之後請他再說一次。冷氣與紅外線家電沒有回讀，結果不會是 confirmed：why 是 one_way 時說「已送出，請看一下有沒有反應」，不要說已經開了、關了或調好了；有 key 時說按了哪個鍵；toggle 表示按的是切換鍵（電源切換鍵或靜音鍵），按一下切換一次，不能說開了、關了、靜音了或取消靜音了；cloud_no_reply 說雲端沒有回覆、不確定有沒有送出；controller_reported 只能說成「控制器回報…」，那不是冷氣的實際狀態；defaults_used 有內容時要說哪些設定用了預設值；有 note 時照說。關冷氣的 note 提到定時時：AIOS 讀不到定時，不能說確實有定時被取消，也不能說冷氣已經關了。不是 AIFA 的冷氣（Tuya、Home Assistant）與無線按鈕還不能用語音控制，使用者要求時照實說。",
+      "AIFA 冷氣：開關用 power；設定溫度用 ac_temperature（「冷氣調 26 度」是 target「冷氣」、value「26」）；模式 ac_mode、風量 ac_fan（「風量調小」是 down）、擺風 ac_swing。「開冷氣 26 度」要呼叫兩次：先 power true，等結果回來再 ac_temperature 26，兩個結果都照說。紅外線家電（電視、電風扇等）：開關用 power、靜音用 mute，其他鍵用 press（「電視大聲一點」是 press volume_up）；一次只按一下，使用者要按好幾下時，按一下之後請他再說一次。冷氣與紅外線家電沒有回讀，結果不會是 confirmed：why 是 one_way 時說「已送出，請看一下有沒有反應」，不要說已經開了、關了或調好了；有 key 時說按了哪個鍵；toggle 表示按的是切換鍵（電源切換鍵或靜音鍵），按一下切換一次，不能說開了、關了、靜音了或取消靜音了；cloud_no_reply 說雲端沒有回覆、不確定有沒有送出；controller_reported 只能說成「控制器回報…」，那不是冷氣的實際狀態；defaults_used 有內容時要說哪些設定用了預設值；有 note 時照說。關冷氣的 note 提到定時時：AIOS 讀不到定時，不能說確實有定時被取消，也不能說冷氣已經關了。不是 AIFA 的冷氣（Tuya、Home Assistant）與無線按鈕還不能用語音控制，使用者要求時照實說。",
     );
   }
   if (caps.mcp.length) {
@@ -241,6 +262,7 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
   if (caps.integrations?.("zh-TW").length) {
     abilities.push(INTEGRATION_RULE);
   }
+  abilities.push(voiceVolumeRule(!!caps.home));
   abilities.push(`需要較長時間產出的工作（報告、整理、規劃、研究）交給背景任務${caps.taskWebSearch ? "，背景任務也能上網查資料" : ""}。`);
   if (caps.memory) {
     abilities.push(
@@ -312,7 +334,7 @@ export function buildLiveInstructions(tasks: Iterable<Task>, now: Date, caps: { 
     locale === "en" ? "Speak English unless the user explicitly asks for another language. Be natural and brief, usually one to three sentences. Preserve all tool and confirmation rules." : "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
     ...voicePersonaRules(locale),
     "使用者隨時會插話；被打斷後以使用者的新內容為準，不要重複剛才的話。",
-    "需要做事時（上網查詢、查家裡狀態、控制家電、交辦背景工作、查任務進度、結束對話），一律交辦（delegate），每個請求只交辦一次，等結果回來。",
+    "需要做事時（上網查詢、查家裡狀態、控制家電、調整你說話的音量、交辦背景工作、查任務進度、結束對話），一律交辦（delegate），每個請求只交辦一次，等結果回來。",
     "只轉述交辦結果；結果回來之前不能說已經做好、查到或開了（例如不能說「燈開了」）。結果說失敗或不確定時照實說。",
     "交辦結果在 speakable 頻道時，用自己的話自然說出；commentary 頻道是安靜的背景，不要念出來。不要提到交辦、頻道或系統。",
     "使用者說「確認執行」或「取消」時也照樣交辦；你不能替使用者確認任何事。",

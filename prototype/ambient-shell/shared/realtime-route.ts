@@ -168,7 +168,7 @@ export interface FallbackOffer {
 // ---- 核心 → 頁面（SSE /api/events，只送給擁有工作階段的那條串流） ----
 
 /** 工具名稱；tests/voice-commands.test.ts 在編譯期比對 server/realtime.ts 的 REALTIME_TOOLS。 */
-export type HostToolName = "web_search" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control";
+export type HostToolName = "web_search" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control" | "set_voice_volume";
 
 /** 有外部副作用的工具：逾時或結果遺失時只能說「結果不明，請確認」，不能說失敗。 */
 export const SIDE_EFFECT_TOOLS: readonly HostToolName[] = ["home_control", "delegate_task"];

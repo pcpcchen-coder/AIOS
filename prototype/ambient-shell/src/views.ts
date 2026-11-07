@@ -20,6 +20,8 @@ import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
 import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
 import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, VoiceRelayProfileBody, VoiceRelaySlots, VoiceRelayTargetBody, VoiceRelayTrialBody, VoiceRelayUnadoptBody } from "./api.ts";
+import { VOICE_VOLUME_TEXT } from "./voice-volume.ts";
+import { VOICE_VOLUME_DEFAULT, VOICE_VOLUME_MAX, VOICE_VOLUME_MIN, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
 import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, rendererText, type FrameStats, type PerformanceProfile, type RendererReadout } from "./performance.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
@@ -72,6 +74,8 @@ export interface ViewActions {
   setPerformance?(profile: PerformanceProfile): void;
   /** 「使用 GPU 繪製（WebGL）」：立即切換並保存在這個頁面。 */
   setGpuDrawing?(on: boolean): void;
+  /** VOL-1：這台裝置的對話音量（立即套用並保存在這個頁面）。 */
+  setVoiceVolume?(request: VoiceVolumeRequest): void;
 }
 
 export const MAX_LISTED = 8;
@@ -395,6 +399,8 @@ export interface SettingsRenderOptions {
   voiceRelay?: VoiceRelayPanelState | null;
   /** 這台裝置的畫面效能（src/performance.ts）；沒有時不畫。 */
   performance?: PerformancePanelState | null;
+  /** VOL-1：這台裝置的對話音量（10–100）；沒有時不畫。 */
+  voiceVolume?: number | null;
 }
 
 export interface PerformancePanelState {
@@ -444,7 +450,7 @@ export function renderSettings(
   options: SettingsRenderOptions = {},
 ): HTMLElement {
   if (!settings) return surfaceShell("settings", h("p", { class: "muted" }, t("正在讀取設定…")), footer(actions));
-  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null, options.integrations ?? null, options.voiceRelay ?? null, options.performance ?? null);
+  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null, options.integrations ?? null, options.voiceRelay ?? null, options.performance ?? null, options.voiceVolume ?? null);
   const g = settings.chatgpt;
 
   const list = h("ul", { class: "provider-list" });
@@ -478,6 +484,7 @@ export function renderSettings(
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions, !!options.terminalCamera),
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
+    typeof options.voiceVolume === "number" && renderVoiceVolumeSettings(options.voiceVolume, actions),
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.clock && renderClockSettings(settings.clock, actions),
@@ -495,7 +502,7 @@ export function renderSettings(
  * macOS App 內的設定頁：只有帳號與登入（ChatGPT 引擎帳號、即時語音用的 Codex 帳號）和狀態。
  * 引擎選擇、即時語音路徑與聲音、秒數、鏡頭與手勢都在選單列，這裡不重複畫。
  */
-function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null, voiceRelay: VoiceRelayPanelState | null, performance: PerformancePanelState | null): HTMLElement {
+function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null, voiceRelay: VoiceRelayPanelState | null, performance: PerformancePanelState | null, voiceVolume: number | null = null): HTMLElement {
   const g = settings.chatgpt;
   const account = chatgptAccount(settings, actions, true);
   // 瀏覽器版的「Continue with ChatGPT」在引擎清單裡；這頁沒有引擎清單，未登入時直接放登入按鈕。
@@ -519,6 +526,7 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.realtime && renderRealtimeSettings(settings.realtime, actions, { desktop: true }),
     // 聲音輸入／輸出（George 2026-11-01）：選單列「聲音」與這裡都能選，寫入同一個 audio.json。
     settings.audio && renderAudioSettings(settings.audio.prefs, audio, actions),
+    typeof voiceVolume === "number" && renderVoiceVolumeSettings(voiceVolume, actions),
     performance && renderPerformanceSettings(performance, actions),
     // PRO-1：選單列「主動提醒」與這裡都能改，寫入同一個 proactive.json。
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
@@ -532,6 +540,28 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.voice_relay === true && voiceRelay && renderVoiceRelay(voiceRelay, actions),
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
     footer(actions),
+  );
+}
+
+/**
+ * VOL-1：這台裝置的對話音量（George 2026-11-07）：小聲一點／大聲一點／恢復預設，和說「你講話大聲一點」是同一個設定。
+ * 只調 Nous 說話的播放元素，最大就是系統音量；每台裝置各自保存在頁面。
+ */
+export function renderVoiceVolumeSettings(volume: number, actions: ViewActions): HTMLElement {
+  const disabled = !actions.setVoiceVolume;
+  const down = button(VOICE_VOLUME_TEXT.down, () => actions.setVoiceVolume?.({ change: "down" }));
+  const up = button(VOICE_VOLUME_TEXT.up, () => actions.setVoiceVolume?.({ change: "up" }));
+  const reset = button(VOICE_VOLUME_TEXT.reset, () => actions.setVoiceVolume?.({ change: "reset" }), "btn--ghost");
+  down.disabled = disabled || volume <= VOICE_VOLUME_MIN;
+  up.disabled = disabled || volume >= VOICE_VOLUME_MAX;
+  reset.disabled = disabled || volume === VOICE_VOLUME_DEFAULT;
+  return h(
+    "section",
+    { class: "camera-settings voice-volume-settings" },
+    h("h3", {}, t(VOICE_VOLUME_TEXT.title)),
+    h("p", { "data-voice-volume": "", role: "status" }, t(VOICE_VOLUME_TEXT.current, String(volume))),
+    h("div", { class: "actions" }, down, up, reset),
+    h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.note)),
   );
 }
 
