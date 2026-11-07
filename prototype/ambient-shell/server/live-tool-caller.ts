@@ -81,7 +81,7 @@ export const DELEGATION_BUDGET_MS = CALLER_LIMITS.maxTurns * CALLER_LIMITS.turnT
 /** 確認卡結束後多久內，「確認執行／取消」的交辦算是在回答那張卡。 */
 export const APPROVAL_WINDOW_MS = 8_000;
 
-const HOST_TOOLS: readonly HostToolName[] = ["web_search", "delegate_task", "get_tasks", "end_conversation", "home_status", "home_control"];
+const HOST_TOOLS: readonly HostToolName[] = ["web_search", "delegate_task", "get_tasks", "end_conversation", "home_status", "home_control", "set_voice_volume"];
 
 /**
  * 工具表：buildRealtimeTools(caps) 去掉 MCP（MCP 在 ChatGPT 方案路徑不可用）。名稱、說明、參數都和 API key 路徑相同：

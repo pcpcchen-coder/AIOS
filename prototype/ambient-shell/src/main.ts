@@ -27,9 +27,11 @@ import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts"
 import { greetingFor, idleSession, newInteractionId, openRealtime, wakeTriggerAction, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
 import { CALL_END_TEXT, type CallAnswer, type LiveCoreEvent, type LiveMemoryReason, type RealtimeServerEvent, type RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
-import { applyProfile, loadProfile, RENDER_BUDGETS, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
+import { applyProfile, loadGpuDrawing, loadProfile, memoriesRenderBudget, saveGpuDrawing, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
 import { MEMORIES_OFF, memoryCaption, stepMemories, wakeMemories, type MemoriesItem, type MemoriesState } from "../shared/memories.ts";
 import { MEMORIES_TIMING, MemoriesPresenter } from "./memories.ts";
+import { ClockCorner } from "./clock-corner.ts";
+import { HomeCorner } from "./home-corner.ts";
 import { CUE_TIMING, ProcessingCue, processingSource } from "./processing-cue.ts";
 import { browserProcessingSound } from "./processing-sound.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
@@ -83,6 +85,8 @@ import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts
 import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
 import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
+import { voiceVolume } from "./voice-volume.ts";
+import { voiceVolumeOutput } from "../shared/voice-volume.ts";
 import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import {
   PushToTalk,
@@ -216,19 +220,41 @@ let developmentProvider: ExecutorMode | null = null;
 let conversationEpoch = 0;
 let pendingProviderSelection: { epoch: number; account: string } | null = null;
 
-const brain = new Brain(canvas, !window.nousDesktop && new URLSearchParams(location.search).get("terminal") === "rpi4" ? 1.5 : 1);
+const isPi4 = bridges.terminal === "rpi4";
+const brain = new Brain(canvas, isPi4 ? 1.5 : 1);
 // 這台裝置的畫面效能（George 2026-11-05）：只改電子腦的繪製與背景模糊，存在這個頁面；Pi 終端機預設「平衡」。
-// MEMO-1：播放回憶時電子腦降到「省電」的繪製，把 Pi 4 的 GPU／CPU 留給照片與影片解碼；收起後回到原本的設定。
+// MEMO-1：播放回憶時電子腦降到「省電」的每秒格數與光暈，把 Pi 4 的 GPU／CPU 留給照片與影片解碼；收起後回到原本的設定。
+// 2026-11-07：解析度維持這台裝置原本的設定（memoriesRenderBudget）。退到角落的那 1.2 秒仍用原本的每秒格數，移動才順，到位後才降。
 let memoriesDimmed = false;
-const performanceTargets = { setRenderBudget: (budget: RenderBudget) => brain.setRenderBudget(memoriesDimmed ? RENDER_BUDGETS.light : budget), root: document.documentElement };
+const performanceTargets = { setRenderBudget: (budget: RenderBudget) => brain.setRenderBudget(memoriesDimmed ? memoriesRenderBudget(budget) : budget), root: document.documentElement };
+let memoriesDimTimer: ReturnType<typeof setTimeout> | null = null;
 let performanceProfile: PerformanceProfile = loadProfile({ search: location.search, desktop: !!window.nousDesktop });
 applyProfile(performanceProfile, performanceTargets);
+// 「使用 GPU 繪製（WebGL）」（方案 B，docs/validation/brain-webgl-2026-11-07.md）：每台裝置預設關閉；沒有硬體 WebGL 或中斷時自動改回 Canvas。
+let gpuDrawing = loadGpuDrawing();
+brain.setRendererPreference(gpuDrawing);
+brain.onRendererChange = (status) => {
+  if (shell.surface?.kind === "settings") refreshPerformanceReadout(surfaceRoot, brain.frameStats(), status);
+};
 brain.start();
 
 /**
  * MEMO-1 回憶模式：電子腦閒置 idle_s 後照片與影片從電子腦浮現；任何喚醒立即收起（shared/memories.ts 的狀態機）。
  * 斷線時視為關閉（核心不在就沒有照片可讀，也不留著過時的清單）。照片不點亮任何腦區。
  */
+/** CLK-1：右上角的時間、日期與天氣（設定 settings.clock.enabled 打開時才有；被動讀數，不能點）。 */
+const clockCorner = new ClockCorner({
+  fetchWeather: (signal) => api.weatherNow(signal),
+  locale: () => getLocale(),
+  enlarged: isPi4,
+});
+/** HOME-1：左上角的家中狀態（設定 settings.home_corner.enabled 打開時才有；被動讀數，不能點、不能控制）。 */
+const homeCorner = new HomeCorner({
+  fetchOverview: (signal) => api.homeOverview(signal),
+  locale: () => getLocale(),
+  enlarged: isPi4,
+});
+
 const memoriesRoot = document.createElement("div");
 memoriesRoot.id = "memories";
 document.body.append(memoriesRoot);
@@ -237,8 +263,8 @@ const memoriesPresenter = new MemoriesPresenter({
   root: memoriesRoot,
   reducedMotion: () => reducedMotion?.matches ?? false,
   origin: () => {
-    const rect = canvas.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2 - window.innerWidth / 2, y: rect.top + rect.height * 0.47 - window.innerHeight / 2 };
+    const corner = brain.memoriesCorner();
+    return { x: corner.x - window.innerWidth / 2, y: corner.y - window.innerHeight / 2 };
   },
   caption: (item) => memoryCaption(item, new Date(), getLocale()),
   onWake: () => wakeMemoriesNow(),
@@ -381,6 +407,12 @@ const realtimeCallbacks: RealtimeCallbacks = {
     showTranscript("assistant", text);
   },
   onDelegate: delegateFromRealtime,
+  // VOL-1：說「你講話大聲一點」「音量 60」：調這台裝置的對話音量（立即套用、保存在這個頁面）。
+  onVoiceVolume: (request) => {
+    const output = voiceVolumeOutput(voiceVolume.apply(request));
+    if (shell.surface?.kind === "settings") render();
+    return output;
+  },
   // MEM-4a：App 裡由核心依這條路徑的記憶同意給真實標題或外殼（George 2026-10-30）；瀏覽器版照舊。
   onGetTasks: async () => ({ ok: true, tasks: protectedTasks.available ? taskSummary(await protectedTasks.voiceTasks(realtimeTicket?.route === "live" ? "live" : "api_key")) : taskSummary() }),
   onWebSearch: webSearchFromRealtime,
@@ -685,6 +717,8 @@ function trackedPlayRemote(stream: MediaStream): () => void {
   const audio = new Audio();
   // 「聲音輸出」選定的裝置（系統預設時不呼叫 setSinkId）；改設定或裝置中斷時 audioDevices 重新套用到這個元素。
   void audioDevices.sink(audio);
+  // VOL-1：對話音量（說「你講話大聲一點」或設定頁），改了立即套用到這個元素。
+  const detachVolume = voiceVolume.attach(audio);
   audio.autoplay = true;
   audio.srcObject = stream;
   liveAudio = audio;
@@ -698,6 +732,7 @@ function trackedPlayRemote(stream: MediaStream): () => void {
     liveAudioPaused = audio.paused;
     if (liveAudio === audio) liveAudio = null;
     audioDevices.release(audio);
+    detachVolume();
     endGuard();
   };
 }
@@ -928,6 +963,8 @@ function applyEffectiveSettings(value: SettingsView, preserveEntry = false): voi
   ambient.refresh();
   syncWake(value.wake);
   syncAudioPrefs(value);
+  clockCorner.setEnabled(value.clock?.enabled === true);
+  homeCorner.setEnabled(value.home_corner?.enabled === true);
 }
 
 /**
@@ -2310,6 +2347,7 @@ async function homeControlFromRealtime(args: HomeControlArgs): Promise<HomeResul
   try {
     const result = await api.homeControl(args);
     showSubtitle(homeControlLine(result, getLocale()));
+    homeCorner.refreshSoon();
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -2325,6 +2363,7 @@ async function homeConfirmFromRealtime(confirmId: string, approve: boolean): Pro
   try {
     const result = await api.homeConfirm(confirmId, approve);
     if (approve) showSubtitle(homeControlLine(result, getLocale()));
+    if (approve) homeCorner.refreshSoon();
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -2849,6 +2888,16 @@ const actions: ViewActions = {
     saveProfile(profile);
     render();
   },
+  setVoiceVolume(request) {
+    voiceVolume.apply(request);
+    render();
+  },
+  setGpuDrawing(on) {
+    gpuDrawing = on;
+    saveGpuDrawing(on);
+    brain.setRendererPreference(on);
+    render();
+  },
   updateAudio(patch) {
     const requestId = userRequest();
     void updateAudioPrefs(patch).then((error) => {
@@ -2863,6 +2912,26 @@ const actions: ViewActions = {
         render();
       },
       (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`主動提醒設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  updateClock(patch) {
+    const requestId = userRequest();
+    void api.updateClock(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`時鐘設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  updateHomeCorner(patch) {
+    const requestId = userRequest();
+    void api.updateHomeCorner(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`家中狀態設定沒有保存：${(err as Error).message}` }),
     );
   },
   updateMemories(patch) {
@@ -3129,9 +3198,22 @@ function syncMemories(): void {
   document.body.dataset.memories = phase;
   if (phase === "showing" && prefs) memoriesPresenter.show(memoriesItems, prefs);
   else memoriesPresenter.hide();
-  if ((phase === "showing") !== memoriesDimmed) {
-    memoriesDimmed = phase === "showing";
-    applyProfile(performanceProfile, performanceTargets);
+  const showing = phase === "showing";
+  brain.setMemoriesCorner(showing);
+  if (!showing) {
+    if (memoriesDimTimer !== null) clearTimeout(memoriesDimTimer);
+    memoriesDimTimer = null;
+    if (memoriesDimmed) {
+      memoriesDimmed = false;
+      applyProfile(performanceProfile, performanceTargets);
+    }
+  } else if (!memoriesDimmed && memoriesDimTimer === null) {
+    memoriesDimTimer = setTimeout(() => {
+      memoriesDimTimer = null;
+      if (memoriesState.phase !== "showing") return;
+      memoriesDimmed = true;
+      applyProfile(performanceProfile, performanceTargets);
+    }, MEMORIES_TIMING.brainMs);
   }
   if (!enabled) {
     if (memoriesTicker !== null) clearInterval(memoriesTicker);
@@ -3452,7 +3534,7 @@ function renderSurface(): void {
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
-      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${gpuDrawing}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
@@ -3481,7 +3563,7 @@ function renderSurface(): void {
     ensureIntegrationStatus();
     // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
     ensureVoiceRelay();
-    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats() } });
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats(), gpu: gpuDrawing, renderer: brain.rendererStatus() }, voiceVolume: voiceVolume.current });
   }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));
@@ -3564,7 +3646,7 @@ function renderVaultPrompt(): void {
 setInterval(() => {
   refreshTimers(surfaceRoot);
   refreshCountdowns(surfaceRoot);
-  if (shell.surface?.kind === "settings") refreshPerformanceReadout(surfaceRoot, brain.frameStats());
+  if (shell.surface?.kind === "settings") refreshPerformanceReadout(surfaceRoot, brain.frameStats(), brain.rendererStatus());
 }, 1000);
 
 // ───────────── 輸入 ─────────────
@@ -3741,5 +3823,7 @@ onLocaleChange(() => {
   sensorIndicator.title = t("{0}（按一下顯示／收起鏡頭畫面）", t(sensorDetail));
   sensorIndicator.textContent = sensorState === "ok" ? t("鏡頭") : sensorState === "starting" ? t("鏡頭啟動中") : t("鏡頭：{0}", t(sensorDetail));
   renderWakeIndicator();
+  clockCorner.refreshLocale();
+  homeCorner.refreshLocale();
   render();
 });

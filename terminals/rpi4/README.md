@@ -126,6 +126,10 @@ Pi 頁面「設定」→「回憶模式」可以開關（和 Mac 選單列寫入
 
 Google 相簿（MEMO-2）：在 Pi 頁面「設定」→「回憶模式」按「從 Google 相簿挑選…」，畫面顯示 QR code，用手機掃描後在 Google 的畫面挑選。照片下載到 Mac 的快取，Pi 只經 Mac 核心取用。需要先在 Mac 執行 `gog auth add 帳號 --services photospicker`。見 [MEMO-2 驗證](../../docs/validation/memories-google-2026-11-06.md)（**未以真實帳號驗證**）。
 
+## 右上角時鐘與天氣
+
+Pi 畫面右上角預設顯示時間、日期、星期、氣溫與天氣（只是讀數，不能點）。時間用 Mac 核心給的時區（天氣地點的時區，沒有地點時 Mac 的系統時區），不用 Pi 自己的時區；Pi 的時鐘和 Mac 差超過 60 秒時頁面改用 Mac 核心的時間，但仍建議用 `timedatectl status` 確認 Pi 的 NTP 已同步。天氣經 SSH 通道向 Mac 核心取得（Open-Meteo，地點同「主動提醒」的天氣地點），Pi 不直接連 Open-Meteo；查不到時照實顯示「天氣暫時無法取得」。Mac 選單列或設定頁「右上角時鐘與天氣」→「Pi 終端機」可以關掉。細節見[時鐘與天氣驗證](../../docs/validation/pi-clock-weather-2026-11-07.md)（**Pi 實機未驗證**）。
+
 <a id="realtime-cost-guard"></a>
 ## 即時語音費用防護
 

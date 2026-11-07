@@ -1,6 +1,8 @@
 import type { FaceTuning } from "../shared/face-tuning.ts";
 import { AUDIO_WRITE_PATH, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import type { ProactivePrefsPatch } from "../shared/proactive.ts";
+import { CLOCK_WRITE_PATH, WEATHER_NOW_PATH, type ClockPrefsPatch, type WeatherNowView } from "../shared/clock.ts";
+import { HOME_CORNER_WRITE_PATH, HOME_OVERVIEW_PATH, type HomeCornerPrefsPatch, type HomeOverviewView } from "../shared/home-corner.ts";
 import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_WRITE_PATH, type MemoriesItem, type MemoriesPrefsPatch } from "../shared/memories.ts";
 import { getLocale, type Locale } from "./i18n.ts";
 import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
@@ -108,6 +110,14 @@ export const api = {
   updateAudio: (patch: AudioPrefsPatch) => call<SettingsView>("POST", AUDIO_WRITE_PATH, patch),
   /** PRO-1「主動提醒」（招呼後接今天的天氣）。 */
   updateProactive: (patch: ProactivePrefsPatch) => call<SettingsView>("POST", "/api/settings/proactive", patch),
+  /** CLK-1「右上角時鐘與天氣」的顯示開關（Mac 視窗、Pi 終端機）。 */
+  updateClock: (patch: ClockPrefsPatch) => call<SettingsView>("POST", CLOCK_WRITE_PATH, patch),
+  /** CLK-1：右上角時鐘的時區、核心時間與現在的天氣（唯讀，沒有參數）。 */
+  weatherNow: (signal?: AbortSignal) => call<WeatherNowView>("GET", WEATHER_NOW_PATH, undefined, getLocale(), false, signal),
+  /** HOME-1「左上角家中狀態」的顯示開關（Mac 視窗、Pi 終端機）。 */
+  updateHomeCorner: (patch: HomeCornerPrefsPatch) => call<SettingsView>("POST", HOME_CORNER_WRITE_PATH, patch),
+  /** HOME-1：左上角的室內讀值、燈與冷氣（唯讀，沒有參數）。 */
+  homeOverview: (signal?: AbortSignal) => call<HomeOverviewView>("GET", HOME_OVERVIEW_PATH, undefined, getLocale(), false, signal),
   /** MEMO-1「回憶模式」。 */
   updateMemories: (patch: MemoriesPrefsPatch) => call<SettingsView>("POST", MEMORIES_WRITE_PATH, patch),
   memoriesItems: () => call<{ items: MemoriesItem[] }>("GET", MEMORIES_ITEMS_PATH),

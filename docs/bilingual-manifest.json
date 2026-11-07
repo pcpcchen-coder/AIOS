@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "1ce1a094630b8459a8ebb1ff5e565996cc7a21002d7c7610d7e2205aaf42bf72",
-      "translationSha256": "16f1b1ce3a9594d30650e78c2422e45c649431dc46f615f539a81fa4133597ee"
+      "sourceSha256": "14d1708fb3071fcb542e7a0d5936c6be58871538abf1696778d16a38b342c712",
+      "translationSha256": "d01b6c505a8ca63ea668fb11c868c939e945923929d1228f27f9de7b0e35cc68"
     },
     {
       "source": "docs/README.md",
@@ -277,8 +277,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "b54617959e2a1e34bf55c5c2939463995933879d106d4fe26e78110a5390b160",
-      "translationSha256": "5a72f1eb2c07ee9abbe01bdecbc3e6ba914de52ed27b01ab707e2da2449aa9e0"
+      "sourceSha256": "5eeba9488ece3ad01e00a26d908ab49e3f02f607f9a666605c501d0a52bee59f",
+      "translationSha256": "61d2817ca592ff66a5b3e475a8738ea433abd8617196539a93623de23a2f82d1"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -342,6 +342,13 @@
       "translation": "docs/validation/brain-regions-2026-10-20.en.md",
       "sourceSha256": "95eef9f81c59320b87f49ff48752de96c9b373dc8368166cb0c49631840e69f2",
       "translationSha256": "cb0c81a39f7a2f05961f02b4b5194766e0e8bceb35cef9f668ce926ec3855bba"
+    },
+    {
+      "source": "docs/validation/brain-webgl-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/brain-webgl-2026-11-07.en.md",
+      "sourceSha256": "d9021e8346dcca9ed7d9686c55bff861e98ba13e63f23821370ceaf93c1dc143",
+      "translationSha256": "be458e47effded047224fab247df4163c8f022e576cf758bfa74891dbbd30cf6"
     },
     {
       "source": "docs/validation/cal-1-google-calendar-2026-11-05.md",
@@ -470,6 +477,13 @@
       "translationSha256": "4426f59223c84b22a6db4161cd65fa43fcce6e3d4a625d01f9e20c16745d96c5"
     },
     {
+      "source": "docs/validation/home-corner-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/home-corner-2026-11-07.en.md",
+      "sourceSha256": "18253f84fbce7b3e5b167dbf84b3897780b3b7051fc991af98196d9d8998219c",
+      "translationSha256": "a45acf48597045d85be174c1c434c27e0b3995de2cdfcf2790e9aaca36dd179e"
+    },
+    {
       "source": "docs/validation/implementation-review-2026-10-24.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/implementation-review-2026-10-24.en.md",
@@ -529,8 +543,8 @@
       "source": "docs/validation/memories-mode-2026-11-06.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/memories-mode-2026-11-06.en.md",
-      "sourceSha256": "4eac7d57d25a5c31c09266c5296a68f58fb406ae76b71a0b627cc173135ef4ff",
-      "translationSha256": "84c3a42af59c74088795d5cd55eb32d58dbf210b802b6180e49dcdb98e73761b"
+      "sourceSha256": "ce8dc17fd13e5ba610a8f36662f76799c5cdaa0ead2c4d67cf278e2895fa7edd",
+      "translationSha256": "8f011de5c8bfe1abd17e67f779f87d6ee536a08a91b1a57a240c9a5d11eaba6a"
     },
     {
       "source": "docs/validation/memory-mem0-2026-10-26.md",
@@ -615,6 +629,13 @@
       "translation": "docs/validation/menu-settings-consolidate-2026-10-23.en.md",
       "sourceSha256": "6dd40b1b8dde63c86e263e76a0e8c02f0d5594d4d9d1daea0e8d1ac2a99536a7",
       "translationSha256": "37ccb89949f1abd40abbdd96045109398d64b2835012b1f380694033f9767d82"
+    },
+    {
+      "source": "docs/validation/pi-clock-weather-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pi-clock-weather-2026-11-07.en.md",
+      "sourceSha256": "6b5f0d7487dee8e091fc05d394f055f7071d9e455ba2d6fd3b9e49486b20ec9a",
+      "translationSha256": "dbd50d71ad5a8e4f78c9cb8982215f8ad8955026897ecb4bf8be1ec39b825093"
     },
     {
       "source": "docs/validation/pi-family-recognition-2026-11-05.md",
@@ -743,6 +764,13 @@
       "translationSha256": "6c090e2d734555809e1b59cebd800bf0b1f31bb2e36b29d910a1df5cf92bc667"
     },
     {
+      "source": "docs/validation/voice-volume-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/voice-volume-2026-11-07.en.md",
+      "sourceSha256": "1a4c2440f5190ee902a6c3cd0963f2ef4b3f663985a4032a2f9cf0850dbd16f5",
+      "translationSha256": "a69c8472aa9f3957f9bcb10108ccb73074380b18bcc6eef78c00962740effb1c"
+    },
+    {
       "source": "docs/validation/wk-00-mac-2026-10-31.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/wk-00-mac-2026-10-31.en.md",
@@ -788,8 +816,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "178d30ea11e9725353558197a95eea76e2e734211c3fc9e3df156f9533a31f26",
-      "translationSha256": "61f93cd0f0a123823b0a97ab6df617702f65629a3f741a8fb80ac0bfd855722d"
+      "sourceSha256": "ed173f249cc9843652fafb7ba2d8be44e0e703b68525d6948d6700897a7f3792",
+      "translationSha256": "7734e4326728d55060f4c99699a4ac31cc14ae54a9bb2e1ad22fc4071ede1192"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",
@@ -802,8 +830,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "abb7608b46ee8c2e7f0e766a6b0e5c70effc2df1eb84dba25bb50fab899142f0",
-      "translationSha256": "ae2ee5345fadcd2fdb7cbc2bb9468b9eb557f0b933e1eee77792bb6e63386656"
+      "sourceSha256": "26aee9157adb3e2a0d60294e5957c2e52501af6a07e03009c42051457fa640d9",
+      "translationSha256": "eee6326ea01c851b94efd6be88f25fda7aa151a4fb46e8c5419432f17185aab5"
     }
   ]
 }

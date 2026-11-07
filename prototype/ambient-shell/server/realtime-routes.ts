@@ -190,6 +190,7 @@ export const HOST_TIMEOUT_MS: Record<HostToolName, number> = {
   delegate_task: 10_000,
   get_tasks: 5_000,
   end_conversation: 5_000,
+  set_voice_volume: 5_000,
 };
 
 /** 有副作用的工具沒有在時限內回覆時交給模型的內容：結果不明，不是失敗。 */

@@ -13,12 +13,16 @@ import { callMeterText } from "../shared/call-meter.ts";
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
 import { durationLabel, formatCacheSize, googlePickBusy, MEMORIES_STATE_TEXT, MEMORIES_TEXT, type MemoriesGoogleView, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
+import { CLOCK_TEXT, type ClockPrefsPatch, type ClockSettingsView } from "../shared/clock.ts";
+import { HOME_CORNER_TEXT, type HomeCornerPrefsPatch, type HomeCornerSettingsView } from "../shared/home-corner.ts";
 import { PROACTIVE_TEXT, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView, type WeatherFetchState, type CalendarFetchState } from "../shared/proactive.ts";
 import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
 import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
 import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, VoiceRelayProfileBody, VoiceRelaySlots, VoiceRelayTargetBody, VoiceRelayTrialBody, VoiceRelayUnadoptBody } from "./api.ts";
-import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, type FrameStats, type PerformanceProfile } from "./performance.ts";
+import { VOICE_VOLUME_TEXT } from "./voice-volume.ts";
+import { VOICE_VOLUME_DEFAULT, VOICE_VOLUME_MAX, VOICE_VOLUME_MIN, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
+import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, rendererText, type FrameStats, type PerformanceProfile, type RendererReadout } from "./performance.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -45,6 +49,9 @@ export interface ViewActions {
   updateAudio?(patch: AudioPrefsPatch): void;
   /** PRO-1「主動提醒」。 */
   updateProactive?(patch: ProactivePrefsPatch): void;
+  /** CLK-1「右上角時鐘與天氣」的兩個顯示開關。 */
+  updateClock?(patch: ClockPrefsPatch): void;
+  updateHomeCorner?(patch: HomeCornerPrefsPatch): void;
   /** MEMO-1「回憶模式」。 */
   updateMemories?(patch: MemoriesPrefsPatch): void;
   /** MEMO-2：Google 相簿的挑選、取消與清除快取。 */
@@ -65,6 +72,10 @@ export interface ViewActions {
   openHistory(): void;
   /** 這台裝置的畫面效能：立即套用並保存在這個頁面。 */
   setPerformance?(profile: PerformanceProfile): void;
+  /** 「使用 GPU 繪製（WebGL）」：立即切換並保存在這個頁面。 */
+  setGpuDrawing?(on: boolean): void;
+  /** VOL-1：這台裝置的對話音量（立即套用並保存在這個頁面）。 */
+  setVoiceVolume?(request: VoiceVolumeRequest): void;
 }
 
 export const MAX_LISTED = 8;
@@ -388,12 +399,18 @@ export interface SettingsRenderOptions {
   voiceRelay?: VoiceRelayPanelState | null;
   /** 這台裝置的畫面效能（src/performance.ts）；沒有時不畫。 */
   performance?: PerformancePanelState | null;
+  /** VOL-1：這台裝置的對話音量（10–100）；沒有時不畫。 */
+  voiceVolume?: number | null;
 }
 
 export interface PerformancePanelState {
   profile: PerformanceProfile;
   /** 電子腦實測的格數與繪製時間；設定頁開著時每秒由 refreshPerformanceReadout 更新。 */
   stats: FrameStats | null;
+  /** 「使用 GPU 繪製（WebGL）」開關；沒給時視為關閉。 */
+  gpu?: boolean;
+  /** 真的在用的繪製方式（Brain.rendererStatus）；沒給時當成一般繪製。 */
+  renderer?: RendererReadout | null;
 }
 
 /** SP-1：設定頁「App 整合」段的狀態（打開設定頁時才向核心查，不在背景輪詢）。 */
@@ -433,7 +450,7 @@ export function renderSettings(
   options: SettingsRenderOptions = {},
 ): HTMLElement {
   if (!settings) return surfaceShell("settings", h("p", { class: "muted" }, t("正在讀取設定…")), footer(actions));
-  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null, options.integrations ?? null, options.voiceRelay ?? null, options.performance ?? null);
+  if (options.desktop) return renderDesktopAccounts(settings, message, actions, options.audio ?? null, options.integrations ?? null, options.voiceRelay ?? null, options.performance ?? null, options.voiceVolume ?? null);
   const g = settings.chatgpt;
 
   const list = h("ul", { class: "provider-list" });
@@ -467,8 +484,11 @@ export function renderSettings(
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions, !!options.terminalCamera),
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
+    typeof options.voiceVolume === "number" && renderVoiceVolumeSettings(options.voiceVolume, actions),
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
+    settings.clock && renderClockSettings(settings.clock, actions),
+    settings.home_corner && renderHomeCornerSettings(settings.home_corner, actions),
     settings.memories && renderMemoriesSettings(settings.memories, actions, false),
     settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
     settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
@@ -482,7 +502,7 @@ export function renderSettings(
  * macOS App 內的設定頁：只有帳號與登入（ChatGPT 引擎帳號、即時語音用的 Codex 帳號）和狀態。
  * 引擎選擇、即時語音路徑與聲音、秒數、鏡頭與手勢都在選單列，這裡不重複畫。
  */
-function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null, voiceRelay: VoiceRelayPanelState | null, performance: PerformancePanelState | null): HTMLElement {
+function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null, voiceRelay: VoiceRelayPanelState | null, performance: PerformancePanelState | null, voiceVolume: number | null = null): HTMLElement {
   const g = settings.chatgpt;
   const account = chatgptAccount(settings, actions, true);
   // 瀏覽器版的「Continue with ChatGPT」在引擎清單裡；這頁沒有引擎清單，未登入時直接放登入按鈕。
@@ -506,9 +526,14 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.realtime && renderRealtimeSettings(settings.realtime, actions, { desktop: true }),
     // 聲音輸入／輸出（George 2026-11-01）：選單列「聲音」與這裡都能選，寫入同一個 audio.json。
     settings.audio && renderAudioSettings(settings.audio.prefs, audio, actions),
+    typeof voiceVolume === "number" && renderVoiceVolumeSettings(voiceVolume, actions),
     performance && renderPerformanceSettings(performance, actions),
     // PRO-1：選單列「主動提醒」與這裡都能改，寫入同一個 proactive.json。
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
+    // CLK-1：選單列「右上角時鐘與天氣」與這裡都能改，寫入同一個 clock.json。
+    settings.clock && renderClockSettings(settings.clock, actions),
+    // HOME-1：選單列「左上角家中狀態」與這裡都能改，寫入同一個 home-corner.json。
+    settings.home_corner && renderHomeCornerSettings(settings.home_corner, actions),
     // MEMO-1：選單列「回憶模式」與這裡都能改，寫入同一個 memories.json。
     settings.memories && renderMemoriesSettings(settings.memories, actions, true),
     settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
@@ -519,8 +544,31 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
 }
 
 /**
+ * VOL-1：這台裝置的對話音量（George 2026-11-07）：小聲一點／大聲一點／恢復預設，和說「你講話大聲一點」是同一個設定。
+ * 只調 Nous 說話的播放元素，最大就是系統音量；每台裝置各自保存在頁面。
+ */
+export function renderVoiceVolumeSettings(volume: number, actions: ViewActions): HTMLElement {
+  const disabled = !actions.setVoiceVolume;
+  const down = button(VOICE_VOLUME_TEXT.down, () => actions.setVoiceVolume?.({ change: "down" }));
+  const up = button(VOICE_VOLUME_TEXT.up, () => actions.setVoiceVolume?.({ change: "up" }));
+  const reset = button(VOICE_VOLUME_TEXT.reset, () => actions.setVoiceVolume?.({ change: "reset" }), "btn--ghost");
+  down.disabled = disabled || volume <= VOICE_VOLUME_MIN;
+  up.disabled = disabled || volume >= VOICE_VOLUME_MAX;
+  reset.disabled = disabled || volume === VOICE_VOLUME_DEFAULT;
+  return h(
+    "section",
+    { class: "camera-settings voice-volume-settings" },
+    h("h3", {}, t(VOICE_VOLUME_TEXT.title)),
+    h("p", { "data-voice-volume": "", role: "status" }, t(VOICE_VOLUME_TEXT.current, String(volume))),
+    h("div", { class: "actions" }, down, up, reset),
+    h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.note)),
+  );
+}
+
+/**
  * 這台裝置的畫面效能（George 2026-11-05，Pi 4 終端機）：完整／平衡／省電，選了立即套用、只存在這個頁面。
  * 只改電子腦的繪製與背景模糊；收音、播放與即時語音不受影響。實測數字來自電子腦每一格的計時。
+ * 另有「使用 GPU 繪製（WebGL）」開關（2026-11-07，方案 B）：和三檔正交、預設關；「目前」一行照實寫真的在用哪一種與改回的原因。
  */
 export function renderPerformanceSettings(state: PerformancePanelState, actions: ViewActions): HTMLElement {
   const choices = h("div", { class: "actions perf-choices", role: "radiogroup", "aria-label": PERFORMANCE_TEXT.group });
@@ -536,12 +584,24 @@ export function renderPerformanceSettings(state: PerformancePanelState, actions:
     choice.disabled = !actions.setPerformance;
     choices.append(choice);
   }
+  const gpu = state.gpu === true;
+  const gpuButton = button(gpu ? "開" : "關", () => actions.setGpuDrawing?.(!gpu), gpu ? "btn--primary" : "");
+  gpuButton.setAttribute("aria-pressed", String(gpu));
+  gpuButton.setAttribute("aria-label", t("{0}：{1}", t(PERFORMANCE_TEXT.gpu), gpu ? t("開") : t("關")));
+  gpuButton.disabled = !actions.setGpuDrawing;
+  const gpuList = h(
+    "ul",
+    { class: "pref-list" },
+    h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(PERFORMANCE_TEXT.gpu)), h("span", { class: "muted small" }, t(PERFORMANCE_TEXT.gpuNote))), gpuButton),
+  );
   return h(
     "section",
     { class: "camera-settings performance-settings" },
     h("h3", {}, t(PERFORMANCE_TEXT.title)),
     choices,
+    gpuList,
     h("p", { class: "muted small" }, t(PERFORMANCE_TEXT.note)),
+    h("p", { class: "muted small", "data-perf-renderer": "" }, t(rendererText(state.renderer ?? null))),
     h("p", { class: "muted small", "data-perf-readout": "" }, performanceReadout(state.stats)),
   );
 }
@@ -551,9 +611,11 @@ function performanceReadout(stats: FrameStats | null): string {
   return t(source, ...values);
 }
 
-/** 設定頁開著時每秒更新實測數字（只改文字，不重建設定頁）。 */
-export function refreshPerformanceReadout(root: ParentNode, stats: FrameStats | null): void {
+/** 設定頁開著時每秒更新實測數字與目前的繪製方式（只改文字，不重建設定頁）。 */
+export function refreshPerformanceReadout(root: ParentNode, stats: FrameStats | null, renderer?: RendererReadout | null): void {
   root.querySelectorAll<HTMLElement>("[data-perf-readout]").forEach((el) => { el.textContent = performanceReadout(stats); });
+  if (renderer === undefined) return;
+  root.querySelectorAll<HTMLElement>("[data-perf-renderer]").forEach((el) => { el.textContent = t(rendererText(renderer)); });
 }
 
 /** ChatGPT 引擎帳號：登入中、已登入（重新授權／用量／其他帳號／登出）、需要重新登入。 */
@@ -871,6 +933,36 @@ export function renderProactiveSettings(view: ProactiveSettingsView, actions: Vi
     h("p", { class: "muted small", role: "status" }, t(PROACTIVE_STATE[view.weather.state])),
     view.calendar && h("p", { class: "muted small", role: "status" }, t(CALENDAR_STATE[view.calendar.state])),
   );
+}
+
+/** CLK-1「右上角時鐘與天氣」：Mac 視窗與 Pi 終端機各一個開關；改了就保存（POST /api/settings/clock）。 */
+export function renderClockSettings(view: ClockSettingsView, actions: ViewActions): HTMLElement {
+  const list = h("ul", { class: "pref-list" });
+  const toggle = (label: string, note: string, on: boolean, patch: ClockPrefsPatch) => {
+    const b = button(on ? "開" : "關", () => actions.updateClock?.(patch), on ? "btn--primary" : "");
+    b.setAttribute("aria-pressed", String(on));
+    b.setAttribute("aria-label", t("{0}：{1}", t(label), on ? t("開") : t("關")));
+    b.disabled = !actions.updateClock;
+    list.append(h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label)), h("span", { class: "muted small" }, t(note))), b));
+  };
+  toggle(CLOCK_TEXT.main, CLOCK_TEXT.mainNote, view.prefs.main, { main: !view.prefs.main });
+  toggle(CLOCK_TEXT.terminal, CLOCK_TEXT.terminalNote, view.prefs.terminal, { terminal: !view.prefs.terminal });
+  return h("section", { class: "camera-settings clock-settings" }, h("h3", {}, t(CLOCK_TEXT.group)), list, h("p", { class: "muted small" }, t(CLOCK_TEXT.note)));
+}
+
+/** HOME-1「左上角家中狀態」：Mac 視窗與 Pi 終端機各一個開關；改了就保存（POST /api/settings/home-corner）。 */
+export function renderHomeCornerSettings(view: HomeCornerSettingsView, actions: ViewActions): HTMLElement {
+  const list = h("ul", { class: "pref-list" });
+  const toggle = (label: string, note: string, on: boolean, patch: HomeCornerPrefsPatch) => {
+    const b = button(on ? "開" : "關", () => actions.updateHomeCorner?.(patch), on ? "btn--primary" : "");
+    b.setAttribute("aria-pressed", String(on));
+    b.setAttribute("aria-label", t("{0}：{1}", t(label), on ? t("開") : t("關")));
+    b.disabled = !actions.updateHomeCorner;
+    list.append(h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label)), h("span", { class: "muted small" }, t(note))), b));
+  };
+  toggle(HOME_CORNER_TEXT.main, HOME_CORNER_TEXT.mainNote, view.prefs.main, { main: !view.prefs.main });
+  toggle(HOME_CORNER_TEXT.terminal, HOME_CORNER_TEXT.terminalNote, view.prefs.terminal, { terminal: !view.prefs.terminal });
+  return h("section", { class: "camera-settings home-corner-settings" }, h("h3", {}, t(HOME_CORNER_TEXT.group)), list, h("p", { class: "muted small" }, t(HOME_CORNER_TEXT.note)));
 }
 
 /** MEMO-1「回憶模式」：總開關、影片聲音、停留與閒置秒數、來源狀態（只有數量）。改了就保存（POST /api/settings/memories）。 */

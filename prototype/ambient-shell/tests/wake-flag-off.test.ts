@@ -88,7 +88,11 @@ describe("NOUS_WAKE off is byte-identical to the pre-wake build", () => {
     expect(parsed.proactive?.prefs).toEqual({ enabled: true, weather: true, calendar: true, start_hour: 5, end_hour: 11, place: null });
     // 第四個刻意的例外（George 2026-11-06 MEMO-1「回憶模式」）：settings.memories 不綁旗標（預設關），一定存在；拿掉後其餘逐位元組相同。
     expect(parsed.memories?.prefs).toEqual({ enabled: false, dwell_s: 8, idle_s: 60, video_sound: false });
-    const { audio: _audio, proactive: _proactive, memories: _memories, ...rest } = parsed;
+    // 第五個刻意的例外（George 2026-11-07 CLK-1「右上角時鐘與天氣」）：settings.clock 不綁旗標（Mac 視窗預設關），一定存在；拿掉後其餘逐位元組相同。
+    expect(parsed.clock).toEqual({ enabled: false, prefs: { main: false, terminal: true }, write_path: "/api/settings/clock" });
+    // 第六個刻意的例外（George 2026-11-07 HOME-1「左上角家中狀態」）：settings.home_corner 不綁旗標（同時鐘的預設），一定存在；拿掉後其餘逐位元組相同。
+    expect(parsed.home_corner).toEqual({ enabled: false, prefs: { main: false, terminal: true }, write_path: "/api/settings/home-corner" });
+    const { audio: _audio, proactive: _proactive, memories: _memories, clock: _clock, home_corner: _homeCorner, ...rest } = parsed;
     const body = JSON.stringify(rest);
     expect(body).toMatchSnapshot();
     expect(menuJson(rest as SettingsView)).toMatchSnapshot();

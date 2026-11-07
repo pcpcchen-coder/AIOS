@@ -128,6 +128,10 @@ On the Pi page, "Settings" → "Memories mode" switches it on or off (the same s
 
 Google Photos (MEMO-2): on the Pi page, "Settings" → "Memories" → "Pick from Google Photos…" shows a QR code; scan it with a phone and pick in Google's screen. Photos download to the Mac cache and the Pi reads them only through the Mac core. Run `gog auth add account --services photospicker` on the Mac first. See the [MEMO-2 validation](../../docs/validation/memories-google-2026-11-06.en.md) (**not verified with a real account**).
 
+## Clock & weather corner
+
+By default the top-right corner of the Pi screen shows the time, date, weekday, temperature and weather (a read-out only; it cannot be tapped). Time uses the time zone the Mac core gives (the weather place's time zone, or the Mac's system time zone without a place), not the Pi's own time zone; when the Pi clock is more than 60 s off the Mac, the page uses the Mac core's time, but it is still worth confirming with `timedatectl status` that the Pi's NTP is synchronised. Weather comes from the Mac core over the SSH tunnel (Open-Meteo, place as the "Proactive briefing" weather place); the Pi never connects to Open-Meteo directly. When it cannot be retrieved the corner says so (「天氣暫時無法取得」, "Weather is unavailable right now"). Switch it off with "Clock & weather corner" → "Pi terminal" in the Mac menu bar or the settings page. Details are in the [clock & weather validation](../../docs/validation/pi-clock-weather-2026-11-07.en.md) (**not verified on a real Pi**).
+
 <a id="realtime-cost-guard"></a>
 ## Realtime voice cost guard
 

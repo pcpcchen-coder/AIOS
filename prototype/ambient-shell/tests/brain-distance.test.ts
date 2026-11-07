@@ -1,5 +1,5 @@
-import { afterEach, expect, it, vi } from "vitest";
-import { Brain, brainGeometry, HIT_EXTENT, LAYOUT, ORBIT_FIT_EXTENT, ZOOM_FIT_EXTENT, type BrainVisualState } from "../src/brain.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Brain, brainGeometry, HIT_EXTENT, LAYOUT, MEMORIES_CORNER, memoriesCornerGeometry, ORBIT_FIT_EXTENT, ZOOM_FIT_EXTENT, type BrainVisualState } from "../src/brain.ts";
 import { brainZoom, SenseController, type SenseTuning } from "../src/sense/controller.ts";
 import { DEFAULT_CAMERA_PREFS, type SenseEvent } from "../shared/sense.ts";
 
@@ -386,6 +386,73 @@ it.each([NaN, Infinity, -1, 0])("invalid renderer input %s recovers neutral geom
   t.frame();
   t.brain.setDistanceScale(scale);
   expect(t.frame().r).toBeCloseTo(top.r);
+});
+
+// 2026-11-07（George：回憶模式時電子腦縮到左下角太小、太淡看不見）：不再用 CSS 把整張 Canvas 縮成 0.32 倍，
+// 改成直接以角落的大小繪製，位置在照片外的左下角。
+describe("memories corner", () => {
+  it("is half the standby radius, with the brain body's left and bottom edges one margin from the viewport edges", () => {
+    expect(MEMORIES_CORNER.scale).toBe(0.5);
+    // 1920×1080：待機半徑 216，角落 108；邊距 max(16, 1.6vw) = 30.72。
+    const big = memoriesCornerGeometry(1920, 1080);
+    expect(big.r).toBeCloseTo(108);
+    expect(big.cx).toBeCloseTo(30.72 + 108 * HIT_EXTENT.x);
+    expect(big.cy).toBeCloseTo(1080 - 30.72 - 108 * HIT_EXTENT.down);
+    const small = memoriesCornerGeometry(800, 480);
+    expect(small.r).toBeCloseTo(48);
+    expect(small.cx).toBeCloseTo(16 + 48 * HIT_EXTENT.x);
+  });
+
+  it.each([[1920, 1080], [1280, 720]])("%i×%i: the drawn particles stay on screen, left of a full-height 3:2 photo", (width, height) => {
+    const t = renderer(width, height);
+    t.brain.setMemoriesCorner(true);
+    const { particles } = t.frame();
+    // 照片最大 86vw × 78vh；3:2 橫式照片受高度限制：寬 0.78 h × 1.5，置中。
+    const photoLeft = (width - height * 0.78 * 1.5) / 2;
+    expect(particles.minX).toBeGreaterThanOrEqual(0);
+    expect(particles.maxY).toBeLessThanOrEqual(height);
+    expect(particles.maxX).toBeLessThan(photoLeft);
+    expect(particles.minY).toBeGreaterThan(height / 2);
+  });
+
+  it("draws at the corner size (not a CSS-scaled full canvas), keeps the standby CSS radius, and returns on wake", () => {
+    const t = renderer(1920, 1080);
+    const home = t.frame();
+    const standbyCss = t.css.get("--brain-r");
+    const corner = memoriesCornerGeometry(1920, 1080);
+    expect(t.css.get("--brain-corner-x")).toBe(`${corner.cx}px`);
+    expect(t.css.get("--brain-corner-y")).toBe(`${corner.cy}px`);
+    expect(t.css.get("--brain-corner-r")).toBe(`${corner.r}px`);
+    t.brain.setMemoriesCorner(true);
+    const shown = t.frame();
+    expect(shown.cx).toBeCloseTo(corner.cx);
+    expect(shown.cy).toBeCloseTo(corner.cy);
+    expect(shown.r).toBeCloseTo(corner.r);
+    expect(t.brain.memoriesCorner()).toEqual({ x: corner.cx, y: corner.cy });
+    expect(t.css.get("--brain-r")).toBe(standbyCss);
+    t.brain.setMemoriesCorner(false);
+    const back = t.frame();
+    expect(back.cx).toBeCloseTo(home.cx);
+    expect(back.cy).toBeCloseTo(home.cy);
+    expect(back.r).toBeCloseTo(home.r);
+  });
+
+  it("without reduced motion it eases to the corner and back like other size changes", () => {
+    const t = renderer(1920, 1080, { reducedMotion: false });
+    const home = t.frame();
+    const corner = memoriesCornerGeometry(1920, 1080);
+    t.brain.setMemoriesCorner(true);
+    const first = t.frame(50);
+    expect(first.cx).toBeLessThan(home.cx);
+    expect(first.cx).toBeGreaterThan(corner.cx + 1);
+    let last = first;
+    for (let i = 0; i < 30; i++) last = t.frame(50); // k = 0.25 per 50 ms frame: 0.75^31 × 795 px < 1 px
+    expect(Math.abs(last.cx - corner.cx)).toBeLessThan(1);
+    t.brain.setMemoriesCorner(false);
+    const leaving = t.frame(50);
+    expect(leaving.cx).toBeGreaterThan(corner.cx + 1);
+    expect(leaving.cx).toBeLessThan(home.cx);
+  });
 });
 
 it("terminal base scale enlarges the brain and published layout radius together", () => {

@@ -49,7 +49,11 @@ import { createIntegrations } from "./integrations/index.ts";
 import type { TasksResponse } from "../shared/protected-tasks.ts";
 import { TerminalPresence } from "./terminal-presence.ts";
 import { isTerminalId, type TerminalStatus } from "../shared/terminal.ts";
-import { WeatherService } from "./weather.ts";
+import { WeatherService, weatherNowView } from "./weather.ts";
+import { ClockSettingsStore } from "./clock-settings.ts";
+import { HomeCornerSettingsStore } from "./home-corner-settings.ts";
+import { HomeOverview } from "./home-overview.ts";
+import { systemTimeZone } from "./local-date.ts";
 import { calendarReaderFrom } from "./proactive-calendar.ts";
 import { FolderMemoriesSource, memoriesFeature, MemoriesSettingsStore } from "./memories.ts";
 import { GooglePhotosCache, googleMemories, GooglePicker, SIPS_PATH, sipsConverter } from "./memories-google.ts";
@@ -261,6 +265,11 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   // PRO-1：主動提醒（招呼後接今天的天氣）。天氣快取一份，招呼與整合層的 app.weather.today 共用。
   const weather = new WeatherService({ log, ...(options.weatherFetch ? { fetch: options.weatherFetch } : {}) });
   const proactiveSettings = new ProactiveSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  // CLK-1：右上角時鐘與天氣（顯示設定 clock.json；天氣和招呼共用同一份快取）。
+  const clockSettings = new ClockSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  // HOME-1：左上角家中狀態（顯示設定 home-corner.json；讀值來自 HomeBridge 的快照，唯讀、快取 30 秒）。
+  const homeCornerSettings = new HomeCornerSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  const homeOverview = new HomeOverview({ source: home });
   // MEMO-1：回憶模式。資料夾不存在時以 0o700 建立（狀態「資料夾是空的」，比「找不到」好處理）。
   // MEMO-2：Google 相簿（經 gog）。找不到 gog 或沒有帳號時仍有快取（之前挑選的照樣播放），挑選回報不可用的原因。
   const googleCache = new GooglePhotosCache({ dir: join(config.configDir, "memories", "google"), log, onChange: () => notify() });
@@ -493,6 +502,16 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     voice,
     audio,
     proactive: { view: () => proactive.view(), update: (patch) => proactiveSettings.update(patch), prefetch: () => proactive.prefetch() },
+    clock: {
+      view: (source) => clockSettings.view(source),
+      update: (patch) => clockSettings.update(patch),
+      weatherNow: (locale) => weatherNowView({ service: weather, place: proactive.place()?.id ?? null, locale, now: Date.now, systemTimeZone: systemTimeZone() }),
+    },
+    homeCorner: {
+      view: (source) => homeCornerSettings.view(source),
+      update: (patch) => homeCornerSettings.update(patch),
+      overview: () => homeOverview.view(),
+    },
     memories,
     ...(config.earlySpeechRms !== null ? { earlySpeechRms: config.earlySpeechRms } : {}),
     identity: identity ?? undefined,
