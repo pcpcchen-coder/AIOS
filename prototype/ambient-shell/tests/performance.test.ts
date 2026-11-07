@@ -8,6 +8,7 @@ import {
   defaultProfile,
   frameStatsText,
   loadProfile,
+  memoriesRenderBudget,
   NO_BLUR_CLASS,
   PERFORMANCE_KEY,
   PERFORMANCE_PROFILES,
@@ -26,6 +27,12 @@ describe("render budgets", () => {
     expect(RENDER_BUDGETS.full).toEqual({ maxFps: 30, pixelRatioCap: 2, maxPulses: 70, glow: "full", backdropBlur: true, ringBlur: true });
     expect(RENDER_BUDGETS.balanced).toEqual({ maxFps: 20, pixelRatioCap: 1, maxPulses: 40, glow: "full", backdropBlur: false, ringBlur: false });
     expect(RENDER_BUDGETS.light).toEqual({ maxFps: 12, pixelRatioCap: 0.75, maxPulses: 20, glow: "reduced", backdropBlur: false, ringBlur: false });
+  });
+
+  it("memories playback uses light fps, pulses and glow but keeps the device's resolution (the corner brain is drawn small, not CSS-scaled)", () => {
+    expect(memoriesRenderBudget(RENDER_BUDGETS.balanced)).toEqual({ ...RENDER_BUDGETS.light, pixelRatioCap: 1 });
+    expect(memoriesRenderBudget(RENDER_BUDGETS.full)).toEqual({ ...RENDER_BUDGETS.light, pixelRatioCap: 2 });
+    expect(memoriesRenderBudget(RENDER_BUDGETS.light)).toEqual(RENDER_BUDGETS.light);
   });
 });
 

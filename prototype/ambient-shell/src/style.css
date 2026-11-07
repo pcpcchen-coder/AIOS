@@ -1477,15 +1477,35 @@ body.history-page {
   width: 6em;
 }
 
-/* ───── 回憶模式（MEMO-1）：電子腦縮到左下角變暗，照片從電子腦的位置浮現 ───── */
+/* ───── 回憶模式（MEMO-1）：電子腦退到左下角，照片從電子腦的位置浮現 ─────
+ * 2026-11-07（George：縮到左下角太小、太淡看不清楚）：不再用 CSS 縮放整張 Canvas（scale 0.32、opacity 0.45，
+ * 線條被縮成不到半個像素）。電子腦直接以角落的大小繪製（src/brain.ts memoriesCornerGeometry，0.5 倍待機半徑，
+ * 在照片外的左下角），這裡只把不透明度降到 0.92，背後加一層便宜的徑向漸層光暈（不用 filter／backdrop-filter）。 */
 
 #brain {
-  transform-origin: 6% 94%;
-  transition: transform 1.2s ease, opacity 1.2s ease;
+  transition: opacity 0.7s ease;
 }
 body[data-memories="showing"] #brain {
-  transform: scale(0.32);
-  opacity: 0.45;
+  opacity: 0.92;
+  transition-duration: 1.2s;
+}
+/* 光暈：在 Canvas 之前（DOM 順序），所以畫在電子腦後面；只有回憶播放時、電子腦到位後淡入。 */
+body::before {
+  content: "";
+  position: fixed;
+  left: calc(var(--brain-corner-x, 0px) - var(--brain-corner-r, 0px) * 2);
+  top: calc(var(--brain-corner-y, 0px) - var(--brain-corner-r, 0px) * 2);
+  width: calc(var(--brain-corner-r, 0px) * 4);
+  height: calc(var(--brain-corner-r, 0px) * 4);
+  border-radius: 50%;
+  background: radial-gradient(circle closest-side, rgba(16, 44, 84, 0.55) 0%, rgba(14, 40, 78, 0.3) 50%, rgba(92, 225, 255, 0.05) 78%, transparent 100%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+body[data-memories="showing"]::before {
+  opacity: 1;
+  transition: opacity 0.8s ease 0.5s;
 }
 
 .memories {
@@ -1596,12 +1616,13 @@ body[data-memories="showing"] #brain {
   from { opacity: 1; }
   to { opacity: 0; }
 }
+/* 減少動態效果：電子腦直接跳到左下角（brain.ts 不緩動），只有不透明度與光暈淡入淡出。 */
 @media (prefers-reduced-motion: reduce) {
-  #brain {
+  #brain,
+  body[data-memories="showing"] #brain,
+  body::before,
+  body[data-memories="showing"]::before {
     transition: opacity 400ms ease;
-  }
-  body[data-memories="showing"] #brain {
-    transform: none;
   }
 }
 
