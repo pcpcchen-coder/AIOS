@@ -184,6 +184,7 @@ bash uninstall.sh --purge
   - 記憶撤銷時的強制靜音只作用在 Mac 主視窗。
   - 建議：用 Pi 時在 Mac 進入[服務模式](#service-mode)，Mac 就不會收音、喚醒或開始語音。
 - Pi 端不跑 Agent、不存任務資料。Mac 睡眠或 App 結束時，Pi 畫面就沒有核心可連。kiosk 只在開 Chromium 之前等核心；Chromium 已經開著時不會自己結束，恢復要靠頁面本身的重新連線，必要時執行 `systemctl --user restart aios-kiosk.service`。
+- **藍牙尚未支援。** 目前 eMeet M0 Plus 用 USB 線接；改用藍牙的規劃（通話模式音質、配對、診斷與實測清單）見 [RPI-BT 規劃](../../docs/experiments/RPI4_BLUETOOTH_EMEET_PLAN.md)，還沒實作。
 - `aios-doctor` 的喇叭檢查只看有沒有播放裝置；接著 HDMI 的 Pi 一定有 HDMI 聲音裝置，所以 PASS 不代表 USB 喇叭已接上或已選為輸出，請看輸出裡列出的裝置名稱。
 
 <a id="rpi-2-draft"></a>
