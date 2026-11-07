@@ -1,5 +1,7 @@
 import { localToday } from "./local-date.ts";
-import { weatherPlace, type DayPart, type WeatherFetchState, type WeatherPlace, type WeatherPlaceId, type WeatherToday } from "../shared/proactive.ts";
+import type { Locale } from "../shared/i18n.mjs";
+import type { WeatherNowView } from "../shared/clock.ts";
+import { WEATHER_ATTRIBUTION, weatherPlace, type DayPart, type WeatherNow, type WeatherFetchState, type WeatherPlace, type WeatherPlaceId, type WeatherToday } from "../shared/proactive.ts";
 
 // PRO-1（George 2026-11-05）：今天的天氣，來源 Open-Meteo（免費、不用金鑰；資料 CC BY 4.0，https://open-meteo.com/）。
 // - 網址只由這裡組：固定主機 api.open-meteo.com，參數只有清單地點的座標與時區（shared/proactive.ts WEATHER_PLACES）。
@@ -11,12 +13,16 @@ export const OPEN_METEO_HOST = "https://api.open-meteo.com";
 export const WEATHER_TTL_MS = 30 * 60_000;
 export const WEATHER_MAX_AGE_MS = 2 * 60 * 60_000;
 export const WEATHER_TIMEOUT_MS = 8_000;
+/** 查詢失敗後這段時間內不再向 Open-Meteo 查同一個地點（右上角時鐘、招呼與工具都可能一直來問；服務掛掉時不要一直打）。 */
+export const WEATHER_FAILURE_COOLDOWN_MS = 2 * 60_000;
 const MAX_BODY_BYTES = 64_000;
 
 export function forecastUrl(place: WeatherPlace): string {
   const q = new URLSearchParams({
     latitude: place.latitude.toFixed(2),
     longitude: place.longitude.toFixed(2),
+    // CLK-1：右上角時鐘要畫現在的氣溫與天氣（is_day 選白天／夜晚圖示）。
+    current: "temperature_2m,weather_code,is_day",
     daily: "weather_code,temperature_2m_max,temperature_2m_min",
     hourly: "precipitation_probability",
     timezone: place.timeZone,
@@ -31,6 +37,22 @@ const PARTS: { part: DayPart; from: number; to: number }[] = [
   { part: "afternoon", from: 12, to: 18 },
   { part: "evening", from: 18, to: 24 },
 ];
+
+/**
+ * CLK-1：Open-Meteo 的 current 區塊 → 現在的氣溫與天氣。時間不是 today、氣溫缺漏或不合理、is_day 不是 0／1 時回 null
+ * （角落改畫今天的最低／最高，不把整天的資料說成「現在」）。
+ */
+export function parseCurrent(body: unknown, today: string): WeatherNow | null {
+  const cur = (body as { current?: Record<string, unknown> } | null)?.current;
+  if (!cur || typeof cur !== "object") return null;
+  const time = cur.time;
+  if (typeof time !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(time) || time.slice(0, 10) !== today) return null;
+  const temp = cur.temperature_2m;
+  if (!finite(temp) || temp < -60 || temp > 60) return null;
+  if (cur.is_day !== 0 && cur.is_day !== 1) return null;
+  const code = cur.weather_code;
+  return { time, temp_c: temp, code: Number.isInteger(code) ? (code as number) : null, is_day: cur.is_day === 1 };
+}
 
 /** Open-Meteo 的回覆 → WeatherToday；日期不是 today、溫度缺漏或不合理時回 null。 */
 export function parseForecast(body: unknown, place: WeatherPlaceId, today: string, fetchedAt: number): WeatherToday | null {
@@ -59,7 +81,7 @@ export function parseForecast(body: unknown, place: WeatherPlaceId, today: strin
       if (best !== null && (rain === null || best > rain.percent)) rain = { part, percent: Math.round(best) };
     }
   }
-  return { place, date: today, code: Number.isInteger(code) ? (code as number) : null, min_c: min, max_c: max, rain, fetched_at: fetchedAt };
+  return { place, date: today, code: Number.isInteger(code) ? (code as number) : null, min_c: min, max_c: max, rain, now: parseCurrent(body, today), fetched_at: fetchedAt };
 }
 
 export interface WeatherServiceOptions {
@@ -99,6 +121,8 @@ export class WeatherService {
   async refresh(placeId: WeatherPlaceId, signal?: AbortSignal): Promise<WeatherToday | null> {
     const c = this.current(placeId);
     if (c && this.now() - c.fetched_at < WEATHER_TTL_MS) return c;
+    // 剛失敗過：冷卻時間內不重查，回快取裡仍可用的資料（2 小時內、今天）或 null。
+    if (!this.inflight && this.last?.place === placeId && !this.last.ok && this.now() - this.last.at < WEATHER_FAILURE_COOLDOWN_MS) return c;
     let shared = this.inflight?.place === placeId ? this.inflight.promise : null;
     if (!shared) {
       const promise = this.load(placeId).finally(() => {
@@ -145,4 +169,43 @@ export class WeatherService {
       return null;
     }
   }
+}
+
+/**
+ * CLK-1：GET /api/weather/now 的內容（右上角時鐘）。地點同主動提醒（選的或依系統時區推的）；和招呼共用 WeatherService 的
+ * 快取，快取 30 分鐘內不另外查。天氣有沒有說出口的開關不影響這裡（這裡只是畫面上的讀數）。時區：地點的時區，沒有地點時核心的系統時區。
+ */
+export async function weatherNowView(options: {
+  service: Pick<WeatherService, "refresh" | "current" | "status">;
+  place: WeatherPlaceId | null;
+  locale: Locale;
+  now: () => number;
+  systemTimeZone: string;
+}): Promise<WeatherNowView> {
+  const place = weatherPlace(options.place);
+  const base = { place: place ? { id: place.id as WeatherPlaceId, label: options.locale === "en" ? place.en : place.zh } : null, attribution: WEATHER_ATTRIBUTION };
+  if (!place) return { ...base, time_zone: options.systemTimeZone, server_now: options.now(), state: "no_place", weather: null };
+  const id = place.id as WeatherPlaceId;
+  await options.service.refresh(id);
+  // refresh 失敗時仍可能有 2 小時內的快取（current）：照樣畫，頁面依 fetched_at 標「N 分鐘前」。
+  const w = options.service.current(id);
+  const state = options.service.status(id).state;
+  return {
+    ...base,
+    time_zone: place.timeZone,
+    server_now: options.now(),
+    state,
+    weather: w
+      ? {
+          date: w.date,
+          code: w.now ? w.now.code : w.code,
+          is_day: w.now ? w.now.is_day : true,
+          temp_c: w.now ? w.now.temp_c : null,
+          min_c: w.min_c,
+          max_c: w.max_c,
+          rain_percent: w.rain ? w.rain.percent : null,
+          fetched_at: w.fetched_at,
+        }
+      : null,
+  };
 }

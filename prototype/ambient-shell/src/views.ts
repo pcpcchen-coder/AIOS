@@ -13,6 +13,7 @@ import { callMeterText } from "../shared/call-meter.ts";
 import { isLiveVoice, ROUTE_PREFERENCE_LABEL, ROUTE_PREFERENCES, unavailableText, type RealtimePrefsPatch } from "../shared/realtime-route.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
 import { durationLabel, formatCacheSize, googlePickBusy, MEMORIES_STATE_TEXT, MEMORIES_TEXT, type MemoriesGoogleView, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
+import { CLOCK_TEXT, type ClockPrefsPatch, type ClockSettingsView } from "../shared/clock.ts";
 import { PROACTIVE_TEXT, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView, type WeatherFetchState, type CalendarFetchState } from "../shared/proactive.ts";
 import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice, type AudioLine, type AudioPrefs, type AudioPrefsPatch, type AudioReport } from "../shared/audio-devices.ts";
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
@@ -45,6 +46,8 @@ export interface ViewActions {
   updateAudio?(patch: AudioPrefsPatch): void;
   /** PRO-1「主動提醒」。 */
   updateProactive?(patch: ProactivePrefsPatch): void;
+  /** CLK-1「右上角時鐘與天氣」的兩個顯示開關。 */
+  updateClock?(patch: ClockPrefsPatch): void;
   /** MEMO-1「回憶模式」。 */
   updateMemories?(patch: MemoriesPrefsPatch): void;
   /** MEMO-2：Google 相簿的挑選、取消與清除快取。 */
@@ -469,6 +472,7 @@ export function renderSettings(
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
+    settings.clock && renderClockSettings(settings.clock, actions),
     settings.memories && renderMemoriesSettings(settings.memories, actions, false),
     settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
     settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
@@ -509,6 +513,8 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     performance && renderPerformanceSettings(performance, actions),
     // PRO-1：選單列「主動提醒」與這裡都能改，寫入同一個 proactive.json。
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
+    // CLK-1：選單列「右上角時鐘與天氣」與這裡都能改，寫入同一個 clock.json。
+    settings.clock && renderClockSettings(settings.clock, actions),
     // MEMO-1：選單列「回憶模式」與這裡都能改，寫入同一個 memories.json。
     settings.memories && renderMemoriesSettings(settings.memories, actions, true),
     settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
@@ -871,6 +877,21 @@ export function renderProactiveSettings(view: ProactiveSettingsView, actions: Vi
     h("p", { class: "muted small", role: "status" }, t(PROACTIVE_STATE[view.weather.state])),
     view.calendar && h("p", { class: "muted small", role: "status" }, t(CALENDAR_STATE[view.calendar.state])),
   );
+}
+
+/** CLK-1「右上角時鐘與天氣」：Mac 視窗與 Pi 終端機各一個開關；改了就保存（POST /api/settings/clock）。 */
+export function renderClockSettings(view: ClockSettingsView, actions: ViewActions): HTMLElement {
+  const list = h("ul", { class: "pref-list" });
+  const toggle = (label: string, note: string, on: boolean, patch: ClockPrefsPatch) => {
+    const b = button(on ? "開" : "關", () => actions.updateClock?.(patch), on ? "btn--primary" : "");
+    b.setAttribute("aria-pressed", String(on));
+    b.setAttribute("aria-label", t("{0}：{1}", t(label), on ? t("開") : t("關")));
+    b.disabled = !actions.updateClock;
+    list.append(h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label)), h("span", { class: "muted small" }, t(note))), b));
+  };
+  toggle(CLOCK_TEXT.main, CLOCK_TEXT.mainNote, view.prefs.main, { main: !view.prefs.main });
+  toggle(CLOCK_TEXT.terminal, CLOCK_TEXT.terminalNote, view.prefs.terminal, { terminal: !view.prefs.terminal });
+  return h("section", { class: "camera-settings clock-settings" }, h("h3", {}, t(CLOCK_TEXT.group)), list, h("p", { class: "muted small" }, t(CLOCK_TEXT.note)));
 }
 
 /** MEMO-1「回憶模式」：總開關、影片聲音、停留與閒置秒數、來源狀態（只有數量）。改了就保存（POST /api/settings/memories）。 */
