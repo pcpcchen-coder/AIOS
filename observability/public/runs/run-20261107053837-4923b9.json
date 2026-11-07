@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-07T05:38:37.855Z",
-  "updated_at": "2026-11-07T05:41:40.825Z",
+  "updated_at": "2026-11-07T06:13:37.794Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
-      "ended_at": null,
-      "note": "",
+      "status": "passed",
+      "started_at": "2026-11-07T06:13:37.794Z",
+      "ended_at": "2026-11-07T06:13:37.794Z",
+      "note": "done",
       "evidence": []
     },
     {
@@ -112,6 +112,13 @@
       "step_id": "architect",
       "status": "passed",
       "note": "plan saved"
+    },
+    {
+      "at": "2026-11-07T06:13:37.794Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "done"
     }
   ],
   "provenance": "Agent self-reported"
