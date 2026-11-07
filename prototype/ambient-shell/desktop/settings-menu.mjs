@@ -409,6 +409,7 @@ export const HOME_CORNER_TEXT = {
   acOff: "關",
   acReported: "控制器回報 · {0}",
   humidity: "濕度",
+  refreshing: "更新中…",
 };
 
 /** 「左上角家中狀態」分段：Mac 視窗、Pi 終端機兩個開關。點選後 setHomeCorner(patch) POST 到 home_corner.write_path。 */

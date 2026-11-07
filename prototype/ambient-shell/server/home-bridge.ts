@@ -33,6 +33,7 @@ import {
   type SendFacts,
   type UnconfirmedWhy,
 } from "../shared/home.ts";
+import { HOME_AC_MAX } from "../shared/home-corner.ts";
 
 const TIMEOUT_MS = 8_000;
 const MAX_DEVICES = 12;
@@ -926,7 +927,10 @@ export class HomeBridge {
   private sent: number[] = [];
   /** HOME-1：冷氣控制器回報（AIFA 子設備 id → 最近一次）；只來自中控的回覆，不從送出的指令推算。 */
   private readonly reports = new Map<string, RememberedReport>();
-  private readonly reportTried = new Map<string, number>();
+  /** 每台冷氣最近一次讀控制器回報或語音控制的時間（背景讀在 AC_REPORT_POLL_MS 內不碰它）。 */
+  private readonly acTouched = new Map<string, number>();
+  /** 每台冷氣進行中的 POST …/status；背景讀與語音控制共用，同一台不會同時有兩個。 */
+  private readonly statusReads = new Map<string, Promise<ControllerReport | null | "stale">>();
   private reportPolling = false;
   /** HOME-1：每次控制結束加一；左上角的快取看到變化就重讀。 */
   private controlCount = 0;
@@ -974,20 +978,22 @@ export class HomeBridge {
   }
 
   /**
-   * HOME-1：在背景讀一台冷氣的控制器回報（不等結果，下一次快照才用得到）。一次只讀一台；同一台 AC_REPORT_POLL_MS 內不重讀，
-   * 回報較舊或沒有回報的優先。失敗、清單過期或權杖被拒都只是這次沒有新回報。
+   * HOME-1：在背景讀一台冷氣的控制器回報（不等結果，下一次快照才用得到）。只讀角落會畫的前 HOME_AC_MAX 台、而且清單沒說離線的；
+   * 一次只讀一台；同一台 AC_REPORT_POLL_MS 內讀過、語音控制過或正在讀就不讀，回報較舊或沒有回報的優先。
+   * 失敗、清單過期或權杖被拒都只是這次沒有新回報。
    */
   pollControllerReports(devices: HubDevice[]): void {
     if (this.reportPolling || !this.available) return;
     const now = this.now();
     const due = devices
       .filter((d): d is HubDevice & { route: Extract<DeviceRoute, { kind: "aifa" }> } => d.route.kind === "aifa")
-      .filter((d) => now - (this.reportTried.get(d.id) ?? -Infinity) >= AC_REPORT_POLL_MS && now - (this.reports.get(d.id)?.at ?? -Infinity) >= AC_REPORT_POLL_MS)
+      .slice(0, HOME_AC_MAX)
+      .filter((d) => d.available !== false && !this.statusReads.has(d.id))
+      .filter((d) => now - (this.acTouched.get(d.id) ?? -Infinity) >= AC_REPORT_POLL_MS && now - (this.reports.get(d.id)?.at ?? -Infinity) >= AC_REPORT_POLL_MS)
       .sort((a, b) => (this.reports.get(a.id)?.at ?? -Infinity) - (this.reports.get(b.id)?.at ?? -Infinity));
     const next = due[0];
     if (!next) return;
     this.reportPolling = true;
-    this.reportTried.set(next.id, now);
     const ref: AifaRef = { hubId: next.route.hubId, childId: next.route.childId, freshUntil: Infinity };
     void this.readAifaStatus(ref, this.timeouts.aifaStatus + MIN_SEND_WINDOW_MS)
       .catch(() => null)
@@ -1164,6 +1170,7 @@ export class HomeBridge {
   private async sendAifa(plan: Extract<Plan, { route: "aifa_power" | "aifa_climate" }>, p: Entry, deadline: number): Promise<HomeControlResult> {
     const left = () => deadline - this.now();
     const ref = plan.aifa;
+    this.acTouched.set(aifaId(ref.hubId, ref.childId), this.now());
     const device = p.target.device;
     /** 這次有沒有重新讀取過清單（每個意圖最多一次）；cooldown＝中控說一分鐘內有人讀過。 */
     const state: { discovered: "no" | "ok" | "cooldown" } = { discovered: "no" };
@@ -1393,6 +1400,23 @@ export class HomeBridge {
     // 留下送出需要的時間；不夠就不讀，改用預設值（會說出來）。
     const timeout = Math.min(this.timeouts.aifaStatus, budgetMs - MIN_SEND_WINDOW_MS);
     if (timeout <= 0) return null;
+    const id = aifaId(ref.hubId, ref.childId);
+    this.acTouched.set(id, this.now());
+    const running = this.statusReads.get(id);
+    if (running) {
+      // 同一台正在讀（多半是左上角的背景讀）：等那一次的結果，最多等自己的時間，不另外送第二個請求。
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const late = new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), timeout)));
+      return Promise.race([running, late]).finally(() => clearTimeout(timer));
+    }
+    const read = this.fetchAifaStatus(ref, timeout).finally(() => {
+      if (this.statusReads.get(id) === read) this.statusReads.delete(id);
+    });
+    this.statusReads.set(id, read);
+    return read;
+  }
+
+  private async fetchAifaStatus(ref: AifaRef, timeout: number): Promise<ControllerReport | null | "stale"> {
     let res: Response;
     try {
       res = await this.fetch(`${this.base}/api/v1/integrations/aifa/devices/${encodeURIComponent(ref.hubId)}/children/${encodeURIComponent(ref.childId)}/status`, {

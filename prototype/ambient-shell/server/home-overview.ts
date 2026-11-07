@@ -1,4 +1,5 @@
 import {
+  HOME_AC_MAX,
   HOME_AC_REPORT_KEEP_MS,
   HOME_CLIMATE_KEYS,
   HOME_ON_NAMES_MAX,
@@ -11,11 +12,14 @@ import {
 import { HomeBridgeError, type HubDevice, type HubSnapshot, type RememberedReport } from "./home-bridge.ts";
 
 // HOME-1（George 2026-11-07）：GET /api/home/overview 的內容（左上角家中狀態）。唯讀：只讀 HomeBridge 的快照，不送任何控制指令。
-// - 快取 30 秒（成功與失敗都算），同時只有一個中控請求；控制指令結束後（HomeBridge.changes 改變）下一次就重讀。
+// - 快取 30 秒（成功與失敗都算），同時只有一個中控請求；控制指令結束後（HomeBridge.changes 改變）下一次就重讀，
+//   控制前就開始的請求不算數（等它結束再讀一次）；控制後讀到的結果只快取 5 秒，頁面 8 秒後的追讀拿得到中控稍晚更新的開關。
 // - 只交出角落要畫的：室內讀值（每種一台）、燈與插座的數量、開著的名稱（最多 4 個）、AIFA 冷氣的控制器回報。
 //   不交出設備 id、權杖、中控位址或原始回應；不寫 log。
 
 export const HOME_OVERVIEW_TTL_MS = 30_000;
+/** 控制結束後讀到的快照只快取這麼久（頁面 HOME_CONTROL_FOLLOWUP_MS 後會再讀一次）。 */
+export const HOME_OVERVIEW_AFTER_CONTROL_TTL_MS = 5_000;
 const NAME_MAX = 24;
 
 /** HomeBridge 裡 overview 用得到的部分（測試可以換成假的）。 */
@@ -41,11 +45,14 @@ function reportedPower(d: HubDevice): boolean | null {
 
 /**
  * 快照 → 角落的內容（純函式）。elapsedS：快照讀完到現在的秒數（快取期間讀值的年紀照樣往上加）。
- * 中控的時間（serverTime）與 receivedAt 都是中控時鐘的秒，所以年紀不受這台電腦時鐘影響。
+ * 年紀＝serverTime − receivedAt：中控有給 server_time 時兩邊都是中控時鐘，不受這台電腦時鐘影響；
+ * 中控沒給 server_time 時 parseHome 改用這台電腦的時間，年紀就受兩邊時鐘差影響。
  */
 export function overviewFromSnapshot(home: HubSnapshot, reports: ReadonlyMap<string, RememberedReport>, now: number, elapsedS: number): Extract<HomeOverviewView, { state: "ok" }> {
   const roomOf = (d: HubDevice) => home.rooms.find((r) => r.id === d.roomId)?.name ?? null;
   const climate: HomeClimateReading[] = [];
+  const sensors = new Map<HubDevice, number>();
+  const sensorOf = (d: HubDevice) => sensors.get(d) ?? (sensors.set(d, sensors.size), sensors.size - 1);
   for (const key of HOME_CLIMATE_KEYS) {
     const candidates = home.devices.flatMap((d) => {
       const t = d.telemetry;
@@ -60,6 +67,7 @@ export function overviewFromSnapshot(home: HubSnapshot, reports: ReadonlyMap<str
     if (!best) continue;
     climate.push({
       key,
+      sensor: sensorOf(best.d),
       value: best.status === "missing" ? null : (best.m.value as number),
       unit: best.m.unit,
       precision: best.m.precision,
@@ -84,7 +92,7 @@ export function overviewFromSnapshot(home: HubSnapshot, reports: ReadonlyMap<str
 
   const ac: HomeAcState[] = home.devices
     .filter((d) => d.route.kind === "aifa")
-    .slice(0, 3)
+    .slice(0, HOME_AC_MAX)
     .map((d) => {
       const kept = reports.get(d.id);
       const r = kept && now - kept.at <= HOME_AC_REPORT_KEEP_MS ? kept : null;
@@ -106,11 +114,11 @@ function errorCode(err: unknown): HomeOverviewError {
   return code === "timeout" || code === "auth" || code === "bad_response" ? code : "unreachable";
 }
 
-type Cached = { at: number; changes: number; home: HubSnapshot | null; error: HomeOverviewError | null };
+type Cached = { at: number; changes: number; afterControl: boolean; home: HubSnapshot | null; error: HomeOverviewError | null };
 
 export class HomeOverview {
   private cached: Cached | null = null;
-  private inflight: Promise<Cached> | null = null;
+  private inflight: { changes: number; read: Promise<Cached> } | null = null;
   private readonly now: () => number;
 
   constructor(private readonly options: { source: HomeOverviewSource; now?: () => number; ttlMs?: number }) {
@@ -130,22 +138,29 @@ export class HomeOverview {
   private async current(): Promise<Cached> {
     const source = this.options.source;
     const c = this.cached;
-    if (c && this.now() - c.at < (this.options.ttlMs ?? HOME_OVERVIEW_TTL_MS) && c.changes === source.changes) return c;
-    if (this.inflight) return this.inflight;
+    const ttl = c?.afterControl ? Math.min(HOME_OVERVIEW_AFTER_CONTROL_TTL_MS, this.options.ttlMs ?? HOME_OVERVIEW_TTL_MS) : (this.options.ttlMs ?? HOME_OVERVIEW_TTL_MS);
+    if (c && this.now() - c.at < ttl && c.changes === source.changes) return c;
+    if (this.inflight) {
+      if (this.inflight.changes === source.changes) return this.inflight.read;
+      // 這個請求在控制結束前就開始了：等它結束（同時只有一個中控請求），再讀一次控制之後的狀態。
+      return this.inflight.read.then(() => this.current());
+    }
     const changes = source.changes;
-    this.inflight = source
+    const afterControl = c !== null && c.changes !== changes;
+    const read = source
       .readSnapshot()
       .then(
-        (home): Cached => ({ at: this.now(), changes, home, error: null }),
-        (err: unknown): Cached => ({ at: this.now(), changes, home: null, error: errorCode(err) }),
+        (home): Cached => ({ at: this.now(), changes, afterControl, home, error: null }),
+        (err: unknown): Cached => ({ at: this.now(), changes, afterControl, home: null, error: errorCode(err) }),
       )
       .then((next) => {
         this.cached = next;
         return next;
       })
       .finally(() => {
-        this.inflight = null;
+        if (this.inflight?.read === read) this.inflight = null;
       });
-    return this.inflight;
+    this.inflight = { changes, read };
+    return read;
   }
 }

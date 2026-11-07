@@ -8,6 +8,7 @@ import type { Locale } from "./i18n.ts";
 // data-visibility-reason="user_setting:home_corner"＝使用者在設定打開了這個角落（Mac 視窗／Pi 終端機各自一個開關）。
 // - 資料與排程在 HomeFeed（src/home-feed.ts，不碰 DOM）；這裡只負責畫與事件。
 // - 每 60 秒向核心讀一次（核心另有 30 秒快取），頁面隱藏時暫停；回到前景、取得焦點、pageshow 時立即重讀。
+// - 小畫面（CSS）只省略房間與設備名稱；讀值的時間與「控制器回報」一律畫，舊資料不會看起來像即時的。
 
 export interface HomeCornerOptions {
   /** 讀 GET /api/home/overview；失敗時丟錯。signal 在逾時時中止。 */
@@ -18,7 +19,10 @@ export interface HomeCornerOptions {
   enlarged?: boolean;
 }
 
-type Els = Record<"climate" | "tempIcon" | "temp" | "humIcon" | "hum" | "climateDetail" | "lines" | "note" | "noteDetail", HTMLElement>;
+type Els = Record<
+  "refresh" | "climate" | "tempIcon" | "temp" | "humIcon" | "hum" | "climateDetail" | "climateRoom" | "climateMeta" | "climateOther" | "lines" | "note" | "noteDetail",
+  HTMLElement
+>;
 
 export class HomeCorner {
   private root: HTMLElement | null = null;
@@ -49,9 +53,9 @@ export class HomeCorner {
     this.render();
   }
 
-  /** 家電控制有了結果：立即重讀（核心看到控制結束也會跳過快取）。 */
+  /** 家電控制有了結果：立即重讀、8 秒後再讀一次（核心看到控制結束也會跳過快取）。 */
   refreshSoon(): void {
-    if (this.enabled) void this.feed.load();
+    if (this.enabled) this.feed.afterControl();
   }
 
   private mount(): void {
@@ -68,6 +72,7 @@ export class HomeCorner {
       parent.append(node);
       return node;
     };
+    const refresh = el("div", "home-refresh");
     const climate = el("div", "home-climate");
     const tempIcon = el("span", "home-icon home-icon--temp", climate);
     const temp = el("span", "home-temp", climate);
@@ -77,10 +82,13 @@ export class HomeCorner {
     tempIcon.innerHTML = homeIconSvg("thermometer");
     humIcon.innerHTML = homeIconSvg("droplet");
     const climateDetail = el("div", "home-climate-detail");
+    const climateRoom = el("span", "home-climate-room", climateDetail);
+    const climateMeta = el("span", "home-climate-meta", climateDetail);
+    const climateOther = el("div", "home-climate-other");
     const lines = el("ul", "home-lines");
     const note = el("div", "home-note");
     const noteDetail = el("div", "home-note-detail");
-    this.els = { climate, tempIcon, temp, humIcon, hum, climateDetail, lines, note, noteDetail };
+    this.els = { refresh, climate, tempIcon, temp, humIcon, hum, climateDetail, climateRoom, climateMeta, climateOther, lines, note, noteDetail };
     this.root = root;
     (this.options.host ?? document.body).append(root);
     document.body.classList.add("has-home-corner");
@@ -118,6 +126,8 @@ export class HomeCorner {
     }
     if (!this.feed.running) this.feed.resume();
     else if (!this.feed.loading) void this.feed.load();
+    // 手上的資料太舊時，重讀完成前先標「更新中…」。
+    this.render();
   }
 
   private render(): void {
@@ -132,19 +142,38 @@ export class HomeCorner {
     this.renderModel(model, els);
     if (root.getAttribute("aria-label") !== model.label) root.setAttribute("aria-label", model.label);
     root.dataset.state = model.kind;
+    root.classList.toggle("home-corner--refreshing", model.refreshing);
     root.hidden = false;
     this.publishSize();
   }
 
   private renderModel(model: HomeCornerModel, els: Els): void {
     const data = model.kind === "data";
+    els.refresh.hidden = !data || !model.refreshNote;
+    setText(els.refresh, model.refreshNote ?? "");
     els.climate.hidden = !data || (!model.temp && !model.humidity);
     els.tempIcon.hidden = els.temp.hidden = !model.temp;
     els.humIcon.hidden = els.hum.hidden = !model.humidity;
     setText(els.temp, model.temp ?? "");
     setText(els.hum, model.humidity ?? "");
-    els.climateDetail.hidden = !data || !model.climateDetail;
-    setText(els.climateDetail, model.climateDetail ?? "");
+    els.climateDetail.hidden = !data || (!model.climateRoom && !model.climateDetail);
+    els.climateRoom.hidden = !model.climateRoom;
+    setText(els.climateRoom, model.climateRoom ?? "");
+    els.climateMeta.hidden = !model.climateDetail;
+    setText(els.climateMeta, model.climateDetail ?? "");
+    els.climateOther.hidden = !data || !model.climateOther.length;
+    const otherKey = model.climateOther.join("\n");
+    if (els.climateOther.dataset.key !== otherKey) {
+      els.climateOther.dataset.key = otherKey;
+      els.climateOther.replaceChildren(
+        ...model.climateOther.map((text) => {
+          const row = document.createElement("div");
+          row.className = "home-climate-other-row";
+          row.textContent = text;
+          return row;
+        }),
+      );
+    }
     els.note.hidden = model.kind !== "note";
     setText(els.note, model.note ?? "");
     els.noteDetail.hidden = model.kind !== "note" || !model.noteDetail;
@@ -173,10 +202,14 @@ export class HomeCorner {
           text.append(extra);
         }
         body.append(text);
-        if (line.detail) {
+        for (const [cls, value] of [
+          ["home-line-detail", line.detail],
+          ["home-line-qualifier", line.qualifier],
+        ] as const) {
+          if (!value) continue;
           const detail = document.createElement("span");
-          detail.className = "home-line-detail";
-          detail.textContent = line.detail;
+          detail.className = cls;
+          detail.textContent = value;
           body.append(detail);
         }
         li.append(icon, body);

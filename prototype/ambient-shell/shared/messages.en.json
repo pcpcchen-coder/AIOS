@@ -380,6 +380,7 @@
   "在 Pi 等終端機畫面左上角顯示室內溫濕度、開著的燈與冷氣": "Show indoor temperature and humidity, lights that are on, and the air conditioner in the top-left corner of terminal screens such as the Pi",
   "只顯示武陵居中控回報的狀態，不能點、不能控制；中控沒有回報的開關顯示「—」": "Shows only what the Wuling home controller reports and cannot be tapped or used for control. Switches the controller does not report show “—”.",
   "家中狀態：{0}": "Home status: {0}",
+  "更新中…": "Updating…",
   "智慧家庭未設定": "Smart home not set up",
   "讀不到中控": "Can't reach the home controller",
   "核心沒有回應": "The core is not responding",

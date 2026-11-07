@@ -72,6 +72,7 @@ export const HOME_CORNER_TEXT = {
   acOff: "關",
   acReported: "控制器回報 · {0}",
   humidity: "濕度",
+  refreshing: "更新中…",
 } as const;
 
 // ───────────── GET /api/home/overview 的回應 ─────────────
@@ -81,9 +82,13 @@ export type HomeClimateKey = "temperature" | "humidity" | "co2" | "pm25";
 export const HOME_CLIMATE_KEYS: readonly HomeClimateKey[] = ["temperature", "humidity", "co2", "pm25"];
 export type HomeDataStatus = "live" | "snapshot" | "stale" | "missing";
 
-/** 一種室內讀值（每種只取一台：即時優先、再取最新）。value null＝中控沒有讀值。age_s＝回應當下距離中控收到讀值的秒數。 */
+/**
+ * 一種室內讀值（每種只取一台：即時優先、再取最新）。value null＝中控沒有讀值。age_s＝回應當下距離中控收到讀值的秒數。
+ * sensor：這次回應裡的感測器編號（不是設備 id），同一台的讀值編號相同；不同台的讀值各自帶房間與時間，不合在一起說。
+ */
 export interface HomeClimateReading {
   key: HomeClimateKey;
+  sensor: number;
   value: number | null;
   unit: string;
   precision: number;
@@ -119,6 +124,8 @@ export type HomeOverviewView =
   | { configured: true; state: "ok"; server_now: number; climate: HomeClimateReading[]; switches: HomeSwitchGroup[]; ac: HomeAcState[] };
 
 export const HOME_ON_NAMES_MAX = 4;
+/** 角落最多畫幾台冷氣（背景讀控制器回報也只讀這幾台）。 */
+export const HOME_AC_MAX = 3;
 /** 冷氣控制器回報超過這個年紀（ms）就當成不知道。 */
 export const HOME_AC_REPORT_KEEP_MS = 2 * 60 * 60_000;
 
@@ -130,6 +137,10 @@ export const HOME_REFRESH_MS = 60_000;
 export const HOME_FETCH_TIMEOUT_MS = 15_000;
 /** 室內讀值超過這個年紀（秒）就標「N 分鐘前」；快照與過期資料一律標。 */
 export const HOME_CLIMATE_AGE_S = 10 * 60;
+/** 家電控制結束後頁面再讀一次的延遲（中控的開關狀態可能稍晚才更新）。 */
+export const HOME_CONTROL_FOLLOWUP_MS = 8_000;
+/** 畫面上的資料比這個舊、又正在重讀（例如從背景回來）：數字淡化並標「更新中…」。 */
+export const HOME_VIEW_STALE_MS = 2 * 60_000;
 
 // ───────────── 角落要畫的內容（純函式；頁面照這個畫） ─────────────
 
@@ -140,8 +151,10 @@ export interface HomeCornerLine {
   text: string;
   /** 接在 text 後面、不拆行的補充：「2 個未知」。 */
   extra: string | null;
-  /** 第二行灰字：開著的燈名稱、冷氣回報的時間。 */
+  /** 第二行灰字：開著的燈名稱（小畫面不畫）。 */
   detail: string | null;
+  /** 第二行灰字、小畫面也畫：數字的來源與時間（「控制器回報 · 5 分鐘前」）。 */
+  qualifier: string | null;
   /** 開著的設備：圖示亮起；都關著或不知道時灰色。 */
   active: boolean;
 }
@@ -154,9 +167,16 @@ export interface HomeCornerModel {
   /** 室內大字：溫度、濕度；沒有時 null。 */
   temp: string | null;
   humidity: string | null;
-  /** 溫度下方一行：房間、CO₂、PM2.5、資料時間。 */
+  /** 溫度下方：主感測器（溫度那台）的房間（小畫面不畫）。 */
+  climateRoom: string | null;
+  /** 溫度下方、小畫面也畫：同一台的 CO₂、PM2.5 與資料時間。 */
   climateDetail: string | null;
+  /** 其他感測器的讀值，每台一行，帶自己的房間與時間（「書房 CO₂ 812 ppm · 3 小時前」）。 */
+  climateOther: string[];
   lines: HomeCornerLine[];
+  /** 正在重讀而畫面上的資料超過 HOME_VIEW_STALE_MS：數字淡化並標 refreshNote。 */
+  refreshing: boolean;
+  refreshNote: string | null;
   label: string;
 }
 
@@ -209,14 +229,14 @@ function switchLine(g: HomeSwitchGroup, locale: Locale): HomeCornerLine {
   const extra = known > 0 && g.unknown > 0 ? tr(locale, HOME_CORNER_TEXT.unknownCount, g.unknown) : null;
   const sep = locale === "en" ? ", " : "、";
   const names = g.on_names.length ? g.on_names.join(sep) + (g.on > g.on_names.length ? "…" : "") : null;
-  return { icon: light ? "bulb" : "plug", text, extra, detail: names, active: g.on > 0 };
+  return { icon: light ? "bulb" : "plug", text, extra, detail: names, qualifier: null, active: g.on > 0 };
 }
 
 function acLine(a: HomeAcState, locale: Locale): HomeCornerLine {
-  if (a.power === null || a.age_s === null) return { icon: "ac", text: `${a.name} —`, extra: null, detail: null, active: false };
+  if (a.power === null || a.age_s === null) return { icon: "ac", text: `${a.name} —`, extra: null, detail: null, qualifier: null, active: false };
   const settings = a.power ? [a.temperature !== null ? `${a.temperature}°` : null, a.mode ? AC_MODE[a.mode][locale === "en" ? "en" : "zh"] : null].filter((p): p is string => !!p) : [];
   const text = `${a.name} ${tr(locale, a.power ? HOME_CORNER_TEXT.acOn : HOME_CORNER_TEXT.acOff)}` + (settings.length ? ` · ${settings.join(" ")}` : "");
-  return { icon: "ac", text, extra: null, detail: tr(locale, HOME_CORNER_TEXT.acReported, homeAge(a.age_s, locale)), active: a.power };
+  return { icon: "ac", text, extra: null, detail: null, qualifier: tr(locale, HOME_CORNER_TEXT.acReported, homeAge(a.age_s, locale)), active: a.power };
 }
 
 const ERROR_TEXT: Record<HomeOverviewError, string> = {
@@ -228,11 +248,24 @@ const ERROR_TEXT: Record<HomeOverviewError, string> = {
 
 /**
  * 角落的內容。view：最近一次 GET /api/home/overview 的回應；null＝還沒回應過。coreDown：上一次向核心讀失敗。
- * 讀不到時只說讀不到，不沿用舊的數字。
+ * refreshing：正在重讀而 view 已經超過 HOME_VIEW_STALE_MS。讀不到時只說讀不到，不沿用舊的數字。
  */
-export function homeCornerModel(input: { view: HomeOverviewView | null; coreDown: boolean; locale: Locale }): HomeCornerModel {
+export function homeCornerModel(input: { view: HomeOverviewView | null; coreDown: boolean; locale: Locale; refreshing?: boolean }): HomeCornerModel {
   const { view, coreDown, locale } = input;
-  const base: HomeCornerModel = { kind: "none", note: null, noteDetail: null, temp: null, humidity: null, climateDetail: null, lines: [], label: "" };
+  const base: HomeCornerModel = {
+    kind: "none",
+    note: null,
+    noteDetail: null,
+    temp: null,
+    humidity: null,
+    climateRoom: null,
+    climateDetail: null,
+    climateOther: [],
+    lines: [],
+    refreshing: false,
+    refreshNote: null,
+    label: "",
+  };
   const note = (text: string, detail: string | null): HomeCornerModel => ({
     ...base,
     kind: "note",
@@ -245,31 +278,49 @@ export function homeCornerModel(input: { view: HomeOverviewView | null; coreDown
   if (!view.configured) return note(HOME_CORNER_TEXT.notConfigured, null);
   if (view.state === "unreachable") return note(HOME_CORNER_TEXT.unreachable, ERROR_TEXT[view.error]);
 
-  const byKey = new Map(view.climate.map((r) => [r.key, r]));
-  const temperature = byKey.get("temperature");
-  const humidity = byKey.get("humidity");
-  const main = temperature ?? humidity;
-  const extras = [readingText(byKey.get("co2")), readingText(byKey.get("pm25"))].filter((p): p is string => !!p);
-  const ages = [...new Set(view.climate.map((r) => readingAge(r, locale)).filter((p): p is string => !!p))];
-  const climateDetail = [main?.room ?? null, ...extras, ...ages].filter((p): p is string => !!p);
+  // 大字只畫溫度那台（沒有溫度時濕度那台）的讀值；別台的讀值各自一行，帶自己的房間與時間。
+  const mainReading = view.climate.find((r) => r.key === "temperature") ?? view.climate.find((r) => r.key === "humidity");
+  const mainSensor = mainReading?.sensor ?? null;
+  const ofMain = (key: HomeClimateKey) => view.climate.find((r) => r.key === key && r.sensor === mainSensor);
+  const ageOf = (readings: HomeClimateReading[]) => [...new Set(readings.map((r) => readingAge(r, locale)).filter((p): p is string => !!p))];
+  const mainReadings = view.climate.filter((r) => r.sensor === mainSensor);
+  const temp = readingText(ofMain("temperature"));
+  const hum = readingText(ofMain("humidity"));
+  const mainExtras = [readingText(ofMain("co2")), readingText(ofMain("pm25"))].filter((p): p is string => !!p);
+  const climateDetail = [...mainExtras, ...ageOf(mainReadings)];
+  const humidityText = (r: HomeClimateReading) => `${tr(locale, HOME_CORNER_TEXT.humidity)} ${readingText(r)}`;
+  const otherSensors = [...new Set(view.climate.filter((r) => r.sensor !== mainSensor).map((r) => r.sensor))];
+  const climateOther = otherSensors.map((sensor) => {
+    const readings = view.climate.filter((r) => r.sensor === sensor);
+    const values = readings.map((r) => (r.key === "humidity" ? humidityText(r) : readingText(r)));
+    const body = [...values, ...ageOf(readings)].filter((p): p is string => !!p).join(" · ");
+    return readings[0].room ? `${readings[0].room} ${body}` : body;
+  });
   const lines = [...view.switches.filter((g) => g.total > 0).map((g) => switchLine(g, locale)), ...view.ac.map((a) => acLine(a, locale))];
-  const temp = readingText(temperature);
-  const hum = readingText(humidity);
-  if (!temp && !hum && !extras.length && !lines.length) return note(HOME_CORNER_TEXT.empty, null);
+  if (!temp && !hum && !mainExtras.length && !climateOther.length && !lines.length) return note(HOME_CORNER_TEXT.empty, null);
+  const refreshing = input.refreshing === true;
+  const refreshNote = refreshing ? tr(locale, HOME_CORNER_TEXT.refreshing) : null;
   const sep = locale === "en" ? ", " : "，";
+  const climateRoom = mainReading?.room ?? null;
   const spoken = [
+    refreshNote,
     temp,
     hum ? `${tr(locale, HOME_CORNER_TEXT.humidity)} ${hum}` : null,
-    climateDetail.length ? climateDetail.join(" · ") : null,
-    ...lines.map((l) => [l.text, l.extra, l.detail].filter(Boolean).join(" · ")),
+    [climateRoom, ...climateDetail].filter(Boolean).join(" · ") || null,
+    ...climateOther,
+    ...lines.map((l) => [l.text, l.extra, l.detail, l.qualifier].filter(Boolean).join(" · ")),
   ].filter((p): p is string => !!p);
   return {
     ...base,
     kind: "data",
     temp,
     humidity: hum,
+    climateRoom,
     climateDetail: climateDetail.length ? climateDetail.join(" · ") : null,
+    climateOther,
     lines,
+    refreshing,
+    refreshNote,
     label: tr(locale, HOME_CORNER_TEXT.aria, spoken.join(sep)),
   };
 }

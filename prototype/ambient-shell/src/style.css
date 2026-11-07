@@ -1838,9 +1838,14 @@ body:is(.has-clock, .has-home-corner) .region-activity {
   transform-origin: top left;
 }
 body.listening .home-corner,
-body.has-surface .home-corner,
 body.has-conversation .home-corner {
   opacity: 0.7;
+}
+/* Surface 打開時整個收起：角落在 Surface 上層（z-index 6 > 4），放大 1.5 倍時會蓋到 Surface 左上角 */
+body.has-surface .home-corner {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 400ms ease, visibility 0s linear 400ms;
 }
 body[data-memories="showing"] .home-corner {
   background: rgba(3, 5, 11, 0.62);
@@ -1885,8 +1890,11 @@ body[data-memories="showing"] .home-corner {
   height: clamp(24px, 3.2vh, 38px);
 }
 .home-climate-detail,
+.home-climate-other,
 .home-line-detail,
-.home-note-detail {
+.home-line-qualifier,
+.home-note-detail,
+.home-refresh {
   font-size: clamp(0.78rem, 1.45vh, 1.05rem);
   line-height: 1.3;
   color: var(--muted);
@@ -1924,6 +1932,16 @@ body[data-memories="showing"] .home-corner {
   white-space: nowrap;
   color: var(--muted);
 }
+.home-climate-room:not([hidden]) + .home-climate-meta::before {
+  content: " · ";
+}
+/* 正在重讀而資料超過 2 分鐘（從背景回來）：數字淡化，最上方標「更新中…」 */
+.home-corner--refreshing .home-climate,
+.home-corner--refreshing .home-climate-detail,
+.home-corner--refreshing .home-climate-other,
+.home-corner--refreshing .home-lines {
+  opacity: 0.4;
+}
 .home-line-detail {
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1934,7 +1952,7 @@ body[data-memories="showing"] .home-corner {
   line-height: 1.3;
   color: var(--muted);
 }
-/* 小畫面：只留溫濕度與每組一行，不畫名稱與時間 */
+/* 小畫面：省略房間、設備名稱與其他感測器；讀值的時間與「控制器回報」照畫（舊資料不能看起來像即時的） */
 @media (max-width: 900px), (max-height: 600px) {
   .home-corner {
     min-width: 0;
@@ -1947,9 +1965,18 @@ body[data-memories="showing"] .home-corner {
   .home-hum {
     font-size: 0.95rem;
   }
-  .home-climate-detail,
+  .home-climate-room,
+  .home-climate-other,
   .home-line-detail {
     display: none;
+  }
+  .home-climate-detail,
+  .home-line-qualifier,
+  .home-refresh {
+    font-size: 0.72rem;
+  }
+  .home-climate-room:not([hidden]) + .home-climate-meta::before {
+    content: none;
   }
   .home-line-text {
     font-size: 0.8rem;
