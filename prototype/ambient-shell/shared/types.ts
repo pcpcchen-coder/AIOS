@@ -10,6 +10,7 @@ import type { WakeSettingsView } from "./wake.ts";
 import type { AudioSettingsView } from "./audio-devices.ts";
 import type { ProactiveSettingsView } from "./proactive.ts";
 import type { ClockSettingsView } from "./clock.ts";
+import type { HomeCornerSettingsView } from "./home-corner.ts";
 import type { MemoriesSettingsView } from "./memories.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
@@ -169,6 +170,8 @@ export interface SettingsView {
   proactive?: ProactiveSettingsView;
   /** CLK-1 右上角時鐘與天氣：這個頁面要不要顯示（enabled）與兩個開關（Mac 視窗、終端機）。 */
   clock?: ClockSettingsView;
+  /** HOME-1：左上角家中狀態（enabled 依頁面來源）。 */
+  home_corner?: HomeCornerSettingsView;
   /** MEMO-1 回憶模式：設定與來源狀態（只有數量，不含檔名或路徑）。 */
   memories?: MemoriesSettingsView;
 }

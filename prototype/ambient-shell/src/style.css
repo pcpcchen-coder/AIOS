@@ -1647,6 +1647,7 @@ body[data-memories="showing"]::before {
 /* ───── CLK-1 右上角時鐘與天氣（George 2026-11-07）：被動讀數，不能點；回憶模式時在照片上方加深色底 ───── */
 
 .clock-corner {
+  /* 天氣狀況與細節的字級；日期另有較大的字級（.clock-date），但每個畫面高度都小於時間 */
   --clock-date-size: clamp(0.85rem, 1.6vh, 1.15rem);
   position: fixed;
   /* 內距 8px／12px 讓回憶模式的深色底不改變文字位置 */
@@ -1689,7 +1690,7 @@ body[data-memories="showing"] .clock-corner {
   color: rgba(230, 244, 255, 0.92);
 }
 .clock-date {
-  font-size: var(--clock-date-size);
+  font-size: clamp(1.15rem, 2.4vh, 1.9rem);
   line-height: 1.25;
   letter-spacing: 0.04em;
   color: var(--muted);
@@ -1737,11 +1738,11 @@ body.has-clock .voice-pill {
   top: calc(var(--clock-h, 14px) + 8px);
   right: max(16px, 1.6vw);
 }
-body.has-clock .presence-notice-root {
-  max-width: min(560px, 92vw, calc(100vw - 2 * var(--clock-reserve, 0px)));
+body:is(.has-clock, .has-home-corner) .presence-notice-root {
+  max-width: min(560px, 92vw, calc(100vw - 2 * max(var(--clock-reserve, 0px), var(--home-reserve, 0px))));
 }
-body.has-clock .region-activity {
-  width: min(90vw, 760px, calc(100vw - 2 * var(--clock-reserve, 0px)));
+body:is(.has-clock, .has-home-corner) .region-activity {
+  width: min(90vw, 760px, calc(100vw - 2 * max(var(--clock-reserve, 0px), var(--home-reserve, 0px))));
 }
 @keyframes clock-fade {
   from {
@@ -1766,7 +1767,7 @@ body.has-clock .region-activity {
     font-size: 1.5rem;
   }
   .clock-date {
-    font-size: 0.8rem;
+    font-size: 0.95rem;
   }
   .clock-weather,
   .clock-note {
@@ -1798,5 +1799,196 @@ body.has-clock .region-activity {
   }
   .clock-weather--in {
     animation: none;
+  }
+}
+
+/* ───── HOME-1 左上角家中狀態（George 2026-11-07）：被動讀數，不能點；和右上角時鐘同樣的字與淡化規則 ───── */
+
+.home-corner {
+  position: fixed;
+  top: calc(max(14px, 2vh) - 8px);
+  left: calc(max(16px, 1.6vw) - 12px);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45vh;
+  min-width: clamp(160px, 13vw, 250px);
+  max-width: min(300px, 30vw);
+  padding: 10px 14px 11px;
+  border-radius: 16px;
+  border: 1px solid rgba(110, 210, 255, 0.14);
+  background: linear-gradient(160deg, rgba(14, 26, 48, 0.5), rgba(6, 11, 22, 0.38));
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 400ms ease, top 300ms ease;
+}
+/* 模擬模式或斷線的狀態列也在左上角：角落排到它下方 */
+.status-line:not([hidden]) ~ .home-corner {
+  top: 48px;
+}
+.home-corner--enlarged {
+  transform: scale(1.5);
+  transform-origin: top left;
+}
+body.listening .home-corner,
+body.has-conversation .home-corner {
+  opacity: 0.7;
+}
+/* Surface 打開時整個收起：角落在 Surface 上層（z-index 6 > 4），放大 1.5 倍時會蓋到 Surface 左上角 */
+body.has-surface .home-corner {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 400ms ease, visibility 0s linear 400ms;
+}
+body[data-memories="showing"] .home-corner {
+  background: rgba(3, 5, 11, 0.62);
+}
+:root.perf-no-blur .home-corner {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: rgba(6, 11, 22, 0.86);
+}
+.home-corner[data-state="note"] {
+  min-width: 0;
+}
+.home-climate {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  line-height: 1;
+}
+.home-temp {
+  font-size: clamp(1.6rem, 3.4vh, 2.7rem);
+  font-weight: 300;
+  letter-spacing: 0.01em;
+  color: rgba(230, 244, 255, 0.94);
+}
+.home-hum {
+  margin-left: 0.2em;
+  font-size: clamp(1.1rem, 2.2vh, 1.7rem);
+  font-weight: 300;
+  color: rgba(230, 244, 255, 0.86);
+}
+.home-icon {
+  display: inline-flex;
+  flex: none;
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.5));
+}
+.home-icon svg {
+  width: clamp(20px, 2.6vh, 30px);
+  height: clamp(20px, 2.6vh, 30px);
+}
+.home-climate .home-icon svg {
+  width: clamp(24px, 3.2vh, 38px);
+  height: clamp(24px, 3.2vh, 38px);
+}
+.home-climate-detail,
+.home-climate-other,
+.home-line-detail,
+.home-line-qualifier,
+.home-note-detail,
+.home-refresh {
+  font-size: clamp(0.78rem, 1.45vh, 1.05rem);
+  line-height: 1.3;
+  color: var(--muted);
+}
+.home-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5vh;
+  margin: 0.5vh 0 0;
+  padding: 0.7vh 0 0;
+  border-top: 1px solid rgba(110, 210, 255, 0.1);
+  list-style: none;
+  align-self: stretch;
+}
+.home-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+.home-line-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.home-line-text {
+  word-break: keep-all;
+  font-size: clamp(0.9rem, 1.75vh, 1.3rem);
+  line-height: 1.35;
+  color: rgba(230, 244, 255, 0.72);
+}
+.home-line--on .home-line-text {
+  color: var(--text);
+}
+.home-line-extra {
+  white-space: nowrap;
+  color: var(--muted);
+}
+.home-climate-room:not([hidden]) + .home-climate-meta::before {
+  content: " · ";
+}
+/* 正在重讀而資料超過 2 分鐘（從背景回來）：數字淡化，最上方標「更新中…」 */
+.home-corner--refreshing .home-climate,
+.home-corner--refreshing .home-climate-detail,
+.home-corner--refreshing .home-climate-other,
+.home-corner--refreshing .home-lines {
+  opacity: 0.4;
+}
+.home-line-detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-note {
+  font-size: clamp(0.85rem, 1.6vh, 1.15rem);
+  line-height: 1.3;
+  color: var(--muted);
+}
+/* 小畫面：省略房間、設備名稱與其他感測器；讀值的時間與「控制器回報」照畫（舊資料不能看起來像即時的） */
+@media (max-width: 900px), (max-height: 600px) {
+  .home-corner {
+    min-width: 0;
+    max-width: 180px;
+    padding: 6px 10px;
+  }
+  .home-temp {
+    font-size: 1.3rem;
+  }
+  .home-hum {
+    font-size: 0.95rem;
+  }
+  .home-climate-room,
+  .home-climate-other,
+  .home-line-detail {
+    display: none;
+  }
+  .home-climate-detail,
+  .home-line-qualifier,
+  .home-refresh {
+    font-size: 0.72rem;
+  }
+  .home-climate-room:not([hidden]) + .home-climate-meta::before {
+    content: none;
+  }
+  .home-line-text {
+    font-size: 0.8rem;
+  }
+  .home-icon svg,
+  .home-climate .home-icon svg {
+    width: 18px;
+    height: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-corner {
+    transition: none;
   }
 }
