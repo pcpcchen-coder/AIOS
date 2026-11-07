@@ -19,7 +19,7 @@ import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
 import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
 import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, VoiceRelayProfileBody, VoiceRelaySlots, VoiceRelayTargetBody, VoiceRelayTrialBody, VoiceRelayUnadoptBody } from "./api.ts";
-import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, type FrameStats, type PerformanceProfile } from "./performance.ts";
+import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, rendererText, type FrameStats, type PerformanceProfile, type RendererReadout } from "./performance.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -68,6 +68,8 @@ export interface ViewActions {
   openHistory(): void;
   /** 這台裝置的畫面效能：立即套用並保存在這個頁面。 */
   setPerformance?(profile: PerformanceProfile): void;
+  /** 「使用 GPU 繪製（WebGL）」：立即切換並保存在這個頁面。 */
+  setGpuDrawing?(on: boolean): void;
 }
 
 export const MAX_LISTED = 8;
@@ -397,6 +399,10 @@ export interface PerformancePanelState {
   profile: PerformanceProfile;
   /** 電子腦實測的格數與繪製時間；設定頁開著時每秒由 refreshPerformanceReadout 更新。 */
   stats: FrameStats | null;
+  /** 「使用 GPU 繪製（WebGL）」開關；沒給時視為關閉。 */
+  gpu?: boolean;
+  /** 真的在用的繪製方式（Brain.rendererStatus）；沒給時當成一般繪製。 */
+  renderer?: RendererReadout | null;
 }
 
 /** SP-1：設定頁「App 整合」段的狀態（打開設定頁時才向核心查，不在背景輪詢）。 */
@@ -527,6 +533,7 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
 /**
  * 這台裝置的畫面效能（George 2026-11-05，Pi 4 終端機）：完整／平衡／省電，選了立即套用、只存在這個頁面。
  * 只改電子腦的繪製與背景模糊；收音、播放與即時語音不受影響。實測數字來自電子腦每一格的計時。
+ * 另有「使用 GPU 繪製（WebGL）」開關（2026-11-07，方案 B）：和三檔正交、預設關；「目前」一行照實寫真的在用哪一種與改回的原因。
  */
 export function renderPerformanceSettings(state: PerformancePanelState, actions: ViewActions): HTMLElement {
   const choices = h("div", { class: "actions perf-choices", role: "radiogroup", "aria-label": PERFORMANCE_TEXT.group });
@@ -542,12 +549,24 @@ export function renderPerformanceSettings(state: PerformancePanelState, actions:
     choice.disabled = !actions.setPerformance;
     choices.append(choice);
   }
+  const gpu = state.gpu === true;
+  const gpuButton = button(gpu ? "開" : "關", () => actions.setGpuDrawing?.(!gpu), gpu ? "btn--primary" : "");
+  gpuButton.setAttribute("aria-pressed", String(gpu));
+  gpuButton.setAttribute("aria-label", t("{0}：{1}", t(PERFORMANCE_TEXT.gpu), gpu ? t("開") : t("關")));
+  gpuButton.disabled = !actions.setGpuDrawing;
+  const gpuList = h(
+    "ul",
+    { class: "pref-list" },
+    h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(PERFORMANCE_TEXT.gpu)), h("span", { class: "muted small" }, t(PERFORMANCE_TEXT.gpuNote))), gpuButton),
+  );
   return h(
     "section",
     { class: "camera-settings performance-settings" },
     h("h3", {}, t(PERFORMANCE_TEXT.title)),
     choices,
+    gpuList,
     h("p", { class: "muted small" }, t(PERFORMANCE_TEXT.note)),
+    h("p", { class: "muted small", "data-perf-renderer": "" }, t(rendererText(state.renderer ?? null))),
     h("p", { class: "muted small", "data-perf-readout": "" }, performanceReadout(state.stats)),
   );
 }
@@ -557,9 +576,11 @@ function performanceReadout(stats: FrameStats | null): string {
   return t(source, ...values);
 }
 
-/** 設定頁開著時每秒更新實測數字（只改文字，不重建設定頁）。 */
-export function refreshPerformanceReadout(root: ParentNode, stats: FrameStats | null): void {
+/** 設定頁開著時每秒更新實測數字與目前的繪製方式（只改文字，不重建設定頁）。 */
+export function refreshPerformanceReadout(root: ParentNode, stats: FrameStats | null, renderer?: RendererReadout | null): void {
   root.querySelectorAll<HTMLElement>("[data-perf-readout]").forEach((el) => { el.textContent = performanceReadout(stats); });
+  if (renderer === undefined) return;
+  root.querySelectorAll<HTMLElement>("[data-perf-renderer]").forEach((el) => { el.textContent = t(rendererText(renderer)); });
 }
 
 /** ChatGPT 引擎帳號：登入中、已登入（重新授權／用量／其他帳號／登出）、需要重新登入。 */

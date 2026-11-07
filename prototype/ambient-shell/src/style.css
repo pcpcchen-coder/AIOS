@@ -47,6 +47,13 @@ body {
   display: block;
   cursor: pointer;
 }
+/* 「使用 GPU 繪製（WebGL）」時的電子腦畫布：插在 #brain 之前（下層）；#brain 改當區名的透明疊層，仍接收點擊。 */
+.brain-gl {
+  position: fixed;
+  inset: 0;
+  display: block;
+  pointer-events: none;
+}
 
 /* ───── 狀態列（只在模擬或斷線時出現） ───── */
 
@@ -1019,7 +1026,8 @@ body.has-surface .region-activity {
 .subtitle {
   zoom: var(--distance-scale, 1);
 }
-body[data-facing="yes"] #brain {
+body[data-facing="yes"] #brain,
+body[data-facing="yes"] .brain-gl {
   filter: drop-shadow(0 0 18px rgba(92, 225, 255, 0.35));
 }
 [data-selectable].pointed {
@@ -1482,10 +1490,12 @@ body.history-page {
  * 線條被縮成不到半個像素）。電子腦直接以角落的大小繪製（src/brain.ts memoriesCornerGeometry，0.5 倍待機半徑，
  * 在照片外的左下角），這裡只把不透明度降到 0.92，背後加一層便宜的徑向漸層光暈（不用 filter／backdrop-filter）。 */
 
-#brain {
+#brain,
+.brain-gl {
   transition: opacity 0.7s ease;
 }
-body[data-memories="showing"] #brain {
+body[data-memories="showing"] #brain,
+body[data-memories="showing"] .brain-gl {
   opacity: 0.92;
   transition-duration: 1.2s;
 }
@@ -1619,7 +1629,9 @@ body[data-memories="showing"]::before {
 /* 減少動態效果：電子腦直接跳到左下角（brain.ts 不緩動），只有不透明度與光暈淡入淡出。 */
 @media (prefers-reduced-motion: reduce) {
   #brain,
+  .brain-gl,
   body[data-memories="showing"] #brain,
+  body[data-memories="showing"] .brain-gl,
   body::before,
   body[data-memories="showing"]::before {
     transition: opacity 400ms ease;

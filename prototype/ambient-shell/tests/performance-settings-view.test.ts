@@ -50,12 +50,14 @@ function actions() {
   return {
     cancel: noop, retry: noop, openArtifact: noop, showProgress: noop, dismiss: noop, openSettings: noop, ackWelcome: noop, selectProvider: noop,
     chatgptLogin: noop, chatgptCancel: noop, chatgptLogout: noop, updateCamera: noop, openCameraPreview: noop, updateVoice: noop, updateRealtime: noop,
-    codexLogin: noop, codexCancel: noop, codexLogout: noop, openHistory: noop, setPerformance: vi.fn(),
+    codexLogin: noop, codexCancel: noop, codexLogout: noop, openHistory: noop, setPerformance: vi.fn(), setGpuDrawing: vi.fn(),
   };
 }
 
-function section(desktop: boolean, a = actions(), stats: { fps: number; drawMs: number } | null = null) {
-  const root = views.renderSettings(settings, null, a, { desktop, performance: { profile: "balanced", stats } }) as unknown as El;
+type Renderer = { active: "canvas" | "webgl"; fallback: "unavailable" | "setup-failed" | "context-lost" | null };
+function section(desktop: boolean, a = actions(), stats: { fps: number; drawMs: number } | null = null, gpu?: { on: boolean; renderer: Renderer | null }) {
+  const performance = { profile: "balanced" as const, stats, ...(gpu ? { gpu: gpu.on, renderer: gpu.renderer } : {}) };
+  const root = views.renderSettings(settings, null, a, { desktop, performance }) as unknown as El;
   const el = root.all().find((e) => e.getAttribute("class")?.includes("performance-settings"));
   const radios = el?.all().filter((e) => e.getAttribute("role") === "radio") ?? [];
   return { root, el, radios, actions: a };
@@ -92,6 +94,54 @@ describe.each([false, true])("settings performance section (desktop=%s)", (deskt
   });
 });
 
+describe.each([false, true])("GPU drawing switch (desktop=%s)", (desktop) => {
+  const gpuButton = (el: El) => el.all().find((e) => e.tagName === "button" && e.getAttribute("aria-pressed") !== null)!;
+  const renderer = (el: El) => el.all().find((e) => e.attributes.has("data-perf-renderer"))!.textContent;
+
+  it("is drawn off by default (older callers without the field) with the Canvas readout, in Chinese", () => {
+    const { el } = section(desktop);
+    expect(el!.textContent).toContain("使用 GPU 繪製（WebGL）");
+    expect(el!.textContent).toContain("預設關閉。");
+    expect(gpuButton(el!).getAttribute("aria-pressed")).toBe("false");
+    expect(gpuButton(el!).getAttribute("aria-label")).toBe("使用 GPU 繪製（WebGL）：關");
+    expect(renderer(el!)).toBe("目前：一般繪製（Canvas）");
+  });
+
+  it.each([
+    [true, { active: "webgl", fallback: null }, "目前：WebGL", "Current: WebGL"],
+    [true, { active: "canvas", fallback: "unavailable" }, "此裝置沒有硬體 WebGL，已改用一般繪製", "This device has no hardware WebGL; using standard drawing instead"],
+    [true, { active: "canvas", fallback: "setup-failed" }, "WebGL 初始化失敗，已改用一般繪製", "WebGL failed to start; using standard drawing instead"],
+    [true, { active: "canvas", fallback: "context-lost" }, "WebGL 中斷，這次開啟期間改用一般繪製", "WebGL stopped working; using standard drawing until the page is reopened"],
+    [false, { active: "canvas", fallback: null }, "目前：一般繪製（Canvas）", "Current: standard drawing (Canvas)"],
+  ] as const)("on=%s shows the honest readout %#", (on, state, zh, en) => {
+    const { el } = section(desktop, actions(), null, { on, renderer: state });
+    expect(gpuButton(el!).getAttribute("aria-pressed")).toBe(String(on));
+    expect(renderer(el!)).toBe(zh);
+    setLocale("en");
+    const english = section(desktop, actions(), null, { on, renderer: state }).el!;
+    expect(renderer(english)).toBe(en);
+    expect(english.textContent).toContain("Use GPU drawing (WebGL)");
+    expect(gpuButton(english).getAttribute("aria-label")).toBe(`Use GPU drawing (WebGL): ${on ? "On" : "Off"}`);
+    expect(english.textContent).not.toMatch(/\p{Script=Han}/u);
+  });
+
+  it("clicking the switch asks for the opposite state", () => {
+    const a = actions();
+    gpuButton(section(desktop, a, null, { on: false, renderer: null }).el!).click();
+    gpuButton(section(desktop, a, null, { on: true, renderer: { active: "webgl", fallback: null } }).el!).click();
+    expect(a.setGpuDrawing.mock.calls).toEqual([[true], [false]]);
+  });
+});
+
+it("refreshPerformanceReadout also updates the renderer line when given a status (e.g. after context loss)", () => {
+  const { root, el } = section(false, actions(), null, { on: true, renderer: { active: "webgl", fallback: null } });
+  const line = () => el!.all().find((e) => e.attributes.has("data-perf-renderer"))!.textContent;
+  views.refreshPerformanceReadout(root as unknown as ParentNode, null);
+  expect(line()).toBe("目前：WebGL");
+  views.refreshPerformanceReadout(root as unknown as ParentNode, null, { active: "canvas", fallback: "context-lost" });
+  expect(line()).toBe("WebGL 中斷，這次開啟期間改用一般繪製");
+});
+
 it("without the performance option the section is not drawn (existing callers unchanged)", () => {
   for (const desktop of [false, true]) {
     const root = views.renderSettings(settings, null, actions(), { desktop }) as unknown as El;
@@ -112,6 +162,7 @@ it("every new performance string has an English catalog entry", () => {
   const sources = [
     PERFORMANCE_TEXT.title, PERFORMANCE_TEXT.group, PERFORMANCE_TEXT.note, PERFORMANCE_TEXT.measured, PERFORMANCE_TEXT.noSample,
     ...Object.values(PERFORMANCE_TEXT.label), ...Object.values(PERFORMANCE_TEXT.detail),
+    PERFORMANCE_TEXT.gpu, PERFORMANCE_TEXT.gpuNote, ...Object.values(PERFORMANCE_TEXT.renderer),
   ];
   for (const source of sources) {
     expect(en[source], source).toBeTruthy();

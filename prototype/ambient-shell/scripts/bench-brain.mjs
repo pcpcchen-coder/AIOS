@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 // Brain canvas benchmark and pixel comparison: baseline brain.ts (a git ref) against the working tree.
+// --webgl instead compares the working tree's Canvas 2D renderer with its WebGL renderer (same brain, same events),
+// with WebGL forced onto software GL (SwiftShader) because headless Chromium has no GPU here.
 // Headless Chromium in this environment is a relative measurement only; it is not a Raspberry Pi number.
 // Usage: node scripts/bench-brain.mjs [--baseline <git-ref>] [--candidate <brain.ts copy>] [--frames 300] [--runs 3] [--json <file>] [--skip-bench] [--skip-pixels] [--no-raster]
+//        node scripts/bench-brain.mjs --webgl [--frames 300] [--runs 3] [--json <file>] [--shots <dir>] [--skip-bench] [--skip-pixels]
 // PLAYWRIGHT_MODULE overrides the Playwright module path.
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -112,6 +115,94 @@ function harness() {
     return { drawMs: stats(drawMs), withRaster: flush ? stats(flushMs) : null, pulses: r.brain.pulses.length, canvas: [r.canvas.width, r.canvas.height] };
   };
 
+  const useRenderer = (r, renderer) => {
+    const status = renderer === 'webgl' ? r.brain.setRendererPreference(true, { allowSoftware: true }) : r.brain.rendererStatus();
+    if (status.active !== renderer) throw new Error(`wanted ${renderer}, got ${status.active}: ${status.detail}`);
+    return renderer === 'webgl' ? r.brain.renderer.gl : null;
+  };
+
+  window.rendererRun = async (renderer, budgetName, count, warm, flush) => {
+    const r = make(CurrentBrain, budgetName);
+    const gl = useRenderer(r, renderer);
+    const ctx = r.canvas.getContext('2d');
+    const px = new Uint8Array(4);
+    const drawMs = [];
+    const flushMs = [];
+    for (let i = 0; i < warm + count; i++) {
+      await nextFrame();
+      const ms = r.advance();
+      let f = 0;
+      if (flush) {
+        // Waits for the GPU (or SwiftShader) to finish this frame: readPixels for WebGL, getImageData for the 2D canvas
+        // (in WebGL mode that canvas is the label overlay).
+        const t0 = performance.now();
+        if (gl) gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        ctx.getImageData(0, 0, 1, 1);
+        f = performance.now() - t0;
+      }
+      if (i >= warm) { drawMs.push(ms); flushMs.push(ms + f); }
+    }
+    const result = { drawMs: stats(drawMs), withRaster: flush ? stats(flushMs) : null, pulses: r.brain.pulses.length, canvas: [r.canvas.width, r.canvas.height], active: r.brain.rendererStatus().active };
+    r.brain.setRendererPreference(false);
+    return result;
+  };
+
+  // Composites what the viewer sees (WebGL canvas under the label overlay) over black and summarises it coarsely.
+  window.visualRun = (renderer, budgetName, count, wantImage) => {
+    const r = make(CurrentBrain, budgetName);
+    useRenderer(r, renderer);
+    const ctx = r.canvas.getContext('2d');
+    const labels = [];
+    const realFillText = ctx.fillText.bind(ctx);
+    ctx.fillText = (text, x, y) => { labels.push(text); realFillText(text, x, y); };
+    for (let i = 0; i < count; i++) r.advance();
+    const w = r.canvas.width;
+    const h = r.canvas.height;
+    const comp = document.createElement('canvas');
+    comp.width = w;
+    comp.height = h;
+    const c = comp.getContext('2d');
+    c.fillStyle = '#000';
+    c.fillRect(0, 0, w, h);
+    if (renderer === 'webgl') c.drawImage(r.brain.renderer.canvas, 0, 0);
+    c.drawImage(r.canvas, 0, 0);
+    const data = c.getImageData(0, 0, w, h).data;
+    const lum = (i) => (0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2]) / 255;
+    const gx = 16, gy = 9;
+    const grid = new Float64Array(gx * gy);
+    let lit = 0;
+    let total = 0;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const l = lum((y * w + x) * 4);
+        total += l;
+        if (l > 8 / 255) lit++;
+        grid[Math.min(gy - 1, Math.floor((y / h) * gy)) * gx + Math.min(gx - 1, Math.floor((x / w) * gx))] += l;
+      }
+    }
+    const cell = (w / gx) * (h / gy);
+    const frame = r.brain.frame;
+    const scale = w / frame.width;
+    const regions = {};
+    for (const d of Object.keys(frame.regionCenter)) {
+      const center = frame.regionCenter[d];
+      if (!center?.valid || frame.activation[d] < 0.25) continue;
+      const rad = frame.R * 0.3 * scale;
+      let sum = 0, n = 0;
+      for (let y = Math.max(0, Math.floor(center.y * scale - rad)); y < Math.min(h, center.y * scale + rad); y++) {
+        for (let x = Math.max(0, Math.floor(center.x * scale - rad)); x < Math.min(w, center.x * scale + rad); x++) {
+          if ((x - center.x * scale) ** 2 + (y - center.y * scale) ** 2 > rad * rad) continue;
+          sum += lum((y * w + x) * 4); n++;
+        }
+      }
+      regions[d] = sum / n;
+    }
+    const counts = renderer === 'webgl' ? { ...r.brain.renderer.lastCounts } : null;
+    const image = wantImage ? comp.toDataURL('image/png') : null;
+    r.brain.setRendererPreference(false);
+    return { grid: Array.from(grid, (v) => v / cell), meanLum: total / (w * h), litShare: lit / (w * h), regions, labels: [...new Set(labels)], pulses: r.brain.pulses.length, counts, image };
+  };
+
   window.pixelRun = (which, budgetName, count, captureAt) => {
     const lib = which === 'baseline' ? BaselineBrain : CurrentBrain;
     const r = make(lib, budgetName);
@@ -199,7 +290,52 @@ try {
   });
   const budgets = ['full', 'balanced', 'light'];
 
-  if (!flag('skip-pixels')) {
+  if (flag('webgl')) {
+    report.environment.note = 'Headless Chromium, x86 container, 1920x1080 at device scale factor 1. WebGL here is SwiftShader (software GL on the CPU), forced on with allowSoftware; the real app refuses software WebGL. Relative comparison only; not Raspberry Pi numbers.';
+    report.visual = [];
+    if (!flag('skip-pixels')) {
+      const shots = arg('shots');
+      for (const budget of budgets) {
+        const canvasShot = await tab.evaluate(([b, n, img]) => window.visualRun('canvas', b, n, img), [budget, 120, !!shots]);
+        const webglShot = await tab.evaluate(([b, n, img]) => window.visualRun('webgl', b, n, img), [budget, 120, !!shots]);
+        if (shots) {
+          for (const [name, shot] of [['canvas', canvasShot], ['webgl', webglShot]]) {
+            await writeFile(join(resolve(shots), `brain-${budget}-${name}.png`), Buffer.from(shot.image.split(',')[1], 'base64'));
+          }
+        }
+        const a = canvasShot.grid;
+        const b = webglShot.grid;
+        const mean = (v) => v.reduce((x, y) => x + y, 0) / v.length;
+        const ma = mean(a), mb = mean(b);
+        let cov = 0, va = 0, vb = 0, absDiff = 0;
+        for (let i = 0; i < a.length; i++) {
+          cov += (a[i] - ma) * (b[i] - mb); va += (a[i] - ma) ** 2; vb += (b[i] - mb) ** 2; absDiff += Math.abs(a[i] - b[i]);
+        }
+        delete canvasShot.image;
+        delete webglShot.image;
+        report.visual.push({
+          budget,
+          gridCorrelation: cov / Math.sqrt(va * vb),
+          gridMeanAbsDiff: absDiff / a.length,
+          canvas: canvasShot,
+          webgl: webglShot,
+        });
+      }
+    }
+    if (!flag('skip-bench')) {
+      for (let run = 1; run <= runs; run++) {
+        for (const budget of budgets) {
+          const order = run % 2 ? ['canvas', 'webgl'] : ['webgl', 'canvas'];
+          for (const renderer of order) {
+            for (const flush of [false, true]) {
+              const result = await tab.evaluate(([r, b, n, warm, f]) => window.rendererRun(r, b, n, warm, f), [renderer, budget, frames, warmup, flush]);
+              report.bench.push({ run, budget, which: renderer, mode: flush ? 'step+draw+gpu' : 'step+draw', ...result });
+            }
+          }
+        }
+      }
+    }
+  } else if (!flag('skip-pixels')) {
     const captureAt = [...new Set([1, 30, 120, frames])].filter((at) => at <= frames);
     for (const budget of budgets) {
       const base = await tab.evaluate(([b, n, at]) => window.pixelRun('baseline', b, n, at), [budget, frames, captureAt]);
@@ -209,7 +345,7 @@ try {
     }
   }
 
-  if (!flag('skip-bench')) {
+  if (!flag('skip-bench') && !flag('webgl')) {
     for (let run = 1; run <= runs; run++) {
       for (const budget of budgets) {
         // Alternate the order each run so warm-up and drift favour neither side.
@@ -231,26 +367,53 @@ try {
 }
 
 const fmt = (v) => v.toFixed(3);
-if (report.bench.length) {
+const summarize = (rows) => {
+  const med = rows.map((s) => s.median).sort((a, b) => a - b);
+  const p95 = rows.map((s) => s.p95).sort((a, b) => a - b);
+  return { median: med[Math.floor(med.length / 2)], medRange: [med[0], med.at(-1)], p95: p95[Math.floor(p95.length / 2)], p95Range: [p95[0], p95.at(-1)] };
+};
+let failed = false;
+if (flag('webgl')) {
+  if (report.bench.length) {
+    console.log(`\nCanvas vs WebGL per frame, ms (${frames} frames after ${warmup} warm-up, ${runs} runs; ${report.environment.note})`);
+    for (const mode of ['step+draw', 'step+draw+gpu']) {
+      for (const budget of ['full', 'balanced', 'light']) {
+        const rows = (which) => report.bench.filter((r) => r.mode === mode && r.budget === budget && r.which === which).map((r) => (mode === 'step+draw' ? r.drawMs : r.withRaster));
+        const c = summarize(rows('canvas'));
+        const g = summarize(rows('webgl'));
+        console.log(`${mode.padEnd(14)} ${budget.padEnd(8)} canvas median ${fmt(c.median)} [${c.medRange.map(fmt).join('–')}] p95 ${fmt(c.p95)} [${c.p95Range.map(fmt).join('–')}]`
+          + ` | webgl median ${fmt(g.median)} [${g.medRange.map(fmt).join('–')}] p95 ${fmt(g.p95)} [${g.p95Range.map(fmt).join('–')}]`
+          + ` | median change ${(((g.median - c.median) / c.median) * 100).toFixed(1)}%`);
+      }
+    }
+    for (const r of report.bench) if (r.active !== r.which) { failed = true; console.log(`renderer mismatch: wanted ${r.which}, ran ${r.active}`); }
+  }
+  for (const v of report.visual ?? []) {
+    const regions = Object.keys(v.canvas.regions).map((d) => `${d} ${v.canvas.regions[d].toFixed(3)}/${(v.webgl.regions[d] ?? NaN).toFixed(3)}`).join(', ');
+    const sameLabels = JSON.stringify(v.canvas.labels) === JSON.stringify(v.webgl.labels) && v.webgl.labels.length > 0;
+    const pulsesDrawn = v.webgl.counts?.pulses > 0 && v.webgl.counts.pulses === v.webgl.pulses && v.canvas.pulses === v.webgl.pulses;
+    if (!sameLabels || !pulsesDrawn || !(v.gridCorrelation > 0.9)) failed = true;
+    console.log(`visual ${v.budget.padEnd(8)} frame 120: 16x9 grid luminance correlation ${v.gridCorrelation.toFixed(3)}, mean abs diff ${v.gridMeanAbsDiff.toFixed(4)};`
+      + ` mean luminance canvas ${v.canvas.meanLum.toFixed(4)} / webgl ${v.webgl.meanLum.toFixed(4)}; lit share ${(v.canvas.litShare * 100).toFixed(1)}% / ${(v.webgl.litShare * 100).toFixed(1)}%;`
+      + ` active-region luminance (canvas/webgl) ${regions}`);
+    console.log(`labels ${v.budget}: canvas ${JSON.stringify(v.canvas.labels)} webgl ${JSON.stringify(v.webgl.labels)} ${sameLabels ? 'same' : 'DIFFERENT'};`
+      + ` pulses canvas ${v.canvas.pulses}, webgl ${v.webgl.pulses} (drawn ${v.webgl.counts?.pulses}); webgl counts ${JSON.stringify(v.webgl.counts)}`);
+  }
+}
+if (report.bench.length && !flag('webgl')) {
   console.log(`\nstep+draw per frame, ms (${frames} frames after ${warmup} warm-up, ${runs} runs; ${report.environment.note})`);
   for (const mode of flag('no-raster') ? ['step+draw'] : ['step+draw', 'step+draw+raster']) {
     for (const budget of ['full', 'balanced', 'light']) {
       const row = (which) => report.bench.filter((r) => r.mode === mode && r.budget === budget && r.which === which)
         .map((r) => (mode === 'step+draw' ? r.drawMs : r.withRaster));
-      const summary = (rows) => {
-        const med = rows.map((s) => s.median).sort((a, b) => a - b);
-        const p95 = rows.map((s) => s.p95).sort((a, b) => a - b);
-        return { median: med[Math.floor(med.length / 2)], medRange: [med[0], med.at(-1)], p95: p95[Math.floor(p95.length / 2)], p95Range: [p95[0], p95.at(-1)] };
-      };
-      const b = summary(row('baseline'));
-      const c = summary(row('current'));
+      const b = summarize(row('baseline'));
+      const c = summarize(row('current'));
       console.log(`${mode.padEnd(17)} ${budget.padEnd(8)} baseline median ${fmt(b.median)} [${b.medRange.map(fmt).join('–')}] p95 ${fmt(b.p95)} [${b.p95Range.map(fmt).join('–')}]`
         + ` | current median ${fmt(c.median)} [${c.medRange.map(fmt).join('–')}] p95 ${fmt(c.p95)} [${c.p95Range.map(fmt).join('–')}]`
         + ` | median change ${(((c.median - b.median) / b.median) * 100).toFixed(1)}%`);
     }
   }
 }
-let failed = false;
 for (const p of report.pixels) {
   for (const d of p.diffs) {
     const share = d.visibleDiffering / d.pixels;
