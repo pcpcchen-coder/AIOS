@@ -86,6 +86,7 @@ import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, ty
 import type { PageEndReason } from "../shared/voice-cost.ts";
 import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
 import { voiceVolume } from "./voice-volume.ts";
+import { SettingsEntry, settingsEntryEnabled } from "./settings-entry.ts";
 import { voiceVolumeOutput } from "../shared/voice-volume.ts";
 import { currentLight, decideDayNight, INITIAL_LIGHT, nextLight, type LightState } from "../shared/day-night.ts";
 import { LightMeter, type LightWorkerLike } from "./light-meter.ts";
@@ -1462,6 +1463,17 @@ sensorIndicator.type = "button";
 sensorIndicator.className = "sensor-indicator";
 sensorIndicator.hidden = true;
 document.body.append(sensorIndicator);
+
+// SET-1：Pi 終端頁面右下角的設定按鈕（Mac 有選單列，不放）。點一下打開設定畫面，再點一下收起。
+const settingsEntry = settingsEntryEnabled({ search: location.search, desktop: !!window.nousDesktop })
+  ? new SettingsEntry({
+      isOpen: () => shell.surface?.kind === "settings",
+      open: () => actions.openSettings(),
+      close: () => dispatch({ type: "dismiss" }),
+      t: (source) => t(source),
+    })
+  : null;
+if (settingsEntry) document.body.classList.add("has-settings-entry");
 let pipeline: SensePipeline | null = null;
 
 // VOL-2：日間／夜間的對話音量。每分鐘依時段重算；鏡頭有開而且設定允許時，每 30 秒量一次環境亮度（只拿回一個數字）。
@@ -3143,6 +3155,7 @@ function showCommandError(message: string): void {
 // ───────────── 繪製 ─────────────
 
 function render(): void {
+  settingsEntry?.refresh();
   const fgRaw = shell.foreground_task_id ? tasks.get(shell.foreground_task_id) : undefined;
   if (fgRaw) protectedTasks.want([fgRaw]);
   const fg = fgRaw ? shown(fgRaw) : undefined;
@@ -3863,6 +3876,7 @@ onLocaleChange(() => {
   renderWakeIndicator();
   clockCorner.refreshLocale();
   homeCorner.refreshLocale();
+  settingsEntry?.refresh();
   render();
 });
 

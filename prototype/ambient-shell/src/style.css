@@ -1060,6 +1060,29 @@ body[data-facing="yes"] .brain-gl {
   background: var(--muted);
 }
 .sensor-indicator[data-state="ok"]::before { background: var(--mint); }
+
+/* SET-1：Pi 終端頁面右下角的設定按鈕（只有終端頁面有）；鏡頭指示點往左挪，讓出最右下角。 */
+.settings-entry {
+  position: fixed;
+  right: 12px;
+  bottom: 8px;
+  z-index: 31;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--panel-border);
+  border-radius: 50%;
+  background: rgba(20, 24, 32, 0.72);
+  color: var(--muted);
+  cursor: pointer;
+}
+.settings-entry:hover,
+.settings-entry:focus-visible { color: inherit; }
+.settings-entry[aria-pressed="true"] { color: var(--mint); border-color: var(--mint); }
+body.has-settings-entry .sensor-indicator { right: 64px; }
+body.has-settings-entry .sensor-preview { bottom: 56px; }
 .sensor-indicator[data-state="degraded"]::before,
 .sensor-indicator[data-state="starting"]::before { background: var(--amber); }
 .sensor-indicator[data-state="error"]::before { background: var(--red); }
