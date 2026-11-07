@@ -1,20 +1,18 @@
 import {
-  HOME_AC_MAX,
-  HOME_AC_REPORT_KEEP_MS,
   HOME_CLIMATE_KEYS,
   HOME_ON_NAMES_MAX,
-  type HomeAcState,
   type HomeClimateReading,
   type HomeOverviewError,
   type HomeOverviewView,
   type HomeSwitchGroup,
 } from "../shared/home-corner.ts";
-import { HomeBridgeError, type HubDevice, type HubSnapshot, type RememberedReport } from "./home-bridge.ts";
+import { HomeBridgeError, type HubDevice, type HubSnapshot } from "./home-bridge.ts";
 
 // HOME-1（George 2026-11-07）：GET /api/home/overview 的內容（左上角家中狀態）。唯讀：只讀 HomeBridge 的快照，不送任何控制指令。
 // - 快取 30 秒（成功與失敗都算），同時只有一個中控請求；控制指令結束後（HomeBridge.changes 改變）下一次就重讀，
 //   控制前就開始的請求不算數（等它結束再讀一次）；控制後讀到的結果只快取 5 秒，頁面 8 秒後的追讀拿得到中控稍晚更新的開關。
-// - 只交出角落要畫的：室內讀值（每種一台）、燈與插座的數量、開著的名稱（最多 4 個）、AIFA 冷氣的控制器回報。
+// - 只交出角落要畫的：室內讀值（每種一台）、燈與插座的數量、開著的名稱（最多 4 個）。
+//   冷氣不在角落（George 2026-11-07 拿掉），所以也不在背景讀冷氣的控制器回報。
 //   不交出設備 id、權杖、中控位址或原始回應；不寫 log。
 
 export const HOME_OVERVIEW_TTL_MS = 30_000;
@@ -27,8 +25,6 @@ export interface HomeOverviewSource {
   readonly available: boolean;
   readonly changes: number;
   readSnapshot(): Promise<HubSnapshot>;
-  controllerReports(): ReadonlyMap<string, RememberedReport>;
-  pollControllerReports(devices: HubDevice[]): void;
 }
 
 const LIGHT_KINDS = new Set(["light"]);
@@ -52,7 +48,7 @@ function reportedPower(d: HubDevice): boolean | null {
  * 年紀＝serverTime − receivedAt：中控有給 server_time 時兩邊都是中控時鐘，不受這台電腦時鐘影響；
  * 中控沒給 server_time 時 parseHome 改用這台電腦的時間，年紀就受兩邊時鐘差影響。
  */
-export function overviewFromSnapshot(home: HubSnapshot, reports: ReadonlyMap<string, RememberedReport>, now: number, elapsedS: number): Extract<HomeOverviewView, { state: "ok" }> {
+export function overviewFromSnapshot(home: HubSnapshot, now: number, elapsedS: number): Extract<HomeOverviewView, { state: "ok" }> {
   const roomOf = (d: HubDevice) => home.rooms.find((r) => r.id === d.roomId)?.name ?? null;
   const climate: HomeClimateReading[] = [];
   const sensors = new Map<HubDevice, number>();
@@ -95,23 +91,7 @@ export function overviewFromSnapshot(home: HubSnapshot, reports: ReadonlyMap<str
     };
   };
 
-  const ac: HomeAcState[] = home.devices
-    .filter((d) => d.route.kind === "aifa")
-    .slice(0, HOME_AC_MAX)
-    .map((d) => {
-      const kept = reports.get(d.id);
-      const r = kept && now - kept.at <= HOME_AC_REPORT_KEEP_MS ? kept : null;
-      return {
-        name: clip(d.name),
-        room: roomOf(d),
-        power: r?.report.power ?? null,
-        mode: r?.report.mode ?? null,
-        temperature: r?.report.temperature ?? null,
-        age_s: r && r.report.power !== null ? Math.max(0, Math.round((now - r.at) / 1000)) : null,
-      };
-    });
-
-  return { configured: true, state: "ok", server_now: now, climate, switches: [group("light", LIGHT_KINDS), group("switch", SWITCH_KINDS)], ac };
+  return { configured: true, state: "ok", server_now: now, climate, switches: [group("light", LIGHT_KINDS), group("switch", SWITCH_KINDS)] };
 }
 
 function errorCode(err: unknown): HomeOverviewError {
@@ -136,8 +116,7 @@ export class HomeOverview {
     const c = await this.current();
     const now = this.now();
     if (!c.home) return { configured: true, state: "unreachable", error: c.error ?? "unreachable", server_now: now };
-    source.pollControllerReports(c.home.devices);
-    return overviewFromSnapshot(c.home, source.controllerReports(), now, Math.max(0, (now - c.at) / 1000));
+    return overviewFromSnapshot(c.home, now, Math.max(0, (now - c.at) / 1000));
   }
 
   private async current(): Promise<Cached> {

@@ -85,7 +85,7 @@ import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts
 import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
 import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
-import { voiceVolume } from "./voice-volume.ts";
+import { VOICE_VOLUME_TEXT, voiceVolume } from "./voice-volume.ts";
 import { SettingsEntry, settingsEntryEnabled } from "./settings-entry.ts";
 import { voiceVolumeOutput } from "../shared/voice-volume.ts";
 import { currentLight, decideDayNight, INITIAL_LIGHT, nextLight, type LightState } from "../shared/day-night.ts";
@@ -1492,7 +1492,19 @@ function updateDayNight(): void {
   const before = voiceVolume.mode;
   const decision = decideDayNight(new Date().getHours(), prefs.use_camera ? currentLight(lightState, Date.now()) : null, prefs);
   voiceVolume.setMode(decision);
+  renderDayNightBadge();
   if (shell.surface?.kind === "settings" && (before.mode !== decision.mode || before.reason !== decision.reason || before.camera !== decision.camera)) render();
+}
+
+/** VOL-2：右上角時鐘下方的日間／夜間模式（文字依目前語言；原因放在 title）。 */
+function renderDayNightBadge(): void {
+  const decision = voiceVolume.mode;
+  const prefs = voiceVolume.prefs;
+  const pad = (h: number) => String(h).padStart(2, "0");
+  const title = decision.reason === "hours"
+    ? t(VOICE_VOLUME_TEXT.modeLine.hours, pad(prefs.night_start_h), pad(prefs.night_end_h))
+    : t(VOICE_VOLUME_TEXT.modeLine[decision.reason]);
+  clockCorner.setDayNight({ mode: decision.mode, label: t(VOICE_VOLUME_TEXT.badge[decision.mode]), title });
 }
 
 function syncLightMeter(): void {
@@ -3874,6 +3886,7 @@ onLocaleChange(() => {
   sensorIndicator.title = t("{0}（按一下顯示／收起鏡頭畫面）", t(sensorDetail));
   sensorIndicator.textContent = sensorState === "ok" ? t("鏡頭") : sensorState === "starting" ? t("鏡頭啟動中") : t("鏡頭：{0}", t(sensorDetail));
   renderWakeIndicator();
+  renderDayNightBadge();
   clockCorner.refreshLocale();
   homeCorner.refreshLocale();
   settingsEntry?.refresh();

@@ -21,7 +21,10 @@ export interface ClockCornerOptions {
 
 export class ClockCorner {
   private root: HTMLElement | null = null;
-  private els: Record<"time" | "date" | "weather" | "icon" | "temp" | "cond" | "detail" | "age" | "note", HTMLElement> | null = null;
+  private els: Record<"time" | "date" | "mode" | "modeIcon" | "modeText" | "weather" | "icon" | "temp" | "cond" | "detail" | "age" | "note", HTMLElement> | null = null;
+  /** VOL-2：日間／夜間（null＝還沒決定）；label 是已翻譯的文字，title 是原因。 */
+  private dayNight: { mode: "day" | "night"; label: string; title: string } | null = null;
+  private modeKey = "";
   private minuteTimer: ReturnType<typeof setTimeout> | null = null;
   private iconKey = "";
   private readonly feed: ClockFeed;
@@ -67,6 +70,12 @@ export class ClockCorner {
     };
     const time = el("div", "clock-time");
     const date = el("div", "clock-date");
+    // VOL-2：日間／夜間模式（太陽／月亮與文字）；只反映對話音量現在用哪一組，原因在 title。
+    const mode = el("div", "clock-mode");
+    mode.hidden = true;
+    const modeIcon = el("span", "clock-mode-icon", mode);
+    modeIcon.setAttribute("aria-hidden", "true");
+    const modeText = el("span", "clock-mode-text", mode);
     const weather = el("div", "clock-weather");
     const icon = el("span", "clock-icon", weather);
     icon.setAttribute("aria-hidden", "true");
@@ -75,7 +84,7 @@ export class ClockCorner {
     const detail = el("div", "clock-detail");
     const age = el("div", "clock-age");
     const note = el("div", "clock-note");
-    this.els = { time, date, weather, icon, temp, cond, detail, age, note };
+    this.els = { time, date, mode, modeIcon, modeText, weather, icon, temp, cond, detail, age, note };
     this.root = root;
     (this.options.host ?? document.body).append(root);
     document.body.classList.add("has-clock");
@@ -103,6 +112,7 @@ export class ClockCorner {
     this.root?.remove();
     this.root = this.els = null;
     this.iconKey = "";
+    this.modeKey = "";
     document.body.classList.remove("has-clock");
     document.documentElement.style.removeProperty("--clock-h");
     document.documentElement.style.removeProperty("--clock-reserve");
@@ -140,11 +150,37 @@ export class ClockCorner {
     }
     setText(els.time, snap.time);
     setText(els.date, snap.date);
+    this.renderMode();
     this.renderWeather(snap.row);
     if (root.getAttribute("aria-label") !== snap.label) root.setAttribute("aria-label", snap.label);
     root.dataset.weather = snap.row.kind;
     root.hidden = false;
     this.publishSize();
+  }
+
+  /** VOL-2：日間／夜間模式改變或換語言時呼叫（main.ts 依對話音量的判斷）。 */
+  setDayNight(state: { mode: "day" | "night"; label: string; title: string } | null): void {
+    this.dayNight = state;
+    if (this.root && !this.root.hidden) {
+      this.renderMode();
+      this.publishSize();
+    }
+  }
+
+  private renderMode(): void {
+    const els = this.els;
+    if (!els) return;
+    const state = this.dayNight;
+    els.mode.hidden = !state;
+    if (!state) return;
+    els.mode.dataset.mode = state.mode;
+    if (state.mode !== this.modeKey) {
+      // 固定的 SVG 字串（weather-icons.ts 的晴天／晴夜），不含任何資料。
+      els.modeIcon.innerHTML = weatherIconSvg("clear", state.mode === "night");
+      this.modeKey = state.mode;
+    }
+    setText(els.modeText, state.label);
+    if (els.mode.title !== state.title) els.mode.title = state.title;
   }
 
   private renderWeather(row: ClockWeatherRow): void {

@@ -21,10 +21,12 @@ export const NIGHT_VOLUME_DEFAULT = 40;
 
 /**
  * 環境亮度（畫面平均亮度，Rec. 601，0–255）。低於 DARK_LUMA 連續 LIGHT_HOLD_MS 才算暗；高於 BRIGHT_LUMA
- * 連續 LIGHT_HOLD_MS 才回到亮（遲滯，開關燈或有人走過不會來回切換）。數值未在實機校正，設定頁顯示實測值。
+ * 連續 LIGHT_HOLD_MS 才回到亮（遲滯，開關燈或有人走過不會來回切換）。
+ * 2026-11-07 George 在 Pi 實測：開燈約 130、關燈約 80（鏡頭自動曝光，關燈也不會很暗）。門檻取兩者之間：
+ * 低於 95 算暗、高於 115 算亮，各離實測值 15，中間 20 是遲滯區。
  */
-export const DARK_LUMA = 40;
-export const BRIGHT_LUMA = 55;
+export const DARK_LUMA = 95;
+export const BRIGHT_LUMA = 115;
 export const LIGHT_HOLD_MS = 60_000;
 /** 每多久量一次。 */
 export const LIGHT_SAMPLE_MS = 30_000;

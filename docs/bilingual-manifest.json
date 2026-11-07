@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "241273a7d4a7003ceb3cbedf634e2cd6d902279748b2aaa53a6fca92433e2c15",
-      "translationSha256": "64b112da2191da4d251f4162494b09b60dd780037fbed4afef76f30b6a1a0e3c"
+      "sourceSha256": "bff9b5ca70a4562167c98dcb2e0d4ee00b72eed8ea4d23f58b3fce76a8551acb",
+      "translationSha256": "c83a480d562ce5ffc5c815022af9051a413fc4cc50ce6c883a985b16b60d6507"
     },
     {
       "source": "docs/README.md",
@@ -386,6 +386,13 @@
       "translationSha256": "2c37b6227be4774fc576a010ad11a55f928460b9cab4624c4cbea2610506374b"
     },
     {
+      "source": "docs/validation/day-night-badge-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/day-night-badge-2026-11-07.en.md",
+      "sourceSha256": "22eac2d1de159eba67c3b9ba8adf5c560632c8acfa278af0bad80aa64bde7380",
+      "translationSha256": "745ac5538973aaad82565f77f4055c0e4afa62f81a1c73b18e9b78f511211a6a"
+    },
+    {
       "source": "docs/validation/day-night-volume-2026-11-07.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/day-night-volume-2026-11-07.en.md",
@@ -494,8 +501,8 @@
       "source": "docs/validation/home-corner-2026-11-07.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/home-corner-2026-11-07.en.md",
-      "sourceSha256": "18253f84fbce7b3e5b167dbf84b3897780b3b7051fc991af98196d9d8998219c",
-      "translationSha256": "a45acf48597045d85be174c1c434c27e0b3995de2cdfcf2790e9aaca36dd179e"
+      "sourceSha256": "0cf758e40bb09ef1b7ba01d16eabbf846719a09ce96fd972e827d388414c6dd3",
+      "translationSha256": "c6b156d8d592de99bbe2b8e9555c412b5414a2122c7b49054b5ac06f36f0073f"
     },
     {
       "source": "docs/validation/implementation-review-2026-10-24.md",

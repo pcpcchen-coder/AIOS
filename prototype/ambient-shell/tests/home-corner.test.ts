@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HomeCornerSettingsStore } from "../server/home-corner-settings.ts";
-import { HomeBridge, HomeBridgeError, parseAifa, parseHome, type HubSnapshot, type RememberedReport } from "../server/home-bridge.ts";
+import { HomeBridge, HomeBridgeError, parseAifa, parseHome, type HubSnapshot } from "../server/home-bridge.ts";
 import { HOME_OVERVIEW_AFTER_CONTROL_TTL_MS, HomeOverview, overviewFromSnapshot, type HomeOverviewSource } from "../server/home-overview.ts";
 import { startNous, type NousHandle } from "../server/nous.ts";
 import {
@@ -90,11 +90,9 @@ function snapshot(home: unknown = HOME, aifa: unknown = AIFA): HubSnapshot {
   return { ...h, devices: [...h.devices, ...a.devices], aifa: a.aifa };
 }
 
-const report = (power: boolean | null, at: number): RememberedReport => ({ report: { power, mode: "cool", temperature: 26, fan: "auto", swing: "auto", feature: "normal" }, at });
-
 describe("overview from the hub snapshot", () => {
   it("counts on/off from the hub's state.values.power (legacy state.power too); offline, unreported or older-without-age devices are unknown; older readings carry their age", () => {
-    const view = overviewFromSnapshot(snapshot(), new Map(), NOW_MS, 0);
+    const view = overviewFromSnapshot(snapshot(), NOW_MS, 0);
     expect(view.switches).toEqual([
       { group: "light", total: 6, on: 2, unknown: 3, on_names: ["客廳主燈", "餐桌燈"], oldest_age_s: 600 },
       { group: "switch", total: 1, on: 1, unknown: 0, on_names: ["延長線"], oldest_age_s: null },
@@ -102,7 +100,7 @@ describe("overview from the hub snapshot", () => {
   });
 
   it("shows the oldest age of a not-fresh reading next to the counts", () => {
-    const view = { configured: true as const, state: "ok" as const, server_now: NOW_S, climate: [], ac: [],
+    const view = { configured: true as const, state: "ok" as const, server_now: NOW_S, climate: [],
       switches: [{ group: "light" as const, total: 3, on: 2, unknown: 0, on_names: ["客廳主燈", "餐桌燈"], oldest_age_s: 600 }] };
     const zh = homeCornerModel({ view, coreDown: false, locale: "zh-TW" });
     const en = homeCornerModel({ view, coreDown: false, locale: "en" });
@@ -111,7 +109,7 @@ describe("overview from the hub snapshot", () => {
   });
 
   it("picks the live sensor first, keeps the stale one only for a key the live one lacks (tagged as another sensor), and ages from the hub clock", () => {
-    const view = overviewFromSnapshot(snapshot(), new Map(), NOW_MS, 30);
+    const view = overviewFromSnapshot(snapshot(), NOW_MS, 30);
     expect(view.climate).toEqual([
       { key: "temperature", sensor: 0, value: 26.53, unit: "°C", precision: 1, room: "客廳", status: "live", age_s: 150 },
       { key: "humidity", sensor: 0, value: 62.4, unit: "%", precision: 0, room: "客廳", status: "live", age_s: 150 },
@@ -121,30 +119,25 @@ describe("overview from the hub snapshot", () => {
 
   it("a missing reading is null (never 0) and marked missing", () => {
     const home = { ...HOME, devices: [sensor("th", "living", "live", 60, [metric("temperature", "溫度", "°C", 1, null)])] };
-    expect(overviewFromSnapshot(snapshot(home), new Map(), NOW_MS, 0).climate).toEqual([{ key: "temperature", sensor: 0, value: null, unit: "°C", precision: 1, room: "客廳", status: "missing", age_s: 60 }]);
+    expect(overviewFromSnapshot(snapshot(home), NOW_MS, 0).climate).toEqual([{ key: "temperature", sensor: 0, value: null, unit: "°C", precision: 1, room: "客廳", status: "missing", age_s: 60 }]);
   });
 
-  it("AIFA 冷氣 shows only a remembered controller report under 2 hours; otherwise power unknown", () => {
-    const reports = new Map([
-      ["aifa:hub1:c1", report(true, NOW_MS - 3 * 60_000)],
-      ["aifa:hub1:c2", report(false, NOW_MS - 3 * 3600_000)],
-    ]);
-    expect(overviewFromSnapshot(snapshot(), reports, NOW_MS, 0).ac).toEqual([
-      { name: "主臥冷氣", room: null, power: true, mode: "cool", temperature: 26, age_s: 180 },
-      { name: "書房冷氣", room: null, power: null, mode: null, temperature: null, age_s: null },
-    ]);
+  it("air conditioners are not part of the overview (George 2026-11-07)", () => {
+    const view = overviewFromSnapshot(snapshot(), NOW_MS, 0);
+    expect(Object.keys(view).sort()).toEqual(["climate", "configured", "server_now", "state", "switches"]);
+    expect(JSON.stringify(view)).not.toMatch(/冷氣/);
   });
 
   it("names are capped at 4 and the response has no device ids, tokens or hub addresses", () => {
     const many = { ...HOME, devices: Array.from({ length: 7 }, (_, i) => light(`id-${i}`, `燈${i}`, { power: true })) };
-    const view = overviewFromSnapshot(snapshot(many, { connected: false, items: [] }), new Map(), NOW_MS, 0);
+    const view = overviewFromSnapshot(snapshot(many, { connected: false, items: [] }), NOW_MS, 0);
     expect(view.switches[0]).toMatchObject({ total: 7, on: 7, on_names: ["燈0", "燈1", "燈2", "燈3"] });
     expect(JSON.stringify(view)).not.toMatch(/id-\d|hub1|aifa:/);
   });
 });
 
 function fakeSource(read: () => Promise<HubSnapshot>, available = true) {
-  const state = { reads: 0, changes: 0, polled: 0 };
+  const state = { reads: 0, changes: 0 };
   const source: HomeOverviewSource = {
     available,
     get changes() {
@@ -153,10 +146,6 @@ function fakeSource(read: () => Promise<HubSnapshot>, available = true) {
     readSnapshot: () => {
       state.reads++;
       return read();
-    },
-    controllerReports: () => new Map(),
-    pollControllerReports: () => {
-      state.polled++;
     },
   };
   return { source, state };
@@ -193,7 +182,6 @@ describe("HomeOverview cache", () => {
     release();
     await late;
     expect(state.reads).toBe(3);
-    expect(state.polled).toBe(5);
   });
 
   it("a read that started before a control finished is not reused: the next view waits for it and reads again; that post-control result is cached only 5 s", async () => {
@@ -282,106 +270,34 @@ describe("HomeBridge read side for the corner", () => {
     await expect(odd.readSnapshot()).rejects.toMatchObject({ code: "bad_response" });
   });
 
-  it("reads one AC controller report at a time, at most every 5 minutes per AC, oldest first", async () => {
-    let now = NOW_MS;
+  it("reading the corner never asks the hub for an air conditioner's status (no background /status reads)", async () => {
     const hub = fakeHubFetch();
-    const bridge = new HomeBridge({ url: "http://hub.test", token: "t", fetch: hub.fetch, now: () => now });
-    const devices = (await bridge.readSnapshot()).devices;
-    const statusCalls = () => hub.calls.filter((c) => c.path.endsWith("/status")).map((c) => c.path);
-    bridge.pollControllerReports(devices);
-    bridge.pollControllerReports(devices);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(statusCalls()).toEqual(["/api/v1/integrations/aifa/devices/hub1/children/c1/status"]);
-    expect(bridge.controllerReports().get("aifa:hub1:c1")).toEqual({ report: { power: true, mode: "dry", temperature: 25, fan: "low", swing: "auto", feature: "normal" }, at: now });
-    bridge.pollControllerReports(devices);
-    await new Promise((r) => setTimeout(r, 10));
-    bridge.pollControllerReports(devices);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(statusCalls()).toHaveLength(2);
-    now += 5 * 60_000;
-    bridge.pollControllerReports(devices);
-    await new Promise((r) => setTimeout(r, 10));
-    expect(statusCalls().at(-1)).toContain("/c1/status");
-    expect(hub.calls.filter((c) => c.method === "POST").every((c) => c.path.endsWith("/status"))).toBe(true);
-  });
-
-  it("background reads cover only the displayed, not-offline ACs and skip an AC a voice control touched in the last 5 minutes", async () => {
-    let now = NOW_MS;
-    const child = (id: string, name: string) => ({ id, name, type: "0", sub_type: "0", capabilities: null });
-    const aifa = {
-      ...AIFA,
-      items: [
-        { id: "hubX", online: false, matched_device_id: null, children: [child("x1", "客房冷氣")] },
-        { id: "hub1", online: true, matched_device_id: null, children: [child("c1", "主臥冷氣"), child("c2", "書房冷氣"), child("c3", "餐廳冷氣")] },
-      ],
-    };
-    const hub = fakeHubFetch({ aifa });
-    const bridge = new HomeBridge({ url: "http://hub.test", token: "t", fetch: hub.fetch, now: () => now });
-    const devices = (await bridge.readSnapshot()).devices;
-    const statusCalls = () => hub.calls.filter((c) => c.path.endsWith("/status")).map((c) => c.path.split("/").at(-2));
-    const pollAll = async () => {
-      for (let i = 0; i < 5; i++) {
-        bridge.pollControllerReports(devices);
-        await new Promise((r) => setTimeout(r, 5));
-      }
-    };
-    await pollAll();
-    expect(statusCalls()).toEqual(["c1", "c2"]);
-    now += 5 * 60_000;
-    await bridge.control({ target: "主臥冷氣", command: "power", value: "true" });
-    await pollAll();
-    expect(statusCalls()).toEqual(["c1", "c2", "c2"]);
-  });
-
-  it("a voice read of an AC whose background read is in flight shares it instead of sending a second /status", async () => {
-    const caps = { modes: ["auto", "cool", "dry"], fan_modes: ["auto", "low", "medium", "high"], swing_modes: ["auto", "fixed_1"], features: ["normal"], min_temperature: 17, max_temperature: 30, timer_supported: false };
-    const aifa = { ...AIFA, items: [{ ...AIFA.items[0], children: [{ id: "c1", name: "主臥冷氣", type: "0", sub_type: "0", capabilities: caps }] }] };
-    let release: () => void = () => {};
-    const hub = fakeHubFetch({
-      aifa,
-      status: () =>
-        new Promise<Response>((r) => (release = () => r(Response.json({ status: { power: true, mode: "dry", temperature: 25, fan: "low", swing: "auto", feature: "normal" } })))),
-    });
-    const bridge = new HomeBridge({ url: "http://hub.test", token: "t", fetch: hub.fetch, now: () => NOW_MS });
-    bridge.pollControllerReports((await bridge.readSnapshot()).devices);
-    const voice = bridge.control({ target: "主臥冷氣", command: "ac_temperature", value: "26" });
-    await new Promise((r) => setTimeout(r, 5));
-    release();
-    const result = await voice;
-    expect(hub.calls.filter((c) => c.path.endsWith("/status"))).toHaveLength(1);
-    expect(hub.calls.some((c) => c.path.endsWith("/c1/climate"))).toBe(true);
-    expect(result).toMatchObject({ sent_settings: expect.stringContaining("除濕") });
-  });
-
-  it("a failed status read leaves no report (never guessed)", async () => {
-    const hub = fakeHubFetch({ status: () => new Response("{}", { status: 500 }) });
     const bridge = new HomeBridge({ url: "http://hub.test", token: "t", fetch: hub.fetch });
-    bridge.pollControllerReports((await bridge.readSnapshot()).devices);
+    const overview = new HomeOverview({ source: bridge });
+    await overview.view();
     await new Promise((r) => setTimeout(r, 10));
-    expect(bridge.controllerReports().size).toBe(0);
+    expect(hub.calls.some((c) => c.path.endsWith("/status"))).toBe(false);
+    expect(hub.calls.every((c) => c.method === "GET")).toBe(true);
   });
 });
 
 const ok = (over: Partial<Extract<HomeOverviewView, { state: "ok" }>> = {}): HomeOverviewView => ({
-  ...overviewFromSnapshot(snapshot(), new Map([["aifa:hub1:c1", report(true, NOW_MS - 5 * 60_000)]]), NOW_MS, 0),
+  ...overviewFromSnapshot(snapshot(), NOW_MS, 0),
   ...over,
 });
 
 describe("corner content (zh / en)", () => {
-  it("data: the living-room temperature and humidity, the study's stale CO₂ on its own line with its room and age, lights, unknown counts and the AC report", () => {
+  it("data: the living-room temperature and humidity, the study's stale CO₂ on its own line with its room and age, lights and unknown counts; no air conditioner line", () => {
     const zh = homeCornerModel({ view: ok(), coreDown: false, locale: "zh-TW" });
     expect(zh).toMatchObject({ kind: "data", temp: "26.5°", humidity: "62%", climateRoom: "客廳", climateDetail: null, climateOther: ["書房 CO₂ 812 ppm · 3 小時前"], refreshing: false });
     expect(zh.lines.map((l) => [l.icon, l.text, l.extra, l.detail, l.qualifier, l.active])).toEqual([
       ["bulb", "燈 2／6 開著", "3 個未知", "客廳主燈、餐桌燈", "最舊的讀值 10 分鐘前", true],
       ["plug", "插座開關 1／1 開著", null, "延長線", null, true],
-      ["ac", "主臥冷氣 開 · 26° 冷氣", null, null, "控制器回報 · 5 分鐘前", true],
-      ["ac", "書房冷氣 —", null, null, null, false],
     ]);
     expect(zh.label.startsWith("家中狀態：26.5°，濕度 62%，客廳，書房 CO₂ 812 ppm · 3 小時前")).toBe(true);
     const en = homeCornerModel({ view: ok(), coreDown: false, locale: "en" });
     expect(en.climateOther).toEqual(["書房 CO₂ 812 ppm · 3 h ago"]);
-    expect(en.lines.map((l) => [l.text, l.extra])).toEqual([["Lights 2/6 on", "3 unknown"], ["Plugs & switches 1/1 on", null], ["主臥冷氣 On · 26° Cool", null], ["書房冷氣 —", null]]);
-    expect(en.lines[2].qualifier).toBe("Controller report · 5 min ago");
+    expect(en.lines.map((l) => [l.text, l.extra])).toEqual([["Lights 2/6 on", "3 unknown"], ["Plugs & switches 1/1 on", null]]);
     expect(en.label).toMatch(/^Home status: 26\.5°, Humidity 62%/);
   });
 
@@ -411,7 +327,7 @@ describe("corner content (zh / en)", () => {
   });
 
   it("no reported switch at all → 「—」, not 0", () => {
-    const view = ok({ switches: [{ group: "light", total: 8, on: 0, unknown: 8, on_names: [], oldest_age_s: null }], ac: [], climate: [] });
+    const view = ok({ switches: [{ group: "light", total: 8, on: 0, unknown: 8, on_names: [], oldest_age_s: null }], climate: [] });
     expect(homeCornerModel({ view, coreDown: false, locale: "zh-TW" }).lines.map((l) => l.text)).toEqual(["燈 —／8"]);
     expect(homeCornerModel({ view, coreDown: false, locale: "en" }).lines.map((l) => l.text)).toEqual(["Lights —/8"]);
   });
@@ -426,7 +342,7 @@ describe("corner content (zh / en)", () => {
     [{ configured: true, state: "unreachable", error: "timeout", server_now: NOW_MS } as HomeOverviewView, false, "讀不到中控", "中控沒有回應（逾時）", "Can't reach the home controller", "The controller did not respond (timeout)"],
     [{ configured: true, state: "unreachable", error: "auth", server_now: NOW_MS } as HomeOverviewView, false, "讀不到中控", "中控拒絕了權杖", "Can't reach the home controller", "The controller rejected the token"],
     [null, true, "讀不到中控", "核心沒有回應", "Can't reach the home controller", "The core is not responding"],
-    [ok({ climate: [], switches: [], ac: [] }), false, "中控沒有可顯示的設備", null, "No devices to show from the controller", null],
+    [ok({ climate: [], switches: [] }), false, "中控沒有可顯示的設備", null, "No devices to show from the controller", null],
   ])("note %#: one muted line, no numbers", (view, coreDown, zhNote, zhDetail, enNote, enDetail) => {
     const zh = homeCornerModel({ view, coreDown, locale: "zh-TW" });
     expect(zh).toMatchObject({ kind: "note", note: zhNote, noteDetail: zhDetail, temp: null, lines: [] });
@@ -632,7 +548,7 @@ describe("HOME-1 CSS", () => {
   const smallStart = css.indexOf("@media (max-width: 900px), (max-height: 600px) {\n  .home-corner");
   const small = css.slice(smallStart, css.indexOf("\n}\n", smallStart));
 
-  it("small screens drop rooms, device names and other sensors, never a reading's age, the AC qualifier or 「更新中…」", () => {
+  it("small screens drop rooms, device names and other sensors, never a reading's age, the qualifier or 「更新中…」", () => {
     expect(smallStart).toBeGreaterThan(-1);
     const hiddenSmall = rules(small).filter((r) => /display:\s*none/.test(r.body)).flatMap((r) => r.selectors);
     expect(hiddenSmall).toEqual(expect.arrayContaining([".home-climate-room", ".home-climate-other", ".home-line-detail"]));
@@ -756,13 +672,8 @@ describe("HomeCorner on the page", () => {
     expect(style.has("--home-reserve")).toBe(false);
   });
 
-  it("stale data keeps its age and the AC's 「控制器回報」 in their own elements (not the ones small screens drop)", async () => {
-    const stale = overviewFromSnapshot(
-      snapshot({ ...HOME, devices: HOME.devices.filter((d) => d.id !== "th-live") }),
-      new Map([["aifa:hub1:c1", report(true, NOW_MS - 40 * 60_000)]]),
-      NOW_MS,
-      0,
-    );
+  it("stale data keeps its age and the oldest-reading qualifier in their own elements (not the ones small screens drop)", async () => {
+    const stale = overviewFromSnapshot(snapshot({ ...HOME, devices: HOME.devices.filter((d) => d.id !== "th-live") }), NOW_MS, 0);
     const { corner, body } = await setup(async () => stale);
     corner.setEnabled(true);
     await new Promise((r) => setTimeout(r, 0));
@@ -770,7 +681,7 @@ describe("HomeCorner on the page", () => {
     expect(byClass(root, "home-temp")[0].textContent).toBe("30.1°");
     expect(byClass(root, "home-climate-room")[0].textContent).toBe("書房");
     expect(byClass(root, "home-climate-meta")[0]).toMatchObject({ hidden: false, textContent: "CO₂ 812 ppm · 3 小時前" });
-    expect(byClass(root, "home-line-qualifier").map((e) => e.textContent)).toEqual(["最舊的讀值 10 分鐘前", "控制器回報 · 40 分鐘前"]);
+    expect(byClass(root, "home-line-qualifier").map((e) => e.textContent)).toEqual(["最舊的讀值 10 分鐘前"]);
     expect(byClass(root, "home-line-detail").map((e) => e.textContent)).toEqual(["客廳主燈、餐桌燈", "延長線"]);
   });
 

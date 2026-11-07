@@ -3,7 +3,7 @@ import { HomeFeed } from "./home-feed.ts";
 import { homeIconSvg } from "./home-icons.ts";
 import type { Locale } from "./i18n.ts";
 
-// HOME-1（George 2026-11-07）：畫面左上角的家中狀態（室內溫濕度、開著的燈與插座、冷氣）。
+// HOME-1（George 2026-11-07）：畫面左上角的家中狀態（室內溫濕度、開著的燈與插座；冷氣 2026-11-07 起不顯示）。
 // 和右上角時鐘（src/clock-corner.ts）一樣是環境狀態角落，不是 Surface：沒有按鈕、不能點、不能控制、不搶焦點；
 // data-visibility-reason="user_setting:home_corner"＝使用者在設定打開了這個角落（Mac 視窗／Pi 終端機各自一個開關）。
 // - 資料與排程在 HomeFeed（src/home-feed.ts，不碰 DOM）；這裡只負責畫與事件。
