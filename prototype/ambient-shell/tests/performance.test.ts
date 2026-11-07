@@ -7,12 +7,16 @@ import {
   applyProfile,
   defaultProfile,
   frameStatsText,
+  GPU_DRAWING_KEY,
+  loadGpuDrawing,
   loadProfile,
   memoriesRenderBudget,
   NO_BLUR_CLASS,
   PERFORMANCE_KEY,
   PERFORMANCE_PROFILES,
   RENDER_BUDGETS,
+  rendererText,
+  saveGpuDrawing,
   saveProfile,
 } from "../src/performance.ts";
 
@@ -91,6 +95,45 @@ describe("per-device default and storage", () => {
   });
 });
 
+describe("GPU drawing (WebGL) switch", () => {
+  it("is off by default on every device and round-trips per device, separately from the profile", () => {
+    expect(loadGpuDrawing(memoryStorage())).toBe(false);
+    const storage = memoryStorage({ [PERFORMANCE_KEY]: "light" });
+    expect(saveGpuDrawing(true, storage)).toBe(true);
+    expect(storage.data.get(GPU_DRAWING_KEY)).toBe("on");
+    expect(loadGpuDrawing(storage)).toBe(true);
+    expect(loadProfile({ search: "", desktop: false }, storage)).toBe("light");
+    saveGpuDrawing(false, storage);
+    expect(storage.data.get(GPU_DRAWING_KEY)).toBe("off");
+    expect(loadGpuDrawing(storage)).toBe(false);
+    expect(storage.data.get(PERFORMANCE_KEY)).toBe("light");
+  });
+
+  it("an existing v1 record (profile only) needs no migration: the switch reads as off and the profile is kept", () => {
+    const storage = memoryStorage({ [PERFORMANCE_KEY]: "balanced" });
+    expect(loadGpuDrawing(storage)).toBe(false);
+    expect(loadProfile({ search: "", desktop: false }, storage)).toBe("balanced");
+    expect(GPU_DRAWING_KEY).not.toBe(PERFORMANCE_KEY);
+  });
+
+  it("invalid values and broken storage read as off", () => {
+    for (const value of ["true", "ON", "1", "", "{}"]) expect(loadGpuDrawing(memoryStorage({ [GPU_DRAWING_KEY]: value }))).toBe(false);
+    const broken = { getItem: () => { throw new Error("SecurityError"); }, setItem: () => { throw new Error("QuotaExceededError"); } };
+    expect(loadGpuDrawing(broken)).toBe(false);
+    expect(saveGpuDrawing(true, broken)).toBe(false);
+    expect(loadGpuDrawing(null)).toBe(false);
+    expect(saveGpuDrawing(true, null)).toBe(false);
+  });
+
+  it("the renderer readout names what is really drawing", () => {
+    expect(rendererText(null)).toBe("目前：一般繪製（Canvas）");
+    expect(rendererText({ active: "canvas", fallback: null })).toBe("目前：一般繪製（Canvas）");
+    expect(rendererText({ active: "webgl", fallback: null })).toBe("目前：WebGL");
+    expect(rendererText({ active: "canvas", fallback: "unavailable" })).toBe("此裝置沒有硬體 WebGL，已改用一般繪製");
+    expect(rendererText({ active: "canvas", fallback: "context-lost" })).toBe("WebGL 中斷，這次開啟期間改用一般繪製");
+  });
+});
+
 describe("applying a profile", () => {
   it("hands the budget to the brain and toggles the no-blur root class", () => {
     const toggles: [string, boolean | undefined][] = [];
@@ -126,7 +169,7 @@ describe("the performance setting does not reach conversation modules", () => {
   }
   const forbidden = /(audio|realtime|speech|speaker|wake|voice|processing-sound|processing-cue|early-speech|live-|terminal-heartbeat|\/api\.ts$|\/main\.ts$)/;
 
-  it.each(["src/performance.ts", "src/brain.ts"])("%s", (entry) => {
+  it.each(["src/performance.ts", "src/brain.ts", "src/brain-webgl.ts"])("%s", (entry) => {
     const files = [...runtimeImports(resolve(root, entry))].map((f) => f.slice(root.length + 1));
     expect(files).toContain(entry);
     if (entry === "src/brain.ts") expect(files).toEqual(expect.arrayContaining(["src/performance.ts", "src/region-activity.ts", "shared/domain.ts"]));

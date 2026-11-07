@@ -27,7 +27,7 @@ import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts"
 import { greetingFor, idleSession, newInteractionId, openRealtime, wakeTriggerAction, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
 import { CALL_END_TEXT, type CallAnswer, type LiveCoreEvent, type LiveMemoryReason, type RealtimeServerEvent, type RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
-import { applyProfile, loadProfile, memoriesRenderBudget, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
+import { applyProfile, loadGpuDrawing, loadProfile, memoriesRenderBudget, saveGpuDrawing, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
 import { MEMORIES_OFF, memoryCaption, stepMemories, wakeMemories, type MemoriesItem, type MemoriesState } from "../shared/memories.ts";
 import { MEMORIES_TIMING, MemoriesPresenter } from "./memories.ts";
 import { ClockCorner } from "./clock-corner.ts";
@@ -226,6 +226,12 @@ const performanceTargets = { setRenderBudget: (budget: RenderBudget) => brain.se
 let memoriesDimTimer: ReturnType<typeof setTimeout> | null = null;
 let performanceProfile: PerformanceProfile = loadProfile({ search: location.search, desktop: !!window.nousDesktop });
 applyProfile(performanceProfile, performanceTargets);
+// 「使用 GPU 繪製（WebGL）」（方案 B，docs/validation/brain-webgl-2026-11-07.md）：每台裝置預設關閉；沒有硬體 WebGL 或中斷時自動改回 Canvas。
+let gpuDrawing = loadGpuDrawing();
+brain.setRendererPreference(gpuDrawing);
+brain.onRendererChange = (status) => {
+  if (shell.surface?.kind === "settings") refreshPerformanceReadout(surfaceRoot, brain.frameStats(), status);
+};
 brain.start();
 
 /**
@@ -2852,6 +2858,12 @@ const actions: ViewActions = {
     saveProfile(profile);
     render();
   },
+  setGpuDrawing(on) {
+    gpuDrawing = on;
+    saveGpuDrawing(on);
+    brain.setRendererPreference(on);
+    render();
+  },
   updateAudio(patch) {
     const requestId = userRequest();
     void updateAudioPrefs(patch).then((error) => {
@@ -3478,7 +3490,7 @@ function renderSurface(): void {
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
-      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${gpuDrawing}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
@@ -3507,7 +3519,7 @@ function renderSurface(): void {
     ensureIntegrationStatus();
     // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
     ensureVoiceRelay();
-    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats() } });
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats(), gpu: gpuDrawing, renderer: brain.rendererStatus() } });
   }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));
@@ -3590,7 +3602,7 @@ function renderVaultPrompt(): void {
 setInterval(() => {
   refreshTimers(surfaceRoot);
   refreshCountdowns(surfaceRoot);
-  if (shell.surface?.kind === "settings") refreshPerformanceReadout(surfaceRoot, brain.frameStats());
+  if (shell.surface?.kind === "settings") refreshPerformanceReadout(surfaceRoot, brain.frameStats(), brain.rendererStatus());
 }, 1000);
 
 // ───────────── 輸入 ─────────────

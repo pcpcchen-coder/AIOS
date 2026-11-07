@@ -35,6 +35,11 @@ export function memoriesRenderBudget(budget: RenderBudget): RenderBudget {
 }
 
 export const PERFORMANCE_KEY = "nous.performance.v1";
+/**
+ * 「使用 GPU 繪製（WebGL）」另存一個鍵（和完整／平衡／省電互不影響），所以舊的 nous.performance.v1 不必遷移：
+ * 沒有這個鍵、或值不是 "on"／"off" 時一律視為關閉。每台裝置預設關閉。
+ */
+export const GPU_DRAWING_KEY = "nous.performance.gpu.v1";
 export const NO_BLUR_CLASS = "perf-no-blur";
 
 /** 設定頁的文字（原文；畫面上經 t() 翻譯，英文在 src/messages.en.json）。 */
@@ -49,6 +54,14 @@ export const PERFORMANCE_TEXT = {
     full: "最多每秒 30 格、最高 2 倍解析度、完整光暈與背景模糊",
     balanced: "最多每秒 20 格、1 倍解析度、較少光脈衝、聆聽光環不模糊、關閉背景模糊",
     light: "最多每秒 12 格、0.75 倍解析度、較少光脈衝、簡化光暈、關閉背景模糊",
+  },
+  gpu: "使用 GPU 繪製（WebGL）",
+  gpuNote: "預設關閉。和上面的設定可以一起用；這台裝置沒有硬體 WebGL 或 WebGL 中斷時，自動改回一般繪製。",
+  renderer: {
+    webgl: "目前：WebGL",
+    canvas: "目前：一般繪製（Canvas）",
+    unavailable: "此裝置沒有硬體 WebGL，已改用一般繪製",
+    contextLost: "WebGL 中斷，這次開啟期間改用一般繪製",
   },
 } as const;
 
@@ -91,6 +104,38 @@ export function saveProfile(profile: PerformanceProfile, storage: ProfileStorage
   } catch {
     return false;
   }
+}
+
+export function loadGpuDrawing(storage: ProfileStorage | null = pageStorage()): boolean {
+  try {
+    return storage?.getItem(GPU_DRAWING_KEY) === "on";
+  } catch {
+    return false;
+  }
+}
+
+export function saveGpuDrawing(on: boolean, storage: ProfileStorage | null = pageStorage()): boolean {
+  try {
+    storage?.setItem(GPU_DRAWING_KEY, on ? "on" : "off");
+    return !!storage;
+  } catch {
+    return false;
+  }
+}
+
+/** 繪製方式的實際狀態（Brain.rendererStatus 的子集；放在這裡讓設定頁不必 import brain.ts）。 */
+export interface RendererReadout {
+  active: "canvas" | "webgl";
+  fallback: "unavailable" | "context-lost" | null;
+}
+
+/** 設定頁的「目前」狀態列：照實說真的在用哪一種；開了開關卻沒用上 WebGL 時說原因。 */
+export function rendererText(status: RendererReadout | null): string {
+  if (!status) return PERFORMANCE_TEXT.renderer.canvas;
+  if (status.active === "webgl") return PERFORMANCE_TEXT.renderer.webgl;
+  if (status.fallback === "unavailable") return PERFORMANCE_TEXT.renderer.unavailable;
+  if (status.fallback === "context-lost") return PERFORMANCE_TEXT.renderer.contextLost;
+  return PERFORMANCE_TEXT.renderer.canvas;
 }
 
 export interface PerformanceTargets {
