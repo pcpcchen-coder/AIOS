@@ -186,6 +186,7 @@ bash uninstall.sh --purge
   - The forced mute on memory revocation applies only to the Mac main window.
   - Recommendation: while using the Pi, put the Mac in [service mode](#service-mode) so the Mac does not listen, wake or start voice.
 - The Pi runs no Agent and stores no task data. If the Mac sleeps or the App quits, the Pi screen has no core to reach. The kiosk waits for the core only before it opens Chromium; once Chromium is open it does not exit by itself, so recovery relies on the page's own reconnection, or run `systemctl --user restart aios-kiosk.service`.
+- **Bluetooth is not supported yet.** The eMeet M0 Plus is connected by USB cable today; the plan for Bluetooth (call-mode audio quality, pairing, diagnostics and a field checklist) is in the [RPI-BT plan](../../docs/experiments/RPI4_BLUETOOTH_EMEET_PLAN.en.md) and is not implemented.
 - The `aios-doctor` speakers check only looks for playback devices. A Pi with HDMI connected always has an HDMI audio device, so PASS does not mean a USB speaker is connected or selected as output; read the device names in the output.
 
 <a id="rpi-2-draft"></a>

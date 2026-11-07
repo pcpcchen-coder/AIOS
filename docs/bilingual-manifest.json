@@ -246,6 +246,13 @@
       "translationSha256": "65499f301e5e843028b086bb32ae67118394213953a5fd0ce98534a76093c190"
     },
     {
+      "source": "docs/experiments/RPI4_BLUETOOTH_EMEET_PLAN.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/experiments/RPI4_BLUETOOTH_EMEET_PLAN.en.md",
+      "sourceSha256": "498185d537cb4297a90ea4154245039a930a31c7d92da9f46612da623aaf57c9",
+      "translationSha256": "0c047dc58bb9b2fec61d65c7742314342eee6df1f9c51d3b8364c32da21365a4"
+    },
+    {
       "source": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.md",
       "sourceLanguage": "en",
       "translation": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.zh-TW.md",
@@ -837,8 +844,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "26aee9157adb3e2a0d60294e5957c2e52501af6a07e03009c42051457fa640d9",
-      "translationSha256": "eee6326ea01c851b94efd6be88f25fda7aa151a4fb46e8c5419432f17185aab5"
+      "sourceSha256": "d44864a698bdf6c7fffbd32b9c17ea81d521e8fa768b2579d71939b66012e614",
+      "translationSha256": "bdbb368e5c611c3434bdde0a91a803c17418fd06cd7953e5484fa28a9384385d"
     }
   ]
 }
