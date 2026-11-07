@@ -27,7 +27,7 @@ import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts"
 import { greetingFor, idleSession, newInteractionId, openRealtime, wakeTriggerAction, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
 import { CALL_END_TEXT, type CallAnswer, type LiveCoreEvent, type LiveMemoryReason, type RealtimeServerEvent, type RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
-import { applyProfile, loadProfile, RENDER_BUDGETS, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
+import { applyProfile, loadProfile, memoriesRenderBudget, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
 import { MEMORIES_OFF, memoryCaption, stepMemories, wakeMemories, type MemoriesItem, type MemoriesState } from "../shared/memories.ts";
 import { MEMORIES_TIMING, MemoriesPresenter } from "./memories.ts";
 import { ClockCorner } from "./clock-corner.ts";
@@ -219,9 +219,11 @@ let pendingProviderSelection: { epoch: number; account: string } | null = null;
 
 const brain = new Brain(canvas);
 // 這台裝置的畫面效能（George 2026-11-05）：只改電子腦的繪製與背景模糊，存在這個頁面；Pi 終端機預設「平衡」。
-// MEMO-1：播放回憶時電子腦降到「省電」的繪製，把 Pi 4 的 GPU／CPU 留給照片與影片解碼；收起後回到原本的設定。
+// MEMO-1：播放回憶時電子腦降到「省電」的每秒格數與光暈，把 Pi 4 的 GPU／CPU 留給照片與影片解碼；收起後回到原本的設定。
+// 2026-11-07：解析度維持這台裝置原本的設定（memoriesRenderBudget）。退到角落的那 1.2 秒仍用原本的每秒格數，移動才順，到位後才降。
 let memoriesDimmed = false;
-const performanceTargets = { setRenderBudget: (budget: RenderBudget) => brain.setRenderBudget(memoriesDimmed ? RENDER_BUDGETS.light : budget), root: document.documentElement };
+const performanceTargets = { setRenderBudget: (budget: RenderBudget) => brain.setRenderBudget(memoriesDimmed ? memoriesRenderBudget(budget) : budget), root: document.documentElement };
+let memoriesDimTimer: ReturnType<typeof setTimeout> | null = null;
 let performanceProfile: PerformanceProfile = loadProfile({ search: location.search, desktop: !!window.nousDesktop });
 applyProfile(performanceProfile, performanceTargets);
 brain.start();
@@ -241,8 +243,8 @@ const memoriesPresenter = new MemoriesPresenter({
   root: memoriesRoot,
   reducedMotion: () => reducedMotion?.matches ?? false,
   origin: () => {
-    const rect = canvas.getBoundingClientRect();
-    return { x: rect.left + rect.width / 2 - window.innerWidth / 2, y: rect.top + rect.height * 0.47 - window.innerHeight / 2 };
+    const corner = brain.memoriesCorner();
+    return { x: corner.x - window.innerWidth / 2, y: corner.y - window.innerHeight / 2 };
   },
   caption: (item) => memoryCaption(item, new Date(), getLocale()),
   onWake: () => wakeMemoriesNow(),
@@ -3140,9 +3142,22 @@ function syncMemories(): void {
   document.body.dataset.memories = phase;
   if (phase === "showing" && prefs) memoriesPresenter.show(memoriesItems, prefs);
   else memoriesPresenter.hide();
-  if ((phase === "showing") !== memoriesDimmed) {
-    memoriesDimmed = phase === "showing";
-    applyProfile(performanceProfile, performanceTargets);
+  const showing = phase === "showing";
+  brain.setMemoriesCorner(showing);
+  if (!showing) {
+    if (memoriesDimTimer !== null) clearTimeout(memoriesDimTimer);
+    memoriesDimTimer = null;
+    if (memoriesDimmed) {
+      memoriesDimmed = false;
+      applyProfile(performanceProfile, performanceTargets);
+    }
+  } else if (!memoriesDimmed && memoriesDimTimer === null) {
+    memoriesDimTimer = setTimeout(() => {
+      memoriesDimTimer = null;
+      if (memoriesState.phase !== "showing") return;
+      memoriesDimmed = true;
+      applyProfile(performanceProfile, performanceTargets);
+    }, MEMORIES_TIMING.brainMs);
   }
   if (!enabled) {
     if (memoriesTicker !== null) clearInterval(memoriesTicker);

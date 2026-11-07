@@ -10,7 +10,7 @@ export const MEMORIES_TIMING = {
   fetchRetryMs: 60_000,
   /** 照片解碼或影片載入超過這麼久就跳過（SSH 通道卡住、Pi 不支援的編碼只會停住不報錯）。 */
   loadTimeoutMs: 20_000,
-  /** 電子腦縮到角落的時間（CSS 1.2 s）；第一張等它到位才浮現，起點才準。 */
+  /** 電子腦退到角落的時間（brain.ts 緩動約 0.55 s 到 95%，不透明度 CSS 1.2 s）；第一張等它到位才浮現，起點才準。 */
   brainMs: 1200,
   collapseMs: 250,
   /** 減少動態效果時只有淡入淡出。 */

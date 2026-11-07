@@ -25,6 +25,15 @@ export const RENDER_BUDGETS: Readonly<Record<PerformanceProfile, RenderBudget>> 
   light: { maxFps: 12, pixelRatioCap: 0.75, maxPulses: 20, glow: "reduced", backdropBlur: false, ringBlur: false },
 };
 
+/**
+ * 回憶模式播放時電子腦的繪製（MEMO-1；2026-11-07 調整）：每秒格數、光脈衝與光暈用「省電」，
+ * 解析度維持這台裝置原本的設定——角落的電子腦直接以小尺寸繪製（brain.ts memoriesCornerGeometry），
+ * 解析度降到 0.75 倍時會被放大回 1 倍而變糊；解析度不變也不必重配 Canvas。
+ */
+export function memoriesRenderBudget(budget: RenderBudget): RenderBudget {
+  return { ...RENDER_BUDGETS.light, pixelRatioCap: budget.pixelRatioCap };
+}
+
 export const PERFORMANCE_KEY = "nous.performance.v1";
 export const NO_BLUR_CLASS = "perf-no-blur";
 

@@ -186,6 +186,22 @@ export function brainGeometry(
   return { cx, cy: zoomCenter(height, cy, home, max, r, fit), r };
 }
 
+/**
+ * 回憶模式的左下角（George 2026-11-07：原本整張 Canvas 用 CSS 縮成 0.32 倍、0.45 不透明度，線條變得又細又糊、幾乎看不見）。
+ * 改成直接以角落的大小繪製：線條維持原本的 0.7–1.4 px，不經縮放取樣。
+ * - 半徑 = 不放大時的待機半徑 × scale（1920×1080：216 × 0.5 = 108 px；1280×720：72 px；800×480：48 px）。
+ * - 中心讓腦形左緣（HIT_EXTENT.x = 1.25 R）與下緣（HIT_EXTENT.down = 0.85 R）離視窗邊緣 margin（max(16 px, 1.6vw)）。
+ *   腦形右緣約在 margin + 2.5 R（1920×1080 約 301 px；1280×720 約 200 px），在 3:2 橫式照片左緣（約 324／216 px）之外；
+ *   照片最大 86vw × 78vh，更寬的照片（16:9）或 800×480 小螢幕上，照片左下角可能蓋到腦形右緣一小塊（照片在上層）。
+ */
+export const MEMORIES_CORNER = { scale: 0.5, marginPx: 16, marginVw: 0.016 } as const;
+
+export function memoriesCornerGeometry(width: number, height: number): { cx: number; cy: number; r: number } {
+  const r = brainGeometry(width, height, "center", 1, 1).r * MEMORIES_CORNER.scale;
+  const margin = Math.max(MEMORIES_CORNER.marginPx, width * MEMORIES_CORNER.marginVw);
+  return { cx: margin + r * HIT_EXTENT.x, cy: height - margin - r * HIT_EXTENT.down, r };
+}
+
 export class Brain {
   private ctx: CanvasRenderingContext2D;
   private nodes: Node3[] = [];
@@ -234,6 +250,8 @@ export class Brain {
   /** 已發布到 CSS 的 --brain-cy（待機中心的高度；放大往中間移時跟著緩動）。 */
   private ambientCy = 0;
   private shownProgress = 0;
+  /** 回憶模式播放中：電子腦退到左下角（memoriesCornerGeometry）。 */
+  private corner = false;
   /** 處理中提示音的波紋（0–1 的進度；每次真的排了提示音才有，減少動態時不畫）。 */
   private cueRings: number[] = [];
 
@@ -375,8 +393,23 @@ export class Brain {
     return ((x - this.cx) / rx) ** 2 + (dy / ry) ** 2 < 1;
   }
 
-  private target(layout = this.state.layout): { cx: number; cy: number; r: number } {
-    return brainGeometry(this.width, this.height, layout, this.zoom, this.distanceScale, this.state.progress !== null);
+  /**
+   * 回憶模式播放中退到左下角（true）或回到原位（false）。和其他大小變化一樣在 step() 裡緩動（約 0.55 秒到 95%），
+   * 減少動態效果時直接跳到。CSS 的 --brain-r／--brain-cy 仍是待機的值（字幕與按鈕的位置不跟著跑）。
+   */
+  setMemoriesCorner(on: boolean): void {
+    this.corner = on;
+  }
+
+  /** 角落的中心（CSS 像素）：照片從這裡浮現、退回這裡。 */
+  memoriesCorner(): { x: number; y: number } {
+    const c = memoriesCornerGeometry(this.width, this.height);
+    return { x: c.cx, y: c.cy };
+  }
+
+  private target(layout?: BrainVisualState["layout"]): { cx: number; cy: number; r: number } {
+    if (layout === undefined && this.corner) return memoriesCornerGeometry(this.width, this.height);
+    return brainGeometry(this.width, this.height, layout ?? this.state.layout, this.zoom, this.distanceScale, this.state.progress !== null);
   }
 
   /**
@@ -401,6 +434,12 @@ export class Brain {
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const ambient = this.target("center");
     this.publishAmbient(ambient.r, ambient.cy);
+    // 回憶模式角落的位置給 CSS 的光暈（body::before）用；只隨視窗大小改變。
+    const corner = memoriesCornerGeometry(this.width, this.height);
+    const css = document.documentElement.style;
+    css.setProperty("--brain-corner-x", `${corner.cx}px`);
+    css.setProperty("--brain-corner-y", `${corner.cy}px`);
+    css.setProperty("--brain-corner-r", `${corner.r}px`);
   }
 
   private buildBrain(): void {

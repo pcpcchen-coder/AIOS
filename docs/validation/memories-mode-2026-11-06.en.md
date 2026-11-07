@@ -69,21 +69,21 @@ Conclusion: the official path cannot do "a chosen album, kept in sync". George c
 
 | Stage | Time | Screen |
 |---|---|---|
-| Brain moves to the lower left | 1.2 s | The brain shrinks, moves to the lower-left corner and dims; the first photo waits until it arrives |
+| Brain moves to the lower left | 1.2 s | The brain moves, at half size, into the free lower-left corner outside the photo (changed 2026-11-07, see addendum); the first photo waits until it arrives |
 | Emerge | 1.4 s | The photo grows from the brain's position to the center (starting at scale 0.06, blur clearing) |
 | Hold | `dwell_s` (default 8 s) | Very slow zoom 1 → 1.03; the text fades in 0.6 s after the emerge ends |
 | Recede | 1.0 s | The text fades out first, then the photo shrinks back into the brain |
 | Collapse (wake) | 0.25 s | Fades out immediately, video stops and its source is removed; the brain returns to its place and its real state |
 
 - Photos are at most 86vw × 78vh, with rounded corners, a soft shadow and a faint cyan glow. Videos move on when they end or after 30 s, whichever comes first.
-- `prefers-reduced-motion: reduce`: no scaling, movement or blur. The brain dims in place, photos only crossfade (0.4 s), and the text shows directly.
+- `prefers-reduced-motion: reduce`: no scaling, movement or blur. The brain appears in the lower-left corner without sliding (since 2026-11-07; before, it dimmed in place), photos only crossfade (0.4 s), and the text shows directly.
 - Photos light no brain region and create no pulses: a photo is not vision processing, and brain animation stays driven only by real task and conversation events.
 - While showing, `#memories` carries `data-visibility-reason="memories_idle"` (switched on and idle for the set time); without that reason it is not shown.
 
 ### Pi 4 performance
 
 - At most one `<video>` at any time (the Pi 4 has headroom for one hardware decoder) and at most two photos (the current one and the next, pre-decoded with `img.decode()`).
-- While showing, the brain uses the "light" render budget (12 fps, 0.75× resolution) and returns to the device's own performance setting on collapse.
+- While showing, the brain uses the "light" frame rate and glow (12 fps, fewer pulses, simplified glow) but keeps the device's own resolution (since 2026-11-07, see addendum), and returns to the device's own performance setting on collapse.
 - Local folder files are sent as they are, not resized. Exporting from Mac Photos as "Large" (about 2048 px on the long side) keeps Pi decoding lighter. iPhone HEVC `.mov` files may not play in Chromium on the Pi (inferred, not verified on a Pi); export H.264.
 - The Pi page fetches photos from the Mac core over the SSH tunnel (same-origin `localhost`) and never connects to Google directly.
 
@@ -142,3 +142,32 @@ This is not a Mac or Pi hardware check. Animation smoothness, Pi decoding load a
 ## Addendum: open memories folder (2026-11-06)
 
 The menu bar "Memories" section gains "Open memories folder" below the folder status. The App main process gets the folder path from the core (`NousHandle.memoriesDir`, never sent to any page), creates it with 0700 when missing, and opens it in Finder; when it cannot, it shows "Could not open the memories folder" with the system's reason. The Pi page has no such item (the Pi cannot open Finder on the Mac). Tests: 1 new test in `tests/memories-menu.test.ts` (shown only when the App gives a handler, clicking calls it, English translation), failing before the change and passing after; overall 153 files, 2844 passed, 5 skipped. Opening Finder on a real Mac is not verified.
+
+## Addendum: a clearly visible corner brain (2026-11-07)
+
+George reported on 2026-11-07 that in memories mode the brain is very hard to see once it shrinks to the lower left. Cause (compared on screenshots with the same mock fixture):
+
+- The whole full-screen canvas was CSS-scaled to 0.32 at 0.45 opacity, with its origin at 6% 94%. The brain's centre landed at about (385, 852) on 1920×1080, right under a 3:2 photo (left edge about 324 px, z-index 5), so the photo hid most of it.
+- Lines are drawn at 0.7–1.4 px; at 0.32× they are under half a pixel, and with the resolution also lowered to 0.75× during playback and then resampled, they came out thin and blurry.
+
+Change:
+
+| Item | Before | Now | Why |
+|---|---|---|---|
+| How it shrinks | CSS `transform: scale(0.32)` on the whole canvas | The brain is drawn at corner size (`src/brain.ts` `memoriesCornerGeometry`); the canvas is not scaled | Lines keep their thickness and are not resampled |
+| Size | 0.32× | 0.5× the standby radius (1920×1080: 108 px; 1280×720: 72 px; 800×480: 48 px) | Easy to see, still far smaller than the photo |
+| Position | Centre about (385, 852), under the photo | The brain body's left and bottom edges sit max(16 px, 1.6vw) from the viewport edges; on 1920×1080 the centre is about (166, 957) and the right edge about 301 px | Outside the left edge of a 3:2 landscape photo (about 328 px on 1920×1080, 219 px on 1280×720), and clear of the status line (top left), the clock (top right) and bottom hints |
+| Opacity | 0.45 | 0.92 | Visible, yet still dimmer than the photo so it does not compete |
+| Backing | None | A radial-gradient halo behind the brain (`body::before`, dark blue to transparent, fades in once the brain arrives) | Cheap: one static gradient, no `filter`, `backdrop-filter` or `shadowBlur` |
+| Resolution | Lowered to 0.75× | Kept at the device's own setting (Pi default 1×; `memoriesRenderBudget`) | Drawn small directly, 0.75× would be upscaled back to 1× and blur; keeping it also avoids reallocating the canvas |
+| Frame rate | Dropped to 12 on entry | The original rate during the 1.2 s move to the corner, then 12 (pulses and glow as in "light") | Smooth move; while showing, the Pi 4 still leaves GPU/CPU to photo and video decoding |
+| Wake | CSS 1.2 s back to place | Eased in `step()` like other size changes (about 0.55 s to 95%), opacity 0.7 s | Back to normal size and state right away |
+
+- Breathing, swing, region lighting and pulses are unchanged and still driven only by real task and conversation events; photos light no region. No text label was added.
+- Photos now emerge from and recede to `brain.memoriesCorner()` (the corner centre) instead of a point derived from the scaled canvas box.
+- Very wide photos (16:9) or an 800×480 screen can cover a small part of the brain's right edge with the photo's lower-left corner (the photo is on top); the photo size limits are unchanged.
+- Reduced motion: the brain jumps to the corner without sliding; only opacity and the halo fade (0.4 s).
+
+Tests: 4 new tests (5 cases) in `tests/brain-distance.test.ts` (corner size and position; on 1920×1080 and 1280×720 every particle is on screen and left of a 3:2 photo; drawn at corner size with the standby CSS radius unchanged and back in place on wake; easing without reduced motion) and 1 in `tests/performance.test.ts` (the playback budget keeps the device's resolution). `npm run typecheck` passes; `npx vitest run` 158 files, 2888 passed, 5 skipped; `npm run build` passes.
+
+Cloud screenshots (headless Chromium, mock engine, synthetic fixture folder with one bright and one dark 3:2 JPEG printed with `MOCK FIXTURE`; `?terminal=pi`, default "balanced"): before and after at 1920×1080, 1280×720 and 800×480, plus 0.25 s and 1.5 s after a wake, and reduced motion. Before, the brain is almost invisible; after, it is clearly visible in the lower left, not covered by the photo, and returns to the centre on wake. This is not verified on a Pi: frame rate and temperature on a Pi 4 during playback were not measured.
