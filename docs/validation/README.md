@@ -10,6 +10,7 @@
 
 | 紀錄 | 證據範圍與限制 |
 |---|---|
+| [通話自動結束後恢復回憶模式](memories-idle-after-call-2026-11-07.md) | 2026-11-07：空白輸入列不再阻擋正常閒置／時限結束後的回憶倒數；實際建置 callback 的六組隔離瀏覽器回歸；指定 Pi 以合成結束事件、真實時鐘觀察到播放與媒體就緒，未讀取私人內容，並非新一通真實語音驗收；保留 Pi 1.5 倍基準 |
 | [左上角家中狀態 HOME-1 與日期放大](home-corner-2026-11-07.md) | 2026-11-07：Pi 畫面左上角顯示室內溫濕度、燈與插座開了幾個（只用中控回報的 `state.power`，沒回報顯示「—」）與 AIFA 冷氣的控制器回報（環境狀態角落，不能點、不能控制，不是 Surface）；唯讀的 `GET /api/home/overview`（HomeBridge 快照，30 秒快取，同時一個請求），未設定、讀不到照實說；設定「Mac 視窗」預設關、「Pi 終端機」預設開（同時鐘）；右上角日期放大到 `clamp(1.15rem, 2.4vh, 1.9rem)`，每個高度都小於時間；假中控 fixture 測試與無頭 Chromium 的 mock 畫面檢查；**真實中控的開關欄位、Pi 與 Mac 實機未驗證** |
 | [右上角時鐘與天氣 CLK-1](pi-clock-weather-2026-11-07.md) | 2026-11-07：Pi 畫面右上角顯示時間、日期、星期、氣溫與天氣（環境狀態角落，不能點，不是 Surface）；時間用核心給的時區，Pi 時鐘差超過 60 秒時改用核心時間；天氣經唯讀的 `GET /api/weather/now`（Open-Meteo，和招呼共用快取），查不到照實說；手繪 SVG 天氣圖示（含夜晚版）；設定「Mac 視窗」預設關、「Pi 終端機」預設開；回憶模式時留在照片上方加深色底；fixture 測試與無頭 Chromium 的 mock 畫面檢查；**Pi 與 Mac 實機、真實天氣未驗證** |
 | [回憶模式 MEMO-2：Google 相簿來源](memories-google-2026-11-06.md) | 2026-11-06：經 gog 的 Photos Picker（token 留在 gog 的鑰匙圈）建立挑選連結；Mac 選單列用瀏覽器打開、設定頁（Mac 與 Pi）顯示 QR code；挑選完成後下載到 Mac 快取（2 GB 上限、先刪最早挑的、可清除），每次最多 300 項；Mac 用 sips 把 HEIC 轉成長邊 2048 px 的 JPEG；Google 照片只有時間沒有地點；Pi 只經核心取用；假 gog 與假時鐘的測試，無頭 Chromium 開 Pi 頁面配 mock gog 的實測；**真實 Google 帳號、Mac 與 Pi 未驗證** |

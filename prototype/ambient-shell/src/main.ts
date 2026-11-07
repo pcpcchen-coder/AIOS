@@ -439,6 +439,10 @@ const realtimeCallbacks: RealtimeCallbacks = {
     endRealtimeTicket();
     sense.conversationEnded();
     showSubtitle(reason);
+    if ((code === "idle" || code === "max_duration") && !input.value.trim() && shell.surface === null) {
+      dispatch({ type: "input.close" });
+      return;
+    }
     dispatch({ type: "input.open" });
     showCommandError(reason);
   },
