@@ -71,6 +71,7 @@ export const HOME_CORNER_TEXT = {
   acOn: "開",
   acOff: "關",
   acReported: "控制器回報 · {0}",
+  oldestAge: "最舊的讀值 {0}",
   humidity: "濕度",
   refreshing: "更新中…",
 } as const;
@@ -104,6 +105,8 @@ export interface HomeSwitchGroup {
   on: number;
   unknown: number;
   on_names: string[];
+  /** 採用的讀值裡有不是最新（中控 fresh 為 false）的：其中最舊的秒數；全是最新時 null。 */
+  oldest_age_s: number | null;
 }
 
 export type HomeAcMode = "auto" | "cool" | "dry";
@@ -229,7 +232,8 @@ function switchLine(g: HomeSwitchGroup, locale: Locale): HomeCornerLine {
   const extra = known > 0 && g.unknown > 0 ? tr(locale, HOME_CORNER_TEXT.unknownCount, g.unknown) : null;
   const sep = locale === "en" ? ", " : "、";
   const names = g.on_names.length ? g.on_names.join(sep) + (g.on > g.on_names.length ? "…" : "") : null;
-  return { icon: light ? "bulb" : "plug", text, extra, detail: names, qualifier: null, active: g.on > 0 };
+  const qualifier = known > 0 && g.oldest_age_s !== null ? tr(locale, HOME_CORNER_TEXT.oldestAge, homeAge(g.oldest_age_s, locale)) : null;
+  return { icon: light ? "bulb" : "plug", text, extra, detail: names, qualifier, active: g.on > 0 };
 }
 
 function acLine(a: HomeAcState, locale: Locale): HomeCornerLine {

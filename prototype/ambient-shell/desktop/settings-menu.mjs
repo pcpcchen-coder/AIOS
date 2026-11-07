@@ -408,6 +408,7 @@ export const HOME_CORNER_TEXT = {
   acOn: "開",
   acOff: "關",
   acReported: "控制器回報 · {0}",
+  oldestAge: "最舊的讀值 {0}",
   humidity: "濕度",
   refreshing: "更新中…",
 };
