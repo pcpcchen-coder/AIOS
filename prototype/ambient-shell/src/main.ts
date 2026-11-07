@@ -87,6 +87,9 @@ import type { PageEndReason } from "../shared/voice-cost.ts";
 import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
 import { voiceVolume } from "./voice-volume.ts";
 import { voiceVolumeOutput } from "../shared/voice-volume.ts";
+import { currentLight, decideDayNight, INITIAL_LIGHT, nextLight, type LightState } from "../shared/day-night.ts";
+import { LightMeter, type LightWorkerLike } from "./light-meter.ts";
+import type { VoiceVolumePanelState } from "./views.ts";
 import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import {
   PushToTalk,
@@ -409,7 +412,8 @@ const realtimeCallbacks: RealtimeCallbacks = {
   onDelegate: delegateFromRealtime,
   // VOL-1：說「你講話大聲一點」「音量 60」：調這台裝置的對話音量（立即套用、保存在這個頁面）。
   onVoiceVolume: (request) => {
-    const output = voiceVolumeOutput(voiceVolume.apply(request));
+    const result = voiceVolume.change(request);
+    const output = voiceVolumeOutput(result.outcome, { period: result.period, active: result.active });
     if (shell.surface?.kind === "settings") render();
     return output;
   },
@@ -1455,6 +1459,34 @@ sensorIndicator.className = "sensor-indicator";
 sensorIndicator.hidden = true;
 document.body.append(sensorIndicator);
 let pipeline: SensePipeline | null = null;
+
+// VOL-2：日間／夜間的對話音量。每分鐘依時段重算；鏡頭有開而且設定允許時，每 30 秒量一次環境亮度（只拿回一個數字）。
+let lightState: LightState = INITIAL_LIGHT;
+const lightMeter = new LightMeter({
+  sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null),
+  createWorker: () => new Worker(new URL("./sense/light-worker.ts", import.meta.url), { type: "module" }) as unknown as LightWorkerLike,
+  onLuma: (luma) => {
+    lightState = nextLight(lightState, luma, Date.now());
+    updateDayNight();
+  },
+});
+
+function updateDayNight(): void {
+  const prefs = voiceVolume.prefs;
+  const before = voiceVolume.mode;
+  const decision = decideDayNight(new Date().getHours(), prefs.use_camera ? currentLight(lightState, Date.now()) : null, prefs);
+  voiceVolume.setMode(decision);
+  if (shell.surface?.kind === "settings" && (before.mode !== decision.mode || before.reason !== decision.reason || before.camera !== decision.camera)) render();
+}
+
+function syncLightMeter(): void {
+  if (voiceVolume.prefs.use_camera) lightMeter.start();
+  else {
+    lightMeter.stop();
+    lightState = INITIAL_LIGHT;
+  }
+}
+
 let pointedZone: PointZone | null = null;
 /** 最後一次的鏡頭裝置狀態（來自管線事件，不是設定）。 */
 let sensorDetail = "";
@@ -2885,7 +2917,13 @@ const actions: ViewActions = {
     render();
   },
   setVoiceVolume(request) {
-    voiceVolume.apply(request);
+    voiceVolume.change(request);
+    render();
+  },
+  setDayNight(patch) {
+    voiceVolume.setPrefs(patch);
+    syncLightMeter();
+    updateDayNight();
     render();
   },
   setGpuDrawing(on) {
@@ -3559,7 +3597,7 @@ function renderSurface(): void {
     ensureIntegrationStatus();
     // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
     ensureVoiceRelay();
-    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats(), gpu: gpuDrawing, renderer: brain.rendererStatus() }, voiceVolume: voiceVolume.current });
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats(), gpu: gpuDrawing, renderer: brain.rendererStatus() }, voiceVolume: voiceVolumePanel() });
   }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));
@@ -3823,3 +3861,21 @@ onLocaleChange(() => {
   homeCorner.refreshLocale();
   render();
 });
+
+/** VOL-2：設定頁「這台裝置的對話音量」的狀態。 */
+function voiceVolumePanel(): VoiceVolumePanelState {
+  const prefs = voiceVolume.prefs;
+  const fresh = currentLight(lightState, Date.now()) !== null;
+  return {
+    day: voiceVolume.volumeFor("day"),
+    night: voiceVolume.volumeFor("night"),
+    decision: voiceVolume.mode,
+    prefs,
+    light: prefs.use_camera && fresh && lightState.luma !== null ? { luma: lightState.luma, level: lightState.level } : null,
+  };
+}
+
+// VOL-2：開頁時依時段（之後鏡頭讀值）決定日間／夜間音量，之後每分鐘重算。
+syncLightMeter();
+updateDayNight();
+setInterval(updateDayNight, 60_000);

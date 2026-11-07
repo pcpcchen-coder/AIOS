@@ -319,7 +319,7 @@ export const CAVEATS: readonly Caveat[] = [
 export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
   end_conversation: { try: ["再見", "結束對話", "先這樣", "不用了"], does: "AI 判斷你要結束時道別並結束即時語音（不保證每次都結束）；ChatGPT 方案路徑上整句只說「再見」「掰掰」「拜拜」「結束對話」時，Nous 也會在道別念完後結束（備援）",
     needs: { text: "即時語音", live: "realtime_available" } },
-  set_voice_volume: { try: ["你講話大聲一點", "小聲一點", "音量調到 60"], does: "調這台裝置上 Nous 說話的音量（每次 20，最小 10、最大 100），立即生效，每台裝置各自記住。最大就是系統音量，不能比系統更大聲；提示音與系統音量不變。說了家電名稱（「電視大聲一點」）才是控制家電",
+  set_voice_volume: { try: ["你講話大聲一點", "小聲一點", "音量調到 60", "晚上的音量調到 30"], does: "調這台裝置上 Nous 說話的音量（每次 20，最小 10、最大 100），立即生效，每台裝置各自記住。分日間與夜間兩個音量：夜間時段（預設 22:00–07:00）或鏡頭量到很暗時用夜間音量；沒說白天或晚上就調現在用的那一個。最大就是系統音量，不能比系統更大聲；提示音與系統音量不變。說了家電名稱（「電視大聲一點」）才是控制家電",
     needs: { text: "即時語音", live: "realtime_available" } },
   get_tasks: { try: ["任務做好了沒", "報告寫到哪了"], does: "AI 查詢真實任務狀態後用說的回答", needs: { text: "即時語音", live: "realtime_available" } },
   web_search: { try: ["新竹今天會下雨嗎"], does: "AI 上網查詢後回答，字幕顯示來源", needs: { text: "即時語音與上網查詢（ChatGPT 方案路徑用 Codex 額度；API key 路徑需要 OPENAI_API_KEY）", live: "realtime_web_search" } },

@@ -2,8 +2,9 @@
 // 2560×720 併排影像 → 切左右 1280×720 → MediaPipe Pose（左右各一）＋手勢辨識（左）→ SenseProcessor → 事件。
 // 不保存、不上傳任何影像；離開這個模組的只有 SenseEvent。使用者要求看鏡頭畫面時，管線自己把縮小的左眼畫面
 // 與左右眼差異畫到呼叫端給的兩個畫布上；不交出 MediaStream、video 或原尺寸畫布，也不讀回像素。
-// 唯一的例外是家人辨識的取樣出口 sampleFrame()：只在「家人辨識」畫面要求時，把目前左眼畫格做成 ImageBitmap，
-// 由呼叫端轉移給推論 worker（src/sense/identity-worker.ts，唯一能讀像素的產品檔）；這裡仍不讀回像素。
+// 唯一的例外是取樣出口 sampleFrame()：把目前左眼畫格做成 ImageBitmap，由呼叫端轉移給 worker——家人辨識的推論 worker
+// （src/sense/identity-worker.ts）與 VOL-2 的亮度 worker（src/sense/light-worker.ts，每 30 秒一格，只回傳平均亮度）。
+// 只有這兩個 worker 讀像素；這裡仍不讀回像素。
 
 import type { CameraInstall, SenseEvent } from "../../shared/sense.ts";
 import { SenseProcessor } from "./processor.ts";
@@ -57,6 +58,8 @@ export class SensePipeline {
   private readonly canvasL = document.createElement("canvas");
   private readonly canvasR = document.createElement("canvas");
   private lastFrameAt = 0;
+  /** 這次開啟後是否已經畫過一格（之前的畫布是空白或上一次的舊畫面，不能拿去取樣）。 */
+  private framesDrawn = false;
   private lastTs = 0;
   private degraded = false;
   private generation = 0;
@@ -122,6 +125,7 @@ export class SensePipeline {
       if (this.facingYawRatio !== null) this.processor.facingYawRatio = this.facingYawRatio;
       this.timer = setInterval(() => this.tick(), this.frameIntervalMs);
       this.lastFrameAt = performance.now();
+      this.framesDrawn = false;
       this.phase = "on";
       this.emit({ type: "sensor", state: "ok", detail: "鏡頭運作中（影像只在本機處理）" });
     } catch (err) {
@@ -146,7 +150,7 @@ export class SensePipeline {
    * 呼叫端必須把它轉移給 worker 或 close()；這裡不保留參考。
    */
   async sampleFrame(): Promise<ImageBitmap | null> {
-    if (this.phase !== "on" || this.degraded) return null;
+    if (this.phase !== "on" || this.degraded || !this.framesDrawn) return null;
     return createImageBitmap(this.canvasL);
   }
 
@@ -220,6 +224,7 @@ export class SensePipeline {
     const [first, second] = this.settings.left_first ? [this.canvasL, this.canvasR] : [this.canvasR, this.canvasL];
     first.getContext("2d")!.drawImage(video, 0, 0, EYE_W, EYE_H, 0, 0, EYE_W, EYE_H);
     second.getContext("2d")!.drawImage(video, EYE_W, 0, EYE_W, EYE_H, 0, 0, EYE_W, EYE_H);
+    this.framesDrawn = true;
     if (this.preview) drawPreview(this.canvasL, this.canvasR, this.preview);
 
     const ts = Math.max(Math.round(now), this.lastTs + 1);

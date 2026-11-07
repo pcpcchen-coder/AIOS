@@ -3,11 +3,12 @@ import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 // 鏡頭畫面只畫到本頁畫布：前端程式不得讀回像素、轉成檔案或網址、或錄下串流（CLAUDE.md：原始影像不得寫檔、進 trace 或外傳）。
-// 家人辨識（ID-01，ADR-0001）的兩個例外各限一個檔案：getImageData 只在推論 worker（sense/identity-worker.ts），
+// 家人辨識（ID-01，ADR-0001）的兩個例外各限一個檔案：getImageData 只在推論 worker（sense/identity-worker.ts，VOL-2 起加上亮度 worker），
 // createImageBitmap 只在感測管線的取樣出口（sense/pipeline.ts）。其餘匯出、錄影、擷取 API 在 src/ 全面禁止。
 const FORBIDDEN = /\b(toDataURL|toBlob|captureStream|createObjectURL|MediaRecorder|ImageCapture|readPixels|convertToBlob|showSaveFilePicker)\b/;
 const PIXEL_READ = /\bgetImageData\b/;
-const PIXEL_READ_ALLOWED = new Set([join("sense", "identity-worker.ts")]);
+// VOL-2：環境亮度 worker（sense/light-worker.ts）也讀像素，但只把畫面縮成 64×36 算平均亮度，回傳一個數字。
+const PIXEL_READ_ALLOWED = new Set([join("sense", "identity-worker.ts"), join("sense", "light-worker.ts")]);
 const BITMAP = /\bcreateImageBitmap\b/;
 const BITMAP_ALLOWED = new Set([join("sense", "pipeline.ts")]);
 

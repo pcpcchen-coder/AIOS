@@ -40,9 +40,9 @@ describe("nextVoiceVolume", () => {
   });
 
   it("parses the model's arguments, including numeric strings, and ignores unknown values", () => {
-    expect(parseVoiceVolumeArgs({ level: "60" })).toEqual({ level: 60, change: null });
-    expect(parseVoiceVolumeArgs({ change: "up" })).toEqual({ level: null, change: "up" });
-    expect(parseVoiceVolumeArgs({ change: "louder", level: "x" })).toEqual({ level: null, change: null });
+    expect(parseVoiceVolumeArgs({ level: "60" })).toEqual({ level: 60, change: null, period: null });
+    expect(parseVoiceVolumeArgs({ change: "up", period: "night" })).toEqual({ level: null, change: "up", period: "night" });
+    expect(parseVoiceVolumeArgs({ change: "louder", level: "x", period: "evening" })).toEqual({ level: null, change: null, period: null });
   });
 
   it("the tool output is confirmed with the real volume, and carries a note only at a limit", () => {
@@ -130,7 +130,7 @@ describe("set_voice_volume tool", () => {
     };
     const ctx = { callbacks, approvals: {}, generation: 1, stale: () => false, end: () => {}, deliver: (o: Record<string, unknown>) => delivered.push(o) };
     await executeRealtimeTool("set_voice_volume", JSON.stringify({ change: "down" }), ctx as never);
-    expect(requests).toEqual([{ level: null, change: "down" }]);
+    expect(requests).toEqual([{ level: null, change: "down", period: null }]);
     expect(delivered[0]).toEqual({ ok: true, status: "confirmed", volume: 80, previous: 100 });
     expect(activity).toEqual(["對話音量：80"]);
     await executeRealtimeTool("set_voice_volume", "{}", ctx as never);
@@ -148,6 +148,8 @@ describe("settings view", () => {
     readonly attributes = new Map<string, string>();
     readonly listeners = new Map<string, (() => void)[]>();
     disabled = false;
+    selected = false;
+    value = "";
     constructor(readonly tagName: string) {}
     setAttribute(key: string, value: string) { this.attributes.set(key, value); }
     append(...nodes: (El | string)[]) { this.children.push(...nodes); }
@@ -163,29 +165,71 @@ describe("settings view", () => {
   });
   afterAll(() => vi.unstubAllGlobals());
 
-  it("shows the current volume and the three buttons call setVoiceVolume; limits disable the matching button", () => {
+  const panel = (over: Partial<import("../src/views.ts").VoiceVolumePanelState> = {}) => ({
+    day: 60, night: 40, decision: { mode: "day", reason: "day", camera: false }, prefs: { night_start_h: 22, night_end_h: 7, use_camera: true }, light: null, ...over,
+  }) as import("../src/views.ts").VoiceVolumePanelState;
+  const volumeButtons = (section: El, period: string) => section.all().find((e) => e.attributes.get("data-volume-period") === period)!.all().filter((e) => e.tagName === "button");
+
+  it("shows day and night volumes; each row's buttons change that period; limits disable the matching button", () => {
     const calls: unknown[] = [];
-    const section = views.renderVoiceVolumeSettings(60, { setVoiceVolume: (r: unknown) => calls.push(r) } as never) as unknown as El;
+    const section = views.renderVoiceVolumeSettings(panel(), { setVoiceVolume: (r: unknown) => calls.push(r), setDayNight: () => {} } as never) as unknown as El;
+    expect(section.textContent).toContain("日間音量");
     expect(section.textContent).toContain("目前 60");
-    const buttons = section.all().filter((e) => e.tagName === "button");
-    expect(buttons.map((b) => b.textContent)).toEqual(["小聲一點", "大聲一點", "恢復預設"]);
-    for (const b of buttons) b.click();
-    expect(calls).toEqual([{ change: "down" }, { change: "up" }, { change: "reset" }]);
-    const atMax = (views.renderVoiceVolumeSettings(100, { setVoiceVolume: () => {} } as never) as unknown as El).all().filter((e) => e.tagName === "button");
-    expect(atMax.map((b) => b.disabled)).toEqual([false, true, true]);
-    const atMin = (views.renderVoiceVolumeSettings(10, { setVoiceVolume: () => {} } as never) as unknown as El).all().filter((e) => e.tagName === "button");
-    expect(atMin.map((b) => b.disabled)).toEqual([true, false, false]);
+    expect(section.textContent).toContain("夜間音量");
+    expect(section.textContent).toContain("目前 40");
+    expect(section.textContent).toContain("現在用日間音量");
+    const day = volumeButtons(section, "day");
+    expect(day.map((b) => b.textContent)).toEqual(["小聲一點", "大聲一點", "恢復預設"]);
+    for (const b of day) b.click();
+    for (const b of volumeButtons(section, "night")) b.click();
+    expect(calls).toEqual([
+      { change: "down", period: "day" }, { change: "up", period: "day" }, { change: "reset", period: "day" },
+      { change: "down", period: "night" }, { change: "up", period: "night" }, { change: "reset", period: "night" },
+    ]);
+    const limits = views.renderVoiceVolumeSettings(panel({ day: 100, night: 10 }), { setVoiceVolume: () => {} } as never) as unknown as El;
+    expect(volumeButtons(limits, "day").map((b) => b.disabled)).toEqual([false, true, true]);
+    expect(volumeButtons(limits, "night").map((b) => b.disabled)).toEqual([true, false, false]);
+    // 夜間的預設是 40：已經是 40 時「恢復預設」停用。
+    expect(volumeButtons(section, "night")[2]!.disabled).toBe(true);
+  });
+
+  it("says honestly why night is in use and what the camera read", () => {
+    const hours = views.renderVoiceVolumeSettings(panel({ decision: { mode: "night", reason: "hours", camera: false } }), {} as never) as unknown as El;
+    expect(hours.textContent).toContain("現在用夜間音量：在夜間時段（22:00–07:00）");
+    expect(hours.textContent).toContain("鏡頭亮度：—（鏡頭沒開或還沒量到，只看時段）");
+    const dark = views.renderVoiceVolumeSettings(panel({ decision: { mode: "night", reason: "camera_dark", camera: true }, light: { luma: 21.6, level: "dark" } }), {} as never) as unknown as El;
+    expect(dark.textContent).toContain("現在用夜間音量：鏡頭量到環境很暗");
+    expect(dark.textContent).toContain("鏡頭亮度：22（暗）");
+    const off = views.renderVoiceVolumeSettings(panel({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: false } }), {} as never) as unknown as El;
+    expect(off.textContent).toContain("鏡頭亮度：不使用（只看時段）");
+  });
+
+  it("the camera toggle and hour selects call setDayNight", () => {
+    const calls: unknown[] = [];
+    const section = views.renderVoiceVolumeSettings(panel(), { setVoiceVolume: () => {}, setDayNight: (p: unknown) => calls.push(p) } as never) as unknown as El;
+    const toggle = section.all().find((e) => e.attributes.get("aria-pressed") === "true")!;
+    toggle.click();
+    const selects = section.all().filter((e) => e.tagName === "select");
+    expect(selects).toHaveLength(2);
+    expect(selects[0]!.all().filter((e) => e.tagName === "option")).toHaveLength(24);
+    selects[0]!.value = "21";
+    for (const fn of selects[0]!.listeners.get("change") ?? []) fn();
+    selects[1]!.value = "6";
+    for (const fn of selects[1]!.listeners.get("change") ?? []) fn();
+    expect(calls).toEqual([{ use_camera: false }, { night_start_h: 21 }, { night_end_h: 6 }]);
   });
 
   it("every new string has an English catalog entry", () => {
     const en = JSON.parse(readFileSync(new URL("../src/messages.en.json", import.meta.url), "utf8")) as Record<string, string>;
     const sources = [
-      ...Object.values(VOICE_VOLUME_TEXT),
+      ...Object.values(VOICE_VOLUME_TEXT).flatMap((v) => (typeof v === "string" ? [v] : Object.values(v))),
       "對話音量：{0}",
       "這個畫面不能調對話音量",
       voiceVolumeOutput(nextVoiceVolume(100, {})).error as string,
       voiceVolumeOutput(nextVoiceVolume(100, { change: "up" })).note as string,
       voiceVolumeOutput(nextVoiceVolume(10, { change: "down" })).note as string,
+      voiceVolumeOutput(nextVoiceVolume(50, { change: "up" }), { period: "night", active: "day" }).note as string,
+      voiceVolumeOutput(nextVoiceVolume(50, { change: "up" }), { period: "day", active: "night" }).note as string,
     ];
     for (const source of sources) {
       expect(en[source], source).toBeTruthy();

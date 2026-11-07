@@ -22,6 +22,7 @@ import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, ty
 import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, VoiceRelayProfileBody, VoiceRelaySlots, VoiceRelayTargetBody, VoiceRelayTrialBody, VoiceRelayUnadoptBody } from "./api.ts";
 import { VOICE_VOLUME_TEXT } from "./voice-volume.ts";
 import { VOICE_VOLUME_DEFAULT, VOICE_VOLUME_MAX, VOICE_VOLUME_MIN, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
+import { NIGHT_VOLUME_DEFAULT, type DayNightDecision, type DayNightMode, type DayNightPrefs, type LightLevel } from "../shared/day-night.ts";
 import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, rendererText, type FrameStats, type PerformanceProfile, type RendererReadout } from "./performance.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
@@ -76,6 +77,8 @@ export interface ViewActions {
   setGpuDrawing?(on: boolean): void;
   /** VOL-1：這台裝置的對話音量（立即套用並保存在這個頁面）。 */
   setVoiceVolume?(request: VoiceVolumeRequest): void;
+  /** VOL-2：夜間時段與「用鏡頭亮度判斷」（立即套用並保存在這個頁面）。 */
+  setDayNight?(patch: Partial<DayNightPrefs>): void;
 }
 
 export const MAX_LISTED = 8;
@@ -399,8 +402,17 @@ export interface SettingsRenderOptions {
   voiceRelay?: VoiceRelayPanelState | null;
   /** 這台裝置的畫面效能（src/performance.ts）；沒有時不畫。 */
   performance?: PerformancePanelState | null;
-  /** VOL-1：這台裝置的對話音量（10–100）；沒有時不畫。 */
-  voiceVolume?: number | null;
+  /** VOL-1／VOL-2：這台裝置的對話音量（日間、夜間與判斷）；沒有時不畫。 */
+  voiceVolume?: VoiceVolumePanelState | null;
+}
+
+export interface VoiceVolumePanelState {
+  day: number;
+  night: number;
+  decision: DayNightDecision;
+  prefs: DayNightPrefs;
+  /** 夠新的鏡頭讀值（設定關閉、鏡頭沒開或太舊時 null）。 */
+  light: { luma: number; level: LightLevel | null } | null;
 }
 
 export interface PerformancePanelState {
@@ -484,7 +496,7 @@ export function renderSettings(
     settings.voice && renderVoiceSettings(settings.voice, !!settings.realtime?.available, actions),
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions, !!options.terminalCamera),
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
-    typeof options.voiceVolume === "number" && renderVoiceVolumeSettings(options.voiceVolume, actions),
+    options.voiceVolume && renderVoiceVolumeSettings(options.voiceVolume, actions),
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.clock && renderClockSettings(settings.clock, actions),
@@ -502,7 +514,7 @@ export function renderSettings(
  * macOS App 內的設定頁：只有帳號與登入（ChatGPT 引擎帳號、即時語音用的 Codex 帳號）和狀態。
  * 引擎選擇、即時語音路徑與聲音、秒數、鏡頭與手勢都在選單列，這裡不重複畫。
  */
-function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null, voiceRelay: VoiceRelayPanelState | null, performance: PerformancePanelState | null, voiceVolume: number | null = null): HTMLElement {
+function renderDesktopAccounts(settings: SettingsView, message: string | null, actions: ViewActions, audio: AudioReport | null, integrations: IntegrationPanelState | null, voiceRelay: VoiceRelayPanelState | null, performance: PerformancePanelState | null, voiceVolume: VoiceVolumePanelState | null = null): HTMLElement {
   const g = settings.chatgpt;
   const account = chatgptAccount(settings, actions, true);
   // 瀏覽器版的「Continue with ChatGPT」在引擎清單裡；這頁沒有引擎清單，未登入時直接放登入按鈕。
@@ -526,7 +538,7 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.realtime && renderRealtimeSettings(settings.realtime, actions, { desktop: true }),
     // 聲音輸入／輸出（George 2026-11-01）：選單列「聲音」與這裡都能選，寫入同一個 audio.json。
     settings.audio && renderAudioSettings(settings.audio.prefs, audio, actions),
-    typeof voiceVolume === "number" && renderVoiceVolumeSettings(voiceVolume, actions),
+    voiceVolume && renderVoiceVolumeSettings(voiceVolume, actions),
     performance && renderPerformanceSettings(performance, actions),
     // PRO-1：選單列「主動提醒」與這裡都能改，寫入同一個 proactive.json。
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
@@ -546,23 +558,84 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
 /**
  * VOL-1：這台裝置的對話音量（George 2026-11-07）：小聲一點／大聲一點／恢復預設，和說「你講話大聲一點」是同一個設定。
  * 只調 Nous 說話的播放元素，最大就是系統音量；每台裝置各自保存在頁面。
+ * VOL-2：分日間與夜間兩組（各有三個按鈕），上方一行照實寫現在用哪一個與原因；夜間時段與「用鏡頭亮度判斷」可以改。
  */
-export function renderVoiceVolumeSettings(volume: number, actions: ViewActions): HTMLElement {
+export function renderVoiceVolumeSettings(state: VoiceVolumePanelState, actions: ViewActions): HTMLElement {
   const disabled = !actions.setVoiceVolume;
-  const down = button(VOICE_VOLUME_TEXT.down, () => actions.setVoiceVolume?.({ change: "down" }));
-  const up = button(VOICE_VOLUME_TEXT.up, () => actions.setVoiceVolume?.({ change: "up" }));
-  const reset = button(VOICE_VOLUME_TEXT.reset, () => actions.setVoiceVolume?.({ change: "reset" }), "btn--ghost");
-  down.disabled = disabled || volume <= VOICE_VOLUME_MIN;
-  up.disabled = disabled || volume >= VOICE_VOLUME_MAX;
-  reset.disabled = disabled || volume === VOICE_VOLUME_DEFAULT;
+  const { decision, prefs } = state;
+  const row = (period: DayNightMode) => {
+    const volume = period === "night" ? state.night : state.day;
+    const resetTo = period === "night" ? NIGHT_VOLUME_DEFAULT : VOICE_VOLUME_DEFAULT;
+    const down = button(VOICE_VOLUME_TEXT.down, () => actions.setVoiceVolume?.({ change: "down", period }));
+    const up = button(VOICE_VOLUME_TEXT.up, () => actions.setVoiceVolume?.({ change: "up", period }));
+    const reset = button(VOICE_VOLUME_TEXT.reset, () => actions.setVoiceVolume?.({ change: "reset", period }), "btn--ghost");
+    down.disabled = disabled || volume <= VOICE_VOLUME_MIN;
+    up.disabled = disabled || volume >= VOICE_VOLUME_MAX;
+    reset.disabled = disabled || volume === resetTo;
+    const label = t(period === "night" ? VOICE_VOLUME_TEXT.night : VOICE_VOLUME_TEXT.day);
+    return h(
+      "li",
+      { class: "pref", "data-volume-period": period },
+      h(
+        "div",
+        { class: "provider-text" },
+        h("strong", {}, label),
+        h("span", { class: "muted small", "data-voice-volume": "" }, t(VOICE_VOLUME_TEXT.current, String(volume))),
+        decision.mode === period && h("span", { class: "chip chip--running" }, t(VOICE_VOLUME_TEXT.inUse)),
+      ),
+      h("div", { class: "actions" }, down, up, reset),
+    );
+  };
+  const hourSelect = (label: string, current: number, patch: (hour: number) => Partial<DayNightPrefs>) => {
+    const el = h("select", { "aria-label": t(label) }) as HTMLSelectElement;
+    for (let hour = 0; hour < 24; hour++) {
+      const opt = h("option", { value: String(hour) }, `${String(hour).padStart(2, "0")}:00`) as HTMLOptionElement;
+      if (hour === current) {
+        opt.setAttribute("selected", "");
+        opt.selected = true;
+      }
+      el.append(opt);
+    }
+    el.disabled = !actions.setDayNight;
+    el.addEventListener("change", () => {
+      if (Number(el.value) !== current) actions.setDayNight?.(patch(Number(el.value)));
+    });
+    return h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label))), el);
+  };
+  const cameraButton = button(prefs.use_camera ? "開" : "關", () => actions.setDayNight?.({ use_camera: !prefs.use_camera }), prefs.use_camera ? "btn--primary" : "");
+  cameraButton.setAttribute("aria-pressed", String(prefs.use_camera));
+  cameraButton.setAttribute("aria-label", t("{0}：{1}", t(VOICE_VOLUME_TEXT.camera), prefs.use_camera ? t("開") : t("關")));
+  cameraButton.disabled = !actions.setDayNight;
   return h(
     "section",
     { class: "camera-settings voice-volume-settings" },
     h("h3", {}, t(VOICE_VOLUME_TEXT.title)),
-    h("p", { "data-voice-volume": "", role: "status" }, t(VOICE_VOLUME_TEXT.current, String(volume))),
-    h("div", { class: "actions" }, down, up, reset),
+    h("p", { "data-day-night": "", role: "status" }, dayNightLine(state)),
+    h("ul", { class: "pref-list" }, row("day"), row("night")),
+    h(
+      "ul",
+      { class: "pref-list" },
+      hourSelect(VOICE_VOLUME_TEXT.hoursStart, prefs.night_start_h, (hour) => ({ night_start_h: hour })),
+      hourSelect(VOICE_VOLUME_TEXT.hoursEnd, prefs.night_end_h, (hour) => ({ night_end_h: hour })),
+      h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(VOICE_VOLUME_TEXT.camera)), h("span", { class: "muted small" }, t(VOICE_VOLUME_TEXT.cameraNote))), cameraButton),
+    ),
+    h("p", { class: "muted small", "data-light": "" }, lightLine(state)),
+    h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.hoursNote)),
     h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.note)),
   );
+}
+
+function dayNightLine(state: VoiceVolumePanelState): string {
+  const { decision, prefs } = state;
+  if (decision.reason === "hours") return t(VOICE_VOLUME_TEXT.modeLine.hours, String(prefs.night_start_h).padStart(2, "0"), String(prefs.night_end_h).padStart(2, "0"));
+  return t(VOICE_VOLUME_TEXT.modeLine[decision.reason]);
+}
+
+function lightLine(state: VoiceVolumePanelState): string {
+  if (!state.prefs.use_camera) return t(VOICE_VOLUME_TEXT.light.off);
+  if (!state.light) return t(VOICE_VOLUME_TEXT.light.unknown);
+  const level = state.light.level === "dark" ? VOICE_VOLUME_TEXT.light.dark : state.light.level === "bright" ? VOICE_VOLUME_TEXT.light.bright : VOICE_VOLUME_TEXT.light.middle;
+  return t(VOICE_VOLUME_TEXT.light.reading, String(Math.round(state.light.luma)), t(level));
 }
 
 /**

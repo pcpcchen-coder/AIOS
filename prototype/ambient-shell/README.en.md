@@ -176,7 +176,7 @@ These are not fixed phrases. AI decides whether to use tools from meaning.
 | Ask | Possible AI action | Conditions |
 |---|---|---|
 | 「再見」「結束對話」「先這樣」「不用了」 | Say goodbye and end realtime when AI infers ending, not guaranteed. On ChatGPT-plan route, exact 再見、掰掰、拜拜、結束對話 also cause a fallback end after goodbye playback | Requires realtime |
-| 「你講話大聲一點」「小聲一點」「音量調到 60」 | Changes how loud Nous speaks on this device (steps of 20, minimum 10, maximum 100), immediately; each device remembers its own. The maximum is the system volume, never louder; cues and the system volume are unchanged. Naming an appliance (「電視大聲一點」, "TV louder") controls that appliance instead | Requires realtime |
+| 「你講話大聲一點」「小聲一點」「音量調到 60」「晚上的音量調到 30」 | Changes how loud Nous speaks on this device (steps of 20, minimum 10, maximum 100), immediately; each device remembers its own. There is a day and a night volume: night hours (default 22:00–07:00) or a dark room seen by the camera use the night volume; without saying day or night, the one in use now changes. The maximum is the system volume, never louder; cues and the system volume are unchanged. Naming an appliance (「電視大聲一點」, "TV louder") controls that appliance instead | Requires realtime |
 | 「任務做好了沒」「報告寫到哪了」 | Query actual task state and answer aloud | Requires realtime |
 | 「新竹今天會下雨嗎」 | Search online and answer with caption sources | Requires realtime and web search; ChatGPT plan uses Codex quota, API-key route requires OPENAI_API_KEY |
 | 「幫我寫一份下週出差規劃」 | Delegate longer work as background tasks with progress below the brain | Requires realtime |

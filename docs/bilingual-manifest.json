@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "14d1708fb3071fcb542e7a0d5936c6be58871538abf1696778d16a38b342c712",
-      "translationSha256": "d01b6c505a8ca63ea668fb11c868c939e945923929d1228f27f9de7b0e35cc68"
+      "sourceSha256": "068bde64d4c2683d1c080b575305e2ba2517b74372e68d2d1a0b39b0bca4f106",
+      "translationSha256": "0871a2d650274e4299ae89bd74b57fdd3a1131eb024edc8dbfed5a070c6d5731"
     },
     {
       "source": "docs/README.md",
@@ -377,6 +377,13 @@
       "translation": "docs/validation/chatgpt-conversation-2026-10-20.en.md",
       "sourceSha256": "c2560ed8bf74828c0ef83f3a3fe0b8a6826c60546544af799ad6cf866730b835",
       "translationSha256": "2c37b6227be4774fc576a010ad11a55f928460b9cab4624c4cbea2610506374b"
+    },
+    {
+      "source": "docs/validation/day-night-volume-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/day-night-volume-2026-11-07.en.md",
+      "sourceSha256": "4d6a895524da787b049245ac9d3f3e744c9dfc16a8bd1050f94cc09e1e03aa34",
+      "translationSha256": "8e7ac983a3fa97ed7f06aff1e70cf2bdf6701857ad351b00f0f5242ae8720c0b"
     },
     {
       "source": "docs/validation/evidence/brain-distance-2026-10-22/brief.md",
@@ -809,8 +816,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "ed173f249cc9843652fafb7ba2d8be44e0e703b68525d6948d6700897a7f3792",
-      "translationSha256": "7734e4326728d55060f4c99699a4ac31cc14ae54a9bb2e1ad22fc4071ede1192"
+      "sourceSha256": "77ffd3e3354a9cc1f50d04136bf5b2ba4b8fd8f8016144100c516c1cdd705abd",
+      "translationSha256": "1bda9c11e2da11316daea704856b1681650f63bafff1526ef683f1f815b1c3b0"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",
