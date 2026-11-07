@@ -92,12 +92,12 @@ describe("Open-Meteo client (fake responses; no network)", () => {
     expect(url.origin).toBe("https://api.open-meteo.com");
     expect(url.pathname).toBe("/v1/forecast");
     expect(Object.fromEntries(url.searchParams)).toEqual({
-      latitude: "22.63", longitude: "120.30", daily: "weather_code,temperature_2m_max,temperature_2m_min", hourly: "precipitation_probability", timezone: "Asia/Taipei", forecast_days: "1",
+      latitude: "22.63", longitude: "120.30", current: "temperature_2m,weather_code,is_day", daily: "weather_code,temperature_2m_max,temperature_2m_min", hourly: "precipitation_probability", timezone: "Asia/Taipei", forecast_days: "1",
     });
   });
 
   it("parses today's daily values and the part of the day with the highest hourly rain chance", () => {
-    expect(parseForecast(fixtureBody(), "taipei", "2026-11-05", 1)).toEqual({ place: "taipei", date: "2026-11-05", code: 2, min_c: 21.8, max_c: 27.6, rain: { part: "afternoon", percent: 60 }, fetched_at: 1 });
+    expect(parseForecast(fixtureBody(), "taipei", "2026-11-05", 1)).toEqual({ place: "taipei", date: "2026-11-05", code: 2, min_c: 21.8, max_c: 27.6, rain: { part: "afternoon", percent: 60 }, now: null, fetched_at: 1 });
     expect(parseForecast(fixtureBody("2026-11-05", { rain: (h) => (h === 7 ? 80 : 5) }), "taipei", "2026-11-05", 1)?.rain).toEqual({ part: "morning", percent: 80 });
   });
 

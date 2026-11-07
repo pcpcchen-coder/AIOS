@@ -30,6 +30,7 @@ import { Brain } from "./brain.ts";
 import { applyProfile, loadProfile, RENDER_BUDGETS, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
 import { MEMORIES_OFF, memoryCaption, stepMemories, wakeMemories, type MemoriesItem, type MemoriesState } from "../shared/memories.ts";
 import { MEMORIES_TIMING, MemoriesPresenter } from "./memories.ts";
+import { ClockCorner } from "./clock-corner.ts";
 import { CUE_TIMING, ProcessingCue, processingSource } from "./processing-cue.ts";
 import { browserProcessingSound } from "./processing-sound.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
@@ -229,6 +230,9 @@ brain.start();
  * MEMO-1 回憶模式：電子腦閒置 idle_s 後照片與影片從電子腦浮現；任何喚醒立即收起（shared/memories.ts 的狀態機）。
  * 斷線時視為關閉（核心不在就沒有照片可讀，也不留著過時的清單）。照片不點亮任何腦區。
  */
+/** CLK-1：右上角的時間、日期與天氣（設定 settings.clock.enabled 打開時才有；被動讀數，不能點）。 */
+const clockCorner = new ClockCorner({ fetchWeather: (signal) => api.weatherNow(signal), locale: () => getLocale() });
+
 const memoriesRoot = document.createElement("div");
 memoriesRoot.id = "memories";
 document.body.append(memoriesRoot);
@@ -924,6 +928,7 @@ function applyEffectiveSettings(value: SettingsView, preserveEntry = false): voi
   ambient.refresh();
   syncWake(value.wake);
   syncAudioPrefs(value);
+  clockCorner.setEnabled(value.clock?.enabled === true);
 }
 
 /**
@@ -2861,6 +2866,16 @@ const actions: ViewActions = {
       (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`主動提醒設定沒有保存：${(err as Error).message}` }),
     );
   },
+  updateClock(patch) {
+    const requestId = userRequest();
+    void api.updateClock(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`時鐘設定沒有保存：${(err as Error).message}` }),
+    );
+  },
   updateMemories(patch) {
     const requestId = userRequest();
     void api.updateMemories(patch).then(
@@ -3737,5 +3752,6 @@ onLocaleChange(() => {
   sensorIndicator.title = t("{0}（按一下顯示／收起鏡頭畫面）", t(sensorDetail));
   sensorIndicator.textContent = sensorState === "ok" ? t("鏡頭") : sensorState === "starting" ? t("鏡頭啟動中") : t("鏡頭：{0}", t(sensorDetail));
   renderWakeIndicator();
+  clockCorner.refreshLocale();
   render();
 });

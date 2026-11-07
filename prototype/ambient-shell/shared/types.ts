@@ -9,6 +9,7 @@ import type { MemorySettingsStatus } from "./memory.ts";
 import type { WakeSettingsView } from "./wake.ts";
 import type { AudioSettingsView } from "./audio-devices.ts";
 import type { ProactiveSettingsView } from "./proactive.ts";
+import type { ClockSettingsView } from "./clock.ts";
 import type { MemoriesSettingsView } from "./memories.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
@@ -166,6 +167,8 @@ export interface SettingsView {
   voice_relay?: boolean;
   /** PRO-1 主動提醒（招呼後接今天的天氣）：設定、實際地點與最近一次查天氣的狀態（不含天氣內容）。 */
   proactive?: ProactiveSettingsView;
+  /** CLK-1 右上角時鐘與天氣：這個頁面要不要顯示（enabled）與兩個開關（Mac 視窗、終端機）。 */
+  clock?: ClockSettingsView;
   /** MEMO-1 回憶模式：設定與來源狀態（只有數量，不含檔名或路徑）。 */
   memories?: MemoriesSettingsView;
 }

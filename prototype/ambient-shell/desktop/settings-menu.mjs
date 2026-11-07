@@ -348,6 +348,35 @@ export function proactiveMenu(proactive, { setProactive, translate = (source) =>
   ];
 }
 
+// ───────────── 右上角時鐘與天氣（CLK-1；核心給了 settings.clock 才畫） ─────────────
+// 文字和 shared/clock.ts 的 CLOCK_TEXT 相同（這個檔案不能載入 .ts；tests/clock-settings.test.ts 核對兩邊一致）。
+
+export const CLOCK_TEXT = {
+  group: "右上角時鐘與天氣",
+  main: "Mac 視窗",
+  mainNote: "在 Mac 的 Nous 視窗右上角顯示時間、日期與天氣",
+  terminal: "Pi 終端機",
+  terminalNote: "在 Pi 等終端機畫面右上角顯示時間、日期與天氣",
+  note: "只顯示時間、日期與天氣，不能點；天氣資料：Open-Meteo.com（CC BY 4.0），地點同「主動提醒」的天氣地點",
+  aria: "時間、日期與天氣：{0}",
+  age: "{0} 分鐘前",
+  rain: "降雨 {0}%",
+  today: "今日{0}",
+  unavailable: "天氣暫時無法取得",
+  noPlace: "設定天氣地點後顯示天氣",
+};
+
+/** 「右上角時鐘與天氣」分段：Mac 視窗、Pi 終端機兩個開關。點選後 setClock(patch) POST 到 clock.write_path。 */
+export function clockMenu(clock, { setClock, translate = (source) => source }) {
+  const set = (patch) => () => void setClock?.(patch);
+  return [
+    { type: "separator" },
+    { label: translate(CLOCK_TEXT.group), enabled: false },
+    { label: translate(CLOCK_TEXT.main), type: "checkbox", checked: clock.prefs.main, sublabel: translate(CLOCK_TEXT.mainNote), click: set({ main: !clock.prefs.main }) },
+    { label: translate(CLOCK_TEXT.terminal), type: "checkbox", checked: clock.prefs.terminal, sublabel: translate(CLOCK_TEXT.terminalNote), click: set({ terminal: !clock.prefs.terminal }) },
+  ];
+}
+
 // ───────────── 回憶模式（MEMO-1；核心給了 settings.memories 才畫） ─────────────
 // 文字和 shared/memories.ts 的 MEMORIES_TEXT 相同（這個檔案不能載入 .ts；tests/memories-menu.test.ts 核對兩邊一致）。
 
@@ -467,10 +496,11 @@ export function memoriesMenu(memories, { setMemories, memoriesGoogle, openMemori
  *   setWakeListen(value)、wakeReport：常駐喚醒聆聽（只有 settings.wake 存在時用到）；setVoiceNameTest(value)：SP-02a 只憑聲音叫名字的測試開關；
  *   setAudio(patch)、audioReport：「聲音」分段（settings.audio 存在時畫；patch 送到 settings.audio.write_path）
  *   setProactive(patch)：「主動提醒」分段（settings.proactive 存在時畫；patch 送到 settings.proactive.write_path）
+ *   setClock(patch)：CLK-1「右上角時鐘與天氣」分段（settings.clock 存在時畫；patch 送到 settings.clock.write_path）
  *   setMemories(patch)：「回憶模式」分段（settings.memories 存在時畫；patch 送到 settings.memories.write_path）
  *   memoriesGoogle(action)：MEMO-2「Google 相簿」的 pick／cancel／clear（settings.memories.google 存在時畫）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, memoriesGoogle, openMemoriesFolder, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setClock, setMemories, memoriesGoogle, openMemoriesFolder, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -543,6 +573,7 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
   if (settings.audio) items.push(...audioMenu(settings.audio, audioReport, { setAudio, translate }));
   if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused, translate }));
   if (settings.proactive) items.push(...proactiveMenu(settings.proactive, { setProactive, translate }));
+  if (settings.clock) items.push(...clockMenu(settings.clock, { setClock, translate }));
   if (settings.memories) items.push(...memoriesMenu(settings.memories, { setMemories, memoriesGoogle, openMemoriesFolder, translate }));
   return items;
 }

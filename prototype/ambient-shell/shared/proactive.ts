@@ -169,7 +169,17 @@ export interface WeatherToday {
   max_c: number;
   /** 降雨機率最高的時段與機率（6–12、12–18、18–24 點，取每小時最大值）；沒有逐時資料時 null。 */
   rain: { part: DayPart; percent: number } | null;
+  /** CLK-1：查詢當下的氣溫與天氣（Open-Meteo 的 current）；回覆沒有或不合理時 null。招呼那一句不用這個。舊的測試資料沒有這個欄位（＝null）。 */
+  now?: WeatherNow | null;
   fetched_at: number;
+}
+
+/** CLK-1：現在的氣溫與天氣（地點時區的 YYYY-MM-DDTHH:mm）。 */
+export interface WeatherNow {
+  time: string;
+  temp_c: number;
+  code: number | null;
+  is_day: boolean;
 }
 
 /** WMO 天氣代碼（Open-Meteo 文件的 Weather variable documentation）→ 念出來的狀況。 */

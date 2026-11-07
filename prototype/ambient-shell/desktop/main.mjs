@@ -698,7 +698,7 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setMemories, memoriesGoogle, openMemoriesFolder, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, servicePaused: prefs.serviceMode, translate: t });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setClock, setMemories, memoriesGoogle, openMemoriesFolder, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, servicePaused: prefs.serviceMode, translate: t });
 }
 
 /**
@@ -726,6 +726,20 @@ async function setProactive(patch) {
     settings = await api(path, patch);
   } catch (err) {
     showError("主動提醒設定沒有保存", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  rebuildMenu();
+}
+
+/** CLK-1「右上角時鐘與天氣」：POST 到核心給的 settings.clock.write_path，直接套用回應；失敗時照實說明並重新讀取。 */
+async function setClock(patch) {
+  const path = settings?.clock?.write_path;
+  if (!path) return;
+  try {
+    settings = await api(path, patch);
+  } catch (err) {
+    showError("時鐘設定沒有保存", String(err.message ?? err));
     await refreshSettings();
     return;
   }

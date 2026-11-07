@@ -1,5 +1,6 @@
 import { localize, localizeSettings } from "./localization.ts";
 import { normalizeLocale, translate } from "../shared/i18n.mjs";
+import type { Locale } from "../shared/i18n.mjs";
 import { BROWSER_MEMORY_STATUS, MEMORY_CLAIM, type MemorySettingsStatus } from "../shared/memory.ts";
 import type { ChatTarget } from "./memory/retrieve.ts";
 import type { MemoryContext } from "./memory/service.ts";
@@ -50,6 +51,7 @@ import type { VoiceRoute } from "./memory/live.ts";
 import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
+import { CLOCK_WRITE_PATH, ClockPatchError, parseClockPatch, WEATHER_NOW_PATH, type ClockPrefs, type ClockPrefsPatch, type ClockSettingsView, type WeatherNowView } from "../shared/clock.ts";
 import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
 import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_MEDIA_PREFIX, MEMORIES_WRITE_PATH, MemoriesPatchError, parseMemoriesPatch, type MemoriesItem, type MemoriesPrefs, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
 import { parseByteRange } from "./memories.ts";
@@ -197,6 +199,11 @@ export interface AppOptions {
    */
   proactive?: { view(): ProactiveSettingsView; update(patch: ProactivePrefsPatch): ProactivePrefs; prefetch(): void };
   /**
+   * CLK-1：右上角時鐘與天氣。view(source) 給 settings.clock（依頁面來源算 enabled）；weatherNow 給唯讀的 GET /api/weather/now
+   * （沒有參數；地點同主動提醒）。未提供時 settings 沒有 clock，兩條路由 404。
+   */
+  clock?: { view(source: string): ClockSettingsView; update(patch: ClockPrefsPatch): ClockPrefs; weatherNow(locale: Locale): Promise<WeatherNowView> };
+  /**
    * MEMO-1：回憶模式（設定與本機資料夾的照片、影片）。未提供時 settings 沒有 memories，相關路由 404。
    * file() 回傳的路徑只在核心內使用，不出現在任何回應。
    */
@@ -301,6 +308,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         audio: { prefs: options.audio?.view() ?? { ...DEFAULT_AUDIO_PREFS }, write_path: AUDIO_WRITE_PATH },
         ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
         ...(options.proactive ? { proactive: options.proactive.view() } : {}),
+        ...(options.clock ? { clock: options.clock.view(source) } : {}),
         ...(options.memories ? { memories: options.memories.view() } : {}),
         ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name) } } : {}),
         // VCR-2：只有註冊了 voice_relay 才有這個鍵（沒有時輸出和之前完全相同）。
@@ -472,6 +480,24 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } catch (err) {
         // 寫檔失敗：記憶體沒有改（仍是保存前的值），回報真實原因，不顯示假成功。
         throw new HttpError(500, `常駐喚醒聆聽設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (options.clock && method === "GET" && path === WEATHER_NOW_PATH) {
+      return sendJson(res, 200, await options.clock.weatherNow(normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (options.clock && method === "POST" && path === CLOCK_WRITE_PATH) {
+      let patch: ClockPrefsPatch;
+      try {
+        patch = parseClockPatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof ClockPatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      try {
+        options.clock.update(patch);
+      } catch (err) {
+        throw new HttpError(500, `時鐘設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }

@@ -1610,3 +1610,156 @@ body[data-memories="showing"] #brain {
 .memories-google h4 { margin: 0 0 4px; font-size: 13px; }
 .memories-google-pick img { display: block; width: 200px; height: 200px; border-radius: 8px; }
 .memories-google-pick code { word-break: break-all; user-select: all; }
+
+/* ───── CLK-1 右上角時鐘與天氣（George 2026-11-07）：被動讀數，不能點；回憶模式時在照片上方加深色底 ───── */
+
+.clock-corner {
+  --clock-date-size: clamp(0.85rem, 1.6vh, 1.15rem);
+  position: fixed;
+  /* 內距 8px／12px 讓回憶模式的深色底不改變文字位置 */
+  top: calc(max(14px, 2vh) - 8px);
+  right: calc(max(16px, 1.6vw) - 12px);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35vh;
+  min-width: clamp(150px, 12vw, 240px);
+  padding: 8px 12px;
+  border-radius: 14px;
+  background: transparent;
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 400ms ease, background-color 600ms ease;
+}
+body.listening .clock-corner,
+body.has-surface .clock-corner,
+body.has-conversation .clock-corner {
+  opacity: 0.7;
+}
+body[data-memories="showing"] .clock-corner {
+  background: rgba(3, 5, 11, 0.55);
+}
+.clock-time {
+  font-size: clamp(2rem, 4.4vh, 3.6rem);
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: rgba(230, 244, 255, 0.92);
+}
+.clock-date {
+  font-size: var(--clock-date-size);
+  line-height: 1.25;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+.clock-weather {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4em;
+  margin-top: 0.6vh;
+  line-height: 1;
+}
+.clock-weather--in {
+  animation: clock-fade 300ms ease both;
+}
+.clock-icon {
+  display: inline-flex;
+  filter: drop-shadow(0 1px 6px rgba(0, 0, 0, 0.55));
+}
+.clock-icon svg {
+  width: clamp(28px, 4.2vh, 46px);
+  height: clamp(28px, 4.2vh, 46px);
+}
+.clock-temp {
+  font-size: clamp(1.25rem, 2.6vh, 1.9rem);
+  font-weight: 400;
+  color: var(--text);
+}
+.clock-cond {
+  font-size: var(--clock-date-size);
+  color: rgba(230, 244, 255, 0.82);
+}
+.clock-detail,
+.clock-age,
+.clock-note {
+  font-size: calc(var(--clock-date-size) * 0.9);
+  line-height: 1.3;
+  color: var(--muted);
+}
+.clock-age {
+  opacity: 0.85;
+}
+/* 語音狀態膠囊排在時鐘下方；置中的提示不壓到時鐘（--clock-h、--clock-reserve 由 src/clock-corner.ts 量測） */
+body.has-clock .voice-pill {
+  top: calc(var(--clock-h, 14px) + 8px);
+  right: max(16px, 1.6vw);
+}
+body.has-clock .presence-notice-root {
+  max-width: min(560px, 92vw, calc(100vw - 2 * var(--clock-reserve, 0px)));
+}
+body.has-clock .region-activity {
+  width: min(90vw, 760px, calc(100vw - 2 * var(--clock-reserve, 0px)));
+}
+@keyframes clock-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+/* 小畫面：時間與日期同一行，天氣只留圖示與氣溫，寬度不超過 180px */
+@media (max-width: 900px), (max-height: 600px) {
+  .clock-corner {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    align-items: baseline;
+    column-gap: 0.5em;
+    min-width: 0;
+    max-width: 180px;
+  }
+  .clock-time {
+    font-size: 1.5rem;
+  }
+  .clock-date {
+    font-size: 0.8rem;
+  }
+  .clock-weather,
+  .clock-note {
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+  .clock-weather {
+    margin-top: 0;
+  }
+  .clock-cond,
+  .clock-detail,
+  .clock-age {
+    display: none;
+  }
+  .clock-icon svg {
+    width: 24px;
+    height: 24px;
+  }
+  .clock-temp {
+    font-size: 1.1rem;
+  }
+  .clock-note {
+    font-size: 0.75rem;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .clock-corner {
+    transition: none;
+  }
+  .clock-weather--in {
+    animation: none;
+  }
+}
