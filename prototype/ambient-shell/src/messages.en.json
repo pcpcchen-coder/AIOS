@@ -970,6 +970,7 @@
   "目前：WebGL": "Current: WebGL",
   "目前：一般繪製（Canvas）": "Current: standard drawing (Canvas)",
   "此裝置沒有硬體 WebGL，已改用一般繪製": "This device has no hardware WebGL; using standard drawing instead",
+  "WebGL 初始化失敗，已改用一般繪製": "WebGL failed to start; using standard drawing instead",
   "WebGL 中斷，這次開啟期間改用一般繪製": "WebGL stopped working; using standard drawing until the page is reopened",
   "完整": "Full",
   "平衡": "Balanced",

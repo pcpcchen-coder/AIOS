@@ -82,7 +82,7 @@ function insideEllipsoid(x: number, y: number, z: number, p: Part): boolean {
 }
 
 /** 繪製方式的實際狀態：requested 是設定、active 是真的在用的；fallback 說明為什麼沒用 WebGL。 */
-export type RendererFallback = "unavailable" | "context-lost";
+export type RendererFallback = "unavailable" | "setup-failed" | "context-lost";
 export interface RendererStatus {
   requested: RendererKind;
   active: RendererKind;
@@ -310,7 +310,7 @@ export class Brain {
 
   /**
    * 「使用 GPU 繪製（WebGL）」：立即切換，不重新載入。WebGL 畫在另一張插在原畫布下方的畫布上，原畫布改當區名的透明疊層
-   * （一張畫布不能同時有 2D 與 WebGL）。建立失敗（沒有硬體 WebGL、只有軟體）或中斷後，這次開啟的其餘時間都用 Canvas。
+   * （一張畫布不能同時有 2D 與 WebGL）。建立失敗（沒有硬體 WebGL、只有軟體、著色器或緩衝區建立失敗）或中斷後，這次開啟的其餘時間都用 Canvas。
    * allowSoftware 只給量測腳本用（無頭 Chromium 只有 SwiftShader 軟體 WebGL）。
    */
   setRendererPreference(gpu: boolean, options: { allowSoftware?: boolean } = {}): RendererStatus {
@@ -337,7 +337,7 @@ export class Brain {
     if (want === "webgl") {
       const result = createWebGLRenderer(this.canvas, this.ctx, { allowSoftware: this.allowSoftwareGL, onContextLost: () => this.blockWebGL("context-lost", "webglcontextlost") });
       if (result.ok) this.renderer = result.renderer;
-      else this.webglBlocked = { reason: "unavailable", detail: result.reason };
+      else this.webglBlocked = { reason: result.fallback, detail: result.reason };
     }
     this.resize();
     this.frameSamples = [];

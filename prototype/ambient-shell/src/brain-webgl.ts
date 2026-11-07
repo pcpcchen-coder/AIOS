@@ -6,7 +6,7 @@ import { clearCanvas, drawRegionLabels, sizeCanvas, type BrainRenderer } from ".
 // 電子腦的 WebGL 1 繪製（方案 B；docs/validation/brain-webgl-2026-11-07.md）。輸入和 Canvas 版相同（BrainFrame），
 // 顏色、透明度、大小都照 Canvas 版；不求逐像素相同。粒子、光暈與光脈衝是 point sprite，連線是 GL_LINES，
 // 中心與腦區光暈、各種光環是畫在方形上的著色器。相加合成（ONE, ONE）對應 Canvas 的 lighter。
-// 每格的頂點資料寫進預先配置的 Float32Array，以 bufferSubData 上傳整個陣列（WebGL 1 不能只傳一段而不建立新的 view）。
+// 每格的頂點資料寫進預先配置的 Float32Array，以 bufferSubData 只上傳這格用到的那段（subarray，每格一個小 view，不複製資料）。
 // 區名照舊用 Canvas 的 drawRegionLabels，畫在疊在上面的透明 2D 畫布（原本的 #brain）。
 
 export const WEBGL_CONTEXT_ATTRIBUTES: WebGLContextAttributes = {
@@ -28,7 +28,9 @@ export interface WebGLRendererOptions {
   onContextLost?: () => void;
 }
 
-export type WebGLRendererResult = { ok: true; renderer: WebGLBrainRenderer } | { ok: false; reason: string };
+/** unavailable：沒有 context 或只有軟體 WebGL；setup-failed：有硬體 WebGL，但著色器、程式連結或緩衝區建立失敗。 */
+export type WebGLFailure = "unavailable" | "setup-failed";
+export type WebGLRendererResult = { ok: true; renderer: WebGLBrainRenderer } | { ok: false; fallback: WebGLFailure; reason: string };
 
 export function createWebGLRenderer(overlay: HTMLCanvasElement, overlayCtx: CanvasRenderingContext2D, options: WebGLRendererOptions = {}): WebGLRendererResult {
   const canvas = document.createElement("canvas");
@@ -38,18 +40,18 @@ export function createWebGLRenderer(overlay: HTMLCanvasElement, overlayCtx: Canv
   } catch {
     gl = null;
   }
-  if (!gl) return { ok: false, reason: "WebGL context refused (no hardware WebGL, or major performance caveat)" };
+  if (!gl) return { ok: false, fallback: "unavailable", reason: "WebGL context refused (no hardware WebGL, or major performance caveat)" };
   const name = rendererName(gl);
   if (!options.allowSoftware && name && SOFTWARE_RENDERER.test(name)) {
     gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return { ok: false, reason: `software WebGL renderer: ${name}` };
+    return { ok: false, fallback: "unavailable", reason: `software WebGL renderer: ${name}` };
   }
   let renderer: WebGLBrainRenderer;
   try {
     renderer = new WebGLBrainRenderer(canvas, gl, overlay, overlayCtx, options.onContextLost ?? null);
   } catch (error) {
     gl.getExtension("WEBGL_lose_context")?.loseContext();
-    return { ok: false, reason: `WebGL setup failed: ${error instanceof Error ? error.message : String(error)}` };
+    return { ok: false, fallback: "setup-failed", reason: `WebGL setup failed: ${error instanceof Error ? error.message : String(error)}` };
   }
   canvas.className = "brain-gl";
   canvas.setAttribute("aria-hidden", "true");
@@ -115,34 +117,35 @@ const LINE_FS = `${HIGHP}
 varying vec4 v_color;
 void main() { gl_FragColor = vec4(v_color.rgb * v_color.a, v_color.a); }`;
 
+// 片段著色器只拿到相對中心的座標（v_rel），不宣告頂點著色器的 uniform：兩邊共用的 uniform 精度必須相同，
+// 而頂點著色器預設 highp、片段著色器在不支援 highp 的 GPU 上只有 mediump，共用會讓程式連結失敗。
 const QUAD_VS = `
 attribute vec2 a_corner;
 uniform vec2 u_res;
 uniform vec2 u_center;
 uniform float u_extent;
-varying vec2 v_pos;
+varying vec2 v_rel;
 void main() {
-  v_pos = u_center + a_corner * u_extent;
-  gl_Position = vec4(v_pos.x / u_res.x * 2.0 - 1.0, 1.0 - v_pos.y / u_res.y * 2.0, 0.0, 1.0);
+  v_rel = a_corner * u_extent;
+  vec2 pos = u_center + v_rel;
+  gl_Position = vec4(pos.x / u_res.x * 2.0 - 1.0, 1.0 - pos.y / u_res.y * 2.0, 0.0, 1.0);
 }`;
 
 // 徑向漸層：0 → u_c0、u_stop → u_c1、1 → 透明（未預乘內插，和 Canvas 漸層到 rgba(0,0,0,0) 相同）。
 const GLOW_FS = `${HIGHP}
-uniform vec2 u_center;
 uniform float u_radius;
 uniform vec4 u_c0;
 uniform vec4 u_c1;
 uniform float u_stop;
-varying vec2 v_pos;
+varying vec2 v_rel;
 void main() {
-  float t = length(v_pos - u_center) / u_radius;
+  float t = length(v_rel) / u_radius;
   vec4 c = t >= 1.0 ? vec4(0.0) : t < u_stop ? mix(u_c0, u_c1, t / u_stop) : mix(u_c1, vec4(0.0), (t - u_stop) / (1.0 - u_stop));
   gl_FragColor = vec4(c.rgb * c.a, c.a);
 }`;
 
-// 圓環：線寬、虛線、圓弧（圓頭）、對角線漸層與 shadowBlur 的近似（高斯衰減）。
+// 圓環：線寬、虛線、圓弧（圓頭）、對角線漸層與 shadowBlur 的近似（高斯衰減）。u_grad 是相對中心的漸層起訖點。
 const RING_FS = `${HIGHP}
-uniform vec2 u_center;
 uniform float u_radius;
 uniform float u_width;
 uniform float u_aa;
@@ -154,10 +157,10 @@ uniform vec4 u_shadow;
 uniform float u_blur;
 uniform vec3 u_dash;
 uniform vec2 u_arc;
-varying vec2 v_pos;
+varying vec2 v_rel;
 const float TAU = 6.2831853;
 void main() {
-  vec2 p = v_pos - u_center;
+  vec2 p = v_rel;
   float ang = mod(atan(p.y, p.x), TAU);
   float d = abs(length(p) - u_radius);
   if (u_arc.y < TAU && mod(ang - u_arc.x, TAU) > u_arc.y) {
@@ -171,7 +174,7 @@ void main() {
   vec4 col = u_color;
   if (u_gradient > 0.5) {
     vec2 g = u_grad.zw - u_grad.xy;
-    col = mix(u_color, u_color2, clamp(dot(v_pos - u_grad.xy, g) / dot(g, g), 0.0, 1.0));
+    col = mix(u_color, u_color2, clamp(dot(p - u_grad.xy, g) / dot(g, g), 0.0, 1.0));
   }
   float a = col.a * cov;
   vec4 stroke = vec4(col.rgb * a, a);
@@ -183,6 +186,14 @@ void main() {
   }
   gl_FragColor = stroke + vec4(u_shadow.rgb * sh, sh) * (1.0 - stroke.a);
 }`;
+
+/** 每個 GL 程式的頂點／片段著色器原始碼（測試檢查兩邊共用的 uniform 精度一致）。 */
+export const SHADER_PROGRAMS = {
+  points: { vs: POINT_VS, fs: POINT_FS },
+  lines: { vs: LINE_VS, fs: LINE_FS },
+  glow: { vs: QUAD_VS, fs: GLOW_FS },
+  ring: { vs: QUAD_VS, fs: RING_FS },
+} as const;
 
 type Uniforms = Record<string, WebGLUniformLocation | null>;
 interface Program {
@@ -353,9 +364,9 @@ export class WebGLBrainRenderer implements BrainRenderer {
     }
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this.pointBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, pts);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, pts.subarray(0, pv));
     gl.bindBuffer(gl.ARRAY_BUFFER, this.lineBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, ln);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, ln.subarray(0, lv));
 
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -513,16 +524,27 @@ export class WebGLBrainRenderer implements BrainRenderer {
     const to = o.gradientTo ?? color;
     gl.uniform4f(u.u_color2, (to[0] | 0) / 255, (to[1] | 0) / 255, (to[2] | 0) / 255, alpha);
     gl.uniform1f(u.u_gradient, o.gradientTo ? 1 : 0);
-    gl.uniform4f(u.u_grad, f.cx - radius, f.cy - radius, f.cx + radius, f.cy + radius);
+    gl.uniform4f(u.u_grad, -radius, -radius, radius, radius);
     gl.uniform4f(u.u_shadow, (color[0] | 0) / 255, (color[1] | 0) / 255, (color[2] | 0) / 255, o.shadowAlpha ?? 0);
     gl.uniform1f(u.u_blur, blur);
-    gl.uniform3f(u.u_dash, o.dash?.[0] ?? 0, o.dash?.[1] ?? 0, o.dashOffset ?? 0);
+    const dash = o.dash?.[0] ?? 0;
+    const gap = o.dash?.[1] ?? 0;
+    gl.uniform3f(u.u_dash, dash, gap, wrapDashOffset(o.dashOffset ?? 0, dash + gap));
     gl.uniform2f(u.u_arc, o.arc ? ((o.arc[0] % TAU) + TAU) % TAU : 0, o.arc ? o.arc[1] : TAU);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 }
 
 const WHITE: RGB = [255, 255, 255];
+
+/**
+ * 虛線偏移取一個週期內的值：圖樣相同，但偏移隨時間無限增大，以 float32 傳進著色器後，開機幾天就只剩整數甚至更粗的精度，虛線會跳動。
+ */
+export function wrapDashOffset(offset: number, period: number): number {
+  if (!(period > 0) || !Number.isFinite(offset)) return 0;
+  const r = offset % period;
+  return r < 0 ? r + period : r;
+}
 
 /** GL 線固定 1 個裝置像素寬：以透明度補回 Canvas 線寬（CSS 像素 × 裝置像素比）的亮度。 */
 function lineAlpha(alpha: number, cssWidth: number, dpr: number): number {

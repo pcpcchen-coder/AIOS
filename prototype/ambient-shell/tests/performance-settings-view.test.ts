@@ -54,7 +54,7 @@ function actions() {
   };
 }
 
-type Renderer = { active: "canvas" | "webgl"; fallback: "unavailable" | "context-lost" | null };
+type Renderer = { active: "canvas" | "webgl"; fallback: "unavailable" | "setup-failed" | "context-lost" | null };
 function section(desktop: boolean, a = actions(), stats: { fps: number; drawMs: number } | null = null, gpu?: { on: boolean; renderer: Renderer | null }) {
   const performance = { profile: "balanced" as const, stats, ...(gpu ? { gpu: gpu.on, renderer: gpu.renderer } : {}) };
   const root = views.renderSettings(settings, null, a, { desktop, performance }) as unknown as El;
@@ -110,6 +110,7 @@ describe.each([false, true])("GPU drawing switch (desktop=%s)", (desktop) => {
   it.each([
     [true, { active: "webgl", fallback: null }, "目前：WebGL", "Current: WebGL"],
     [true, { active: "canvas", fallback: "unavailable" }, "此裝置沒有硬體 WebGL，已改用一般繪製", "This device has no hardware WebGL; using standard drawing instead"],
+    [true, { active: "canvas", fallback: "setup-failed" }, "WebGL 初始化失敗，已改用一般繪製", "WebGL failed to start; using standard drawing instead"],
     [true, { active: "canvas", fallback: "context-lost" }, "WebGL 中斷，這次開啟期間改用一般繪製", "WebGL stopped working; using standard drawing until the page is reopened"],
     [false, { active: "canvas", fallback: null }, "目前：一般繪製（Canvas）", "Current: standard drawing (Canvas)"],
   ] as const)("on=%s shows the honest readout %#", (on, state, zh, en) => {

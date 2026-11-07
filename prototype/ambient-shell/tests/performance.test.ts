@@ -130,6 +130,7 @@ describe("GPU drawing (WebGL) switch", () => {
     expect(rendererText({ active: "canvas", fallback: null })).toBe("目前：一般繪製（Canvas）");
     expect(rendererText({ active: "webgl", fallback: null })).toBe("目前：WebGL");
     expect(rendererText({ active: "canvas", fallback: "unavailable" })).toBe("此裝置沒有硬體 WebGL，已改用一般繪製");
+    expect(rendererText({ active: "canvas", fallback: "setup-failed" })).toBe("WebGL 初始化失敗，已改用一般繪製");
     expect(rendererText({ active: "canvas", fallback: "context-lost" })).toBe("WebGL 中斷，這次開啟期間改用一般繪製");
   });
 });

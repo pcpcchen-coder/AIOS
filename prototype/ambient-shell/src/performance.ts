@@ -61,6 +61,7 @@ export const PERFORMANCE_TEXT = {
     webgl: "目前：WebGL",
     canvas: "目前：一般繪製（Canvas）",
     unavailable: "此裝置沒有硬體 WebGL，已改用一般繪製",
+    setupFailed: "WebGL 初始化失敗，已改用一般繪製",
     contextLost: "WebGL 中斷，這次開啟期間改用一般繪製",
   },
 } as const;
@@ -126,7 +127,7 @@ export function saveGpuDrawing(on: boolean, storage: ProfileStorage | null = pag
 /** 繪製方式的實際狀態（Brain.rendererStatus 的子集；放在這裡讓設定頁不必 import brain.ts）。 */
 export interface RendererReadout {
   active: "canvas" | "webgl";
-  fallback: "unavailable" | "context-lost" | null;
+  fallback: "unavailable" | "setup-failed" | "context-lost" | null;
 }
 
 /** 設定頁的「目前」狀態列：照實說真的在用哪一種；開了開關卻沒用上 WebGL 時說原因。 */
@@ -134,6 +135,7 @@ export function rendererText(status: RendererReadout | null): string {
   if (!status) return PERFORMANCE_TEXT.renderer.canvas;
   if (status.active === "webgl") return PERFORMANCE_TEXT.renderer.webgl;
   if (status.fallback === "unavailable") return PERFORMANCE_TEXT.renderer.unavailable;
+  if (status.fallback === "setup-failed") return PERFORMANCE_TEXT.renderer.setupFailed;
   if (status.fallback === "context-lost") return PERFORMANCE_TEXT.renderer.contextLost;
   return PERFORMANCE_TEXT.renderer.canvas;
 }

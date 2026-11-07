@@ -1,10 +1,11 @@
 // 方案 B：電子腦的 WebGL 繪製（src/brain-webgl.ts）。用假的 WebGL context 記錄呼叫，不需要真的 GPU。
 // 檢查：每格畫粒子、連線、光脈衝；上傳不超過預先配置的大小、每格不重新配置；遵守效能設定；
-// 建立失敗、只有軟體 WebGL、context lost 時自動改回 Canvas 並照實回報；區名畫在上層的 2D 畫布。
+// 建立失敗、只有軟體 WebGL、context lost 時自動改回 Canvas 並照實回報；區名畫在上層的 2D 畫布；
+// 著色器兩邊共用的 uniform 精度一致；長時間執行後虛線偏移仍在一個週期內。
 import { afterEach, expect, it, vi } from "vitest";
 import { Brain, type BrainVisualState } from "../src/brain.ts";
 import { RENDER_BUDGETS } from "../src/performance.ts";
-import { MAX_PULSES, WEBGL_CONTEXT_ATTRIBUTES, type WebGLBrainRenderer } from "../src/brain-webgl.ts";
+import { MAX_PULSES, SHADER_PROGRAMS, WEBGL_CONTEXT_ATTRIBUTES, wrapDashOffset, type WebGLBrainRenderer } from "../src/brain-webgl.ts";
 import { activityDescription, type RegionActivity } from "../src/region-activity.ts";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -14,7 +15,9 @@ const activity: RegionActivity[] = [{ domain: "language", source: "tts", owner: 
 
 type Call = { name: string; args: unknown[] };
 
-function fakeGL(opts: { rendererName?: string }) {
+type SetupFailure = "shader" | "link" | "buffer";
+
+function fakeGL(opts: { rendererName?: string; fail?: SetupFailure }) {
   const calls: Call[] = [];
   const allocated = new Map<unknown, number>();
   let bound: unknown = null;
@@ -25,9 +28,11 @@ function fakeGL(opts: { rendererName?: string }) {
       return null;
     },
     getParameter: (p: string) => (p === "ALIASED_POINT_SIZE_RANGE" ? new Float32Array([1, 256]) : opts.rendererName ?? "Fake GPU"),
-    getShaderParameter: () => true,
-    getProgramParameter: () => true,
-    createBuffer: () => ({ buffer: calls.length }),
+    getShaderParameter: () => opts.fail !== "shader",
+    getShaderInfoLog: () => "ERROR: 0:1: precision mismatch",
+    getProgramParameter: () => opts.fail !== "link",
+    getProgramInfoLog: () => "uniform precision mismatch",
+    createBuffer: () => (opts.fail === "buffer" ? null : { buffer: calls.length }),
     createProgram: () => ({}),
     createShader: () => ({}),
     getUniformLocation: (_p: unknown, name: string) => ({ name }),
@@ -50,7 +55,7 @@ function fakeGL(opts: { rendererName?: string }) {
   return { gl, calls };
 }
 
-function setup(opts: { webgl?: "ok" | "refuse" | "software" | "throw"; devicePixelRatio?: number } = {}) {
+function setup(opts: { webgl?: "ok" | "refuse" | "software" | "throw" | SetupFailure; devicePixelRatio?: number } = {}) {
   let nextFrame: FrameRequestCallback = () => {};
   let now = 0;
   const text: string[] = [];
@@ -80,7 +85,8 @@ function setup(opts: { webgl?: "ok" | "refuse" | "software" | "throw"; devicePix
         attributes.push(attrs);
         if (opts.webgl === "refuse") return null;
         if (opts.webgl === "throw") throw new Error("boom");
-        const fake = fakeGL({ rendererName: opts.webgl === "software" ? "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)" : undefined });
+        const fail = opts.webgl === "shader" || opts.webgl === "link" || opts.webgl === "buffer" ? opts.webgl : undefined;
+        const fake = fakeGL({ rendererName: opts.webgl === "software" ? "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero)), SwiftShader driver)" : undefined, fail });
         gls.push(fake);
         glCanvases.push(element);
         return fake.gl;
@@ -111,7 +117,7 @@ function setup(opts: { webgl?: "ok" | "refuse" | "software" | "throw"; devicePix
     }
     return ticks;
   };
-  const internal = brain as unknown as { renderer: WebGLBrainRenderer & { kind: string }; pulses: unknown[]; nodes: unknown[]; edges: unknown[] };
+  const internal = brain as unknown as { renderer: WebGLBrainRenderer & { kind: string }; pulses: unknown[]; nodes: unknown[]; edges: unknown[]; time: number };
   return { brain, canvas, run, gls, glCanvases, inserted, attributes, internal, text, counts: { get particles() { return particles; }, reset() { particles = 0; } } };
 }
 
@@ -164,7 +170,7 @@ it("every frame draws all particles, every connection and the live pulses with a
   expect(counts.pulses).toBeGreaterThan(0);
 });
 
-it("uploads fit the preallocated buffers and nothing is reallocated per frame", () => {
+it("uploads only the used part, within the preallocated buffers, and nothing is reallocated per frame", () => {
   const t = setup({ webgl: "ok" });
   t.brain.setRendererPreference(true);
   t.brain.setState({ ...idle, activity });
@@ -175,17 +181,24 @@ it("uploads fit the preallocated buffers and nothing is reallocated per frame", 
   const uploads = calls.filter((c) => c.name === "bufferSubData");
   expect(allocations).toBe(3); // 方形（靜態）、點、線各一次
   expect(uploads.length).toBeGreaterThan(0);
-  const arrays = new Set<unknown>();
+  const backing = new Set<ArrayBufferLike>();
   for (const call of uploads) {
     const [, offset, data, capacity] = call.args as [unknown, number, Float32Array, number];
     expect(offset).toBe(0);
     expect(data.byteLength).toBeLessThanOrEqual(capacity);
-    arrays.add(data);
+    backing.add(data.buffer);
   }
   t.run(1000);
   expect(calls.filter((c) => c.name === "bufferData").length).toBe(allocations);
-  for (const call of calls.filter((c) => c.name === "bufferSubData")) arrays.add(call.args[2]);
-  expect(arrays.size).toBe(2); // 同兩個 Float32Array 每格重複使用
+  const all = calls.filter((c) => c.name === "bufferSubData");
+  for (const call of all) backing.add((call.args[2] as Float32Array).buffer);
+  expect(backing.size).toBe(2); // 同兩個預先配置的陣列每格重複使用，只是取不同長度的 view
+  const [pointUpload, lineUpload] = all.slice(-2).map((c) => c.args as [unknown, number, Float32Array, number]);
+  const counts = t.internal.renderer.lastCounts;
+  expect(pointUpload[2].length).toBe((counts.nodes + counts.glows + counts.pulses) * 7);
+  expect(pointUpload[2].byteLength).toBeLessThan(pointUpload[3]); // 預留的光脈衝空位沒用到時不上傳
+  expect(lineUpload[2].length).toBe((2 * 96 + counts.edgeVertices + counts.regionEdgeVertices + 2 * counts.pulses) * 6);
+  expect(lineUpload[2].byteLength).toBeLessThanOrEqual(lineUpload[3]);
   expect(t.internal.pulses.length).toBeLessThanOrEqual(MAX_PULSES);
 });
 
@@ -240,25 +253,29 @@ it("active-region labels are drawn on the 2D overlay in WebGL mode", () => {
 });
 
 it.each([
-  ["refuse", /refused/],
-  ["throw", /refused/],
-  ["software", /SwiftShader/],
-] as const)("creation failure (%s) falls back to Canvas, keeps drawing and says why", (mode, detail) => {
+  ["refuse", "unavailable", /refused/],
+  ["throw", "unavailable", /refused/],
+  ["software", "unavailable", /SwiftShader/],
+  ["shader", "setup-failed", /setup failed: compile: .*precision mismatch/],
+  ["link", "setup-failed", /setup failed: link: uniform precision mismatch/],
+  ["buffer", "setup-failed", /setup failed: createBuffer failed/],
+] as const)("creation failure (%s) falls back to Canvas as %s, keeps drawing and says why", (mode, fallback, detail) => {
   const t = setup({ webgl: mode });
   const changes: unknown[] = [];
   t.brain.onRendererChange = (s) => changes.push(s);
   const status = t.brain.setRendererPreference(true);
-  expect(status).toMatchObject({ requested: "webgl", active: "canvas", fallback: "unavailable" });
+  expect(status).toMatchObject({ requested: "webgl", active: "canvas", fallback });
   expect(status.detail).toMatch(detail);
   expect(changes).toEqual([status]);
   expect(t.inserted).toEqual([]);
+  if (fallback === "setup-failed") expect(t.gls[0].calls.filter((c) => c.name === "loseContext")).toHaveLength(1);
   t.counts.reset();
   t.run(500);
   expect(t.counts.particles).toBeGreaterThan(0); // Canvas 照畫，不會空白
   // 這次開啟期間不再嘗試；關掉再開仍是 Canvas
   t.brain.setRendererPreference(false);
   expect(t.brain.rendererStatus()).toMatchObject({ active: "canvas", fallback: null });
-  expect(t.brain.setRendererPreference(true)).toMatchObject({ active: "canvas", fallback: "unavailable" });
+  expect(t.brain.setRendererPreference(true)).toMatchObject({ active: "canvas", fallback });
 });
 
 it("context loss switches to Canvas for the rest of the session and reports it", () => {
@@ -304,4 +321,55 @@ it("the default is Canvas and nothing touches WebGL until the switch is on", () 
   t.run(300);
   expect(t.brain.rendererStatus()).toEqual({ requested: "canvas", active: "canvas", fallback: null, detail: null });
   expect(t.attributes).toEqual([]);
+});
+
+/** 一個著色器裡每個 uniform 的精度：明寫的修飾字，否則是該階段 float 的預設（頂點 highp；片段看 precision 敘述）。 */
+function uniformPrecisions(source: string, stage: "vertex" | "fragment"): Map<string, string> {
+  const fragmentDefault = /#ifdef GL_FRAGMENT_PRECISION_HIGH\s+precision highp float;\s+#else\s+precision mediump float;\s+#endif/.test(source)
+    ? "highp-if-supported"
+    : /precision (\w+) float;/.exec(source)?.[1] ?? "none";
+  const out = new Map<string, string>();
+  for (const m of source.matchAll(/^\s*uniform\s+(?:(lowp|mediump|highp)\s+)?\w+\s+(\w+)\s*;/gm)) {
+    out.set(m[2], m[1] ?? (stage === "vertex" ? "highp" : fragmentDefault));
+  }
+  return out;
+}
+
+it.each(Object.entries(SHADER_PROGRAMS))("%s: uniforms used by both shader stages have the same precision (else link fails without fragment highp)", (_name, { vs, fs }) => {
+  const vertex = uniformPrecisions(vs, "vertex");
+  const fragment = uniformPrecisions(fs, "fragment");
+  expect(vertex.size + fragment.size).toBeGreaterThan(0);
+  for (const [name, precision] of fragment) {
+    if (vertex.has(name)) expect({ name, precision }).toEqual({ name, precision: vertex.get(name) });
+  }
+});
+
+it("the precision check catches a uniform shared with the vertex stage's default highp", () => {
+  const vs = "uniform vec2 u_center;\nvoid main() {}";
+  const fs = "#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\nuniform vec2 u_center;\nvoid main() {}";
+  expect(uniformPrecisions(vs, "vertex").get("u_center")).toBe("highp");
+  expect(uniformPrecisions(fs, "fragment").get("u_center")).toBe("highp-if-supported");
+});
+
+it("the connecting ring's dash offset stays within one dash period after days of uptime", () => {
+  expect(wrapDashOffset(-7.5, 10)).toBeCloseTo(2.5);
+  expect(wrapDashOffset(25, 10)).toBeCloseTo(5);
+  expect(wrapDashOffset(5, 0)).toBe(0);
+  const t = setup({ webgl: "ok" });
+  t.brain.setRendererPreference(true);
+  t.brain.setState({ ...idle, voice: "connecting" });
+  t.run(500);
+  t.internal.time = 30 * 24 * 3600; // 開機一個月
+  const { calls } = t.gls[0];
+  calls.length = 0;
+  t.run(200);
+  const dashes = calls.filter((c) => c.name === "uniform3f" && (c.args[0] as { name: string }).name === "u_dash").map((c) => c.args.slice(1) as number[]).filter(([dash]) => dash > 0);
+  expect(dashes.length).toBeGreaterThan(0);
+  for (const [dash, gap, offset] of dashes) {
+    expect(offset).toBeGreaterThanOrEqual(0);
+    expect(offset).toBeLessThan(dash + gap);
+    expect(Math.fround(offset)).toBeCloseTo(offset, 3); // float32 下仍保有小數精度
+  }
+  const raw = (t.brain as unknown as { frame: { connectDashOffset: number } }).frame.connectDashOffset;
+  expect(Math.abs(raw)).toBeGreaterThan(1e6); // 原值很大，是傳給著色器前才取週期內的值
 });

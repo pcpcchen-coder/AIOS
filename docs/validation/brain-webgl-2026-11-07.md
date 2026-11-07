@@ -35,7 +35,9 @@ Canvas 版和 main 逐像素相同：`scripts/bench-brain.mjs --baseline origin/
 - 軌道：`GL_LINE_LOOP`（96 段的橢圓）。
 - 中心光暈、腦區光暈、聆聽／通話光環、連線中虛線環、處理中波紋、進度環：畫在方形上的著色器（徑向漸層；圓環含虛線、圓頭與對角漸層；聆聽光環的 `shadowBlur` 以高斯衰減近似）。
 - 合成：中心光暈、軌道與光環用一般疊加（`ONE, ONE_MINUS_SRC_ALPHA`）；腦區光暈、連線、粒子、光脈衝用相加（`ONE, ONE`），對應 Canvas 的 `lighter`。
-- 每格的頂點寫進建腦後配置一次的兩個 `Float32Array`（點與線），以 `bufferSubData` 上傳整個陣列；每格不建立新的陣列或 buffer。WebGL 1 不能只上傳其中一段而不建立新的 view，所以整段上傳（點約 29 KB、線約 141 KB）。
+- 每格的頂點寫進建腦後配置一次的兩個 `Float32Array`（點與線；容量約 29 KB 與 141 KB），以 `bufferSubData` 只上傳這格用到的那段（`subarray(0, 用到的長度)`，每格兩個不複製資料的小 view）；每格不建立新的陣列或 buffer。量測情境完整模式第 120 格依計數換算約上傳 23 KB 與 86 KB。
+- 頂點與片段著色器之間不共用 uniform：片段著色器只拿到相對中心的座標。頂點著色器的 uniform 預設 highp，片段著色器在不支援 highp 的 GPU 上是 mediump，兩邊共用的 uniform 精度不同會讓程式連結失敗。
+- 連線中虛線環的虛線偏移在 JavaScript 先取一個週期（虛線＋間隔）內的值才交給著色器：原值隨時間無限增大，以 float32 傳進去，開機幾天後精度不足會讓虛線跳動。Canvas 版仍用原值。
 - 效能設定一樣生效：每秒格數上限、解析度上限（GL 畫布與區名疊層同解析度）、光脈衝上限、簡化光暈（粒子光暈減半、光點縮小）、聆聽光環不模糊。
 - 區名：WebGL 畫布插在原本的 `#brain` 畫布下方，`#brain` 改當透明的 2D 疊層，用同一個 `drawRegionLabels` 畫區名，仍接收點擊。沒有區名、上一格也沒有時不清這張畫布。
 
@@ -45,10 +47,10 @@ Canvas 版和 main 逐像素相同：`scripts/bench-brain.mjs --baseline origin/
 
 1. 建立 WebGL context 失敗（沒有硬體 WebGL，或瀏覽器回報 major performance caveat）→ 改用 Canvas。
 2. 拿到的是軟體 WebGL（renderer 名稱含 SwiftShader、llvmpipe、softpipe）→ 視為沒有硬體 WebGL，改用 Canvas。
-3. 著色器編譯或連結失敗 → 改用 Canvas。
-4. 執行中觸發 `webglcontextlost` → 立刻改用 Canvas。
+3. 有硬體 WebGL，但著色器編譯、程式連結或建立緩衝區失敗 → 改用 Canvas，「目前」一行說「WebGL 初始化失敗」，不說沒有硬體 WebGL。
+4. 執行中觸發 `webglcontextlost` → 改用 Canvas。
 
-改回後這次開啟頁面期間都用 Canvas（關掉再打開開關也一樣），重新整理頁面才再試。不會留下空白的電子腦：改回時同一格就換成 Canvas 繼續畫。原因寫在 console（`[brain] WebGL 不可用，改用 Canvas：…`）。
+改回後這次開啟頁面期間都用 Canvas（關掉再打開開關也一樣），重新整理頁面才再試；任何 context lost（包括 GPU 短暫重設後瀏覽器本來可以恢復的情況）都一樣，WebGL 要重新開啟頁面才會再用。`webglcontextlost` 觸發後的下一格就用 Canvas 畫；但事件送到之前，可能有一兩格是空白的。原因寫在 console（`[brain] WebGL 不可用，改用 Canvas：…`）。
 
 ### 設定與狀態
 
@@ -62,7 +64,8 @@ Canvas 版和 main 逐像素相同：`scripts/bench-brain.mjs --baseline origin/
 |---|---|---|
 | 用 WebGL | 目前：WebGL | Current: WebGL |
 | 開關關閉 | 目前：一般繪製（Canvas） | Current: standard drawing (Canvas) |
-| 開了但沒有硬體 WebGL | 此裝置沒有硬體 WebGL，已改用一般繪製 | This device has no hardware WebGL; using standard drawing instead |
+| 開了但沒有硬體 WebGL（拿不到 context，或只有軟體 WebGL） | 此裝置沒有硬體 WebGL，已改用一般繪製 | This device has no hardware WebGL; using standard drawing instead |
+| 開了、有 WebGL，但著色器、連結或緩衝區建立失敗 | WebGL 初始化失敗，已改用一般繪製 | WebGL failed to start; using standard drawing instead |
 | 執行中 WebGL 中斷 | WebGL 中斷，這次開啟期間改用一般繪製 | WebGL stopped working; using standard drawing until the page is reopened |
 
 - 開關說明：「預設關閉。和上面的設定可以一起用；這台裝置沒有硬體 WebGL 或 WebGL 中斷時，自動改回一般繪製。」
@@ -137,16 +140,16 @@ node scripts/bench-brain.mjs --skip-bench --baseline origin/main
 
 | 檢查 | 結果 |
 |---|---|
-| `tests/brain-webgl.test.ts`（新，15 項，假的 WebGL context 記錄呼叫） | 要求 WebGL 1、`premultipliedAlpha`、不反鋸齒、拒絕 major performance caveat；GL 畫布插在原畫布下方；每格畫 775 個粒子、所有連線、兩條軌道與光脈衝，並用相加合成；上傳不超過預先配置的大小、配置只有 3 次、每格重複使用同兩個陣列；完整／平衡／省電的每秒格數、解析度與光脈衝上限；省電的粒子光暈較少、平衡與省電的光環不模糊；區名畫在疊層、腦區暗下後不畫；建立失敗、丟例外、軟體 renderer 都改回 Canvas、照畫並說原因，這次開啟期間不再試；context lost 改回 Canvas、不再呼叫 `loseContext`；關掉開關移除 GL 畫布並釋放 context；預設不碰 WebGL |
-| `tests/performance.test.ts`（新增 5 項） | 開關預設關閉、每台裝置保存、和三檔分開；舊的 `nous.performance.v1` 不必遷移；不合法的值與壞掉的儲存都視為關閉；「目前」一行的四種文字；`src/brain-webgl.ts` 的 import 不碰收音、播放、即時語音等模組 |
-| `tests/performance-settings-view.test.ts`（新增 13 項） | 瀏覽器版與 App 版都畫開關，中英文、`aria-pressed`、`aria-label`；四種狀態的「目前」文字；點擊要求相反狀態；`refreshPerformanceReadout` 更新「目前」一行；新字串都有英文翻譯 |
+| `tests/brain-webgl.test.ts`（新，24 項，假的 WebGL context 記錄呼叫） | 要求 WebGL 1、`premultipliedAlpha`、不反鋸齒、拒絕 major performance caveat；GL 畫布插在原畫布下方；每格畫 775 個粒子、所有連線、兩條軌道與光脈衝，並用相加合成；只上傳用到的長度、不超過預先配置的大小、配置只有 3 次、每格重複使用同兩個陣列；四個 GL 程式的兩階段共用 uniform 精度一致（解析著色器原始碼）；開機一個月後虛線偏移仍在一個週期內；完整／平衡／省電的每秒格數、解析度與光脈衝上限；省電的粒子光暈較少、平衡與省電的光環不模糊；區名畫在疊層、腦區暗下後不畫；建立失敗、丟例外、軟體 renderer 改回 Canvas 並回報沒有硬體 WebGL，著色器編譯、連結、建立緩衝區失敗改回 Canvas 並回報初始化失敗，都照畫並說原因，這次開啟期間不再試；context lost 改回 Canvas、不再呼叫 `loseContext`；關掉開關移除 GL 畫布並釋放 context；預設不碰 WebGL |
+| `tests/performance.test.ts`（新增 5 項） | 開關預設關閉、每台裝置保存、和三檔分開；舊的 `nous.performance.v1` 不必遷移；不合法的值與壞掉的儲存都視為關閉；「目前」一行的五種文字；`src/brain-webgl.ts` 的 import 不碰收音、播放、即時語音等模組 |
+| `tests/performance-settings-view.test.ts`（新增 14 項） | 瀏覽器版與 App 版都畫開關，中英文、`aria-pressed`、`aria-label`；五種狀態的「目前」文字；點擊要求相反狀態；`refreshPerformanceReadout` 更新「目前」一行；新字串都有英文翻譯 |
 | 既有電子腦測試 | `brain-performance`、`brain-regions`、`brain-distance` 不改即通過（Canvas 路徑） |
-| 全部 | `npm run typecheck` 通過；`npx vitest run` 159 個檔案、2921 項通過、5 項略過；`npm run build` 通過 |
+| 全部 | `npm run typecheck` 通過；`npx vitest run` 159 個檔案、2932 項通過、5 項略過；`npm run build` 通過 |
 
 ## 限制
 
 - **沒有在 Pi 的硬體 GPU 上跑過。** Pi 4 的 VideoCore VI 在 Chromium 下是否有硬體 WebGL、填充率是否夠，以及實際每秒格數，都未知。
 - 量測的 WebGL 是 SwiftShader（CPU 上的軟體 GL），而且量測腳本特地放寬了 `failIfMajorPerformanceCaveat`；正式頁面會拒絕軟體 WebGL。這些數字只能比較主執行緒的相對成本，不能推算 Pi 上的毫秒數或 GPU 成本。
-- 和 Canvas 不是逐像素相同：GL 線沒有反鋸齒、固定 1 個裝置像素寬（以透明度補亮度）；聆聽光環的模糊是近似；粒子方塊對齊像素。比對只用粗略指標（亮度格子、亮點比例、腦區亮度），加上人工看截圖。
-- 每格整段上傳頂點資料（約 170 KB），GPU 記憶體頻寬的影響沒有量。
+- 和 Canvas 不是逐像素相同：GL 線沒有反鋸齒、固定 1 個裝置像素寬（以透明度補亮度）；聆聽光環的模糊是近似；粒子方塊對齊像素；區名畫在上層的 2D 疊層，所以 WebGL 模式下區名蓋在聆聽光環與進度環上面（Canvas 版是光環蓋在區名上面）。比對只用粗略指標（亮度格子、亮點比例、腦區亮度），加上人工看截圖。
+- 每格上傳用到的頂點資料（量測情境約 109 KB，最多約 170 KB），GPU 記憶體頻寬的影響沒有量。
 - 沒有測 `webglcontextlost` 在真實瀏覽器裡的觸發，只有單元測試以假的 context 觸發事件。

@@ -40,7 +40,9 @@ The Canvas renderer is pixel-identical to main: `scripts/bench-brain.mjs --basel
 - Orbits: `GL_LINE_LOOP` (96-segment ellipses).
 - Central glow, region glows, listening/call ring, connecting dashed ring, processing ripples and progress ring: shaders on quads (radial gradient; rings with dashes, round caps and the diagonal gradient; the listening ring's `shadowBlur` approximated by a Gaussian falloff).
 - Compositing: central glow, orbits and rings use normal blending (`ONE, ONE_MINUS_SRC_ALPHA`); region glows, connections, particles and pulses are additive (`ONE, ONE`), matching Canvas `lighter`.
-- Each frame's vertices are written into two `Float32Array`s (points and lines) allocated once after the brain is built, and the whole array is uploaded with `bufferSubData`; no array or buffer is created per frame. WebGL 1 cannot upload part of an array without creating a new view, so the whole array is uploaded (points about 29 KB, lines about 141 KB).
+- Each frame's vertices are written into two `Float32Array`s (points and lines; capacity about 29 KB and 141 KB) allocated once after the brain is built, and `bufferSubData` uploads only the part used this frame (`subarray(0, used length)`, two small views per frame that do not copy data); no array or buffer is created per frame. In Full mode at frame 120 of the measurement scenario, the counts work out to uploads of about 23 KB and 86 KB.
+- The vertex and fragment shaders share no uniforms: the fragment shaders only receive coordinates relative to the center. Vertex-shader uniforms default to highp, while fragment shaders are mediump on GPUs without fragment highp, and a uniform shared with different precisions makes the program fail to link.
+- The connecting ring's dash offset is reduced in JavaScript to within one period (dash + gap) before it reaches the shader: the raw value grows without bound, and once passed as float32 it loses enough precision after days of uptime to make the dashes jump. The Canvas renderer still uses the raw value.
 - The performance settings still apply: frame-rate cap, resolution cap (the GL canvas and the label overlay share the resolution), pulse cap, reduced glow (half the particle glows, smaller pulse heads), no blur on the listening ring.
 - Region names: the WebGL canvas is inserted under the original `#brain` canvas, and `#brain` becomes a transparent 2D overlay where the same `drawRegionLabels` draws the names; it still receives clicks. When there are no names to draw this frame or last frame, the overlay is not cleared.
 
@@ -51,10 +53,10 @@ With the switch on:
 
 1. Creating the WebGL context fails (no hardware WebGL, or the browser reports a major performance caveat) → Canvas.
 2. The context is software WebGL (renderer name contains SwiftShader, llvmpipe or softpipe) → treated as no hardware WebGL → Canvas.
-3. A shader fails to compile or link → Canvas.
-4. `webglcontextlost` fires while running → Canvas immediately.
+3. Hardware WebGL exists, but a shader fails to compile, the program fails to link, or a buffer cannot be created → Canvas, and the “Current” line says WebGL failed to start rather than that there is no hardware WebGL.
+4. `webglcontextlost` fires while running → Canvas.
 
-After a fallback, Canvas is used for the rest of the page session (also after turning the switch off and on again); reloading the page tries again. The brain is never left blank: the fallback switches to Canvas in the same frame and keeps drawing. The reason is logged to the console (`[brain] WebGL 不可用，改用 Canvas：…`).
+After a fallback, Canvas is used for the rest of the page session (also after turning the switch off and on again); reloading the page tries again. This applies to any context loss, including transient GPU resets the browser could otherwise recover from: WebGL is not used again until the page is reopened. After `webglcontextlost` fires, the next frame is drawn with Canvas; before the event arrives, a frame or so may be blank. The reason is logged to the console (`[brain] WebGL 不可用，改用 Canvas：…`).
 
 <a id="設定與狀態"></a>
 ### Setting and status
@@ -69,7 +71,8 @@ Settings → “Display performance on this device”:
 |---|---|---|
 | Using WebGL | 目前：WebGL | Current: WebGL |
 | Switch off | 目前：一般繪製（Canvas） | Current: standard drawing (Canvas) |
-| On, but no hardware WebGL | 此裝置沒有硬體 WebGL，已改用一般繪製 | This device has no hardware WebGL; using standard drawing instead |
+| On, but no hardware WebGL (no context, or only software WebGL) | 此裝置沒有硬體 WebGL，已改用一般繪製 | This device has no hardware WebGL; using standard drawing instead |
+| On, WebGL exists, but shader, link or buffer setup fails | WebGL 初始化失敗，已改用一般繪製 | WebGL failed to start; using standard drawing instead |
 | WebGL stopped while running | WebGL 中斷，這次開啟期間改用一般繪製 | WebGL stopped working; using standard drawing until the page is reopened |
 
 - Switch note: “Off by default. Works together with the setting above; if this device has no hardware WebGL, or WebGL stops working, drawing switches back to standard drawing automatically.”
@@ -151,17 +154,17 @@ Each renderer's output (for WebGL, the GL canvas plus the label overlay) is comp
 
 | Check | Result |
 |---|---|
-| `tests/brain-webgl.test.ts` (new, 15 tests, a fake WebGL context that records calls) | Asks for WebGL 1, `premultipliedAlpha`, no antialiasing, refusing a major performance caveat; the GL canvas goes under the original canvas; every frame draws 775 particles, every connection, both orbits and the pulses with additive blending; uploads fit the preallocated sizes, only 3 allocations, the same two arrays reused every frame; Full/Balanced/Light frame-rate, resolution and pulse caps; Light has fewer particle glows, Balanced and Light send no ring blur; labels are drawn on the overlay and stop when the region dims; creation failure, an exception and a software renderer all fall back to Canvas, keep drawing and say why, with no retry during the session; context loss falls back to Canvas without calling `loseContext`; switching off removes the GL canvas and releases the context; WebGL is not touched by default |
-| `tests/performance.test.ts` (5 new) | The switch is off by default, stored per device and separate from the three settings; the old `nous.performance.v1` needs no migration; invalid values and broken storage mean off; the four “Current” texts; the imports of `src/brain-webgl.ts` do not reach listening, playback, realtime voice and similar modules |
-| `tests/performance-settings-view.test.ts` (13 new) | The switch is drawn in the browser and App versions, in Chinese and English, with `aria-pressed` and `aria-label`; the “Current” text for the four states; clicking asks for the opposite state; `refreshPerformanceReadout` updates the “Current” line; every new string has an English translation |
+| `tests/brain-webgl.test.ts` (new, 24 tests, a fake WebGL context that records calls) | Asks for WebGL 1, `premultipliedAlpha`, no antialiasing, refusing a major performance caveat; the GL canvas goes under the original canvas; every frame draws 775 particles, every connection, both orbits and the pulses with additive blending; only the used length is uploaded, within the preallocated sizes, only 3 allocations, the same two arrays reused every frame; uniforms shared by both stages of the four GL programs have the same precision (parsed from the shader sources); the dash offset stays within one period after a month of uptime; Full/Balanced/Light frame-rate, resolution and pulse caps; Light has fewer particle glows, Balanced and Light send no ring blur; labels are drawn on the overlay and stop when the region dims; creation failure, an exception and a software renderer fall back to Canvas reporting no hardware WebGL, shader compile, link and buffer failures fall back to Canvas reporting a startup failure, all keep drawing and say why, with no retry during the session; context loss falls back to Canvas without calling `loseContext`; switching off removes the GL canvas and releases the context; WebGL is not touched by default |
+| `tests/performance.test.ts` (5 new) | The switch is off by default, stored per device and separate from the three settings; the old `nous.performance.v1` needs no migration; invalid values and broken storage mean off; the five “Current” texts; the imports of `src/brain-webgl.ts` do not reach listening, playback, realtime voice and similar modules |
+| `tests/performance-settings-view.test.ts` (14 new) | The switch is drawn in the browser and App versions, in Chinese and English, with `aria-pressed` and `aria-label`; the “Current” text for the five states; clicking asks for the opposite state; `refreshPerformanceReadout` updates the “Current” line; every new string has an English translation |
 | Existing brain tests | `brain-performance`, `brain-regions`, `brain-distance` pass unchanged (Canvas path) |
-| All | `npm run typecheck` passes; `npx vitest run` 159 files, 2921 passed, 5 skipped; `npm run build` passes |
+| All | `npm run typecheck` passes; `npx vitest run` 159 files, 2932 passed, 5 skipped; `npm run build` passes |
 
 <a id="限制"></a>
 ## Limitations
 
 - **Never run on the Pi's hardware GPU.** Whether the Pi 4's VideoCore VI gives Chromium hardware WebGL, whether its fill rate is enough, and the real frame rate are all unknown.
 - The measured WebGL is SwiftShader (software GL on the CPU), and the script deliberately relaxes `failIfMajorPerformanceCaveat`; the real page refuses software WebGL. These numbers only compare relative main-thread cost and cannot be used to infer milliseconds or GPU cost on the Pi.
-- Not pixel-identical to Canvas: GL lines are not antialiased and are always one device pixel wide (alpha compensates brightness); the listening-ring blur is an approximation; particle squares snap to pixels. The comparison uses only coarse measures (luminance grid, lit share, region luminance) plus looking at screenshots.
-- The whole vertex arrays (about 170 KB) are uploaded every frame; the effect on GPU memory bandwidth was not measured.
+- Not pixel-identical to Canvas: GL lines are not antialiased and are always one device pixel wide (alpha compensates brightness); the listening-ring blur is an approximation; particle squares snap to pixels; region labels are drawn on the 2D overlay on top, so in WebGL mode the labels are drawn above the listening and progress rings (in Canvas the rings are drawn over the labels). The comparison uses only coarse measures (luminance grid, lit share, region luminance) plus looking at screenshots.
+- The used vertex data (about 109 KB in the measurement scenario, at most about 170 KB) is uploaded every frame; the effect on GPU memory bandwidth was not measured.
 - `webglcontextlost` was not triggered in a real browser; only unit tests fire the event on a fake context.
