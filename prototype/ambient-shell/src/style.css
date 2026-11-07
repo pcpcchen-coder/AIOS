@@ -1718,6 +1718,24 @@ body[data-memories="showing"] .clock-corner {
   letter-spacing: 0.04em;
   color: var(--muted);
 }
+/* VOL-2：日間／夜間模式（太陽／月亮與文字），在日期下方、天氣上方 */
+.clock-mode {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35em;
+  margin-top: 0.4vh;
+  font-size: var(--clock-date-size);
+  line-height: 1;
+  color: var(--muted);
+}
+.clock-mode[hidden] { display: none; }
+.clock-mode-icon { display: inline-flex; }
+.clock-mode-icon svg {
+  width: clamp(18px, 2.6vh, 28px);
+  height: clamp(18px, 2.6vh, 28px);
+}
+.clock-mode[data-mode="night"] .clock-mode-text { color: rgba(200, 210, 255, 0.85); }
 .clock-weather {
   display: flex;
   align-items: center;

@@ -4,6 +4,8 @@
 
 # Home status corner HOME-1 and a larger date (2026-11-07)
 
+> **Later change on 2026-11-07:** the corner no longer shows air conditioners and no longer reads their controller reports in the background; see the [follow-up record](day-night-badge-2026-11-07.en.md). The air-conditioner parts below describe the implementation at that time.
+
 George's request on 2026-11-07: (1) make the date in the top-right clock larger, but still smaller than the time; (2) add a block in the top-left corner of the screen (above the brain) that shows the home's current switches, device use, indoor temperature and so on — "I want a smart-home feel".
 
 ## Scope and product red lines

@@ -92,6 +92,18 @@ describe("light state", () => {
     expect(s).toMatchObject({ level: null, pendingSince: LIGHT_STALE_MS + 1 });
   });
 
+  it("George's Pi readings (2026-11-07): lights on ≈130 is bright, lights off ≈80 is dark after a minute", () => {
+    expect(BRIGHT_LUMA).toBeLessThan(130);
+    expect(DARK_LUMA).toBeGreaterThan(80);
+    let s = nextLight(INITIAL_LIGHT, 130, 0);
+    expect(s.level).toBe("bright");
+    s = nextLight(s, 80, 30_000);
+    s = nextLight(s, 80, 30_000 + LIGHT_HOLD_MS);
+    expect(s.level).toBe("dark");
+    // 介於中間（例如 105）不會來回切。
+    expect(nextLight(s, 105, 120_000).level).toBe("dark");
+  });
+
   it("frameLuma is the Rec. 601 mean", () => {
     expect(frameLuma([255, 255, 255, 255, 0, 0, 0, 255])).toBeCloseTo(127.5);
     expect(frameLuma([100, 0, 0, 255])).toBeCloseTo(29.9);

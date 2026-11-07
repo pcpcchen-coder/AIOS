@@ -1,8 +1,8 @@
-// HOME-1（George 2026-11-07）：畫面左上角的家中狀態（室內溫濕度、燈與插座開了幾個、冷氣）。
+// HOME-1（George 2026-11-07）：畫面左上角的家中狀態（室內溫濕度、燈與插座開了幾個；冷氣 2026-11-07 起不顯示）。
 // 和右上角時鐘（shared/clock.ts）一樣是環境狀態角落：被動讀數，不是 Surface、Dashboard 或 App 入口；沒有按鈕、不能點、不能控制。
 // 這裡只有型別、固定表與純函式（核心、頁面與測試都讀），沒有網址或檔案。
 // - 資料只來自核心的 GET /api/home/overview（武陵居中控 GET /home 與 GET /integrations/aifa 的整理）；讀不到照實說。
-// - 開關狀態只用中控回報的 state.power；沒有回報時是「—」，不猜。冷氣只有控制器回報（不是冷氣本身的狀態），帶上時間。
+// - 開關狀態只用中控回報的 state.power；沒有回報時是「—」，不猜。
 import { translate, type Locale } from "./i18n.mjs";
 
 // ───────────── 設定（configDir/home-corner.json） ─────────────
@@ -46,9 +46,9 @@ export interface HomeCornerSettingsView {
 export const HOME_CORNER_TEXT = {
   group: "左上角家中狀態",
   main: "Mac 視窗",
-  mainNote: "在 Mac 的 Nous 視窗左上角顯示室內溫濕度、開著的燈與冷氣",
+  mainNote: "在 Mac 的 Nous 視窗左上角顯示室內溫濕度與開著的燈和插座",
   terminal: "Pi 終端機",
-  terminalNote: "在 Pi 等終端機畫面左上角顯示室內溫濕度、開著的燈與冷氣",
+  terminalNote: "在 Pi 等終端機畫面左上角顯示室內溫濕度與開著的燈和插座",
   note: "只顯示武陵居中控回報的狀態，不能點、不能控制；中控沒有回報的開關顯示「—」",
   aria: "家中狀態：{0}",
   notConfigured: "智慧家庭未設定",
@@ -68,9 +68,6 @@ export const HOME_CORNER_TEXT = {
   switches: "插座開關 {0}／{1} 開著",
   switchesUnknown: "插座開關 —／{0}",
   unknownCount: "{0} 個未知",
-  acOn: "開",
-  acOff: "關",
-  acReported: "控制器回報 · {0}",
   oldestAge: "最舊的讀值 {0}",
   humidity: "濕度",
   refreshing: "更新中…",
@@ -109,28 +106,12 @@ export interface HomeSwitchGroup {
   oldest_age_s: number | null;
 }
 
-export type HomeAcMode = "auto" | "cool" | "dry";
-
-/** AIFA 冷氣：控制器記得的設定（不是冷氣本身的狀態）。沒有回報或超過 2 小時時 power 與 age_s 都是 null。 */
-export interface HomeAcState {
-  name: string;
-  room: string | null;
-  power: boolean | null;
-  mode: HomeAcMode | null;
-  temperature: number | null;
-  age_s: number | null;
-}
-
 export type HomeOverviewView =
   | { configured: false }
   | { configured: true; state: "unreachable"; error: HomeOverviewError; server_now: number }
-  | { configured: true; state: "ok"; server_now: number; climate: HomeClimateReading[]; switches: HomeSwitchGroup[]; ac: HomeAcState[] };
+  | { configured: true; state: "ok"; server_now: number; climate: HomeClimateReading[]; switches: HomeSwitchGroup[] };
 
 export const HOME_ON_NAMES_MAX = 4;
-/** 角落最多畫幾台冷氣（背景讀控制器回報也只讀這幾台）。 */
-export const HOME_AC_MAX = 3;
-/** 冷氣控制器回報超過這個年紀（ms）就當成不知道。 */
-export const HOME_AC_REPORT_KEEP_MS = 2 * 60 * 60_000;
 
 // ───────────── 頁面的排程 ─────────────
 
@@ -147,7 +128,7 @@ export const HOME_VIEW_STALE_MS = 2 * 60_000;
 
 // ───────────── 角落要畫的內容（純函式；頁面照這個畫） ─────────────
 
-export type HomeIconKind = "thermometer" | "droplet" | "bulb" | "plug" | "ac" | "home";
+export type HomeIconKind = "thermometer" | "droplet" | "bulb" | "plug" | "home";
 
 export interface HomeCornerLine {
   icon: HomeIconKind;
@@ -220,8 +201,6 @@ function readingAge(r: HomeClimateReading, locale: Locale): string | null {
   return r.status === "snapshot" ? tr(locale, HOME_CORNER_TEXT.snapshot) : r.status === "stale" ? tr(locale, HOME_CORNER_TEXT.stale) : null;
 }
 
-const AC_MODE: Record<HomeAcMode, { zh: string; en: string }> = { auto: { zh: "自動", en: "Auto" }, cool: { zh: "冷氣", en: "Cool" }, dry: { zh: "除濕", en: "Dry" } };
-
 function switchLine(g: HomeSwitchGroup, locale: Locale): HomeCornerLine {
   const light = g.group === "light";
   const known = g.total - g.unknown;
@@ -234,13 +213,6 @@ function switchLine(g: HomeSwitchGroup, locale: Locale): HomeCornerLine {
   const names = g.on_names.length ? g.on_names.join(sep) + (g.on > g.on_names.length ? "…" : "") : null;
   const qualifier = known > 0 && g.oldest_age_s !== null ? tr(locale, HOME_CORNER_TEXT.oldestAge, homeAge(g.oldest_age_s, locale)) : null;
   return { icon: light ? "bulb" : "plug", text, extra, detail: names, qualifier, active: g.on > 0 };
-}
-
-function acLine(a: HomeAcState, locale: Locale): HomeCornerLine {
-  if (a.power === null || a.age_s === null) return { icon: "ac", text: `${a.name} —`, extra: null, detail: null, qualifier: null, active: false };
-  const settings = a.power ? [a.temperature !== null ? `${a.temperature}°` : null, a.mode ? AC_MODE[a.mode][locale === "en" ? "en" : "zh"] : null].filter((p): p is string => !!p) : [];
-  const text = `${a.name} ${tr(locale, a.power ? HOME_CORNER_TEXT.acOn : HOME_CORNER_TEXT.acOff)}` + (settings.length ? ` · ${settings.join(" ")}` : "");
-  return { icon: "ac", text, extra: null, detail: null, qualifier: tr(locale, HOME_CORNER_TEXT.acReported, homeAge(a.age_s, locale)), active: a.power };
 }
 
 const ERROR_TEXT: Record<HomeOverviewError, string> = {
@@ -300,7 +272,7 @@ export function homeCornerModel(input: { view: HomeOverviewView | null; coreDown
     const body = [...values, ...ageOf(readings)].filter((p): p is string => !!p).join(" · ");
     return readings[0].room ? `${readings[0].room} ${body}` : body;
   });
-  const lines = [...view.switches.filter((g) => g.total > 0).map((g) => switchLine(g, locale)), ...view.ac.map((a) => acLine(a, locale))];
+  const lines = view.switches.filter((g) => g.total > 0).map((g) => switchLine(g, locale));
   if (!temp && !hum && !mainExtras.length && !climateOther.length && !lines.length) return note(HOME_CORNER_TEXT.empty, null);
   const refreshing = input.refreshing === true;
   const refreshNote = refreshing ? tr(locale, HOME_CORNER_TEXT.refreshing) : null;

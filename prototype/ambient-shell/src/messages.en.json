@@ -1016,5 +1016,7 @@
   "調的是夜間音量；現在用的是日間音量，到夜間才會用到。": "This changed the night volume; the day volume is in use now, so it applies at night.",
   "調的是日間音量；現在用的是夜間音量，到白天才會用到。": "This changed the day volume; the night volume is in use now, so it applies during the day.",
   "打開設定": "Open settings",
-  "收起設定": "Close settings"
+  "收起設定": "Close settings",
+  "日間模式": "Day mode",
+  "夜間模式": "Night mode"
 }

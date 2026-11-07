@@ -20,6 +20,8 @@ export const VOICE_VOLUME_TEXT = {
   day: "日間音量",
   night: "夜間音量",
   inUse: "使用中",
+  /** 右上角時鐘下方的圖示文字（VOL-2；George 2026-11-07）。 */
+  badge: { day: "日間模式", night: "夜間模式" },
   modeLine: {
     day: "現在用日間音量",
     hours: "現在用夜間音量：在夜間時段（{0}:00–{1}:00）",
