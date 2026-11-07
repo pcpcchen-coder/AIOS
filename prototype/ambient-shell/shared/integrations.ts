@@ -127,6 +127,9 @@ export const HEALTH_REASONS = [
   "taken_over",
   "not_ready",
   "error",
+  // LGTV-1：裝置連不上（電視關機待機時是正常的）；還沒配對。
+  "unreachable",
+  "not_paired",
 ] as const;
 export type HealthReason = (typeof HEALTH_REASONS)[number];
 

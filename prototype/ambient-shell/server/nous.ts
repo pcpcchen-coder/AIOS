@@ -259,7 +259,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     timezone: config.searchTimezone,
     codex: codexSearch,
   });
-  const home = new HomeBridge({ url: config.smarthomeUrl, token: config.smarthomeToken });
+  // LGTV-1：lg_tv 有設定電視 IP 時，電視改由 app.tv.* 控制，中控的 home_control 不再控制電視（George 2026-11-07）。
+  const home = new HomeBridge({ url: config.smarthomeUrl, token: config.smarthomeToken, tvHandledElsewhere: config.ail.services.includes("lg_tv") && !!config.ail.tv?.host });
   // AIL-1（docs/18）：NOUS_AIL=on 才建立整合層；關閉時 ail 為 null，工具表、說明與 HTTP 路由都和之前相同。
   // AIL-2：HomeBridge 交給整合層包成 Facade（NOUS_AIL_SERVICES 列出 home 才註冊）。
   // PRO-1：主動提醒（招呼後接今天的天氣）。天氣快取一份，招呼與整合層的 app.weather.today 共用。

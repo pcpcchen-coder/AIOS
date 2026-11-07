@@ -24,7 +24,8 @@
     "wake:spike": "tsx spike/wake/cli.ts",
     "wake:bench": "tsx spike/wake/bench.ts",
     "wake:page": "vite --config spike/wake/vite.config.ts",
-    "docs:commands": "tsx scripts/write-commands-doc.ts"
+    "docs:commands": "tsx scripts/write-commands-doc.ts",
+    "tv:pair": "tsx scripts/tv-pair.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.131.0",
@@ -33,10 +34,12 @@
     "marked": "18.0.14",
     "onnxruntime-web": "1.30.0",
     "opencc-js": "1.4.2",
-    "qrcode-generator": "2.0.4"
+    "qrcode-generator": "2.0.4",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "25.9.9",
+    "@types/ws": "8.18.1",
     "sherpa-onnx": "2.0.1",
     "sherpa-onnx-node": "2.0.1",
     "tsx": "4.23.15",

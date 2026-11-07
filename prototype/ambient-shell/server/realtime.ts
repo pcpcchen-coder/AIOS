@@ -228,11 +228,17 @@ export function taskLines(tasks: Iterable<Task>): string[] {
 /**
  * VOL-1：對話音量的說話規則（兩條路徑相同）。沒有接中控時不提家電工具（沒有中控的工作階段，說明裡不出現 home_）。
  */
-export function voiceVolumeRule(home: boolean): string {
-  return `使用者要你講話大聲或小聲一點、或說音量調到幾時，呼叫 set_voice_volume，調的是你在這台裝置上說話的音量；沒有指名設備的「大聲一點」「小聲一點」「音量 60」都是指你的聲音。${home ? "說出設備名稱（電視、音響、電風扇）才是家電，用 home_control。" : ""}結果回來後說現在的音量（volume）；有 note 時照說。使用者說「晚上的音量」「夜間音量」時 period 填 night，「白天」填 day。`;
+export function voiceVolumeRule(home: boolean, tv = false): string {
+  const tvPart = tv ? "說到電視（電視大聲一點、電視音量 20、電視靜音）用 app__tv__volume 或 app__tv__mute（客廳電視；指名其他房間的電視才是家電）。" : "";
+  const homePart = home ? (tv ? "說出其他設備名稱（音響、電風扇）才是家電，用 home_control。" : "說出設備名稱（電視、音響、電風扇）才是家電，用 home_control。") : "";
+  return `使用者要你講話大聲或小聲一點、或說音量調到幾時，呼叫 set_voice_volume，調的是你在這台裝置上說話的音量；沒有指名設備的「大聲一點」「小聲一點」「音量 60」都是指你的聲音。${tvPart}${homePart}結果回來後說現在的音量（volume）；有 note 時照說。使用者說「晚上的音量」「夜間音量」時 period 填 night，「白天」填 day。`;
 }
 
 /** AIL-1：整合工具（app__ 開頭）的說話規則；兩條路徑相同。 */
+/** LGTV-1：客廳 LG 電視（lg_tv 有工具時才加）；和家電一樣直接說就能控制。 */
+export const TV_RULE =
+  "你可以控制客廳的 LG 電視：使用者要開關電視、看電視狀態、調電視音量或靜音、切 HDMI、在電視上開 App（YouTube、Netflix 等）、暫停或繼續播放時，先說一句「好，我來處理電視」，再呼叫對應的 app__tv__ 工具；沒指名房間的「電視」就是客廳這台，一律用 app__tv__ 工具，不要用 home_control；其他房間的電視（例如臥室電視）才用 home_control。開電視可能要十幾秒。app__tv__launch_app 只會開 App，不會播指定的節目；使用者要播某個節目時，照實說目前只能開到 App，請他用遙控器選。";
+
 export const INTEGRATION_RULE =
   "名稱以 app__ 開頭的工具由 Nous 核心的整合層執行。依回傳的 status 說話：confirmed 才說已經完成；unconfirmed 是已送出但沒有確認，請使用者看一下；unknown 只能說「結果不明，請確認」，不能說失敗或沒做；refused 表示沒有送出，照 message 說原因；failed 照 message 說沒有成功。工具說明寫著「模擬」的是測試用，不是真的 App，要照實說是模擬。沒有出現在工具清單上的 App 功能就是目前不能用，照實說，不要用其他工具代替。";
 
@@ -260,10 +266,13 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
       `你也接上了這些外部服務，可以直接使用它們的工具：${names.join("、")}。需要確認的動作（寄出、發布、刪除等），系統會在畫面顯示確認卡；你用一句話說明要做什麼、對象和影響，請使用者說「確認執行」或「取消」。使用者要說出「確認執行」才會執行，只說「好」不算，你也不能替使用者確認。沒有執行時照實說。`,
     );
   }
-  if (caps.integrations?.("zh-TW").length) {
+  const integrationNames = (caps.integrations?.("zh-TW") ?? []).map((spec) => spec.name);
+  const tv = integrationNames.some((name) => name.startsWith("app__tv__"));
+  if (integrationNames.length) {
     abilities.push(INTEGRATION_RULE);
+    if (tv) abilities.push(TV_RULE);
   }
-  abilities.push(voiceVolumeRule(!!caps.home));
+  abilities.push(voiceVolumeRule(!!caps.home, tv));
   abilities.push(`需要較長時間產出的工作（報告、整理、規劃、研究）交給背景任務${caps.taskWebSearch ? "，背景任務也能上網查資料" : ""}。`);
   if (caps.memory) {
     abilities.push(

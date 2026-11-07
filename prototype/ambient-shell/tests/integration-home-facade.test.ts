@@ -278,7 +278,9 @@ describe("AIL-2 home Facade: model-facing tools and settings unchanged", () => {
     const r = await ail.dispatcher.execute({ tool: HOME_TOOL.control, args: { target: "書桌燈", command: "brightness", value: "60" }, route: "page", actor: "agent", sessionId: "page" });
     expect(r.status).toBe("confirmed");
     expect(lines.join("\n")).toMatch(/app\.home\.control page → confirmed/);
-    expect(lines.join("\n")).not.toMatch(/書桌燈|brightness|60|hub-secret/);
+    // 稽核行帶隨機 request-id（8 位十六進位）與毫秒數，可能剛好含「60」：先拿掉這兩個欄位再檢查參數有沒有外洩。
+    const scrubbed = lines.map((l) => l.replace(/^整合層：[0-9a-f]{8} /, "整合層：<id> ").replace(/ \d+ ms$/, " <n> ms"));
+    expect(scrubbed.join("\n")).not.toMatch(/書桌燈|brightness|60|hub-secret/);
   });
 });
 
