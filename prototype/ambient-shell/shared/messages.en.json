@@ -401,5 +401,6 @@
   "未知的家中狀態設定：{0}": "Unknown home status setting: {0}",
   "家中狀態設定沒有保存（無法寫入設定檔：{0}）": "Home status settings were not saved (cannot write the settings file: {0})",
   "家中狀態設定沒有保存": "Home status settings were not saved",
-  "家中狀態設定沒有保存：{0}": "Home status settings were not saved: {0}"
+  "家中狀態設定沒有保存：{0}": "Home status settings were not saved: {0}",
+  "最舊的讀值 {0}": "oldest reading {0}"
 }

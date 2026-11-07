@@ -54,12 +54,13 @@ const HOME = {
   devices: [
     sensor("th-live", "living", "live", 120, [metric("temperature", "溫度", "°C", 1, 26.53), metric("humidity", "濕度", "%", 0, 62.4)]),
     sensor("th-stale", "study", "stale", 3 * 3600, [metric("temperature", "溫度", "°C", 1, 30.1), metric("co2", "二氧化碳", "ppm", 0, 812)]),
-    light("l1", "客廳主燈", { power: true }),
-    light("l2", "客廳立燈", { power: false }),
-    light("l3", "書桌燈", { power: true, fresh: false }),
+    light("l1", "客廳主燈", { values: { power: true } }),
+    light("l2", "客廳立燈", { values: { power: false } }),
+    light("l3", "書桌燈", { values: { power: true }, fresh: false }),
+    light("l6", "餐桌燈", { values: { power: true }, fresh: false, age_seconds: 600 }),
     light("l4", "床頭燈", {}),
     light("l5", "走廊燈", { power: true, available: false }),
-    light("p1", "延長線", { power: true }, "switch", { config: { cloud_category: "cz" } }),
+    light("p1", "延長線", { power: true, values: {} }, "switch", { config: { cloud_category: "cz" } }),
     // 冷氣（Tuya kt）匯入成 kind switch：不是可開關的插座，不算進數量。
     light("kt", "客房冷氣", { power: true }, "switch", { config: { cloud_category: "kt" } }),
     light("ir", "電視", {}, "remote", { infrared: { keys: [], ready: false }, config: { infrared_virtual: true } }),
@@ -92,12 +93,21 @@ function snapshot(home: unknown = HOME, aifa: unknown = AIFA): HubSnapshot {
 const report = (power: boolean | null, at: number): RememberedReport => ({ report: { power, mode: "cool", temperature: 26, fan: "auto", swing: "auto", feature: "normal" }, at });
 
 describe("overview from the hub snapshot", () => {
-  it("counts on/off only from fresh state.power; offline, not fresh or unreported devices are unknown", () => {
+  it("counts on/off from the hub's state.values.power (legacy state.power too); offline, unreported or older-without-age devices are unknown; older readings carry their age", () => {
     const view = overviewFromSnapshot(snapshot(), new Map(), NOW_MS, 0);
     expect(view.switches).toEqual([
-      { group: "light", total: 5, on: 1, unknown: 3, on_names: ["客廳主燈"] },
-      { group: "switch", total: 1, on: 1, unknown: 0, on_names: ["延長線"] },
+      { group: "light", total: 6, on: 2, unknown: 3, on_names: ["客廳主燈", "餐桌燈"], oldest_age_s: 600 },
+      { group: "switch", total: 1, on: 1, unknown: 0, on_names: ["延長線"], oldest_age_s: null },
     ]);
+  });
+
+  it("shows the oldest age of a not-fresh reading next to the counts", () => {
+    const view = { configured: true as const, state: "ok" as const, server_now: NOW_S, climate: [], ac: [],
+      switches: [{ group: "light" as const, total: 3, on: 2, unknown: 0, on_names: ["客廳主燈", "餐桌燈"], oldest_age_s: 600 }] };
+    const zh = homeCornerModel({ view, coreDown: false, locale: "zh-TW" });
+    const en = homeCornerModel({ view, coreDown: false, locale: "en" });
+    expect(JSON.stringify(zh)).toContain("最舊的讀值 10 分鐘前");
+    expect(JSON.stringify(en)).toContain("oldest reading");
   });
 
   it("picks the live sensor first, keeps the stale one only for a key the live one lacks (tagged as another sensor), and ages from the hub clock", () => {
@@ -362,7 +372,7 @@ describe("corner content (zh / en)", () => {
     const zh = homeCornerModel({ view: ok(), coreDown: false, locale: "zh-TW" });
     expect(zh).toMatchObject({ kind: "data", temp: "26.5°", humidity: "62%", climateRoom: "客廳", climateDetail: null, climateOther: ["書房 CO₂ 812 ppm · 3 小時前"], refreshing: false });
     expect(zh.lines.map((l) => [l.icon, l.text, l.extra, l.detail, l.qualifier, l.active])).toEqual([
-      ["bulb", "燈 1／5 開著", "3 個未知", "客廳主燈", null, true],
+      ["bulb", "燈 2／6 開著", "3 個未知", "客廳主燈、餐桌燈", "最舊的讀值 10 分鐘前", true],
       ["plug", "插座開關 1／1 開著", null, "延長線", null, true],
       ["ac", "主臥冷氣 開 · 26° 冷氣", null, null, "控制器回報 · 5 分鐘前", true],
       ["ac", "書房冷氣 —", null, null, null, false],
@@ -370,7 +380,7 @@ describe("corner content (zh / en)", () => {
     expect(zh.label.startsWith("家中狀態：26.5°，濕度 62%，客廳，書房 CO₂ 812 ppm · 3 小時前")).toBe(true);
     const en = homeCornerModel({ view: ok(), coreDown: false, locale: "en" });
     expect(en.climateOther).toEqual(["書房 CO₂ 812 ppm · 3 h ago"]);
-    expect(en.lines.map((l) => [l.text, l.extra])).toEqual([["Lights 1/5 on", "3 unknown"], ["Plugs & switches 1/1 on", null], ["主臥冷氣 On · 26° Cool", null], ["書房冷氣 —", null]]);
+    expect(en.lines.map((l) => [l.text, l.extra])).toEqual([["Lights 2/6 on", "3 unknown"], ["Plugs & switches 1/1 on", null], ["主臥冷氣 On · 26° Cool", null], ["書房冷氣 —", null]]);
     expect(en.lines[2].qualifier).toBe("Controller report · 5 min ago");
     expect(en.label).toMatch(/^Home status: 26\.5°, Humidity 62%/);
   });
@@ -401,7 +411,7 @@ describe("corner content (zh / en)", () => {
   });
 
   it("no reported switch at all → 「—」, not 0", () => {
-    const view = ok({ switches: [{ group: "light", total: 8, on: 0, unknown: 8, on_names: [] }], ac: [], climate: [] });
+    const view = ok({ switches: [{ group: "light", total: 8, on: 0, unknown: 8, on_names: [], oldest_age_s: null }], ac: [], climate: [] });
     expect(homeCornerModel({ view, coreDown: false, locale: "zh-TW" }).lines.map((l) => l.text)).toEqual(["燈 —／8"]);
     expect(homeCornerModel({ view, coreDown: false, locale: "en" }).lines.map((l) => l.text)).toEqual(["Lights —/8"]);
   });
@@ -736,7 +746,7 @@ describe("HomeCorner on the page", () => {
     expect(root.dataset.state).toBe("data");
     expect(root.all().some((e) => e.tag === "button" || e.tag === "a" || e.tag === "input")).toBe(false);
     expect(root.textContent).toContain("26.5°");
-    expect(root.textContent).toContain("燈 1／5 開著 · 3 個未知");
+    expect(root.textContent).toContain("燈 2／6 開著 · 3 個未知");
     expect(root.getAttribute("aria-label")).toMatch(/^家中狀態：/);
     expect(body.className).toContain("has-home-corner");
     expect(style.get("--home-reserve")).toBe("256px");
@@ -760,8 +770,8 @@ describe("HomeCorner on the page", () => {
     expect(byClass(root, "home-temp")[0].textContent).toBe("30.1°");
     expect(byClass(root, "home-climate-room")[0].textContent).toBe("書房");
     expect(byClass(root, "home-climate-meta")[0]).toMatchObject({ hidden: false, textContent: "CO₂ 812 ppm · 3 小時前" });
-    expect(byClass(root, "home-line-qualifier").map((e) => e.textContent)).toEqual(["控制器回報 · 40 分鐘前"]);
-    expect(byClass(root, "home-line-detail").map((e) => e.textContent)).toEqual(["客廳主燈", "延長線"]);
+    expect(byClass(root, "home-line-qualifier").map((e) => e.textContent)).toEqual(["最舊的讀值 10 分鐘前", "控制器回報 · 40 分鐘前"]);
+    expect(byClass(root, "home-line-detail").map((e) => e.textContent)).toEqual(["客廳主燈、餐桌燈", "延長線"]);
   });
 
   it("back from hidden with numbers over 2 minutes old: dimmed and 「更新中…」 until the new read lands", async () => {
@@ -868,7 +878,7 @@ describe("HTTP", () => {
     const text = await res.text();
     const view = JSON.parse(text) as Extract<HomeOverviewView, { state: "ok" }>;
     expect(view).toMatchObject({ configured: true, state: "ok" });
-    expect(view.switches[0]).toMatchObject({ group: "light", on: 1, on_names: ["客廳主燈"] });
+    expect(view.switches[0]).toMatchObject({ group: "light", on: 2, on_names: ["客廳主燈", "餐桌燈"] });
     expect(text).not.toContain("hub-token");
     expect(text).not.toContain("127.0.0.1");
     await fetch(`${url}/api/home/overview`);

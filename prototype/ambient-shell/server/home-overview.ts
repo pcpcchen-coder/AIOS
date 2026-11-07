@@ -37,10 +37,14 @@ const STATUS_RANK = { live: 0, snapshot: 1, stale: 2, missing: 3 } as const;
 
 const clip = (name: string) => (name.length > NAME_MAX ? `${name.slice(0, NAME_MAX - 1)}…` : name);
 
-/** 中控回報的開關；設備不在線、資料不是最新或中控沒給 state.power 時 null（不知道）。 */
+/**
+ * 中控回報的開關；設備不在線或中控沒給開關值時 null（不知道）。
+ * 中控只把 90 秒內的讀值標成 fresh；較舊的讀值照樣採用，但要知道多舊（age_seconds），不知道多舊就算不知道。
+ */
 function reportedPower(d: HubDevice): boolean | null {
-  if (d.available !== true || !d.fresh) return null;
-  return typeof d.power === "boolean" ? d.power : null;
+  if (d.available !== true || typeof d.power !== "boolean") return null;
+  if (!d.fresh && typeof d.observedAgeS !== "number") return null;
+  return d.power;
 }
 
 /**
@@ -86,6 +90,7 @@ export function overviewFromSnapshot(home: HubSnapshot, reports: ReadonlyMap<str
       total: devices.length,
       on: on.length,
       unknown: powers.filter((p) => p.power === null).length,
+      oldest_age_s: powers.reduce<number | null>((oldest, p) => (p.power === null || p.d.fresh ? oldest : Math.max(oldest ?? 0, Math.round(p.d.observedAgeS ?? 0))), null),
       on_names: on.slice(0, HOME_ON_NAMES_MAX).map((p) => clip(p.d.name)),
     };
   };

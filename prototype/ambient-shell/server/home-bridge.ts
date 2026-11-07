@@ -175,8 +175,10 @@ export interface HubDevice {
   fresh: boolean;
   /** 只有 AIFA 子設備有：available 是哪一次讀 AIFA 清單得到的（queried_at，中控時鐘的秒；沒有時 null）。離線要連時間一起說，不說成現在。 */
   listedAt?: number | null;
-  /** HOME-1：中控 /home 的 state.power（布林）；中控沒給時 null，不從其他欄位猜。 */
+  /** HOME-1：中控 /home 的 state.values.power（SmartHomeAI 的 observation 把開關放在 values）；中控沒給時 null，不從其他欄位猜。 */
   power?: boolean | null;
+  /** 中控算好的 state.age_seconds（中控時鐘）；沒有時 null。 */
+  observedAgeS?: number | null;
   route: DeviceRoute;
   telemetry: { metrics: HubMetric[]; status: HubDataStatus; receivedAt: number | null; source: string } | null;
 }
@@ -1610,7 +1612,8 @@ export function parseHome(body: unknown): HubSnapshot {
       roomId: str(placement.room_id) || null,
       available: typeof state.available === "boolean" ? state.available : null,
       fresh: state.fresh === true,
-      power: typeof state.power === "boolean" ? state.power : null,
+      power: reportedPowerValue(state),
+      observedAgeS: num(state.age_seconds),
       route,
       telemetry: t
         ? { metrics, status: dataStatus(str(t.status), metrics), receivedAt: num(t.received_at), source: str(t.source_label) }
@@ -1618,6 +1621,13 @@ export function parseHome(body: unknown): HubSnapshot {
     };
   });
   return { rooms, devices: devices.filter((d) => d.id && d.name), serverTime: num(body.server_time) ?? Date.now() / 1000 };
+}
+
+/** SmartHomeAI 的 observation 把開關放在 state.values.power；舊格式的 state.power 也接受。 */
+function reportedPowerValue(state: Record<string, unknown>): boolean | null {
+  const values = state.values && typeof state.values === "object" ? (state.values as Record<string, unknown>) : null;
+  if (typeof values?.power === "boolean") return values.power;
+  return typeof state.power === "boolean" ? state.power : null;
 }
 
 const aifaId = (hubId: string, childId: string) => `aifa:${hubId}:${childId}`;
