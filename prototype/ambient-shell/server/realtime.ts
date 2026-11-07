@@ -161,12 +161,13 @@ export const REALTIME_TOOLS = [
     type: "function",
     name: "set_voice_volume",
     description:
-      "調整這台裝置上你（Nous）說話的音量，立即生效，這台裝置會記住。使用者說「你講話大聲一點」「小聲一點」「音量調到 60」「音量恢復預設」時呼叫。不是用來調家電（電視、音響、電風扇）的音量。最大 100 等於這台裝置的系統音量，不能比系統更大聲。",
+      "調整這台裝置上你（Nous）說話的音量，立即生效，這台裝置會記住。日間與夜間各有一個音量，沒指定就調現在用的那一個。使用者說「你講話大聲一點」「小聲一點」「音量調到 60」「音量恢復預設」時呼叫。不是用來調家電（電視、音響、電風扇）的音量。最大 100 等於這台裝置的系統音量，不能比系統更大聲。",
     parameters: {
       type: "object",
       properties: {
         change: { type: "string", enum: ["up", "down", "reset"], description: "up 大聲一點、down 小聲一點（一次 20）、reset 恢復預設（100）" },
         level: { type: "integer", minimum: 10, maximum: 100, description: "使用者說了數字時填（10 到 100）；有 level 時不用填 change" },
+        period: { type: "string", enum: ["day", "night"], description: "使用者明確說白天（日間）或晚上（夜間）的音量時才填；沒說就不填，調現在用的那一個" },
       },
       additionalProperties: false,
     },
@@ -228,7 +229,7 @@ export function taskLines(tasks: Iterable<Task>): string[] {
  * VOL-1：對話音量的說話規則（兩條路徑相同）。沒有接中控時不提家電工具（沒有中控的工作階段，說明裡不出現 home_）。
  */
 export function voiceVolumeRule(home: boolean): string {
-  return `使用者要你講話大聲或小聲一點、或說音量調到幾時，呼叫 set_voice_volume，調的是你在這台裝置上說話的音量；沒有指名設備的「大聲一點」「小聲一點」「音量 60」都是指你的聲音。${home ? "說出設備名稱（電視、音響、電風扇）才是家電，用 home_control。" : ""}結果回來後說現在的音量（volume）；有 note 時照說。`;
+  return `使用者要你講話大聲或小聲一點、或說音量調到幾時，呼叫 set_voice_volume，調的是你在這台裝置上說話的音量；沒有指名設備的「大聲一點」「小聲一點」「音量 60」都是指你的聲音。${home ? "說出設備名稱（電視、音響、電風扇）才是家電，用 home_control。" : ""}結果回來後說現在的音量（volume）；有 note 時照說。使用者說「晚上的音量」「夜間音量」時 period 填 night，「白天」填 day。`;
 }
 
 /** AIL-1：整合工具（app__ 開頭）的說話規則；兩條路徑相同。 */
