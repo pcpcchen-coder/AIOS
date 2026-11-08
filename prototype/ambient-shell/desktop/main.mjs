@@ -837,7 +837,7 @@ async function setMenuPref(row, value) {
   try {
     settings = await api(row.write_path, { [row.key]: value });
   } catch (err) {
-    const title = row.kind === "bool" ? `「${t(row.label)}」沒有保存` : row.kind === "factor" ? "倍率沒有保存" : "秒數沒有保存";
+    const title = row.kind === "bool" ? `「${t(row.label)}」沒有保存` : row.kind === "factor" ? "倍率沒有保存" : row.kind === "threshold" ? "喚醒詞門檻沒有保存" : "秒數沒有保存";
     showError(title, String(err.message ?? err));
     await refreshSettings();
     return;

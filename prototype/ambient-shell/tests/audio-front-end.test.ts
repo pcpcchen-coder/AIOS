@@ -488,7 +488,7 @@ function controller(runtime: WakeRuntimeState = "ok") {
   };
   const audio = micFor(media);
   const c = new WakeController(host, { mic: audio.mic, capture, earcon, timer });
-  const view = (listen: boolean, device: string | null = null): WakeSettingsView => ({ wake_listen: listen, device_id: device, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime });
+  const view = (listen: boolean, device: string | null = null): WakeSettingsView => ({ wake_listen: listen, device_id: device, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, runtime });
   return {
     c, clock, media, capture, earcon, captions, reports, view, timers, audio,
     /** 推進假時鐘並執行到期、沒被取消的計時器。 */
@@ -757,8 +757,8 @@ describe("WakeController: WK-02 hooks (subscribers, rate-limit pause, calls)", (
       now: clock.now, runtime: () => "ok", caption: () => {}, visible: () => true, onVisible: () => () => {}, state: () => {}, newId: () => "w",
     };
     const c = new WakeController(host, { mic: micFor(media).mic, capture, earcon: new FakeEarcon(), timer: (run) => { run(); return () => {}; } });
-    c.applySettings({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime: "ok" });
-    c.applySettings({ wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime: "ok" });
+    c.applySettings({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, runtime: "ok" });
+    c.applySettings({ wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, runtime: "ok" });
     await flush();
     capture.last!.events.started();
     expect(() => c.pauseFor("rate_limited", 0)).not.toThrow();

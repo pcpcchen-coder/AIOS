@@ -198,13 +198,13 @@ describe("runDesktopCommand", () => {
 
 // WK-01a 常駐喚醒聆聽（George 2026-10-31 D3：「通話中辨認說話者」先放停用的一列）。
 describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wake)", () => {
-  function wakeBuild(listen: boolean, report: WakeReport | null, silence = 5, voiceTest = false, speaker = false) {
+  function wakeBuild(listen: boolean, report: WakeReport | null, silence = 5, voiceTest = false, speaker = false, offset = 0) {
     const command = vi.fn();
     const wakeCommand = vi.fn();
     const setWakeListen = vi.fn();
     const setVoiceNameTest = vi.fn();
     const setMenuPref = vi.fn();
-    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, voice_name_test: voiceTest, speaker_in_call: speaker, runtime: "missing" as const } };
+    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, voice_name_test: voiceTest, speaker_in_call: speaker, wake_threshold_offset: offset, runtime: "missing" as const } };
     const items = settingsMenu(settings, { command, setMenuPref, setWakeListen, setVoiceNameTest, wakeReport: report, wakeCommand });
     const find = (label: string) => items.find((i) => i.label === label) as MenuItemTemplate;
     return { items, find, command, wakeCommand, setWakeListen, setVoiceNameTest, setMenuPref };
@@ -220,12 +220,31 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     const { items, find } = wakeBuild(true, { state: "listening_local", reason: null });
     const start = items.findIndex((i) => i.label === "喚醒詞");
     expect(items[start - 1]).toEqual({ type: "separator" });
-    expect(items.slice(start).map((i) => i.label)).toEqual(["喚醒詞", "喚醒聆聽：本機聆聽中", "常駐喚醒聆聽", "喚醒後等你開口：5 秒", "暫停聆聽（到這次結束）", "通話中辨認說話者", "只憑聲音也叫名字（測試）"]);
+    expect(items.slice(start).map((i) => i.label)).toEqual(["喚醒詞", "喚醒聆聽：本機聆聽中", "常駐喚醒聆聽", "喚醒後等你開口：5 秒", "喚醒詞門檻：預設（0）", "暫停聆聽（到這次結束）", "通話中辨認說話者", "只憑聲音也叫名字（測試）"]);
     expect(find("喚醒詞").enabled).toBe(false);
     expect(find("喚醒聆聽：本機聆聽中").enabled).toBe(false);
     expect(find("常駐喚醒聆聽")).toMatchObject({ type: "checkbox", checked: true, enabled: true });
     const speaker = find("通話中辨認說話者");
     expect(speaker).toMatchObject({ label: "通話中辨認說話者", type: "checkbox", checked: false, enabled: true, sublabel: "通話中每段話在本機比對聲音；只用來問要不要用你的記憶，換人只記錄" });
+  });
+
+  it("「喚醒詞門檻」 (George 2026-11-08) lists the five offsets like the settings page and writes wake_threshold_offset through setMenuPref", async () => {
+    const { WAKE_THRESHOLD_OFFSETS: shared } = await import("../shared/wake.ts");
+    const { WAKE_THRESHOLD_OFFSETS: menu, WAKE_THRESHOLD_LABEL } = await import("../desktop/settings-menu.mjs");
+    expect(menu).toEqual([...shared]);
+    // 和設定頁（src/views.ts 的 WAKE_THRESHOLD_TEXT.options）同一組文字；tests/wake-threshold.test.ts 另核對設定頁那一組
+    const viewsSrc = (await import("node:fs")).readFileSync(new URL("../src/views.ts", import.meta.url), "utf8");
+    for (const label of Object.values(WAKE_THRESHOLD_LABEL)) expect(viewsSrc).toContain(`"${label}"`);
+    expect(Object.keys(WAKE_THRESHOLD_LABEL).sort()).toEqual(menu.map(String).sort());
+    const off = wakeBuild(false, null, 5, false, false, -0.05);
+    const row = off.find("喚醒詞門檻：稍微容易（−0.05）");
+    expect(row.sublabel).toBe("數字越小越容易喚醒，也越容易被電視或聊天誤觸；設定頁也能改，所有裝置共用");
+    const radios = (row.submenu as MenuItemTemplate[]).filter((i) => i.type === "radio");
+    expect(radios.map((i) => [i.label, i.checked])).toEqual([["更容易喚醒（−0.10）", false], ["稍微容易（−0.05）", true], ["預設（0）", false], ["稍微嚴格（+0.05）", false], ["更不容易誤觸（+0.10）", false]]);
+    radios[4]!.click!();
+    expect(off.setMenuPref).toHaveBeenCalledWith({ key: "wake_threshold_offset", kind: "threshold", label: "喚醒詞門檻", write_path: "/api/settings/wake" }, 0.1);
+    // 不在選項裡的值（不該發生）顯示成預設
+    expect(wakeBuild(false, null, 5, false, false, 0.3).find("喚醒詞門檻：預設（0）")).toBeTruthy();
   });
 
   it("「通話中辨認說話者」 (SP-02b) is a plain checkbox written through setMenuPref to /api/settings/wake, without a dialog", () => {
@@ -313,7 +332,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
   it("is fully translated in English (the wake word Hello Nous is English already)", () => {
     setNativeLocale("en");
     try {
-      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime: "missing" as const } };
+      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, runtime: "missing" as const } };
       for (const report of [null, ...Object.entries(WAKE_STATE_REASONS).flatMap(([state, reasons]) => reasons.map((reason) => ({ state, reason }) as WakeReport))]) {
         const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), wakeReport: report, translate: nativeT });
         const start = items.findIndex((i) => i.label === "Wake word");

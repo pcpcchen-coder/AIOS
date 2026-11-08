@@ -198,7 +198,7 @@ function settings(): SettingsView {
     seconds: describeMenuPrefs({ camera, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime: { available: true, model: "fixture", detail: "fixture" } }),
     camera_preview_disabled_reason: null,
     identity: { available: true, disabled_reason: null, limited_reason: null },
-    wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime: "ok" },
+    wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, runtime: "ok" },
   };
 }
 function texts(items: MenuItemTemplate[]): string[] {

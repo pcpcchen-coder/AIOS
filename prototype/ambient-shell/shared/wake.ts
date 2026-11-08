@@ -77,6 +77,11 @@ export interface WakePrefs {
    * 給核心當記憶人物候選並記錄換人（只記 log，不打斷）。預設關閉；聲音不離開這台 Mac。
    */
   speaker_in_call: boolean;
+  /**
+   * 喚醒詞門檻調整值（George 2026-11-08；docs/validation/wake-threshold-2026-11-08.md）：加到 shared/wake-runtime.json 每一行
+   * 關鍵詞門檻（含全域門檻）上。負的比較容易喚醒、也比較容易誤觸；正的相反。只能是 WAKE_THRESHOLD_OFFSETS 其中一個，預設 0。
+   */
+  wake_threshold_offset: number;
 }
 export type WakePrefsPatch = Partial<WakePrefs>;
 
@@ -87,13 +92,21 @@ export type WakePrefsPatch = Partial<WakePrefs>;
 export const WAKE_SILENCE_OPTIONS_S = [3, 5, 8, 10, 15, 20] as const;
 export const DEFAULT_WAKE_SILENCE_S = 5;
 
-export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null, wake_silence_s: DEFAULT_WAKE_SILENCE_S, voice_name_test: false, speaker_in_call: false };
-export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s", "voice_name_test", "speaker_in_call"] as const satisfies readonly (keyof WakePrefs)[];
+/**
+ * 門檻調整值的選項（設定頁一組選項）。±0.10 為上下限，依據 WK-00 Mac 實測（docs/validation/wk-00-mac-2026-10-31.md）：
+ * Hello Nous 在 0.25（+0.10）時離線只剩 6/10；Hey Nous 在 1.0／0.30（+0.05）時已降到 6/10；Hey Nous 在提升分數 1.5、門檻 0.15 時
+ * 「Hey nurse」會觸發（−0.10 是提升分數 1.0、門檻 0.15，沒量過）。Hello Nous 的 0.05（−0.10）也低於量過的最低 0.10。
+ */
+export const WAKE_THRESHOLD_OFFSETS = [-0.1, -0.05, 0, 0.05, 0.1] as const;
+export const DEFAULT_WAKE_THRESHOLD_OFFSET = 0;
+
+export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null, wake_silence_s: DEFAULT_WAKE_SILENCE_S, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: DEFAULT_WAKE_THRESHOLD_OFFSET };
+export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s", "voice_name_test", "speaker_in_call", "wake_threshold_offset"] as const satisfies readonly (keyof WakePrefs)[];
 
 export class WakePatchError extends Error {}
 
 
-/** 邊界驗證：只接受 wake_listen、voice_name_test、speaker_in_call（布林）、device_id（字串或 null）與 wake_silence_s（選項之一）；其他鍵、空 patch、型別不符一律丟錯。 */
+/** 邊界驗證：只接受 wake_listen、voice_name_test、speaker_in_call（布林）、device_id（字串或 null）、wake_silence_s 與 wake_threshold_offset（選項之一）；其他鍵、空 patch、型別不符一律丟錯。 */
 export function parseWakePatch(input: unknown): WakePrefsPatch {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new WakePatchError("喚醒設定必須是 JSON 物件");
   const patch: WakePrefsPatch = {};
@@ -109,6 +122,11 @@ export function parseWakePatch(input: unknown): WakePrefsPatch {
         throw new WakePatchError("wake_silence_s 必須是選單裡的秒數（3、5、8、10、15 或 20）");
       }
       patch.wake_silence_s = value as number;
+    } else if (key === "wake_threshold_offset") {
+      if (!(WAKE_THRESHOLD_OFFSETS as readonly unknown[]).includes(value)) {
+        throw new WakePatchError("wake_threshold_offset 必須是 -0.1、-0.05、0、0.05 或 0.1");
+      }
+      patch.wake_threshold_offset = value as number;
     } else if (key === "voice_name_test") {
       if (typeof value !== "boolean") throw new WakePatchError("voice_name_test 必須是 true 或 false");
       patch.voice_name_test = value;
@@ -277,6 +295,34 @@ export function wakeRuntimeBlockers(m: WakeRuntimeManifest): string[] {
   return blockers;
 }
 
+const clampThreshold = (t: number) => Math.round(Math.min(0.99, Math.max(0.01, t)) * 100) / 100;
+
+/** 把每一行關鍵詞門檻（含全域門檻）加上 delta，夾在 0.01–0.99、取到小數兩位；提升分數不變。delta 為 0 時回傳原物件，其他時候是新物件（原物件不變）。 */
+export function offsetKeywords(k: WakeKeywordConfig, delta: number): WakeKeywordConfig {
+  if (!Number.isFinite(delta) || delta === 0) return k;
+  return {
+    ...k,
+    keywords_threshold: k.keywords_threshold === null ? null : clampThreshold(k.keywords_threshold + delta),
+    entries: k.entries.map((e) => ({ ...e, threshold: e.threshold === null ? null : clampThreshold(e.threshold + delta) })),
+  };
+}
+
+/**
+ * 設定頁顯示用：每個喚醒詞（關鍵詞 id 去掉最後的念法後綴，例如 HELLO_NOUS_OW → HELLO_NOUS）實際用的門檻。
+ * 沒有自己門檻的行用全域門檻（再沒有就是引擎預設 0.25，同 src/audio/detector.ts 的 kwsConfig）。
+ */
+export function effectiveWakeThresholds(k: WakeKeywordConfig, delta: number): { phrase: string; threshold: number }[] {
+  const shifted = offsetKeywords(k, delta);
+  const global = shifted.keywords_threshold ?? 0.25;
+  const out: { phrase: string; threshold: number }[] = [];
+  for (const e of shifted.entries) {
+    // 念法後綴（_OW、_AW、_UW 這類兩個字母）才去掉；沒有後綴的 id 原樣使用。
+    const phrase = e.id.replace(/_[A-Z]{2}$/, "");
+    if (!out.some((o) => o.phrase === phrase)) out.push({ phrase, threshold: e.threshold ?? global });
+  }
+  return out;
+}
+
 /** 關鍵詞設定 → sherpa-onnx 關鍵詞檔內容（keywordsBuf）；一行一個：發音單元 [:提升分數] [#門檻] @id。 */
 export function wakeKeywordsText(k: WakeKeywordConfig): string {
   return k.entries.map((e) => [e.tokens, e.boost === null ? null : `:${e.boost}`, e.threshold === null ? null : `#${e.threshold}`, `@${e.id}`].filter(Boolean).join(" ")).join("\n") + "\n";
@@ -288,6 +334,8 @@ export type WakeRuntimeState = "ok" | "missing" | "hash_mismatch" | "not_configu
 /** SettingsView.wake：只有 NOUS_WAKE=on 時才有這個欄位（關閉時 /api/settings 與之前逐位元組相同）。 */
 export interface WakeSettingsView extends WakePrefs {
   runtime: WakeRuntimeState;
+  /** 設定頁顯示用：套上門檻調整值之後，每個喚醒詞實際用的門檻（核心依 shared/wake-runtime.json 計算，effectiveWakeThresholds）。 */
+  thresholds?: { phrase: string; threshold: number }[];
 }
 
 // ───────────── 喚醒觸發（WK-01 的終點，WK-02 接上 startRealtime("wake_word")） ─────────────

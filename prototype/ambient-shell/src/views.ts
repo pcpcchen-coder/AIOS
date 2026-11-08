@@ -21,6 +21,7 @@ import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus 
 import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
 import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, VoiceRelayProfileBody, VoiceRelaySlots, VoiceRelayTargetBody, VoiceRelayTrialBody, VoiceRelayUnadoptBody } from "./api.ts";
 import { VOICE_VOLUME_TEXT } from "./voice-volume.ts";
+import { WAKE_THRESHOLD_OFFSETS, type WakePrefsPatch, type WakeSettingsView } from "../shared/wake.ts";
 import { VOICE_VOLUME_DEFAULT, VOICE_VOLUME_MAX, VOICE_VOLUME_MIN, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
 import { NIGHT_VOLUME_DEFAULT, type DayNightDecision, type DayNightMode, type DayNightPrefs, type LightLevel } from "../shared/day-night.ts";
 import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, rendererText, type FrameStats, type PerformanceProfile, type RendererReadout } from "./performance.ts";
@@ -79,6 +80,8 @@ export interface ViewActions {
   setVoiceVolume?(request: VoiceVolumeRequest): void;
   /** VOL-2：夜間時段與「用鏡頭亮度判斷」（立即套用並保存在這個頁面）。 */
   setDayNight?(patch: Partial<DayNightPrefs>): void;
+  /** 喚醒偏好（目前只有設定頁的「喚醒詞門檻」；寫入核心的 wake.json）。 */
+  updateWake?(patch: WakePrefsPatch): void;
 }
 
 export const MAX_LISTED = 8;
@@ -497,6 +500,7 @@ export function renderSettings(
     settings.camera && renderCameraSettings(settings.camera, !!settings.realtime?.available, actions, !!options.terminalCamera),
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
     options.voiceVolume && renderVoiceVolumeSettings(options.voiceVolume, actions),
+    settings.wake && renderWakeThresholdSettings(settings.wake, actions),
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.clock && renderClockSettings(settings.clock, actions),
@@ -539,6 +543,8 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     // 聲音輸入／輸出（George 2026-11-01）：選單列「聲音」與這裡都能選，寫入同一個 audio.json。
     settings.audio && renderAudioSettings(settings.audio.prefs, audio, actions),
     voiceVolume && renderVoiceVolumeSettings(voiceVolume, actions),
+    // 喚醒詞門檻（George 2026-11-08）：只在設定頁，寫入核心的 wake.json。
+    settings.wake && renderWakeThresholdSettings(settings.wake, actions),
     performance && renderPerformanceSettings(performance, actions),
     // PRO-1：選單列「主動提醒」與這裡都能改，寫入同一個 proactive.json。
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
@@ -622,6 +628,57 @@ export function renderVoiceVolumeSettings(state: VoiceVolumePanelState, actions:
     h("p", { class: "muted small", "data-light": "" }, lightLine(state)),
     h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.hoursNote)),
     h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.note)),
+  );
+}
+
+/** 設定頁「喚醒詞門檻」的文字（中文是翻譯表的鍵）。 */
+export const WAKE_THRESHOLD_TEXT = {
+  title: "喚醒詞門檻",
+  label: "門檻調整",
+  options: {
+    "-0.1": "更容易喚醒（−0.10）",
+    "-0.05": "稍微容易（−0.05）",
+    "0": "預設（0）",
+    "0.05": "稍微嚴格（+0.05）",
+    "0.1": "更不容易誤觸（+0.10）",
+  } as Record<string, string>,
+  current: "目前門檻：{0}",
+  note: "數字越小越容易喚醒，也越容易被電視或聊天誤觸；數字越大越不容易誤觸，但可能要說兩次。改了立即套用，通話中等這通結束；所有連到這台核心的裝置共用。",
+} as const;
+
+/** HELLO_NOUS → Hello Nous */
+function phraseLabel(id: string): string {
+  return id.split("_").map((w) => w.charAt(0) + w.slice(1).toLowerCase()).join(" ");
+}
+
+/**
+ * 喚醒詞門檻調整（George 2026-11-08；docs/validation/wake-threshold-2026-11-08.md）：加到每個喚醒詞門檻上的調整值，
+ * 五個選項（−0.10～+0.10），預設 0＝產品原本的門檻。只有 NOUS_WAKE=on（settings.wake 存在）時畫。
+ */
+export function renderWakeThresholdSettings(wake: WakeSettingsView, actions: ViewActions): HTMLElement {
+  const current = wake.wake_threshold_offset ?? 0;
+  const select = h("select", { "aria-label": t(WAKE_THRESHOLD_TEXT.label), "data-wake-threshold": "" }) as HTMLSelectElement;
+  for (const value of WAKE_THRESHOLD_OFFSETS) {
+    const opt = h("option", { value: String(value) }, t(WAKE_THRESHOLD_TEXT.options[String(value)]!)) as HTMLOptionElement;
+    if (value === current) {
+      opt.setAttribute("selected", "");
+      opt.selected = true;
+    }
+    select.append(opt);
+  }
+  select.disabled = !actions.updateWake;
+  select.addEventListener("change", () => {
+    const next = Number(select.value);
+    if (next !== current && (WAKE_THRESHOLD_OFFSETS as readonly number[]).includes(next)) actions.updateWake?.({ wake_threshold_offset: next });
+  });
+  const thresholds = (wake.thresholds ?? []).map((x) => `${phraseLabel(x.phrase)} ${x.threshold.toFixed(2)}`).join(getLocale() === "en" ? ", " : "、");
+  return h(
+    "section",
+    { class: "camera-settings wake-threshold-settings" },
+    h("h3", {}, t(WAKE_THRESHOLD_TEXT.title)),
+    h("ul", { class: "pref-list" }, h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(WAKE_THRESHOLD_TEXT.label))), select)),
+    thresholds && h("p", { class: "muted small", "data-wake-thresholds": "" }, t(WAKE_THRESHOLD_TEXT.current, thresholds)),
+    h("p", { class: "muted small" }, t(WAKE_THRESHOLD_TEXT.note)),
   );
 }
 

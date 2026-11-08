@@ -1022,5 +1022,15 @@
   "客廳 LG 電視": "Living-room LG TV",
   "連不上（電視可能關機待機或不在網路上）": "Unreachable (the TV may be in standby or off the network)",
   "還沒配對（在 Mac 上執行 npm run tv:pair）": "Not paired yet (run npm run tv:pair on the Mac)",
-  "電視待機時連不上是正常的；說「開電視」會用網路喚醒。": "Being unreachable is normal while the TV is in standby; saying “turn on the TV” wakes it over the network."
+  "電視待機時連不上是正常的；說「開電視」會用網路喚醒。": "Being unreachable is normal while the TV is in standby; saying “turn on the TV” wakes it over the network.",
+  "喚醒詞門檻": "Wake word threshold",
+  "門檻調整": "Threshold adjustment",
+  "更容易喚醒（−0.10）": "Wakes more easily (−0.10)",
+  "稍微容易（−0.05）": "Slightly easier (−0.05)",
+  "預設（0）": "Default (0)",
+  "稍微嚴格（+0.05）": "Slightly stricter (+0.05)",
+  "更不容易誤觸（+0.10）": "Fewer false wakes (+0.10)",
+  "目前門檻：{0}": "Current thresholds: {0}",
+  "數字越小越容易喚醒，也越容易被電視或聊天誤觸；數字越大越不容易誤觸，但可能要說兩次。改了立即套用，通話中等這通結束；所有連到這台核心的裝置共用。": "Lower values wake more easily but are more often triggered by the TV or conversation; higher values cause fewer false wakes but you may need to say it twice. Changes apply right away (during a call, after it ends) and are shared by every device connected to this core.",
+  "喚醒設定沒有保存：{0}": "Wake settings were not saved: {0}"
 }

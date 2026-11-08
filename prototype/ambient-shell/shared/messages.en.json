@@ -402,5 +402,13 @@
   "家中狀態設定沒有保存（無法寫入設定檔：{0}）": "Home status settings were not saved (cannot write the settings file: {0})",
   "家中狀態設定沒有保存": "Home status settings were not saved",
   "家中狀態設定沒有保存：{0}": "Home status settings were not saved: {0}",
-  "最舊的讀值 {0}": "oldest reading {0}"
+  "最舊的讀值 {0}": "oldest reading {0}",
+  "wake_threshold_offset 必須是 -0.1、-0.05、0、0.05 或 0.1": "wake_threshold_offset must be -0.1, -0.05, 0, 0.05 or 0.1",
+  "喚醒詞門檻": "Wake word threshold",
+  "數字越小越容易喚醒，也越容易被電視或聊天誤觸；設定頁也能改，所有裝置共用": "Lower values wake more easily but are more often triggered by the TV or conversation; also changeable in Settings, shared by all devices",
+  "更容易喚醒（−0.10）": "Wakes more easily (−0.10)",
+  "稍微容易（−0.05）": "Slightly easier (−0.05)",
+  "預設（0）": "Default (0)",
+  "稍微嚴格（+0.05）": "Slightly stricter (+0.05)",
+  "更不容易誤觸（+0.10）": "Fewer false wakes (+0.10)"
 }

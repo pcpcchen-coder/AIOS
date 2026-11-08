@@ -86,6 +86,11 @@ export class WakeController implements WakeActivationPort {
     return this.frontEnd.current;
   }
 
+  /** 設定頁的「喚醒詞門檻調整」（還沒讀到設定時是 0＝產品原本的門檻）；擷取 worker 建立時讀。 */
+  get thresholdOffset(): number {
+    return this.settings?.wake_threshold_offset ?? 0;
+  }
+
   /** WK-02：換成真正開通話的處理（startRealtime("wake_word")、限速、問候）。 */
   setTriggerHandler(handler: WakeTriggerHandler): void {
     this.trigger = handler;
@@ -143,6 +148,8 @@ export class WakeController implements WakeActivationPort {
       if (view.wake_listen) this.frontEnd.setPreference(true, "auto_resume");
       return;
     }
+    // 門檻調整值改了：聆聽中就以新門檻重建擷取（閒置時立即，通話中等這通結束，同「聲音輸入」改了）。
+    if ((previous.wake_threshold_offset ?? 0) !== (view.wake_threshold_offset ?? 0) && view.wake_listen && previous.wake_listen) this.frontEnd.reopen();
     if (previous.wake_listen === view.wake_listen) return;
     this.frontEnd.setPreference(view.wake_listen, view.wake_listen ? "enable" : "auto_resume");
   }
