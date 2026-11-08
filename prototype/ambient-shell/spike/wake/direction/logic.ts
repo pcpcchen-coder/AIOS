@@ -84,7 +84,7 @@ export function peak(samples: Float32Array): number {
 
 // ───────────── 偵測器變體 ─────────────
 
-/** 送進某個偵測器的聲音來源：產品混音、全部平均（只在聲道數不是 1/2/4/6 時與產品不同），或單一聲道（0 起算）。 */
+/** 送進某個偵測器的聲音來源：產品混音、全部平均（聲道數是 1、2、4 時與產品相同；6 聲道產品用 5.1 公式），或單一聲道（0 起算）。 */
 export type Source = { kind: "product" } | { kind: "average" } | { kind: "channel"; index: number };
 
 export interface Variant {
@@ -106,20 +106,31 @@ export function variantId(source: Source, delta: number): string {
 }
 
 /**
- * 依實際送到 Web Audio 的聲道數排出偵測器：產品混音 × 每個選定的門檻位移；多聲道時另加每一聲道（產品門檻），
- * 聲道數不是 1/2/4/6 時另加「全部平均」。上限 maxDetectors（每個偵測器各跑一次 KWS，CPU 約成正比）。
+ * 依實際送到 Web Audio 的聲道數排出偵測器：產品門檻（位移 0）一定有，再加每個選定的門檻位移；聲道數不是 1、2、4 時
+ * 另加「全部平均」（6 聲道的 5.1 公式也和平均不同）；多聲道時另加每一聲道（產品門檻）。上限 maxDetectors
+ * （每個偵測器各跑一次 KWS，CPU 約成正比）；超過的部分由呼叫端以 skippedVariants 告知使用者。
  */
 export function planVariants(channels: number, deltas: readonly number[], perChannel: boolean, maxDetectors = 10): Variant[] {
   const list: Variant[] = [];
   const add = (source: Source, delta: number) => {
     if (list.length < maxDetectors && !list.some((v) => v.id === variantId(source, delta))) list.push({ id: variantId(source, delta), source, delta });
   };
-  const sorted = [...new Set(deltas)].sort((a, b) => b - a);
-  for (const d of sorted.length ? sorted : [0]) add({ kind: "product" }, d);
+  add({ kind: "product" }, 0);
+  for (const d of [...new Set(deltas)].sort((a, b) => b - a)) add({ kind: "product" }, d);
+  list.sort((a, b) => b.delta - a.delta);
   if (channels > 1 && productMixRule(channels) !== "average" && productMixRule(channels) !== "copy") add({ kind: "average" }, 0);
   if (perChannel && channels > 1) for (let i = 0; i < channels; i++) add({ kind: "channel", index: i }, 0);
   return list;
 }
+
+/** 想要但因為上限沒有排進去的偵測器數（畫面照實顯示）。 */
+export function skippedVariants(channels: number, deltas: readonly number[], perChannel: boolean, maxDetectors = 10): number {
+  const wanted = planVariants(channels, deltas, perChannel, Number.MAX_SAFE_INTEGER).length;
+  return wanted - planVariants(channels, deltas, perChannel, maxDetectors).length;
+}
+
+/** 產品門檻的產品混音偵測器 id（一定會排進去）。 */
+export const PRODUCT_VARIANT_ID = "product+0.00";
 
 const clampThreshold = (t: number) => Math.round(Math.min(0.99, Math.max(0.01, t)) * 100) / 100;
 
@@ -214,8 +225,14 @@ export interface Condition {
 
 export const PRODUCT_CONDITION: Condition = { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channels: "default" };
 
-export function conditionLabel(c: Condition): string {
-  return `ec${c.echoCancellation ? 1 : 0}-ns${c.noiseSuppression ? 1 : 0}-agc${c.autoGainControl ? 1 : 0}-ch:${c.channels}`;
+/** 麥克風名稱的簡短代號（小寫英數字，最多 16 字）：讓不同麥克風的結果分開；沒有名稱時 default。 */
+export function micSlug(label: string | null | undefined): string {
+  const slug = (label ?? "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16);
+  return slug || "default";
+}
+
+export function conditionLabel(c: Condition, micLabel: string | null = null): string {
+  return `ec${c.echoCancellation ? 1 : 0}-ns${c.noiseSuppression ? 1 : 0}-agc${c.autoGainControl ? 1 : 0}-ch:${c.channels}-mic:${micSlug(micLabel)}`;
 }
 
 export interface Rate {
@@ -345,7 +362,7 @@ export function toCsv(results: Results): string {
 }
 
 const isRecord = (x: unknown): x is Record<string, unknown> => typeof x === "object" && x !== null && !Array.isArray(x);
-const SAFE_KEY = /^[A-Za-z0-9:+.\-]{1,40}$/;
+const SAFE_KEY = /^[A-Za-z0-9:+.\-]{1,64}$/;
 
 /** 匯入先前複製的結果 JSON；格式不對就丟錯（只接受次數與已知的列舉值，不接受陣列樣本或其他欄位）。 */
 export function parseResults(text: string): Results {

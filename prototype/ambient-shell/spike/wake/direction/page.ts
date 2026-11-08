@@ -19,11 +19,12 @@ import {
   nextCell,
   parseResults,
   planVariants,
+  PRODUCT_VARIANT_ID,
+  skippedVariants,
   plannedTrials,
   productMixRule,
   summarize,
   toCsv,
-  variantId,
   type Angle,
   type Condition,
   type Distance,
@@ -31,13 +32,14 @@ import {
   type Phrase,
   type Rate,
   type Results,
+  type Trial,
   type Variant,
 } from "./logic.ts";
 import workletUrl from "./worklet.ts?worker&url";
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 const KEYWORDS = (manifest as WakeRuntimeManifest).keywords.entries.map((e) => e.id);
-const PRODUCT_VARIANT = variantId({ kind: "product" }, 0);
+const PRODUCT_VARIANT = PRODUCT_VARIANT_ID;
 
 const PHRASE_TEXT: Record<Phrase, string> = { hello: "Hello Nous", hey: "Hey Nous" };
 const NEG_TEXT: Record<NegativeKind, string> = { tv: "電視 / TV", chat: "聊天 / Conversation" };
@@ -100,6 +102,8 @@ let trial: ActiveTrial | null = null;
 let negative: ActiveNegative | null = null;
 let results: Results = emptyResults();
 let unprompted = 0;
+/** 這次開頁以來記下的測試（復原只刪這些，不會刪到匯入的或其他條件的）。 */
+let added: Trial[] = [];
 
 // ───────────── 選單 ─────────────
 
@@ -120,6 +124,12 @@ async function refreshDevices(): Promise<void> {
   fillSelect("device", [{ value: "", text: "系統預設 / System default" }, ...list.map((d, i) => ({ value: d.deviceId, text: d.label || `麥克風 ${i + 1} / Microphone ${i + 1}` }))]);
 }
 
+/** 還沒開始時的條件名稱（用選單上的麥克風名稱；系統預設時開始後會換成實際裝置的名稱）。 */
+function previewCondition(): string {
+  const sel = $<HTMLSelectElement>("device");
+  return conditionLabel(readCondition(), sel.value ? sel.selectedOptions[0]?.text ?? null : null);
+}
+
 function readCondition(): Condition {
   return {
     echoCancellation: $<HTMLInputElement>("ec").checked,
@@ -137,7 +147,7 @@ const selectedCell = () => ({
 
 function showCell(): void {
   const c = selectedCell();
-  const cond = session?.condition ?? conditionLabel(readCondition());
+  const cond = session?.condition ?? previewCondition();
   const done = results.trials.filter((t) => t.condition === cond).length;
   $<HTMLSpanElement>("cell").textContent = `此格 / This cell: ${cellCount(results, cond, c.angle, c.distance, c.phrase)}/${TRIALS_PER_CELL}　全部 / Total: ${done}/${plannedTrials()}`;
 }
@@ -190,7 +200,7 @@ async function start(): Promise<void> {
   mute.gain.value = 0;
   node.connect(mute).connect(ctx.destination);
   const source = ctx.createMediaStreamSource(stream);
-  const s: Session = { stream, ctx, node, source, mute, condition: conditionLabel(cond), channels: null, detectors: [] };
+  const s: Session = { stream, ctx, node, source, mute, condition: conditionLabel(cond, track.label || null), channels: null, detectors: [] };
   session = s;
   node.port.onmessage = (event: MessageEvent<{ type?: string; channels?: number; rmsDb?: number[]; peaks?: number[] }>) => {
     if (session !== s || event.data?.type !== "levels") return;
@@ -212,7 +222,10 @@ async function start(): Promise<void> {
 
 function spawnDetectors(s: Session): void {
   const deltas = [...document.querySelectorAll<HTMLInputElement>("input.delta")].filter((i) => i.checked).map((i) => Number(i.value));
-  const plan = planVariants(s.channels ?? 1, deltas, $<HTMLInputElement>("perchannel").checked);
+  const perChannel = $<HTMLInputElement>("perchannel").checked;
+  const plan = planVariants(s.channels ?? 1, deltas, perChannel);
+  const skipped = skippedVariants(s.channels ?? 1, deltas, perChannel);
+  if (skipped > 0) log(`偵測器上限 10 個，略過 ${skipped} 個（少勾幾個門檻）/ detector limit is 10; ${skipped} skipped (untick some offsets)`);
   const ports: MessagePort[] = [];
   for (const variant of plan) {
     const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
@@ -355,9 +368,12 @@ function renderDetectors(s: Session): void {
       return tr;
     }),
   );
-  const product = s.detectors.find((d) => d.variant.id === PRODUCT_VARIANT) ?? s.detectors[0];
-  const listening = !!product && product.state === "listening";
-  if (listening) setStatus("listening", `本機聆聽中 / listening locally（${s.detectors.filter((d) => d.state === "listening").length}/${s.detectors.length}）`);
+  const product = s.detectors.find((d) => d.variant.id === PRODUCT_VARIANT);
+  const count = s.detectors.filter((d) => d.state === "listening").length;
+  // 全部載入完（聆聽中或無法使用）才開放測試，免得早期的測試少了還在載入的偵測器（包括產品那一個）。
+  const listening = count > 0 && !s.detectors.some((d) => d.state === "loading");
+  if (count > 0 && !listening) setStatus("starting", `載入偵測器中 / loading detectors（${count}/${s.detectors.length}）`);
+  else if (listening) setStatus("listening", `本機聆聽中 / listening locally（${count}/${s.detectors.length}）${product?.state === "error" ? "　產品偵測器無法使用 / product detector unavailable" : ""}`);
   else if (s.detectors.length > 0 && s.detectors.every((d) => d.state === "error")) setStatus("error", "偵測器都無法使用 / no detector is available");
   $<HTMLButtonElement>("trial").disabled = !listening || !!negative;
   $<HTMLButtonElement>("neg").disabled = !listening || !!trial;
@@ -372,8 +388,8 @@ function onDetected(d: Detector, keywordIndex: number): void {
     trial.hits[d.variant.id] = true;
     log(`✅ ${d.variant.id}  ${keyword}`);
     showTrialProgress();
-  } else if (negative) {
-    negative.triggers[d.variant.id] = (negative.triggers[d.variant.id] ?? 0) + 1;
+  } else if (negative && d.variant.id in negative.triggers) {
+    negative.triggers[d.variant.id]! += 1;
     log(`⚠️ 負樣本觸發 / negative trigger  ${d.variant.id}  ${keyword}`);
   } else {
     if (d.variant.id === PRODUCT_VARIANT) unprompted++;
@@ -428,7 +444,9 @@ function finishTrial(): void {
   const s = session;
   trial = null;
   if (!t || !s) return;
-  results.trials.push({ condition: s.condition, angle: t.angle, distance: t.distance, phrase: t.phrase, hits: t.hits });
+  const record: Trial = { condition: s.condition, angle: t.angle, distance: t.distance, phrase: t.phrase, hits: t.hits };
+  results.trials.push(record);
+  added.push(record);
   const product = t.hits[PRODUCT_VARIANT];
   const others = Object.entries(t.hits).filter(([id]) => id !== PRODUCT_VARIANT).map(([id, hit]) => `${id} ${hit ? "✅" : "❌"}`).join("　");
   const out = $<HTMLParagraphElement>("trialout");
@@ -451,8 +469,15 @@ function finishTrial(): void {
 
 function undoLast(): void {
   if (trial) return;
-  results.trials.pop();
-  $<HTMLButtonElement>("undo").disabled = results.trials.length === 0;
+  const last = added.pop();
+  if (!last) return;
+  const index = results.trials.lastIndexOf(last);
+  if (index >= 0) results.trials.splice(index, 1);
+  // 回到被刪的那一格（自動換格之後復原，重說的那次才會記在原本的格子）
+  $<HTMLSelectElement>("angle").value = String(last.angle);
+  $<HTMLSelectElement>("distance").value = last.distance;
+  $<HTMLSelectElement>("phrase").value = last.phrase;
+  $<HTMLButtonElement>("undo").disabled = added.length === 0;
   $<HTMLParagraphElement>("trialout").textContent = "已刪除上一次 / last trial removed";
   showCell();
   renderResults();
@@ -493,7 +518,7 @@ const ci = (r: Rate) => (r.low === null || r.high === null ? "" : ` [${Math.roun
 
 function renderResults(): void {
   const keys = knownKeys(results);
-  const current = session?.condition ?? conditionLabel(readCondition());
+  const current = session?.condition ?? previewCondition();
   const conditions = [...new Set([current, ...keys.conditions])];
   fillSelect("rcond", conditions.map((c) => ({ value: c, text: c })));
   const variants = [...new Set([PRODUCT_VARIANT, ...keys.variants])];
@@ -553,7 +578,11 @@ $<HTMLButtonElement>("export").addEventListener("click", () => {
 $<HTMLButtonElement>("import").addEventListener("click", () => {
   try {
     const imported = parseResults($<HTMLTextAreaElement>("io").value);
-    results = { version: 1, trials: [...results.trials, ...imported.trials], negatives: [...results.negatives, ...imported.negatives] };
+    // 匯入是「取代」，不是合併：同一份貼兩次不會把次數算兩倍。
+    if ((results.trials.length > 0 || results.negatives.length > 0) && !window.confirm("匯入會取代目前的結果，先匯出備份。繼續？/ Importing replaces the current results. Export a backup first. Continue?")) return;
+    results = imported;
+    added = [];
+    $<HTMLButtonElement>("undo").disabled = true;
     log(`已匯入 / imported: ${imported.trials.length} 次測試 / trials, ${imported.negatives.length} 段負樣本 / negative runs`);
     showCell();
     renderResults();
@@ -564,16 +593,26 @@ $<HTMLButtonElement>("import").addEventListener("click", () => {
 $<HTMLButtonElement>("clear").addEventListener("click", () => {
   if (!window.confirm("清除全部結果？先匯出備份。/ Clear all results? Export a backup first.")) return;
   results = emptyResults();
+  added = [];
+  $<HTMLButtonElement>("undo").disabled = true;
   unprompted = 0;
   $<HTMLSpanElement>("unprompted").textContent = "0";
   showCell();
   renderResults();
 });
+// 空白鍵一律是「說一次」：焦點在按鈕上時也不讓瀏覽器按下那個按鈕（否則按過「刪除上一次」或「停止」後，空白鍵會再刪一次或停止）。
+// 只有在輸入框、文字區、下拉選單裡才保留空白鍵原本的作用。按鈕點完就放掉焦點，雙重保險。
+const typing = (target: EventTarget | null) => target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) && (target as HTMLInputElement).type !== "checkbox";
 document.addEventListener("keydown", (event) => {
-  const target = event.target as HTMLElement | null;
-  if (event.code !== "Space" || (target && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(target.tagName))) return;
+  if (event.code !== "Space" || typing(event.target)) return;
   event.preventDefault();
-  startTrial();
+  if (!event.repeat) startTrial();
+});
+document.addEventListener("keyup", (event) => {
+  if (event.code === "Space" && !typing(event.target)) event.preventDefault();
+});
+document.addEventListener("click", (event) => {
+  if (event.target instanceof HTMLButtonElement) event.target.blur();
 });
 window.addEventListener("pagehide", () => stop());
 

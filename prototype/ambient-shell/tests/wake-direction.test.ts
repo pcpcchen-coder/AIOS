@@ -14,6 +14,8 @@ import {
   pickSource,
   planVariants,
   plannedTrials,
+  micSlug,
+  skippedVariants,
   productDownmix,
   productMixRule,
   PRODUCT_CONDITION,
@@ -24,7 +26,9 @@ import {
   type Results,
   type Trial,
 } from "../spike/wake/direction/logic.ts";
-import { contentTypeFor, runtimeFileFor } from "../spike/wake/direction/serve.ts";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { DIRECTION_CSP, contentTypeFor, readVerifiedRuntime, runtimeFileFor } from "../spike/wake/direction/serve.ts";
 
 // 喚醒方向性診斷（docs/validation/wake-direction-2026-11-08.md）。所有音訊都是程式產生的合成測試音（fixture），
 // 不是錄音，也不代表 eMeet M0 Plus 的實機行為；這裡只驗證混音規則、門檻位移、統計公式與頁面的隱私邊界。
@@ -92,7 +96,14 @@ describe("detector variants and threshold offsets", () => {
     expect(planVariants(4, [0], true).map((v) => v.id)).toEqual(["product+0.00", "ch1+0.00", "ch2+0.00", "ch3+0.00", "ch4+0.00"]);
     expect(planVariants(3, [0], false).map((v) => v.id)).toEqual(["product+0.00", "average+0.00"]);
     expect(planVariants(8, [0.1, 0.05, 0, -0.05], true).length).toBe(10);
+    // 4 個門檻 + 平均 + 8 個聲道 = 13，上限 10 → 略過 3 個（畫面照實說）
+    expect(skippedVariants(8, [0.1, 0.05, 0, -0.05], true)).toBe(3);
+    expect(skippedVariants(1, [0.1, 0.05, 0, -0.05], true)).toBe(0);
+    // 產品門檻一定有，即使沒有勾 0
     expect(planVariants(2, [], false).map((v) => v.id)).toEqual(["product+0.00"]);
+    expect(planVariants(1, [0.05], false).map((v) => v.id)).toEqual(["product+0.05", "product+0.00"]);
+    // 6 聲道：產品用 5.1 公式，和平均不同，所以也加平均
+    expect(planVariants(6, [0], false).map((v) => v.id)).toEqual(["product+0.00", "average+0.00"]);
   });
 
   it("Chunker emits fixed 100 ms blocks in order, keeps working after the block is transferred, and zeroes the remainder on stop", () => {
@@ -131,10 +142,13 @@ describe("direction-test statistics (formulas documented in the validation doc)"
     for (let i = 0; i < 5; i++) r.trials.push(trial(0, true));
     for (let i = 0; i < 5; i++) r.trials.push(trial(180, i < 2));
     r.trials.push(trial(90, true, { distance: "3m", phrase: "hey" }));
-    r.trials.push({ ...trial(90, true), condition: "ec0-ns0-agc0-ch:default" });
+    r.trials.push({ ...trial(90, true), condition: "ec0-ns0-agc0-ch:default-mic:default" });
     r.negatives.push({ condition: cond, kind: "tv", seconds: 1800, triggers: { "product+0.00": 2 } });
     const s = summarize(r, cond, "product+0.00");
-    expect(cond).toBe("ec1-ns1-agc1-ch:default");
+    expect(cond).toBe("ec1-ns1-agc1-ch:default-mic:default");
+    expect(conditionLabel(PRODUCT_CONDITION, "EMEET OfficeCore M0 Plus (328f:00a0)")).toBe("ec1-ns1-agc1-ch:default-mic:emeetofficecorem");
+    expect(micSlug("MacBook Pro Microphone")).toBe("macbookpromicrop");
+    expect(micSlug("  ")).toBe("default");
     expect(s.cells[0]!["1m"]!["hello"]).toMatchObject({ hits: 5, n: 5, rate: 1 });
     expect(s.byAngle[180]).toMatchObject({ hits: 2, n: 5, rate: 0.4 });
     expect(s.byAngle[90]).toMatchObject({ hits: 1, n: 1 });
@@ -168,7 +182,7 @@ describe("direction-test statistics (formulas documented in the validation doc)"
     r.negatives.push({ condition: cond, kind: "chat", seconds: 600, triggers: { "product+0.00": 1 } });
     const csv = toCsv(r);
     expect(csv.split("\n")[0]).toBe("condition,variant,angle,distance,phrase,hits,trials,rate,wilson_low,wilson_high");
-    expect(csv).toContain("ec1-ns1-agc1-ch:default,product+0.00,45,1m,hello,0,1,0.000,0.000,0.793");
+    expect(csv).toContain("ec1-ns1-agc1-ch:default-mic:default,product+0.00,45,1m,hello,0,1,0.000,0.000,0.793");
     expect(csv).toContain("negative:chat,1,600s,6.00/h");
     expect(parseResults(JSON.stringify(r))).toEqual(r);
     expect(() => parseResults(JSON.stringify({ ...r, trials: [{ ...r.trials[0], angle: 30 }] }))).toThrow();
@@ -228,6 +242,11 @@ describe("direction page privacy boundary (static)", () => {
     expect(runtimeFileFor(`/wake-runtime/${listed}?v=1`, "/x")).toBe(`/x/${listed}`);
     for (const bad of ["/wake-runtime/../package.json", "/wake-runtime/secret.txt", "/wake-runtime/", "/other/" + listed, `/wake-runtime/sub/${listed}`]) expect(runtimeFileFor(bad, "/x")).toBeNull();
     expect(contentTypeFor("a.mjs")).toMatch(/javascript/);
+    // 和核心一樣每次讀取都核對雜湊：內容被換掉就 404（worker 的 import() 重新讀取時也受保護）
+    const tmp = mkdtempSync(join(tmpdir(), "wake-direction-"));
+    writeFileSync(join(tmp, listed), "tampered");
+    expect(readVerifiedRuntime(`/wake-runtime/${listed}`, tmp)).toBeNull();
+    expect(readVerifiedRuntime("/wake-runtime/not-listed.txt", tmp)).toBeNull();
     expect(contentTypeFor("a.wasm")).toBe("application/wasm");
   });
 
@@ -236,7 +255,12 @@ describe("direction page privacy boundary (static)", () => {
     const csp = /http-equiv="Content-Security-Policy"\s+content="([^"]+)"/.exec(html)?.[1] ?? "";
     expect(csp).toMatch(/(^|; )connect-src 'self' ws:\/\/127\.0\.0\.1:5184(;|$)/);
     expect(csp).toMatch(/(^|; )default-src 'self'(;|$)/);
-    expect(readFileSync(join(dir, "vite.config.ts"), "utf8")).toMatch(/host: "127\.0\.0\.1", port: 5184/);
+    const vite = readFileSync(join(dir, "vite.config.ts"), "utf8");
+    expect(vite).toMatch(/host: "127\.0\.0\.1", port: 5184/);
+    // meta CSP 只管頁面；開發伺服器對每個回應（含 worker 腳本）都送同一組 CSP
+    expect(vite).toMatch(/headers: \{ "Content-Security-Policy": DIRECTION_CSP \}/);
+    expect(DIRECTION_CSP).toMatch(/(^|; )connect-src 'self' ws:\/\/127\.0\.0\.1:5184(;|$)/);
+    expect(DIRECTION_CSP).toMatch(/(^|; )default-src 'self'(;|$)/);
   });
 
   it("the page thread never receives samples: only levels from the worklet and WakeWorkerOut events from workers", () => {
@@ -247,6 +271,7 @@ describe("direction page privacy boundary (static)", () => {
     expect(page).not.toMatch(/Float32Array/);
     const worker = readFileSync(join(dir, "worker.ts"), "utf8");
     expect(worker).toMatch(/new SherpaWasmDetector\(runtime, net\)/);
-    expect(worker).not.toMatch(/postMessage\([^)]*(pcm|chunk|data)\b/);
+    // worker 只送兩種東西給主執行緒：WakeWorkerCore 的事件（out）與 closed
+    expect([...worker.matchAll(/\bpostMessage\(([^;]*)\);/g)].map((m) => m[1])).toEqual(["out)", '{ type: "closed" }']);
   });
 });

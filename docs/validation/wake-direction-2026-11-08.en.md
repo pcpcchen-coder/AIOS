@@ -96,21 +96,21 @@ Open `http://127.0.0.1:5184/` in **Chrome**. The Nous App is Chromium, so Chrome
 
 | Section | Contents |
 |---|---|
-| 1. Condition | Microphone (choose the eMeet), three checkboxes `echoCancellation`/`noiseSuppression`/`autoGainControl`, channel request (none = product; or ask for max channels). All three on plus none is the product's current setting. Stop and start again after a change |
-| 2. Detectors | Threshold offsets (+0.10, +0.05, 0 = product, −0.05; larger is harder to trigger); "one per channel with several channels" |
+| 1. Condition | Microphone (choose the eMeet; the condition name carries a microphone code such as `-mic:emeetofficecorem`, so results from different microphones stay apart), three checkboxes `echoCancellation`/`noiseSuppression`/`autoGainControl`, channel request (none = product; or ask for max channels). All three on plus none is the product's current setting. Stop and start again after a change |
+| 2. Detectors | Threshold offsets (+0.10, +0.05, −0.05; larger is harder to trigger; 0 = the product threshold always runs); "one per channel with several channels" |
 | 3. What actually arrives | Values the browser reports: the three options, the track's channel count and sample rate, capability ranges, the AudioContext rate, **the channels reaching Web Audio**, how the product would mix them to mono; per-channel RMS (dBFS) and peak; each detector's state and detection count |
-| 4. Direction test | Choose a direction, distance and phrase, press "Say it once" (or Space): after a beep, say it once within 5 seconds; at the end each detector records a hit or a miss. After 5 tries the next cell is selected. "Negative" times a run and counts false wakes. Detections outside a window count as unprompted |
-| 5. Results | Choose a condition and detector to see the table of 8 directions × 2 distances × 2 phrases, per-direction totals with the Wilson 95% interval, the direction spread, the worst direction and false wakes per hour. "Export" produces JSON and CSV with counts only; the JSON can be pasted back and imported |
+| 4. Direction test | Choose a direction, distance and phrase, press "Say it once" (or Space): after a beep, say it once within 5 seconds; at the end each detector records a hit or a miss. Trials start only once every detector has finished loading. After 5 tries the next cell is selected; "Undo last" removes only trials recorded since the page opened and moves the selection back to that cell. Space always means "Say it once", even when a button has focus. "Negative" times a run and counts false wakes. Detections outside a window count as unprompted |
+| 5. Results | Choose a condition and detector to see the table of 8 directions × 2 distances × 2 phrases, per-direction totals with the Wilson 95% interval, the direction spread, the worst direction and false wakes per hour. "Export" produces JSON and CSV with counts only; the JSON can be pasted back and imported, and importing **replaces** the current results (pasting the same JSON twice does not double the counts) |
 
-**Detector plan**: based on the real channel count, one `product±threshold` for each selected offset; with several channels, `ch1`, `ch2`… at the product threshold; when the count is not 1/2/4/6, also `average` (all channels averaged). At most 10.
+**Detector plan**: based on the real channel count, `product+0.00` (always) plus each selected offset; when the count is not 1, 2 or 4, `average` (all channels averaged; for 6 channels the product uses the 5.1 formula, which also differs from an average); with several channels, `ch1`, `ch2`… at the product threshold. At most 10; when more are wanted, the log says how many were skipped.
 
 **No score from the engine**: sherpa-onnx KWS results carry the keyword, tokens and timestamps, not a score. The tool runs several thresholds at once instead; the strictest threshold that hit is that try's margin.
 
 ### 5.3 Privacy and limits
 
-- Audio stays in memory: the AudioWorklet transfers samples straight to the detector workers, and the main thread receives only level numbers and detection events. Nothing is recorded, no blobs, no files, no browser storage. The only network use is same-origin reads of the listed files under `/wake-runtime/`, and the network closes once the engine loads (the product's `runtime-net.ts`). The static scan in `tests/wake-privacy.test.ts` covers this folder; `tests/wake-direction.test.ts` also checks the CSP and the file allowlist.
+- Audio stays in memory: the AudioWorklet transfers samples straight to the detector workers, and the main thread receives only level numbers and detection events. Nothing is recorded, no blobs, no files, no browser storage. The only network use is same-origin reads of the listed files under `/wake-runtime/`, and the network closes once the engine loads (the product's `runtime-net.ts`). The dev server sends the same same-origin CSP with every response, including the detector worker scripts, and like the product core it re-checks the SHA-256 on every `/wake-runtime/` read, answering 404 on a mismatch. The static scan in `tests/wake-privacy.test.ts` covers this folder; `tests/wake-direction.test.ts` also checks the CSP, the file allowlist and the hash check.
 - Results are not saved automatically. **Reloading the page loses them.** Press "Export" after each part and paste the JSON into a note.
-- CPU: each detector runs its own KWS. WK-00 measured about 6.7% of one core per KWS worker on the Mac, so 6 detectors are estimated at about 6 × 6.7% ≈ 40% of one core (an estimate, not measured on the Mac).
+- CPU: each detector runs its own KWS. WK-00 measured one separate Renderer thread at about 6.7% of one core on the Mac (presumed then to be the KWS worker; the whole wake feature cost about 14% of one core). On that basis 6 detectors are estimated at about 6 × 6.7% ≈ 40% of one core (an estimate, not measured on the Mac).
 - This is a Chrome tab, not the Nous App. Both are Chromium, but the versions may differ.
 
 ## 6. Direction test procedure (at home)
@@ -126,11 +126,11 @@ Open `http://127.0.0.1:5184/` in **Chrome**. The Nous App is Chromium, so Chrome
 
 | Code | Condition | Purpose |
 |---|---|---|
-| **P (required)** | All three on, channels not specified (`ec1-ns1-agc1-ch:default`) | The product today; find the weak direction first |
-| **R (recommended)** | All three off, max channels (`ec0-ns0-agc0-ch:max`) | Whether Chromium processing causes the difference (cause B), and whether the eMeet delivers several channels (cause C) |
-| N (if R is clearly better) | Only echoCancellation (`ec1-ns0-agc0-ch:default`) | Separates noise suppression/AGC from echo cancellation |
+| **P (required)** | All three on, channels not specified (`ec1-ns1-agc1-ch:default-mic:…`) | The product today; find the weak direction first |
+| **R (recommended)** | All three off, max channels (`ec0-ns0-agc0-ch:max-mic:…`) | Whether Chromium processing causes the difference (cause B), and whether the eMeet delivers several channels (cause C) |
+| N (if R is clearly better) | Only echoCancellation (`ec1-ns0-agc0-ch:default-mic:…`) | Separates noise suppression/AGC from echo cancellation |
 
-A full round per condition is 8 × 2 × 2 × 5 = **160 tries**, about 25–30 minutes. With less time, use the **short version**: 3 m and Hello Nous only, 8 × 5 = 40 tries.
+A full round per condition is 8 × 2 × 2 × 5 = **160 tries**. Each try takes about 8.2 seconds (0.2 s beep + 5 s window + about 3 s to get ready), so 160 × 8.2 s ≈ 1312 s ≈ 22 minutes, plus walking between the 16 positions. With less time, use the **short version**: 3 m and Hello Nous only, 8 × 5 = 40 tries.
 
 ### 6.3 Extras
 
@@ -186,7 +186,7 @@ Each becomes a setting that keeps today's behaviour by default; turning it off r
 |---|---|---|---|
 | F1 | Turn off the Chromium processing that duplicates the device's for always-on wake (all, or only noise suppression/AGC) | Condition R or N is clearly better | Realtime voice leases a clone of the same source, so calls also lose Chromium's echo cancellation and Nous's voice may come back into the call (relying on the eMeet's own echo cancellation). Opening wake and calls separately instead means one device with different constraints, which interact (docs/17 §10.3); needs real testing |
 | F2 | Average all channels when there are several | The real count is 3, 5, 7, 8… | Almost no extra CPU; differs from today only for those counts |
-| F3 | Run KWS on each channel; any hit wakes | One channel is clearly better in the weak direction | CPU roughly × channel count (about 6.7% of one core per KWS, WK-00); false wakes can approach × channel count, so negatives must be redone |
+| F3 | Run KWS on each channel; any hit wakes | One channel is clearly better in the weak direction | CPU roughly × channel count (an estimated 6.7% of one core per KWS, presumed in WK-00); false wakes can approach × channel count, so negatives must be redone |
 | F4 | An eMeet-specific threshold (for example Hey Nous 0.25 → 0.20) | The weak direction hits at a looser threshold | More false wakes; in WK-00 on the Mac, "Hey nurse" triggered Hey Nous at 0.15 |
 | F5 | Wake-only gain or level normalisation before KWS | The weak direction is clearly quieter but R does not help | Noise is amplified too; little CPU |
 
@@ -194,9 +194,9 @@ Each becomes a setting that keeps today's behaviour by default; turning it off r
 
 | Item | Result |
 |---|---|
-| `tests/wake-direction.test.ts` (17 tests) | Mixing rules with synthetic tones (only channel 3 of 4 → −12.04 dB; 3 channels → the product hears nothing on channels 2–3), threshold offsets, detector plan, chunking, statistics (Wilson, spread, false wakes per hour, 160 tries), export/import validation, the worklet sends only numbers to the page and each detector its own source, the page server serves only listed engine files, the CSP is same-origin only |
+| `tests/wake-direction.test.ts` (17 tests) | Mixing rules with synthetic tones (only channel 3 of 4 → −12.04 dB; 3 channels → the product hears nothing on channels 2–3), threshold offsets, detector plan (including 6 channels, the product threshold always present, and the skipped count above the limit), condition names with a microphone code, chunking, statistics (Wilson, spread, false wakes per hour, 160 tries), export/import validation, the worklet sends only numbers to the page and each detector its own source, the worker sends only events, the page server serves only listed engine files whose hash matches, the page and worker CSP is same-origin only |
 | `tests/wake-privacy.test.ts` | The static scan covers the new folder: no recording, no file writes, no network, no browser storage |
-| Headless Chromium end to end | The real engine files installed by `npm run wake:setup -- --product`; the fake microphone played "Hello, nose." synthesized in memory by MeloTTS (the spike's `vits-melo-tts-zh_en`) and saved to a scratch folder outside the repo (a 3.0-second loop; of 20 synthesized clips only this one triggers offline with the product settings). About 30 seconds of listening per condition |
+| Headless Chromium end to end | Rerun after the independent review: after clicking "Undo last", Space starts a trial instead of undoing again, and undo moves back to the original cell. The real engine files installed by `npm run wake:setup -- --product`; the fake microphone played "Hello, nose." synthesized in memory by MeloTTS (the spike's `vits-melo-tts-zh_en`) and saved to a scratch folder outside the repo (a 3.0-second loop; of 20 synthesized clips only this one triggers offline with the product settings). About 30 seconds of listening per condition |
 
 Detections per detector end to end (comparable within a condition; the listening time differs slightly between conditions, so these are not rates):
 

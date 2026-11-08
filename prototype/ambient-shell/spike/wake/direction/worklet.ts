@@ -70,6 +70,7 @@ class DirectionProcessor extends AudioWorkletProcessor {
     if (this.sumSq.length !== input.length) {
       this.sumSq = input.map(() => 0);
       this.peaks = input.map(() => 0);
+      this.levelN = 0;
     }
     input.forEach((ch, i) => {
       this.sumSq[i]! += ch.reduce((s, x) => s + x * x, 0);
