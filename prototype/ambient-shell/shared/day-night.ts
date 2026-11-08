@@ -13,9 +13,14 @@ export interface DayNightPrefs {
   night_end_h: number;
   /** 用鏡頭亮度判斷（鏡頭有開時）。 */
   use_camera: boolean;
+  /**
+   * DN-1（George 2026-11-08）：夜間模式一併套用畫面變暗、處理中音效靜音、回憶模式暫停。
+   * 關閉時回到 VOL-2 的行為：夜間只換對話音量（這就是回退）。
+   */
+  night_effects: boolean;
 }
 
-export const DEFAULT_DAY_NIGHT_PREFS: DayNightPrefs = { night_start_h: 22, night_end_h: 7, use_camera: true };
+export const DEFAULT_DAY_NIGHT_PREFS: DayNightPrefs = { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true };
 /** 夜間音量的預設值（日間沿用 VOL-1 的對話音量，預設 100）。 */
 export const NIGHT_VOLUME_DEFAULT = 40;
 
@@ -104,7 +109,25 @@ export function parseDayNightPrefs(raw: unknown): DayNightPrefs {
     night_start_h: isHour(o.night_start_h) ? o.night_start_h : DEFAULT_DAY_NIGHT_PREFS.night_start_h,
     night_end_h: isHour(o.night_end_h) ? o.night_end_h : DEFAULT_DAY_NIGHT_PREFS.night_end_h,
     use_camera: typeof o.use_camera === "boolean" ? o.use_camera : DEFAULT_DAY_NIGHT_PREFS.use_camera,
+    night_effects: typeof o.night_effects === "boolean" ? o.night_effects : DEFAULT_DAY_NIGHT_PREFS.night_effects,
   };
+}
+
+/** DN-1：夜間模式要一併套用的行為（純函式；日間或 night_effects 關閉時全部是 false，只剩對話音量的切換）。 */
+export interface NightEffects {
+  /** 整個畫面變暗（CSS 疊一層半透明黑，約 3 秒漸變；不改電子腦腦區連動的事件來源）。 */
+  dim: boolean;
+  /** 處理中的聲納提示音不出聲（電子腦的「處理中」樣子照常）。 */
+  muteProcessingCue: boolean;
+  /** 回憶模式不開始播放；正在播放的收起。 */
+  pauseMemories: boolean;
+}
+
+export const NO_NIGHT_EFFECTS: NightEffects = { dim: false, muteProcessingCue: false, pauseMemories: false };
+
+export function nightEffects(mode: DayNightMode, prefs: Pick<DayNightPrefs, "night_effects">): NightEffects {
+  if (mode !== "night" || !prefs.night_effects) return NO_NIGHT_EFFECTS;
+  return { dim: true, muteProcessingCue: true, pauseMemories: true };
 }
 
 /** 畫面平均亮度（Rec. 601），每隔 step 個像素取一個；只回傳一個數字。 */

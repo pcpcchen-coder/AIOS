@@ -612,6 +612,11 @@ export function renderVoiceVolumeSettings(state: VoiceVolumePanelState, actions:
   cameraButton.setAttribute("aria-pressed", String(prefs.use_camera));
   cameraButton.setAttribute("aria-label", t("{0}：{1}", t(VOICE_VOLUME_TEXT.camera), prefs.use_camera ? t("開") : t("關")));
   cameraButton.disabled = !actions.setDayNight;
+  const effectsButton = button(prefs.night_effects ? "開" : "關", () => actions.setDayNight?.({ night_effects: !prefs.night_effects }), prefs.night_effects ? "btn--primary" : "");
+  effectsButton.setAttribute("aria-pressed", String(prefs.night_effects));
+  effectsButton.setAttribute("aria-label", t("{0}：{1}", t(VOICE_VOLUME_TEXT.effects), prefs.night_effects ? t("開") : t("關")));
+  effectsButton.setAttribute("data-night-effects", "");
+  effectsButton.disabled = !actions.setDayNight;
   return h(
     "section",
     { class: "camera-settings voice-volume-settings" },
@@ -624,6 +629,7 @@ export function renderVoiceVolumeSettings(state: VoiceVolumePanelState, actions:
       hourSelect(VOICE_VOLUME_TEXT.hoursStart, prefs.night_start_h, (hour) => ({ night_start_h: hour })),
       hourSelect(VOICE_VOLUME_TEXT.hoursEnd, prefs.night_end_h, (hour) => ({ night_end_h: hour })),
       h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(VOICE_VOLUME_TEXT.camera)), h("span", { class: "muted small" }, t(VOICE_VOLUME_TEXT.cameraNote))), cameraButton),
+      h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(VOICE_VOLUME_TEXT.effects)), h("span", { class: "muted small" }, t(VOICE_VOLUME_TEXT.effectsNote))), effectsButton),
     ),
     h("p", { class: "muted small", "data-light": "" }, lightLine(state)),
     h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.hoursNote)),

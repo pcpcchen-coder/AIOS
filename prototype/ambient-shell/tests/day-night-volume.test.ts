@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BRIGHT_LUMA, DARK_LUMA, currentLight, decideDayNight, DEFAULT_DAY_NIGHT_PREFS, frameLuma, inNightHours, INITIAL_LIGHT,
-  LIGHT_HOLD_MS, LIGHT_STALE_MS, nextLight, parseDayNightPrefs,
+  LIGHT_HOLD_MS, LIGHT_STALE_MS, nextLight, nightEffects, NO_NIGHT_EFFECTS, parseDayNightPrefs,
 } from "../shared/day-night.ts";
 import { voiceVolumeOutput } from "../shared/voice-volume.ts";
 import { LIGHT_REPLY_MS, LightMeter, type LightWorkerLike } from "../src/light-meter.ts";
@@ -25,8 +25,8 @@ describe("night hours", () => {
 
   it("parses saved prefs, falling back per field", () => {
     expect(parseDayNightPrefs(null)).toEqual(DEFAULT_DAY_NIGHT_PREFS);
-    expect(parseDayNightPrefs({ night_start_h: 21, night_end_h: 24, use_camera: "yes" })).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: true });
-    expect(parseDayNightPrefs({ night_start_h: 0, night_end_h: 6.5, use_camera: false })).toEqual({ night_start_h: 0, night_end_h: 7, use_camera: false });
+    expect(parseDayNightPrefs({ night_start_h: 21, night_end_h: 24, use_camera: "yes" })).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: true, night_effects: true });
+    expect(parseDayNightPrefs({ night_start_h: 0, night_end_h: 6.5, use_camera: false })).toEqual({ night_start_h: 0, night_end_h: 7, use_camera: false, night_effects: true });
   });
 });
 
@@ -139,9 +139,9 @@ describe("VoiceVolume day/night", () => {
   it("saves day/night prefs", () => {
     const storage = memoryStorage();
     const v = new VoiceVolume(storage);
-    expect(v.setPrefs({ night_start_h: 21, use_camera: false })).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false });
-    expect(new VoiceVolume(storage).prefs).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false });
-    expect(JSON.parse(storage.data.get(DAY_NIGHT_KEY)!)).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false });
+    expect(v.setPrefs({ night_start_h: 21, use_camera: false })).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false, night_effects: true });
+    expect(new VoiceVolume(storage).prefs).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false, night_effects: true });
+    expect(JSON.parse(storage.data.get(DAY_NIGHT_KEY)!)).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false, night_effects: true });
   });
 
   it("the tool output names the period and says when it is not the one in use", () => {
@@ -231,5 +231,24 @@ describe("LightMeter", () => {
     await new Promise((r) => setTimeout(r, 0));
     w.onmessage!({ data: { type: "error", id: w.posted[0]!.id, message: "boom" } });
     expect(lumas).toEqual([]);
+  });
+});
+
+describe("DN-1 night effects", () => {
+  it("night with night_effects on dims, mutes the processing cue and pauses memories", () => {
+    expect(nightEffects("night", { night_effects: true })).toEqual({ dim: true, muteProcessingCue: true, pauseMemories: true });
+  });
+  it("day, or night_effects off (rollback), applies nothing beyond the volume", () => {
+    expect(nightEffects("day", { night_effects: true })).toEqual(NO_NIGHT_EFFECTS);
+    expect(nightEffects("night", { night_effects: false })).toEqual(NO_NIGHT_EFFECTS);
+    expect(DEFAULT_DAY_NIGHT_PREFS.night_effects).toBe(true);
+    expect(parseDayNightPrefs({ night_effects: false }).night_effects).toBe(false);
+    expect(parseDayNightPrefs({ night_effects: "no" }).night_effects).toBe(true);
+  });
+  it("a fake clock at 23:00 and a dark camera reading at 14:00 both turn the effects on", () => {
+    const prefs = DEFAULT_DAY_NIGHT_PREFS;
+    expect(nightEffects(decideDayNight(23, null, prefs).mode, prefs).dim).toBe(true);
+    expect(nightEffects(decideDayNight(14, "dark", prefs).mode, prefs).dim).toBe(true);
+    expect(nightEffects(decideDayNight(14, "bright", prefs).mode, prefs).dim).toBe(false);
   });
 });
