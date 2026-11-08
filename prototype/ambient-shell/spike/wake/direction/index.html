@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <!-- 喚醒方向性診斷（開發工具頁，不是產品畫面）：只在本機 127.0.0.1:5184；麥克風音訊只在記憶體，不錄音、不寫檔、不連外。
+         connect-src 'self' 只允許同源讀 /wake-runtime/ 的引擎檔案；ws://127.0.0.1:5184 只給開發伺服器的 HMR。 -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self' ws://127.0.0.1:5184; img-src 'self' data:; style-src 'self' 'unsafe-inline'; media-src 'self' mediastream:"
+    />
+    <title>喚醒方向性診斷 / Wake direction diagnostics</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root { color-scheme: dark; --bg: #101318; --fg: #e8ebf0; --muted: #98a2b3; --line: #2a3140; --ok: #39d98a; --warn: #ffb020; --bad: #ff6b6b; }
+      body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, sans-serif; }
+      h1 { font-size: 18px; margin: 0 0 4px; }
+      h2 { font-size: 15px; margin: 0 0 6px; }
+      .note { color: var(--muted); margin: 0 0 12px; max-width: 72em; }
+      fieldset { border: 1px solid var(--line); border-radius: 8px; margin: 0 0 12px; padding: 8px 12px; }
+      legend { color: var(--muted); }
+      label { margin-right: 14px; white-space: nowrap; }
+      button { margin: 4px 8px 4px 0; }
+      table { border-collapse: collapse; margin: 6px 0; }
+      th, td { border: 1px solid var(--line); padding: 2px 6px; text-align: center; font-variant-numeric: tabular-nums; }
+      td.k { text-align: left; color: var(--muted); }
+      meter { width: 160px; }
+      textarea { width: 100%; min-height: 8em; background: #0b0d11; color: var(--fg); border: 1px solid var(--line); border-radius: 8px; }
+      pre { white-space: pre-wrap; background: #0b0d11; border: 1px solid var(--line); border-radius: 8px; padding: 8px; max-height: 16em; overflow: auto; }
+      .big { font-size: 22px; font-weight: 600; }
+      .hit { color: var(--ok); }
+      .miss { color: var(--bad); }
+      #status[data-state="listening"] { color: var(--ok); }
+      #status[data-state="error"] { color: var(--warn); }
+    </style>
+    <script type="module" src="./page.ts"></script>
+  </head>
+  <body>
+    <h1>喚醒方向性診斷 / Wake direction diagnostics</h1>
+    <p class="note">
+      開發工具，不是產品功能。用產品同一份喚醒引擎與關鍵詞（shared/wake-runtime.json），音訊只在本頁記憶體，不錄音、不寫檔、不連外；結果只有次數，由你自己複製保存。引擎檔案要先執行 <code>npm run wake:setup -- --product</code>。偵測器拿不到分數，所以用「多個門檻同時跑」看餘裕。<br />
+      Developer tool, not a product feature. It uses the product's wake engine and keywords (shared/wake-runtime.json). Audio stays in this page's memory; nothing is recorded, saved or sent. Results are counts only, and you copy them yourself. Run <code>npm run wake:setup -- --product</code> first for the engine files. The detector exposes no score, so several thresholds run at once to show the margin.
+    </p>
+
+    <fieldset>
+      <legend>1. 條件 / Condition（改了要重新開始 / restart after changing）</legend>
+      <label>麥克風 / Microphone <select id="device"><option value="">系統預設 / System default</option></select></label>
+      <button id="refresh" type="button">重新整理清單 / Refresh list</button><br />
+      <label><input id="ec" type="checkbox" checked /> echoCancellation</label>
+      <label><input id="ns" type="checkbox" checked /> noiseSuppression</label>
+      <label><input id="agc" type="checkbox" checked /> autoGainControl</label>
+      <label>聲道要求 / Channel request
+        <select id="channels">
+          <option value="default">不指定（同產品）/ None (same as product)</option>
+          <option value="max">要求最多聲道 / Ask for max channels</option>
+        </select>
+      </label>
+      <p class="note">三項全勾＋不指定＝產品現在的設定 / All three on + none = the product's current setting.</p>
+    </fieldset>
+
+    <fieldset>
+      <legend>2. 偵測器 / Detectors（每個都各跑一次 KWS，CPU 約成正比 / each runs its own KWS; CPU scales roughly with the count）</legend>
+      門檻位移 / Threshold offset:
+      <label><input class="delta" type="checkbox" value="0.1" checked /> +0.10</label>
+      <label><input class="delta" type="checkbox" value="0.05" checked /> +0.05</label>
+      <label><input class="delta" type="checkbox" value="0" checked /> 0（產品 / product）</label>
+      <label><input class="delta" type="checkbox" value="-0.05" checked /> −0.05</label><br />
+      <label><input id="perchannel" type="checkbox" checked /> 多聲道時每個聲道各跑一個（產品門檻）/ With several channels, one per channel (product threshold)</label>
+    </fieldset>
+
+    <button id="start" type="button">開始本機聆聽 / Start listening locally</button>
+    <button id="stop" type="button" disabled>停止並清空 / Stop and clear</button>
+    <p>狀態 / Status: <span id="status" data-state="off" role="status" aria-live="polite">關閉 / off</span></p>
+
+    <fieldset>
+      <legend>3. 實際收到的聲音 / What actually arrives</legend>
+      <table aria-label="麥克風實際設定 / Actual microphone settings"><tbody id="info"></tbody></table>
+      <div id="meters" aria-label="各聲道音量 / Per-channel level"></div>
+      <table aria-label="偵測器狀態 / Detector status"><thead><tr><th>偵測器 / Detector</th><th>來源 / Source</th><th>狀態 / State</th><th>觸發次數 / Detections</th></tr></thead><tbody id="detectors"></tbody></table>
+    </fieldset>
+
+    <fieldset>
+      <legend>4. 方向測試 / Direction test</legend>
+      <label>方向 / Angle <select id="angle"></select></label>
+      <label>距離 / Distance <select id="distance"></select></label>
+      <label>喚醒詞 / Wake phrase <select id="phrase"></select></label>
+      <label>時間窗（秒）/ Window (s) <input id="window" type="number" min="2" max="15" step="1" value="5" /></label>
+      <label><input id="beep" type="checkbox" checked /> 開始時嗶一聲 / Beep at start</label>
+      <label><input id="advance" type="checkbox" checked /> 每格滿 5 次自動換下一格 / Move to the next cell after 5</label><br />
+      <button id="trial" type="button" disabled>說一次（空白鍵）/ Say it once (Space)</button>
+      <button id="undo" type="button" disabled>刪除上一次 / Undo last</button>
+      <span id="cell"></span>
+      <p class="big" id="trialout" role="status" aria-live="polite"></p>
+      <label>負樣本 / Negative <select id="negkind"></select></label>
+      <button id="neg" type="button" disabled>開始負樣本 / Start negative</button>
+      <span id="negout" role="status" aria-live="polite"></span>
+      <p class="note">時間窗外的觸發算「未提示觸發」/ Detections outside a window count as unprompted: <span id="unprompted">0</span></p>
+    </fieldset>
+
+    <fieldset>
+      <legend>5. 結果 / Results（只有次數 / counts only）</legend>
+      <label>條件 / Condition <select id="rcond"></select></label>
+      <label>偵測器 / Detector <select id="rvar"></select></label>
+      <div id="summary"></div>
+      <button id="export" type="button">匯出 / Export</button>
+      <button id="import" type="button">從下方 JSON 匯入 / Import JSON below</button>
+      <button id="clear" type="button">清除全部結果 / Clear all results</button>
+      <textarea id="io" aria-label="結果 JSON / Results JSON" spellcheck="false"></textarea>
+      <pre id="csv" aria-label="結果 CSV / Results CSV"></pre>
+    </fieldset>
+
+    <pre id="log" aria-label="紀錄 / Log"></pre>
+  </body>
+</html>

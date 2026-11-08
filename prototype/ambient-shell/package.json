@@ -24,6 +24,7 @@
     "wake:spike": "tsx spike/wake/cli.ts",
     "wake:bench": "tsx spike/wake/bench.ts",
     "wake:page": "vite --config spike/wake/vite.config.ts",
+    "wake:direction": "vite --config spike/wake/direction/vite.config.ts",
     "docs:commands": "tsx scripts/write-commands-doc.ts",
     "tv:pair": "tsx scripts/tv-pair.ts"
   },
