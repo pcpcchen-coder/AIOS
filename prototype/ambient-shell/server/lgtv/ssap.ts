@@ -34,8 +34,14 @@ export const SSAP = {
   switchInput: "tv/switchInput",
   connectionInfo: "com.webos.service.connectionmanager/getinfo",
   systemInfo: "system/getSystemInfo",
+  inputSocket: "com.webos.service.networkinput/getPointerInputSocket",
+  /** LGTV-2：媒體播放狀態（foregroundAppInfo[].playState）。 */
+  mediaForeground: "com.webos.media/getForegroundAppInfo",
   media: { play: "media.controls/play", pause: "media.controls/pause", stop: "media.controls/stop", rewind: "media.controls/rewind", fast_forward: "media.controls/fastForward" },
 } as const;
+
+/** 遙控按鍵名稱（aiowebostv buttons.py 的子集：大寫英文與數字）。 */
+const BUTTON = /^[A-Z0-9_]{1,20}$/;
 
 /** 連不上電視（沒有送出任何指令）：關機待機、不在網路上、LG Connect Apps 關閉。 */
 export class SsapUnreachable extends Error {}
@@ -79,6 +85,8 @@ export class SsapSession {
     private readonly ws: WebSocket,
     readonly clientKey: string,
     private readonly requestTimeoutMs: number,
+    /** 這條連線實際連到的主機（遙控按鍵的第二條連線只接受同一台主機）。 */
+    readonly remoteHost: string = "",
   ) {
     ws.on("message", (data) => this.onMessage(String(data)));
     ws.on("close", () => this.failAll(new SsapLost("連線中斷")));
@@ -117,6 +125,41 @@ export class SsapSession {
       return true;
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * LGTV-2：送遙控器按鍵（HOME、ENTER、RIGHT…）。按鍵走電視給的第二條 WebSocket（getPointerInputSocket），
+   * 只接受和主連線同一台主機的位址（電視回的位址不能把 Nous 帶去別的主機）。每個鍵之間隔 gapMs。
+   */
+  async buttons(names: readonly string[], gapMs = 150, signal?: AbortSignal): Promise<void> {
+    const r = await this.request(SSAP.inputSocket);
+    const path = typeof r.socketPath === "string" ? r.socketPath : "";
+    let url: URL;
+    try {
+      url = new URL(path);
+    } catch {
+      throw new SsapRejected("電視沒有給遙控按鍵的位址");
+    }
+    if (!["ws:", "wss:"].includes(url.protocol) || (this.remoteHost && url.hostname !== this.remoteHost)) throw new SsapRejected("遙控按鍵的位址不是這台電視");
+    // 按鍵連線開不起來：一個鍵都還沒送，是「沒有送出」。
+    const input = await openSocket(url.href, 3_000, signal).catch(() => {
+      throw new SsapUnreachable("連不上遙控按鍵的連線");
+    });
+    input.on("error", () => undefined);
+    try {
+      for (let i = 0; i < names.length; i++) {
+        if (signal?.aborted) throw new SsapLost("已中止");
+        if (i) await new Promise((resolve) => setTimeout(resolve, gapMs));
+        if (!BUTTON.test(names[i]!)) throw new SsapRejected("不支援的按鍵");
+        await new Promise<void>((resolve, reject) => input.send(`type:button\nname:${names[i]}\n\n`, (err) => (err ? reject(new SsapLost("按鍵送出失敗")) : resolve())));
+      }
+    } finally {
+      try {
+        input.close();
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -265,10 +308,12 @@ export async function connectSsap(options: SsapConnectOptions): Promise<SsapSess
   const connectTimeout = options.connectTimeoutMs ?? 4_000;
   const urls = options.urls ?? [`wss://${options.host}:3001`, `ws://${options.host}:3000`];
   let ws: WebSocket | null = null;
+  let remoteHost = "";
   for (const url of urls) {
     if (options.signal?.aborted) throw new SsapUnreachable("已中止");
     try {
       ws = await openSocket(url, connectTimeout, options.signal);
+      remoteHost = new URL(url).hostname;
       break;
     } catch {
       ws = null;
@@ -317,7 +362,7 @@ export async function connectSsap(options: SsapConnectOptions): Promise<SsapSess
     const key = (reply.payload as Record<string, unknown> | undefined)?.["client-key"];
     if (reply.type !== "registered" || typeof key !== "string" || !key) fail(new SsapPairingRequired("註冊沒有完成"));
     inbox.detach();
-    const session = new SsapSession(ws, key as string, options.requestTimeoutMs ?? 5_000);
+    const session = new SsapSession(ws, key as string, options.requestTimeoutMs ?? 5_000, remoteHost);
     inbox.release();
     return session;
   } catch (err) {

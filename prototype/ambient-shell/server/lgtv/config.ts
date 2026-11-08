@@ -36,3 +36,11 @@ export function parseLgtvBroadcast(value: string | undefined): string | null {
   if (!privateIpv4(v)) throw new Error("NOUS_LGTV_BROADCAST 必須是區網的 IPv4 廣播位址，例如 192.168.1.255");
   return v;
 }
+
+/** LGTV-2：NOUS_YOUTUBE_API_KEY：可省略；Google API key 是英數、底線、連字號（不印出值）。 */
+export function parseYoutubeKey(value: string | undefined): string | null {
+  const v = value?.trim();
+  if (!v) return null;
+  if (!/^[A-Za-z0-9_-]{20,100}$/.test(v)) throw new Error("NOUS_YOUTUBE_API_KEY 格式不對（應該是 Google Cloud 的 API key）");
+  return v;
+}
