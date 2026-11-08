@@ -172,8 +172,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "3a4f708e4eff98e762ac42a368c65f733e577a87f9059169110be6cac2c4d8e5",
-      "translationSha256": "1cfd8fa2026e12cf90edb7744b1982fde53f63b83ddda3d34d001dae72e30846"
+      "sourceSha256": "8553f7c3c3cc7c4404968c09c1d8bec5047c514a15fecc32206076aadb931a74",
+      "translationSha256": "cfbd012a434776abbb44355037830b2f3a27016f3c06156df2d269b8c15e3bcf"
     },
     {
       "source": "docs/README.md",
@@ -690,8 +690,8 @@
       "source": "docs/validation/pinned-settings-2026-11-08.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/pinned-settings-2026-11-08.en.md",
-      "sourceSha256": "63f69592976d9742aa170d928045cdc71000ca87f58fb0fea61be807fb56214d",
-      "translationSha256": "cae6faa70e3906dd3354418025c16530b54c725a8b8678bf99c1f5faae58007d"
+      "sourceSha256": "00940d9d5781b750ab4e6357c19fab5d926adf6185788cb49ab7397b79258943",
+      "translationSha256": "534b547e58ca0cf4c3a4123d47e9fc6e1bc9d9ada5c0360d8f95f10ab5d966bd"
     },
     {
       "source": "docs/validation/pro-1-2026-11-05.md",

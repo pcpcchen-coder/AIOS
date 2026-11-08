@@ -23,6 +23,8 @@ Which one fired on the Pi has not been confirmed; the change below blocks all of
 
 - **Pinning**: a new pure function, `keepPinnedSettings` in `src/shell-state.ts`. After the user opens settings, other events still update tasks, listening and voice state, but the view returns to the same settings card (same `surface_id`, no redraw).
 - **How to close**: only the "收起" button at the bottom of settings or the bottom-right gear unpin it (`closeSettings`, the only place in main.ts that clears the pin). Esc, saying 「收起」, the person leaving, a wake word or starting voice do not close it.
+- **Pinned only on terminal pages such as the Pi**: the same condition as the bottom-right gear. The Mac App opens family recognition, memory and results from its menu bar; pinning on the Mac would make those menu items do nothing while settings are open, so the Mac keeps its old behavior.
+- **Esc still ends realtime voice**: while settings are pinned, Esc does not close them and instead ends the conversation as usual (before, the first Esc closed the view and the second ended the call).
 - **Confirmation cards are the exception**: a confirmation card for an external action (for example a home command that needs confirmation) may cover settings for a while; when it ends, settings come back. Blocking it too would let it time out and count as rejected.
 - **Text 1.5× larger**: the settings view uses `zoom: 1.5`, so text, buttons and spacing grow together. The frame widens to the screen (up to 1200 px), and the height limit is divided by 1.5 so the enlarged view still fits and scrolls. Only settings change; other views are unchanged.
 
@@ -41,9 +43,13 @@ Which one fired on the Pi has not been confirmed; the change below blocks all of
   - Esc does not close it, and neither does clicking the lower part of the screen;
   - "收起" closes it; the gear opens it again and closes it again;
   - no JS errors on the page.
-- `npm run typecheck`, `npx vitest run` (165 files, 3051 passed, 5 skipped), `npm run build` and `node scripts/verify-aios.mjs` all pass.
+- `npm run typecheck`, `npx vitest run` (165 files, 3051 passed, 5 skipped; re-run after the review fixes), `npm run build` and `node scripts/verify-aios.mjs` all pass.
 
 ## Known limits
+
+- While settings are pinned, other views (progress, results, result search) do not appear, and typed chat replies are visible only after settings close.
+- A settings card rejected by the presentation policy is unpinned automatically to avoid an endless redraw (settings cards are not rejected today; this is a safeguard).
+- Settings do not grow with the camera's distance scaling; they stay at 1.5×.
 
 - On small screens such as 1024×600 the enlarged settings show less at a time and need scrolling.
 - The bottom-right gear covers a small corner of the settings card; scrolling brings any covered button into reach.

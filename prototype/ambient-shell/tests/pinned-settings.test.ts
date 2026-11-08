@@ -32,15 +32,19 @@ describe("keepPinnedSettings", () => {
     expect(next.surface).toBeNull();
   });
 
-  it("main.ts only unpins through closeSettings (the 收起 button and the gear)", () => {
+  it("main.ts unpins only through closeSettings (收起 and the gear) or a policy-rejected card; pins only on terminal pages; Esc still ends a call", () => {
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-    expect(main.match(/pinnedSettings = null/g)).toHaveLength(1);
+    expect(main.match(/pinnedSettings = null/g)).toHaveLength(2);
+    expect(main).toMatch(/if \(pinnedSettings\?\.surface_id === s\.surface_id\) pinnedSettings = null;/);
+    expect(main).toMatch(/next\.surface\?\.kind === "settings" && pinSettingsOnThisPage\) pinnedSettings = next\.surface;/);
+    expect(main).toMatch(/realtime\.on && shell\.surface !== null && !pinnedSettings\) dispatch/);
     expect(main).toMatch(/dismiss: \(\) => \(shell\.surface\?\.kind === "settings" \? closeSettings\(\) : dispatch\(\{ type: "dismiss" \}\)\)/);
     expect(main).toMatch(/close: \(\) => closeSettings\(\)/);
   });
 
   it("settings text is 1.5× (zoom) and still fits the screen height", () => {
     const css = readFileSync(new URL("../src/style.css", import.meta.url), "utf8");
+    expect(css).toMatch(/\.surface-root:has\(> \.surface--settings\) \{ width: min\(1200px, 96vw\); zoom: 1; \}/);
     expect(css).toMatch(/\.surface\.surface--settings \{\n  zoom: 1\.5;\n  max-height: calc\(\(100vh - var\(--surface-top\) - 4vh\) \/ 1\.5\);/);
   });
 });
