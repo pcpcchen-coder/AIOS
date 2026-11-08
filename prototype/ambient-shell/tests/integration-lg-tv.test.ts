@@ -11,6 +11,7 @@ import { buildRealtimeTools, INTEGRATION_RULE, realtimeToolRules, TV_RULE, voice
 import { inputOfApp, resolveApp, resolveInput } from "../server/lgtv/apps.ts";
 import { connectSsap, SsapLost, SsapPairingRequired, SsapRejected, SsapUnreachable } from "../server/lgtv/ssap.ts";
 import { pairingFile, readPairing, removePairing, writePairing } from "../server/lgtv/store.ts";
+import { parseYouTube, tvUrl, YouTubeSearch } from "../server/lgtv/youtube.ts";
 import { magicPacket, normalizeMac } from "../server/lgtv/wol.ts";
 import type { ExecutionContext } from "../server/integrations/contracts.ts";
 import type { IntegrationToolId } from "../shared/integrations.ts";
@@ -40,6 +41,14 @@ interface FakeTvOptions {
   volumeUpOkTimes?: number;
   /** 收到 turnOn 後變成 Active。 */
   wakeOnTurnOn?: boolean;
+  /** LGTV-2：YouTube 冷啟動時停在「誰在觀看」：影片被丟掉，要按 ENTER 選帳號後重送才播。 */
+  profilePicker?: boolean;
+  /** LGTV-2：launch 帶 params 時拒絕（只接受 contentId）。 */
+  rejectParams?: boolean;
+  /** LGTV-2：媒體狀態不帶 mediaId。 */
+  noMediaId?: boolean;
+  /** LGTV-2：遙控按鍵位址指到別的主機。 */
+  foreignInputHost?: boolean;
 }
 
 const LAUNCH_POINTS = [
@@ -58,6 +67,10 @@ class FakeTv {
   volume: number;
   muted: boolean;
   requests: { uri: string; payload: Record<string, unknown> }[] = [];
+  buttons: string[] = [];
+  playState: string | null = null;
+  mediaId = 0;
+  pickerShowing = false;
   registers = 0;
   constructor(readonly o: FakeTvOptions = {}) {
     this.power = o.power ?? "Active";
@@ -69,7 +82,17 @@ class FakeTv {
     this.server = new WebSocketServer({ host: "127.0.0.1", port });
     await new Promise<void>((r) => this.server!.once("listening", () => r()));
     this.port = (this.server.address() as { port: number }).port;
-    this.server.on("connection", (ws) => this.handle(ws));
+    this.server.on("connection", (ws, req) => {
+      if (req.url === "/input") {
+        ws.on("message", (raw) => {
+          const name = /name:(\w+)/.exec(String(raw))?.[1] ?? "";
+          this.buttons.push(name);
+          if (name === "ENTER" && this.pickerShowing) this.pickerShowing = false;
+        });
+        return;
+      }
+      this.handle(ws);
+    });
     return this;
   }
   async stop(): Promise<void> {
@@ -135,8 +158,23 @@ class FakeTv {
           if (!this.o.ignoreLaunch) this.app = `com.webos.app.${String(payload.inputId).toLowerCase().replace("_", "")}`;
           return ok();
         case "system.launcher/launch":
+          if (this.o.rejectParams && payload.params) return send({ type: "response", id: m.id, payload: { returnValue: false, errorText: "bad params" } });
           if (!this.o.ignoreLaunch) this.app = payload.id;
+          if (payload.id === "youtube.leanback.v4" && (payload.params?.contentTarget || payload.contentId)) {
+            // 第一次冷啟動：停在帳號畫面，影片被丟掉（LGTVG3 實機行為）。
+            if (this.o.profilePicker && !this.buttons.includes("ENTER")) {
+              this.pickerShowing = true;
+              this.playState = null;
+            } else if (!this.o.ignoreLaunch) {
+              this.playState = "playing";
+              this.mediaId++;
+            }
+          }
           return ok({ id: payload.id });
+        case "com.webos.service.networkinput/getPointerInputSocket":
+          return ok({ socketPath: this.o.foreignInputHost ? `ws://10.9.9.9:${this.port}/input` : `ws://127.0.0.1:${this.port}/input` });
+        case "com.webos.media/getForegroundAppInfo":
+          return ok({ foregroundAppInfo: this.playState ? [{ appId: this.app, playState: this.playState, ...(this.o.noMediaId ? {} : { mediaId: `m${this.mediaId}` }) }] : [] });
         case "system/turnOn":
           if (this.o.wakeOnTurnOn) this.power = "Active";
           return ok();
@@ -189,7 +227,7 @@ async function deadUrl() {
   return url;
 }
 
-const FAST = { connectMs: 500, wakeWaitMs: 1_000, pollMs: 20, offWaitMs: 400, appWaitMs: 300, standbyWaitMs: 300, stepMs: 1 };
+const FAST = { connectMs: 500, wakeWaitMs: 1_000, pollMs: 20, offWaitMs: 400, appWaitMs: 300, standbyWaitMs: 300, stepMs: 1, playWaitMs: 300, profileReplayMs: 1 };
 
 function adapter(urls: string[], extra: Partial<ConstructorParameters<typeof LgTvAdapter>[0]> = {}) {
   return new LgTvAdapter({ host: HOST, pairingFile: paired(), urls, timing: FAST, wol: async () => undefined, ...extra });
@@ -494,7 +532,7 @@ describe("LGTV-1 Adapter（假電視，誠實狀態）", () => {
 describe("LGTV-1 設定與整合層", () => {
   it("NOUS_LGTV_HOST 只接受私有網段；MAC 與廣播位址格式檢查；金鑰檔固定在 configDir", () => {
     const base = { NOUS_AIL: "on", NOUS_AIL_SERVICES: "lg_tv", NOUS_CONFIG_DIR: "/tmp/nous-x" };
-    expect(loadConfig({ ...base, NOUS_LGTV_HOST: HOST, NOUS_LGTV_MAC: "A8-23-FE-12-34-56" }).ail.tv).toEqual({ host: HOST, mac: MAC, broadcast: null, pairingFile: "/tmp/nous-x/lgtv.json" });
+    expect(loadConfig({ ...base, NOUS_LGTV_HOST: HOST, NOUS_LGTV_MAC: "A8-23-FE-12-34-56" }).ail.tv).toEqual({ host: HOST, mac: MAC, broadcast: null, pairingFile: "/tmp/nous-x/lgtv.json", youtubeApiKey: null });
     expect(loadConfig({ ...base }).ail.tv?.host).toBeNull();
     for (const bad of ["8.8.8.8", "tv.example.com", "192.168.1.300", "172.32.0.1", "010.0.0.1", "192.168.01.5"]) expect(() => loadConfig({ ...base, NOUS_LGTV_HOST: bad })).toThrow(/NOUS_LGTV_HOST/);
     expect(() => loadConfig({ ...base, NOUS_LGTV_HOST: HOST, NOUS_LGTV_MAC: "nope" })).toThrow(/NOUS_LGTV_MAC/);
@@ -509,7 +547,7 @@ describe("LGTV-1 設定與整合層", () => {
     const ail = createIntegrations({ enabled: true, services: ["lg_tv"], soloistPort: 19090, tv: { host: HOST, mac: null, broadcast: null, pairingFile: "/x" } })!;
     const apiKey = buildRealtimeTools({ webSearch: false, mcp: [], integrations: (l) => ail.registry.functionSpecs("api_key", l) }).filter((t) => String(t.name).startsWith("app__"));
     const live = liveCallerTools({ webSearch: false, mcp: [], integrations: (l) => ail.registry.functionSpecs("live", l) }).filter((t) => t.type === "function" && t.name.startsWith("app__"));
-    expect(apiKey.map((t) => t.name)).toEqual(["app__tv__input", "app__tv__launch_app", "app__tv__media", "app__tv__mute", "app__tv__power", "app__tv__status", "app__tv__volume"]);
+    expect(apiKey.map((t) => t.name)).toEqual(["app__tv__input", "app__tv__launch_app", "app__tv__media", "app__tv__mute", "app__tv__play_youtube", "app__tv__power", "app__tv__status", "app__tv__volume", "app__tv__youtube_select_profile"]);
     expect(live.map((t) => (t.type === "function" ? [t.name, t.parameters] : null))).toEqual(apiKey.map((t) => [t.name, t.parameters]));
   });
 
@@ -533,5 +571,188 @@ describe("LGTV-1 設定與整合層", () => {
     expect(withoutTv).not.toContain(TV_RULE);
     expect(withoutTv).toContain(voiceVolumeRule(true));
     expect(voiceVolumeRule(true)).toBe(voiceVolumeRule(true, false));
+  });
+});
+
+// ───────── LGTV-2：在電視的 YouTube 播指定影片（假電視＋假的 YouTube Data API；不是實機） ─────────
+
+const YT_KEY = "AIzaFAKEKEY_0123456789abcdef";
+
+function fakeYoutubeApi(reply: { status?: number; body?: unknown } | ((url: URL) => { status?: number; body?: unknown })) {
+  const calls: URL[] = [];
+  const headers: Headers[] = [];
+  const f = (async (input: string | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    calls.push(url);
+    headers.push(new Headers(init?.headers));
+    const r = typeof reply === "function" ? reply(url) : reply;
+    return new Response(JSON.stringify(r.body ?? {}), { status: r.status ?? 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  return { fetch: f, calls, headers };
+}
+
+const SEARCH_BODY = {
+  items: [
+    { id: { videoId: "m_dhMSvUCIc" }, snippet: { title: "🔴LIVE：TVBS NEWS &amp; 現場", channelTitle: "TVBS NEWS", liveBroadcastContent: "live" } },
+    { id: { kind: "youtube#channel" }, snippet: { title: "a channel" } },
+    { id: { videoId: "7aattNnxTEE" }, snippet: { title: "晚間整點新聞\u202e", channelTitle: "TVBS NEWS" } },
+  ],
+};
+
+describe("LGTV-2 YouTube 網址解析與官方搜尋", () => {
+  it("網址、短網址、shorts、影片 ID、播放清單與起始秒數；不是 YouTube 的一律 null", () => {
+    expect(parseYouTube("dQw4w9WgXcQ")).toEqual({ videoId: "dQw4w9WgXcQ", playlistId: null, startSeconds: null });
+    expect(parseYouTube("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1m30s")?.startSeconds).toBe(90);
+    expect(parseYouTube("youtu.be/dQw4w9WgXcQ")?.videoId).toBe("dQw4w9WgXcQ");
+    expect(parseYouTube("https://m.youtube.com/shorts/dQw4w9WgXcQ")?.videoId).toBe("dQw4w9WgXcQ");
+    expect(parseYouTube("https://www.youtube.com/playlist?list=PLabcdefghij")?.playlistId).toBe("PLabcdefghij");
+    for (const bad of ["https://evil.example/watch?v=dQw4w9WgXcQ", "https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ", "孤獨的美食家", "https://www.youtube.com/watch?v=short"]) expect(parseYouTube(bad)).toBeNull();
+    expect(tvUrl({ videoId: "dQw4w9WgXcQ", playlistId: null, startSeconds: 90 })).toBe("https://www.youtube.com/tv?v=dQw4w9WgXcQ&t=90");
+  });
+
+  it("搜尋：官方 search.list 參數、清理標題、略過非影片、1 小時快取、錯誤不含金鑰", async () => {
+    const api = fakeYoutubeApi({ body: SEARCH_BODY });
+    let now = 0;
+    const yt = new YouTubeSearch({ apiKey: YT_KEY, fetch: api.fetch, now: () => now });
+    const r = await yt.search("TVBS 新聞直播");
+    expect(r.map((x) => x.video_id)).toEqual(["m_dhMSvUCIc", "7aattNnxTEE"]);
+    expect(r[0]).toMatchObject({ title: "🔴LIVE：TVBS NEWS & 現場", channel: "TVBS NEWS", live: true });
+    expect(r[1]!.title).toBe("晚間整點新聞");
+    const u = api.calls[0]!;
+    expect(u.origin + u.pathname).toBe("https://www.googleapis.com/youtube/v3/search");
+    expect(Object.fromEntries(u.searchParams)).toEqual({ part: "snippet", type: "video", q: "TVBS 新聞直播", maxResults: "5", regionCode: "TW", relevanceLanguage: "zh-Hant" });
+    // key 只放在標頭，不在網址裡。
+    expect(u.href).not.toContain(YT_KEY);
+    expect(api.headers[0]!.get("x-goog-api-key")).toBe(YT_KEY);
+    await yt.search("tvbs 新聞直播");
+    expect(api.calls).toHaveLength(1);
+    now = 61 * 60_000;
+    await yt.search("TVBS 新聞直播");
+    expect(api.calls).toHaveLength(2);
+    const quota = new YouTubeSearch({ apiKey: YT_KEY, fetch: fakeYoutubeApi({ status: 403, body: { error: { errors: [{ reason: "quotaExceeded" }] } } }).fetch });
+    await expect(quota.search("x")).rejects.toMatchObject({ kind: "quota" });
+    const denied = new YouTubeSearch({ apiKey: YT_KEY, fetch: fakeYoutubeApi({ status: 400, body: { error: { errors: [{ reason: "keyInvalid" }] } } }).fetch });
+    // 找不到不快取。
+    const empty = fakeYoutubeApi({ body: { items: [] } });
+    const ye = new YouTubeSearch({ apiKey: YT_KEY, fetch: empty.fetch });
+    await ye.search("nothing");
+    await ye.search("nothing");
+    expect(empty.calls).toHaveLength(2);
+    // 搜尋卡住：自己的時限到了就是 network（不會拖到整合層逾時）。
+    const hang = new YouTubeSearch({ apiKey: YT_KEY, timeoutMs: 50, fetch: ((_: unknown, init?: RequestInit) => new Promise((_r, reject) => init?.signal?.addEventListener("abort", () => reject(new Error("aborted"))))) as typeof fetch });
+    await expect(hang.search("x")).rejects.toMatchObject({ kind: "network" });
+    const err = await denied.search("x").catch((e: Error) => e);
+    expect(err).toMatchObject({ kind: "denied" });
+    expect(String((err as Error).message)).not.toContain(YT_KEY);
+  });
+});
+
+describe("LGTV-2 Adapter：play_youtube 與選帳號（假電視）", () => {
+  const yt = (body: unknown = SEARCH_BODY) => {
+    const api = fakeYoutubeApi({ body });
+    return { api, search: new YouTubeSearch({ apiKey: YT_KEY, fetch: api.fetch }) };
+  };
+
+  it("給網址：用 contentTarget 送出，回讀前景與播放狀態 → confirmed", async () => {
+    const t = await tv();
+    const r = await run(adapter([t.url]), TV_TOOL.playYoutube, { video: "https://youtu.be/dQw4w9WgXcQ?t=30" });
+    expect(r).toMatchObject({ status: "confirmed", message: TV_TEXT.ytPlaying, data: { video_id: "dQw4w9WgXcQ" } });
+    expect(t.requests.find((x) => x.uri === "system.launcher/launch")?.payload).toEqual({ id: "youtube.leanback.v4", params: { contentTarget: "https://www.youtube.com/tv?v=dQw4w9WgXcQ&t=30" } });
+  });
+
+  it("給名稱：先搜尋再播第一筆，data 帶標題、頻道與其他候選；結果不含 API key", async () => {
+    const t = await tv();
+    const { api, search } = yt();
+    const r = await run(adapter([t.url], { youtube: search }), TV_TOOL.playYoutube, { query: "TVBS 新聞直播" });
+    expect(r).toMatchObject({ status: "confirmed", data: { video_id: "m_dhMSvUCIc", title: "🔴LIVE：TVBS NEWS & 現場", channel: "TVBS NEWS", live: true, others: [{ video_id: "7aattNnxTEE" }] } });
+    expect(api.calls).toHaveLength(1);
+    expect(JSON.stringify(r)).not.toContain(YT_KEY);
+  });
+
+  it("搜尋失敗、找不到、沒有 key、參數不對：不開機、不動電視", async () => {
+    const t = await tv({ power: "Active Standby", wakeOnTurnOn: true });
+    const a = (search: YouTubeSearch | null) => adapter([t.url], { youtube: search });
+    expect(await run(a(null), TV_TOOL.playYoutube, { query: "孤獨的美食家" })).toMatchObject({ status: "refused", message: TV_TEXT.ytNoKey });
+    expect(await run(a(yt({ items: [] }).search), TV_TOOL.playYoutube, { query: "zzz" })).toMatchObject({ status: "failed", message: TV_TEXT.ytNotFound });
+    const quota = new YouTubeSearch({ apiKey: YT_KEY, fetch: fakeYoutubeApi({ status: 403, body: { error: { errors: [{ reason: "quotaExceeded" }] } } }).fetch });
+    expect(await run(a(quota), TV_TOOL.playYoutube, { query: "x" })).toMatchObject({ status: "failed", message: TV_TEXT.ytQuota });
+    expect(await run(a(null), TV_TOOL.playYoutube, {})).toMatchObject({ status: "refused", message: TV_TEXT.ytNeedOne });
+    expect(await run(a(null), TV_TOOL.playYoutube, { video: "dQw4w9WgXcQ", query: "x" })).toMatchObject({ status: "refused", message: TV_TEXT.ytNeedOne });
+    expect(await run(a(null), TV_TOOL.playYoutube, { video: "https://evil.example/watch?v=dQw4w9WgXcQ" })).toMatchObject({ status: "refused", message: TV_TEXT.ytBadTarget });
+    expect(t.registers).toBe(0);
+    expect(t.power).toBe("Active Standby");
+  });
+
+  it("電視待機：先開機再播；韌體不接受 params 時改用 contentId", async () => {
+    const t = await tv({ power: "Active Standby", wakeOnTurnOn: true, rejectParams: true });
+    const r = await run(adapter([t.url]), TV_TOOL.playYoutube, { video: "dQw4w9WgXcQ" });
+    expect(r).toMatchObject({ status: "confirmed", data: { turned_on: true } });
+    const launches = t.requests.filter((x) => x.uri === "system.launcher/launch").map((x) => x.payload);
+    expect(launches).toEqual([{ id: "youtube.leanback.v4", params: { contentTarget: "https://www.youtube.com/tv?v=dQw4w9WgXcQ" } }, { id: "youtube.leanback.v4", contentId: "https://www.youtube.com/tv?v=dQw4w9WgXcQ" }]);
+  });
+
+  it("停在「誰在觀看」：unconfirmed 並提示；選帳號（按 RIGHT×1、ENTER）後重送影片 → confirmed", async () => {
+    const t = await tv({ profilePicker: true });
+    const a = adapter([t.url]);
+    expect(await run(a, TV_TOOL.playYoutube, { video: "dQw4w9WgXcQ" })).toMatchObject({ status: "unconfirmed", message: TV_TEXT.ytOpenNotPlaying });
+    const r = await run(a, TV_TOOL.youtubeProfile, { index: 1 });
+    expect(r).toMatchObject({ status: "confirmed", data: { profile_index: 1, replayed: true, video_id: "dQw4w9WgXcQ" } });
+    expect(t.buttons).toEqual(["RIGHT", "ENTER"]);
+    expect(t.requests.filter((x) => x.uri === "system.launcher/launch")).toHaveLength(2);
+  });
+
+  it("選帳號：YouTube 不在前景時不按鍵；沒有剛才的影片時只說已選帳號；按鍵位址指到別的主機時不連", async () => {
+    const home = await tv();
+    expect(await run(adapter([home.url]), TV_TOOL.youtubeProfile, { index: 0 })).toMatchObject({ status: "refused", message: TV_TEXT.ytNotForeground });
+    expect(home.buttons).toEqual([]);
+    const yt0 = await tv({ app: "youtube.leanback.v4" });
+    expect(await run(adapter([yt0.url]), TV_TOOL.youtubeProfile, {})).toMatchObject({ status: "unconfirmed", message: TV_TEXT.ytProfileSelected });
+    await new Promise((r) => setTimeout(r, 50)); // 按鍵經另一條連線，等它送到假電視
+    expect(yt0.buttons).toEqual(["ENTER"]);
+    const foreign = await tv({ app: "youtube.leanback.v4", foreignInputHost: true });
+    expect(await run(adapter([foreign.url]), TV_TOOL.youtubeProfile, {})).toMatchObject({ status: "failed", message: TV_TEXT.rejected });
+    expect(foreign.buttons).toEqual([]);
+  });
+
+  it("送出後沒有切到 YouTube → unconfirmed（不說在播）", async () => {
+    const t = await tv({ ignoreLaunch: true });
+    expect(await run(adapter([t.url]), TV_TOOL.playYoutube, { video: "dQw4w9WgXcQ" })).toMatchObject({ status: "unconfirmed", message: TV_TEXT.ytNotOpen });
+  });
+
+  it("設定：NOUS_YOUTUBE_API_KEY 格式檢查；沒有 key 時記 log；兩條路徑都有 play_youtube", () => {
+    const base = { NOUS_AIL: "on", NOUS_AIL_SERVICES: "lg_tv", NOUS_CONFIG_DIR: "/tmp/nous-x", NOUS_LGTV_HOST: HOST };
+    expect(loadConfig({ ...base, NOUS_YOUTUBE_API_KEY: YT_KEY }).ail.tv?.youtubeApiKey).toBe(YT_KEY);
+    expect(loadConfig(base).ail.tv?.youtubeApiKey).toBeNull();
+    expect(() => loadConfig({ ...base, NOUS_YOUTUBE_API_KEY: "bad key!" })).toThrow(/NOUS_YOUTUBE_API_KEY/);
+    const lines: string[] = [];
+    const ail = createIntegrations({ enabled: true, services: ["lg_tv"], soloistPort: 19090, tv: { host: HOST, mac: null, broadcast: null, pairingFile: "/x", youtubeApiKey: null } }, (l) => lines.push(l))!;
+    expect(lines.join("\n")).toMatch(/NOUS_YOUTUBE_API_KEY/);
+    const names = ail.registry.functionSpecs("live").map((f) => f.name);
+    expect(names).toContain("app__tv__play_youtube");
+    expect(names).toContain("app__tv__youtube_select_profile");
+    expect(JSON.stringify(ail.registry.functionSpecs("api_key"))).not.toContain(YT_KEY);
+  });
+
+  it("審查後：原本就在播放時，電視沒有換片不能說 confirmed；有媒體 ID 時換片才 confirmed", async () => {
+    // 原本在播 A，電視不理新的影片。
+    const ignored = await tv({ app: "youtube.leanback.v4", ignoreLaunch: true });
+    ignored.playState = "playing";
+    expect(await run(adapter([ignored.url]), TV_TOOL.playYoutube, { video: "dQw4w9WgXcQ" })).toMatchObject({ status: "unconfirmed", message: TV_TEXT.ytAlreadyPlaying });
+    // 原本在播、而且分不出媒體 ID：就算換了也只能 unconfirmed。
+    const noId = await tv({ app: "youtube.leanback.v4", noMediaId: true });
+    noId.playState = "playing";
+    expect((await run(adapter([noId.url]), TV_TOOL.playYoutube, { video: "dQw4w9WgXcQ" })).status).toBe("unconfirmed");
+    // 有媒體 ID：換片後 ID 變了 → confirmed。
+    const withId = await tv({ app: "youtube.leanback.v4" });
+    withId.playState = "playing";
+    expect((await run(adapter([withId.url]), TV_TOOL.playYoutube, { video: "dQw4w9WgXcQ" })).status).toBe("confirmed");
+  });
+
+  it("審查後：YouTube 正在播放時選帳號 → refused，不按鍵（按確認鍵會暫停）", async () => {
+    const t = await tv({ app: "youtube.leanback.v4" });
+    t.playState = "playing";
+    expect(await run(adapter([t.url]), TV_TOOL.youtubeProfile, { index: 0 })).toMatchObject({ status: "refused", message: TV_TEXT.ytProfileWhilePlaying });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(t.buttons).toEqual([]);
   });
 });

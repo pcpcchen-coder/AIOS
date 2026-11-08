@@ -598,5 +598,19 @@
   "已送出開機，但沒有讀到電視開機，所以還沒有開 App；電視開好後請再說一次。": "Sent the power-on, but did not read the TV as on, so the app has not been opened yet; say it again once the TV is on.",
   "已送出開機，但沒有讀到電視開機，所以還沒有切輸入源；電視開好後請再說一次。": "Sent the power-on, but did not read the TV as on, so the input has not been switched yet; say it again once the TV is on.",
   "電視開了，但之後連不上電視，沒有開 App；請再說一次。": "The TV turned on, but then could not be reached, so the app was not opened; please say it again.",
-  "電視開了，但之後連不上電視，沒有切輸入源；請再說一次。": "The TV turned on, but then could not be reached, so the input was not switched; please say it again."
+  "電視開了，但之後連不上電視，沒有切輸入源；請再說一次。": "The TV turned on, but then could not be reached, so the input was not switched; please say it again.",
+  "看不懂這個 YouTube 影片網址或 ID，沒有送出。": "Could not read that YouTube video URL or ID; nothing was sent.",
+  "要播 YouTube 時，video（網址或影片 ID）和 query（要搜尋的內容）只能給一個，沒有送出。": "To play YouTube, give exactly one of video (URL or video ID) and query (what to search for); nothing was sent.",
+  "還沒有設定 YouTube 搜尋的 API key（NOUS_YOUTUBE_API_KEY），不能依名稱搜尋；可以給影片網址，或只開 YouTube。沒有送出。": "No API key for YouTube search is set (NOUS_YOUTUBE_API_KEY), so videos cannot be found by name; give a video URL, or just open YouTube. Nothing was sent.",
+  "YouTube 搜尋找不到這個內容，電視沒有動作。": "YouTube search found nothing for that; the TV was not touched.",
+  "今天的 YouTube 搜尋額度用完了（官方每天約 100 次），電視沒有動作；可以給影片網址，或明天再試。": "Today's YouTube search quota is used up (about 100 a day officially); the TV was not touched. Give a video URL, or try again tomorrow.",
+  "YouTube 拒絕了搜尋的 API key（金鑰錯誤或沒有啟用 YouTube Data API），電視沒有動作。": "YouTube rejected the search API key (wrong key, or YouTube Data API not enabled); the TV was not touched.",
+  "YouTube 搜尋沒有成功（網路或回覆有問題），電視沒有動作。": "YouTube search did not succeed (network or reply problem); the TV was not touched.",
+  "YouTube 正在電視上播放。": "YouTube is playing on the TV.",
+  "YouTube 已經開了，也送出了影片，但沒有讀到正在播放：可能停在「誰在觀看」帳號畫面（要選帳號可以說「選第一個帳號」），或是廣告、還在載入，請看一下電視。": "YouTube is open and the video was sent, but playback was not read: it may be on the “Who's watching?” account screen (say “pick the first account” to choose one), or an ad or still loading; please check the TV.",
+  "已送出 YouTube 影片，但沒有讀到電視切到 YouTube，請看一下電視。": "Sent the YouTube video, but did not read the TV switching to YouTube; please check the TV.",
+  "YouTube 沒有在電視前景，沒有按任何鍵。": "YouTube is not in the TV's foreground; no key was pressed.",
+  "已在 YouTube 選帳號；沒有剛才的影片可以重播，請看一下電視。": "Picked the account in YouTube; there is no recent video to replay, please check the TV.",
+  "已送出這部影片，但 YouTube 原本就在播放，分不出是否已經換成這部，請看一下電視。": "Sent this video, but YouTube was already playing, so it cannot tell whether it switched to this one; please check the TV.",
+  "YouTube 正在播放，不是帳號畫面，沒有按鍵（按確認鍵會暫停）。": "YouTube is playing, so this is not the account screen; no key was pressed (OK would pause it)."
 }
