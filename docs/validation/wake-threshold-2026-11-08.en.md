@@ -24,7 +24,7 @@ The settings page has a new "Wake word threshold" section where you choose a **t
 
 (Calculation: threshold + adjustment, clamped to 0.01–0.99 and rounded to two decimals; checked in `tests/wake-threshold.test.ts`.)
 
-A higher sherpa-onnx threshold is harder to trigger, so a lower value wakes more easily and also false-wakes more easily. The limits are ±0.10 based on the WK-00 Mac measurements: at 0.15 (−0.10) Hey Nous was triggered by "Hey nurse", and at 0.25 (+0.10) Hello Nous dropped to 6/10 offline. Values further out are almost certainly worse, so they are not offered.
+A higher sherpa-onnx threshold is harder to trigger, so a lower value wakes more easily and also false-wakes more easily. The limits are ±0.10 based on the WK-00 Mac measurements: Hello Nous dropped to 6/10 offline at 0.25 (+0.10); Hey Nous had already dropped to 6/10 at 1.0/0.30 (+0.05); and Hey Nous was triggered by "Hey nurse" at boost 1.5 with threshold 0.15. The −0.10 option (Hey Nous at boost 1.0 with threshold 0.15; Hello Nous at 0.05, below the lowest tested value of 0.10) **has not been measured**, and false wakes may rise noticeably. Values further out are not offered.
 
 | Item | How |
 |---|---|

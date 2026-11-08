@@ -402,5 +402,6 @@
   "家中狀態設定沒有保存（無法寫入設定檔：{0}）": "Home status settings were not saved (cannot write the settings file: {0})",
   "家中狀態設定沒有保存": "Home status settings were not saved",
   "家中狀態設定沒有保存：{0}": "Home status settings were not saved: {0}",
-  "最舊的讀值 {0}": "oldest reading {0}"
+  "最舊的讀值 {0}": "oldest reading {0}",
+  "wake_threshold_offset 必須是 -0.1、-0.05、0、0.05 或 0.1": "wake_threshold_offset must be -0.1, -0.05, 0, 0.05 or 0.1"
 }

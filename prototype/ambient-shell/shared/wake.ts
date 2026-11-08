@@ -93,8 +93,9 @@ export const WAKE_SILENCE_OPTIONS_S = [3, 5, 8, 10, 15, 20] as const;
 export const DEFAULT_WAKE_SILENCE_S = 5;
 
 /**
- * 門檻調整值的選項（設定頁一組選項）。±0.10 為上下限：WK-00 Mac 實測 Hey Nous 在 0.15（−0.10）時「Hey nurse」會觸發，
- * Hello Nous 在 0.25（+0.10）時離線只剩 6/10（docs/validation/wk-00-mac-2026-10-31.md）；再往外幾乎一定變差。
+ * 門檻調整值的選項（設定頁一組選項）。±0.10 為上下限，依據 WK-00 Mac 實測（docs/validation/wk-00-mac-2026-10-31.md）：
+ * Hello Nous 在 0.25（+0.10）時離線只剩 6/10；Hey Nous 在 1.0／0.30（+0.05）時已降到 6/10；Hey Nous 在提升分數 1.5、門檻 0.15 時
+ * 「Hey nurse」會觸發（−0.10 是提升分數 1.0、門檻 0.15，沒量過）。Hello Nous 的 0.05（−0.10）也低於量過的最低 0.10。
  */
 export const WAKE_THRESHOLD_OFFSETS = [-0.1, -0.05, 0, 0.05, 0.1] as const;
 export const DEFAULT_WAKE_THRESHOLD_OFFSET = 0;
@@ -294,10 +295,9 @@ export function wakeRuntimeBlockers(m: WakeRuntimeManifest): string[] {
   return blockers;
 }
 
-/** 關鍵詞設定 → sherpa-onnx 關鍵詞檔內容（keywordsBuf）；一行一個：發音單元 [:提升分數] [#門檻] @id。 */
 const clampThreshold = (t: number) => Math.round(Math.min(0.99, Math.max(0.01, t)) * 100) / 100;
 
-/** 把每一行關鍵詞門檻（含全域門檻）加上 delta，夾在 0.01–0.99、取到小數兩位；提升分數不變。新物件，原物件不變。 */
+/** 把每一行關鍵詞門檻（含全域門檻）加上 delta，夾在 0.01–0.99、取到小數兩位；提升分數不變。delta 為 0 時回傳原物件，其他時候是新物件（原物件不變）。 */
 export function offsetKeywords(k: WakeKeywordConfig, delta: number): WakeKeywordConfig {
   if (!Number.isFinite(delta) || delta === 0) return k;
   return {
@@ -316,12 +316,14 @@ export function effectiveWakeThresholds(k: WakeKeywordConfig, delta: number): { 
   const global = shifted.keywords_threshold ?? 0.25;
   const out: { phrase: string; threshold: number }[] = [];
   for (const e of shifted.entries) {
-    const phrase = e.id.replace(/_[A-Z]+$/, "");
+    // 念法後綴（_OW、_AW、_UW 這類兩個字母）才去掉；沒有後綴的 id 原樣使用。
+    const phrase = e.id.replace(/_[A-Z]{2}$/, "");
     if (!out.some((o) => o.phrase === phrase)) out.push({ phrase, threshold: e.threshold ?? global });
   }
   return out;
 }
 
+/** 關鍵詞設定 → sherpa-onnx 關鍵詞檔內容（keywordsBuf）；一行一個：發音單元 [:提升分數] [#門檻] @id。 */
 export function wakeKeywordsText(k: WakeKeywordConfig): string {
   return k.entries.map((e) => [e.tokens, e.boost === null ? null : `:${e.boost}`, e.threshold === null ? null : `#${e.threshold}`, `@${e.id}`].filter(Boolean).join(" ")).join("\n") + "\n";
 }
