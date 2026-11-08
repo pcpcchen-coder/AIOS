@@ -16,6 +16,16 @@ Currently reading: English
 
 > **An animated, high-tech electronic brain wallpaper at rest. State your request, let AI Agents do the work, and see results when they are ready. Operate by voice and use webcam gaze to point, without choosing or opening an App.**
 
+<div align="center">
+
+<a href="docs/media/nous-demo-2026-11-08.mp4"><img src="docs/media/nous-demo-2026-11-08-preview.gif" width="720" alt="Nous live demo: the on-screen electronic brain lights up during the conversation, with English subtitles below"></a>
+
+**▶ [Watch the full video with sound (47 s)](docs/media/nous-demo-2026-11-08.mp4)** · Subtitles: [English](docs/media/nous-demo-2026-11-08.en.srt) · [繁體中文](docs/media/nous-demo-2026-11-08.zh-TW.srt)
+
+<sub>Real recording, 2026-11-08: asked Nous by voice to look up the menu of Lao Zhang Beef Noodles and recommend something. Nous found an older menu, answered, and noted that current items and prices should be confirmed with the shop. The surroundings are blurred so only the Nous screen and camera remain.</sub>
+
+</div>
+
 ---
 
 <a id="這是什麼"></a>
