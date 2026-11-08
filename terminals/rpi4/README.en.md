@@ -121,7 +121,7 @@ While using the Pi, choose "Enter service mode (for the Pi)" in the Mac menu bar
 <a id="settings-entry"></a>
 ## Settings button
 
-The Pi page has a gear button in the bottom-right corner. Click it once with the mouse to open this Pi's settings and again to close them; the camera status dot sits to its left. The settings page holds every setting available on this Pi: AI engine, realtime voice, voice, camera and gestures (including "Show camera view"), sound, voice volume, display performance, proactive reminders, clock and weather, home status, and memories mode. Family enrolment and memory management remain in the Mac App only. The Mac has a menu bar, so the Mac window has no such button. See the [validation record](../../docs/validation/pi-settings-entry-2026-11-07.en.md).
+The Pi page has a gear button in the bottom-right corner. Click it once with the mouse to open this Pi's settings and again to close them. Once open, settings stay on top (the person leaving, a wake word, starting voice or Esc do not close them) until you click "收起" (Close) or the gear, and their text is 1.5× larger ([2026-11-08 record](../../docs/validation/pinned-settings-2026-11-08.en.md)); the camera status dot sits to its left. The settings page holds every setting available on this Pi: AI engine, realtime voice, voice, camera and gestures (including "Show camera view"), sound, voice volume, display performance, proactive reminders, clock and weather, home status, and memories mode. Family enrolment and memory management remain in the Mac App only. The Mac has a menu bar, so the Mac window has no such button. See the [validation record](../../docs/validation/pi-settings-entry-2026-11-07.en.md).
 
 ## Display performance
 

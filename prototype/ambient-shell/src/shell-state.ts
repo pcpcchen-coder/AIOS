@@ -192,3 +192,13 @@ export function reduceShell(state: ShellState, event: ShellEvent): ShellState {
       return { ...initialShell };
   }
 }
+
+/**
+ * 釘住的設定畫面（George 2026-11-08）：設定畫面打開後一直留在最上層，只有使用者按「收起」（或右下角齒輪）才關。
+ * 其他事件（人離開、喚醒、開始語音、任務完成、別的畫面、Esc）照常更新任務與收音等狀態，但畫面換回同一張設定卡
+ * （同一個 surface_id，不重畫）。確認卡例外：外部動作要使用者確認，確認卡可以暫時蓋在上面，結束後回到設定。純函式。
+ */
+export function keepPinnedSettings(next: ShellState, pinned: Surface | null): ShellState {
+  if (!pinned || next.surface?.kind === "settings" || next.surface?.kind === "confirm") return next;
+  return { ...next, mode: next.mode === "ambient" ? "presenting" : next.mode, surface: pinned };
+}

@@ -263,6 +263,17 @@ body.has-surface .command,
   z-index: 4;
 }
 
+/*
+ * 設定畫面（George 2026-11-08）：內文放大 1.5 倍。用 zoom 讓所有字級、按鈕與間距一起放大；
+ * 外框加寬到螢幕寬度（最多 1200px），高度上限除以 1.5，放大後仍在螢幕內、可以捲動。
+ */
+/* 設定畫面不跟距離縮放（已經固定放大 1.5 倍，兩者相乘會超出螢幕） */
+.surface-root:has(> .surface--settings) { width: min(1200px, 96vw); zoom: 1; }
+.surface.surface--settings {
+  zoom: 1.5;
+  max-height: calc((100vh - var(--surface-top) - 4vh) / 1.5);
+}
+
 .surface {
   max-height: calc(100vh - var(--surface-top) - 4vh);
   overflow-y: auto;

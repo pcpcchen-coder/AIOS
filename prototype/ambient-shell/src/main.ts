@@ -59,7 +59,7 @@ import speakerRuntime from "../shared/speaker-runtime.json" with { type: "json" 
 import { OWN_MICROPHONE, SPEAKER_RUNTIME_ASSETS, tapStream, type MicSource, type SpeakerWorkerLike } from "./speaker/recorder.ts";
 import { WakeVoice } from "./speaker/wake-voice.ts";
 import { evaluateSurface } from "./presentation-policy.ts";
-import { blocksAutoTalk, initialShell, reduceShell, type ShellEvent, type ShellState } from "./shell-state.ts";
+import { blocksAutoTalk, initialShell, keepPinnedSettings, reduceShell, type ShellEvent, type ShellState, type Surface } from "./shell-state.ts";
 import {
   progressStructureKey,
   refreshTimers,
@@ -307,6 +307,9 @@ const artifacts = new Map<string, Artifact>();
 const artifactErrors = new Map<string, string>();
 /** 只有真實的使用者輸入會登記在這裡；Presentation Policy 以此驗證 user_request。 */
 const userRequestIds = new Set<string>();
+/** 使用者打開的設定畫面；不是 null 時其他事件不會把它收起（見 keepPinnedSettings）。只在 Pi 等終端頁面釘住。 */
+let pinnedSettings: Surface | null = null;
+const pinSettingsOnThisPage = settingsEntryEnabled({ search: location.search, desktop: !!window.nousDesktop });
 let shell: ShellState = initialShell;
 let settings: SettingsView | null = null;
 const terminalCamera = new TerminalCameraPrefs({ search: location.search, desktop: !!window.nousDesktop, storage: () => localStorage });
@@ -1465,11 +1468,11 @@ sensorIndicator.hidden = true;
 document.body.append(sensorIndicator);
 
 // SET-1：Pi 終端頁面右下角的設定按鈕（Mac 有選單列，不放）。點一下打開設定畫面，再點一下收起。
-const settingsEntry = settingsEntryEnabled({ search: location.search, desktop: !!window.nousDesktop })
+const settingsEntry = pinSettingsOnThisPage
   ? new SettingsEntry({
       isOpen: () => shell.surface?.kind === "settings",
       open: () => actions.openSettings(),
-      close: () => dispatch({ type: "dismiss" }),
+      close: () => closeSettings(),
       t: (source) => t(source),
     })
   : null;
@@ -2511,13 +2514,23 @@ function userRequest(): string {
   return id;
 }
 
+/** 使用者按設定畫面的「收起」或右下角齒輪：解除釘住再收起。 */
+function closeSettings(): void {
+  pinnedSettings = null;
+  dispatch({ type: "dismiss" });
+}
+
 function dispatch(event: ShellEvent): void {
   if (event.type.startsWith("show.")) {
     conversationEpoch++;
     session.dismiss();
     hideSubtitle();
   }
-  const next = reduceShell(shell, event);
+  let next = reduceShell(shell, event);
+  // 釘住的設定畫面：使用者打開後，只有按「收起」或齒輪（closeSettings）才關（George 2026-11-08）。
+  // 只在 Pi 等終端頁面釘住：Mac 的 App 用選單列打開家人辨識、記憶、成果等畫面，釘住會讓那些指令沒有反應。
+  if (event.type === "show.settings" && next.surface?.kind === "settings" && pinSettingsOnThisPage) pinnedSettings = next.surface;
+  next = keepPinnedSettings(next, pinnedSettings);
   if (next === shell) return;
   const wasListening = shell.listening;
   const leftConfirm = shell.surface?.kind === "confirm" && next.surface?.surface_id !== shell.surface.surface_id ? shell.surface.request_id : null;
@@ -2922,7 +2935,7 @@ const actions: ViewActions = {
     dispatch({ type: "show.artifact", request_id: userRequest(), task_id: taskId, artifact_id: artifactId }),
   showProgress: () => dispatch({ type: "show.progress", request_id: userRequest() }),
   openHistory: () => openHistory(userRequest()),
-  dismiss: () => dispatch({ type: "dismiss" }),
+  dismiss: () => (shell.surface?.kind === "settings" ? closeSettings() : dispatch({ type: "dismiss" })),
   openSettings: () => dispatch({ type: "show.settings", request_id: userRequest() }),
   selectProvider: (provider) => void selectProvider(provider, userRequest()),
   updateCamera(patch) {
@@ -3583,6 +3596,8 @@ function renderSurface(): void {
   if (!s || !decision.allowed) {
     if (s && !decision.allowed) {
       console.warn(t("[presentation-policy] 拒絕呈現："), decision.reason, s);
+      // 被拒絕的設定卡不能再被釘回來（否則會一直拒絕、收起、釘回）。
+      if (pinnedSettings?.surface_id === s.surface_id) pinnedSettings = null;
       queueMicrotask(() => dispatch({ type: "dismiss" }));
     }
     if (renderedKey !== null) surfaceRoot.replaceChildren();
@@ -3739,8 +3754,8 @@ window.addEventListener("keydown", (e) => {
     // WK-01a：喚醒提示音播放中按 Esc＝取消這次喚醒（不觸發），其他不動。
     if (wake?.cancelEarcon()) return;
     if (realtime.current === "speaking") realtime.interrupt();
-    // 即時語音中有畫面（進度、成果）開著時，Esc 只關畫面，對話繼續。
-    else if (realtime.on && shell.surface !== null) dispatch({ type: "dismiss" });
+    // 即時語音中有畫面（進度、成果）開著時，Esc 只關畫面，對話繼續。釘住的設定畫面不會被 Esc 關，Esc 就照常結束對話。
+    else if (realtime.on && shell.surface !== null && !pinnedSettings) dispatch({ type: "dismiss" });
     else if (conversation.current === "speaking") conversation.interrupt();
     else closeConversation();
     return;
