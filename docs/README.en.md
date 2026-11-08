@@ -28,6 +28,7 @@ Updated 2026-11-01: the wake word is now the English Hello Nous and wake works i
 | [12 Smart home](12_SmartHome_Integration_Plan_2026-10.en.md) | H0, H1, H1b have code and some verbal home reports. H2–H4 are unimplemented |
 | [18 App Integration Layer and Spotify/Pi 4 design](18_App_Integration_Layer_and_Spotify_2026-11.en.md) | **Proposal / unimplemented**: shared core Adapter/Tool Registry, Spotify authorization boundary, and [Pi 4 Soloist weekend test](experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.en.md); Spotify voice control pending permission |
 | [19 Voice Command Relay: multi-brand TTS command transport](19_Voice_Command_Relay_Design_2026-11.en.md) | **Design / unimplemented**: vendor-specific Google/Siri/Alexa/XiaoAI templates, per-target TTS engine/voice selection, recognition measurements, [implementation batches](development/voice-command-relay-implementation-plan.en.md) and [experiment matrix](experiments/VOICE_COMMAND_RELAY_TEST_PLAN.en.md) |
+| [20 Playing a specific Netflix show on the TV](20_TV_Netflix_Playback_Plan_2026-11.en.md) | **Plan / unimplemented**: Netflix's community launch parameter (to be tested on the G3); no official API for finding titles; recommends "give a URL" plus "a local list" (LGTV-3), with opening the search page to be evaluated |
 
 <a id="歷史藍圖與決策"></a>
 ## Historical blueprints and decisions
