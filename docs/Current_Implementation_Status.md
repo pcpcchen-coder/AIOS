@@ -110,6 +110,8 @@ App 與網頁已加入繁體中文／English 切換與保存，包含原生選�
 
 **目前批次：WK-01**（George 2026-10-31 選定，分成 a／b）。WK-01a（本機喚醒的基礎：麥克風租用、狀態、偏好與自動恢復、緩衝、提示音、防自我觸發，旗標 `NOUS_WAKE` 預設關閉）已實作，見 [WK-01a 驗證](validation/wk-01a-2026-10-31.md)；WK-01b 接上 sherpa-onnx wasm（由 GitHub Actions 建置）與關鍵詞：2026-10-31 George 在 Mac 試跑後，關鍵詞定為英文 Hello Nous（[WK-00 Mac 試跑](validation/wk-00-mac-2026-10-31.md)，#72），App 內喚醒 4/4。WK-02（接上兩條語音路徑）已實作，ChatGPT 方案路徑已在 Mac 上由喚醒開始通話。下一步是 WK-03（Mac 實測 W1–W12），最優先的是其他家人的念法（W5）與 8 小時電視誤觸發（W6）。
 
+**暫緩：喚醒方向性第二批**（George 2026-11-08 要求先記下、之後再做）。第一批已合併（#125）：診斷頁 `npm run wake:direction` 與方向測試流程，見[驗證](validation/wake-direction-2026-11-08.md)。之後要做的：① George 在家用 eMeet M0 Plus 量條件 P（產品設定）與 R（三項處理全關、要求最多聲道），完整 160 次或簡短版 40 次，加電視 30 分鐘、聊天 10 分鐘負樣本，匯出 JSON；② 依數字從驗證文件 §8 的 F1–F5（關掉重複的 Chromium 處理、多聲道平均、各聲道分別偵測、eMeet 專用門檻、喚醒專用增益）挑選，做成設定、預設維持現狀；③ 在 Nous App 內確認後才採用。
+
 **待 Mac 重驗與待補的實機步驟**：HIST-1 第 3b 步與 F3、F4 的修正；ID-02 的 F1、F2、F7、F10 修正，以及需要第二個人的第 2、4、5 步與第 7 步；MEM-1～MEM-5b 的 Mac gate；未修的 HIST-1 F1、N1、14／15 筆差異與 ID-02 F3、F8、F11。順序見 [Mac 實機驗收手冊](validation/mac-acceptance-runbook-2026-10-30.md)。
 
 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md) 建議先做共用能力政策、可回復任務、裝置配對，再完成 Quest 空間成果與 OpenClaw 受限 worker。F0–F10 是功能建議，Q0–Q4 是建議驗收階段。F0 的產品 CI 已有 mock 版本（上一節），其餘仍是提案。
