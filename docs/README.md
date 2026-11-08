@@ -26,6 +26,7 @@
 | [12 智慧家庭](12_SmartHome_Integration_Plan_2026-10.md) | H0、H1、H1b 有程式；部分家中口頭紀錄；H2–H4 待實作 |
 | [18 App Integration Layer 與 Spotify/Pi 4 設計](18_App_Integration_Layer_and_Spotify_2026-11.md) | **規劃／未實作**：核心共用 Adapter/Tool Registry、Spotify 授權邊界、[Pi 4 Soloist 週末實驗](experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.md)；Spotify 語音控制待授權 |
 | [19 Voice Command Relay：跨品牌語音命令中繼](19_Voice_Command_Relay_Design_2026-11.md) | **設計／未實作**：Google／Siri／Alexa／小愛各自查命令模板，每台設備可選 TTS 模型／音色、量測辨識率；[分批實作](development/voice-command-relay-implementation-plan.md)與[實測表](experiments/VOICE_COMMAND_RELAY_TEST_PLAN.md) |
+| [20 電視 Netflix 播指定節目](20_TV_Netflix_Playback_Plan_2026-11.md) | **規劃／未實作**：Netflix 送片的社群參數（待在 G3 實測）、找片沒有官方 API；建議做「給網址」加「本機片單」（LGTV-3），開到搜尋頁再評估 |
 
 ## 歷史藍圖與決策
 
