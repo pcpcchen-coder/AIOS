@@ -16,6 +16,16 @@
 
 > **平時是高科技感的電子腦動態桌布；說出需求，AI Agents 完成工作，成果才浮現。以語音操作、webcam 視線指向，不需要挑選或開啟 App。**
 
+<div align="center">
+
+<a href="docs/media/nous-demo-2026-11-08.mp4"><img src="docs/media/nous-demo-2026-11-08-preview.gif" width="720" alt="Nous 實機示範：螢幕上的電子腦隨對話亮起，下方顯示英文字幕"></a>
+
+**▶ [觀看完整有聲影片（47 秒）](docs/media/nous-demo-2026-11-08.mp4)** · 字幕：[English](docs/media/nous-demo-2026-11-08.en.srt) · [繁體中文](docs/media/nous-demo-2026-11-08.zh-TW.srt)
+
+<sub>2026-11-08 實機錄影：以語音請 Nous 查老張牛肉麵的菜單並推薦，Nous 找到舊菜單後回覆，並提醒內容與價格以店家為準。周邊已模糊處理，只保留 Nous 螢幕與鏡頭。</sub>
+
+</div>
+
 ---
 
 ## 這是什麼？
