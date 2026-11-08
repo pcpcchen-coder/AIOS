@@ -1035,5 +1035,17 @@
   "喚醒設定沒有保存：{0}": "Wake settings were not saved: {0}",
   "夜間一併調暗畫面、靜音處理中音效、暫停回憶": "At night, also dim the screen, mute the processing sound and pause memories",
   "夜間模式時整個畫面約 3 秒漸暗、處理中的提示音不出聲（電子腦的樣子照常）、回憶模式不播放。關閉就只換對話音量。": "In night mode the whole screen fades darker over about 3 seconds, the processing ping is silent (the brain still shows it), and memories do not play. Turn this off to switch only the conversation volume.",
-  "已調暗畫面、處理中音效靜音、回憶暫停": "Screen dimmed, processing sound muted, memories paused"
+  "已調暗畫面、處理中音效靜音、回憶暫停": "Screen dimmed, processing sound muted, memories paused",
+  "手動切換：維持日間模式到 {0}": "Manual: staying in day mode until {0}",
+  "手動切換：維持夜間模式到 {0}": "Manual: staying in night mode until {0}",
+  "手動切換（所有畫面共用）": "Manual switch (shared by every screen)",
+  "自動": "Automatic",
+  "現在是白天": "It's daytime now",
+  "切到夜間": "Switch to night",
+  "今晚維持日間": "Stay in day mode tonight",
+  "「現在是白天」「切到夜間」維持到下一次時段交界；「今晚維持日間」維持到今晚夜間時段結束。到時自動回到依時段與鏡頭判斷。也可以在即時語音說「切到夜間模式」「現在是白天」「今晚維持日間」「恢復自動」。": "\"It's daytime now\" and \"Switch to night\" last until the next boundary of the night hours; \"Stay in day mode tonight\" lasts until tonight's night hours end. Afterwards it goes back to deciding by the hours and the camera. In realtime voice you can also say \"switch to night mode\", \"it's daytime now\", \"stay in day mode tonight\" or \"back to automatic\".",
+  "日夜間設定沒有保存：{0}": "Day/night settings were not saved: {0}",
+  "日夜間模式": "Day/night mode",
+  "自動：依夜間時段 {0}:00–{1}:00 與各裝置的鏡頭": "Automatic: by the night hours {0}:00–{1}:00 and each device's camera",
+  "這個核心不支援手動切換日夜間模式": "This core does not support switching day/night mode manually"
 }

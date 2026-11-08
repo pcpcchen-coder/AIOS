@@ -51,6 +51,7 @@ import { TerminalPresence } from "./terminal-presence.ts";
 import { isTerminalId, type TerminalStatus } from "../shared/terminal.ts";
 import { WeatherService, weatherNowView } from "./weather.ts";
 import { ClockSettingsStore } from "./clock-settings.ts";
+import { DayNightSettingsStore } from "./day-night-settings.ts";
 import { HomeCornerSettingsStore } from "./home-corner-settings.ts";
 import { HomeOverview } from "./home-overview.ts";
 import { systemTimeZone } from "./local-date.ts";
@@ -268,6 +269,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const proactiveSettings = new ProactiveSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   // CLK-1：右上角時鐘與天氣（顯示設定 clock.json；天氣和招呼共用同一份快取）。
   const clockSettings = new ClockSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  // DN-2：日夜間模式的共用設定與手動切換（day-night.json；Mac 與 Pi 共用）。
+  const dayNight = new DayNightSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   // HOME-1：左上角家中狀態（顯示設定 home-corner.json；讀值來自 HomeBridge 的快照，唯讀、快取 30 秒）。
   const homeCornerSettings = new HomeCornerSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   const homeOverview = new HomeOverview({ source: home });
@@ -303,6 +306,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     home: home.available,
     ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("api_key", locale) } : {}),
     ...(calendarReader ? { calendarBriefing: true } : {}),
+    night: () => dayNight.coreMode() === "night",
   });
   const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available, ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("live", locale) } : {}) });
   // MEM-2：ChatGPT 方案即時語音的記憶同意鍵（provider codex，獨立於 chatgpt）；沒有 Codex 登入時為 null。
@@ -316,7 +320,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     clientVersion: config.nousVersion,
     capabilities: () => ({ webSearch: true, home: home.available }),
     // memoryOn：這通記憶開著而且有 codex 同意（LiveMemoryBinding.memoryActive）才加記憶規則；否則和 MEM-2 之前一樣。
-    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp, memory: !!memoryOn, ...(calendarReader ? { calendarBriefing: true } : {}) }, ctx.locale),
+    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp, memory: !!memoryOn, ...(calendarReader ? { calendarBriefing: true } : {}), ...(dayNight.coreMode() === "night" ? { night: true } : {}) }, ctx.locale),
     // PRO-2：行程問句的回答（核心從 sideband 聽）。
     followUp: (sessionId: string) => proactive.followUp(sessionId),
     // MEM-4b：voice（受保護的語音交辦）只改 delegate_task 的處理，不影響說明與工具表。
@@ -508,6 +512,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
       update: (patch) => clockSettings.update(patch),
       weatherNow: (locale) => weatherNowView({ service: weather, place: proactive.place()?.id ?? null, locale, now: Date.now, systemTimeZone: systemTimeZone() }),
     },
+    dayNight: { view: () => dayNight.view(), update: (patch) => dayNight.update(patch) },
     homeCorner: {
       view: (source) => homeCornerSettings.view(source),
       update: (patch) => homeCornerSettings.update(patch),

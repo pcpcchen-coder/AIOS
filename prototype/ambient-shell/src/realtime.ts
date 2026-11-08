@@ -1,3 +1,4 @@
+import type { DayNightToolRequest } from "../shared/day-night.ts";
 import type { HomeControlResult } from "../shared/home.ts";
 import { audioDevices } from "./audio-devices.ts";
 import { voiceVolume } from "./voice-volume.ts";
@@ -47,6 +48,8 @@ export interface RealtimeCallbacks {
   onGetTasks(): Promise<Record<string, unknown>>;
   /** VOL-1：模型要調這台裝置的對話音量（同步）；沒有提供時工具回報這個畫面不能調。 */
   onVoiceVolume?(request: VoiceVolumeRequest): Record<string, unknown>;
+  /** DN-2：模型要切換日夜間模式（核心共用的手動切換）；沒有提供時工具回報這個畫面不能切換。 */
+  onDayNight?(request: DayNightToolRequest): Promise<Record<string, unknown>>;
   /** 模型要上網查詢；回傳答案與來源，交還給模型。 */
   onWebSearch(query: string): Promise<Record<string, unknown>>;
   /** 模型要查家電狀態（唯讀）；回傳中控的真實讀值，交還給模型。 */

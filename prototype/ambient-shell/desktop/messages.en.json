@@ -204,5 +204,14 @@
   "服務模式沒有保存": "Service mode was not saved",
   "{0}（進行中） · {1}": "{0} (active) · {1}",
   "{0}（進行中） · {1}；下次：{2}": "{0} (active) · {1}; next: {2}",
-  "喚醒詞門檻沒有保存": "Wake word threshold was not saved"
+  "喚醒詞門檻沒有保存": "Wake word threshold was not saved",
+  "日夜間模式": "Day/night mode",
+  "自動": "Automatic",
+  "現在是白天": "It's daytime now",
+  "切到夜間": "Switch to night",
+  "今晚維持日間": "Stay in day mode tonight",
+  "自動：依夜間時段 {0}:00–{1}:00 與各裝置的鏡頭": "Automatic: by the night hours {0}:00–{1}:00 and each device's camera",
+  "手動切換：維持日間模式到 {0}": "Manual: staying in day mode until {0}",
+  "手動切換：維持夜間模式到 {0}": "Manual: staying in night mode until {0}",
+  "日夜間設定沒有保存": "Day/night settings were not saved"
 }

@@ -85,10 +85,10 @@ import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts
 import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
 import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
-import { VOICE_VOLUME_TEXT, voiceVolume } from "./voice-volume.ts";
+import { DAY_NIGHT_KEY, dayNightReasonText, VOICE_VOLUME_TEXT, voiceVolume } from "./voice-volume.ts";
 import { SettingsEntry, settingsEntryEnabled } from "./settings-entry.ts";
 import { voiceVolumeOutput } from "../shared/voice-volume.ts";
-import { currentLight, decideDayNight, INITIAL_LIGHT, nextLight, nightEffects, type LightState, type NightEffects } from "../shared/day-night.ts";
+import { activeOverride, currentLight, dayNightToolOutput, decideDayNight, INITIAL_LIGHT, nextLight, nightEffects, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type DayNightToolRequest, type LightState, type NightEffects } from "../shared/day-night.ts";
 import { LightMeter, type LightWorkerLike } from "./light-meter.ts";
 import type { VoiceVolumePanelState } from "./views.ts";
 import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
@@ -415,6 +415,8 @@ const realtimeCallbacks: RealtimeCallbacks = {
   },
   onDelegate: delegateFromRealtime,
   // VOL-1：說「你講話大聲一點」「音量 60」：調這台裝置的對話音量（立即套用、保存在這個頁面）。
+  // DN-2：說「切到夜間模式」「現在是白天」「今晚維持日間」「恢復自動」：改核心共用的手動切換。
+  onDayNight: (request) => dayNightFromRealtime(request),
   onVoiceVolume: (request) => {
     const result = voiceVolume.change(request);
     const output = voiceVolumeOutput(result.outcome, { period: result.period, active: result.active });
@@ -973,6 +975,10 @@ function applyEffectiveSettings(value: SettingsView, preserveEntry = false): voi
   syncAudioPrefs(value);
   clockCorner.setEnabled(value.clock?.enabled === true);
   homeCorner.setEnabled(value.home_corner?.enabled === true);
+  // DN-2：核心的日夜間設定或手動切換可能變了（另一台裝置、選單列、語音）。
+  migrateDayNightPrefs();
+  syncLightMeter();
+  updateDayNight();
 }
 
 /**
@@ -1490,10 +1496,21 @@ const lightMeter = new LightMeter({
   },
 });
 
+/** DN-2：日夜間設定以核心（settings.day_night，Mac 與 Pi 共用）為準；核心沒有給（舊核心、測試）時用這個頁面保存的。 */
+function dayNightPrefs(): DayNightPrefs {
+  return settings?.day_night?.prefs ?? voiceVolume.prefs;
+}
+
+/** DN-2：還有效的手動切換（核心給的；過期就是 null）。 */
+function dayNightOverride(): DayNightOverride | null {
+  return activeOverride(settings?.day_night?.override, Date.now());
+}
+
 function updateDayNight(): void {
-  const prefs = voiceVolume.prefs;
+  const prefs = dayNightPrefs();
   const before = voiceVolume.mode;
-  const decision = decideDayNight(new Date().getHours(), prefs.use_camera ? currentLight(lightState, Date.now()) : null, prefs);
+  const now = Date.now();
+  const decision = decideDayNight(new Date(now).getHours(), prefs.use_camera ? currentLight(lightState, now) : null, prefs, dayNightOverride(), now);
   voiceVolume.setMode(decision);
   applyNightEffects();
   renderDayNightBadge();
@@ -1502,7 +1519,7 @@ function updateDayNight(): void {
 
 /** DN-1：夜間模式一併套用的行為（日間或設定關閉時全部 false）。 */
 function currentNightEffects(): NightEffects {
-  return nightEffects(voiceVolume.mode.mode, voiceVolume.prefs);
+  return nightEffects(voiceVolume.mode.mode, dayNightPrefs());
 }
 
 /** DN-1：畫面變暗（CSS 漸變）、處理中音效與回憶模式依夜間模式重算。 */
@@ -1517,18 +1534,53 @@ function applyNightEffects(): void {
 /** VOL-2：右上角時鐘下方的日間／夜間模式（文字依目前語言；原因放在 title）。 */
 function renderDayNightBadge(): void {
   const decision = voiceVolume.mode;
-  const prefs = voiceVolume.prefs;
-  const pad = (h: number) => String(h).padStart(2, "0");
-  const title = decision.reason === "hours"
-    ? t(VOICE_VOLUME_TEXT.modeLine.hours, pad(prefs.night_start_h), pad(prefs.night_end_h))
-    : t(VOICE_VOLUME_TEXT.modeLine[decision.reason]);
+  const title = dayNightReasonText(decision, dayNightPrefs(), dayNightOverride(), t);
   const effects = currentNightEffects();
   const full = effects.dim ? `${title}\n${t(VOICE_VOLUME_TEXT.effectsLine)}` : title;
   clockCorner.setDayNight({ mode: decision.mode, label: t(VOICE_VOLUME_TEXT.badge[decision.mode]), title: full });
 }
 
+/**
+ * DN-2：改日夜間設定或手動切換。核心有 settings.day_night 時送核心（Mac 與 Pi 一起變）；否則存在這個頁面（VOL-2 的行為）。
+ * 回傳核心的回應（失敗時丟錯，呼叫端照實說）。
+ */
+async function patchDayNight(patch: DayNightPatch): Promise<void> {
+  if (settings?.day_night) {
+    applySettings(await api.updateDayNight(patch));
+  } else {
+    const { override: _override, scope: _scope, ...prefs } = patch;
+    if (patch.override) throw new Error(t("這個核心不支援手動切換日夜間模式"));
+    voiceVolume.setPrefs(prefs);
+  }
+  syncLightMeter();
+  updateDayNight();
+}
+
+/** DN-2：核心還沒保存過日夜間設定、這個頁面有 VOL-2 時存的設定時，搬到核心一次（之後以核心為準）。 */
+let dayNightMigrated = false;
+function migrateDayNightPrefs(): void {
+  if (dayNightMigrated || !settings?.day_night || settings.day_night.saved) return;
+  dayNightMigrated = true;
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(DAY_NIGHT_KEY); } catch {}
+  if (!saved) return;
+  void patchDayNight(voiceVolume.prefs).catch(() => undefined);
+}
+
+/** DN-2：即時語音說「切到夜間模式」「現在是白天」「今晚維持日間」「恢復自動」。 */
+async function dayNightFromRealtime(request: DayNightToolRequest): Promise<Record<string, unknown>> {
+  if (!settings?.day_night) return { ok: false, error: "這個核心不支援切換日夜間模式" };
+  try {
+    await patchDayNight(request.mode === "auto" ? { override: "auto" } : { override: request.mode, scope: request.scope ?? "now" });
+  } catch (err) {
+    return { ok: false, error: `沒有切換：${(err as Error).message}` };
+  }
+  if (shell.surface?.kind === "settings") render();
+  return dayNightToolOutput(voiceVolume.mode, dayNightOverride());
+}
+
 function syncLightMeter(): void {
-  if (voiceVolume.prefs.use_camera) lightMeter.start();
+  if (dayNightPrefs().use_camera) lightMeter.start();
   else {
     lightMeter.stop();
     lightState = INITIAL_LIGHT;
@@ -2979,10 +3031,11 @@ const actions: ViewActions = {
     render();
   },
   setDayNight(patch) {
-    voiceVolume.setPrefs(patch);
-    syncLightMeter();
-    updateDayNight();
-    render();
+    const requestId = userRequest();
+    void patchDayNight(patch).then(
+      () => render(),
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`日夜間設定沒有保存：${(err as Error).message}` }),
+    );
   },
   setGpuDrawing(on) {
     gpuDrawing = on;
@@ -3937,13 +3990,15 @@ onLocaleChange(() => {
 
 /** VOL-2：設定頁「這台裝置的對話音量」的狀態。 */
 function voiceVolumePanel(): VoiceVolumePanelState {
-  const prefs = voiceVolume.prefs;
+  const prefs = dayNightPrefs();
   const fresh = currentLight(lightState, Date.now()) !== null;
   return {
     day: voiceVolume.volumeFor("day"),
     night: voiceVolume.volumeFor("night"),
     decision: voiceVolume.mode,
     prefs,
+    override: dayNightOverride(),
+    shared: !!settings?.day_night,
     light: prefs.use_camera && fresh && lightState.luma !== null ? { luma: lightState.luma, level: lightState.level } : null,
   };
 }

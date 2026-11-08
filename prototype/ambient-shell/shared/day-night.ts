@@ -4,8 +4,8 @@
 // 鏡頭沒開、量不到或讀值太舊時只看時段，並照實標出來源。
 
 export type DayNightMode = "day" | "night";
-/** hours：在夜間時段內；camera_dark：鏡頭量到很暗；day：兩者都不成立。 */
-export type DayNightReason = "hours" | "camera_dark" | "day";
+/** hours：在夜間時段內；camera_dark：鏡頭量到很暗；day：兩者都不成立；manual：手動切換（DN-2，到 override.until 為止）。 */
+export type DayNightReason = "hours" | "camera_dark" | "day" | "manual";
 
 export interface DayNightPrefs {
   /** 夜間時段開始與結束的整點（0–23）；開始等於結束時沒有夜間時段。 */
@@ -91,8 +91,9 @@ export interface DayNightDecision {
   camera: boolean;
 }
 
-export function decideDayNight(hour: number, light: LightLevel | null, prefs: DayNightPrefs): DayNightDecision {
+export function decideDayNight(hour: number, light: LightLevel | null, prefs: DayNightPrefs, override: DayNightOverride | null = null, now: number = Date.now()): DayNightDecision {
   const camera = prefs.use_camera && light !== null;
+  if (override && now < override.until) return { mode: override.mode, reason: "manual", camera };
   if (inNightHours(hour, prefs)) return { mode: "night", reason: "hours", camera };
   if (camera && light === "dark") return { mode: "night", reason: "camera_dark", camera };
   return { mode: "day", reason: "day", camera };
@@ -139,4 +140,131 @@ export function frameLuma(rgba: ArrayLike<number>, step = 1): number {
     n++;
   }
   return n ? sum / n : 0;
+}
+
+// ───────────── DN-2：核心共用的設定與手動切換（George 2026-11-08） ─────────────
+// 夜間時段、用鏡頭判斷、一併套用與手動切換存在核心（configDir/day-night.json），Mac 與 Pi 共用；
+// 鏡頭亮度仍是各頁面自己量（只影響那台裝置）。手動切換一定有結束時間，到時自動回到依時段與鏡頭判斷。
+
+/** 手動切換：mode 維持到 until（epoch 毫秒）。 */
+export interface DayNightOverride {
+  mode: DayNightMode;
+  until: number;
+  /** 使用者選的是哪一種（只用來標示按鈕；舊檔沒有時當成 now）。 */
+  scope?: DayNightOverrideScope;
+}
+
+/** now：到下一次時段交界（夜間開始或結束）；tonight：到今晚（或現在這段夜間）結束。 */
+export type DayNightOverrideScope = "now" | "tonight";
+
+export const DAY_NIGHT_WRITE_PATH = "/api/settings/day-night" as const;
+
+/** 沒有夜間時段（開始等於結束）時，手動切換維持多久。 */
+export const OVERRIDE_FALLBACK_MS = { now: 12 * 3_600_000, tonight: 24 * 3_600_000 } as const;
+
+const HOUR_MS = 3_600_000;
+
+/** 從 now 往後找下一個整點交界，在那之後是否在夜間時段和現在不同（本機時區；找不到時 null）。 */
+export function nextScheduledChange(now: number, prefs: Pick<DayNightPrefs, "night_start_h" | "night_end_h">): number | null {
+  const current = inNightHours(new Date(now).getHours(), prefs);
+  const d = new Date(now);
+  d.setMinutes(0, 0, 0);
+  let t = d.getTime() + HOUR_MS;
+  for (let i = 0; i < 48; i++, t += HOUR_MS) {
+    if (inNightHours(new Date(t).getHours(), prefs) !== current) return t;
+  }
+  return null;
+}
+
+/** 手動切換的結束時間（純函式）。 */
+export function overrideUntil(now: number, scope: DayNightOverrideScope, prefs: Pick<DayNightPrefs, "night_start_h" | "night_end_h">): number {
+  const next = nextScheduledChange(now, prefs);
+  if (next === null) return now + OVERRIDE_FALLBACK_MS[scope];
+  if (scope === "now" || inNightHours(new Date(now).getHours(), prefs)) return next;
+  // 白天說「今晚」：跳過今晚開始，到今晚結束。
+  return nextScheduledChange(next, prefs) ?? now + OVERRIDE_FALLBACK_MS.tonight;
+}
+
+/** 還有效的手動切換（過期時 null）。 */
+export function activeOverride(override: DayNightOverride | null | undefined, now: number): DayNightOverride | null {
+  return override && now < override.until ? override : null;
+}
+
+export class DayNightPatchError extends Error {}
+
+/** HTTP body：設定欄位之外，override 是 day／night／auto（auto＝取消手動），scope 只能跟 override 一起送。 */
+export interface DayNightPatch extends Partial<DayNightPrefs> {
+  override?: DayNightMode | "auto";
+  scope?: DayNightOverrideScope;
+}
+
+/** 邊界驗證（HTTP body）：不認得的鍵或型別不對一律丟 DayNightPatchError（→ HTTP 400）。 */
+export function parseDayNightPatch(input: unknown): DayNightPatch {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new DayNightPatchError("日夜間設定必須是 JSON 物件");
+  const patch: DayNightPatch = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (key === "night_start_h" || key === "night_end_h") {
+      if (!isHour(value)) throw new DayNightPatchError(`${key} 必須是 0 到 23 的整數`);
+      patch[key] = value;
+    } else if (key === "use_camera" || key === "night_effects") {
+      if (typeof value !== "boolean") throw new DayNightPatchError(`${key} 必須是 true 或 false`);
+      patch[key] = value;
+    } else if (key === "override") {
+      if (value !== "day" && value !== "night" && value !== "auto") throw new DayNightPatchError("override 只能是 day、night 或 auto");
+      patch.override = value;
+    } else if (key === "scope") {
+      if (value !== "now" && value !== "tonight") throw new DayNightPatchError("scope 只能是 now 或 tonight");
+      patch.scope = value;
+    } else throw new DayNightPatchError(`未知的日夜間設定：${key}`);
+  }
+  if (patch.scope && (!patch.override || patch.override === "auto")) throw new DayNightPatchError("scope 只能和 override day／night 一起送");
+  if (Object.keys(patch).length === 0) throw new DayNightPatchError("沒有要改的日夜間設定");
+  return patch;
+}
+
+/** 讀已保存的手動切換（day-night.json 的 override 鍵）；不合法時丟錯。 */
+export function parseStoredOverride(value: unknown): DayNightOverride | null {
+  if (value === null) return null;
+  const o = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  if (!o || (o.mode !== "day" && o.mode !== "night") || typeof o.until !== "number" || !Number.isFinite(o.until)) throw new DayNightPatchError("override 格式不對");
+  return { mode: o.mode, until: o.until, ...(o.scope === "tonight" || o.scope === "now" ? { scope: o.scope } : {}) };
+}
+
+/** settings.day_night：核心保存的設定、還有效的手動切換，以及核心依時段與手動切換算出的模式（不含鏡頭）。 */
+export interface DayNightSettingsView {
+  prefs: DayNightPrefs;
+  override: DayNightOverride | null;
+  /** 有沒有保存過（false 時頁面可以把舊的頁面設定搬過來一次）。 */
+  saved: boolean;
+  /** 核心的判斷（時段＋手動，不含各裝置的鏡頭）：輕聲語氣看這個。 */
+  core_mode: DayNightMode;
+  write_path: typeof DAY_NIGHT_WRITE_PATH;
+}
+
+/** 時間顯示成 HH:MM（本機時區）。 */
+export function clockText(at: number): string {
+  const d = new Date(at);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// ───────────── DN-2：語音工具 set_day_night ─────────────
+
+export interface DayNightToolRequest {
+  mode: DayNightMode | "auto";
+  scope?: DayNightOverrideScope;
+}
+
+/** 模型給的參數（不合法的 mode 當成 null，由呼叫端回錯）。 */
+export function parseDayNightToolArgs(args: Record<string, unknown>): DayNightToolRequest | null {
+  const mode = args.mode;
+  if (mode !== "day" && mode !== "night" && mode !== "auto") return null;
+  const scope = args.scope === "tonight" ? "tonight" : args.scope === "now" ? "now" : undefined;
+  return mode === "auto" ? { mode } : { mode, ...(scope ? { scope } : {}) };
+}
+
+/** 交給模型的結果：現在的模式、原因與手動切換維持到幾點（照實；不說成功以外的事）。 */
+export function dayNightToolOutput(decision: DayNightDecision, override: DayNightOverride | null): Record<string, unknown> {
+  const base = { ok: true, status: "confirmed", mode: decision.mode, reason: decision.reason };
+  if (decision.reason === "manual" && override) return { ...base, until: clockText(override.until), note: `手動切換，${clockText(override.until)} 之後自動回到依時段判斷。` };
+  return { ...base, note: "已恢復自動：依夜間時段與鏡頭亮度判斷。" };
 }

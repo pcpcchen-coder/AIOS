@@ -20,10 +20,10 @@ import { AUDIO_TEXT, inputStatus, outputStatus, preferredLabel, type AudioDevice
 import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus } from "../shared/integrations.ts";
 import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
 import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, VoiceRelayProfileBody, VoiceRelaySlots, VoiceRelayTargetBody, VoiceRelayTrialBody, VoiceRelayUnadoptBody } from "./api.ts";
-import { VOICE_VOLUME_TEXT } from "./voice-volume.ts";
+import { dayNightReasonText, VOICE_VOLUME_TEXT } from "./voice-volume.ts";
 import { WAKE_THRESHOLD_OFFSETS, type WakePrefsPatch, type WakeSettingsView } from "../shared/wake.ts";
 import { VOICE_VOLUME_DEFAULT, VOICE_VOLUME_MAX, VOICE_VOLUME_MIN, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
-import { NIGHT_VOLUME_DEFAULT, type DayNightDecision, type DayNightMode, type DayNightPrefs, type LightLevel } from "../shared/day-night.ts";
+import { NIGHT_VOLUME_DEFAULT, type DayNightDecision, type DayNightMode, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type LightLevel } from "../shared/day-night.ts";
 import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, rendererText, type FrameStats, type PerformanceProfile, type RendererReadout } from "./performance.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
@@ -79,7 +79,7 @@ export interface ViewActions {
   /** VOL-1：這台裝置的對話音量（立即套用並保存在這個頁面）。 */
   setVoiceVolume?(request: VoiceVolumeRequest): void;
   /** VOL-2：夜間時段與「用鏡頭亮度判斷」（立即套用並保存在這個頁面）。 */
-  setDayNight?(patch: Partial<DayNightPrefs>): void;
+  setDayNight?(patch: DayNightPatch): void;
   /** 喚醒偏好（目前只有設定頁的「喚醒詞門檻」；寫入核心的 wake.json）。 */
   updateWake?(patch: WakePrefsPatch): void;
 }
@@ -416,6 +416,10 @@ export interface VoiceVolumePanelState {
   prefs: DayNightPrefs;
   /** 夠新的鏡頭讀值（設定關閉、鏡頭沒開或太舊時 null）。 */
   light: { luma: number; level: LightLevel | null } | null;
+  /** DN-2：還有效的手動切換。 */
+  override?: DayNightOverride | null;
+  /** DN-2：設定存在核心（Mac 與 Pi 共用）；false 時沒有手動切換按鈕。 */
+  shared?: boolean;
 }
 
 export interface PerformancePanelState {
@@ -622,6 +626,7 @@ export function renderVoiceVolumeSettings(state: VoiceVolumePanelState, actions:
     { class: "camera-settings voice-volume-settings" },
     h("h3", {}, t(VOICE_VOLUME_TEXT.title)),
     h("p", { "data-day-night": "", role: "status" }, dayNightLine(state)),
+    state.shared && manualRow(state, actions),
     h("ul", { class: "pref-list" }, row("day"), row("night")),
     h(
       "ul",
@@ -689,9 +694,36 @@ export function renderWakeThresholdSettings(wake: WakeSettingsView, actions: Vie
 }
 
 function dayNightLine(state: VoiceVolumePanelState): string {
-  const { decision, prefs } = state;
-  if (decision.reason === "hours") return t(VOICE_VOLUME_TEXT.modeLine.hours, String(prefs.night_start_h).padStart(2, "0"), String(prefs.night_end_h).padStart(2, "0"));
-  return t(VOICE_VOLUME_TEXT.modeLine[decision.reason]);
+  return dayNightReasonText(state.decision, state.prefs, state.override ?? null, t);
+}
+
+/** DN-2：手動切換的四個按鈕（自動／現在是白天／切到夜間／今晚維持日間）；目前選的那一個 aria-pressed＝true。 */
+function manualRow(state: VoiceVolumePanelState, actions: ViewActions): HTMLElement {
+  const text = VOICE_VOLUME_TEXT.manual;
+  const override = state.override ?? null;
+  const current = !override ? "auto" : override.mode === "day" && override.scope === "tonight" ? "tonightDay" : override.mode;
+  const make = (key: "auto" | "day" | "night" | "tonightDay", patch: DayNightPatch) => {
+    const pressed = current === key;
+    const el = button(text[key], () => actions.setDayNight?.(patch), pressed ? "btn--primary" : "");
+    el.setAttribute("aria-pressed", String(pressed));
+    el.setAttribute("data-day-night-manual", key);
+    el.disabled = !actions.setDayNight;
+    return el;
+  };
+  return h(
+    "div",
+    { class: "pref-list" },
+    h("strong", {}, t(text.title)),
+    h(
+      "div",
+      { class: "actions" },
+      make("auto", { override: "auto" }),
+      make("day", { override: "day", scope: "now" }),
+      make("night", { override: "night", scope: "now" }),
+      make("tonightDay", { override: "day", scope: "tonight" }),
+    ),
+    h("p", { class: "muted small" }, t(text.note)),
+  );
 }
 
 function lightLine(state: VoiceVolumePanelState): string {

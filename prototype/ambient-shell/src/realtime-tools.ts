@@ -4,6 +4,7 @@ import type { ApprovalReport } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, HomeResult, RealtimeCallbacks } from "./realtime.ts";
 import { taiwanText } from "./zh-tw.ts";
 import { parseVoiceVolumeArgs } from "../shared/voice-volume.ts";
+import { parseDayNightToolArgs } from "../shared/day-night.ts";
 
 // 兩條即時語音路徑共用的工具執行器與確認卡佇列，從 RealtimeVoice（src/realtime.ts）原樣搬出：
 //   API key：RealtimeVoice 收到 response.function_call_arguments.done → executeRealtimeTool → function_call_output
@@ -146,7 +147,7 @@ export interface ToolContext {
 }
 
 /**
- * 驗證參數、呼叫既有的 callbacks（onDelegate、onWebSearch、onHomeStatus、onHomeControl、onGetTasks、onVoiceVolume），
+ * 驗證參數、呼叫既有的 callbacks（onDelegate、onWebSearch、onHomeStatus、onHomeControl、onGetTasks、onVoiceVolume、onDayNight），
  * 並透過 approvals 套用 needs_confirmation → 確認卡／busy 的規則。分支與搬出前的 runTool 完全相同。
  */
 export async function executeRealtimeTool(name: string, rawArgs: string, ctx: ToolContext): Promise<void> {
@@ -200,6 +201,16 @@ export async function executeRealtimeTool(name: string, rawArgs: string, ctx: To
             approvals.queue({ kind: "home", id: result.confirm_id, device: result.device, room: result.room, action: result.action, expiresAt });
           }
         }
+      }
+    } else if (name === "set_day_night") {
+      const request = parseDayNightToolArgs(args as Record<string, unknown>);
+      if (!callbacks.onDayNight) {
+        output = { ok: false, error: "這個畫面不能切換日夜間模式" };
+      } else if (!request) {
+        output = { ok: false, error: "mode 只能是 day、night 或 auto" };
+      } else {
+        output = await callbacks.onDayNight(request);
+        if (output.ok === true) callbacks.onToolActivity(`日夜間模式：${output.mode === "night" ? "夜間" : "日間"}${output.reason === "manual" ? "（手動）" : "（自動）"}`);
       }
     } else if (name === "set_voice_volume") {
       if (!callbacks.onVoiceVolume) {

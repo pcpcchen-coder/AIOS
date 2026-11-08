@@ -404,6 +404,53 @@ export function clockMenu(clock, { setClock, translate = (source) => source }) {
   ];
 }
 
+// ───────────── 日夜間模式（DN-2；核心給了 settings.day_night 才畫） ─────────────
+// 文字和 src/voice-volume.ts 的 VOICE_VOLUME_TEXT.manual 與 modeLine 相同（這個檔案不能載入 .ts；tests/day-night-mode.test.ts 核對兩邊一致）。
+
+export const DAY_NIGHT_TEXT = {
+  group: "日夜間模式",
+  auto: "自動",
+  day: "現在是白天",
+  night: "切到夜間",
+  tonightDay: "今晚維持日間",
+  autoLine: "自動：依夜間時段 {0}:00–{1}:00 與各裝置的鏡頭",
+  manual_day: "手動切換：維持日間模式到 {0}",
+  manual_night: "手動切換：維持夜間模式到 {0}",
+};
+
+function fill(text, ...args) {
+  return args.reduce((out, arg, i) => out.replace(`{${i}}`, arg), text);
+}
+
+function hhmm(at) {
+  const d = new Date(at);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * 「日夜間模式」分段：一行目前狀態（核心的手動切換或自動），四個單選：自動／現在是白天／切到夜間／今晚維持日間。
+ * 點選後 setDayNight(patch) POST 到 day_night.write_path；Mac 與 Pi 一起變。
+ */
+export function dayNightMenu(dayNight, { setDayNight, translate = (source) => source, now = Date.now() }) {
+  const set = (patch) => () => void setDayNight?.(patch);
+  const override = dayNight.override && now < dayNight.override.until ? dayNight.override : null;
+  const current = !override ? "auto" : override.mode === "day" && override.scope === "tonight" ? "tonightDay" : override.mode;
+  const pad = (h) => String(h).padStart(2, "0");
+  const status = override
+    ? fill(translate(override.mode === "night" ? DAY_NIGHT_TEXT.manual_night : DAY_NIGHT_TEXT.manual_day), hhmm(override.until))
+    : fill(translate(DAY_NIGHT_TEXT.autoLine), pad(dayNight.prefs.night_start_h), pad(dayNight.prefs.night_end_h));
+  const radio = (key, patch) => ({ label: translate(DAY_NIGHT_TEXT[key]), type: "radio", checked: current === key, click: set(patch) });
+  return [
+    { type: "separator" },
+    { label: translate(DAY_NIGHT_TEXT.group), enabled: false },
+    { label: status, enabled: false },
+    radio("auto", { override: "auto" }),
+    radio("day", { override: "day", scope: "now" }),
+    radio("night", { override: "night", scope: "now" }),
+    radio("tonightDay", { override: "day", scope: "tonight" }),
+  ];
+}
+
 // ───────────── 左上角家中狀態（HOME-1；核心給了 settings.home_corner 才畫） ─────────────
 // 文字和 shared/home-corner.ts 的 HOME_CORNER_TEXT 相同（這個檔案不能載入 .ts；tests/home-corner.test.ts 核對兩邊一致）。
 
@@ -568,11 +615,12 @@ export function memoriesMenu(memories, { setMemories, memoriesGoogle, openMemori
  *   setAudio(patch)、audioReport：「聲音」分段（settings.audio 存在時畫；patch 送到 settings.audio.write_path）
  *   setProactive(patch)：「主動提醒」分段（settings.proactive 存在時畫；patch 送到 settings.proactive.write_path）
  *   setClock(patch)：CLK-1「右上角時鐘與天氣」分段（settings.clock 存在時畫；patch 送到 settings.clock.write_path）
+ *   setDayNight(patch)：DN-2「日夜間模式」分段（settings.day_night 存在時畫；patch 送到 settings.day_night.write_path）
  *   setHomeCorner(patch)：HOME-1「左上角家中狀態」分段（settings.home_corner 存在時畫；patch 送到 settings.home_corner.write_path）
  *   setMemories(patch)：「回憶模式」分段（settings.memories 存在時畫；patch 送到 settings.memories.write_path）
  *   memoriesGoogle(action)：MEMO-2「Google 相簿」的 pick／cancel／clear（settings.memories.google 存在時畫）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setClock, setHomeCorner, setMemories, memoriesGoogle, openMemoriesFolder, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setClock, setDayNight, setHomeCorner, setMemories, memoriesGoogle, openMemoriesFolder, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -646,6 +694,7 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
   if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused, translate }));
   if (settings.proactive) items.push(...proactiveMenu(settings.proactive, { setProactive, translate }));
   if (settings.clock) items.push(...clockMenu(settings.clock, { setClock, translate }));
+  if (settings.day_night) items.push(...dayNightMenu(settings.day_night, { setDayNight, translate }));
   if (settings.home_corner) items.push(...homeCornerMenu(settings.home_corner, { setHomeCorner, translate }));
   if (settings.memories) items.push(...memoriesMenu(settings.memories, { setMemories, memoriesGoogle, openMemoriesFolder, translate }));
   return items;

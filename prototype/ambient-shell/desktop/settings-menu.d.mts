@@ -5,6 +5,7 @@ import type { WakePrefs, WakeReason, WakeReport, WakeState } from "../shared/wak
 import type { AudioMenuReport, AudioPrefsPatch, AudioSettingsView } from "../shared/audio-devices.ts";
 import type { ProactivePrefsPatch, ProactiveSettingsView } from "../shared/proactive.ts";
 import type { ClockPrefsPatch, ClockSettingsView } from "../shared/clock.ts";
+import type { DayNightPatch, DayNightSettingsView } from "../shared/day-night.ts";
 import type { HomeCornerPrefsPatch, HomeCornerSettingsView } from "../shared/home-corner.ts";
 import type { MemoriesPrefsPatch, MemoriesSettingsView } from "../shared/memories.ts";
 
@@ -67,6 +68,12 @@ export function clockMenu(
   handlers: { setClock?(patch: ClockPrefsPatch): unknown; translate?(source: string, ...values: unknown[]): string },
 ): MenuItemTemplate[];
 
+export const DAY_NIGHT_TEXT: Record<string, string>;
+export function dayNightMenu(
+  dayNight: DayNightSettingsView,
+  handlers: { setDayNight?(patch: DayNightPatch): unknown; translate?(source: string, ...values: unknown[]): string; now?: number },
+): MenuItemTemplate[];
+
 export const HOME_CORNER_TEXT: Record<string, string>;
 export function homeCornerMenu(
   homeCorner: HomeCornerSettingsView,
@@ -93,6 +100,7 @@ export function settingsMenu(
     audioReport?: AudioMenuReport | null;
     setProactive?(patch: ProactivePrefsPatch): unknown;
     setClock?(patch: ClockPrefsPatch): unknown;
+    setDayNight?(patch: DayNightPatch): unknown;
     setHomeCorner?(patch: HomeCornerPrefsPatch): unknown;
     setMemories?(patch: MemoriesPrefsPatch): unknown;
     /** MEMO-2「Google 相簿」：pick（主程序開 picker_uri）、cancel、clear（主程序先確認）。 */

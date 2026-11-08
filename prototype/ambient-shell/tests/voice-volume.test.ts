@@ -233,6 +233,22 @@ describe("settings view", () => {
     expect(calls).toEqual([{ night_effects: false }, { night_effects: true }]);
   });
 
+  const dnPanel = (over: Record<string, unknown> = {}) => ({ day: 100, night: 40, decision: { mode: "day", reason: "day", camera: false }, prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true }, light: null, override: null, shared: true, ...over });
+
+  it("DN-2: four manual buttons send the patch; the active one is pressed; none without a shared core", () => {
+    const calls: unknown[] = [];
+    const section = views.renderVoiceVolumeSettings(dnPanel() as never, { setVoiceVolume: () => {}, setDayNight: (p: unknown) => calls.push(p) } as never) as unknown as El;
+    const buttons = section.all().filter((e) => e.attributes.has("data-day-night-manual"));
+    expect(buttons.map((b) => b.attributes.get("data-day-night-manual"))).toEqual(["auto", "day", "night", "tonightDay"]);
+    expect(buttons[0]!.attributes.get("aria-pressed")).toBe("true");
+    for (const b of buttons) b.click();
+    expect(calls).toEqual([{ override: "auto" }, { override: "day", scope: "now" }, { override: "night", scope: "now" }, { override: "day", scope: "tonight" }]);
+    const tonight = views.renderVoiceVolumeSettings(dnPanel({ override: { mode: "day", until: Date.now() + 3_600_000, scope: "tonight" }, decision: { mode: "day", reason: "manual", camera: false } }) as never, { setDayNight: () => {} } as never) as unknown as El;
+    expect(tonight.all().find((e) => e.attributes.get("aria-pressed") === "true" && e.attributes.has("data-day-night-manual"))?.attributes.get("data-day-night-manual")).toBe("tonightDay");
+    const local = views.renderVoiceVolumeSettings(dnPanel({ shared: false }) as never, {} as never) as unknown as El;
+    expect(local.all().some((e) => e.attributes.has("data-day-night-manual"))).toBe(false);
+  });
+
   it("every new string has an English catalog entry", () => {
     const en = JSON.parse(readFileSync(new URL("../src/messages.en.json", import.meta.url), "utf8")) as Record<string, string>;
     const sources = [
