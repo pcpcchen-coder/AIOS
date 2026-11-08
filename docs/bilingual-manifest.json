@@ -179,8 +179,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "cfc901b65e820862875b6c1c31947772aed3f77e8cade9e3308ec52d9113fb93",
-      "translationSha256": "c3a7b9940c6ac37a800c612a11b29a9584b62b97f13df9da3d81f69263744cf3"
+      "sourceSha256": "bffb8495218bb1c60753ab30a318c7bc91b5866140cc8b5b0af4bdbf59a95df2",
+      "translationSha256": "b902e74c325a74af351258a7cf2c3608cabb106e986523ac357047a4559049fb"
     },
     {
       "source": "docs/README.md",
@@ -291,8 +291,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "e642aa40e0ed2a92d6e094192b770ea83c8a5c337b10b4621c10aee193773564",
-      "translationSha256": "3f09ea4a0e5f69e4a12226a38b9a62de5c8b254af045294a1f63acf4dda50c08"
+      "sourceSha256": "9266c8954e32e59fad619918b01a0d1f1c2031e239659feb92bde9bf2f4cbf20",
+      "translationSha256": "83118bc912fb67e913beabfd2af0995e8f4c48bb5b5dcff085a7d92527c8520d"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -398,6 +398,13 @@
       "translation": "docs/validation/day-night-badge-2026-11-07.en.md",
       "sourceSha256": "22eac2d1de159eba67c3b9ba8adf5c560632c8acfa278af0bad80aa64bde7380",
       "translationSha256": "745ac5538973aaad82565f77f4055c0e4afa62f81a1c73b18e9b78f511211a6a"
+    },
+    {
+      "source": "docs/validation/day-night-mode-2026-11-08.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/day-night-mode-2026-11-08.en.md",
+      "sourceSha256": "183dcdd4db0e74311a01584d1e1f343a6235211d441362a6ed0731733ab893a9",
+      "translationSha256": "5feec92de18b5fa1ac7cc3083e1d7db456e3dd034667123f85bcfa0b4b76a5cc"
     },
     {
       "source": "docs/validation/day-night-volume-2026-11-07.md",

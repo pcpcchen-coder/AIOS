@@ -166,7 +166,7 @@ describe("settings view", () => {
   afterAll(() => vi.unstubAllGlobals());
 
   const panel = (over: Partial<import("../src/views.ts").VoiceVolumePanelState> = {}) => ({
-    day: 60, night: 40, decision: { mode: "day", reason: "day", camera: false }, prefs: { night_start_h: 22, night_end_h: 7, use_camera: true }, light: null, ...over,
+    day: 60, night: 40, decision: { mode: "day", reason: "day", camera: false }, prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true }, light: null, ...over,
   }) as import("../src/views.ts").VoiceVolumePanelState;
   const volumeButtons = (section: El, period: string) => section.all().find((e) => e.attributes.get("data-volume-period") === period)!.all().filter((e) => e.tagName === "button");
 
@@ -200,7 +200,7 @@ describe("settings view", () => {
     const dark = views.renderVoiceVolumeSettings(panel({ decision: { mode: "night", reason: "camera_dark", camera: true }, light: { luma: 21.6, level: "dark" } }), {} as never) as unknown as El;
     expect(dark.textContent).toContain("現在用夜間音量：鏡頭量到環境很暗");
     expect(dark.textContent).toContain("鏡頭亮度：22（暗）");
-    const off = views.renderVoiceVolumeSettings(panel({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: false } }), {} as never) as unknown as El;
+    const off = views.renderVoiceVolumeSettings(panel({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: false, night_effects: true } }), {} as never) as unknown as El;
     expect(off.textContent).toContain("鏡頭亮度：不使用（只看時段）");
   });
 
@@ -217,6 +217,20 @@ describe("settings view", () => {
     selects[1]!.value = "6";
     for (const fn of selects[1]!.listeners.get("change") ?? []) fn();
     expect(calls).toEqual([{ use_camera: false }, { night_start_h: 21 }, { night_end_h: 6 }]);
+  });
+
+  it("DN-1: the night-effects toggle calls setDayNight with night_effects", () => {
+    const calls: unknown[] = [];
+    const section = views.renderVoiceVolumeSettings(panel(), { setVoiceVolume: () => {}, setDayNight: (p: unknown) => calls.push(p) } as never) as unknown as El;
+    expect(section.textContent).toContain("夜間一併調暗畫面、靜音處理中音效、暫停回憶");
+    const toggle = section.all().find((e) => e.attributes.has("data-night-effects"))!;
+    expect(toggle.attributes.get("aria-pressed")).toBe("true");
+    toggle.click();
+    const off = views.renderVoiceVolumeSettings(panel({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: false } }), { setVoiceVolume: () => {}, setDayNight: (p: unknown) => calls.push(p) } as never) as unknown as El;
+    const offToggle = off.all().find((e) => e.attributes.has("data-night-effects"))!;
+    expect(offToggle.attributes.get("aria-pressed")).toBe("false");
+    offToggle.click();
+    expect(calls).toEqual([{ night_effects: false }, { night_effects: true }]);
   });
 
   it("every new string has an English catalog entry", () => {

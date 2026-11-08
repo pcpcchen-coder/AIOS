@@ -88,7 +88,7 @@ import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
 import { VOICE_VOLUME_TEXT, voiceVolume } from "./voice-volume.ts";
 import { SettingsEntry, settingsEntryEnabled } from "./settings-entry.ts";
 import { voiceVolumeOutput } from "../shared/voice-volume.ts";
-import { currentLight, decideDayNight, INITIAL_LIGHT, nextLight, type LightState } from "../shared/day-night.ts";
+import { currentLight, decideDayNight, INITIAL_LIGHT, nextLight, nightEffects, type LightState, type NightEffects } from "../shared/day-night.ts";
 import { LightMeter, type LightWorkerLike } from "./light-meter.ts";
 import type { VoiceVolumePanelState } from "./views.ts";
 import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
@@ -1495,8 +1495,23 @@ function updateDayNight(): void {
   const before = voiceVolume.mode;
   const decision = decideDayNight(new Date().getHours(), prefs.use_camera ? currentLight(lightState, Date.now()) : null, prefs);
   voiceVolume.setMode(decision);
+  applyNightEffects();
   renderDayNightBadge();
   if (shell.surface?.kind === "settings" && (before.mode !== decision.mode || before.reason !== decision.reason || before.camera !== decision.camera)) render();
+}
+
+/** DN-1：夜間模式一併套用的行為（日間或設定關閉時全部 false）。 */
+function currentNightEffects(): NightEffects {
+  return nightEffects(voiceVolume.mode.mode, voiceVolume.prefs);
+}
+
+/** DN-1：畫面變暗（CSS 漸變）、處理中音效與回憶模式依夜間模式重算。 */
+function applyNightEffects(): void {
+  const effects = currentNightEffects();
+  document.body.dataset.dayNight = voiceVolume.mode.mode;
+  document.body.dataset.nightDim = effects.dim ? "on" : "off";
+  syncProcessingCue();
+  syncMemories();
 }
 
 /** VOL-2：右上角時鐘下方的日間／夜間模式（文字依目前語言；原因放在 title）。 */
@@ -1507,7 +1522,9 @@ function renderDayNightBadge(): void {
   const title = decision.reason === "hours"
     ? t(VOICE_VOLUME_TEXT.modeLine.hours, pad(prefs.night_start_h), pad(prefs.night_end_h))
     : t(VOICE_VOLUME_TEXT.modeLine[decision.reason]);
-  clockCorner.setDayNight({ mode: decision.mode, label: t(VOICE_VOLUME_TEXT.badge[decision.mode]), title });
+  const effects = currentNightEffects();
+  const full = effects.dim ? `${title}\n${t(VOICE_VOLUME_TEXT.effectsLine)}` : title;
+  clockCorner.setDayNight({ mode: decision.mode, label: t(VOICE_VOLUME_TEXT.badge[decision.mode]), title: full });
 }
 
 function syncLightMeter(): void {
@@ -3276,7 +3293,7 @@ function wakeMemoriesNow(): void {
 
 function syncMemories(): void {
   const prefs = settings?.memories?.prefs ?? null;
-  const enabled = !!prefs?.enabled && connected;
+  const enabled = !!prefs?.enabled && connected && !currentNightEffects().pauseMemories;
   const now = performance.now();
   const was = memoriesState.phase;
   memoriesState = stepMemories(memoriesState, { now, enabled, busy: memoriesBusy(), hasItems: memoriesItems.length > 0, idleMs: (prefs?.idle_s ?? 60) * 1000 });
@@ -3335,7 +3352,7 @@ function currentProcessingSource(): string[] {
 function syncProcessingCue(phase = document.body.dataset.conversationState): boolean {
   processingCue.update({
     owners: currentProcessingSource(),
-    enabled: settings?.audio?.prefs.processing_cue !== false,
+    enabled: settings?.audio?.prefs.processing_cue !== false && !currentNightEffects().muteProcessingCue,
     callOn: realtime.on || realtimeStarting,
     speaking: speechActive > 0 || conversation.playing || realtime.playing || phase === "speaking",
     capturing: voice.capturing || conversation.capturing || realtime.capturing,

@@ -2044,3 +2044,30 @@ body[data-memories="showing"] .home-corner {
     transition: none;
   }
 }
+
+/* DN-1（George 2026-11-08）：夜間模式整個畫面變暗。只是一層不接收點擊的半透明黑，約 3 秒漸變；
+   電子腦腦區連動仍只由真實事件驅動，只是看起來比較暗。設定頁打開時暗得少一點，方便閱讀。 */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 3s ease;
+  z-index: 2147483000;
+}
+
+body[data-night-dim="on"]::after {
+  opacity: 0.45;
+}
+
+body[data-night-dim="on"].has-surface::after {
+  opacity: 0.25;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::after {
+    transition-duration: 0.4s;
+  }
+}

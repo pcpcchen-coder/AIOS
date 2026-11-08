@@ -1032,5 +1032,8 @@
   "更不容易誤觸（+0.10）": "Fewer false wakes (+0.10)",
   "目前門檻：{0}": "Current thresholds: {0}",
   "數字越小越容易喚醒，也越容易被電視或聊天誤觸；數字越大越不容易誤觸，但可能要說兩次。改了立即套用，通話中等這通結束；所有連到這台核心的裝置共用。": "Lower values wake more easily but are more often triggered by the TV or conversation; higher values cause fewer false wakes but you may need to say it twice. Changes apply right away (during a call, after it ends) and are shared by every device connected to this core.",
-  "喚醒設定沒有保存：{0}": "Wake settings were not saved: {0}"
+  "喚醒設定沒有保存：{0}": "Wake settings were not saved: {0}",
+  "夜間一併調暗畫面、靜音處理中音效、暫停回憶": "At night, also dim the screen, mute the processing sound and pause memories",
+  "夜間模式時整個畫面約 3 秒漸暗、處理中的提示音不出聲（電子腦的樣子照常）、回憶模式不播放。關閉就只換對話音量。": "In night mode the whole screen fades darker over about 3 seconds, the processing ping is silent (the brain still shows it), and memories do not play. Turn this off to switch only the conversation volume.",
+  "已調暗畫面、處理中音效靜音、回憶暫停": "Screen dimmed, processing sound muted, memories paused"
 }
