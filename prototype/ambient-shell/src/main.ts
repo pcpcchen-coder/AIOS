@@ -2979,6 +2979,16 @@ const actions: ViewActions = {
       if (error) dispatch({ type: "show.settings", request_id: requestId, message: error });
     });
   },
+  updateWake(patch) {
+    const requestId = userRequest();
+    void api.updateWake(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`喚醒設定沒有保存：${(err as Error).message}` }),
+    );
+  },
   updateProactive(patch) {
     const requestId = userRequest();
     void api.updateProactive(patch).then(

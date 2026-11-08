@@ -13,8 +13,9 @@ export const WORKER_CLOSE_TIMEOUT_MS = 100;
 /**
  * keywordPort（SP-02a）：每次建立喚醒 worker 時取一條新的 MessagePort（另一端已交給 speaker worker），在 init 時轉移給 worker；
  * 偵測到喚醒詞時 worker 只把那一段樣本直接送過去。主執行緒只轉手 port，碰不到樣本。
+ * thresholdOffset：設定頁的「喚醒詞門檻調整」（shared/wake.ts 的 wake_threshold_offset），每次建立 worker 時讀一次、在 init 交給 worker。
  */
-export function browserCapture(keywordPort: (() => MessagePort | null) | null = null): CaptureDeps {
+export function browserCapture(keywordPort: (() => MessagePort | null) | null = null, thresholdOffset: () => number = () => 0): CaptureDeps {
   return {
     async connect(stream: MediaStream, events: CaptureEvents): Promise<CaptureGraph> {
       const AudioCtx = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
@@ -73,7 +74,7 @@ export function browserCapture(keywordPort: (() => MessagePort | null) | null = 
           if (!stopped) events.failed("runtime_load_failed");
         };
         const toSpeaker = keywordPort?.() ?? null;
-        worker.postMessage({ type: "init", sampleRate: ctx.sampleRate }, toSpeaker ? [channel.port2, toSpeaker] : [channel.port2]);
+        worker.postMessage({ type: "init", sampleRate: ctx.sampleRate, thresholdOffset: thresholdOffset() }, toSpeaker ? [channel.port2, toSpeaker] : [channel.port2]);
         node.port.postMessage({ type: "port" }, [channel.port1]);
         source = ctx.createMediaStreamSource(stream);
         source.connect(node);

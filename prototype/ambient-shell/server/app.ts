@@ -41,7 +41,8 @@ import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
 import { readVerifiedSpeakerRuntime, speakerRuntimePath } from "./speaker-runtime.ts";
 import { readVerifiedWakeRuntime, wakeRuntimePath } from "./wake-runtime.ts";
 import { AUDIO_WRITE_PATH, AudioPatchError, DEFAULT_AUDIO_PREFS, parseAudioPatch, type AudioPrefs, type AudioPrefsPatch } from "../shared/audio-devices.ts";
-import { parseWakePatch, WAKE_ID, WakePatchError, type WakePrefs, type WakePrefsPatch, type WakeRuntimeState } from "../shared/wake.ts";
+import { effectiveWakeThresholds, parseWakePatch, WAKE_ID, WakePatchError, type WakeKeywordConfig, type WakePrefs, type WakePrefsPatch, type WakeRuntimeState } from "../shared/wake.ts";
+import wakeManifest from "../shared/wake-runtime.json" with { type: "json" };
 import { parsePageEndReason, parseVoiceUsage } from "../shared/voice-cost.ts";
 import { parseCostLimit, type VoiceCostLog } from "./voice-cost-log.ts";
 import { historyPageHeaders, pageHeaders } from "./page-headers.ts";
@@ -312,7 +313,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         identity: options.identity?.status(source) ?? BROWSER_IDENTITY_STATUS,
         memory: options.memory?.settingsStatus() ?? BROWSER_MEMORY_STATUS,
         audio: { prefs: options.audio?.view() ?? { ...DEFAULT_AUDIO_PREFS }, write_path: AUDIO_WRITE_PATH },
-        ...(options.wake ? { wake: { ...options.wake.view(), runtime: options.wake.runtime() } } : {}),
+        ...(options.wake ? { wake: wakeView(options.wake.view(), options.wake.runtime()) } : {}),
         ...(options.proactive ? { proactive: options.proactive.view() } : {}),
         ...(options.clock ? { clock: options.clock.view(source) } : {}),
         ...(options.homeCorner ? { home_corner: options.homeCorner.view(source) } : {}),
@@ -1158,6 +1159,11 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
     // fall through
   }
   throw new HttpError(400, "body must be a JSON object");
+}
+
+/** settings.wake：偏好、引擎核對結果，以及套上門檻調整值之後每個喚醒詞的門檻（設定頁顯示用）。 */
+function wakeView(prefs: WakePrefs, runtime: WakeRuntimeState) {
+  return { ...prefs, runtime, thresholds: effectiveWakeThresholds(wakeManifest.keywords as WakeKeywordConfig, prefs.wake_threshold_offset ?? 0) };
 }
 
 function sendJson(res: ServerResponse, status: number, value: unknown): void {

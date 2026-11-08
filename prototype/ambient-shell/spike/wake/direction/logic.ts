@@ -2,7 +2,7 @@
 // 方向測試的統計（成功率、Wilson 95% 區間、方向差距、每小時誤觸）與結果的匯出／匯入。
 // 不碰 DOM、不保存音訊；tests/wake-direction.test.ts 直接測。AudioWorklet（worklet.ts）也 import 這個檔案，所以不得用到 DOM。
 
-import type { WakeKeywordConfig } from "../../../shared/wake.ts";
+export { offsetKeywords } from "../../../shared/wake.ts";
 
 // ───────────── 測試格 ─────────────
 
@@ -131,17 +131,6 @@ export function skippedVariants(channels: number, deltas: readonly number[], per
 
 /** 產品門檻的產品混音偵測器 id（一定會排進去）。 */
 export const PRODUCT_VARIANT_ID = "product+0.00";
-
-const clampThreshold = (t: number) => Math.round(Math.min(0.99, Math.max(0.01, t)) * 100) / 100;
-
-/** 把每一行關鍵詞門檻（含全域門檻）加上 delta，夾在 0.01–0.99、取到小數兩位；提升分數不變。新物件。 */
-export function offsetKeywords(k: WakeKeywordConfig, delta: number): WakeKeywordConfig {
-  return {
-    ...k,
-    keywords_threshold: k.keywords_threshold === null ? null : clampThreshold(k.keywords_threshold + delta),
-    entries: k.entries.map((e) => ({ ...e, threshold: e.threshold === null ? null : clampThreshold(e.threshold + delta) })),
-  };
-}
 
 /** 取出一個來源的樣本（新陣列）。 */
 export function pickSource(input: readonly Float32Array[], source: Source): Float32Array {

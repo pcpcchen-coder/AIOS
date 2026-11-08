@@ -204,7 +204,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     const setWakeListen = vi.fn();
     const setVoiceNameTest = vi.fn();
     const setMenuPref = vi.fn();
-    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, voice_name_test: voiceTest, speaker_in_call: speaker, runtime: "missing" as const } };
+    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, voice_name_test: voiceTest, speaker_in_call: speaker, wake_threshold_offset: 0, runtime: "missing" as const } };
     const items = settingsMenu(settings, { command, setMenuPref, setWakeListen, setVoiceNameTest, wakeReport: report, wakeCommand });
     const find = (label: string) => items.find((i) => i.label === label) as MenuItemTemplate;
     return { items, find, command, wakeCommand, setWakeListen, setVoiceNameTest, setMenuPref };
@@ -313,7 +313,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
   it("is fully translated in English (the wake word Hello Nous is English already)", () => {
     setNativeLocale("en");
     try {
-      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, runtime: "missing" as const } };
+      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, runtime: "missing" as const } };
       for (const report of [null, ...Object.entries(WAKE_STATE_REASONS).flatMap(([state, reasons]) => reasons.map((reason) => ({ state, reason }) as WakeReport))]) {
         const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), wakeReport: report, translate: nativeT });
         const start = items.findIndex((i) => i.label === "Wake word");

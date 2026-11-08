@@ -240,7 +240,7 @@ describe("audio privacy (static)", () => {
         'node?.port.postMessage({ type: "stop" });',
         'w.postMessage({ type: "clear" });',
         'w.postMessage({ type: "close" });',
-        'worker.postMessage({ type: "init", sampleRate: ctx.sampleRate }, toSpeaker ? [channel.port2, toSpeaker] : [channel.port2]);',
+        'worker.postMessage({ type: "init", sampleRate: ctx.sampleRate, thresholdOffset: thresholdOffset() }, toSpeaker ? [channel.port2, toSpeaker] : [channel.port2]);',
         'node.port.postMessage({ type: "port" }, [channel.port1]);',
       ],
       "wake-worker.ts": [

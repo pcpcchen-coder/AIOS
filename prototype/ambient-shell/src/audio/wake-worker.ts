@@ -8,9 +8,9 @@ import manifest from "../../shared/wake-runtime.json" with { type: "json" };
 import { SherpaWasmDetector } from "./detector.ts";
 import { createRuntimeNet, type NetScope } from "./runtime-net.ts";
 import { WakeWorkerCore } from "./worker-core.ts";
-import type { WakeRuntimeManifest, WakeWorkerOut } from "../../shared/wake.ts";
+import { offsetKeywords, WAKE_THRESHOLD_OFFSETS, type WakeRuntimeManifest, type WakeWorkerOut } from "../../shared/wake.ts";
 
-type WakeWorkerIn = { type: "init"; sampleRate: number } | { type: "clear" } | { type: "close" };
+type WakeWorkerIn = { type: "init"; sampleRate: number; thresholdOffset?: number } | { type: "clear" } | { type: "close" };
 
 interface Scope extends NetScope {
   postMessage(message: WakeWorkerOut): void;
@@ -28,7 +28,10 @@ scope.onmessage = (event) => {
   if (message?.type === "init" && !core && Number.isFinite(message.sampleRate) && message.sampleRate > 0) {
     port = event.ports[0] ?? null;
     keywordPort = event.ports[1] ?? null;
-    const runtime = manifest as WakeRuntimeManifest;
+    // 門檻調整值只接受設定的選項之一，其他（含沒有給）一律用產品原本的門檻。
+    const offset = (WAKE_THRESHOLD_OFFSETS as readonly unknown[]).includes(message.thresholdOffset) ? (message.thresholdOffset as number) : 0;
+    const base = manifest as WakeRuntimeManifest;
+    const runtime: WakeRuntimeManifest = { ...base, keywords: offsetKeywords(base.keywords, offset) };
     const net = createRuntimeNet(scope, runtime.url_prefix, runtime.files.map((f) => f.name));
     const toSpeaker = keywordPort ? (span: Float32Array) => keywordPort?.postMessage(span, [span.buffer]) : null;
     core = new WakeWorkerCore(new SherpaWasmDetector(runtime, net), (out) => scope.postMessage(out), toSpeaker);
