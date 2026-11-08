@@ -166,7 +166,7 @@ describe("settings view", () => {
   afterAll(() => vi.unstubAllGlobals());
 
   const panel = (over: Partial<import("../src/views.ts").VoiceVolumePanelState> = {}) => ({
-    day: 60, night: 40, decision: { mode: "day", reason: "day", camera: false }, prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true }, light: null, ...over,
+    day: 60, night: 40, decision: { mode: "day", reason: "day", camera: false }, prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true, screen_off: true }, light: null, ...over,
   }) as import("../src/views.ts").VoiceVolumePanelState;
   const volumeButtons = (section: El, period: string) => section.all().find((e) => e.attributes.get("data-volume-period") === period)!.all().filter((e) => e.tagName === "button");
 
@@ -200,7 +200,7 @@ describe("settings view", () => {
     const dark = views.renderVoiceVolumeSettings(panel({ decision: { mode: "night", reason: "camera_dark", camera: true }, light: { luma: 21.6, level: "dark" } }), {} as never) as unknown as El;
     expect(dark.textContent).toContain("現在用夜間音量：鏡頭量到環境很暗");
     expect(dark.textContent).toContain("鏡頭亮度：22（暗）");
-    const off = views.renderVoiceVolumeSettings(panel({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: false, night_effects: true } }), {} as never) as unknown as El;
+    const off = views.renderVoiceVolumeSettings(panel({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: false, night_effects: true, screen_off: true } }), {} as never) as unknown as El;
     expect(off.textContent).toContain("鏡頭亮度：不使用（只看時段）");
   });
 
@@ -226,14 +226,14 @@ describe("settings view", () => {
     const toggle = section.all().find((e) => e.attributes.has("data-night-effects"))!;
     expect(toggle.attributes.get("aria-pressed")).toBe("true");
     toggle.click();
-    const off = views.renderVoiceVolumeSettings(panel({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: false } }), { setVoiceVolume: () => {}, setDayNight: (p: unknown) => calls.push(p) } as never) as unknown as El;
+    const off = views.renderVoiceVolumeSettings(panel({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: false, screen_off: true } }), { setVoiceVolume: () => {}, setDayNight: (p: unknown) => calls.push(p) } as never) as unknown as El;
     const offToggle = off.all().find((e) => e.attributes.has("data-night-effects"))!;
     expect(offToggle.attributes.get("aria-pressed")).toBe("false");
     offToggle.click();
     expect(calls).toEqual([{ night_effects: false }, { night_effects: true }]);
   });
 
-  const dnPanel = (over: Record<string, unknown> = {}) => ({ day: 100, night: 40, decision: { mode: "day", reason: "day", camera: false }, prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true }, light: null, override: null, shared: true, ...over });
+  const dnPanel = (over: Record<string, unknown> = {}) => ({ day: 100, night: 40, decision: { mode: "day", reason: "day", camera: false }, prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true, screen_off: true }, light: null, override: null, shared: true, ...over });
 
   it("DN-2: four manual buttons send the patch; the active one is pressed; none without a shared core", () => {
     const calls: unknown[] = [];
@@ -247,6 +247,17 @@ describe("settings view", () => {
     expect(tonight.all().find((e) => e.attributes.get("aria-pressed") === "true" && e.attributes.has("data-day-night-manual"))?.attributes.get("data-day-night-manual")).toBe("tonightDay");
     const local = views.renderVoiceVolumeSettings(dnPanel({ shared: false }) as never, {} as never) as unknown as El;
     expect(local.all().some((e) => e.attributes.has("data-day-night-manual"))).toBe(false);
+  });
+
+  it("DN-3: the Pi screen-off toggle shows only with a shared core and sends screen_off", () => {
+    const calls: unknown[] = [];
+    const section = views.renderVoiceVolumeSettings(dnPanel() as never, { setVoiceVolume: () => {}, setDayNight: (p: unknown) => calls.push(p) } as never) as unknown as El;
+    const toggle = section.all().find((e) => e.attributes.has("data-screen-off"))!;
+    expect(toggle.attributes.get("aria-pressed")).toBe("true");
+    toggle.click();
+    expect(calls).toEqual([{ screen_off: false }]);
+    const local = views.renderVoiceVolumeSettings(dnPanel({ shared: false }) as never, {} as never) as unknown as El;
+    expect(local.all().some((e) => e.attributes.has("data-screen-off"))).toBe(false);
   });
 
   it("every new string has an English catalog entry", () => {

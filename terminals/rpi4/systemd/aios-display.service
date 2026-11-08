@@ -1,0 +1,11 @@
+# DN-3: turns the screen off late at night when the Nous page says so. No [Install] section:
+# it needs the desktop session's WAYLAND_DISPLAY/DISPLAY, so aios-session-start starts it with the kiosk.
+[Unit]
+Description=AIOS Pi terminal screen on/off at night
+After=aios-tunnel.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=%h/.local/share/aios-terminal/bin/aios-display
+Restart=always
+RestartSec=5

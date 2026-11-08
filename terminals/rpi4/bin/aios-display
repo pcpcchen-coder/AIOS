@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# DN-3 (George 2026-11-08): turns the Pi screen off late at night and back on.
+# The Nous page on this Pi decides (night mode + 5 idle minutes) and tells the core; this loop reads the core through
+# the SSH tunnel every 2 seconds and applies it. Anything unexpected (core unreachable, stale report, odd answer) means ON.
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/common.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh"
+
+load_config || die "$CONFIG_ERROR" "$CONFIG_ERROR" 2
+method="$(detect_display_method)" ||
+  die "AIOS_DISPLAY_METHOD 只能是 auto、backlight、wlr-randr、xset 或 none。" "AIOS_DISPLAY_METHOD must be auto, backlight, wlr-randr, xset or none." 2
+interval="${AIOS_DISPLAY_INTERVAL:-2}"
+if ! [[ "$interval" =~ ^[1-9][0-9]*$ ]]; then
+  die "AIOS_DISPLAY_INTERVAL 必須是正整數。" "AIOS_DISPLAY_INTERVAL must be a positive integer." 2
+fi
+
+if [[ "$method" == none ]]; then
+  t "找不到可以關螢幕的方法（DSI 背光、wlr-randr 或 xset）；螢幕維持開著。" \
+    "No way to turn the screen off was found (DSI backlight, wlr-randr or xset); the screen stays on." >&2
+fi
+
+current=""
+apply() {
+  local want="$1"
+  [[ "$want" == "$current" ]] && return 0
+  if set_screen "$method" "$want"; then
+    current="$want"
+    t "螢幕：$want（$method）" "Screen: $want ($method)"
+  else
+    t "無法把螢幕設為 $want（$method）" "Could not set the screen $want ($method)" >&2
+  fi
+}
+
+once="${AIOS_DISPLAY_ONCE:-}"
+if [[ -z "$once" ]]; then
+  # Never leave the screen dark when this service stops.
+  trap 'set_screen "$method" on >/dev/null 2>&1 || true' EXIT
+fi
+
+while :; do
+  body="$(curl -fsS --max-time 3 "$(core_url '/api/terminal/display?terminal=rpi4')" 2>/dev/null || true)"
+  if [[ "$body" == *'"screen":"off"'* ]]; then apply off; else apply on; fi
+  [[ -z "$once" ]] || break
+  sleep "$interval"
+done

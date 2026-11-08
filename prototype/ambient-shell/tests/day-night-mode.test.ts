@@ -145,6 +145,15 @@ describe("HTTP (startNous, mock provider)", () => {
     expect((await post({ override: "dusk" })).status).toBe(400);
     expect((await post({ scope: "tonight" })).status).toBe(400);
     expect(((await (await post({ override: "auto" })).json()) as SettingsView).day_night?.override).toBeNull();
+    // DN-3：頁面回報螢幕狀態，Pi 的 aios-display 讀；不合法 400，沒回報時是 on。
+    expect(await (await fetch(`${url}/api/terminal/display?terminal=rpi4`)).json()).toEqual({ screen: "on", fresh: false });
+    const report = (body: unknown) => fetch(`${url}/api/terminal/display`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await report({ terminal: "rpi4", screen: "off" })).status).toBe(200);
+    expect(await (await fetch(`${url}/api/terminal/display?terminal=rpi4`)).json()).toEqual({ screen: "off", fresh: true });
+    expect((await report({ terminal: "rpi4", screen: "dim" })).status).toBe(400);
+    expect((await report({ terminal: "RPI 4", screen: "off" })).status).toBe(400);
+    expect((await fetch(`${url}/api/terminal/display`)).status).toBe(400);
+    expect(((await (await post({ screen_off: false })).json()) as SettingsView).day_night?.prefs.screen_off).toBe(false);
   });
 });
 
@@ -258,5 +267,61 @@ describe("page text", () => {
       expect(en[source], source).toBeTruthy();
       expect(en[source]).not.toMatch(/\p{Script=Han}/u);
     }
+  });
+});
+
+// ───────────── DN-3：Pi 深夜關螢幕 ─────────────
+import { isScreenState, SCREEN_IDLE_MS, SCREEN_REPORT_MS, SCREEN_STALE_MS, screenWanted } from "../shared/day-night.ts";
+import { TerminalDisplay } from "../server/terminal-display.ts";
+import { ScreenReporter } from "../src/screen-reporter.ts";
+
+describe("DN-3 screen off late at night", () => {
+  it("off only at night, with the setting on, not busy and idle for 5 minutes", () => {
+    const on = { screen_off: true };
+    expect(SCREEN_IDLE_MS).toBe(300_000);
+    expect(screenWanted({ mode: "night", prefs: on, busy: false, idleMs: SCREEN_IDLE_MS })).toBe("off");
+    expect(screenWanted({ mode: "night", prefs: on, busy: false, idleMs: SCREEN_IDLE_MS - 1 })).toBe("on");
+    expect(screenWanted({ mode: "night", prefs: on, busy: true, idleMs: SCREEN_IDLE_MS * 2 })).toBe("on");
+    expect(screenWanted({ mode: "day", prefs: on, busy: false, idleMs: SCREEN_IDLE_MS * 2 })).toBe("on");
+    expect(screenWanted({ mode: "night", prefs: { screen_off: false }, busy: false, idleMs: SCREEN_IDLE_MS * 2 })).toBe("on");
+    expect(DEFAULT_DAY_NIGHT_PREFS.screen_off).toBe(true);
+    expect(parseDayNightPatch({ screen_off: false })).toEqual({ screen_off: false });
+    expect(isScreenState("off")).toBe(true);
+    expect(isScreenState("dim")).toBe(false);
+  });
+
+  it("the page reporter (fake clock): reports changes at once, refreshes every 10 s, and activity or busy wakes the screen", () => {
+    let now = at(23);
+    const sent: string[] = [];
+    const r = new ScreenReporter({ send: async (s) => void sent.push(s), now: () => now });
+    const night = { mode: "night" as const, prefs: { screen_off: true }, busy: false };
+    expect(r.update(night)).toBe("on");
+    now += SCREEN_REPORT_MS - 1;
+    r.update(night);
+    expect(sent).toEqual(["on"]);
+    now = at(23) + SCREEN_IDLE_MS;
+    expect(r.update(night)).toBe("off");
+    expect(sent).toEqual(["on", "off"]);
+    now += 1_000;
+    r.activity();
+    expect(r.update(night)).toBe("on");
+    now += SCREEN_IDLE_MS;
+    expect(r.update({ ...night, busy: true })).toBe("on");
+    now += SCREEN_IDLE_MS - 1;
+    expect(r.update(night)).toBe("on");
+    now += 1;
+    expect(r.update(night)).toBe("off");
+    expect(sent.at(-1)).toBe("off");
+  });
+
+  it("the core keeps the last report per terminal and falls back to on when it is stale or missing", () => {
+    let now = 0;
+    const d = new TerminalDisplay({ now: () => now });
+    expect(d.view("rpi4")).toEqual({ screen: "on", fresh: false });
+    d.report("rpi4", "off");
+    expect(d.view("rpi4")).toEqual({ screen: "off", fresh: true });
+    expect(d.view("other")).toEqual({ screen: "on", fresh: false });
+    now = SCREEN_STALE_MS;
+    expect(d.view("rpi4")).toEqual({ screen: "on", fresh: false });
   });
 });

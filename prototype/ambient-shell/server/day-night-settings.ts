@@ -43,6 +43,7 @@ export class DayNightSettingsStore {
       night_end_h: saved.night_end_h ?? DEFAULT_DAY_NIGHT_PREFS.night_end_h,
       use_camera: saved.use_camera ?? DEFAULT_DAY_NIGHT_PREFS.use_camera,
       night_effects: saved.night_effects ?? DEFAULT_DAY_NIGHT_PREFS.night_effects,
+      screen_off: saved.screen_off ?? DEFAULT_DAY_NIGHT_PREFS.screen_off,
     };
   }
 

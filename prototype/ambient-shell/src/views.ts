@@ -616,6 +616,11 @@ export function renderVoiceVolumeSettings(state: VoiceVolumePanelState, actions:
   cameraButton.setAttribute("aria-pressed", String(prefs.use_camera));
   cameraButton.setAttribute("aria-label", t("{0}：{1}", t(VOICE_VOLUME_TEXT.camera), prefs.use_camera ? t("開") : t("關")));
   cameraButton.disabled = !actions.setDayNight;
+  const screenButton = button(prefs.screen_off ? "開" : "關", () => actions.setDayNight?.({ screen_off: !prefs.screen_off }), prefs.screen_off ? "btn--primary" : "");
+  screenButton.setAttribute("aria-pressed", String(prefs.screen_off));
+  screenButton.setAttribute("aria-label", t("{0}：{1}", t(VOICE_VOLUME_TEXT.screenOff), prefs.screen_off ? t("開") : t("關")));
+  screenButton.setAttribute("data-screen-off", "");
+  screenButton.disabled = !actions.setDayNight;
   const effectsButton = button(prefs.night_effects ? "開" : "關", () => actions.setDayNight?.({ night_effects: !prefs.night_effects }), prefs.night_effects ? "btn--primary" : "");
   effectsButton.setAttribute("aria-pressed", String(prefs.night_effects));
   effectsButton.setAttribute("aria-label", t("{0}：{1}", t(VOICE_VOLUME_TEXT.effects), prefs.night_effects ? t("開") : t("關")));
@@ -635,6 +640,7 @@ export function renderVoiceVolumeSettings(state: VoiceVolumePanelState, actions:
       hourSelect(VOICE_VOLUME_TEXT.hoursEnd, prefs.night_end_h, (hour) => ({ night_end_h: hour })),
       h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(VOICE_VOLUME_TEXT.camera)), h("span", { class: "muted small" }, t(VOICE_VOLUME_TEXT.cameraNote))), cameraButton),
       h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(VOICE_VOLUME_TEXT.effects)), h("span", { class: "muted small" }, t(VOICE_VOLUME_TEXT.effectsNote))), effectsButton),
+      state.shared && h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(VOICE_VOLUME_TEXT.screenOff)), h("span", { class: "muted small" }, t(VOICE_VOLUME_TEXT.screenOffNote))), screenButton),
     ),
     h("p", { class: "muted small", "data-light": "" }, lightLine(state)),
     h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.hoursNote)),

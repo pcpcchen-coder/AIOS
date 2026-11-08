@@ -79,6 +79,7 @@ if [[ -n "${FAKE_CURL_FAIL:-}" ]]; then
 fi
 case "$url" in
   */api/settings) body="{\"provider\":\"mock\"}" ;;
+  */api/terminal/display*) body="{\"screen\":\"${FAKE_SCREEN:-on}\",\"fresh\":true}" ;;
   *) body="<!doctype html><script></script>" ;;
 esac
 if [[ -z "$out" || "$out" == - ]]; then printf "%s" "$body"; else printf "%s" "$body" >"$out"; fi
@@ -98,11 +99,17 @@ fake vcgencmd 'case "${1:-}" in
 esac'
 fake ip 'echo "default via 192.168.1.1 dev wlan0 proto dhcp src 192.168.1.50 metric 600"'
 fake timeout 'exec true'
+fake udevadm
+fake xset
+fake wlr-randr 'if (($# == 0)); then printf "HDMI-A-1 \"Fake Monitor\"\n  Enabled: yes\nDSI-1 \"Fake Touch\"\n  Enabled: yes\n"; fi'
 
 export PATH="$FAKEBIN:$PATH"
 export USER=pi AIOS_LANG=en LANG=C.UTF-8
 unset DISPLAY WAYLAND_DISPLAY AIOS_CHROMIUM AIOS_MAC_USER AIOS_MAC_HOST AIOS_PORT AIOS_SSH_PORT AIOS_MAC_HOSTKEY_SHA256
 
+export AIOS_UDEV_RULE="$WORK/udev/90-aios-backlight.rules"
+mkdir -p "$WORK/udev"
+export AIOS_BACKLIGHT_DIR="$WORK/no-backlight"
 export AIOS_MEMINFO="$WORK/meminfo"
 printf 'MemTotal:        3884812 kB\nMemFree:          912345 kB\nMemAvailable:    2734567 kB\n' >"$AIOS_MEMINFO"
 
@@ -158,11 +165,11 @@ check "ed25519 key pair generated" test -f "$CONF/id_ed25519" -a -f "$CONF/id_ed
 check "key comment names this Pi" grep -q ' aios-terminal@raspberrypi$' "$CONF/id_ed25519.pub"
 check "dedicated known_hosts holds exactly the scanned host key" \
   test "$(cat "$CONF/known_hosts")" = "mac-mini.local $(awk '{print $1" "$2}' "$FAKE_HOSTKEY_PUB")"
-for unit in aios-tunnel.service aios-kiosk.service; do
+for unit in aios-tunnel.service aios-kiosk.service aios-display.service; do
   check "unit $unit installed" test -f "$UNITS/$unit"
 done
 check "autostart desktop entry installed" test -f "$AUTOSTART"
-for name in aios-doctor aios-tunnel aios-kiosk aios-session-start; do
+for name in aios-doctor aios-tunnel aios-kiosk aios-session-start aios-display; do
   check "symlink ~/.local/bin/$name points at an executable" test -L "$LBIN/$name" -a -x "$LBIN/$name"
 done
 check "apt-get installs autossh, v4l-utils and chromium" called "apt-get install -y autossh openssh-client v4l-utils alsa-utils curl chromium"
@@ -172,6 +179,10 @@ check "key login is verified in batch mode" called_matching '^ssh .*-o BatchMode
 check "tunnel unit enabled" called "systemctl --user enable aios-tunnel.service"
 check "tunnel unit restarted so a re-run applies new settings" called "systemctl --user restart aios-tunnel.service"
 check "kiosk unit try-restarted so a re-run applies new settings" called "systemctl --user try-restart aios-kiosk.service"
+check "display unit try-restarted so a re-run applies new settings" called "systemctl --user try-restart aios-display.service"
+check "backlight udev rule written for the video group" grep -qF 'RUN+="/bin/chgrp video /sys%p/bl_power /sys%p/brightness"' "$AIOS_UDEV_RULE"
+check "udev rule applied to existing backlights" called "sudo udevadm trigger --subsystem-match=backlight --action=add"
+check "display unit is not enabled (started from desktop autostart)" lacks "enable.*aios-display" "$CALLS"
 check "user tunnel unit does not depend on the system network-online target" lacks "network-online" "$HOME/.config/systemd/user/aios-tunnel.service"
 check "kiosk unit is not enabled (started from desktop autostart)" lacks "enable.*aios-kiosk" "$CALLS"
 check "linger enabled through sudo" called "sudo loginctl enable-linger pi"
@@ -230,6 +241,34 @@ if FAKE_CURL_FAIL=1 AIOS_KIOSK_WAIT_SECONDS=1 "$LBIN/aios-kiosk" >"$WORK/out" 2>
 ok "aios-kiosk exits non-zero when the core never answers"
 check "aios-kiosk never launches chromium while the core is down" lacks "^chromium" "$CALLS"
 
+# DN-3: aios-display (one pass each; AIOS_DISPLAY_ONCE skips the loop and the exit trap).
+display_once() { AIOS_DISPLAY_ONCE=1 "$LBIN/aios-display" >"$WORK/out" 2>&1; }
+reset_calls
+check "aios-display turns HDMI and DSI outputs off with wlr-randr when the core says off" env WAYLAND_DISPLAY=wayland-1 FAKE_SCREEN=off bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "wlr-randr --off for HDMI-A-1" called "wlr-randr --output HDMI-A-1 --off"
+check "wlr-randr --off for DSI-1" called "wlr-randr --output DSI-1 --off"
+check "aios-display polls the core through the tunnel" called_matching '^curl .*http://localhost:8787/api/terminal/display\?terminal=rpi4$'
+reset_calls
+check "aios-display keeps the screen on when the core is unreachable" env WAYLAND_DISPLAY=wayland-1 FAKE_CURL_FAIL=1 bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "unreachable core means wlr-randr --on" called "wlr-randr --output HDMI-A-1 --on"
+check "unreachable core never turns a screen off" lacks "output [^ ]+ [-][-]off" "$CALLS"
+mkdir -p "$WORK/backlight/10-0045"
+printf 0 >"$WORK/backlight/10-0045/bl_power"
+reset_calls
+check "aios-display prefers a writable DSI backlight" env AIOS_BACKLIGHT_DIR="$WORK/backlight" WAYLAND_DISPLAY=wayland-1 FAKE_SCREEN=off bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "backlight bl_power set to 1 (off)" test "$(cat "$WORK/backlight/10-0045/bl_power")" = 1
+check "backlight path does not call wlr-randr" lacks "^wlr-randr" "$CALLS"
+reset_calls
+check "aios-display falls back to xset on X11" env DISPLAY=:0 FAKE_SCREEN=off bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "xset dpms force off" called "xset dpms force off"
+check "no display method keeps running without touching the screen" env FAKE_SCREEN=off bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "no display method says the screen stays on" grep -q "the screen stays on" "$WORK/out"
+set +e
+AIOS_DISPLAY_METHOD=bogus AIOS_DISPLAY_ONCE=1 "$LBIN/aios-display" >"$WORK/out" 2>&1
+status=$?
+set -e
+check "invalid AIOS_DISPLAY_METHOD exits 2" test "$status" = 2
+
 doctor() {
   set +e
   "$LBIN/aios-doctor" >"$WORK/out" 2>&1
@@ -269,6 +308,10 @@ check "core down fails health and page checks" grep -q '^FAIL  Nous core health:
 FAKE_KIOSK_INACTIVE=1 doctor
 check "inactive kiosk is only a WARN" grep -q '^WARN  kiosk service: ' "$WORK/out"
 check "inactive kiosk keeps exit 0" test "$status" = 0
+doctor
+check "doctor warns when no screen-off method exists" grep -q '^WARN  night screen off: no DSI backlight, wlr-randr or xset found' "$WORK/out"
+WAYLAND_DISPLAY=wayland-1 doctor
+check "doctor reports wlr-randr as the screen-off method" grep -q '^PASS  night screen off: wlr-randr, aios-display.service active' "$WORK/out"
 mv "$FAKEBIN/vcgencmd" "$WORK/vcgencmd.off"
 if command -v vcgencmd >/dev/null 2>&1; then
   echo "skip - a real vcgencmd is on PATH; missing-vcgencmd case not exercised"
@@ -294,6 +337,8 @@ reset_calls
 check "uninstall succeeds" quiet bash "$KIT/uninstall.sh"
 check "uninstall removes units" test ! -e "$UNITS/aios-tunnel.service" -a ! -e "$UNITS/aios-kiosk.service"
 check "uninstall removes the autostart entry" test ! -e "$AUTOSTART"
+check "uninstall removes the display unit" test ! -e "$UNITS/aios-display.service"
+check "uninstall removes the backlight udev rule" test ! -e "$AIOS_UDEV_RULE"
 check "uninstall removes the command symlinks" test ! -e "$LBIN/aios-doctor" -a ! -L "$LBIN/aios-tunnel"
 check "uninstall removes installed scripts" test ! -e "$SHARE/bin" -a ! -e "$SHARE/lib"
 check "uninstall disables linger it enabled" called "sudo loginctl disable-linger pi"

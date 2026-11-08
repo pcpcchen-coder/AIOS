@@ -12,8 +12,10 @@ AIOS_PROFILE_DIR="$AIOS_SHARE_DIR/chromium-profile"
 AIOS_LOCAL_BIN="$HOME/.local/bin"
 AIOS_UNIT_DIR="$HOME/.config/systemd/user"
 AIOS_AUTOSTART_FILE="$HOME/.config/autostart/aios-kiosk.desktop"
-AIOS_COMMANDS=(aios-doctor aios-tunnel aios-kiosk aios-session-start)
-AIOS_UNITS=(aios-tunnel.service aios-kiosk.service)
+AIOS_COMMANDS=(aios-doctor aios-tunnel aios-kiosk aios-session-start aios-display)
+AIOS_UNITS=(aios-tunnel.service aios-kiosk.service aios-display.service)
+# DN-3: udev rule that lets the video group switch a DSI backlight (overridable for the dry run).
+AIOS_UDEV_RULE="${AIOS_UDEV_RULE:-/etc/udev/rules.d/90-aios-backlight.rules}"
 
 t() {
   case "${AIOS_LANG:-${LANG:-}}" in
@@ -111,3 +113,58 @@ find_chromium() {
 }
 
 core_url() { printf 'http://localhost:%s%s' "$AIOS_PORT" "${1:-}"; }
+
+# DN-3: how to turn the screen off and on. AIOS_DISPLAY_METHOD forces one of backlight, wlr-randr, xset or none;
+# otherwise the first that works wins: a writable DSI backlight, then wlr-randr (Wayland), then xset (X11).
+backlight_device() {
+  local dir
+  for dir in "${AIOS_BACKLIGHT_DIR:-/sys/class/backlight}"/*; do
+    if [[ -w "$dir/bl_power" ]]; then
+      printf '%s' "$dir"
+      return 0
+    fi
+  done
+  return 1
+}
+
+detect_display_method() {
+  case "${AIOS_DISPLAY_METHOD:-auto}" in
+    backlight | wlr-randr | xset | none)
+      printf '%s' "$AIOS_DISPLAY_METHOD"
+      return 0
+      ;;
+    auto) ;;
+    *) return 1 ;;
+  esac
+  if backlight_device >/dev/null; then
+    printf backlight
+  elif [[ -n "${WAYLAND_DISPLAY:-}" ]] && command -v wlr-randr >/dev/null 2>&1; then
+    printf wlr-randr
+  elif [[ -n "${DISPLAY:-}" ]] && command -v xset >/dev/null 2>&1; then
+    printf xset
+  else
+    printf none
+  fi
+}
+
+# set_screen METHOD on|off
+set_screen() {
+  local method="$1" state="$2" device output
+  case "$method" in
+    backlight)
+      device="$(backlight_device)" || return 1
+      if [[ "$state" == off ]]; then printf 1 >"$device/bl_power"; else printf 0 >"$device/bl_power"; fi
+      ;;
+    wlr-randr)
+      while read -r output; do
+        [[ -n "$output" ]] || continue
+        wlr-randr --output "$output" "--$state" || return 1
+      done < <(wlr-randr | awk '/^[^ \t]/ {print $1}')
+      ;;
+    xset)
+      xset dpms force "$state"
+      ;;
+    none) return 0 ;;
+    *) return 1 ;;
+  esac
+}

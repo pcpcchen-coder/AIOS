@@ -18,9 +18,11 @@ export interface DayNightPrefs {
    * 關閉時回到 VOL-2 的行為：夜間只換對話音量（這就是回退）。
    */
   night_effects: boolean;
+  /** DN-3（George 2026-11-08）：Pi 等終端機在夜間閒置 SCREEN_IDLE_MS 後關螢幕（Pi 套件的 aios-display 執行；有人互動或喚醒就亮回來）。 */
+  screen_off: boolean;
 }
 
-export const DEFAULT_DAY_NIGHT_PREFS: DayNightPrefs = { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true };
+export const DEFAULT_DAY_NIGHT_PREFS: DayNightPrefs = { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true, screen_off: true };
 /** 夜間音量的預設值（日間沿用 VOL-1 的對話音量，預設 100）。 */
 export const NIGHT_VOLUME_DEFAULT = 40;
 
@@ -111,6 +113,7 @@ export function parseDayNightPrefs(raw: unknown): DayNightPrefs {
     night_end_h: isHour(o.night_end_h) ? o.night_end_h : DEFAULT_DAY_NIGHT_PREFS.night_end_h,
     use_camera: typeof o.use_camera === "boolean" ? o.use_camera : DEFAULT_DAY_NIGHT_PREFS.use_camera,
     night_effects: typeof o.night_effects === "boolean" ? o.night_effects : DEFAULT_DAY_NIGHT_PREFS.night_effects,
+    screen_off: typeof o.screen_off === "boolean" ? o.screen_off : DEFAULT_DAY_NIGHT_PREFS.screen_off,
   };
 }
 
@@ -206,7 +209,7 @@ export function parseDayNightPatch(input: unknown): DayNightPatch {
     if (key === "night_start_h" || key === "night_end_h") {
       if (!isHour(value)) throw new DayNightPatchError(`${key} 必須是 0 到 23 的整數`);
       patch[key] = value;
-    } else if (key === "use_camera" || key === "night_effects") {
+    } else if (key === "use_camera" || key === "night_effects" || key === "screen_off") {
       if (typeof value !== "boolean") throw new DayNightPatchError(`${key} 必須是 true 或 false`);
       patch[key] = value;
     } else if (key === "override") {
@@ -267,4 +270,27 @@ export function dayNightToolOutput(decision: DayNightDecision, override: DayNigh
   const base = { ok: true, status: "confirmed", mode: decision.mode, reason: decision.reason };
   if (decision.reason === "manual" && override) return { ...base, until: clockText(override.until), note: `手動切換，${clockText(override.until)} 之後自動回到依時段判斷。` };
   return { ...base, note: "已恢復自動：依夜間時段與鏡頭亮度判斷。" };
+}
+
+// ───────────── DN-3：Pi 深夜關螢幕（George 2026-11-08） ─────────────
+// 終端機頁面依「夜間模式＋閒置」算出螢幕要開或關，回報給核心（POST /api/terminal/display）；Pi 套件的 aios-display 每 2 秒
+// 經 SSH 通道讀（GET /api/terminal/display?terminal=rpi4），照著開關螢幕。讀不到、讀值太舊或頁面沒回報時一律開（不會卡在黑畫面）。
+
+export const TERMINAL_DISPLAY_PATH = "/api/terminal/display" as const;
+/** 夜間閒置多久關螢幕。 */
+export const SCREEN_IDLE_MS = 5 * 60_000;
+/** 頁面多久重新回報一次（狀態沒變也送，讓核心知道頁面還活著）。 */
+export const SCREEN_REPORT_MS = 10_000;
+/** 核心超過這麼久沒收到回報就當成「開」。 */
+export const SCREEN_STALE_MS = 30_000;
+
+export type ScreenState = "on" | "off";
+
+export function isScreenState(value: unknown): value is ScreenState {
+  return value === "on" || value === "off";
+}
+
+/** 螢幕要開或關（純函式）：夜間、設定開著、沒有在忙、閒置夠久才關。 */
+export function screenWanted(input: { mode: DayNightMode; prefs: Pick<DayNightPrefs, "screen_off">; busy: boolean; idleMs: number }): ScreenState {
+  return input.mode === "night" && input.prefs.screen_off && !input.busy && input.idleMs >= SCREEN_IDLE_MS ? "off" : "on";
 }

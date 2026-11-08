@@ -53,7 +53,7 @@ import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHist
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
 import { HOME_CORNER_WRITE_PATH, HOME_OVERVIEW_PATH, HomeCornerPatchError, parseHomeCornerPatch, type HomeCornerPrefs, type HomeCornerPrefsPatch, type HomeCornerSettingsView, type HomeOverviewView } from "../shared/home-corner.ts";
-import { DAY_NIGHT_WRITE_PATH, DayNightPatchError, parseDayNightPatch, type DayNightPatch, type DayNightSettingsView } from "../shared/day-night.ts";
+import { DAY_NIGHT_WRITE_PATH, DayNightPatchError, isScreenState, parseDayNightPatch, TERMINAL_DISPLAY_PATH, type DayNightPatch, type DayNightSettingsView, type ScreenState } from "../shared/day-night.ts";
 import { CLOCK_WRITE_PATH, ClockPatchError, parseClockPatch, WEATHER_NOW_PATH, type ClockPrefs, type ClockPrefsPatch, type ClockSettingsView, type WeatherNowView } from "../shared/clock.ts";
 import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
 import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_MEDIA_PREFIX, MEMORIES_WRITE_PATH, MemoriesPatchError, parseMemoriesPatch, type MemoriesItem, type MemoriesPrefs, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
@@ -196,6 +196,8 @@ export interface AppOptions {
    * 服務模式：終端機（Pi kiosk）頁面的心跳（server/terminal-presence.ts）。未提供時 POST /api/terminal/heartbeat 落到 404。
    */
   terminals?: { heartbeat(id: string): void };
+  /** DN-3：終端機的螢幕狀態（頁面回報、Pi 的 aios-display 讀）。未提供時兩條路由 404。 */
+  terminalDisplay?: { report(id: string, screen: ScreenState): void; view(id: string): { screen: ScreenState; fresh: boolean } };
   /**
    * PRO-1：主動提醒（招呼後接今天的天氣）。view 給 settings.proactive；prefetch 在看著說話或喚醒開始時先取天氣。
    * 未提供時（舊的組裝、測試）settings 沒有 proactive、POST /api/settings/proactive 回 404。
@@ -764,6 +766,19 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       if (!isTerminalId(body.terminal)) throw new HttpError(400, "terminal must be a lowercase id (a-z, 0-9, -; up to 32 characters)");
       options.terminals.heartbeat(body.terminal);
       return sendJson(res, 200, { ok: true });
+    }
+    if (options.terminalDisplay && path === TERMINAL_DISPLAY_PATH && (method === "POST" || method === "GET")) {
+      // DN-3：頁面回報螢幕要開或關（POST）；Pi 的 aios-display 經 SSH 通道讀（GET ?terminal=）。只有識別碼與狀態，不記 log。
+      if (method === "POST") {
+        const body = await readJson(req);
+        if (!isTerminalId(body.terminal)) throw new HttpError(400, "terminal must be a lowercase id (a-z, 0-9, -; up to 32 characters)");
+        if (!isScreenState(body.screen)) throw new HttpError(400, "screen must be on or off");
+        options.terminalDisplay.report(body.terminal, body.screen);
+        return sendJson(res, 200, { ok: true });
+      }
+      const terminal = params.get("terminal");
+      if (!isTerminalId(terminal)) throw new HttpError(400, "terminal must be a lowercase id (a-z, 0-9, -; up to 32 characters)");
+      return sendJson(res, 200, options.terminalDisplay.view(terminal));
     }
     if (method === "POST" && path === "/api/terminal/identity" && options.identity?.handle) {
       // RPI-ID：Pi 的認人（特徵向量，不是影像或錄音）；不記 log（取樣約 2 Hz），核心自己記狀態轉換與問候決策。

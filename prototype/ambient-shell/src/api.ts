@@ -1,7 +1,7 @@
 import type { FaceTuning } from "../shared/face-tuning.ts";
 import { AUDIO_WRITE_PATH, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import type { ProactivePrefsPatch } from "../shared/proactive.ts";
-import { DAY_NIGHT_WRITE_PATH, type DayNightPatch } from "../shared/day-night.ts";
+import { DAY_NIGHT_WRITE_PATH, TERMINAL_DISPLAY_PATH, type DayNightPatch, type ScreenState } from "../shared/day-night.ts";
 import { CLOCK_WRITE_PATH, WEATHER_NOW_PATH, type ClockPrefsPatch, type WeatherNowView } from "../shared/clock.ts";
 import { HOME_CORNER_WRITE_PATH, HOME_OVERVIEW_PATH, type HomeCornerPrefsPatch, type HomeOverviewView } from "../shared/home-corner.ts";
 import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_WRITE_PATH, type MemoriesItem, type MemoriesPrefsPatch } from "../shared/memories.ts";
@@ -114,6 +114,7 @@ export const api = {
   /** CLK-1「右上角時鐘與天氣」的顯示開關（Mac 視窗、Pi 終端機）。 */
   updateClock: (patch: ClockPrefsPatch) => call<SettingsView>("POST", CLOCK_WRITE_PATH, patch),
   updateDayNight: (patch: DayNightPatch) => call<SettingsView>("POST", DAY_NIGHT_WRITE_PATH, patch),
+  terminalDisplay: (terminal: string, screen: ScreenState) => call<{ ok: true }>("POST", TERMINAL_DISPLAY_PATH, { terminal, screen }),
   /** CLK-1：右上角時鐘的時區、核心時間與現在的天氣（唯讀，沒有參數）。 */
   weatherNow: (signal?: AbortSignal) => call<WeatherNowView>("GET", WEATHER_NOW_PATH, undefined, getLocale(), false, signal),
   /** HOME-1「左上角家中狀態」的顯示開關（Mac 視窗、Pi 終端機）。 */

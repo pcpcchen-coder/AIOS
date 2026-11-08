@@ -122,6 +122,21 @@ else
   fi
 fi
 
+label="$(t "夜間關螢幕" "night screen off")"
+if ! method="$(detect_display_method)"; then
+  report FAIL "$label" "$(t "AIOS_DISPLAY_METHOD 只能是 auto、backlight、wlr-randr、xset 或 none" "AIOS_DISPLAY_METHOD must be auto, backlight, wlr-randr, xset or none")"
+elif [[ "$method" == none ]]; then
+  report WARN "$label" "$(t "找不到 DSI 背光、wlr-randr 或 xset；夜間不會關螢幕" "no DSI backlight, wlr-randr or xset found; the screen will not turn off at night")"
+else
+  state=""
+  if have systemctl; then state="$(unit_state aios-display.service)"; fi
+  if [[ -z "$state" || "$state" == active ]]; then
+    report PASS "$label" "$method${state:+, aios-display.service active}"
+  else
+    report WARN "$label" "$method, aios-display.service $state; $(t "需要桌面工作階段" "needs a desktop session")"
+  fi
+fi
+
 label="Chromium"
 if chromium="$(find_chromium)"; then
   report PASS "$label" "$chromium"

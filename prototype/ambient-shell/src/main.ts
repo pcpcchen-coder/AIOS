@@ -42,8 +42,9 @@ import { classify, settingsReply } from "./intent.ts";
 import { matchVoiceCommand, RealtimeLocalCommands } from "./voice-command.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
 import { startTerminalHeartbeat } from "./terminal-heartbeat.ts";
+import { ScreenReporter } from "./screen-reporter.ts";
 import { selectBridges } from "./identity-bridge.ts";
-import { PAGE_PACE, type TerminalPageReport } from "../shared/terminal.ts";
+import { PAGE_PACE, pageTerminal, type TerminalPageReport } from "../shared/terminal.ts";
 import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
 import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
@@ -3952,6 +3953,35 @@ window.nousDesktop?.onService?.((event) => {
 });
 // 終端機（Pi kiosk，網址帶 ?terminal=）的心跳：Mac 選單列的「Pi 已連線」只以這個為準。
 // 心跳時也重送鏡頭回報：核心重新啟動後會忘記回報，頁面的設定卻沒變。
+// DN-3：終端機頁面（Pi）依夜間模式與閒置回報螢幕要開或關；Pi 套件的 aios-display 照著開關螢幕。Mac 主視窗不回報。
+const screenTerminal = pageTerminal(location.search, !!window.nousDesktop);
+const screenReporter = screenTerminal ? new ScreenReporter({ send: (screen) => api.terminalDisplay(screenTerminal, screen) }) : null;
+function syncScreen(): void {
+  if (!screenReporter || !settings?.day_night) return;
+  screenReporter.update({ mode: voiceVolume.mode.mode, prefs: dayNightPrefs(), busy: memoriesBusy() });
+}
+/** 螢幕關著時叫醒它的那一下不算點擊（不會因此開始對話或打開畫面）。 */
+let swallowClicksUntil = 0;
+if (screenReporter) {
+  for (const type of ["pointerdown", "touchstart", "keydown", "wheel"] as const) {
+    window.addEventListener(type, (event) => {
+      if (screenReporter.current === "off") {
+        swallowClicksUntil = Date.now() + 800;
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
+      }
+      screenReporter.activity();
+      syncScreen();
+    }, { passive: false, capture: true });
+  }
+  window.addEventListener("click", (event) => {
+    if (Date.now() < swallowClicksUntil) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, { capture: true });
+  setInterval(syncScreen, 2_000);
+}
 startTerminalHeartbeat({ desktop: !!window.nousDesktop, search: location.search, send: (terminal) => {
   bridges.syncPage?.(true);
   return api.terminalHeartbeat(terminal);

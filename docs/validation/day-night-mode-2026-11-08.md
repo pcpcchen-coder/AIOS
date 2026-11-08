@@ -7,7 +7,7 @@
 George 2026-11-08 要求把 VOL-2 的「日間／夜間音量」升級成完整的日夜間模式。本文件包含：
 - 現況盤點；
 - 整體設計與 George 的決定；
-- 第一批（B1）與第二批（B2，第 7 節）的實作、測試與回退方式。
+- 第一批（B1）、第二批（B2，第 7 節）與第三批（B3，第 8 節）的實作、測試與回退方式。
 
 ## 1. 現況盤點（main @ 1a66fb9）
 
@@ -88,7 +88,7 @@ George 2026-11-08 要求把 VOL-2 的「日間／夜間音量」升級成完整�
 
 - 沒有在 Mac 或 Pi 實機看過變暗的程度與漸變；45% 是預估值。
 - 沒有實機確認夜間時處理中音效真的不響、回憶模式真的不開始（只有單元測試與程式路徑）。
-- Pi 螢幕關閉（B3）還沒做；B2 的範圍與驗證見第 7 節。
+- B2 的範圍與驗證見第 7 節，B3（Pi 深夜關螢幕）見第 8 節。
 
 ## 6. George 在家的實測步驟
 
@@ -173,3 +173,93 @@ George 2026-11-08 要求把 VOL-2 的「日間／夜間音量」升級成完整�
 3. 即時語音說「切到夜間模式」，再說「恢復自動」：Nous 說出模式與維持到幾點，畫面跟著變。
 4. 晚上 9 點左右說「今晚維持日間」：到隔天 07:00 前都是日間，選單列顯示「今晚維持日間」被選。
 5. 夜間時段開一通即時語音：聽聽語氣是否比較輕、比較短。
+
+## 8. 第三批 B3：Pi 深夜關螢幕（2026-11-08）
+
+### 行為
+
+| 項目 | 行為 |
+| --- | --- |
+| 什麼時候關 | 夜間模式（時段、手動切換或那台裝置的鏡頭判斷）＋設定「Pi 夜間閒置 5 分鐘關螢幕」開著＋頁面不忙（任務、通話、對話、收音、念話、處理中、打開的畫面、看著說話都算忙）＋5 分鐘沒人碰螢幕或按鍵 |
+| 怎麼亮回來 | 碰螢幕、按鍵或開始對話（含喚醒詞），約 2 秒內亮回來。叫醒螢幕的那一下不算點擊（頁面吞掉那次點擊，不會開始對話或打開畫面） |
+| 誰決定 | Pi 頁面算出開或關，經 `POST /api/terminal/display` 回報核心：狀態改變立即送，沒變也每 10 秒送一次 |
+| 誰執行 | Pi 套件新的 `aios-display`（`aios-display.service`，由 `aios-session-start` 跟 kiosk 一起啟動）每 2 秒經 SSH 通道讀 `GET /api/terminal/display?terminal=rpi4` |
+| 讀不到就亮著 | 核心讀不到、頁面 30 秒沒回報、回應看不懂、服務停止時，一律打開螢幕 |
+| Mac | Mac 主視窗不回報，也不關 Mac 螢幕 |
+| 設定 | 設定頁「Pi 夜間閒置 5 分鐘關螢幕」（核心 `day-night.json` 的 `screen_off`，預設開，所有畫面共用） |
+
+### 關螢幕的方法與權限
+
+| 方法 | 適用 | 權限 |
+| --- | --- | --- |
+| `backlight` | 官方 DSI 觸控螢幕：寫 `/sys/class/backlight/*/bl_power`（1 關、0 開） | `install.sh` 用 sudo 安裝 `/etc/udev/rules.d/90-aios-backlight.rules`，讓 `video` 群組可寫 `bl_power`、`brightness`，並對現有背光觸發一次 |
+| `wlr-randr` | Wayland（labwc）：`wlr-randr --output <每個輸出> --off/--on` | 不需要 |
+| `xset` | X11：`xset dpms force off/on` | 不需要 |
+| `none` | 都找不到 | 螢幕不動；`aios-doctor` 顯示 WARN |
+
+- 方法依上表順序自動選，也可以用 `AIOS_DISPLAY_METHOD` 指定；不合法的值結束碼 2。
+- `uninstall.sh` 會用 sudo 刪除 udev 規則。
+
+### 實作
+
+- `shared/day-night.ts`：`screen_off` 設定、`screenWanted`（純函式）與常數（閒置 5 分鐘、每 10 秒回報、30 秒算太舊）。
+- `server/terminal-display.ts`：只在記憶體記每台終端機最後的狀態；不寫檔、不記 log。
+- `server/app.ts`：`POST`／`GET /api/terminal/display`（驗證識別碼與狀態，400）。
+- `src/screen-reporter.ts`：頁面端的閒置計算與回報。
+- `src/main.ts`：只在終端機頁面啟用；觸控、按鍵、滾輪都算活動；螢幕關著時吞掉叫醒的那次點擊。
+- 設定頁加一個開關。
+- Pi 套件：
+  - `bin/aios-display`、`systemd/aios-display.service`；
+  - `lib/common.sh` 的 `detect_display_method`、`set_screen`；
+  - `install.sh` 的 udev 規則；
+  - `aios-session-start` 啟動新服務；
+  - `aios-doctor` 加「夜間關螢幕」一行；
+  - `uninstall.sh` 移除規則；
+  - `terminals/rpi4/README` 加說明（中英）。
+
+### 回退
+
+- 設定頁把「Pi 夜間閒置 5 分鐘關螢幕」關掉，頁面一律回報「開」，螢幕不再被關。
+- 只想停掉 Pi 這邊：`systemctl --user stop aios-display.service`，停止時會把螢幕打開。
+- 完全移除：執行 `uninstall.sh`，或還原這批程式並重新安裝 Pi 套件。
+
+### 測試
+
+- `tests/day-night-mode.test.ts`：
+  - `screenWanted` 的五種情況；
+  - 頁面回報器在假時鐘下的行為：立即回報改變、每 10 秒重送、活動與忙碌都會叫醒；
+  - 核心太舊或沒有回報時當成開；
+  - HTTP：預設開、回報後是關、不合法 400，`screen_off` 可以改。
+- `tests/voice-volume.test.ts`：設定頁開關只在核心共用時出現，按下送 `{ screen_off: false }`。
+- `terminals/rpi4/tests/dry-run.sh`（130 項，假指令）：
+  - 安裝新指令、新服務與 udev 規則，並觸發 udevadm；
+  - 重新安裝會 try-restart 新服務；
+  - `aios-display` 依核心回應用 wlr-randr 關掉 HDMI-A-1 與 DSI-1；
+  - 核心讀不到時只會打開；
+  - 有可寫的背光時優先寫 `bl_power`；
+  - X11 用 xset；
+  - 沒有方法時說明螢幕維持開著；
+  - 不合法的方法結束碼 2；
+  - doctor 顯示 WARN 或 PASS 與方法；
+  - 解除安裝移除服務與規則；
+  - shellcheck 乾淨。
+- 無頭 Chromium（mock 核心，Playwright 假時鐘，核心手動切夜間）：
+  - Pi 頁面載入後核心是 `on`；
+  - 前進 5 分鐘後是 `off`；
+  - 點電子腦一下後回到 `on`，對話狀態仍是 `idle`、沒有打開畫面；
+  - 沒有 JS 錯誤。
+- `npm run typecheck`、`npx vitest run`（168 個檔案，3115 項通過、5 項略過）、`npm run build` 都通過。
+
+### 還沒驗證（B3）
+
+- 沒有在 Pi 實機確認任何一種方法真的能關螢幕，也沒有確認 DSI 背光的 udev 規則權限。
+- wlr-randr 關掉輸出後，觸控能不能叫醒螢幕不確定，可能只能靠喚醒詞或鍵盤。
+- 用喚醒詞叫醒的延遲（約 2 秒輪詢）也沒有實測。
+
+### George 在家的實測步驟（B3）
+
+1. 在 Pi 重新執行 `install.sh`（會用 sudo 裝 udev 規則），再執行 `aios-doctor`，看「夜間關螢幕」那一行用哪一種方法。
+2. Mac 選單列選「切到夜間」，Pi 放著不碰 5 分鐘：螢幕應該關掉。
+3. 碰一下螢幕（DSI）或說喚醒詞：約 2 秒內亮回來，而且這一下不會開始對話。
+4. 設定頁把「Pi 夜間閒置 5 分鐘關螢幕」關掉，再等 5 分鐘：螢幕不再關。
+5. 測完在選單列選「自動」。

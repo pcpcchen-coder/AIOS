@@ -46,6 +46,9 @@ export const VOICE_VOLUME_TEXT = {
   effects: "夜間一併調暗畫面、靜音處理中音效、暫停回憶",
   effectsNote: "夜間模式時整個畫面約 3 秒漸暗、處理中的提示音不出聲（電子腦的樣子照常）、回憶模式不播放。關閉就只換對話音量。",
   effectsLine: "已調暗畫面、處理中音效靜音、回憶暫停",
+  /** DN-3：Pi 深夜關螢幕（George 2026-11-08）。 */
+  screenOff: "Pi 夜間閒置 5 分鐘關螢幕",
+  screenOffNote: "夜間模式時，Pi 等終端機 5 分鐘沒人碰、也沒有對話或任務，就關掉螢幕；碰一下螢幕、按鍵或喚醒 Nous 就亮回來（叫醒螢幕的那一下不算點擊）。需要 Pi 套件的 aios-display；Mac 視窗不受影響。所有畫面共用。",
   hoursStart: "夜間開始",
   hoursEnd: "夜間結束",
   hoursNote: "開始和結束選同一個整點就沒有夜間時段。",

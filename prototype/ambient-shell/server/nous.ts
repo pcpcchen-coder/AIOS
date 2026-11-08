@@ -52,6 +52,7 @@ import { isTerminalId, type TerminalStatus } from "../shared/terminal.ts";
 import { WeatherService, weatherNowView } from "./weather.ts";
 import { ClockSettingsStore } from "./clock-settings.ts";
 import { DayNightSettingsStore } from "./day-night-settings.ts";
+import { TerminalDisplay } from "./terminal-display.ts";
 import { HomeCornerSettingsStore } from "./home-corner-settings.ts";
 import { HomeOverview } from "./home-overview.ts";
 import { systemTimeZone } from "./local-date.ts";
@@ -485,6 +486,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const server = createApp({
     cameraEnable: options.cameraEnable ?? "http",
     terminals,
+    terminalDisplay: new TerminalDisplay(),
     store,
     runner,
     settings: providers,

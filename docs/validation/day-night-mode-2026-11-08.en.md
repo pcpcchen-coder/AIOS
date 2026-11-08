@@ -7,7 +7,7 @@
 On 2026-11-08 George asked to turn VOL-2's "day/night volume" into a full day/night mode. This document covers:
 - an inventory of what exists;
 - the overall design and George's decisions;
-- the first batch (B1) and the second batch (B2, section 7): implementation, tests and how to roll them back.
+- the first batch (B1), the second batch (B2, section 7) and the third batch (B3, section 8): implementation, tests and how to roll them back.
 
 ## 1. Inventory (main @ 1a66fb9)
 
@@ -88,7 +88,7 @@ Turn off "At night, also dim the screen, mute the processing sound and pause mem
 
 - The amount of dimming and the fade have not been seen on a real Mac or Pi; 45% is an estimate.
 - It has not been confirmed on real hardware that the processing sound stays silent and memories mode does not start at night (unit tests and code paths only).
-- Turning off the Pi screen (B3) is not done yet; see section 7 for the scope and validation of B2.
+- See section 7 for the scope and validation of B2, and section 8 for B3 (turning the Pi screen off late at night).
 
 ## 6. George's steps to try at home
 
@@ -173,3 +173,93 @@ Turn off "At night, also dim the screen, mute the processing sound and pause mem
 3. In realtime voice, say 「切到夜間模式」 (switch to night mode), then 「恢復自動」 (back to automatic): Nous says the mode and until when, and the screen follows.
 4. Around 9 pm, say 「今晚維持日間」 (stay in day mode tonight): it stays day until 07:00 the next day, and the menu bar shows "Stay in day mode tonight" selected.
 5. Start a realtime call during the night hours and listen for a softer, shorter tone.
+
+## 8. Third batch B3: turning the Pi screen off late at night (2026-11-08)
+
+### Behaviour
+
+| Item | Behaviour |
+| --- | --- |
+| When it turns off | Night mode (hours, manual switch, or that device's camera) + the "Turn the Pi screen off after 5 idle minutes at night" setting on + the page not busy (tasks, calls, conversation, listening, speech, processing, open views and look-to-talk all count as busy) + 5 minutes without a touch or key press |
+| How it comes back | Touch the screen, press a key or start a conversation (including the wake word); it comes back within about 2 s. The touch that wakes the screen is not a click (the page swallows it, so it neither starts a conversation nor opens a view) |
+| Who decides | The Pi page works out on or off and reports it to the core with `POST /api/terminal/display`: at once when it changes, and every 10 s even when it does not |
+| Who acts | The Pi package's new `aios-display` (`aios-display.service`, started by `aios-session-start` with the kiosk) reads `GET /api/terminal/display?terminal=rpi4` through the SSH tunnel every 2 s |
+| When in doubt, on | If the core cannot be reached, the page has not reported for 30 s, the answer is unreadable, or the service stops, the screen is turned on |
+| Mac | The Mac main window does not report and the Mac screen is never turned off |
+| Setting | "Turn the Pi screen off after 5 idle minutes at night" on the settings page (`screen_off` in the core's `day-night.json`, on by default, shared by every screen) |
+
+### Methods and permissions
+
+| Method | Applies to | Permission |
+| --- | --- | --- |
+| `backlight` | Official DSI touch display: writes `/sys/class/backlight/*/bl_power` (1 off, 0 on) | `install.sh` uses sudo to install `/etc/udev/rules.d/90-aios-backlight.rules`, which lets the `video` group write `bl_power` and `brightness`, and triggers it once for existing backlights |
+| `wlr-randr` | Wayland (labwc): `wlr-randr --output <each output> --off/--on` | None |
+| `xset` | X11: `xset dpms force off/on` | None |
+| `none` | None found | The screen is left alone; `aios-doctor` shows a WARN |
+
+- The method is picked automatically in the order above, or forced with `AIOS_DISPLAY_METHOD`; an invalid value exits with code 2.
+- `uninstall.sh` removes the udev rule with sudo.
+
+### Implementation
+
+- `shared/day-night.ts`: the `screen_off` setting, `screenWanted` (a pure function) and constants (5 idle minutes, a report every 10 s, stale after 30 s).
+- `server/terminal-display.ts`: keeps only each terminal's latest state, in memory; no file, no log.
+- `server/app.ts`: `POST`/`GET /api/terminal/display` (validates the id and the state, 400 otherwise).
+- `src/screen-reporter.ts`: idle tracking and reporting in the page.
+- `src/main.ts`: enabled only on terminal pages; touch, keys and the wheel count as activity; while the screen is off, the waking click is swallowed.
+- One more toggle on the settings page.
+- Pi package:
+  - `bin/aios-display`, `systemd/aios-display.service`;
+  - `detect_display_method` and `set_screen` in `lib/common.sh`;
+  - the udev rule in `install.sh`;
+  - `aios-session-start` starts the new service;
+  - a "night screen off" line in `aios-doctor`;
+  - `uninstall.sh` removes the rule;
+  - documentation in `terminals/rpi4/README` (both languages).
+
+### Rollback
+
+- Turn off "Turn the Pi screen off after 5 idle minutes at night" on the settings page: the page always reports on, and the screen is no longer turned off.
+- To stop only the Pi side: `systemctl --user stop aios-display.service` (stopping turns the screen on).
+- To remove it completely: run `uninstall.sh`, or revert this batch and reinstall the Pi package.
+
+### Tests
+
+- `tests/day-night-mode.test.ts`:
+  - the five cases of `screenWanted`;
+  - the page reporter on a fake clock: reports changes at once, resends every 10 s, and activity or busy wakes the screen;
+  - the core treating a stale or missing report as on;
+  - HTTP: on by default, off after a report, 400 for invalid input, and `screen_off` can be changed.
+- `tests/voice-volume.test.ts`: the settings toggle appears only with a shared core and sends `{ screen_off: false }`.
+- `terminals/rpi4/tests/dry-run.sh` (130 checks, fake commands):
+  - installs the new command, service and udev rule, and triggers udevadm;
+  - a re-install try-restarts the new service;
+  - `aios-display` follows the core and turns HDMI-A-1 and DSI-1 off with wlr-randr;
+  - an unreachable core only ever turns screens on;
+  - a writable backlight is preferred and `bl_power` is written;
+  - X11 uses xset;
+  - with no method it says the screen stays on;
+  - an invalid method exits 2;
+  - doctor shows a WARN, or a PASS with the method;
+  - uninstall removes the service and the rule;
+  - shellcheck is clean.
+- Headless Chromium (mock core, Playwright fake clock, core switched to night manually):
+  - the core holds `on` after the Pi page loads;
+  - `off` after advancing 5 minutes;
+  - back to `on` after one tap on the brain, with the conversation still `idle` and no view opened;
+  - no JS errors.
+- `npm run typecheck`, `npx vitest run` (168 files, 3115 passed, 5 skipped) and `npm run build` all pass.
+
+### Not yet verified (B3)
+
+- None of the methods has been confirmed to turn the screen off on a real Pi, and the udev rule's permissions for the DSI backlight have not been confirmed.
+- With wlr-randr turning the output off, it is unknown whether touch can wake the screen; it may need the wake word or a keyboard.
+- The delay when waking by the wake word (about 2 s of polling) has not been measured.
+
+### George's steps to try at home (B3)
+
+1. On the Pi, re-run `install.sh` (it installs the udev rule with sudo), then run `aios-doctor` and see which method the "night screen off" line names.
+2. Choose "Switch to night" in the Mac menu bar and leave the Pi untouched for 5 minutes: the screen should turn off.
+3. Touch the screen (DSI) or say the wake word: it comes back within about 2 s, and that touch does not start a conversation.
+4. Turn off "Turn the Pi screen off after 5 idle minutes at night" on the settings page and wait another 5 minutes: the screen no longer turns off.
+5. When done, choose "Automatic" in the menu bar.

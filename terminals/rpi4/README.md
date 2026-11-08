@@ -28,7 +28,8 @@ Pi Chromium ──http://localhost:<AIOS_PORT>──> Pi 127.0.0.1:<AIOS_PORT>
 | `terminal.conf.example` | 設定檔範本，不含私人值 |
 | `bin/aios-tunnel` | autossh 通道（`aios-tunnel.service` 執行） |
 | `bin/aios-kiosk` | 等核心可用後開 Chromium 全螢幕（`aios-kiosk.service` 執行） |
-| `bin/aios-session-start` | 桌面登入時把顯示環境交給 systemd，再啟動 `aios-kiosk.service` |
+| `bin/aios-session-start` | 桌面登入時把顯示環境交給 systemd，再啟動 `aios-kiosk.service` 與 `aios-display.service` |
+| `bin/aios-display` | 夜間關螢幕：每 2 秒經通道讀核心，照 Pi 頁面的決定開關螢幕（`aios-display.service` 執行） |
 | `bin/aios-doctor` | 診斷，逐項輸出 PASS／WARN／FAIL／SKIP |
 | `systemd/`、`autostart/` | 使用者服務與桌面自動啟動檔 |
 | `tests/dry-run.sh` | 容器內可跑的 dry-run 測試（假指令），CI 與 `scripts/verify-aios.mjs` 都會跑 |
@@ -134,6 +135,28 @@ Google 相簿（MEMO-2）：在 Pi 頁面「設定」→「回憶模式」按「
 ## 右上角時鐘與天氣
 
 Pi 畫面右上角預設顯示時間、日期、星期、氣溫與天氣（只是讀數，不能點）。時間用 Mac 核心給的時區（天氣地點的時區，沒有地點時 Mac 的系統時區），不用 Pi 自己的時區；Pi 的時鐘和 Mac 差超過 60 秒時頁面改用 Mac 核心的時間，但仍建議用 `timedatectl status` 確認 Pi 的 NTP 已同步。天氣經 SSH 通道向 Mac 核心取得（Open-Meteo，地點同「主動提醒」的天氣地點），Pi 不直接連 Open-Meteo；查不到時照實顯示「天氣暫時無法取得」。Mac 選單列或設定頁「右上角時鐘與天氣」→「Pi 終端機」可以關掉。細節見[時鐘與天氣驗證](../../docs/validation/pi-clock-weather-2026-11-07.md)（**Pi 實機未驗證**）。
+
+<a id="night-screen-off"></a>
+## 夜間關螢幕
+
+2026-11-08 起（DN-3，[驗證](../../docs/validation/day-night-mode-2026-11-08.md)，**Pi 實機未驗證**）：
+
+- **什麼時候關**：夜間模式時（夜間時段、手動切換或鏡頭量到很暗），Pi 頁面 5 分鐘沒人碰，也沒有對話、收音、念話、任務或打開的畫面，就關掉螢幕。
+- **怎麼亮回來**：碰一下螢幕、按鍵，或用喚醒詞開始對話，螢幕在 2 秒內亮回來。叫醒螢幕的那一下不算點擊，不會因此開始對話或打開畫面。
+- **誰決定、誰執行**：Pi 頁面決定後回報給 Mac 核心；`aios-display` 每 2 秒經 SSH 通道讀 `GET /api/terminal/display?terminal=rpi4` 並照著做。
+- **讀不到就亮著**：核心讀不到、頁面 30 秒沒回報、服務停止時，螢幕一律打開，不會卡在黑畫面。
+- **開關**：設定頁「Pi 夜間閒置 5 分鐘關螢幕」，預設開，所有畫面共用。
+
+關螢幕的方法依序自動選（也可以在 `aios-display.service` 設 `AIOS_DISPLAY_METHOD=backlight|wlr-randr|xset|none` 指定）：
+
+| 方法 | 螢幕 | 權限 | 觸控叫醒 |
+|---|---|---|---|
+| `backlight` | 官方 DSI 觸控螢幕（`/sys/class/backlight/*/bl_power`） | `install.sh` 用 sudo 安裝 udev 規則 `/etc/udev/rules.d/90-aios-backlight.rules`，讓 `video` 群組（Raspberry Pi OS 的桌面使用者預設在裡面）可以寫 `bl_power` 與 `brightness` | 可以（只關背光，觸控照常） |
+| `wlr-randr` | Wayland（labwc）下的 HDMI 或 DSI | 不需要額外權限 | 不一定：輸出關掉後觸控可能收不到，請用喚醒詞或鍵盤 |
+| `xset` | X11 桌面 | 不需要額外權限 | 依螢幕而定 |
+| `none` | 找不到上面任何一種 | — | 螢幕一直開著，`aios-doctor` 顯示 WARN |
+
+`aios-doctor` 的「夜間關螢幕」一行顯示用哪一種方法與服務狀態。關螢幕不會結束即時語音（見下一節）。解除安裝會一併移除 udev 規則。
 
 <a id="realtime-cost-guard"></a>
 ## 即時語音費用防護
