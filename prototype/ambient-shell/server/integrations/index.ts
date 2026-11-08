@@ -6,6 +6,7 @@ import { GmailGogAdapter, resolveGogPath } from "./adapters/gmail-gog.ts";
 import { HomeAdapter, type HomeBridgePort } from "./adapters/home.ts";
 import { GoogleCalendarAdapter } from "./adapters/google-calendar.ts";
 import { LgTvAdapter } from "./adapters/lg-tv.ts";
+import { YouTubeSearch } from "../lgtv/youtube.ts";
 import { WeatherAdapter, type WeatherAdapterOptions } from "./adapters/weather.ts";
 import type { IntegrationAdapter } from "./contracts.ts";
 import { IntegrationDispatcher, type AuditEntry } from "./dispatcher.ts";
@@ -76,7 +77,8 @@ export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
       log("整合層：lg_tv 需要 NOUS_LGTV_HOST（電視的區網 IP），略過");
       return null;
     }
-    return new LgTvAdapter({ host: tv.host, pairingFile: tv.pairingFile, mac: tv.mac, broadcast: tv.broadcast });
+    if (!tv.youtubeApiKey) log("整合層：lg_tv 沒有 NOUS_YOUTUBE_API_KEY，不能依名稱搜尋 YouTube（給網址仍可播）");
+    return new LgTvAdapter({ host: tv.host, pairingFile: tv.pairingFile, mac: tv.mac, broadcast: tv.broadcast, youtube: tv.youtubeApiKey ? new YouTubeSearch({ apiKey: tv.youtubeApiKey }) : null });
   },
   // MAIL-1：用 gog 寄信給自己（收件人只來自 NOUS_MAIL_SELF）。沒有信箱或找不到 gog 時不註冊，照實記 log。
   gmail_gog: (config, log) => {

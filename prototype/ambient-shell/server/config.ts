@@ -6,7 +6,7 @@ import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_MAX_CONCURRENT } from "./runner.ts";
 import { DEFAULT_SOLOIST_PORT, parseSoloistPort } from "./integrations/adapters/spotify-soloist.ts";
 import { parseGogPath, parseMailSelf } from "./integrations/adapters/gmail-gog.ts";
-import { parseLgtvBroadcast, parseLgtvHost, parseLgtvMac } from "./lgtv/config.ts";
+import { parseLgtvBroadcast, parseLgtvHost, parseLgtvMac, parseYoutubeKey } from "./lgtv/config.ts";
 import { pairingFile } from "./lgtv/store.ts";
 import { parseCalendarTimeZone, parseGogAccount } from "./integrations/adapters/google-calendar.ts";
 import { DEFAULT_LIVE_VOICE, isLiveVoice, LIVE_VOICES, ROUTE_PREFERENCES, type LiveVoiceId, type RoutePreference } from "../shared/realtime-route.ts";
@@ -95,7 +95,7 @@ export interface Config {
    * AIL-1（docs/18）：App Integration Layer 的功能旗標（NOUS_AIL=on，預設關閉）與啟用的 Adapter（NOUS_AIL_SERVICES，逗號分隔，例如 mock）。
    * 關閉時不建立 Registry：工具表、說明、/api/settings 與 HTTP 路由都和加入整合層之前相同。
    */
-  ail: { enabled: boolean; services: string[]; soloistPort: number; vcr?: { mode: "fake" | "mac"; dir: string }; mail?: { self: string | null; gogPath: string | null }; calendar?: { account: string | null; gogPath: string | null; timeZone: string }; tv?: { host: string | null; mac: string | null; broadcast: string | null; pairingFile: string } };
+  ail: { enabled: boolean; services: string[]; soloistPort: number; vcr?: { mode: "fake" | "mac"; dir: string }; mail?: { self: string | null; gogPath: string | null }; calendar?: { account: string | null; gogPath: string | null; timeZone: string }; tv?: { host: string | null; mac: string | null; broadcast: string | null; pairingFile: string; youtubeApiKey?: string | null } };
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -153,7 +153,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     smarthomeUrl: parseHttpUrl(env.SMARTHOME_URL, "SMARTHOME_URL"),
     smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
     wake: (env.NOUS_WAKE ?? "off").trim().toLowerCase() === "on",
-    ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES, env.NOUS_SPOTIFY_SOLOIST_PORT, env.NOUS_VCR, env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"), { self: env.NOUS_MAIL_SELF, gog: env.NOUS_GOG_PATH, account: env.NOUS_GOG_ACCOUNT, calendarTz: env.NOUS_CALENDAR_TZ }, { host: env.NOUS_LGTV_HOST, mac: env.NOUS_LGTV_MAC, broadcast: env.NOUS_LGTV_BROADCAST }),
+    ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES, env.NOUS_SPOTIFY_SOLOIST_PORT, env.NOUS_VCR, env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"), { self: env.NOUS_MAIL_SELF, gog: env.NOUS_GOG_PATH, account: env.NOUS_GOG_ACCOUNT, calendarTz: env.NOUS_CALENDAR_TZ }, { host: env.NOUS_LGTV_HOST, mac: env.NOUS_LGTV_MAC, broadcast: env.NOUS_LGTV_BROADCAST, youtubeKey: env.NOUS_YOUTUBE_API_KEY }),
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",
@@ -286,9 +286,10 @@ export function parseHttpUrl(raw: string | undefined, name: string): string | nu
  * MAIL-1：只有 NOUS_AIL_SERVICES 列出 gmail_gog 時才讀 NOUS_MAIL_SELF（自己的 Gmail，寄件與收件相同）與 NOUS_GOG_PATH（gog 的絕對路徑，可省略）。
  * LGTV-1：列出 lg_tv 時才讀 NOUS_LGTV_HOST（電視的區網 IP，限私有網段）、NOUS_LGTV_MAC（Wake-on-LAN，可省略）、NOUS_LGTV_BROADCAST（可省略）；
  *   配對金鑰固定在 <configDir>/lgtv.json（npm run tv:pair 寫入），不從環境變數讀。
+ *   LGTV-2：NOUS_YOUTUBE_API_KEY（YouTube Data API v3 的 key，可省略；沒有時不能依名稱搜尋）。
  * SP-1：NOUS_SPOTIFY_SOLOIST_PORT＝Mac loopback 上經 SSH -R 轉送的 Soloist WebSocket 埠（預設 19090；主機固定 127.0.0.1）。
  */
-export function parseAil(flag: string | undefined, services: string | undefined, soloistPort?: string, vcr?: string, configDir?: string, mail?: { self?: string; gog?: string; account?: string; calendarTz?: string }, tv?: { host?: string; mac?: string; broadcast?: string }): Config["ail"] {
+export function parseAil(flag: string | undefined, services: string | undefined, soloistPort?: string, vcr?: string, configDir?: string, mail?: { self?: string; gog?: string; account?: string; calendarTz?: string }, tv?: { host?: string; mac?: string; broadcast?: string; youtubeKey?: string }): Config["ail"] {
   const enabled = (flag ?? "off").trim().toLowerCase() === "on";
   // 整合層關閉時 NOUS_VCR 整個不看（和 NOUS_AIL_SERVICES 一樣）。
   if (!enabled) return { enabled: false, services: [], soloistPort: DEFAULT_SOLOIST_PORT };
@@ -304,7 +305,7 @@ export function parseAil(flag: string | undefined, services: string | undefined,
     ...(unique.includes("gmail_gog") ? { mail: { self: parseMailSelf(mail?.self), gogPath: parseGogPath(mail?.gog) } } : {}),
     // CAL-1：列出 google_calendar 時才讀帳號（NOUS_GOG_ACCOUNT，沒有時用 NOUS_MAIL_SELF）與時區（NOUS_CALENDAR_TZ，預設 Asia/Taipei）。
     ...(unique.includes("google_calendar") ? { calendar: { account: parseGogAccount(mail?.account, mail?.self), gogPath: parseGogPath(mail?.gog), timeZone: parseCalendarTimeZone(mail?.calendarTz) } } : {}),
-    ...(unique.includes("lg_tv") ? { tv: { host: parseLgtvHost(tv?.host), mac: parseLgtvMac(tv?.mac), broadcast: parseLgtvBroadcast(tv?.broadcast), pairingFile: pairingFile(configDir ?? join(homedir(), ".config", "nous")) } } : {}),
+    ...(unique.includes("lg_tv") ? { tv: { host: parseLgtvHost(tv?.host), mac: parseLgtvMac(tv?.mac), broadcast: parseLgtvBroadcast(tv?.broadcast), pairingFile: pairingFile(configDir ?? join(homedir(), ".config", "nous")), youtubeApiKey: parseYoutubeKey(tv?.youtubeKey) } } : {}),
   };
   // VCR-0／VCR-2（docs/19）：NOUS_VCR=fake（假輸出，mock）或 mac（say 發聲）才加上 vcr；目錄固定在 <configDir>/voice-relay，不來自模型。
   return vcrMode === "fake" || vcrMode === "mac" ? { ...base, vcr: { mode: vcrMode, dir: join(configDir ?? join(homedir(), ".config", "nous"), "voice-relay") } } : base;
