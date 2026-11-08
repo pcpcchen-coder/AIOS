@@ -53,6 +53,7 @@ import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHist
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
 import { HOME_CORNER_WRITE_PATH, HOME_OVERVIEW_PATH, HomeCornerPatchError, parseHomeCornerPatch, type HomeCornerPrefs, type HomeCornerPrefsPatch, type HomeCornerSettingsView, type HomeOverviewView } from "../shared/home-corner.ts";
+import { DAY_NIGHT_WRITE_PATH, DayNightPatchError, parseDayNightPatch, type DayNightPatch, type DayNightSettingsView } from "../shared/day-night.ts";
 import { CLOCK_WRITE_PATH, ClockPatchError, parseClockPatch, WEATHER_NOW_PATH, type ClockPrefs, type ClockPrefsPatch, type ClockSettingsView, type WeatherNowView } from "../shared/clock.ts";
 import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
 import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_MEDIA_PREFIX, MEMORIES_WRITE_PATH, MemoriesPatchError, parseMemoriesPatch, type MemoriesItem, type MemoriesPrefs, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
@@ -209,6 +210,8 @@ export interface AppOptions {
    * HOME-1：左上角家中狀態。view(source) 給 settings.home_corner；overview 給唯讀的 GET /api/home/overview（沒有參數，
    * 不送任何控制指令）。未提供時 settings 沒有 home_corner，兩條路由 404。
    */
+  /** DN-2：日夜間模式的共用設定與手動切換（settings.day_night 與 POST /api/settings/day-night）。未提供時兩者都沒有。 */
+  dayNight?: { view(): DayNightSettingsView; update(patch: DayNightPatch): DayNightSettingsView };
   homeCorner?: { view(source: string): HomeCornerSettingsView; update(patch: HomeCornerPrefsPatch): HomeCornerPrefs; overview(): Promise<HomeOverviewView> };
   /**
    * MEMO-1：回憶模式（設定與本機資料夾的照片、影片）。未提供時 settings 沒有 memories，相關路由 404。
@@ -317,6 +320,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         ...(options.proactive ? { proactive: options.proactive.view() } : {}),
         ...(options.clock ? { clock: options.clock.view(source) } : {}),
         ...(options.homeCorner ? { home_corner: options.homeCorner.view(source) } : {}),
+        ...(options.dayNight ? { day_night: options.dayNight.view() } : {}),
         ...(options.memories ? { memories: options.memories.view() } : {}),
         ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name) } } : {}),
         // VCR-2：只有註冊了 voice_relay 才有這個鍵（沒有時輸出和之前完全相同）。
@@ -506,6 +510,21 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         options.clock.update(patch);
       } catch (err) {
         throw new HttpError(500, `時鐘設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+      }
+      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+    if (options.dayNight && method === "POST" && path === DAY_NIGHT_WRITE_PATH) {
+      let patch: DayNightPatch;
+      try {
+        patch = parseDayNightPatch(await readJson(req));
+      } catch (err) {
+        if (err instanceof DayNightPatchError) throw new HttpError(400, err.message);
+        throw err;
+      }
+      try {
+        options.dayNight.update(patch);
+      } catch (err) {
+        throw new HttpError(500, `日夜間設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
       }
       return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }

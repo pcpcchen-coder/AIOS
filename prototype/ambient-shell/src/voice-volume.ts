@@ -1,4 +1,4 @@
-import { DEFAULT_DAY_NIGHT_PREFS, NIGHT_VOLUME_DEFAULT, parseDayNightPrefs, type DayNightDecision, type DayNightMode, type DayNightPrefs } from "../shared/day-night.ts";
+import { clockText, DEFAULT_DAY_NIGHT_PREFS, NIGHT_VOLUME_DEFAULT, parseDayNightPrefs, type DayNightDecision, type DayNightMode, type DayNightOverride, type DayNightPrefs } from "../shared/day-night.ts";
 import { clampVoiceVolume, nextVoiceVolume, VOICE_VOLUME_DEFAULT, type VoiceVolumeOutcome, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
 
 // VOL-1：對話音量的頁面狀態（shared/voice-volume.ts 是規則）。播放 AI 語音的元素（兩條即時語音路徑）向這裡登記，
@@ -26,6 +26,21 @@ export const VOICE_VOLUME_TEXT = {
     day: "現在用日間音量",
     hours: "現在用夜間音量：在夜間時段（{0}:00–{1}:00）",
     camera_dark: "現在用夜間音量：鏡頭量到環境很暗",
+    /** DN-2：手動切換（維持到幾點）。 */
+    manual_day: "手動切換：維持日間模式到 {0}",
+    manual_night: "手動切換：維持夜間模式到 {0}",
+  },
+  /** DN-2：手動切換（設定頁的按鈕；Mac 選單列 desktop/settings-menu.mjs 有同一份，測試核對）。 */
+  manual: {
+    title: "手動切換（所有畫面共用）",
+    auto: "自動",
+    day: "現在是白天",
+    night: "切到夜間",
+    tonightDay: "今晚維持日間",
+    note: "「現在是白天」「切到夜間」維持到下一次時段交界；「今晚維持日間」維持到今晚夜間時段結束。到時自動回到依時段與鏡頭判斷。也可以在即時語音說「切到夜間模式」「現在是白天」「今晚維持日間」「恢復自動」。",
+    failed: "日夜間設定沒有保存：{0}",
+    group: "日夜間模式",
+    autoLine: "自動：依夜間時段 {0}:00–{1}:00 與各裝置的鏡頭",
   },
   /** DN-1：夜間模式一併套用的行為（George 2026-11-08）。 */
   effects: "夜間一併調暗畫面、靜音處理中音效、暫停回憶",
@@ -187,3 +202,17 @@ export class VoiceVolume {
 
 /** 頁面共用的一份。 */
 export const voiceVolume = new VoiceVolume();
+
+/** DN-2：一行說明現在是哪個模式與原因（右上角 title 與設定頁共用；文字經 t() 翻譯）。 */
+export function dayNightReasonText(
+  decision: DayNightDecision,
+  prefs: Pick<DayNightPrefs, "night_start_h" | "night_end_h">,
+  override: DayNightOverride | null,
+  t: (source: string, ...args: string[]) => string,
+): string {
+  const pad = (h: number) => String(h).padStart(2, "0");
+  if (decision.reason === "manual" && override) return t(decision.mode === "night" ? VOICE_VOLUME_TEXT.modeLine.manual_night : VOICE_VOLUME_TEXT.modeLine.manual_day, clockText(override.until));
+  if (decision.reason === "hours") return t(VOICE_VOLUME_TEXT.modeLine.hours, pad(prefs.night_start_h), pad(prefs.night_end_h));
+  if (decision.reason === "camera_dark") return t(VOICE_VOLUME_TEXT.modeLine.camera_dark);
+  return t(VOICE_VOLUME_TEXT.modeLine.day);
+}

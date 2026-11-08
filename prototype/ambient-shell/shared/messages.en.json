@@ -410,5 +410,8 @@
   "稍微容易（−0.05）": "Slightly easier (−0.05)",
   "預設（0）": "Default (0)",
   "稍微嚴格（+0.05）": "Slightly stricter (+0.05)",
-  "更不容易誤觸（+0.10）": "Fewer false wakes (+0.10)"
+  "更不容易誤觸（+0.10）": "Fewer false wakes (+0.10)",
+  "日夜間設定沒有保存（無法寫入設定檔：{0}）": "Day/night settings were not saved (could not write the settings file: {0})",
+  "日夜間設定沒有保存": "Day/night settings were not saved",
+  "日夜間設定沒有保存：{0}": "Day/night settings were not saved: {0}"
 }

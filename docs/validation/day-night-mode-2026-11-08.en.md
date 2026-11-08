@@ -7,7 +7,7 @@
 On 2026-11-08 George asked to turn VOL-2's "day/night volume" into a full day/night mode. This document covers:
 - an inventory of what exists;
 - the overall design and George's decisions;
-- the first batch (B1): implementation, tests and how to roll it back.
+- the first batch (B1) and the second batch (B2, section 7): implementation, tests and how to roll them back.
 
 ## 1. Inventory (main @ 1a66fb9)
 
@@ -88,7 +88,7 @@ Turn off "At night, also dim the screen, mute the processing sound and pause mem
 
 - The amount of dimming and the fade have not been seen on a real Mac or Pi; 45% is an estimate.
 - It has not been confirmed on real hardware that the processing sound stays silent and memories mode does not start at night (unit tests and code paths only).
-- Turning off the Pi screen (B3), the shared core mode with manual switching, and the quiet tone (B2) are not done yet.
+- Turning off the Pi screen (B3) is not done yet; see section 7 for the scope and validation of B2.
 
 ## 6. George's steps to try at home
 
@@ -98,3 +98,78 @@ Turn off "At night, also dim the screen, mute the processing sound and pause mem
 4. Leave it idle longer than the memories idle time: memories mode does not play.
 5. Turn the toggle off: the screen fades back right away, memories and the processing sound return, and only the volume stays at night level.
 6. Set the night hours back to 22:00–07:00.
+
+## 7. Second batch B2: shared core mode, manual switching and a quiet tone (2026-11-08)
+
+### Behaviour
+
+| Item | Behaviour |
+| --- | --- |
+| Shared settings | The night hours, use-camera, "also apply" and the manual switch live in the core's `configDir/day-night.json` and reach every page through `settings.day_night`; the Mac main window and the Pi change together. **Camera brightness is still measured by each page** and only affects that device |
+| Moving old settings | When the core has saved nothing yet and a page has settings saved by VOL-2, the page sends them to the core once; from then on the core decides. If two devices had different settings, the one opened first wins |
+| Conversation volume | The day and night volumes are still saved per device (unchanged) |
+| Manual switch | "It's daytime now" and "Switch to night" last until the next boundary of the night hours (switching to night at 15:00 lasts until 22:00, after which the hours keep it night anyway); "Stay in day mode tonight" lasts until tonight's night hours end (07:00 the next day by default); "Automatic" cancels at once. A manual switch beats the hours and the camera, and goes back to automatic when it ends |
+| Entry points | Four buttons at the top of the settings page's "Conversation volume on this device"; a "Day/night mode" section in the Mac menu bar with a status line and four radios; the realtime voice tool `set_day_night` ("switch to night mode", "it's daytime now", "stay in day mode tonight", "back to automatic") |
+| Top-right badge | When manual, it shows "Manual: staying in night mode until 22:00" |
+| Quiet tone | When the core decides it is night (hours or manual switch), the instructions at the start of each realtime call gain "speak softly and slowly, with shorter sentences". Only the tone changes, not the voice or volume; switching mid-call does not change that call; **each device's camera is not considered** |
+| Unchanged | Proactive reminders and the wake threshold (George chose to keep them) |
+
+### Implementation
+
+- `shared/day-night.ts`:
+  - `nextScheduledChange`, `overrideUntil` and `activeOverride` (local time, pure functions);
+  - `decideDayNight` gains a manual-switch argument and the `manual` reason;
+  - new `parseDayNightPatch` and `DayNightSettingsView`, plus the voice tool's argument and result functions.
+- `server/day-night-settings.ts`: the only writer of `day-night.json`; a broken key is dropped and logged.
+- `server/app.ts`: adds `settings.day_night` and `POST /api/settings/day-night` (validated, 400 on bad bodies).
+- `server/realtime.ts`:
+  - the new `set_day_night` tool (both paths) with its rule `DAY_NIGHT_RULE`;
+  - the new `NIGHT_TONE_RULE` (only with `caps.night`; otherwise the instructions are byte-identical to before).
+- `src/main.ts`:
+  - pages follow the core's settings;
+  - they recompute when new settings arrive;
+  - the voice tool goes from the page to the core, and returns a real error when the core lacks the feature.
+- `desktop/settings-menu.mjs`, `desktop/main.mjs`: the menu bar section.
+- Strings in both languages: `src/messages.en.json`, `desktop/messages.en.json`, `shared/messages.en.json`; one more row in the command table of `README.md`/`README.en.md`.
+
+### Rollback
+
+- Say "back to automatic" or press "Automatic": cancels the manual switch.
+- Turn off "At night, also dim the screen, mute the processing sound and pause memories": back to volume-only switching. From B2 on this toggle lives in the core, so turning it off once applies to both the Mac and the Pi.
+- To go back to before B1 completely: delete `configDir/day-night.json` and revert this batch. Pages then return to their own saved settings.
+
+### Tests
+
+- `tests/day-night-mode.test.ts` (17 tests):
+  - boundaries and end times on a fake clock (15:30, 23:10, "tonight" at 21:00, no night hours);
+  - the manual switch winning and expiring;
+  - patch validation;
+  - `day-night.json` saving, expiry, reopening and broken keys;
+  - `startNous` HTTP (shared, 400, automatic);
+  - the tool's presence, arguments, output and page executor;
+  - the quiet tone appearing only at night and being byte-identical once removed;
+  - menu bar text matching the page, the patches the radios send, an expired switch showing automatic, and English containing no Chinese.
+- `tests/voice-volume.test.ts`: the four settings buttons, `aria-pressed` on the current one, and none without the core.
+- Deliberate exceptions to existing snapshots:
+  - `apikey-route`'s tool list gains `set_day_night` and its instructions gain `DAY_NIGHT_RULE`;
+  - the `realtime-bridge` tool lists;
+  - `settings.day_night` in `wake-flag-off` (the seventh exception).
+- Headless Chromium (mock core):
+  - a Pi page opened with old page settings (21–06) leaves the core saving 21–06;
+  - after the core switches to night, both the Pi and Mac pages become `night` and dim, and the badge says "Manual: staying in night mode until 21:00";
+  - pressing "Automatic" in the Pi settings page brings the Mac page back to `day`;
+  - no JS errors.
+- `npm run typecheck`, `npx vitest run` (168 files, 3111 passed, 5 skipped) and `npm run build` all pass.
+
+### Not yet verified (B2)
+
+- Switching together, the menu bar and voice commands have not been tried on a real Mac and Pi.
+- Whether the model really calls `set_day_night` as described, and whether the quiet tone sounds different, have not been tried with real realtime voice.
+
+### George's steps to try at home (B2)
+
+1. Open Nous on both the Mac and the Pi. In the Mac menu bar's "Day/night mode", choose "Switch to night": both screens dim within about 3 s, and the badge shows until when.
+2. Press "Automatic" in the Pi settings page: both go back to deciding by the hours.
+3. In realtime voice, say 「切到夜間模式」 (switch to night mode), then 「恢復自動」 (back to automatic): Nous says the mode and until when, and the screen follows.
+4. Around 9 pm, say 「今晚維持日間」 (stay in day mode tonight): it stays day until 07:00 the next day, and the menu bar shows "Stay in day mode tonight" selected.
+5. Start a realtime call during the night hours and listen for a softer, shorter tone.

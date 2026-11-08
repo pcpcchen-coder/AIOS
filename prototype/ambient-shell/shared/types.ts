@@ -10,6 +10,7 @@ import type { WakeSettingsView } from "./wake.ts";
 import type { AudioSettingsView } from "./audio-devices.ts";
 import type { ProactiveSettingsView } from "./proactive.ts";
 import type { ClockSettingsView } from "./clock.ts";
+import type { DayNightSettingsView } from "./day-night.ts";
 import type { HomeCornerSettingsView } from "./home-corner.ts";
 import type { MemoriesSettingsView } from "./memories.ts";
 // 前後端共用的資料契約（原型版）。
@@ -172,6 +173,8 @@ export interface SettingsView {
   clock?: ClockSettingsView;
   /** HOME-1：左上角家中狀態（enabled 依頁面來源）。 */
   home_corner?: HomeCornerSettingsView;
+  /** DN-2：核心共用的日夜間設定與手動切換（Mac 與 Pi 共用；鏡頭亮度各頁面自己量）。 */
+  day_night?: DayNightSettingsView;
   /** MEMO-1 回憶模式：設定與來源狀態（只有數量，不含檔名或路徑）。 */
   memories?: MemoriesSettingsView;
 }
