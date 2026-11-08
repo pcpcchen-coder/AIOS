@@ -179,8 +179,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "e79fd474ce64e6b589643059ba0585fe641ad40e2d86d381d07788324ed75572",
-      "translationSha256": "06f43ab978605c37157f010d0aca50f16547870d4a1a3f0cd02efe0af9effc47"
+      "sourceSha256": "183cbb814ec0c66c1d890de705fbbd6a28577d44a6a3e4f98fe73f93f9be8568",
+      "translationSha256": "4ec7c17da467674d96afc55d9be5177113462b5ee5a77ea25d542158b1227408"
     },
     {
       "source": "docs/README.md",
@@ -291,8 +291,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "06b7b73c5349add6bbdccc170a153b98cce73d3d72abbd21359799049e7fd9b2",
-      "translationSha256": "393c2e181f80d629cffc9207f6ce7ce49086c925efb371b22aa57ca45264684b"
+      "sourceSha256": "e642aa40e0ed2a92d6e094192b770ea83c8a5c337b10b4621c10aee193773564",
+      "translationSha256": "3f09ea4a0e5f69e4a12226a38b9a62de5c8b254af045294a1f63acf4dda50c08"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -837,8 +837,8 @@
       "source": "docs/validation/wake-threshold-2026-11-08.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/wake-threshold-2026-11-08.en.md",
-      "sourceSha256": "ebad441b0bc51ac670058718e8de3a2dc28966b0f60cf12624eb2b6daf0ee0bf",
-      "translationSha256": "c34eb8c7cb2eb9e813193f5e5bc9b6d2dd7c4ede16735a8065550428b89226ef"
+      "sourceSha256": "d7a3ef5c32674331ca238b91582dddcf201c8fcad0587422687c1931db5af379",
+      "translationSha256": "b506e58428b3a67637a47fa2fcd6be8d136f88bd06b903efc10bb9c4aa4d15a0"
     },
     {
       "source": "docs/validation/wk-00-mac-2026-10-31.md",
@@ -893,8 +893,8 @@
       "source": "prototype/ambient-shell/desktop/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/desktop/README.en.md",
-      "sourceSha256": "cea1ca51ff7af0f92a719412b6195e18e7d0908cfd18279e1e3ef9c6e0583db2",
-      "translationSha256": "e5fbe476bc1c749906be28555af0177921a8c44fbc2e5c9ef87a9bb3ccaf05f9"
+      "sourceSha256": "3e74537fd2016c1a1fa1349936a14b65930a0d7df71d24a99b8b13db52b01c5d",
+      "translationSha256": "24d6e4c7bbaaa3459153d1fefa7d3c1c8e07a541f58f6ee447f53ccb6138feb2"
     },
     {
       "source": "terminals/rpi4/README.md",

@@ -77,6 +77,21 @@ export const WAKE_MENU_TEXT = {
   voiceNameTest: "只憑聲音也叫名字（測試）",
   voiceNameTestNote: "喚醒時認不出臉，聲音認出就叫名字；門檻未校準，可能叫錯人",
   notReported: "尚未回報",
+  threshold: "喚醒詞門檻",
+  thresholdNote: "數字越小越容易喚醒，也越容易被電視或聊天誤觸；設定頁也能改，所有裝置共用",
+};
+
+/**
+ * 「喚醒詞門檻」的調整值與選項文字（同 shared/wake.ts 的 WAKE_THRESHOLD_OFFSETS、src/views.ts 的 WAKE_THRESHOLD_TEXT.options；
+ * George 2026-11-08：設定頁之外選單列也要有）。
+ */
+export const WAKE_THRESHOLD_OFFSETS = [-0.1, -0.05, 0, 0.05, 0.1];
+export const WAKE_THRESHOLD_LABEL = {
+  "-0.1": "更容易喚醒（−0.10）",
+  "-0.05": "稍微容易（−0.05）",
+  "0": "預設（0）",
+  "0.05": "稍微嚴格（+0.05）",
+  "0.1": "更不容易誤觸（+0.10）",
 };
 
 /** 「喚醒後等你開口」的選項與預設（同 shared/wake.ts 的 WAKE_SILENCE_OPTIONS_S、DEFAULT_WAKE_SILENCE_S）。 */
@@ -100,6 +115,9 @@ export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTes
   // 和「鏡頭與語音設定」的秒數列同一條寫入路徑（setMenuPref POST { wake_silence_s } 到 /api/settings/wake）；關著聆聽也能先選好。
   const silenceRow = { key: "wake_silence_s", kind: "seconds", label: WAKE_MENU_TEXT.silence, write_path: "/api/settings/wake" };
   const speakerRow = { key: "speaker_in_call", kind: "bool", label: WAKE_MENU_TEXT.speaker, write_path: "/api/settings/wake" };
+  // 喚醒詞門檻（George 2026-11-08）：和設定頁同一個 wake_threshold_offset，同一條寫入路徑；關著聆聽也能先選好。
+  const thresholdRow = { key: "wake_threshold_offset", kind: "threshold", label: WAKE_MENU_TEXT.threshold, write_path: "/api/settings/wake" };
+  const offset = WAKE_THRESHOLD_OFFSETS.includes(wake.wake_threshold_offset) ? wake.wake_threshold_offset : 0;
   const seconds = (n) => `${n} 秒${n === DEFAULT_WAKE_SILENCE_S ? "（預設）" : ""}`;
   return [
     { type: "separator" },
@@ -126,6 +144,15 @@ export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTes
         ...WAKE_SILENCE_OPTIONS_S.map((n) => radio(text(seconds(n)), n === silence, () => void setMenuPref?.(silenceRow, n))),
         { type: "separator" },
         { label: text(WAKE_MENU_TEXT.silenceNote), enabled: false },
+      ],
+    },
+    {
+      label: `${text(WAKE_MENU_TEXT.threshold)}${text("：")}${text(WAKE_THRESHOLD_LABEL[String(offset)])}`,
+      sublabel: text(WAKE_MENU_TEXT.thresholdNote),
+      submenu: [
+        ...WAKE_THRESHOLD_OFFSETS.map((v) => radio(text(WAKE_THRESHOLD_LABEL[String(v)]), v === offset, () => void setMenuPref?.(thresholdRow, v))),
+        { type: "separator" },
+        { label: text(WAKE_MENU_TEXT.thresholdNote), enabled: false },
       ],
     },
     {

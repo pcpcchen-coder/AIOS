@@ -203,5 +203,6 @@
   "服務模式中：Mac 的麥克風與鏡頭已暫停（設定不變）": "Service mode: the Mac's microphone and camera are paused (settings unchanged)",
   "服務模式沒有保存": "Service mode was not saved",
   "{0}（進行中） · {1}": "{0} (active) · {1}",
-  "{0}（進行中） · {1}；下次：{2}": "{0} (active) · {1}; next: {2}"
+  "{0}（進行中） · {1}；下次：{2}": "{0} (active) · {1}; next: {2}",
+  "喚醒詞門檻沒有保存": "Wake word threshold was not saved"
 }

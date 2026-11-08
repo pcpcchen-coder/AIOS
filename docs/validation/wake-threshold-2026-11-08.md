@@ -32,7 +32,7 @@ sherpa-onnx 的門檻越大越不容易觸發，所以數字越小越容易喚�
 | 顯示 | `/api/settings` 的 `settings.wake` 多了 `thresholds`，是核心依清單算出的每個喚醒詞實際門檻；設定頁照這個顯示「目前門檻：Hello Nous 0.15、Hey Nous 0.25」 |
 | 套用 | 擷取（`src/audio/capture.ts`）建立 worker 時在 init 帶上調整值；worker 只接受五個選項之一，其他值或沒給時用產品原本的門檻（`offsetKeywords`） |
 | 何時生效 | 聆聽中改了就以新門檻重建擷取：閒置時立即，通話中等這通結束（同「聲音輸入」改了，`AudioFrontEnd.reopen`）。聆聽關著時改，下次打開就用新門檻 |
-| 在哪裡 | 瀏覽器版與 Pi 頁面的設定畫面、macOS App 的設定頁，只要核心開了喚醒（`NOUS_WAKE=on`，`settings.wake` 存在）就會顯示。選單列沒有加。所有連到同一個核心的裝置共用一個值 |
+| 在哪裡 | 瀏覽器版與 Pi 頁面的設定畫面、macOS App 的設定頁，只要核心開了喚醒（`NOUS_WAKE=on`，`settings.wake` 存在）就會顯示。macOS App 的選單列「喚醒詞」段也有「喚醒詞門檻：…」子選單（George 同日追加），五個選項相同、寫入同一個設定。所有連到同一個核心的裝置共用一個值 |
 | 雙語 | 選項、說明、錯誤訊息都在 `src/messages.en.json` |
 | 回退 | 選「預設（0）」就回到原本的門檻；舊的 `wake.json` 沒有這個欄位時也是 0 |
 
@@ -49,6 +49,7 @@ sherpa-onnx 的門檻越大越不容易觸發，所以數字越小越容易喚�
 | 項目 | 結果 |
 |---|---|
 | `tests/wake-threshold.test.ts`（8 項） | 只接受五個選項；保存與讀不懂時用 0；五個值的實際門檻（上表）；`kwsConfig` 的全域門檻與提升分數；worker 只接受清單上的值、擷取在 init 帶上設定；聆聽中改了會重建擷取，值相同或聆聽關著時不重建；設定頁五個選項、選中的值、目前門檻、改了才送出、沒有動作時停用、英文翻譯齊全、兩種設定頁都有這一段 |
+| 選單列（`tests/desktop-menu.test.ts`） | 「喚醒詞門檻：…」排在「喚醒後等你開口」之後；五個選項和 `shared/wake.ts`、設定頁同一組，目前的值打勾；點選經 `setMenuPref` 寫入 `wake_threshold_offset`；英文選單完全翻譯；不在選項裡的值顯示成預設 |
 | 既有測試 | `wake-settings`（`settings.wake` 多了 `thresholds`）、`audio-privacy`（擷取 init 那一行逐字更新）等跟著更新；`node scripts/verify-aios.mjs` 結果見 PR |
 | 無頭 Chromium | 以 `NOUS_WAKE=on`、mock 引擎啟動核心，開 Pi 頁面（`?terminal=rpi4`）按齒輪：設定頁出現「喚醒詞門檻」、預設 0、顯示 Hello Nous 0.15、Hey Nous 0.25；改成「稍微容易（−0.05）」後 `wake.json` 存成 `-0.05`，畫面改成 Hello Nous 0.10、Hey Nous 0.20 |
 
