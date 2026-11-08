@@ -137,6 +137,7 @@ export type AudioDeviceEvent =
   | { type: "input_fallback"; label: string | null }
   /** 之前找不到的麥克風又出現了（常駐聆聽在閒置時重新開）。 */
   | { type: "input_returned" }
+  | { type: "input_available" }
   /** 選定的聲音輸出不見了（例如藍牙喇叭中斷），改由系統預設播放。 */
   | { type: "output_lost"; label: string | null }
   /** 選定的聲音輸出回來了，已改回它播放。 */
@@ -176,6 +177,7 @@ export class AudioDevices {
   /** 上一次清單裡「選定的麥克風在不在」：只有由不在變成在時才通知 input_returned（每次出現最多一次）。 */
   private inputWasPresent = false;
   private cancelReturn: (() => void) | null = null;
+  private cancelAvailability: (() => void) | null = null;
   /** 每次重讀清單的世代：晚到的舊結果丟掉（enumerateDevices 可能重疊）。 */
   private refreshGen = 0;
   private readonly listeners = new Set<(event: AudioDeviceEvent) => void>();
@@ -190,7 +192,7 @@ export class AudioDevices {
     if (this.started) return;
     this.started = true;
     const media = this.media();
-    media?.addEventListener?.("devicechange", () => void this.refresh());
+    media?.addEventListener?.("devicechange", () => void this.refresh(true));
     void this.refresh();
   }
 
@@ -276,7 +278,7 @@ export class AudioDevices {
   }
 
   /** 重讀裝置清單（devicechange）：輸出重新套用（不見了就回系統預設，回來了就改回去）；之前找不到的麥克風回來時通知。 */
-  async refresh(): Promise<void> {
+  async refresh(deviceChanged = false): Promise<void> {
     const media = this.media();
     if (!media?.enumerateDevices) return;
     const gen = ++this.refreshGen;
@@ -293,6 +295,7 @@ export class AudioDevices {
     this.devices = list.filter((d) => (d.kind === "audioinput" || d.kind === "audiooutput") && typeof d.deviceId === "string");
     this.enumerated = true;
     this.noteInputPresence();
+    if (deviceChanged) this.noteInputAvailability();
     await this.reapplySinks(!first);
     this.emit({ type: "changed" });
   }
@@ -369,18 +372,40 @@ export class AudioDevices {
     }
     if (!appeared || !this.inputFallback) return;
     this.cancelPendingReturn();
-    const timer = this.options.timer ?? ((run: () => void, ms: number) => {
-      const id = setTimeout(run, ms);
-      return () => clearTimeout(id);
-    });
     const id = this.prefs.input_device_id;
     const token = { cancel: () => {} };
     this.cancelReturn = () => token.cancel();
-    token.cancel = timer(() => {
+    token.cancel = this.debounceInput(() => {
       if (this.cancelReturn === null) return;
       this.cancelReturn = null;
       if (this.prefs.input_device_id === id && this.inputWasPresent && this.inputFallback) this.emit({ type: "input_returned" });
-    }, this.options.returnDebounceMs ?? INPUT_RETURN_DEBOUNCE_MS);
+    });
+  }
+
+  private noteInputAvailability(): void {
+    this.cancelAvailability?.();
+    this.cancelAvailability = null;
+    if (this.cancelReturn || !this.hasPhysicalInput()) return;
+    // USB can return with the same ID, and devicechange can precede the old track's ended event.
+    const token = { cancel: () => {} };
+    const cancel = () => token.cancel();
+    this.cancelAvailability = cancel;
+    token.cancel = this.debounceInput(() => {
+      if (this.cancelAvailability !== cancel) return;
+      this.cancelAvailability = null;
+      if (!this.cancelReturn && this.hasPhysicalInput()) this.emit({ type: "input_available" });
+    });
+  }
+
+  private hasPhysicalInput(): boolean {
+    return this.devices.some((device) => device.kind === "audioinput" && !!device.deviceId && !isAlias(device.deviceId));
+  }
+
+  private debounceInput(run: () => void): () => void {
+    const ms = this.options.returnDebounceMs ?? INPUT_RETURN_DEBOUNCE_MS;
+    if (this.options.timer) return this.options.timer(run, ms);
+    const id = setTimeout(run, ms);
+    return () => clearTimeout(id);
   }
 
   private cancelPendingReturn(): void {

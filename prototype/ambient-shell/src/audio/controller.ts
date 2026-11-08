@@ -48,6 +48,7 @@ export interface WakeControllerDeps {
   mic: MicOpener | null;
   capture: CaptureDeps;
   earcon: EarconPlayer;
+  retryInterruptedInput?: boolean;
   /** 單次計時器（預設 setTimeout）；回傳取消。限速暫停的自動恢復用，測試注入假的。 */
   timer?(run: () => void, ms: number): () => void;
 }
@@ -73,7 +74,7 @@ export class WakeController implements WakeActivationPort {
     this.guard = new WakeGuard(host.now);
     this.trigger = () => host.caption(WAKE_TEXT.heard);
     this.frontEnd = new AudioFrontEnd(
-      { mic: deps.mic, capture: deps.capture, runtime: () => host.runtime() },
+      { mic: deps.mic, capture: deps.capture, runtime: () => host.runtime(), retryInterruptedInput: deps.retryInterruptedInput },
       {
         state: (report) => this.onState(report),
         detected: (keyword) => void this.onDetected(keyword, deps.earcon),
@@ -202,6 +203,10 @@ export class WakeController implements WakeActivationPort {
   /** 「聲音輸入」改了或之前找不到的麥克風回來了：閒置時重開，通話中等這通結束（AudioFrontEnd.reopen）。 */
   inputChanged(): void {
     this.frontEnd.reopen();
+  }
+
+  inputAvailable(): void {
+    this.frontEnd.inputAvailable();
   }
 
   /** 即時語音租用麥克風（兩條路徑的 getMicrophone）。 */

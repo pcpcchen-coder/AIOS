@@ -3,13 +3,13 @@ import { WakeController, type WakeHost } from "../src/audio/controller.ts";
 import { AudioFrontEnd, micError, type FrontEndEvents } from "../src/audio/front-end.ts";
 import type { WakeReport, WakeRuntimeState, WakeSettingsView } from "../shared/wake.ts";
 import { FakeCapture, FakeClock, FakeEarcon, FakeMediaDevices, FakeStream, FakeTrack, flush } from "./fixtures/wake.ts";
-import { AudioDevices, type AudioDeviceEvent } from "../src/audio-devices.ts";
+import { AudioDevices, INPUT_RETURN_DEBOUNCE_MS, type AudioDeviceEvent, type AudioDevicesOptions } from "../src/audio-devices.ts";
 import { DEFAULT_AUDIO_PREFS } from "../shared/audio-devices.ts";
 
 /** 「聲音輸入」設定（null＝系統預設）與真的 AudioDevices（假的 MediaDevices）：常駐聆聽經它開麥克風。 */
-function micFor(media: FakeMediaDevices) {
+function micFor(media: FakeMediaDevices, timer?: AudioDevicesOptions["timer"]) {
   // 「麥克風回來了」的去彈跳在 tests/audio-devices.test.ts 測；這裡用立即執行的計時器。
-  const devices = new AudioDevices(() => media, { timer: (run) => { run(); return () => {}; } });
+  const devices = new AudioDevices(() => media, { timer: timer ?? ((run) => { run(); return () => {}; }) });
   const events: AudioDeviceEvent[] = [];
   devices.on((e) => events.push(e));
   devices.start();
@@ -23,7 +23,7 @@ function micFor(media: FakeMediaDevices) {
 
 // WK-01a AudioFrontEnd（docs/17 §5.1、§5.3、§5.5、§5.8、§10.3）：假的 MediaDevices 與擷取圖（fixture），狀態只由事件推進。
 
-function setup(runtime: WakeRuntimeState = "ok") {
+function setup(runtime: WakeRuntimeState = "ok", timer?: AudioDevicesOptions["timer"], retryInterruptedInput = false) {
   const media = new FakeMediaDevices();
   const capture = new FakeCapture();
   const states: WakeReport[] = [];
@@ -43,8 +43,8 @@ function setup(runtime: WakeRuntimeState = "ok") {
     detected: (k) => detected.push(k),
     listening: (id, how) => listening.push([id, how]),
   };
-  const audio = micFor(media);
-  const fe = new AudioFrontEnd({ mic: audio.mic, capture, runtime: () => rt, defer }, events);
+  const audio = micFor(media, timer);
+  const fe = new AudioFrontEnd({ mic: audio.mic, capture, runtime: () => rt, defer, retryInterruptedInput }, events);
   return { media, capture, states, listening, detected, fe, runDeferred, audio, setRuntime: (r: WakeRuntimeState) => (rt = r) };
 }
 
@@ -205,6 +205,207 @@ describe("AudioFrontEnd: one microphone owner, states driven by device events", 
     expect(s.fe.current).toEqual({ state: "error", reason: "device_ended" });
     expect(s.media.calls).toHaveLength(1);
     expect(s.capture.active).toBe(0);
+  });
+
+  it("the Pi default microphone reopens when the same USB input returns", async () => {
+    const s = setup();
+    s.audio.devices.on((event) => {
+      if (event.type === "input_available") s.fe.inputAvailable();
+    });
+    s.media.devices = ["mic-a"];
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    s.media.devices = [];
+    s.media.streams[0]!.tracks[0]!.unplug();
+    s.media.deviceChange();
+    await flush();
+    expect(s.fe.current).toEqual({ state: "error", reason: "device_ended" });
+    expect(s.media.calls).toHaveLength(1);
+
+    s.media.devices = ["mic-a"];
+    s.media.deviceChange();
+    await flush();
+    expect(s.media.calls).toHaveLength(2);
+    expect(s.fe.current.state).toBe("armed");
+    s.capture.last!.events.started();
+    expect(s.fe.current.state).toBe("listening_local");
+    expect(s.media.liveTracks()).toHaveLength(1);
+  });
+
+  it("debounces USB notifications and tolerates devicechange before track ended", async () => {
+    const pending = new Set<() => void>();
+    const s = setup("ok", (run, ms) => {
+      expect(ms).toBe(INPUT_RETURN_DEBOUNCE_MS);
+      pending.add(run);
+      return () => { pending.delete(run); };
+    });
+    s.audio.devices.on((event) => {
+      if (event.type === "input_available") s.fe.inputAvailable();
+    });
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    for (let i = 0; i < 3; i++) {
+      s.media.deviceChange();
+      await flush();
+    }
+    expect(pending.size).toBe(1);
+    expect(s.media.calls).toHaveLength(1);
+    s.media.streams[0]!.tracks[0]!.unplug();
+    for (const run of pending) run();
+    await flush();
+    expect(s.media.calls).toHaveLength(2);
+    s.capture.last!.events.started();
+    s.fe.inputAvailable();
+    expect(s.media.calls).toHaveLength(2);
+  });
+
+  it("recovery waits for another device event after a transient mic-open failure and stops on permission denial", async () => {
+    const s = setup();
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    s.media.streams[0]!.tracks[0]!.unplug();
+    s.media.failWith = "NotReadableError";
+    s.fe.inputAvailable();
+    await flush();
+    expect(s.fe.current).toEqual({ state: "error", reason: "audio_failed" });
+    expect(s.media.calls).toHaveLength(2);
+    s.media.failWith = "NotAllowedError";
+    s.fe.inputAvailable();
+    await flush();
+    expect(s.fe.current).toEqual({ state: "error", reason: "permission_denied" });
+    s.media.failWith = null;
+    s.fe.inputAvailable();
+    await flush();
+    expect(s.media.calls).toHaveLength(3);
+  });
+
+  it("the Pi retries a long disconnect even if the browser never emits devicechange", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = setup("ok", undefined, true);
+      s.fe.setPreference(true, "enable");
+      await flush();
+      s.capture.last!.events.started();
+      s.media.failWith = "NotFoundError";
+      s.media.streams[0]!.tracks[0]!.unplug();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(s.media.calls).toHaveLength(10);
+      expect(s.fe.current.state).toBe("error");
+      s.media.failWith = null;
+      await vi.advanceTimersByTimeAsync(8_000);
+      expect(s.media.calls).toHaveLength(11);
+      expect(s.fe.current.state).toBe("armed");
+      s.capture.last!.events.started();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(s.fe.current.state).toBe("listening_local");
+      expect(s.media.calls).toHaveLength(11);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("Pi retry timers stop during pause, after disabling wake, and on permission denial", async () => {
+    vi.useFakeTimers();
+    try {
+      const s = setup("ok", undefined, true);
+      s.fe.setPreference(true, "enable");
+      await flush();
+      s.capture.last!.events.started();
+      s.media.failWith = "NotFoundError";
+      s.media.streams[0]!.tracks[0]!.unplug();
+      expect(vi.getTimerCount()).toBe(1);
+
+      s.fe.pause("user_pause");
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(s.media.calls).toHaveLength(1);
+
+      s.fe.resume("user_pause");
+      await flush();
+      expect(vi.getTimerCount()).toBe(1);
+      s.fe.setPreference(false, "auto_resume");
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(s.media.calls).toHaveLength(2);
+
+      s.media.failWith = null;
+      s.fe.setPreference(true, "enable");
+      await flush();
+      s.capture.last!.events.started();
+      s.media.failWith = "NotAllowedError";
+      s.media.streams[1]!.tracks[0]!.unplug();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(s.fe.current).toEqual({ state: "error", reason: "permission_denied" });
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(s.media.calls).toHaveLength(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the returning microphone waits for the active lease to be returned", async () => {
+    const s = setup();
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    const firstLease = await s.fe.lease();
+    s.media.streams[0]!.tracks[0]!.unplug();
+    s.fe.inputAvailable();
+    await flush();
+    expect(s.fe.current.state).toBe("in_call");
+    expect(s.media.calls).toHaveLength(1);
+    s.fe.releaseLease(firstLease);
+    await flush();
+    s.capture.last!.events.started();
+    expect(s.fe.current.state).toBe("listening_local");
+    expect(s.media.calls).toHaveLength(2);
+  });
+
+  it("the returning microphone does not race a lease still waiting for the device", async () => {
+    const s = setup();
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    s.media.streams[0]!.tracks[0]!.unplug();
+    s.media.hold();
+    const opening = s.fe.lease();
+    s.fe.inputAvailable();
+    expect(s.media.calls).toHaveLength(2);
+    s.media.open();
+    s.fe.releaseLease(await opening);
+    await flush();
+    s.capture.last!.events.started();
+    expect(s.fe.current.state).toBe("listening_local");
+    expect(s.media.calls).toHaveLength(2);
+  });
+
+  it("the returning microphone respects user pause and a disabled wake preference", async () => {
+    const s = setup();
+    s.fe.setPreference(true, "enable");
+    await flush();
+    s.capture.last!.events.started();
+    s.media.streams[0]!.tracks[0]!.unplug();
+    s.fe.pause("user_pause");
+    s.fe.inputAvailable();
+    await flush();
+    expect(s.fe.current).toEqual({ state: "paused", reason: "user_pause" });
+    expect(s.media.calls).toHaveLength(1);
+    s.fe.resume("user_pause");
+    await flush();
+    s.capture.last!.events.started();
+    expect(s.fe.current.state).toBe("listening_local");
+    expect(s.media.calls).toHaveLength(2);
+
+    s.media.streams[1]!.tracks[0]!.unplug();
+    s.fe.setPreference(false, "auto_resume");
+    s.fe.inputAvailable();
+    await flush();
+    expect(s.fe.current).toEqual({ state: "off", reason: "pref_off" });
+    expect(s.media.calls).toHaveLength(2);
   });
 
   it("realtime lease returns a clone of the single source and disconnects the worklet (in_call); release returns to listening", async () => {

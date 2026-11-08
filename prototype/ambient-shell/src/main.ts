@@ -1003,6 +1003,10 @@ function onAudioDeviceEvent(event: AudioDeviceEvent): void {
       break;
     case "input_returned":
       wake?.inputChanged();
+      if (isPi4) wake?.inputAvailable();
+      break;
+    case "input_available":
+      if (isPi4) wake?.inputAvailable();
       break;
     case "output_lost":
       showSubtitle(t(AUDIO_TEXT.outputLost, event.label ?? t(AUDIO_TEXT.unknownDevice)));
@@ -1123,6 +1127,7 @@ function syncWake(view: WakeSettingsView | undefined): void {
       // 常駐聆聽的麥克風跟著「聲音輸入」設定（找不到就暫用系統預設），提示音跟著「聲音輸出」設定（src/audio-devices.ts）。
       mic: typeof navigator.mediaDevices?.getUserMedia === "function" ? { open: () => audioDevices.openInput(), preferred: () => audioDevices.preferredInput } : null,
       output: { sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) },
+      retryInterruptedInput: isPi4,
     });
     // WK-02：喚醒觸發開始 wake_word 即時語音（取代 WK-01a 預設的「聽到了」字幕）。
     wake.setTriggerHandler(onWakeTrigger);

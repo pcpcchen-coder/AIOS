@@ -12,7 +12,7 @@
 // - 服務模式（service）：Mac 交給 Pi 使用時停止來源，只有「返回 Mac 使用」才解除，之後和解鎖一樣依偏好自動恢復。
 // - 選定的麥克風找不到（開始、自動恢復）：audioDevices 改用系統預設並顯示字幕「找不到「X」，暫用系統預設」
 //   （George 2026-11-01 改掉 WK-01a 原本「不改用其他麥克風」的規則）；它回來時 reopen() 在閒置時重新開。
-// - track ended：選了特定麥克風時重新開一次（找不到就用系統預設）；系統預設的麥克風結束時照舊 error（device_ended），不在背景重試。
+// - track ended：選了特定麥克風時重新開一次（找不到就用系統預設）。Pi 可在瀏覽器回報麥克風可用時恢復中斷的聆聽。
 // - 「聲音輸入」改了：閒置時立即重開；通話中等這通結束（最後一份租用歸還）才換，下一通起使用。
 // - 引擎檔案不在（runtime 不是 ok）時直接 error runtime_missing，**不開麥克風**。
 // 這個檔案只看得到 MediaStream 與事件，拿不到樣本；樣本只在 worklet 與 worker（tests/audio-privacy.test.ts 靜態檢查）。
@@ -52,6 +52,8 @@ export interface FrontEndDeps {
   capture: CaptureDeps;
   /** 喚醒引擎檔案的核對結果（核心的 settings.wake.runtime）；不是 ok 時不開麥克風。 */
   runtime(): WakeRuntimeState;
+  /** Pi Chromium can delay devicechange until the device list is queried. */
+  retryInterruptedInput?: boolean;
 }
 
 /** 是什麼讓擷取開始（決定 armed 的原因與「已恢復」字幕）；麥克風一律用「聲音輸入」設定。 */
@@ -65,6 +67,9 @@ export interface FrontEndEvents {
 }
 
 type SystemPause = "sleep" | "lock" | "rate_limited" | "service";
+const TRANSIENT_INPUT_ERRORS = new Set(["NotFoundError", "DevicesNotFoundError", "NotReadableError", "TrackStartError", "OverconstrainedError", "AbortError"]);
+const INPUT_RETRY_START_MS = 1_000;
+const INPUT_RETRY_CAP_MS = 8_000;
 
 export class AudioFrontEnd {
   private wanted = false;
@@ -81,6 +86,10 @@ export class AudioFrontEnd {
   private pendingReclaim: (() => void) | null = null;
   /** 來源 track 在通話中或暫停時結束（拔除）：等不再被擋時再照實報 device_ended，不在通話中顯示喚醒錯誤。 */
   private endedPending = false;
+  private inputInterrupted = false;
+  private inputRetry: ReturnType<typeof setTimeout> | null = null;
+  private inputRetryDelay = INPUT_RETRY_START_MS;
+  private openingLeases = 0;
   private leases: MediaStream[] = [];
   private source: MediaStream | null = null;
   private track: MediaStreamTrack | null = null;
@@ -119,6 +128,7 @@ export class AudioFrontEnd {
       if (this.wanted) this.offReason = "pref_off";
       this.userPaused = false;
       this.endedPending = false;
+      this.resetInputRecovery();
     }
     this.wanted = on;
     this.sync(how);
@@ -186,11 +196,39 @@ export class AudioFrontEnd {
     this.sync("reclaim");
   }
 
+  inputAvailable(): void {
+    if (!this.wanted || !this.inputInterrupted) return;
+    this.endedPending = false;
+    if (this.openingLeases === 0 && !this.blocked()) this.sync("reclaim");
+  }
+
+  private cancelInputRetry(): void {
+    if (this.inputRetry === null) return;
+    clearTimeout(this.inputRetry);
+    this.inputRetry = null;
+  }
+
+  private resetInputRecovery(): void {
+    this.inputInterrupted = false;
+    this.inputRetryDelay = INPUT_RETRY_START_MS;
+    this.cancelInputRetry();
+  }
+
+  private scheduleInputRetry(): void {
+    if (!this.deps.retryInterruptedInput || !this.inputInterrupted || this.inputRetry !== null || this.openingLeases > 0 || this.blocked()) return;
+    this.inputRetry = setTimeout(() => {
+      this.inputRetry = null;
+      this.inputRetryDelay = Math.min(this.inputRetryDelay * 2, INPUT_RETRY_CAP_MS);
+      this.inputAvailable();
+    }, this.inputRetryDelay);
+  }
+
   /**
    * 即時語音租用麥克風：回傳來源串流的複製品。來源已在時直接複製（同一個裝置、同一條來源），沒有時經 MicOpener 開一條。
    * 失敗時丟出 getUserMedia 的錯誤（呼叫端照舊依 name 顯示原因）。
    */
   async lease(): Promise<MediaStream> {
+    this.cancelInputRetry();
     // Web Speech 剛結束、還沒重新取得：直接交給這次租用，不另外開一條。
     if (this.pendingReclaim) {
       this.cancelReclaim();
@@ -204,7 +242,12 @@ export class AudioFrontEnd {
       let stream: MediaStream;
       try {
         if (!this.deps.mic) throw Object.assign(new Error("找不到可用的麥克風。"), { name: "NotFoundError" });
-        stream = await this.deps.mic.open();
+        this.openingLeases++;
+        try {
+          stream = await this.deps.mic.open();
+        } finally {
+          this.openingLeases--;
+        }
       } catch (err) {
         // 通話拿不到麥克風：喚醒照原本的狀態繼續（或停著），錯誤交回即時語音照舊顯示。
         this.sync("after_call");
@@ -258,6 +301,7 @@ export class AudioFrontEnd {
   dispose(): void {
     this.cancelReclaim();
     this.wanted = false;
+    this.resetInputRecovery();
     this.reopenPending = false;
     this.invalidate();
     this.stopGraph();
@@ -282,6 +326,7 @@ export class AudioFrontEnd {
   }
 
   private sync(how: StartHow): void {
+    this.cancelInputRetry();
     const blocked = this.blocked();
     if (!blocked && this.endedPending) {
       this.endedPending = false;
@@ -313,14 +358,15 @@ export class AudioFrontEnd {
           stream = await this.deps.mic.open();
         } catch (err) {
           if (gen !== this.gen) return;
-          return this.fail(micError(err, this.deps.mic.preferred()));
+          const name = (err as { name?: string } | null)?.name ?? "";
+          return this.fail(micError(err, this.deps.mic.preferred()), TRANSIENT_INPUT_ERRORS.has(name));
         }
         if (gen !== this.gen) {
           stopTracks(stream);
           return;
         }
         if (this.source) stopTracks(this.source);
-        if (!this.adopt(stream)) return this.fail("audio_failed");
+        if (!this.adopt(stream)) return this.fail("audio_failed", true);
       }
       const source = this.source!;
       let graph: CaptureGraph;
@@ -353,6 +399,7 @@ export class AudioFrontEnd {
     if (this.report.state === "listening_local") return;
     this.deviceId = this.track.getSettings?.().deviceId ?? this.deviceId;
     this.endedRetried = false;
+    this.resetInputRecovery();
     this.setState("listening_local", null);
     this.events.listening(this.deviceId, how);
   }
@@ -382,17 +429,20 @@ export class AudioFrontEnd {
     this.source = null;
     this.track = null;
     if (this.wanted) {
+      this.inputInterrupted = true;
       if (this.deps.mic?.preferred() && !this.endedRetried) this.endedRetried = true;
       else this.endedPending = true;
     }
     this.sync("reclaim");
   }
 
-  private fail(reason: WakeErrorReason): void {
+  private fail(reason: WakeErrorReason, transientInputError = false): void {
+    if (reason !== "device_ended" && !transientInputError) this.resetInputRecovery();
     this.invalidate();
     this.stopGraph();
     if (this.leases.length === 0) this.stopSource();
     this.setState("error", reason);
+    this.scheduleInputRetry();
   }
 
   private invalidate(): void {
