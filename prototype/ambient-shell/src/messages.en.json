@@ -1047,5 +1047,7 @@
   "日夜間設定沒有保存：{0}": "Day/night settings were not saved: {0}",
   "日夜間模式": "Day/night mode",
   "自動：依夜間時段 {0}:00–{1}:00 與各裝置的鏡頭": "Automatic: by the night hours {0}:00–{1}:00 and each device's camera",
-  "這個核心不支援手動切換日夜間模式": "This core does not support switching day/night mode manually"
+  "這個核心不支援手動切換日夜間模式": "This core does not support switching day/night mode manually",
+  "Pi 夜間閒置 5 分鐘關螢幕": "Turn the Pi screen off after 5 idle minutes at night",
+  "夜間模式時，Pi 等終端機 5 分鐘沒人碰、也沒有對話或任務，就關掉螢幕；碰一下螢幕、按鍵或喚醒 Nous 就亮回來（叫醒螢幕的那一下不算點擊）。需要 Pi 套件的 aios-display；Mac 視窗不受影響。所有畫面共用。": "In night mode, when a terminal such as the Pi has not been touched for 5 minutes and has no conversation or task, its screen turns off; touch the screen, press a key or wake Nous to turn it back on (the touch that wakes the screen is not a click). Needs aios-display from the Pi package; the Mac window is not affected. Shared by every screen."
 }

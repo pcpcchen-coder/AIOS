@@ -179,8 +179,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "5a56dcc2f148a8f8298175c476044a2d50068ff240ab349b53029c8dd51fa253",
-      "translationSha256": "a63bd338525db6455f711e039200250d929f86f5a7d87c1cf45e0920105088a2"
+      "sourceSha256": "8289654e9de4cf03e047a3c81db33d5432acd2dd82c68ff6fe1dc9d397883634",
+      "translationSha256": "53c45de2ea5fe1a3677c60b927c86dedb92646b716380ece744d1ce502187f64"
     },
     {
       "source": "docs/README.md",
@@ -291,8 +291,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "68d4b96442abd4db14be353cd2399715a2feb124668f874a6af3e98e9ffe5bf3",
-      "translationSha256": "27f9f8f2bf5ca96ce4e4c4988b8adac0a5adbcfa067ce26a71e72df070724044"
+      "sourceSha256": "9ce35b46cb7e79e967c1fbfca0cb6351529e83c3d2090ed57b82c7730201a51b",
+      "translationSha256": "553fcc4d13617f60300f822640e12d34dd4c57130e5bc88f2b5e0941c54d18fb"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -403,8 +403,8 @@
       "source": "docs/validation/day-night-mode-2026-11-08.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/day-night-mode-2026-11-08.en.md",
-      "sourceSha256": "8f120cf429ab046a38b1dfdb9e68f9c1059936dc44f4fecebb19d2871806cb67",
-      "translationSha256": "083ba26db8d830f2c8c0bf931e1f99bb40f0a6dc4b6a24fd379168b5130a2bdf"
+      "sourceSha256": "9d888d57303333806623b5a584d039fb8cc5dfb43b3613948f5dc2c77f727feb",
+      "translationSha256": "bcb73154aee0e846a42be7ab261d270eb744aaa2898072513b3e3706598b6419"
     },
     {
       "source": "docs/validation/day-night-volume-2026-11-07.md",
@@ -907,8 +907,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "2e23ffffa22e35d8e0152edc5337a3778afc68777f6c7d7b5f2c317656632539",
-      "translationSha256": "671c41a96911d36a2f5907fe58d7d3226f12fa19b836631b73af3ac14cfce764"
+      "sourceSha256": "766754f355bde08d82c659e274c2dfa48d11f549eeae0cc2197a564175eacd7a",
+      "translationSha256": "51233f7de01a20e35fca243390ee7a67c66eddc3e6902e82dd706b609cd9b746"
     }
   ]
 }

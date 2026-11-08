@@ -56,6 +56,10 @@ done
 rm -rf "${AIOS_SHARE_DIR:?}/bin" "${AIOS_SHARE_DIR:?}/lib"
 systemctl --user daemon-reload >/dev/null 2>&1 || true
 
+if [[ -e "$AIOS_UDEV_RULE" ]]; then
+  sudo rm -f "$AIOS_UDEV_RULE"
+fi
+
 if [[ -f "$AIOS_LINGER_MARKER" ]]; then
   sudo loginctl disable-linger "$user_name"
   rm -f "$AIOS_LINGER_MARKER"

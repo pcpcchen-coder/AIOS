@@ -174,6 +174,18 @@ install_files() {
   install -m 644 "$KIT_DIR/autostart/aios-kiosk.desktop" "$AIOS_AUTOSTART_FILE"
 }
 
+# DN-3: the official DSI touch display exposes its backlight in /sys/class/backlight, writable only by root.
+# This rule gives the video group (the desktop user is a member on Raspberry Pi OS) write access to bl_power and
+# brightness, so aios-display can switch the backlight without sudo. HDMI screens use wlr-randr/xset instead.
+install_backlight_rule() {
+  step "允許 video 群組開關 DSI 螢幕背光（udev 規則）" "Letting the video group switch the DSI backlight (udev rule)"
+  printf '%s\n' \
+    '# AIOS Pi terminal (aios-display): video group may switch the display backlight.' \
+    'SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp video /sys%p/bl_power /sys%p/brightness", RUN+="/bin/chmod g+w /sys%p/bl_power /sys%p/brightness"' |
+    sudo tee "$AIOS_UDEV_RULE" >/dev/null
+  sudo udevadm trigger --subsystem-match=backlight --action=add || true
+}
+
 enable_linger() {
   if [[ "$(loginctl show-user "$user_name" -p Linger 2>/dev/null || true)" == "Linger=yes" ]]; then
     return
@@ -190,6 +202,7 @@ start_services() {
   # restart, not start: a re-run with a new port or host must replace the running forward.
   systemctl --user restart aios-tunnel.service
   systemctl --user try-restart aios-kiosk.service
+  systemctl --user try-restart aios-display.service
   if [[ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]]; then
     "$AIOS_SHARE_DIR/bin/aios-session-start"
   else
@@ -218,6 +231,7 @@ ensure_key
 verify_host_key
 ((skip_copy_id)) || authorize_key
 install_files
+install_backlight_rule
 enable_linger
 start_services
 next_steps

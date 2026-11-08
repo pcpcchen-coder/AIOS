@@ -28,7 +28,8 @@ Kit contents:
 | `terminal.conf.example` | Config template with no private values |
 | `bin/aios-tunnel` | autossh tunnel (run by `aios-tunnel.service`) |
 | `bin/aios-kiosk` | Waits for the core, then opens Chromium full screen (run by `aios-kiosk.service`) |
-| `bin/aios-session-start` | On desktop login, hands the display environment to systemd and starts `aios-kiosk.service` |
+| `bin/aios-session-start` | On desktop login, hands the display environment to systemd and starts `aios-kiosk.service` and `aios-display.service` |
+| `bin/aios-display` | Night screen off: reads the core over the tunnel every 2 s and turns the screen off or on as the Pi page decides (run by `aios-display.service`) |
 | `bin/aios-doctor` | Diagnostics with one PASS / WARN / FAIL / SKIP line per check |
 | `systemd/`, `autostart/` | User services and the desktop autostart entry |
 | `tests/dry-run.sh` | Dry-run test with fake commands that runs in a container; CI and `scripts/verify-aios.mjs` run it |
@@ -136,6 +137,28 @@ Google Photos (MEMO-2): on the Pi page, "Settings" → "Memories" → "Pick from
 ## Clock & weather corner
 
 By default the top-right corner of the Pi screen shows the time, date, weekday, temperature and weather (a read-out only; it cannot be tapped). Time uses the time zone the Mac core gives (the weather place's time zone, or the Mac's system time zone without a place), not the Pi's own time zone; when the Pi clock is more than 60 s off the Mac, the page uses the Mac core's time, but it is still worth confirming with `timedatectl status` that the Pi's NTP is synchronised. Weather comes from the Mac core over the SSH tunnel (Open-Meteo, place as the "Proactive briefing" weather place); the Pi never connects to Open-Meteo directly. When it cannot be retrieved the corner says so (「天氣暫時無法取得」, "Weather is unavailable right now"). Switch it off with "Clock & weather corner" → "Pi terminal" in the Mac menu bar or the settings page. Details are in the [clock & weather validation](../../docs/validation/pi-clock-weather-2026-11-07.en.md) (**not verified on a real Pi**).
+
+<a id="night-screen-off"></a>
+## Night screen off
+
+Since 2026-11-08 (DN-3, [validation](../../docs/validation/day-night-mode-2026-11-08.en.md), **not verified on a real Pi**):
+
+- **When it turns off**: in night mode (night hours, a manual switch or a dark room seen by the camera), when the Pi page has not been touched for 5 minutes and has no conversation, listening, speech, task or open view, the screen turns off.
+- **How it comes back**: touch the screen, press a key, or start a conversation with the wake word, and the screen comes back within 2 s. The touch that wakes the screen is not a click, so it neither starts a conversation nor opens a view.
+- **Who decides, who acts**: the Pi page decides and reports to the Mac core; `aios-display` reads `GET /api/terminal/display?terminal=rpi4` through the SSH tunnel every 2 s and applies it.
+- **When in doubt, on**: if the core cannot be reached, the page has not reported for 30 s, or the service stops, the screen is turned on, so it never gets stuck dark.
+- **Toggle**: "Turn the Pi screen off after 5 idle minutes at night" on the settings page; on by default and shared by every screen.
+
+The method is picked automatically in this order (or forced with `AIOS_DISPLAY_METHOD=backlight|wlr-randr|xset|none` on `aios-display.service`):
+
+| Method | Screen | Permission | Wake by touch |
+|---|---|---|---|
+| `backlight` | Official DSI touch display (`/sys/class/backlight/*/bl_power`) | `install.sh` uses sudo to install the udev rule `/etc/udev/rules.d/90-aios-backlight.rules`, which lets the `video` group (the Raspberry Pi OS desktop user is a member by default) write `bl_power` and `brightness` | Yes (only the backlight turns off; touch keeps working) |
+| `wlr-randr` | HDMI or DSI under Wayland (labwc) | No extra permission | Not always: with the output off, touch may not arrive, so use the wake word or a keyboard |
+| `xset` | X11 desktop | No extra permission | Depends on the screen |
+| `none` | None of the above found | — | The screen stays on, and `aios-doctor` shows a WARN |
+
+The "night screen off" line of `aios-doctor` shows the method and the service state. Turning the screen off does not end realtime voice (see the next section). Uninstalling also removes the udev rule.
 
 <a id="realtime-cost-guard"></a>
 ## Realtime voice cost guard

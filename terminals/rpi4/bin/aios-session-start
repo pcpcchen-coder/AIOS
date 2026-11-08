@@ -5,3 +5,5 @@ set -euo pipefail
 # desktop autostart entry hands the display environment to the user manager and starts the kiosk.
 systemctl --user import-environment DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_RUNTIME_DIR 2>/dev/null || true
 systemctl --user start aios-kiosk.service
+# DN-3: screen off at night; needs the same display environment.
+systemctl --user start aios-display.service

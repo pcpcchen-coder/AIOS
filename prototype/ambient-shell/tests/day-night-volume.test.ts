@@ -25,8 +25,8 @@ describe("night hours", () => {
 
   it("parses saved prefs, falling back per field", () => {
     expect(parseDayNightPrefs(null)).toEqual(DEFAULT_DAY_NIGHT_PREFS);
-    expect(parseDayNightPrefs({ night_start_h: 21, night_end_h: 24, use_camera: "yes" })).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: true, night_effects: true });
-    expect(parseDayNightPrefs({ night_start_h: 0, night_end_h: 6.5, use_camera: false })).toEqual({ night_start_h: 0, night_end_h: 7, use_camera: false, night_effects: true });
+    expect(parseDayNightPrefs({ night_start_h: 21, night_end_h: 24, use_camera: "yes" })).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: true, night_effects: true, screen_off: true });
+    expect(parseDayNightPrefs({ night_start_h: 0, night_end_h: 6.5, use_camera: false })).toEqual({ night_start_h: 0, night_end_h: 7, use_camera: false, night_effects: true, screen_off: true });
   });
 });
 
@@ -139,9 +139,9 @@ describe("VoiceVolume day/night", () => {
   it("saves day/night prefs", () => {
     const storage = memoryStorage();
     const v = new VoiceVolume(storage);
-    expect(v.setPrefs({ night_start_h: 21, use_camera: false })).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false, night_effects: true });
-    expect(new VoiceVolume(storage).prefs).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false, night_effects: true });
-    expect(JSON.parse(storage.data.get(DAY_NIGHT_KEY)!)).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false, night_effects: true });
+    expect(v.setPrefs({ night_start_h: 21, use_camera: false })).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false, night_effects: true, screen_off: true });
+    expect(new VoiceVolume(storage).prefs).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false, night_effects: true, screen_off: true });
+    expect(JSON.parse(storage.data.get(DAY_NIGHT_KEY)!)).toEqual({ night_start_h: 21, night_end_h: 7, use_camera: false, night_effects: true, screen_off: true });
   });
 
   it("the tool output names the period and says when it is not the one in use", () => {
