@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T13:12:50.661Z",
-  "updated_at": "2026-11-09T13:47:00.123Z",
+  "updated_at": "2026-11-09T13:48:39.454Z",
   "ended_at": null,
   "steps": [
     {
@@ -77,10 +77,10 @@
     {
       "id": "pr",
       "title": "pr",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-11-09T13:47:00.122Z",
-      "ended_at": null,
-      "note": "8 review findings fixed; 3143 tests; verify-aios PASS; headless Mac+Pi ring re-run",
+      "ended_at": "2026-11-09T13:48:39.454Z",
+      "note": "PR #133 merged after green CI",
       "evidence": []
     }
   ],
@@ -175,6 +175,13 @@
       "step_id": "pr",
       "status": "running",
       "note": "8 review findings fixed; 3143 tests; verify-aios PASS; headless Mac+Pi ring re-run"
+    },
+    {
+      "at": "2026-11-09T13:48:39.454Z",
+      "type": "step_updated",
+      "step_id": "pr",
+      "status": "passed",
+      "note": "PR #133 merged after green CI"
     }
   ],
   "provenance": "Agent self-reported"
