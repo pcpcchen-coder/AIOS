@@ -89,10 +89,10 @@ import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts
 import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
 import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
-import { DAY_NIGHT_KEY, dayNightReasonText, VOICE_VOLUME_TEXT, voiceVolume } from "./voice-volume.ts";
+import { DAY_NIGHT_KEY, dayNightReasonText, loadLumaThresholds, saveLumaThresholds, VOICE_VOLUME_TEXT, voiceVolume } from "./voice-volume.ts";
 import { SettingsEntry, settingsEntryEnabled } from "./settings-entry.ts";
 import { voiceVolumeOutput } from "../shared/voice-volume.ts";
-import { activeOverride, currentLight, dayNightToolOutput, decideDayNight, INITIAL_LIGHT, nextLight, nightEffects, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type DayNightToolRequest, type LightState, type NightEffects } from "../shared/day-night.ts";
+import { activeOverride, currentLight, dayNightToolOutput, decideDayNight, INITIAL_LIGHT, nextLight, nightEffects, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type DayNightToolRequest, type LightState, type LumaThresholds, type NightEffects } from "../shared/day-night.ts";
 import { LightMeter, type LightWorkerLike } from "./light-meter.ts";
 import type { VoiceVolumePanelState } from "./views.ts";
 import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
@@ -1560,14 +1560,24 @@ let pipeline: SensePipeline | null = null;
 
 // VOL-2：日間／夜間的對話音量。每分鐘依時段重算；鏡頭有開而且設定允許時，每 30 秒量一次環境亮度（只拿回一個數字）。
 let lightState: LightState = INITIAL_LIGHT;
+/** LUX-1：這台裝置的亮暗門檻（設定頁可調，存在這個頁面）。 */
+let lumaThresholds = loadLumaThresholds();
 const lightMeter = new LightMeter({
   sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null),
   createWorker: () => new Worker(new URL("./sense/light-worker.ts", import.meta.url), { type: "module" }) as unknown as LightWorkerLike,
   onLuma: (luma) => {
-    lightState = nextLight(lightState, luma, Date.now());
+    lightState = nextLight(lightState, luma, Date.now(), lumaThresholds);
     updateDayNight();
   },
 });
+
+/** LUX-1：改門檻。保存後用最近一次讀值重新判斷（暗一樣要連續 1 分鐘才算，亮立即定案）。 */
+function setLumaThresholds(next: LumaThresholds): void {
+  lumaThresholds = saveLumaThresholds(next);
+  const { luma, at } = lightState;
+  lightState = luma !== null && at !== null ? nextLight(INITIAL_LIGHT, luma, at, lumaThresholds) : INITIAL_LIGHT;
+  updateDayNight();
+}
 
 /** DN-2：日夜間設定以核心（settings.day_night，Mac 與 Pi 共用）為準；核心沒有給（舊核心、測試）時用這個頁面保存的。 */
 function dayNightPrefs(): DayNightPrefs {
@@ -3110,6 +3120,15 @@ const actions: ViewActions = {
     voiceVolume.change(request);
     render();
   },
+  setLumaThresholds(next) {
+    const requestId = userRequest();
+    try {
+      setLumaThresholds(next);
+      render();
+    } catch (err) {
+      dispatch({ type: "show.settings", request_id: requestId, message: msg`門檻沒有保存：${(err as Error).message}` });
+    }
+  },
   setDayNight(patch) {
     const requestId = userRequest();
     void patchDayNight(patch).then(
@@ -3826,7 +3845,7 @@ function renderSurface(): void {
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "settings"
-      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${gpuDrawing}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置或整合狀態（SP-1）變了也重畫
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${gpuDrawing}:${voiceVolumeKey()}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置、整合狀態（SP-1）或這台裝置的音量與亮暗門檻變了也重畫
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
@@ -4158,6 +4177,12 @@ onLocaleChange(() => {
   render();
 });
 
+/** 設定頁重畫用：這台裝置的音量、模式與亮暗門檻（不含每 30 秒變動的亮度數字，免得選單打開時被重畫關掉）。 */
+function voiceVolumeKey(): string {
+  const panel = voiceVolumePanel();
+  return JSON.stringify({ ...panel, light: panel.light ? panel.light.level : null });
+}
+
 /** VOL-2：設定頁「這台裝置的對話音量」的狀態。 */
 function voiceVolumePanel(): VoiceVolumePanelState {
   const prefs = dayNightPrefs();
@@ -4170,6 +4195,7 @@ function voiceVolumePanel(): VoiceVolumePanelState {
     override: dayNightOverride(),
     shared: !!settings?.day_night,
     light: prefs.use_camera && fresh && lightState.luma !== null ? { luma: lightState.luma, level: lightState.level } : null,
+    thresholds: lumaThresholds,
   };
 }
 

@@ -1136,5 +1136,11 @@
   "時間到後響多久；沒人停就自動停止並記錄。": "How long it rings once due; if nobody stops it, it stops by itself and this is logged.",
   "到期前 30 秒畫面開始倒數，最後 10 秒每秒「滴」一聲（只在會響的那台）。": "30 seconds before it is due the screen starts counting down, with a tick every second for the last 10 seconds (only on the device that will ring).",
   "鈴聲": "Ringtone",
-  "「{0}」快到了": "“{0}” is almost due"
+  "「{0}」快到了": "“{0}” is almost due",
+  "低於這個值算暗": "Dark below",
+  "高於這個值算亮": "Bright above",
+  "門檻恢復預設（{0}／{1}）": "Reset thresholds ({0}/{1})",
+  "數字是鏡頭畫面的平均亮度（0–255）。先看上面的「鏡頭亮度」讀數：開燈與關燈各記一個數字，把「算暗」設在關燈值之上、「算亮」設在開燈值之下，中間留一段不切換。只存在這台裝置。": "The numbers are the camera picture's average brightness (0–255). Watch the \"Camera brightness\" reading above: note one number with the lights on and one with them off, set \"Dark below\" above the lights-off value and \"Bright above\" below the lights-on value, and leave a gap between them where nothing switches. Saved on this device only.",
+  "門檻沒有保存：{0}": "Thresholds were not saved: {0}",
+  "門檻不合法：算暗要比算亮至少低 5": "Invalid thresholds: \"dark\" must be at least 5 below \"bright\""
 }

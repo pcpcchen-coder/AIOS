@@ -25,7 +25,7 @@ import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, Vo
 import { dayNightReasonText, VOICE_VOLUME_TEXT } from "./voice-volume.ts";
 import { WAKE_THRESHOLD_OFFSETS, type WakePrefsPatch, type WakeSettingsView } from "../shared/wake.ts";
 import { VOICE_VOLUME_DEFAULT, VOICE_VOLUME_MAX, VOICE_VOLUME_MIN, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
-import { NIGHT_VOLUME_DEFAULT, type DayNightDecision, type DayNightMode, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type LightLevel } from "../shared/day-night.ts";
+import { brightOptions, darkOptions, DEFAULT_LUMA_THRESHOLDS, NIGHT_VOLUME_DEFAULT, type LumaThresholds, type DayNightDecision, type DayNightMode, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type LightLevel } from "../shared/day-night.ts";
 import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, rendererText, type FrameStats, type PerformanceProfile, type RendererReadout } from "./performance.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
@@ -91,6 +91,8 @@ export interface ViewActions {
   setVoiceVolume?(request: VoiceVolumeRequest): void;
   /** VOL-2：夜間時段與「用鏡頭亮度判斷」（立即套用並保存在這個頁面）。 */
   setDayNight?(patch: DayNightPatch): void;
+  /** LUX-1：這台裝置的鏡頭亮暗門檻。 */
+  setLumaThresholds?(next: LumaThresholds): void;
   /** 喚醒偏好（目前只有設定頁的「喚醒詞門檻」；寫入核心的 wake.json）。 */
   updateWake?(patch: WakePrefsPatch): void;
 }
@@ -427,6 +429,8 @@ export interface VoiceVolumePanelState {
   prefs: DayNightPrefs;
   /** 夠新的鏡頭讀值（設定關閉、鏡頭沒開或太舊時 null）。 */
   light: { luma: number; level: LightLevel | null } | null;
+  /** LUX-1：這台裝置的亮暗門檻（沒給時不顯示調整）。 */
+  thresholds?: LumaThresholds;
   /** DN-2：還有效的手動切換。 */
   override?: DayNightOverride | null;
   /** DN-2：設定存在核心（Mac 與 Pi 共用）；false 時沒有手動切換按鈕。 */
@@ -656,6 +660,7 @@ export function renderVoiceVolumeSettings(state: VoiceVolumePanelState, actions:
       state.shared && h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(VOICE_VOLUME_TEXT.screenOff)), h("span", { class: "muted small" }, t(VOICE_VOLUME_TEXT.screenOffNote))), screenButton),
     ),
     h("p", { class: "muted small", "data-light": "" }, lightLine(state)),
+    state.thresholds && thresholdRows(state.thresholds, actions),
     h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.hoursNote)),
     h("p", { class: "muted small" }, t(VOICE_VOLUME_TEXT.note)),
   );
@@ -741,6 +746,39 @@ function manualRow(state: VoiceVolumePanelState, actions: ViewActions): HTMLElem
       make("night", { override: "night", scope: "now" }),
       make("tonightDay", { override: "day", scope: "tonight" }),
     ),
+    h("p", { class: "muted small" }, t(text.note)),
+  );
+}
+
+/** LUX-1：兩個門檻下拉選單（選項保證算暗比算亮至少低 5）與恢復預設。 */
+function thresholdRows(th: LumaThresholds, actions: ViewActions): HTMLElement {
+  const text = VOICE_VOLUME_TEXT.thresholds;
+  const select = (label: string, key: "dark" | "bright", options: number[]) => {
+    const el = h("select", { "aria-label": t(label), [`data-luma-${key}`]: "" }) as HTMLSelectElement;
+    for (const v of options) {
+      const opt = h("option", { value: String(v) }, String(v)) as HTMLOptionElement;
+      if (v === th[key]) {
+        opt.setAttribute("selected", "");
+        opt.selected = true;
+      }
+      el.append(opt);
+    }
+    el.disabled = !actions.setLumaThresholds;
+    el.addEventListener("change", () => {
+      const v = Number(el.value);
+      if (v !== th[key]) actions.setLumaThresholds?.({ ...th, [key]: v });
+    });
+    return h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t(label))), el);
+  };
+  const isDefault = th.dark === DEFAULT_LUMA_THRESHOLDS.dark && th.bright === DEFAULT_LUMA_THRESHOLDS.bright;
+  const reset = button(t(text.reset, String(DEFAULT_LUMA_THRESHOLDS.dark), String(DEFAULT_LUMA_THRESHOLDS.bright)), () => actions.setLumaThresholds?.({ ...DEFAULT_LUMA_THRESHOLDS }), "btn--ghost");
+  reset.setAttribute("data-luma-reset", "");
+  reset.disabled = !actions.setLumaThresholds || isDefault;
+  return h(
+    "div",
+    {},
+    h("ul", { class: "pref-list" }, select(text.dark, "dark", darkOptions(th.bright)), select(text.bright, "bright", brightOptions(th.dark))),
+    h("div", { class: "actions" }, reset),
     h("p", { class: "muted small" }, t(text.note)),
   );
 }
