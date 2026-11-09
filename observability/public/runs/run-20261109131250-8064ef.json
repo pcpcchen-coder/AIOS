@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T13:12:50.661Z",
-  "updated_at": "2026-11-09T13:31:37.670Z",
+  "updated_at": "2026-11-09T13:31:42.270Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,8 +59,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-11-09T13:31:42.270Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -140,6 +140,13 @@
       "step_id": "implement",
       "status": "passed",
       "note": "typecheck, 3140 tests, headless Chromium Mac+Pi ring run"
+    },
+    {
+      "at": "2026-11-09T13:31:42.270Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
