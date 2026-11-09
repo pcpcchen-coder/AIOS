@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T22:40:46.148Z",
-  "updated_at": "2026-11-09T23:00:59.353Z",
+  "updated_at": "2026-11-09T23:24:07.798Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,10 +41,10 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-11-09T23:00:59.353Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-11-09T23:24:07.798Z",
+      "note": "Owner subagent delivered; uncommitted",
       "evidence": []
     },
     {
@@ -124,6 +124,13 @@
       "step_id": "implement",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-11-09T23:24:07.798Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "passed",
+      "note": "Owner subagent delivered; uncommitted"
     }
   ],
   "provenance": "Agent self-reported"
