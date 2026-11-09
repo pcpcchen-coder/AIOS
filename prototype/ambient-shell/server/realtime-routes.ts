@@ -1018,6 +1018,14 @@ export class RealtimeSessions {
     return null;
   }
 
+  /** ALARM-1：開始這個工作階段的頁面（"main" 或終端機識別碼）；已結束時 null。 */
+  pageOf(sessionId: string | null): string | null {
+    if (!sessionId) return null;
+    if (this.live?.id === sessionId) return this.live.page;
+    if (this.ga?.id === sessionId) return this.ga.page;
+    return null;
+  }
+
   /** 驗證工作階段的擁有者（給 web-search 等附帶 session_id 的請求用）；已結束或撤銷的工作階段一律 false。 */
   isOwner(sessionId: string, owner: string): boolean {
     return (this.live?.id === sessionId && this.live.owner === owner) || (this.ga?.id === sessionId && this.ga.owner === owner);

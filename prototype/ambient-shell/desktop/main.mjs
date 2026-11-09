@@ -157,6 +157,12 @@ async function startCore() {
       terminalStatus = status;
       rebuildMenu();
     },
+    // ALARM-1：定時器開始響時發系統通知（主視窗隱藏或頁面沒出聲時的備援；通知本身有系統提示音）；
+    // 有定時器在跑或正在響時阻止系統閒置睡眠（螢幕仍可關），手動睡眠或蓋上仍會停住核心，醒來後補響或記錄錯過。
+    alarms: {
+      onRingStart: (ring) => showAlarmNotification(ring),
+      onAwakeChange: (needed) => syncAlarmBlocker(needed),
+    },
     identity: {
       dir: identityDir,
       secretBox: identitySecretBox,
@@ -615,6 +621,32 @@ function syncServiceBlocker() {
     powerSaveBlocker.stop(serviceBlocker);
     serviceBlocker = null;
   }
+}
+
+// ALARM-1：和服務模式分開的 blocker（兩者各自開關，任一個需要就不閒置睡眠）。
+let alarmBlocker = null;
+function syncAlarmBlocker(needed) {
+  if (needed && alarmBlocker === null) alarmBlocker = powerSaveBlocker.start("prevent-app-suspension");
+  else if (!needed && alarmBlocker !== null) {
+    powerSaveBlocker.stop(alarmBlocker);
+    alarmBlocker = null;
+  }
+}
+
+/** ALARM-1：響鈴的系統通知（只有名稱與是否晚響；按通知打開主視窗）。 */
+function showAlarmNotification(ring) {
+  // 只在 Mac 也要響時通知（Pi 上建立、Pi 在線的定時器只在 Pi 響）。
+  if (!Notification.isSupported() || (ring.targets !== "all" && !ring.targets.includes("main"))) return;
+  const title = ring.label ? t("「{0}」時間到", ring.label) : t("定時器時間到");
+  const body = ring.late_ms >= 60_000 ? t("晚了 {0} 分鐘才響（Mac 睡眠或 Nous 沒在執行）。", Math.round(ring.late_ms / 60_000)) : t("在 Nous 畫面按「停止」或舉起手掌停止。");
+  const note = new Notification({ title, body, silent: false });
+  note.on("click", () => {
+    if (win && !win.isDestroyed()) {
+      win.show();
+      win.focus();
+    }
+  });
+  note.show();
 }
 
 /** 選單列用的終端狀態：每次直接問核心（逾時計時器晚到時也不會沿用舊的「已連線」）。 */
@@ -1471,6 +1503,9 @@ app.whenReady().then(async () => {
   powerMonitor.on("lock-screen", () => notifyPower("lock"));
   powerMonitor.on("suspend", () => notifyPower("suspend"));
   powerMonitor.on("resume", () => notifyPower("resume"));
+  // ALARM-1：醒來立刻檢查睡眠中到期的定時器（補響或記錄錯過），不等下一次排程。
+  powerMonitor.on("resume", () => core?.alarms?.tick());
+  powerMonitor.on("unlock-screen", () => core?.alarms?.tick());
   powerMonitor.on("unlock-screen", () => notifyPower("unlock"));
 
   syncServiceBlocker();

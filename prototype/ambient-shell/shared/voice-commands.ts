@@ -334,7 +334,19 @@ export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
     needs: { text: "即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）", live: "realtime_home" } },
 };
 
+/**
+ * ALARM-1（George 2026-11-09）：定時器是核心內建的整合工具（app__timer__*），兩條即時語音路徑都有，由模型判斷何時用。
+ * 不是本機固定語句；本機只有「鈴響時停止」的固定語句（shared/alarm.ts matchRingStop，見 CONTROLS 的 ring-stop）。
+ */
+export const TIMER_ASK: readonly AskTheAi[] = [
+  { try: ["計時 10 分鐘", "泡麵 3 分鐘", "5 分鐘後叫我"], does: "設定定時器（可以取名字，可以同時好幾個）；時間到時在建立的那台裝置響（那台不在線時每個畫面都響），右下角按需顯示倒數",
+    needs: { text: "即時語音，設定頁「鬧鐘與定時器」開著（預設開）", live: "realtime_available" } },
+  { try: ["泡麵還剩多久", "有哪些定時器"], does: "說各個定時器剩下的時間", needs: { text: "即時語音", live: "realtime_available" } },
+  { try: ["暫停泡麵", "繼續", "再加 5 分鐘", "取消雞蛋的定時器", "全部取消"], does: "暫停、繼續、延長或取消；有好幾個而沒說是哪一個時，AI 會問", needs: { text: "即時語音", live: "realtime_available" } },
+];
+
 export const CONTROLS: readonly Control[] = [
+  { id: "ring-stop", how: "定時器響鈴時", does: "按「停止」、Esc 或空白鍵、舉起張開的手掌（需要鏡頭與「手掌停止播報」），或打字／通話中整句說「停」「好了」「知道了」「關掉」就停止響鈴（每個畫面一起停）；鈴聲期間喚醒詞暫停（避免鈴聲誤觸），沒有通話時不能用說的停止。響 5 分鐘沒人停會自動停止並記錄" },
   { id: "esc", how: "Esc", does: "即時語音 Nous 說話時：打斷（ChatGPT 方案路徑沒有取消回覆的指令，只會把這段回覆靜音）；即時語音中有畫面開著：只收起畫面；語音模式念回覆時：打斷；其他時候：收起畫面並結束語音" },
   { id: "voice-pill", how: "點右上角的語音指示", does: "結束語音模式或即時語音" },
   { id: "palm", how: "舉起張開的手掌", does: "停止 Nous 說話，不取消任務（需要鏡頭與「手掌停止播報」）" },
@@ -442,6 +454,8 @@ export function commandSections(ctx: CommandContext | null): TableSection[] {
         const row = ASK_THE_AI[tool];
         return { id: `ai-${tool}`, cells: [quote(row.try), row.does, `需要${row.needs.text}`], unmet: unmet(row.needs.live, ctx) };
       }) },
+    { id: "timers", title: "定時器（即時語音，由模型判斷，不保證）", intro: "定時器由 Nous 核心保存與排程，重新啟動後還在；Mac 睡眠時核心會停住，醒來後 30 分鐘內補響並說晚了多久，超過只記錄錯過。", columns: ["可以這樣問", "AI 可能會做什麼", "條件"],
+      rows: TIMER_ASK.map((row, i) => ({ id: `timer-${i}`, cells: [quote(row.try), row.does, `需要${row.needs.text}`], unmet: unmet(row.needs.live, ctx) })) },
     { id: "controls", title: "不用說話", intro: null, columns: ["操作", "作用"],
       rows: CONTROLS.map((c) => ({ id: c.id, cells: [c.how, c.seconds ? `${c.does}；${secondsText(c.seconds, ctx)}` : c.does], unmet: null })) },
   ];

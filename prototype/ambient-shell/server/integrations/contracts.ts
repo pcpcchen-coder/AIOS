@@ -33,6 +33,8 @@ export interface ExecutionContext {
   /** 核心產生的請求 ID（不含使用者內容）；有副作用的 Adapter 用它當 idempotency key。 */
   requestId: string;
   signal: AbortSignal;
+  /** ALARM-1：開始這通即時語音的頁面（"main" 或終端機識別碼）；不知道時沒有。 */
+  page?: string;
 }
 
 export interface HealthReport {

@@ -116,6 +116,7 @@ describe("audio privacy (static)", () => {
       `${join("audio", "capture.ts")}: node.connect(mute).connect(ctx.destination);`,
       `${join("audio", "earcon.ts")}: osc.connect(gain).connect(ctx.destination);`,
       "processing-sound.ts: master.connect(ctx.destination);",
+      "alarm-sound.ts: s.connect(g).connect(c.destination);",
       "main.ts: const audio = new Audio();",
       "realtime.ts: const audio = new Audio();",
       `${join("speaker", "recorder.ts")}: node.connect(mute).connect(ctx.destination);`,
@@ -131,6 +132,11 @@ describe("audio privacy (static)", () => {
     expect(text(join("audio", "earcon.ts"))).toMatch(/void output\.sink\(ctx\)\.catch\(\(\) => undefined\)\.then\(\(\) => schedule\(ctx\)\);/);
     expect(text(join("audio", "index.ts"))).toMatch(/earcon: browserEarcon\(devices\.output\),/);
     expect(text("main.ts")).toMatch(/output: \{ sink: \(ctx\) => audioDevices\.sink\(ctx\), release: \(ctx\) => audioDevices\.release\(ctx\) \},/);
+    // ALARM-1 鈴聲：開始出聲前先 output.sink(c)（最多等 1 秒，導不好照系統預設），停止時 release；main.ts 注入 audioDevices
+    const ring = text("alarm-sound.ts");
+    expect(ring).toMatch(/await Promise\.race\(\[output\.sink\(c\)\.catch\(\(\) => undefined\)/);
+    expect(ring).toMatch(/output\?\.release\(c\);/);
+    expect(text("main.ts")).toMatch(/createSound: \(\) => browserRingSound\(\{ sink: \(ctx\) => audioDevices\.sink\(ctx\), release: \(ctx\) => audioDevices\.release\(ctx\) \}\),/);
     // 處理中提示音（George 2026-11-02）：開始出聲前先 output.sink(ctx)（等太久照系統預設），淡出後 release；main.ts 注入 audioDevices
     const cueSound = text("processing-sound.ts");
     expect(cueSound).toMatch(/ready = Promise\.race\(\[output\.sink\(ctx\)\.catch\(\(\) => undefined\)/);

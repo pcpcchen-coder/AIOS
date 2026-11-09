@@ -1,3 +1,4 @@
+import type { AlarmsView } from "./alarm.ts";
 import type { FaceTuningView } from "./face-tuning.ts";
 import type { Locale } from "./i18n.mjs";
 import type { CameraSettings } from "./sense.ts";
@@ -164,7 +165,8 @@ export interface SettingsView {
    * AIL-1（docs/18）：只有 NOUS_AIL=on 時才有。tools＝API key 路徑上由核心整合層執行的函式名稱（app__<service>__<action>）；
    * 頁面收到這些名稱的工具呼叫時轉交核心（POST /api/integrations/call），自己不執行。
    */
-  integrations?: { tools: string[] };
+  /** builtin_only：NOUS_AIL 關閉，只有核心內建工具（定時器）；頁面不顯示「App 整合」狀態。 */
+  integrations?: { tools: string[]; builtin_only?: true };
   /** VCR-2：只有核心註冊了 voice_relay（NOUS_AIL=on 且 NOUS_VCR=fake／mac）時才有（true）；設定頁據此畫「語音中繼（實驗）」診斷區。沒有註冊時沒有這個鍵。 */
   voice_relay?: boolean;
   /** PRO-1 主動提醒（招呼後接今天的天氣）：設定、實際地點與最近一次查天氣的狀態（不含天氣內容）。 */
@@ -175,6 +177,8 @@ export interface SettingsView {
   home_corner?: HomeCornerSettingsView;
   /** DN-2：核心共用的日夜間設定與手動切換（Mac 與 Pi 共用；鏡頭亮度各頁面自己量）。 */
   day_night?: DayNightSettingsView;
+  /** ALARM-1：定時器與響鈴（核心保存與排程；只有這個頁面要響的鈴 here 是 true）。 */
+  alarms?: AlarmsView;
   /** MEMO-1 回憶模式：設定與來源狀態（只有數量，不含檔名或路徑）。 */
   memories?: MemoriesSettingsView;
 }

@@ -12,6 +12,8 @@ export interface StatusBoardOptions {
   now?: () => number;
   timeoutMs?: number;
   cacheMs?: number;
+  /** ALARM-1：核心內建的 Adapter（定時器）不列在「App 整合」狀態（它不是外部服務）。 */
+  hidden?: ReadonlySet<string>;
 }
 
 export class IntegrationStatusBoard {
@@ -27,7 +29,7 @@ export class IntegrationStatusBoard {
   }
 
   async view(): Promise<IntegrationStatusView> {
-    const services = await Promise.all(this.registry.adapters().map((adapter) => this.service(adapter)));
+    const services = await Promise.all(this.registry.adapters().filter((adapter) => !this.options.hidden?.has(adapter.id)).map((adapter) => this.service(adapter)));
     return { services };
   }
 

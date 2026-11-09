@@ -1,3 +1,4 @@
+import type { AlarmsView } from "../shared/alarm.ts";
 import { TERMINAL_CAMERA_SCOPE } from "./terminal-camera.ts";
 import { WITHDRAWN_TEXT } from "./protected-tasks.ts";
 import { t, msg, getLocale, setLocale, useLocale, uiText } from "./i18n.ts";
@@ -53,6 +54,9 @@ export interface ViewActions {
   updateProactive?(patch: ProactivePrefsPatch): void;
   /** CLK-1「右上角時鐘與天氣」的兩個顯示開關。 */
   updateClock?(patch: ClockPrefsPatch): void;
+  /** ALARM-1：「鬧鐘與定時器」開關與清除（POST /api/settings/alarms、/api/alarms/clear）。 */
+  updateAlarms?(patch: { enabled?: boolean }): void;
+  clearAlarms?(): void;
   updateHomeCorner?(patch: HomeCornerPrefsPatch): void;
   /** MEMO-1「回憶模式」。 */
   updateMemories?(patch: MemoriesPrefsPatch): void;
@@ -508,9 +512,10 @@ export function renderSettings(
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.clock && renderClockSettings(settings.clock, actions),
+    settings.alarms && renderAlarmSettings(settings.alarms, actions),
     settings.home_corner && renderHomeCornerSettings(settings.home_corner, actions),
     settings.memories && renderMemoriesSettings(settings.memories, actions, false),
-    settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
+    settings.integrations && !settings.integrations.builtin_only && options.integrations && renderIntegrationStatus(options.integrations, actions),
     settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
     // 家人辨識只在 macOS App（加密保存需要 safeStorage）；瀏覽器版照實說不可用，不提供任何操作。
     settings.identity && !settings.identity.available && h("p", { class: "muted small" }, msg`家人辨識：${uiText(settings.identity.disabled_reason ?? "不可用")}`),
@@ -554,11 +559,12 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     // CLK-1：選單列「右上角時鐘與天氣」與這裡都能改，寫入同一個 clock.json。
     settings.clock && renderClockSettings(settings.clock, actions),
+    settings.alarms && renderAlarmSettings(settings.alarms, actions),
     // HOME-1：選單列「左上角家中狀態」與這裡都能改，寫入同一個 home-corner.json。
     settings.home_corner && renderHomeCornerSettings(settings.home_corner, actions),
     // MEMO-1：選單列「回憶模式」與這裡都能改，寫入同一個 memories.json。
     settings.memories && renderMemoriesSettings(settings.memories, actions, true),
-    settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
+    settings.integrations && !settings.integrations.builtin_only && integrations && renderIntegrationStatus(integrations, actions),
     settings.voice_relay === true && voiceRelay && renderVoiceRelay(voiceRelay, actions),
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
     footer(actions),
@@ -1122,6 +1128,34 @@ export function renderClockSettings(view: ClockSettingsView, actions: ViewAction
   toggle(CLOCK_TEXT.main, CLOCK_TEXT.mainNote, view.prefs.main, { main: !view.prefs.main });
   toggle(CLOCK_TEXT.terminal, CLOCK_TEXT.terminalNote, view.prefs.terminal, { terminal: !view.prefs.terminal });
   return h("section", { class: "camera-settings clock-settings" }, h("h3", {}, t(CLOCK_TEXT.group)), list, h("p", { class: "muted small" }, t(CLOCK_TEXT.note)));
+}
+
+/**
+ * ALARM-1「鬧鐘與定時器」（George 2026-11-09）：開關（關掉＝不提供工具、不排程、不響，已建立的保留）與「清除全部」。
+ * 定時器本身用說的建立；這裡只列出目前的定時器數量，不是常駐清單。
+ */
+export function renderAlarmSettings(view: AlarmsView, actions: ViewActions): HTMLElement {
+  const on = view.prefs.enabled;
+  const b = button(on ? "開" : "關", () => actions.updateAlarms?.({ enabled: !on }), on ? "btn--primary" : "");
+  b.setAttribute("aria-pressed", String(on));
+  b.setAttribute("aria-label", t("{0}：{1}", t("鬧鐘與定時器"), on ? t("開") : t("關")));
+  b.disabled = !actions.updateAlarms;
+  const clear = button("清除全部", () => actions.clearAlarms?.(), "btn--ghost");
+  clear.disabled = !actions.clearAlarms;
+  clear.setAttribute("data-alarm-clear", "");
+  const count = view.timers.length;
+  return h(
+    "section",
+    { class: "camera-settings alarm-settings" },
+    h("h3", {}, t("鬧鐘與定時器")),
+    h(
+      "ul",
+      { class: "pref-list" },
+      h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("鬧鐘與定時器")), h("span", { class: "muted small" }, t("用說的設定（「計時 10 分鐘」「泡麵 3 分鐘」）；時間到時在建立的那台響，那台不在線時每個畫面都響。關掉後不響，已建立的保留。"))), b),
+      h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("清除全部")), h("span", { class: "muted small" }, count ? t("目前有 {0} 個定時器；清除會一併停止響鈴與刪掉紀錄。", count) : t("刪掉所有定時器、響鈴與紀錄。"))), clear),
+    ),
+    h("p", { class: "muted small" }, t("響鈴的音量跟這台裝置的對話音量（日間／夜間）；{0} 秒內由小漸強，響 {1} 分鐘沒人停就自動停止並記錄。", view.prefs.ramp_s, Math.round(view.prefs.ring_s / 60))),
+  );
 }
 
 /** HOME-1「左上角家中狀態」：Mac 視窗與 Pi 終端機各一個開關；改了就保存（POST /api/settings/home-corner）。 */
