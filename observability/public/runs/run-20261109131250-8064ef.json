@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T13:12:50.661Z",
-  "updated_at": "2026-11-09T13:15:03.942Z",
+  "updated_at": "2026-11-09T13:15:08.509Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,8 +23,8 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-11-09T13:15:08.509Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -105,6 +105,13 @@
       "step_id": "how",
       "status": "passed",
       "note": "Read core (prefs-file, nous, app SSE, integrations), page (main, realtime-tools, earcon, guard, clock-corner, voice-volume), desktop power hooks"
+    },
+    {
+      "at": "2026-11-09T13:15:08.509Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
