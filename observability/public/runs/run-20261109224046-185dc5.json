@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T22:40:46.148Z",
-  "updated_at": "2026-11-09T23:00:54.680Z",
+  "updated_at": "2026-11-09T23:00:59.353Z",
   "ended_at": null,
   "steps": [
     {
@@ -41,8 +41,8 @@
     {
       "id": "implement",
       "title": "implement",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-11-09T23:00:59.353Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -117,6 +117,13 @@
       "step_id": "checkpoint",
       "status": "passed",
       "note": "Blocking: backend candidates shape. Single owner (code-coupled across shared/server/src). Shared state: none parallel."
+    },
+    {
+      "at": "2026-11-09T23:00:59.353Z",
+      "type": "step_updated",
+      "step_id": "implement",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
