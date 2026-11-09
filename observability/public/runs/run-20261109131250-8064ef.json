@@ -8,16 +8,16 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T13:12:50.661Z",
-  "updated_at": "2026-11-09T13:13:00.749Z",
+  "updated_at": "2026-11-09T13:15:03.942Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-11-09T13:13:00.749Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-11-09T13:15:03.942Z",
+      "note": "Read core (prefs-file, nous, app SSE, integrations), page (main, realtime-tools, earcon, guard, clock-corner, voice-volume), desktop power hooks",
       "evidence": []
     },
     {
@@ -98,6 +98,13 @@
       "step_id": "how",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-11-09T13:15:03.942Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "passed",
+      "note": "Read core (prefs-file, nous, app SSE, integrations), page (main, realtime-tools, earcon, guard, clock-corner, voice-volume), desktop power hooks"
     }
   ],
   "provenance": "Agent self-reported"
