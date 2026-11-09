@@ -14,7 +14,7 @@ import { createIntegrations, type Integrations } from "../server/integrations/in
 import { LiveToolCaller } from "../server/live-tool-caller.ts";
 import { MockExecutor } from "../server/mock-executor.ts";
 import { ProviderManager } from "../server/providers.ts";
-import { realtimeToolRules } from "../server/realtime.ts";
+import { buildLiveInstructions, realtimeToolRules } from "../server/realtime.ts";
 import type { RealtimeRoute, RouteCall } from "../server/realtime-routes.ts";
 import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
@@ -299,6 +299,17 @@ describe("app.timer.* tools (built in; no NOUS_AIL)", () => {
     const a = ail(c);
     expect(a.builtinOnly).toBe(true);
     expect(await a.status.view()).toEqual({ services: [] });
+  });
+
+  it("tells the live voice layer to hand off a timer request only when the timer tool is available", () => {
+    const { c } = center();
+    const a = ail(c);
+    const caps = { mcp: [], integrations: () => a.registry.functionSpecs("live") };
+    const instructions = buildLiveInstructions([], new Date(), caps);
+    expect(instructions).toMatch(/計時一分鐘.*一律交辦/);
+    expect(instructions).toContain("等核心回報成功才說已設定");
+    c.updatePrefs({ enabled: false });
+    expect(buildLiveInstructions([], new Date(), caps)).not.toContain("計時一分鐘");
   });
 
   it("start records the page that started the call; list reports remaining time; refused results carry candidates", async () => {
