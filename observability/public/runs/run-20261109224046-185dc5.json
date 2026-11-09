@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T22:40:46.148Z",
-  "updated_at": "2026-11-09T23:33:02.677Z",
+  "updated_at": "2026-11-09T23:33:06.858Z",
   "ended_at": null,
   "steps": [
     {
@@ -68,8 +68,8 @@
     {
       "id": "fix",
       "title": "fix",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-11-09T23:33:06.857Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -159,6 +159,13 @@
       "step_id": "review",
       "status": "passed",
       "note": "Independent review: 2 high (read-along ahead of audio; close timer during thinking), 6 medium, 5 low"
+    },
+    {
+      "at": "2026-11-09T23:33:06.857Z",
+      "type": "step_updated",
+      "step_id": "fix",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
