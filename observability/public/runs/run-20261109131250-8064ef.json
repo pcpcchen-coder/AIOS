@@ -8,14 +8,14 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T13:12:50.661Z",
-  "updated_at": "2026-11-09T13:12:50.661Z",
+  "updated_at": "2026-11-09T13:13:00.749Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-11-09T13:13:00.749Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -89,6 +89,13 @@
       "at": "2026-11-09T13:12:50.661Z",
       "type": "run_started",
       "step_id": null,
+      "status": "running",
+      "note": ""
+    },
+    {
+      "at": "2026-11-09T13:13:00.749Z",
+      "type": "step_updated",
+      "step_id": "how",
       "status": "running",
       "note": ""
     }
