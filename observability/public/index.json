@@ -1,8 +1,23 @@
 {
   "schema_version": 1,
   "repo": "pcpcchen-coder/AIOS",
-  "updated_at": "2026-11-09T13:48:45.849Z",
+  "updated_at": "2026-11-09T22:40:48.537Z",
   "runs": [
+    {
+      "repo": "pcpcchen-coder/AIOS",
+      "run_id": "run-20261109224046-185dc5",
+      "title": "Web search results: top-3 picker and read-along panel",
+      "playbook": "feature",
+      "status": "running",
+      "updated_at": "2026-11-09T22:40:46.148Z",
+      "started_at": "2026-11-09T22:40:46.148Z",
+      "ended_at": null,
+      "branch": "claude/web-search-picker",
+      "commit_sha": "",
+      "passed_steps": 0,
+      "total_steps": 7,
+      "provenance": "Agent self-reported"
+    },
     {
       "repo": "pcpcchen-coder/AIOS",
       "run_id": "run-20261109131250-8064ef",

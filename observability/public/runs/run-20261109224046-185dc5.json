@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "repo": "pcpcchen-coder/AIOS",
+  "run_id": "run-20261109224046-185dc5",
+  "title": "Web search results: top-3 picker and read-along panel",
+  "playbook": "feature",
+  "branch": "claude/web-search-picker",
+  "commit_sha": "",
+  "status": "running",
+  "started_at": "2026-11-09T22:40:46.148Z",
+  "updated_at": "2026-11-09T22:40:46.148Z",
+  "ended_at": null,
+  "steps": [
+    {
+      "id": "how",
+      "title": "how",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "architect",
+      "title": "architect",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "checkpoint",
+      "title": "checkpoint",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "implement",
+      "title": "implement",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "verify",
+      "title": "verify",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "review",
+      "title": "review",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    },
+    {
+      "id": "fix",
+      "title": "fix",
+      "status": "pending",
+      "started_at": null,
+      "ended_at": null,
+      "note": "",
+      "evidence": []
+    }
+  ],
+  "events": [
+    {
+      "at": "2026-11-09T22:40:46.148Z",
+      "type": "run_started",
+      "step_id": null,
+      "status": "running",
+      "note": ""
+    }
+  ],
+  "provenance": "Agent self-reported"
+}
