@@ -27,6 +27,7 @@
 | [18 App Integration Layer 與 Spotify/Pi 4 設計](18_App_Integration_Layer_and_Spotify_2026-11.md) | **規劃／未實作**：核心共用 Adapter/Tool Registry、Spotify 授權邊界、[Pi 4 Soloist 週末實驗](experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.md)；Spotify 語音控制待授權 |
 | [19 Voice Command Relay：跨品牌語音命令中繼](19_Voice_Command_Relay_Design_2026-11.md) | **設計／未實作**：Google／Siri／Alexa／小愛各自查命令模板，每台設備可選 TTS 模型／音色、量測辨識率；[分批實作](development/voice-command-relay-implementation-plan.md)與[實測表](experiments/VOICE_COMMAND_RELAY_TEST_PLAN.md) |
 | [20 電視 Netflix 播指定節目](20_TV_Netflix_Playback_Plan_2026-11.md) | **規劃／未實作**：Netflix 送片的社群參數（待在 G3 實測）、找片沒有官方 API；建議做「給網址」加「本機片單」（LGTV-3），開到搜尋頁再評估 |
+| [22 Nous 搬到 LG G3 電視（webOS）可行性評估](22_LG_G3_webOS_Port_Assessment_2026-11.md) | **評估中／未實作**（2026-11-09）：webOS 23 的 Web App 是 Chromium 94；官方沒有收音 API、鏡頭 API 已 deprecated，LG 論壇回覆 WebRTC 只給合作夥伴，所以電視當收音／鏡頭終端不可行（待實測）；建議先用 Pi 接電視 HDMI，並用[唯讀檢測頁](../terminals/webos/capability-check.html)做 G-0 實測 |
 
 ## 歷史藍圖與決策
 

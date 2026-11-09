@@ -171,6 +171,13 @@
       "translationSha256": "731871b9680ec3d9996c58f40e94893f9cdafb7cdd6b631bccb09fff445591a2"
     },
     {
+      "source": "docs/22_LG_G3_webOS_Port_Assessment_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/22_LG_G3_webOS_Port_Assessment_2026-11.en.md",
+      "sourceSha256": "16dd029e7c594582f70a8d500857d4ef819a84ebb1dccb5a684798fb5c89bd50",
+      "translationSha256": "e75c4a2356ce3e818d6f2a24d0bf4039c03c314d7a87ce8e52c8b9c086163edf"
+    },
+    {
       "source": "docs/BILINGUAL.md",
       "mode": "inline",
       "sha256": "d2ba4d1c494863262594e6d315bcc32759e377756ad7b7de0680e757955cc0cc"
@@ -179,15 +186,15 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "8289654e9de4cf03e047a3c81db33d5432acd2dd82c68ff6fe1dc9d397883634",
-      "translationSha256": "53c45de2ea5fe1a3677c60b927c86dedb92646b716380ece744d1ce502187f64"
+      "sourceSha256": "f6fc2035fbc35cee4c6c2b1ae5c99ea0d44512cb8a1ce88dcb5e52e2f9bbf8d3",
+      "translationSha256": "4c037efbd112bf836dfeb8edb0eedbfb5d711439c9c23766b6752c7b47ee7959"
     },
     {
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "3e03e72cd2bb09122d826442bcda621ea92b41326307be354ed4c96f77141102",
-      "translationSha256": "f621c52f5fd2ee37cc81cc03478cdc4006d4b479901aaa54297aad80f6f9d602"
+      "sourceSha256": "e90de73fbfebb57c1a17cbcefe292e9ef62803625b6e73cd1cde510d8249eed9",
+      "translationSha256": "995faa6d04299a8e87fa26afad3119f1f8587ecbbd2f34f994ea332b45d1ee4e"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
