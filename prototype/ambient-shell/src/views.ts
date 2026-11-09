@@ -27,7 +27,7 @@ import { WAKE_THRESHOLD_OFFSETS, type WakePrefsPatch, type WakeSettingsView } fr
 import { VOICE_VOLUME_DEFAULT, VOICE_VOLUME_MAX, VOICE_VOLUME_MIN, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
 import { brightOptions, darkOptions, DEFAULT_LUMA_THRESHOLDS, NIGHT_VOLUME_DEFAULT, type LumaThresholds, type DayNightDecision, type DayNightMode, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type LightLevel } from "../shared/day-night.ts";
 import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, rendererText, type FrameStats, type PerformanceProfile, type RendererReadout } from "./performance.ts";
-import { SEARCH_TEXT, type SearchPanel } from "./search-panel.ts";
+import { SEARCH_ERROR_TEXT, SEARCH_TEXT, type SearchPanel } from "./search-panel.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -1442,7 +1442,7 @@ export function renderNotice(message: string, actions: ViewActions): HTMLElement
 
 /**
  * 即時語音的查詢結果（docs/10 §5 的例外，George 2026-11-09）：候選、選定那一則的重點（念到的那一點亮起）或失敗。
- * 標題、網站、重點與錯誤都是資料（不翻譯）；查詢詞是模型寫的查詢。
+ * 標題、網站與重點都是資料（不翻譯）；查詢詞是模型寫的查詢。錯誤顯示分類後翻譯過的固定句（核心原文是中文）。
  */
 export function renderSearch(panel: SearchPanel, actions: ViewActions): HTMLElement {
   const close = h(
@@ -1461,7 +1461,7 @@ export function renderSearch(panel: SearchPanel, actions: ViewActions): HTMLElem
         "li",
         { class: "search-candidate", "data-selectable": "", "data-label": c.title },
         badge,
-        h("div", { class: "search-candidate-text" }, h("p", { class: "search-title" }, raw(c.title)), h("p", { class: "search-host" }, raw(c.host))),
+        h("div", { class: "search-candidate-text" }, h("p", { class: "search-title" }, raw(c.title)), h("p", { class: "search-host" }, raw(c.host), ...uncitedNote(c.cited))),
       ));
     }
     body = [h("p", { class: "eyebrow search-eyebrow" }, t(SEARCH_TEXT.candidatesEyebrow)), h("p", { class: "search-query" }, raw(panel.query)), list];
@@ -1478,25 +1478,32 @@ export function renderSearch(panel: SearchPanel, actions: ViewActions): HTMLElem
       h("p", { class: "eyebrow search-eyebrow" }, t(SEARCH_TEXT.readingEyebrow, c.n)),
       h("h2", { class: "search-title" }, raw(c.title)),
       points,
-      h("p", { class: "search-host" }, h("span", { class: "search-source-label" }, t(SEARCH_TEXT.source)), " ", raw(c.host)),
+      h("p", { class: "search-host" }, h("span", { class: "search-source-label" }, t(SEARCH_TEXT.source)), " ", raw(c.host), ...uncitedNote(c.cited)),
     ];
   } else {
     body = [
       h("p", { class: "eyebrow search-eyebrow" }, t(SEARCH_TEXT.failedEyebrow)),
       h("p", { class: "search-query" }, raw(panel.query)),
-      h("p", { class: "search-error" }, raw(panel.error)),
+      h("p", { class: "search-error" }, t(SEARCH_ERROR_TEXT[panel.error])),
     ];
   }
   return h("section", { class: `surface surface--search surface--search-${panel.mode}`, role: "region", "aria-label": SEARCH_TEXT.region }, ...body, close);
 }
 
-/** 跟讀：只換亮起的那一點，不重建畫面（念的時候每個片段都可能換點）。 */
+/** 這次查詢沒有回來源（citations），網址只是模型寫的：照樣顯示，但註明沒有核對。 */
+function uncitedNote(cited: boolean | undefined): (HTMLElement | string)[] {
+  return cited === false ? [" · ", h("span", { class: "search-uncited" }, t(SEARCH_TEXT.uncited))] : [];
+}
+
+/** 跟讀：只換亮起的那一點，不重建畫面（念的時候每個片段都可能換點）；視窗矮時把亮起的那一點捲進畫面。 */
 export function applySearchHighlight(root: ParentNode, active: number | null): void {
   root.querySelectorAll<HTMLElement>(".search-point").forEach((el, i) => {
     el.classList.toggle("is-active", active === i);
     el.classList.toggle("is-dim", active !== null && active !== i);
-    if (active === i) el.setAttribute("aria-current", "true");
-    else el.removeAttribute("aria-current");
+    if (active === i) {
+      el.setAttribute("aria-current", "true");
+      el.scrollIntoView?.({ block: "nearest" });
+    } else el.removeAttribute("aria-current");
   });
 }
 

@@ -9,11 +9,11 @@ import type { CodexTurn } from "../server/codex-responses.ts";
 import { translate } from "../shared/i18n.mjs";
 import { parsePrefsPatch, stepPref } from "../shared/prefs.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VOICE_PREFS, VoicePatchError } from "../shared/voice-prefs.ts";
-import { parseCandidates, SEARCH_ERRORS, type SearchCandidate } from "../shared/web-search.ts";
+import { parseCandidates, SEARCH_ERRORS, searchToolOutput, type SearchCandidate } from "../shared/web-search.ts";
 import { evaluateSurface } from "../src/presentation-policy.ts";
 import { executeRealtimeTool, type ToolContext } from "../src/realtime-tools.ts";
 import type { RealtimeCallbacks } from "../src/realtime.ts";
-import { SEARCH_TEXT, SearchPanelController, SPEECH_WAIT_MS } from "../src/search-panel.ts";
+import { classifySearchError, dismissEmptySearch, planSearchSurface, READ_ALONG_CHARS_PER_S, READ_ALONG_TICK_MS, SEARCH_ERROR_TEXT, SEARCH_TEXT, SearchPanelController, shouldAutoClose, SPEECH_WAIT_MS, UtteranceRequests } from "../src/search-panel.ts";
 import { initialShell, reduceShell } from "../src/shell-state.ts";
 import { setLocale } from "../src/i18n.ts";
 
@@ -27,12 +27,14 @@ const CANDIDATES = parseCandidates(`台股今天收 23,456.78 點（fixture）�
   ],
 })}`, []).candidates;
 
-function panel(closeS = 8) {
+function panel(closeS = 8, charsPerSecond: number = READ_ALONG_CHARS_PER_S["zh-TW"]) {
   const closed: number[] = [];
   let changes = 0;
-  const controller = new SearchPanelController({ closeAfterMs: () => closeS * 1000, changed: () => { changes++; }, autoClose: () => closed.push(Date.now()) });
+  const controller = new SearchPanelController({ closeAfterMs: () => closeS * 1000, changed: () => { changes++; }, autoClose: () => closed.push(Date.now()), charsPerSecond: () => charsPerSecond });
   return { controller, closed, changes: () => changes };
 }
+
+const shownOk = () => true;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -74,7 +76,7 @@ describe("executeRealtimeTool show_search_result", () => {
   function run(args: unknown, options: { stale?: boolean; controller?: SearchPanelController; noCallback?: boolean } = {}) {
     const delivered: Record<string, unknown>[] = [];
     const controller = options.controller ?? panel().controller;
-    const callbacks = options.noCallback ? {} : { onShowSearchResult: (index: number) => controller.pick(index) };
+    const callbacks = options.noCallback ? {} : { onShowSearchResult: (index: number) => controller.pick(index, shownOk) };
     const ctx = { callbacks: callbacks as RealtimeCallbacks, approvals: {} as ToolContext["approvals"], generation: 1, stale: () => !!options.stale, end: () => {}, deliver: (o: Record<string, unknown>) => delivered.push(o) };
     return executeRealtimeTool("show_search_result", JSON.stringify(args), ctx).then(() => ({ out: delivered[0], controller }));
   }
@@ -119,7 +121,7 @@ describe("executeRealtimeTool show_search_result", () => {
       call: async (name, args) => {
         hostCalls.push(name);
         let output: Record<string, unknown> = {};
-        await executeRealtimeTool(name, JSON.stringify(args), { callbacks: { onShowSearchResult: (i: number) => controller.pick(i) } as unknown as RealtimeCallbacks, approvals: {} as ToolContext["approvals"], generation: 1, stale: () => false, end: () => {}, deliver: (o) => { output = o; } });
+        await executeRealtimeTool(name, JSON.stringify(args), { callbacks: { onShowSearchResult: (i: number) => controller.pick(i, shownOk) } as unknown as RealtimeCallbacks, approvals: {} as ToolContext["approvals"], generation: 1, stale: () => false, end: () => {}, deliver: (o) => { output = o; } });
         return output;
       },
     };
@@ -146,14 +148,15 @@ describe("SearchPanelController", () => {
     expect(p.closed).toEqual([]);
     expect(p.controller.results("台股", [CANDIDATES[0]])).toMatchObject({ mode: "reading", candidate: CANDIDATES[0] });
     expect(p.controller.results("台股", [])).toBe(null);
+    expect(p.controller.state).toBe(null);
   });
 
-  it("speaking → listening closes after N seconds", () => {
+  it("speaking → listening after the pick closes after N seconds", () => {
     vi.useFakeTimers();
     const p = panel(8);
     p.controller.results("台股", CANDIDATES);
     p.controller.setPhase("thinking");
-    p.controller.pick(1);
+    p.controller.pick(1, shownOk);
     p.controller.setPhase("speaking");
     vi.advanceTimersByTime(30_000);
     expect(p.closed).toHaveLength(0);
@@ -164,7 +167,34 @@ describe("SearchPanelController", () => {
     expect(p.closed).toHaveLength(1);
   });
 
-  it("speaking again or the user starting to talk cancels the countdown; it restarts after", () => {
+  it("filler speech that started before the pick does not count as reading: no N-second close, only the 15 s fallback", () => {
+    vi.useFakeTimers();
+    const p = panel(8);
+    p.controller.results("台股", CANDIDATES);
+    p.controller.setPhase("speaking"); // 「好，我看看」：選之前就開始的話
+    p.controller.pick(1, shownOk);
+    p.controller.setPhase("listening");
+    vi.advanceTimersByTime(8_000);
+    expect(p.closed).toHaveLength(0);
+    vi.advanceTimersByTime(SPEECH_WAIT_MS - 8_000 + 8_000);
+    expect(p.closed).toHaveLength(1);
+  });
+
+  it("thinking (a pending delegation) arms neither the close timer nor the 15 s fallback", () => {
+    vi.useFakeTimers();
+    const p = panel(8);
+    p.controller.results("台股", CANDIDATES);
+    p.controller.setPhase("speaking");
+    p.controller.setPhase("thinking");
+    p.controller.pick(2, shownOk);
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(p.closed).toHaveLength(0);
+    p.controller.failed("台股", "timeout");
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(p.closed).toHaveLength(0);
+  });
+
+  it("speaking again, thinking or the user starting to talk cancels the countdown; it restarts after", () => {
     vi.useFakeTimers();
     const p = panel(8);
     p.controller.results("台股", [CANDIDATES[0]]);
@@ -187,16 +217,16 @@ describe("SearchPanelController", () => {
     vi.useFakeTimers();
     const p = panel(8);
     p.controller.results("台股", CANDIDATES);
-    p.controller.pick(2);
+    p.controller.pick(2, shownOk);
     p.controller.setPhase("speaking");
     p.controller.setPhase("listening");
     p.controller.hidden();
     vi.advanceTimersByTime(60_000);
     expect(p.closed).toHaveLength(0);
-    expect(p.controller.pick(3)).toMatchObject({ ok: true, n: 3 });
+    expect(p.controller.pick(3, shownOk)).toMatchObject({ ok: true, n: 3 });
   });
 
-  it("no speech after entering reading: waits SPEECH_WAIT_MS, then counts N anyway", () => {
+  it("no speech after entering reading while idle (listening): waits SPEECH_WAIT_MS, then counts N anyway", () => {
     vi.useFakeTimers();
     const p = panel(8);
     p.controller.setPhase("listening");
@@ -212,43 +242,149 @@ describe("SearchPanelController", () => {
   it("a failed search uses the same rule", () => {
     vi.useFakeTimers();
     const p = panel(3);
-    expect(p.controller.failed("台股", "上網查詢逾時（30 秒）。")).toEqual({ mode: "failed", query: "台股", error: "上網查詢逾時（30 秒）。" });
+    expect(p.controller.failed("台股", "timeout")).toEqual({ mode: "failed", query: "台股", error: "timeout" });
     p.controller.setPhase("speaking");
     p.controller.setPhase("listening");
     vi.advanceTimersByTime(3_000);
     expect(p.closed).toHaveLength(1);
-    expect(p.controller.pick(1)).toEqual({ ok: false, error: SEARCH_ERRORS.none });
+    expect(p.controller.pick(1, shownOk)).toEqual({ ok: false, error: SEARCH_ERRORS.none });
   });
 
-  it("read-along lights only while speaking, keeps the last point when not speaking, and never guesses", () => {
+  it("every enter() bumps the revision, so re-picking the same result re-renders", () => {
     const p = panel();
     p.controller.results("台股", CANDIDATES);
-    p.controller.pick(1);
+    const a = p.controller.revision;
+    p.controller.pick(1, shownOk);
+    const b = p.controller.revision;
+    p.controller.pick(1, shownOk);
+    expect(b).toBeGreaterThan(a);
+    expect(p.controller.revision).toBeGreaterThan(b);
+  });
+
+  it("the pick tells the model whether the screen really shows it", () => {
+    const p = panel();
+    p.controller.results("台股", CANDIDATES);
+    expect(String(p.controller.pick(1, () => true).next)).toMatch(/^畫面已顯示/);
+    expect(String(p.controller.pick(1, () => false).next)).toMatch(/^畫面沒有顯示/);
+  });
+});
+
+describe("read-along paced by real playback (estimated)", () => {
+  // 每秒 10 個字（測試用的速率），算起來比較直觀。
+  const RATE = 10;
+  const SPOKEN = "好，加權指數收兩萬三千點。成交量四千多億元。外資買超 120 億元。";
+  const at = (text: string) => SPOKEN.indexOf(text);
+
+  function reading() {
+    vi.useFakeTimers();
+    const p = panel(8, RATE);
+    p.controller.results("台股", CANDIDATES);
+    p.controller.setPhase("thinking");
+    p.controller.pick(1, shownOk);
+    return p;
+  }
+
+  it("a whole final transcript arriving at playback start does not jump ahead: the highlight advances with speaking time", () => {
+    const p = reading();
     p.controller.setPhase("speaking");
-    p.controller.assistantPartial("好，");
+    p.controller.assistantFinal(SPOKEN);
     expect(p.controller.state).toMatchObject({ active: null });
-    p.controller.assistantPartial("加權指數收兩萬");
+    // 「加權指數收」念完大約在第 (位置 + 5) 個字。
+    vi.advanceTimersByTime(((at("加權指數收") + 5) / RATE) * 1000 + READ_ALONG_TICK_MS);
     expect(p.controller.state).toMatchObject({ active: 0 });
-    p.controller.assistantPartial("三千點。成交量");
+    vi.advanceTimersByTime(((at("成交量") - at("加權指數收")) / RATE) * 1000);
+    expect(p.controller.state).toMatchObject({ active: 1 });
+    vi.advanceTimersByTime(((at("外資買超") + 4 - at("成交量")) / RATE) * 1000);
+    expect(p.controller.state).toMatchObject({ active: 2 });
+  });
+
+  it("only speaking time counts: pauses (listening) do not advance it, and speech already playing at the pick does not count", () => {
+    vi.useFakeTimers();
+    const p = panel(8, RATE);
+    p.controller.results("台股", CANDIDATES);
+    p.controller.setPhase("speaking"); // 選之前就在播放
+    p.controller.pick(1, shownOk);
+    p.controller.assistantPartial(SPOKEN);
+    vi.advanceTimersByTime(60_000);
+    expect(p.controller.state).toMatchObject({ active: null });
+    p.controller.setPhase("listening");
+    vi.advanceTimersByTime(60_000);
+    p.controller.setPhase("speaking"); // 選之後真的開始念
+    vi.advanceTimersByTime(((at("加權指數收") + 5) / RATE) * 1000 + READ_ALONG_TICK_MS);
+    expect(p.controller.state).toMatchObject({ active: 0 });
+    p.controller.setPhase("listening");
+    vi.advanceTimersByTime(60_000);
+    expect(p.controller.state).toMatchObject({ active: 0 });
+    p.controller.setPhase("speaking");
+    vi.advanceTimersByTime(((at("成交量") + 3 - at("加權指數收") - 5) / RATE) * 1000 + READ_ALONG_TICK_MS);
+    expect(p.controller.state).toMatchObject({ active: 1 });
+  });
+
+  it("never moves backwards within one reading, and a conclusion with a later point's number does not start the highlight", () => {
+    const p = reading();
+    p.controller.setPhase("speaking");
+    p.controller.assistantPartial("外資今天買超 120 億元。加權指數收兩萬三千點。成交量");
+    vi.advanceTimersByTime(("外資今天買超 120 億元。".length / RATE) * 1000 + READ_ALONG_TICK_MS);
+    expect(p.controller.state).toMatchObject({ active: null }); // 只憑數字不開始亮
+    vi.advanceTimersByTime(10_000);
+    expect(p.controller.state).toMatchObject({ active: 1 });
+    p.controller.assistantFinal("回到加權指數收盤");
+    vi.advanceTimersByTime(10_000);
     expect(p.controller.state).toMatchObject({ active: 1 });
     p.controller.setPhase("listening");
-    p.controller.assistantFinal("好，加權指數收兩萬三千點。成交量四千多億元。外資買超 120 億元。");
-    expect(p.controller.state).toMatchObject({ active: 1 });
     p.controller.setPhase("speaking");
-    expect(p.controller.state).toMatchObject({ active: 2 });
-    expect(p.changes()).toBe(3);
+    vi.advanceTimersByTime(10_000);
+    expect(p.controller.state).toMatchObject({ active: 1 });
   });
 
-  it("cumulative partials (ChatGPT plan route) are not double-counted", () => {
-    const p = panel();
-    p.controller.results("台股", CANDIDATES);
-    p.controller.pick(1);
+  it("does not tick while not speaking (no change callbacks while idle)", () => {
+    const p = reading();
+    p.controller.assistantFinal(SPOKEN);
+    vi.advanceTimersByTime(60_000);
+    expect(p.changes()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("uses the locale's estimated rate (zh 5.5, en 15 characters per second)", () => {
+    expect(READ_ALONG_CHARS_PER_S).toEqual({ "zh-TW": 5.5, en: 15 });
+    vi.useFakeTimers();
+    const en = panel(8, READ_ALONG_CHARS_PER_S.en);
+    const points = ["The index closed at 23,456.78", "Turnover reached 432.1 billion"];
+    const c: SearchCandidate = { n: 1, title: "t", url: "https://e.example/", host: "e.example", points, summarized: true, cited: true };
+    en.controller.results("q", [c]);
+    en.controller.setPhase("speaking");
+    en.controller.assistantFinal("The index closed at twenty-three thousand. Turnover reached four hundred billion.");
+    vi.advanceTimersByTime(2_000 + READ_ALONG_TICK_MS); // 30 個字元：還沒到 Turnover
+    expect(en.controller.state).toMatchObject({ active: 0 });
+    vi.advanceTimersByTime(2_000); // 63 個字元：念到 Turnover
+    expect(en.controller.state).toMatchObject({ active: 1 });
+  });
+
+  it("cumulative partials from two sources: a lagging copy is ignored, an extension replaces, anything else appends", () => {
+    const p = reading();
     p.controller.setPhase("speaking");
     p.controller.assistantPartial("加權指數收");
     p.controller.assistantPartial("加權指數收兩萬三千點，成交");
+    p.controller.assistantPartial("加權指數收兩萬"); // 另一個來源慢一步的累積版本
+    p.controller.assistantPartial("加權指數收兩萬三千點，成交"); // 一樣的
+    vi.advanceTimersByTime(60_000);
     expect(p.controller.state).toMatchObject({ active: 0 });
     p.controller.assistantPartial("加權指數收兩萬三千點，成交量四千");
+    vi.advanceTimersByTime(READ_ALONG_TICK_MS);
     expect(p.controller.state).toMatchObject({ active: 1 });
+  });
+
+  it("ABCDE then ABC stays ABCDE (observed through the cap: nothing is appended)", () => {
+    vi.useFakeTimers();
+    const p = panel(8, 1);
+    const c: SearchCandidate = { n: 1, title: "t", url: "https://e.example/", host: "e.example", points: ["ABCDEABC", "第二點"], summarized: true, cited: true };
+    p.controller.results("q", [c]);
+    p.controller.setPhase("speaking");
+    p.controller.assistantPartial("ABCDE");
+    p.controller.assistantPartial("ABC");
+    vi.advanceTimersByTime(60_000);
+    // 若 "ABC" 被接在後面，累積會變成 ABCDEABC 而亮起第一點。
+    expect(p.controller.state).toMatchObject({ active: null });
   });
 });
 
@@ -262,11 +398,67 @@ describe("search Surface", () => {
     expect(reduceShell(shown, { type: "dismiss" }).surface).toBe(null);
   });
 
-  it("main.ts keeps an open confirm card and only auto-closes the same search surface", () => {
-    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
-    expect(main).toMatch(/if \(s\?\.kind === "confirm"\) \{\n\s+searchPanel\.hidden\(\);\n\s+return false;/);
-    expect(main).toContain('if (shell.surface?.kind === "search" && shell.surface.surface_id === searchSurfaceId) dispatch({ type: "dismiss" });');
-    expect(main).toContain('dispatch({ type: "show.search", request_id: userRequest() });');
+  function requests() {
+    const userRequestIds = new Set<string>();
+    let n = 0;
+    const r = new UtteranceRequests(() => {
+      const id = `req_utter${String(++n).padStart(4, "0")}`;
+      userRequestIds.add(id);
+      return id;
+    });
+    return { r, userRequestIds };
+  }
+
+  it("opening needs the user's latest unconsumed utterance; its id passes the presentation policy; each id opens once", () => {
+    const { r, userRequestIds } = requests();
+    expect(planSearchSurface(null, null, r)).toEqual({ action: "no_request" });
+    r.noted();
+    r.noted();
+    const step = planSearchSurface(null, null, r);
+    expect(step).toEqual({ action: "open", requestId: "req_utter0002" });
+    const shell = reduceShell(initialShell, { type: "show.search", request_id: (step as { requestId: string }).requestId });
+    expect(evaluateSurface(shell.surface, { userRequestIds, tasks: new Map() })).toEqual({ allowed: true });
+    expect(planSearchSurface(null, null, r)).toEqual({ action: "no_request" });
+  });
+
+  it("an open confirm card is kept (the utterance stays for a later pick); the same search surface is reused", () => {
+    const { r } = requests();
+    r.noted();
+    expect(planSearchSurface({ kind: "confirm", surface_id: "surface_confirm_x" }, null, r)).toEqual({ action: "blocked" });
+    expect(planSearchSurface({ kind: "search", surface_id: "s1" }, "s1", r)).toEqual({ action: "reuse" });
+    // reuse 也用掉了那一句話：之後模型自己的查詢不能拿它打開新畫面。
+    expect(planSearchSurface({ kind: "search", surface_id: "old" }, "s1", r)).toEqual({ action: "no_request" });
+  });
+
+  it("a successful search with no candidates closes the previous search panel (no blank card) and the model answers by voice", () => {
+    const p = panel();
+    p.controller.results("台股", CANDIDATES);
+    const empty = p.controller.results("別的問題", []);
+    expect(empty).toBe(null);
+    expect(p.controller.state).toBe(null);
+    expect(dismissEmptySearch(empty, { kind: "search", surface_id: "s1" })).toBe(true);
+    expect(dismissEmptySearch(empty, { kind: "confirm", surface_id: "c1" })).toBe(false);
+    expect(dismissEmptySearch(empty, null)).toBe(false);
+    expect(dismissEmptySearch(p.controller.results("台股", CANDIDATES), { kind: "search", surface_id: "s1" })).toBe(false);
+    expect(searchToolOutput({ answer: "台股今天收 23,456.78 點。", candidates: [] }, false)).toEqual({ ok: true, answer: "台股今天收 23,456.78 點。", candidates: [], next: "用 answer 回答。" });
+  });
+
+  it("auto-close only dismisses the same search surface", () => {
+    expect(shouldAutoClose({ kind: "search", surface_id: "s1" }, "s1")).toBe(true);
+    expect(shouldAutoClose({ kind: "search", surface_id: "s2" }, "s1")).toBe(false);
+    expect(shouldAutoClose({ kind: "confirm", surface_id: "s1" }, "s1")).toBe(false);
+    expect(shouldAutoClose(null, "s1")).toBe(false);
+  });
+
+  it("search errors map to fixed bilingual sentences", () => {
+    expect(classifySearchError(504, "上網查詢逾時（30 秒）。")).toBe("timeout");
+    expect(classifySearchError(502, "上網查詢逾時（30 秒）。")).toBe("timeout");
+    expect(classifySearchError(409, "上網查詢未啟用（需要 OPENAI_API_KEY）")).toBe("unavailable");
+    expect(classifySearchError(502, "上網查詢失敗：OPENAI_API_KEY 無效或未授權（401）。")).toBe("auth");
+    expect(classifySearchError(0, "無法連到本機核心（伺服器未啟動或已停止）")).toBe("network");
+    expect(classifySearchError(502, "上網查詢失敗：無法連線到 OpenAI（網路中斷或被阻擋）。")).toBe("network");
+    expect(classifySearchError(502, "上網查詢失敗（HTTP 500）：boom")).toBe("generic");
+    expect(classifySearchError(null, "boom")).toBe("generic");
   });
 });
 
@@ -324,7 +516,7 @@ describe("search panel view and English", () => {
 
   it("every new interface string has an English entry without Han characters", () => {
     const en = JSON.parse(readFileSync(new URL("../src/messages.en.json", import.meta.url), "utf8")) as Record<string, string>;
-    for (const source of Object.values(SEARCH_TEXT)) {
+    for (const source of [...Object.values(SEARCH_TEXT), ...Object.values(SEARCH_ERROR_TEXT)]) {
       expect(en[source], source).toBeTruthy();
       expect(translate(source, "en", 2), source).not.toMatch(/\p{Script=Han}/u);
     }
@@ -335,5 +527,40 @@ describe("search panel view and English", () => {
     const el = views.renderSearch({ mode: "reading", query: "SIMULATED", candidate: { ...CANDIDATES[2], title: "Title", host: "example.com" }, active: null }, actions) as unknown as El;
     expect(el.textContent).not.toMatch(/\p{Script=Han}/u);
     expect(el.getAttribute("aria-label")).toBe(en[SEARCH_TEXT.region]);
+    const failed = views.renderSearch({ mode: "failed", query: "SIMULATED", error: "timeout" }, actions) as unknown as El;
+    expect(failed.textContent).not.toMatch(/\p{Script=Han}/u);
+    expect(failed.textContent).toContain("Search failed");
+    expect(failed.textContent).toContain(en[SEARCH_ERROR_TEXT.timeout]);
+    const uncited = views.renderSearch({ mode: "reading", query: "SIMULATED", candidate: { ...CANDIDATES[0], title: "Title", points: ["Point"], cited: false }, active: null }, actions) as unknown as El;
+    expect(uncited.textContent).toContain(en[SEARCH_TEXT.uncited]);
+    expect(uncited.textContent).not.toMatch(/\p{Script=Han}/u);
+  });
+
+  it("failed panel: 查詢失敗 eyebrow and a fixed sentence per error kind (not the core's raw text)", () => {
+    const el = views.renderSearch({ mode: "failed", query: "台股", error: "auth" }, actions) as unknown as El;
+    expect(byClass(el, "search-eyebrow")[0].textContent).toBe("查詢失敗");
+    expect(byClass(el, "search-error")[0].textContent).toBe(SEARCH_ERROR_TEXT.auth);
+  });
+
+  it("the highlight scrolls the lit point into view (nearest) and marks only that one", () => {
+    const scrolled: unknown[] = [];
+    const items = [0, 1, 2].map((i) => {
+      const classes = new Set<string>();
+      const attrs = new Map<string, string>();
+      return {
+        i,
+        classList: { toggle: (c: string, on: boolean) => (on ? classes.add(c) : classes.delete(c)) },
+        setAttribute: (k: string, v: string) => attrs.set(k, v),
+        removeAttribute: (k: string) => attrs.delete(k),
+        scrollIntoView: (o: unknown) => scrolled.push([i, o]),
+        classes,
+        attrs,
+      };
+    });
+    const root = { querySelectorAll: () => items } as unknown as ParentNode;
+    views.applySearchHighlight(root, 1);
+    expect(scrolled).toEqual([[1, { block: "nearest" }]]);
+    expect(items.map((e) => [...e.classes])).toEqual([["is-dim"], ["is-active"], ["is-dim"]]);
+    expect(items[1].attrs.get("aria-current")).toBe("true");
   });
 });

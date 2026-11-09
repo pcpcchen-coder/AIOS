@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Screenshots of the realtime web search panel (candidates, reading with read-along, failed) and its settings stepper.
-// SIMULATED: the search response is a page.route fixture and the realtime callbacks are invoked directly in the built page;
+// SIMULATED: the search response is a page.route fixture and the realtime callbacks are invoked directly in the built page
+// (a user transcript first: the panel opens only for a real user utterance);
 // no microphone, voice model, Codex or OpenAI call is made. Build first: (cd prototype/ambient-shell && npx vite build).
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -52,9 +53,9 @@ const SIMULATED = {
   sources: [{ title: 'SIMULATED 財經 A', url: 'https://news.example.com/a' }],
   model: 'simulated',
   candidates: [
-    { n: 1, title: 'SIMULATED 台股收盤', url: 'https://news.example.com/a', host: 'news.example.com', points: ['加權指數收 23,456.78 點', '成交量 4,321 億元', '外資買超 120 億元'], summarized: true },
-    { n: 2, title: 'SIMULATED 半導體領漲', url: 'https://example.org/b', host: 'example.org', points: ['台積電上漲 1.2%', '聯發科持平'], summarized: true },
-    { n: 3, title: 'SIMULATED 盤後分析', url: 'https://c.example.net/x', host: 'c.example.net', points: [], summarized: false },
+    { n: 1, title: 'SIMULATED 台股收盤', url: 'https://news.example.com/a', host: 'news.example.com', points: ['加權指數收 23,456.78 點', '成交量 4,321 億元', '外資買超 120 億元'], summarized: true, cited: true },
+    { n: 2, title: 'SIMULATED 半導體領漲', url: 'https://example.org/b', host: 'example.org', points: ['台積電上漲 1.2%', '聯發科持平'], summarized: true, cited: true },
+    { n: 3, title: 'SIMULATED 盤後分析', url: 'https://c.example.net/x', host: 'c.example.net', points: [], summarized: false, cited: true },
   ],
 };
 
@@ -109,22 +110,29 @@ try {
     await page.route('**/api/realtime/web-search', route => failNext
       ? route.fulfill({ status: 504, json: { error: '上網查詢逾時（30 秒）。（SIMULATED）' } })
       : route.fulfill({ json: SIMULATED }));
-    await call('return cb.onWebSearch(arg)', 'SIMULATED · 今日台股');
+    // 沒有使用者那一句話（模型自己決定的查詢）：不打開查詢畫面。
+    await call('return cb.onWebSearch(arg).then((out) => { if (!String(out.next).includes("畫面沒有顯示")) throw new Error(JSON.stringify(out)); })', 'SIMULATED · 今日台股');
+    assert.equal(await page.locator('.surface--search').count(), 0, 'no panel without a user utterance');
+    report.noUtterance = 'web_search results without a preceding user transcript: no panel, the model is told the screen is not showing them';
+    await call('cb.onUserTranscript("SIMULATED 幫我查今天台股"); return cb.onWebSearch(arg)', 'SIMULATED · 今日台股');
     await page.locator('.surface--search-candidates').waitFor({ state: 'visible' });
     assert.equal(await page.locator('.search-candidate[data-selectable]').count(), 3);
     await shot('search-candidates.zh-TW.png');
 
-    await call('cb.onPhase("thinking"); const out = cb.onShowSearchResult(1); if (!out.ok) throw new Error(JSON.stringify(out)); cb.onPhase("speaking"); cb.onAssistantPartial("好，第一則。加權指數收兩萬三千四百五十六點。成交量");');
-    await page.locator('.search-point.is-active').waitFor({ state: 'visible' });
-    assert.equal(await page.locator('.search-point').nth(1).getAttribute('aria-current'), 'true', 'point 2 is lit while speaking');
+    // 整段逐字稿一次到（比聲音快）：亮起的那一點跟著播放時間（估計語速）往前走，不會一下子跳到最後。
+    await call('cb.onUserTranscript("SIMULATED 第一個"); cb.onPhase("thinking"); const out = cb.onShowSearchResult(1); if (!out.ok) throw new Error(JSON.stringify(out)); cb.onPhase("speaking"); cb.onAssistantPartial("好，第一則。加權指數收兩萬三千四百五十六點。成交量");');
+    assert.equal(await page.locator('.search-point[aria-current]').count(), 0, 'nothing lit at playback start');
+    await page.locator('.search-point').nth(0).and(page.locator('[aria-current="true"]')).waitFor({ timeout: 10_000 });
+    await page.locator('.search-point').nth(1).and(page.locator('[aria-current="true"]')).waitFor({ timeout: 10_000 });
+    report.pacing = 'whole transcript delivered at playback start: point 1 lit, then point 2 after more speaking time (estimated pacing)';
     await shot('search-reading-point2.zh-TW.png');
 
-    await call('cb.onPhase("listening"); const out = cb.onShowSearchResult(3); if (!out.ok) throw new Error(JSON.stringify(out));');
+    await call('cb.onPhase("listening"); cb.onUserTranscript("SIMULATED 第三個"); const out = cb.onShowSearchResult(3); if (!out.ok) throw new Error(JSON.stringify(out));');
     await page.locator('.search-unsummarized').waitFor({ state: 'visible' });
     await shot('search-reading-unsummarized.zh-TW.png');
 
     failNext = true;
-    await call('return cb.onWebSearch(arg)', 'SIMULATED · 今日台股');
+    await call('cb.onUserTranscript("SIMULATED 再查一次"); return cb.onWebSearch(arg)', 'SIMULATED · 今日台股');
     await page.locator('.surface--search-failed').waitFor({ state: 'visible' });
     await shot('search-failed.zh-TW.png');
 
@@ -153,9 +161,9 @@ try {
         { ...SIMULATED.candidates[1], title: 'SIMULATED Chipmakers lead' },
       ],
     } }));
-    await call('return cb.onWebSearch(arg)', 'SIMULATED · market today');
-    await call('const out = cb.onShowSearchResult(1); if (!out.ok) throw new Error(JSON.stringify(out)); cb.onPhase("speaking"); cb.onAssistantPartial("Sure. The index closed at twenty-three thousand. Turnover reached");');
-    await page.locator('.search-point.is-active').waitFor({ state: 'visible' });
+    await call('cb.onUserTranscript("SIMULATED search the market"); return cb.onWebSearch(arg)', 'SIMULATED · market today');
+    await call('cb.onUserTranscript("SIMULATED the first one"); cb.onPhase("thinking"); const out = cb.onShowSearchResult(1); if (!out.ok) throw new Error(JSON.stringify(out)); cb.onPhase("speaking"); cb.onAssistantPartial("Sure. The index closed at twenty-three thousand. Turnover reached");');
+    await page.locator('.search-point').nth(1).and(page.locator('[aria-current="true"]')).waitFor({ timeout: 10_000 });
     assert.equal(await page.locator('.surface--search').getAttribute('aria-label'), 'Search results');
     await shot('search-reading-point2.en.png');
     await context.close();

@@ -2440,6 +2440,15 @@ body.alarm-ringing .alarm-countdown {
 .surface--search .surface-footer .hint {
   font-size: clamp(13px, 1.6vw, 28px);
 }
+.surface--search .search-uncited {
+  color: var(--amber);
+}
+/* 窄視窗（Mac 小視窗）：192 px 安全區會把內容擠成一條，改留 16 px 邊。 */
+@media (max-width: 800px) {
+  .surface-root:has(> .surface--search) {
+    width: calc(100vw - 32px);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .search-point { transition: none; }
   .search-point.is-active { transform: none; }
