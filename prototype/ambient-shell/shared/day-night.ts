@@ -54,9 +54,50 @@ export interface LightState {
 
 export const INITIAL_LIGHT: LightState = { level: null, luma: null, at: null, pendingSince: null };
 
-function classify(luma: number, current: LightLevel | null): LightLevel | null {
-  if (luma < DARK_LUMA) return "dark";
-  if (luma > BRIGHT_LUMA) return "bright";
+/**
+ * LUX-1（George 2026-11-09）：亮暗門檻可以在設定頁調整，每台裝置各自保存（各自的鏡頭曝光不同）。
+ * 低於 dark 算暗、高於 bright 算亮；兩者之間是遲滯區（維持原本判斷）。
+ */
+export interface LumaThresholds {
+  dark: number;
+  bright: number;
+}
+
+export const DEFAULT_LUMA_THRESHOLDS: LumaThresholds = { dark: DARK_LUMA, bright: BRIGHT_LUMA };
+/** 設定頁的選項：5 到 250，每格 5；暗的門檻至少比亮的門檻低 LUMA_MIN_GAP。 */
+export const LUMA_STEP = 5;
+export const LUMA_MIN = 5;
+export const LUMA_MAX = 250;
+export const LUMA_MIN_GAP = 5;
+
+export function validLumaThresholds(value: unknown): value is LumaThresholds {
+  const o = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const ok = (n: unknown): n is number => typeof n === "number" && Number.isInteger(n) && n >= LUMA_MIN && n <= LUMA_MAX;
+  return !!o && ok(o.dark) && ok(o.bright) && (o.bright as number) - (o.dark as number) >= LUMA_MIN_GAP;
+}
+
+/** 讀已保存的門檻；不合法就用預設。 */
+export function parseLumaThresholds(raw: unknown): LumaThresholds {
+  return validLumaThresholds(raw) ? { dark: raw.dark, bright: raw.bright } : { ...DEFAULT_LUMA_THRESHOLDS };
+}
+
+/** 暗的門檻可以選的值（要比 bright 低至少 LUMA_MIN_GAP）。 */
+export function darkOptions(bright: number): number[] {
+  const out: number[] = [];
+  for (let v = LUMA_MIN; v <= bright - LUMA_MIN_GAP; v += LUMA_STEP) out.push(v);
+  return out;
+}
+
+/** 亮的門檻可以選的值（要比 dark 高至少 LUMA_MIN_GAP）。 */
+export function brightOptions(dark: number): number[] {
+  const out: number[] = [];
+  for (let v = LUMA_MAX; v >= dark + LUMA_MIN_GAP; v -= LUMA_STEP) out.unshift(v);
+  return out;
+}
+
+function classify(luma: number, current: LightLevel | null, th: LumaThresholds): LightLevel | null {
+  if (luma < th.dark) return "dark";
+  if (luma > th.bright) return "bright";
   return current;
 }
 
@@ -64,9 +105,9 @@ function classify(luma: number, current: LightLevel | null): LightLevel | null {
  * 收到一個讀值（純函式）。還不知道時（第一次或讀值太舊），「亮」直接定案，「暗」也要連續 LIGHT_HOLD_MS 才算：
  * 剛開鏡頭的一格可能是全黑或舊畫面，不能一格就切到夜間。已知之後要連續 LIGHT_HOLD_MS 都是另一邊才切換。
  */
-export function nextLight(prev: LightState, luma: number, now: number): LightState {
+export function nextLight(prev: LightState, luma: number, now: number, thresholds: LumaThresholds = DEFAULT_LUMA_THRESHOLDS): LightState {
   const base = prev.at !== null && now - prev.at > LIGHT_STALE_MS ? INITIAL_LIGHT : prev;
-  const seen = classify(luma, base.level);
+  const seen = classify(luma, base.level, thresholds);
   if (base.level === null && seen === "bright") return { level: "bright", luma, at: now, pendingSince: null };
   if (seen === null || seen === base.level) return { ...base, luma, at: now, pendingSince: null };
   const since = base.pendingSince ?? now;

@@ -1121,5 +1121,11 @@
   "最多 20 個鬧鐘。": "At most 20 alarms.",
   "重複規則看不懂（custom 要給 days，例如 mon,wed,fri）。": "The repeat rule was not understood (custom needs days, for example mon,wed,fri).",
   "鬧鐘的重複規則不正確": "Invalid alarm repeat rule",
-  "鬧鐘清單": "Alarms"
+  "鬧鐘清單": "Alarms",
+  "低於這個值算暗": "Dark below",
+  "高於這個值算亮": "Bright above",
+  "門檻恢復預設（{0}／{1}）": "Reset thresholds ({0}/{1})",
+  "數字是鏡頭畫面的平均亮度（0–255）。先看上面的「鏡頭亮度」讀數：開燈與關燈各記一個數字，把「算暗」設在關燈值之上、「算亮」設在開燈值之下，中間留一段不切換。只存在這台裝置。": "The numbers are the camera picture's average brightness (0–255). Watch the \"Camera brightness\" reading above: note one number with the lights on and one with them off, set \"Dark below\" above the lights-off value and \"Bright above\" below the lights-on value, and leave a gap between them where nothing switches. Saved on this device only.",
+  "門檻沒有保存：{0}": "Thresholds were not saved: {0}",
+  "門檻不合法：算暗要比算亮至少低 5": "Invalid thresholds: \"dark\" must be at least 5 below \"bright\""
 }

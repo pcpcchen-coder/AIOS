@@ -1,4 +1,4 @@
-import { clockText, DEFAULT_DAY_NIGHT_PREFS, NIGHT_VOLUME_DEFAULT, parseDayNightPrefs, type DayNightDecision, type DayNightMode, type DayNightOverride, type DayNightPrefs } from "../shared/day-night.ts";
+import { clockText, DEFAULT_DAY_NIGHT_PREFS, DEFAULT_LUMA_THRESHOLDS, parseLumaThresholds, validLumaThresholds, type LumaThresholds, NIGHT_VOLUME_DEFAULT, parseDayNightPrefs, type DayNightDecision, type DayNightMode, type DayNightOverride, type DayNightPrefs } from "../shared/day-night.ts";
 import { clampVoiceVolume, nextVoiceVolume, VOICE_VOLUME_DEFAULT, type VoiceVolumeOutcome, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
 
 // VOL-1：對話音量的頁面狀態（shared/voice-volume.ts 是規則）。播放 AI 語音的元素（兩條即時語音路徑）向這裡登記，
@@ -8,6 +8,8 @@ import { clampVoiceVolume, nextVoiceVolume, VOICE_VOLUME_DEFAULT, type VoiceVolu
 export const VOICE_VOLUME_KEY = "nous.voice-volume.v1";
 export const NIGHT_VOLUME_KEY = "nous.voice-volume.night.v1";
 export const DAY_NIGHT_KEY = "nous.day-night.v1";
+/** LUX-1：鏡頭亮暗門檻（每台裝置各自保存）。 */
+export const LUMA_THRESHOLDS_KEY = "nous.light-thresholds.v1";
 
 /** 設定頁的文字（原文；畫面上經 t() 翻譯，英文在 src/messages.en.json）。 */
 export const VOICE_VOLUME_TEXT = {
@@ -61,6 +63,13 @@ export const VOICE_VOLUME_TEXT = {
     dark: "暗",
     bright: "亮",
     middle: "介於中間",
+  },
+  /** LUX-1（George 2026-11-09）：亮暗門檻。 */
+  thresholds: {
+    dark: "低於這個值算暗",
+    bright: "高於這個值算亮",
+    reset: "門檻恢復預設（{0}／{1}）",
+    note: "數字是鏡頭畫面的平均亮度（0–255）。先看上面的「鏡頭亮度」讀數：開燈與關燈各記一個數字，把「算暗」設在關燈值之上、「算亮」設在開燈值之下，中間留一段不切換。只存在這台裝置。",
   },
 } as const;
 
@@ -218,4 +227,20 @@ export function dayNightReasonText(
   if (decision.reason === "hours") return t(VOICE_VOLUME_TEXT.modeLine.hours, pad(prefs.night_start_h), pad(prefs.night_end_h));
   if (decision.reason === "camera_dark") return t(VOICE_VOLUME_TEXT.modeLine.camera_dark);
   return t(VOICE_VOLUME_TEXT.modeLine.day);
+}
+
+/** LUX-1：這台裝置的鏡頭亮暗門檻（不合法或讀不到時用預設）。 */
+export function loadLumaThresholds(storage: VolumeStorage | null = pageStorage()): LumaThresholds {
+  try {
+    const saved = storage?.getItem(LUMA_THRESHOLDS_KEY);
+    if (saved) return parseLumaThresholds(JSON.parse(saved));
+  } catch {}
+  return { ...DEFAULT_LUMA_THRESHOLDS };
+}
+
+/** 保存（不合法時丟錯，不保存）。 */
+export function saveLumaThresholds(value: LumaThresholds, storage: VolumeStorage | null = pageStorage()): LumaThresholds {
+  if (!validLumaThresholds(value)) throw new Error("門檻不合法：算暗要比算亮至少低 5");
+  try { storage?.setItem(LUMA_THRESHOLDS_KEY, JSON.stringify(value)); } catch {}
+  return { dark: value.dark, bright: value.bright };
 }
