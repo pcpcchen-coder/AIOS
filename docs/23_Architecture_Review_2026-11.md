@@ -10,15 +10,15 @@
 
 ## 0. 一頁摘要
 
-- 原型 `prototype/ambient-shell` 現在有 241 個原始檔、66,887 行（server 30,844、src 25,626、shared 7,721、desktop 2,696），不是 2026-10 規劃時的小原型。全部驗證在基準上都是綠的：型別檢查、172 個測試檔 3,188 項通過、6 項跳過，Vite 建置、`verify-aios`、雙語檢查。
+- 原型 `prototype/ambient-shell` 現在有 241 個原始檔、66,887 行（server 30,844、src 25,626、shared 7,721、desktop 2,696），不是 2026-10 規劃時的小原型。全部驗證在基準上都是綠的：型別檢查、172 個測試檔 3,194 項中 3,188 項通過、6 項跳過（跳過數依環境而異：本機檔案鎖可用時是 3,189／5），Vite 建置、`verify-aios`、雙語檢查。
 - 分層本身是乾淨的：`server`、`src`、`desktop` 只 import `shared`，**沒有任何跨層 import**。問題在層內：16 個檔案超過 800 行、4 組 import 環、同一件事寫在兩三個地方。
 - 最大的五個問題，依「不改的代價」排序：
   1. `src/main.ts` 4,211 行、import 67 個模組，混了 12 種責任；每個功能批次都要改它。
   2. 兩條即時語音路徑在頁面層（`src/realtime.ts`／`src/live-voice.ts`）有 13 個同名 private 方法，在核心層（`server/apikey-call.ts`／`server/live-tool-caller.ts`）各自實作 `recall_memory`／`delegate_task`；每個語音修正要做兩次。
-  3. 設定與偏好散在 27 個寫檔點（11 個走 `prefs-file.ts`、16 個自己寫 tmp＋rename）、頁面 localStorage 與 `desktop.json`；同一個預設值寫在兩處的有 4 組。
+  3. 設定與資料檔的寫入方式分散：11 個 store 走 `prefs-file.ts`，`prefs-file.ts` 之外另有 15 個模組自己寫 tmp＋rename（其中幾個是任務、記憶、身分等資料檔，不是設定），再加頁面 localStorage 與 `desktop.json`；同一個預設值寫在兩處的有 4 組。
   4. `server/home-bridge.ts` 1,655 行把中控 `/commands`、AIFA 冷氣、紅外線三條路線與解析器放在一起；但只有 4 個 importer，拆起來便宜。
   5. 文件落後程式：根 README、原型 README、`docs/11`、`docs/12` 仍說記憶、加密保存、家人辨識、喚醒詞「尚未實作」或「待 PoC」；`docs/validation/README.md` 少索引 9 份紀錄。依 CLAUDE.md 的閱讀順序，後續 Agent 會先被這些句子誤導。
-- 重整計畫分 14 步（§3），每一步是一個行為不變、測試全綠、可以單獨合併的小 PR；風險低的文件同步、改名、抽共用 helper 在前，`app.ts`、`main.ts` 拆分在最後。
+- 重整計畫是 S0（本文）加 14 步（§3，共 15 列），每一步是一個行為不變、測試全綠、可以單獨合併的小 PR；風險低的文件同步、改名、抽共用 helper 在前，`app.ts`、`main.ts` 拆分在最後。
 
 ## 1. 現況架構
 
@@ -61,7 +61,7 @@ BrowserWindow ── loads index.html ──▶ src/main.ts (page composition ro
 | 記憶（家庭記憶） | `memory/{service,live,store,parse,boundary,suggest,retrieve}.ts` | 只在 macOS App 經 IPC；`memory/live.ts` 同時提供口語確認、`delegatePolicy` 給兩條語音路徑 |
 | 回憶模式（照片） | `memories.ts`、`memories-google.ts`、`memories-meta.ts` | 與「記憶」同音不同事 |
 | 身分、臉、聲音、喚醒 | `identity-service.ts`、`identity-store.ts`、`greeting-picker.ts`、`face-runtime.ts`、`speaker-runtime.ts`、`wake-runtime.ts`、`terminal-routes.ts` | 三個 `*-runtime.ts` 幾乎相同（雜湊核對、`/…-runtime/` 提供） |
-| 設定檔 | `prefs-file.ts` 與 11 個 `*-settings.ts` store；另 16 個檔案自己寫檔 | 見 §1.4 |
+| 設定檔 | `prefs-file.ts` 與 11 個 PrefsFile store（9 個 `*-settings.ts` 加 `memories.ts`、`proactive.ts`）；另 15 個模組自己寫檔 | 見 §1.4 |
 | 主動提醒、鬧鐘、天氣 | `proactive.ts`、`proactive-calendar.ts`、`alarms.ts`、`weather.ts`、`local-date.ts` | `alarms.json` 由核心排程 |
 | 終端（Pi） | `terminal-presence.ts`、`terminal-display.ts`、`terminal-routes.ts`；`shared/terminal.ts` | 核心只聽 loopback，Pi 經 SSH 通道 |
 
@@ -70,7 +70,7 @@ BrowserWindow ── loads index.html ──▶ src/main.ts (page composition ro
 | 子系統 | 檔案 | 備註 |
 |---|---|---|
 | 組合根 | `main.ts`（4,211 行）、`shell-state.ts`、`presentation-policy.ts`、`api.ts`、`intent.ts`、`desktop-command.ts` | `main.ts` 的 12 種責任見 §2 問題 1 |
-| 畫面 | `views.ts`（2,028 行：Surface、約 15 個 `render*Settings`、面板狀態型別、文字表）、`settings-entry.ts`、`performance.ts`、`voice-volume.ts` | |
+| 畫面 | `views.ts`（2,028 行：Surface、13 個 `render*Settings`、面板狀態型別、文字表）、`settings-entry.ts`、`performance.ts`、`voice-volume.ts` | |
 | 電子腦 | `brain.ts`（狀態與編排）、`brain-canvas.ts`、`brain-webgl.ts`、`brain-frame.ts`、`region-activity.ts`、`processing-cue.ts`、`processing-sound.ts` | 六區動畫只由 `domain` 事件驅動（CLAUDE.md 要求） |
 | 即時語音頁面層 | `realtime.ts`（`RealtimeVoice`，API key）、`live-voice.ts`（`LiveVoice`，Codex）、`realtime-session.ts`（接縫 `RealtimeSession`、`openRealtime`）、`realtime-tools.ts`（兩路共用工具執行器與確認佇列）、`call-guard.ts`、`call-lifecycle.ts`、`early-speech.ts`、`voice-command.ts`、`echo.ts`、`voice.ts`、`conversation.ts` | |
 | 感測（鏡頭） | `sense/{controller,pipeline,processor,trackers,geometry,identity-ambient,identity-client,identity-worker,light-worker}.ts`、`sense/face/*`、`light-meter.ts`、`face-calibration*.ts` | 只有 worker 能讀像素 |
@@ -121,7 +121,7 @@ POST /api/tasks (or voice delegate_task) → TaskStore (tasks.json; encrypted in
 ```
 voice home_status / home_control (or a typed command)
   → API-key path: page → POST /api/home/{status,control,confirm}; live path: core → SSE realtime.host → page → the same /api/home/*
-  → app.ts homeCall (app.ts:1079): through the adapters/home.ts Facade when NOUS_AIL lists home, otherwise HomeBridge directly
+  → app.ts homeCall (app.ts:1080): through the adapters/home.ts Facade when NOUS_AIL lists home, otherwise HomeBridge directly
   → HomeBridge.control → planFor picks the route: commands (POST /api/v1/devices/{id}/commands)
                                                  aifa_power / aifa_climate (/integrations/aifa/…)
                                                  ir_key (/infrared-commands)
@@ -145,7 +145,7 @@ Raw frames are never written to disk, traced or sent out (CLAUDE.md red line).
 write: page src/api.ts POST /api/settings/{provider,camera,camera-tuning,voice,audio,wake,clock,alarms,day-night,home-corner,proactive,memories,realtime}
        desktop main.mjs uses the same HTTP; the Pi's camera settings stay in page localStorage (terminal-camera.ts)
 store: 11 PrefsFile stores (camera/voice/audio/wake/face-tuning/clock/home-corner/day-night/realtime/proactive/memories .json)
-       + 16 modules that write their own files (alarms, providers settings.json, two credentials files, identity, memory, sealed vault, voice relay, lgtv, voice-cost.jsonl, proactive-log, …)
+       + 15 modules that write their own files (alarms, providers settings.json, two credentials files, identity, memory, sealed vault, voice relay, lgtv, voice-cost.jsonl, proactive-log, …)
        + page localStorage (a second copy of day-night / luma / volume, performance, locale, Web Speech consent)
        + desktop.json (locale, realtimeModel / realtimeVoice fed to the core as environment variables, maxConcurrent, window bounds)
 broadcast: each store's onChange → nous.ts notify() → app.ts notifyAll → SSE settings.updated (rendered per Mac / terminal source)
@@ -154,7 +154,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 
 ### 1.4 對外介面
 
-**HTTP 路由：85 條**（80 條 `/api/*`＋5 條非 API 分派），全部在 `server/app.ts`，只有語音中繼 10 條在 `server/integrations/voice-relay/routes.ts:57-123`。點算方式見驗證紀錄。
+**HTTP 路由：85 條**（80 條 `/api/*`＋5 條非 API 分派），全部在 `server/app.ts`，只有語音中繼 10 條在 `server/integrations/voice-relay/routes.ts:57-126`。點算方式見驗證紀錄。
 
 | 群組 | 路由 | 位置 |
 |---|---|---|
@@ -170,7 +170,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 | 任務與紀錄 | `GET/POST /api/tasks`、`POST /api/tasks/:id/{cancel,retry}`、`GET /api/artifacts/:id`、`GET /api/history`、`GET /api/history/:id`、`POST /api/history/:id/delete`、`GET /api/events`（SSE） | `app.ts:986-1038` |
 | 非 API | `GET /help/commands`、`/face-runtime/*`、`/speaker-runtime/*`、`/wake-runtime/*`、靜態頁（`/history` → `history.html`） | `app.ts:375-393` |
 
-**SSE 事件（`/api/events`，型別 `shared/types.ts:208-217`）**：`hello`（`app.ts:1220`）、`task.updated`（350）、`task.deleted`（354）、`settings.updated`（`notifyAll` 1203）、`memory.presence_changed`（1243）、`realtime.host`（`realtime-routes.ts:1201`）、`realtime.live`（`realtime-routes.ts:752,1114,1156,1193`；`kind` 清單在 `shared/realtime-route.ts:250-283`，由 `live-route.ts`、`apikey-call.ts`、`memory/live.ts` 發出）。頁面只用匿名 `onmessage`，在 `src/main.ts:2728` `onServerEvent` 依 `type` 分派。SSE 幀在 `app.ts` 四處各自組字串（302-307、341、1205-1208、1221）。`/api/chat` 另有一套每次請求的串流事件（delta、delegate、delegate_blocked、delegated、memory_notice、memory_revoked、done、error）。
+**SSE 事件（`/api/events`，型別 `shared/types.ts:208-217`）**：`hello`（`app.ts:1221`）、`task.updated`（350）、`task.deleted`（354）、`settings.updated`（`notifyAll` 1205）、`memory.presence_changed`（1243）、`realtime.host`（`realtime-routes.ts:1201`）、`realtime.live`（`realtime-routes.ts:752,1114,1156,1193`；`kind` 清單在 `shared/realtime-route.ts:250-283`，由 `live-route.ts`、`apikey-call.ts`、`memory/live.ts` 發出）。頁面只用匿名 `onmessage`，在 `src/main.ts:2728` `onServerEvent` 依 `type` 分派。SSE 幀 `data: …\n\n` 在 `app.ts` 五處各自組字串（296 即時語音旁路、346 `broadcast`、1125 `streamChat`、1209 `notifyAll`、1222 `hello`），keep-alive 在 366。`/api/chat` 另有一套每次請求的串流事件（delta、delegate、delegate_blocked、delegated、memory_notice、memory_revoked、done、error）。
 
 **設定檔（configDir）**
 
@@ -213,7 +213,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 
 ### P1-3　設定與偏好散在四種地方
 
-- 證據：11 個 store 走 `prefs-file.ts`，另外 16 個檔案各自 tmp＋rename（`alarms.ts:615`、`providers.ts:172`、`chatgpt-auth.ts:511`、`codex-auth.ts:588`、`proactive.ts:106`、`nous.ts:687`、`voice-cost-log.ts:54`、`identity-store.ts:388`、`memories-google.ts:219`、`task-migration.ts:158`、`sealed-vault.ts:123`、`memory/store.ts:347`、`store.ts:1013`、`voice-relay/store.ts:84`、`lgtv/store.ts:39`、`prefs-file.ts:100`）；`sealed-vault.ts:11` 的註解自己說「和 memory/store.ts 相同」。`clock-settings.ts` 與 `home-corner-settings.ts` 去掉領域字後只差註解。
+- 證據：11 個 store 走 `prefs-file.ts`（共用 helper 的寫入在 `prefs-file.ts:100`），另外 15 個模組各自 tmp＋rename（`alarms.ts:615`、`providers.ts:172`、`chatgpt-auth.ts:511`、`codex-auth.ts:588`、`proactive.ts:106`、`nous.ts:687`、`voice-cost-log.ts:54`、`identity-store.ts:388`、`memories-google.ts:219`、`task-migration.ts:158`、`sealed-vault.ts:123`、`memory/store.ts:347`、`store.ts:1013`、`voice-relay/store.ts:84`、`lgtv/store.ts:39`）；`sealed-vault.ts:11` 的註解自己說「和 memory/store.ts 相同」。`clock-settings.ts` 與 `home-corner-settings.ts` 去掉領域字後只差註解、`unreadable` 訊息字串與 import 順序。
 - 頁面另存一份：`src/voice-volume.ts` 的 `DAY_NIGHT_KEY`／`LUMA_THRESHOLDS_KEY`（:10-12）在 localStorage，`main.ts:1588 dayNightPrefs()` 先讀核心、沒有才讀 localStorage，`:1649` 還有搬遷碼。
 - 預設值寫兩處：通話上限 `src/call-guard.ts:12 DEFAULT_MAX_CALL_MS` 對 `shared/voice-prefs.ts`；`gpt-realtime`／`marin` 在 `desktop/main.mjs:61-62` 與 `server/config.ts:136-137`；`maxConcurrent 4` 在 `desktop/main.mjs` 與 `server/runner.ts:57`；`REALTIME_ROUTES` 標籤在 `desktop/main.mjs:53` 與 `shared/realtime-route.ts:15`。
 - 桌面複製 shared：`settings-menu.mjs` 的 `WAKE_STATE_REASONS`（:19）、`WAKE_THRESHOLD_OFFSETS`（:88）、`DEFAULT_WAKE_SILENCE_S`（:99）、音訊清理（:229）、`formatCallClock`（:761）、五張文字表；`preload.cjs:10,26-62` 再複製一次。
@@ -221,7 +221,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 
 ### P1-4　`server/home-bridge.ts` 1,655 行三條路線同檔
 
-- 證據：常數 37-86、型別 87-212、讀值正規化 214-283、指令解析 285-392、目標比對 393-477、`planFor` 626、AIFA 667-767、紅外線 768-843、三種回覆 844-927、`class HomeBridge` 928-1511（`sendCommands` 1142、`sendAifa` 1159、`sendIr` 1242、`discoverAifa` 1425、`home` 1488）、解析器 1512-1654。Importer 只有 `app.ts:18`、`nous.ts:29`、`home-overview.ts:9`、`adapters/home.ts:3` 與 4 個測試。
+- 證據：常數 37-86、型別 87-212、讀值正規化 214-283、指令解析 285-392、目標比對 393-477、`planFor` 626、AIFA 667-767、紅外線 768-843、三種回覆 844-927、`class HomeBridge` 928-1511（`sendCommands` 1142、`sendAifa` 1159、`sendIr` 1242、`discoverAifa` 1425、`home` 1484）、解析器 1512-1654。Importer 只有 `app.ts:18`、`nous.ts:29`、`home-overview.ts:9`、`adapters/home.ts:3` 與 4 個測試。
 - 不改的代價：H2–H4（`docs/12` §6）要再加設備政策與房間指令時全部疊進同一個檔；AIFA／紅外線的調整會碰到 H1 已口頭驗過的 `/commands` 路線。好消息是 importer 少、純函式多、`home-bridge.test.ts` 用假中控覆蓋三條路線，拆分風險低。
 
 ### P1-5　文件與程式不一致
@@ -249,7 +249,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 
 ### P2-6　`server/app.ts` 1,369 行手寫路由鏈
 
-- 證據：85 條路由在一條 `if` 鏈；`localizeSettings(settings.view(pageSource(…)))` 重複 18 次；同一句「沒有保存（無法寫入設定檔…）」的 try/catch 重複 12 次（436-679）；驗證做兩次（`app.ts` 解析 patch，`PrefsFile.parse` 讀回再驗一次）；SSE 幀四處手組；`app.ts:285` 自己 `new ApiKeyRoute`（組合根應在 `nous.ts`）；`app.ts:1083-1086` 讀 Home adapter 的私有結果欄位 `data.legacy`／`data.http_error`／`data.rethrow`。
+- 證據：85 條路由在一條 `if` 鏈；`localizeSettings(settings.view(pageSource(…)))` 重複 18 次；同一句「沒有保存（無法寫入設定檔…）」的 try/catch 重複 12 次（436-679）；驗證做兩次（`app.ts` 解析 patch，`PrefsFile.parse` 讀回再驗一次）；SSE 幀五處手組；`app.ts:285` 自己 `new ApiKeyRoute`（組合根應在 `nous.ts`）；`app.ts:1083-1086` 讀 Home adapter 的私有結果欄位 `data.legacy`／`data.http_error`／`data.rethrow`。
 - 不改的代價：每新增一個設定檔要在 `app.ts` 加 25 行幾乎相同的程式；路由順序決定行為（`startsWith` 在前會吃掉後面的），沒有測試保證。
 
 ### P2-7　4 組 import 環
@@ -265,7 +265,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 
 ### P2-9　小 helper 重複
 
-- `normalizeSpoken` 三份不同語意（`live-route.ts:118`、`memory/live.ts:241`、`voice-relay/catalog.ts:47`）；`hostOf`（`codex-responses.ts:339`、`web-search.ts:185`）；OAuth 回呼頁與常數（`chatgpt-auth.ts:27-35,545`、`codex-auth.ts:30-34,645`）；`face-`／`speaker-`／`wake-runtime.ts` 三胞胎與 `app.ts:1328-1368` 三個 `serve*Runtime`；頁面 `intent.ts` 與 `voice-command.ts` 兩套指令文法。
+- `normalizeSpoken` 三份不同語意（`live-route.ts:118`、`memory/live.ts:241`、`voice-relay/catalog.ts:47`）；`hostOf`（`codex-responses.ts:339`、`web-search.ts:185`）；OAuth 回呼頁與常數（`chatgpt-auth.ts:27-35,545`、`codex-auth.ts:30-34,645`）；`face-`／`speaker-`／`wake-runtime.ts` 三胞胎；`app.ts:1328-1368` 已有共用的 `serveVerifiedRuntime`，但只有講者路由用它，`serveFaceRuntime` 與 `serveWakeRuntime` 仍各自複製同一段；頁面 `intent.ts` 與 `voice-command.ts` 兩套指令文法。
 - 不改的代價：口語比對規則改一處漏兩處；三個 runtime 的雜湊核對若要加一種檔案得改三次。
 
 ### P3-10　測試基礎設施
@@ -276,7 +276,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 ### P3-11　命名
 
 - `shared/seconds-menu.ts`（§P1-5）、`shared/realtime-route.ts`、「memories＝照片回憶」對「memory＝家庭記憶」、`settings.json` 其實只放供應商。
-- 不改的代價：低；但改名最好趁現在 importer 還少（`seconds-menu` 4 個來源檔＋7 個測試）。
+- 不改的代價：低；但改名最好趁現在 importer 還少（`seconds-menu` 5 個來源檔＋7 個測試）。
 
 ## 3. 重整計畫
 
@@ -287,11 +287,11 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 | S0 | **本文與量測腳本**（這個 PR）：`docs/23`、`scripts/architecture-metrics.mjs`、驗證紀錄、索引 | 只有文件與一支唯讀腳本 | 無 | 全套驗證綠 |
 | S1 | **文件同步**：修 §P1-5 表列的每一句；補索引 9 份驗證紀錄；原型 README 結構樹補齊 | `README.md`、`prototype/ambient-shell/README.md`、`docs/Current_Implementation_Status.md`、`docs/11`、`docs/12`、`docs/README.md`、`docs/validation/README.md`（都含 .en） | 無 | 雙語檢查＋人工核對每句對應程式 |
 | S2 | **架構守門測試**：`tests/architecture.test.ts` 用 `scripts/architecture-metrics.mjs` 的邏輯鎖住：跨層 import 為 0、import 環不多於現在 4 組（允許清單）、超過 800 行的檔不多於現在 16 個（允許清單，只能減不能加） | 新增 1 個測試；腳本抽成可 import 的模組 | 低 | 測試在基準上通過；故意加一個跨層 import 會失敗 |
-| S3 | **改名 `shared/seconds-menu.ts` → `shared/menu-prefs.ts`**，順手把 `MenuPrefSetting` 型別搬到 `shared/prefs.ts` 解掉 shared 的型別環 | 4 個來源檔、7 個測試改 import 路徑 | 低 | `tsc` 綠；`describeMenuPrefs` 輸出 snapshot 相同 |
+| S3 | **改名 `shared/seconds-menu.ts` → `shared/menu-prefs.ts`**，順手把 `MenuPrefSetting` 型別搬到 `shared/prefs.ts` 解掉 shared 的型別環 | 5 個來源檔（含 `desktop/settings-menu.d.mts`）、7 個測試改 import 路徑 | 低 | `tsc` 綠；`describeMenuPrefs` 輸出 snapshot 相同 |
 | S4 | **共用原子寫檔 helper**：`server/fs-atomic.ts` 提供 `writeAtomic(path, data, mode)`，先讓 5 個最簡單的呼叫者改用（`providers.ts`、`proactive.ts` 的 log、`voice-cost-log.ts`、`lgtv/store.ts`、`nous.ts` 的 memory-enabled）；`sealed-vault.ts`／`memory/store.ts` 的 durable 寫法保留、第二個 PR 再評估 | 1 新檔＋5 檔各 -10 行 | 低 | 既有 store 測試；寫出的檔逐位元組相同 |
-| S5 | **PrefsFile store 工廠**：`server/prefs-store.ts` 的 `createPrefsStore(spec, file, defaults)` 取代 11 個 `*-settings.ts` 的相同樣板；各檔留一行 export 維持 import 路徑 | 11 檔瘦身 | 低 | 11 個 settings 測試不改即綠；`settings.view()` JSON 相同 |
-| S6 | **`app.ts` 設定路由表**：13 條 `/api/settings/*` 改成一張表（path → store → parsePatch），消掉 18 次 localize 與 12 次錯誤樣板；驗證只做一次 | `app.ts` -200 行左右；新增 `server/routes/settings.ts` | 中低 | `http.test.ts` 與 `backend-i18n.test.ts` 不改；錯誤訊息、狀態碼、回應 JSON 逐位元組比對 |
-| S7 | **解執行期環＋搬 `ApiKeyRoute`**：`RouteStartError`／`RouteCall`／`SessionContext`／`HostGone` 等契約移到 `server/realtime-contracts.ts`；`ApiKeyRoute` 從 `realtime-routes.ts:1232` 搬到 `server/apikey-route.ts`（對稱 `live-route.ts`）；`app.ts:285` 不再自己 `new ApiKeyRoute`，由 `nous.ts` 注入 | `realtime-routes.ts` -60、`apikey-call.ts`、`app.ts`、`nous.ts` | 中低 | `realtime-routes.test.ts`、`apikey-route.test.ts`、`live-integration.test.ts` 不改即綠；量測腳本顯示環數 4 → 3 |
+| S5 | **PrefsFile store 工廠**：`server/prefs-store.ts` 的 `createPrefsStore(spec, file, defaults)` 取代 11 個 PrefsFile store（9 個 `*-settings.ts` 加 `memories.ts`、`proactive.ts`）的相同樣板；各檔留一行 export 維持 import 路徑 | 11 檔瘦身 | 低 | 既有測試不改即綠：`audio-`／`camera-`／`clock-`／`voice-`／`wake-settings`、`camera-prefs`、`prefs`、`day-night-mode`、`home-corner`、`memories-http`、`memories-google`、`proactive`、`proactive-calendar`、`apikey-integration`、`live-integration`（`face-tuning.json` 只經 `http.test.ts` 的 `/api/settings/camera-tuning` 間接測）；`settings.view()` JSON 相同 |
+| S6 | **`app.ts` 設定路由表**：13 條 `/api/settings/*` 改成一張表（path → store → parsePatch），消掉 18 次 localize 與 12 次錯誤樣板；`PrefsFile.parse` 讀回時的第二次驗證先保留，等測試證明兩處驗證等價再另開 PR 移除 | `app.ts` -200 行左右；新增 `server/routes/settings.ts` | 中低 | `http.test.ts` 與 `backend-i18n.test.ts` 不改；錯誤訊息、狀態碼、回應 JSON 逐位元組比對 |
+| S7 | **解執行期環＋搬 `ApiKeyRoute`**：`RouteStartError`／`RouteCall`／`SessionContext`／`HostGone` 等契約移到 `server/realtime-contracts.ts`；`ApiKeyRoute` 從 `realtime-routes.ts:1232` 搬到 `server/apikey-route.ts`（對稱 `live-route.ts`）；`app.ts:285` 不再自己 `new ApiKeyRoute`，由 `nous.ts` 注入（風險：`createApp` 沒帶 `realtimeRoutes` 時目前預設建 `ApiKeyRoute`，改成注入前要先確認沒有測試依賴這個預設，否則保留預設只搬位置） | `realtime-routes.ts` -60、`apikey-call.ts`、`app.ts`、`nous.ts` | 中低 | `realtime-routes.test.ts`、`apikey-route.test.ts`、`live-integration.test.ts` 不改即綠；量測腳本顯示環數 4 → 3 |
 | S8 | **工具名單單一來源**：`HOST_TOOLS`、`HOST_TIMEOUT_MS` 的鍵、`RealtimeToolName` 都從 `shared/realtime-route.ts` 的 `HostToolName` 推導；家電參數上限只留 `adapters/home.ts` schema 一份，`realtime.ts` 與 `app.ts` 引用它 | 4 檔 | 低 | 工具 schema JSON 與 `realtimeToolRules` 文字逐位元組相同（加一個 snapshot 測試） |
 | S9 | **`home-bridge.ts` 拆成資料夾**：`server/home/{hub-client,parse,commands,aifa,infrared,bridge}.ts`，`home-bridge.ts` 變成 re-export barrel，4 個 importer 與測試路徑不變 | 1 檔 → 7 檔，純搬移 | 中低 | `home-bridge.test.ts`、`integration-home-facade.test.ts`、`home-corner.test.ts` 不改；假中控收到的請求序列逐位元組相同 |
 | S10 | **頁面兩路共用基底**：抽 `src/voice-path-shared.ts`（問候時序、先開口偵測、`CallGuard`／`ApprovalQueue` 建構、`LiveCoreEvent` 記憶事件處理）給 `RealtimeVoice` 與 `LiveVoice` 用；兩類各自保留連線與音訊差異 | `realtime.ts`、`live-voice.ts` 各 -150 行左右 | 中 | `realtime-voice.test.ts`、`live-voice.test.ts`、`realtime-local-commands.test.ts`、`id02-mac-fixes.test.ts` 不改；兩路事件序列 fixture 相同 |

@@ -17,7 +17,7 @@ Companion document: [23 Architecture review and restructuring plan](../23_Archit
 | Check | Command | Result |
 |---|---|---|
 | Typecheck | `npx tsc --noEmit` | passed, 2.5 s |
-| Unit and integration tests | `npx vitest run` | 172 test files passed; 3,188 tests passed, 6 skipped; 54 s |
+| Unit and integration tests | `npx vitest run` | 172 test files passed; 3,188 of 3,194 tests passed, 6 skipped; 54 s. The skip count is environment-dependent: a later re-run in the same container gave 3,189 passed, 5 skipped (`apikey-integration.test.ts:193` and others use `describe.skipIf(!realLockAvailable)`) |
 | Front-end build | `npx vite build` | passed; warning: the `zh-tw-opencc` chunk is 1,070 kB, above 500 kB |
 | Desktop main syntax | `node --check desktop/main.mjs` | passed |
 | Isolated mock flow | `node scripts/verify-aios.mjs` | PASS, 66 s (typecheck, tests, build, isolated mock task and chat HTTP) |
@@ -62,7 +62,7 @@ The script only counts the `path === "/api/…"`, `path.startsWith(…)` and `pa
 
 ### 3.4 Settings file writers
 
-- Server files that call `renameSync` themselves: 16 (`alarms`, `chatgpt-auth`, `codex-auth`, `identity-store`, `integrations/voice-relay/store`, `lgtv/store`, `memories-google`, `memory/store`, `nous`, `prefs-file`, `proactive`, `providers`, `sealed-vault`, `store`, `task-migration`, `voice-cost-log`).
+- Server files that call `renameSync` themselves: 16, of which `prefs-file.ts` is the shared helper itself, so 15 bypass it (`alarms`, `chatgpt-auth`, `codex-auth`, `identity-store`, `integrations/voice-relay/store`, `lgtv/store`, `memories-google`, `memory/store`, `nous`, `prefs-file`, `proactive`, `providers`, `sealed-vault`, `store`, `task-migration`, `voice-cost-log`).
 - Server files that import `prefs-file.ts`: 11 (`audio-`, `camera-`, `clock-`, `day-night-`, `face-tuning-`, `home-corner-`, `realtime-`, `voice-`, `wake-settings`, `memories`, `proactive`). `proactive.ts` is in both lists: its settings use PrefsFile, its daily log is written by hand.
 - `server/app.ts`: `localizeSettings(settings.view(pageSource` appears 18 times; the error string "not saved (cannot write settings file" appears 12 times.
 

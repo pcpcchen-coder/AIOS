@@ -10,15 +10,15 @@ Line numbers refer to the baseline commit and will drift; use file and function 
 
 ## 0. One-page summary
 
-- The prototype `prototype/ambient-shell` now has 241 source files and 66,887 lines (server 30,844, src 25,626, shared 7,721, desktop 2,696). It is no longer the small prototype planned in 2026-10. Every check is green on the baseline: typecheck, 172 test files with 3,188 tests passing and 6 skipped, the Vite build, `verify-aios`, and the bilingual check.
+- The prototype `prototype/ambient-shell` now has 241 source files and 66,887 lines (server 30,844, src 25,626, shared 7,721, desktop 2,696). It is no longer the small prototype planned in 2026-10. Every check is green on the baseline: typecheck, 172 test files with 3,188 of 3,194 tests passing and 6 skipped (the skip count is environment-dependent: 3,189 / 5 when the local file lock is available), the Vite build, `verify-aios`, and the bilingual check.
 - The layering itself is clean: `server`, `src` and `desktop` import only `shared`, and there are **zero cross-layer imports**. The problems are inside each layer: 16 files over 800 lines, 4 import cycles, and the same thing written in two or three places.
 - The five largest problems, ordered by the cost of leaving them:
   1. `src/main.ts` is 4,211 lines, imports 67 modules and mixes 12 responsibilities; every feature batch edits it.
   2. The two realtime voice paths duplicate each other: 13 same-named private methods on the page (`src/realtime.ts` / `src/live-voice.ts`), and separate implementations of `recall_memory` / `delegate_task` in the core (`server/apikey-call.ts` / `server/live-tool-caller.ts`). Every voice fix has to be made twice.
-  3. Settings and preferences live in 27 write sites (11 through `prefs-file.ts`, 16 with their own tmp+rename), page localStorage and `desktop.json`; four defaults are declared in two places.
+  3. Settings and data files are written in scattered ways: 11 stores go through `prefs-file.ts`, 15 other modules besides `prefs-file.ts` do their own tmp+rename (several of them are task, memory and identity data files rather than settings), plus page localStorage and `desktop.json`; four defaults are declared in two places.
   4. `server/home-bridge.ts` (1,655 lines) holds the hub `/commands` path, the AIFA air conditioner, the infrared path and the parsers in one file; it has only 4 importers, so splitting it is cheap.
   5. The docs lag the code: the root README, the prototype README, `docs/11` and `docs/12` still say memory, encrypted storage, family recognition and the wake word are "not implemented" or "pending PoC"; `docs/validation/README.md` is missing 9 records. Under the CLAUDE.md reading order, later agents are misled by these sentences first.
-- The plan has 14 steps (§3). Each is a small PR that can be merged alone, changes no behaviour and keeps every test green. Low-risk work (doc sync, renames, shared helpers) comes first; splitting `app.ts` and `main.ts` comes last.
+- The plan is S0 (this document) plus 14 steps (§3, 15 rows in all). Each is a small PR that can be merged alone, changes no behaviour and keeps every test green. Low-risk work (doc sync, renames, shared helpers) comes first; splitting `app.ts` and `main.ts` comes last.
 
 ## 1. Current architecture
 
@@ -59,7 +59,7 @@ BrowserWindow ── loads index.html ──▶ src/main.ts (page composition ro
 | Memory (family memory) | `memory/{service,live,store,parse,boundary,suggest,retrieve}.ts` | macOS App only, over IPC; `memory/live.ts` also provides spoken confirmation and `delegatePolicy` to both voice paths |
 | Memories mode (photos) | `memories.ts`, `memories-google.ts`, `memories-meta.ts` | Same word, different feature from "memory" |
 | Identity, face, voice, wake | `identity-service.ts`, `identity-store.ts`, `greeting-picker.ts`, `face-runtime.ts`, `speaker-runtime.ts`, `wake-runtime.ts`, `terminal-routes.ts` | The three `*-runtime.ts` files are near-identical (hash check, served under `/…-runtime/`) |
-| Settings files | `prefs-file.ts` and 11 `*-settings.ts` stores; 16 other files write their own files | See §1.4 |
+| Settings files | `prefs-file.ts` and 11 PrefsFile stores (9 `*-settings.ts` plus `memories.ts`, `proactive.ts`); 15 other modules write their own files | See §1.4 |
 | Proactive, alarms, weather | `proactive.ts`, `proactive-calendar.ts`, `alarms.ts`, `weather.ts`, `local-date.ts` | `alarms.json` is scheduled by the core |
 | Terminal (Pi) | `terminal-presence.ts`, `terminal-display.ts`, `terminal-routes.ts`; `shared/terminal.ts` | The core listens on loopback only; the Pi comes in through an SSH tunnel |
 
@@ -68,7 +68,7 @@ BrowserWindow ── loads index.html ──▶ src/main.ts (page composition ro
 | Subsystem | Files | Notes |
 |---|---|---|
 | Composition root | `main.ts` (4,211 lines), `shell-state.ts`, `presentation-policy.ts`, `api.ts`, `intent.ts`, `desktop-command.ts` | The 12 responsibilities of `main.ts` are listed under §2 problem 1 |
-| Views | `views.ts` (2,028 lines: Surfaces, about 15 `render*Settings`, panel state types, text tables), `settings-entry.ts`, `performance.ts`, `voice-volume.ts` | |
+| Views | `views.ts` (2,028 lines: Surfaces, 13 `render*Settings`, panel state types, text tables), `settings-entry.ts`, `performance.ts`, `voice-volume.ts` | |
 | Brain | `brain.ts` (state and orchestration), `brain-canvas.ts`, `brain-webgl.ts`, `brain-frame.ts`, `region-activity.ts`, `processing-cue.ts`, `processing-sound.ts` | The six-region animation is driven only by `domain` events (CLAUDE.md requirement) |
 | Realtime voice page layer | `realtime.ts` (`RealtimeVoice`, API key), `live-voice.ts` (`LiveVoice`, Codex), `realtime-session.ts` (the `RealtimeSession` seam, `openRealtime`), `realtime-tools.ts` (tool executor and approval queue shared by both paths), `call-guard.ts`, `call-lifecycle.ts`, `early-speech.ts`, `voice-command.ts`, `echo.ts`, `voice.ts`, `conversation.ts` | |
 | Sensing (camera) | `sense/{controller,pipeline,processor,trackers,geometry,identity-ambient,identity-client,identity-worker,light-worker}.ts`, `sense/face/*`, `light-meter.ts`, `face-calibration*.ts` | Only the worker can read pixels |
@@ -119,7 +119,7 @@ POST /api/tasks (or voice delegate_task) → TaskStore (tasks.json; encrypted in
 ```
 voice home_status / home_control (or a typed command)
   → API-key path: page → POST /api/home/{status,control,confirm}; live path: core → SSE realtime.host → page → the same /api/home/*
-  → app.ts homeCall (app.ts:1079): through the adapters/home.ts Facade when NOUS_AIL lists home, otherwise HomeBridge directly
+  → app.ts homeCall (app.ts:1080): through the adapters/home.ts Facade when NOUS_AIL lists home, otherwise HomeBridge directly
   → HomeBridge.control → planFor picks the route: commands (POST /api/v1/devices/{id}/commands)
                                                  aifa_power / aifa_climate (/integrations/aifa/…)
                                                  ir_key (/infrared-commands)
@@ -143,7 +143,7 @@ Raw frames are never written to disk, traced or sent out (CLAUDE.md red line).
 write: page src/api.ts POST /api/settings/{provider,camera,camera-tuning,voice,audio,wake,clock,alarms,day-night,home-corner,proactive,memories,realtime}
        desktop main.mjs uses the same HTTP; the Pi's camera settings stay in page localStorage (terminal-camera.ts)
 store: 11 PrefsFile stores (camera/voice/audio/wake/face-tuning/clock/home-corner/day-night/realtime/proactive/memories .json)
-       + 16 modules that write their own files (alarms, providers settings.json, two credentials files, identity, memory, sealed vault, voice relay, lgtv, voice-cost.jsonl, proactive-log, …)
+       + 15 modules that write their own files (alarms, providers settings.json, two credentials files, identity, memory, sealed vault, voice relay, lgtv, voice-cost.jsonl, proactive-log, …)
        + page localStorage (a second copy of day-night / luma / volume, performance, locale, Web Speech consent)
        + desktop.json (locale, realtimeModel / realtimeVoice fed to the core as environment variables, maxConcurrent, window bounds)
 broadcast: each store's onChange → nous.ts notify() → app.ts notifyAll → SSE settings.updated (rendered per Mac / terminal source)
@@ -152,7 +152,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 
 ### 1.4 External interfaces
 
-**HTTP routes: 85** (80 under `/api/*` plus 5 non-API dispatches), all in `server/app.ts` except the 10 voice-relay routes in `server/integrations/voice-relay/routes.ts:57-123`. The counting method is in the validation record.
+**HTTP routes: 85** (80 under `/api/*` plus 5 non-API dispatches), all in `server/app.ts` except the 10 voice-relay routes in `server/integrations/voice-relay/routes.ts:57-126`. The counting method is in the validation record.
 
 | Group | Routes | Location |
 |---|---|---|
@@ -168,7 +168,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 | Tasks and history | `GET/POST /api/tasks`, `POST /api/tasks/:id/{cancel,retry}`, `GET /api/artifacts/:id`, `GET /api/history`, `GET /api/history/:id`, `POST /api/history/:id/delete`, `GET /api/events` (SSE) | `app.ts:986-1038` |
 | Non-API | `GET /help/commands`, `/face-runtime/*`, `/speaker-runtime/*`, `/wake-runtime/*`, static pages (`/history` → `history.html`) | `app.ts:375-393` |
 
-**SSE events (`/api/events`, type `shared/types.ts:208-217`)**: `hello` (`app.ts:1220`), `task.updated` (350), `task.deleted` (354), `settings.updated` (`notifyAll` 1203), `memory.presence_changed` (1243), `realtime.host` (`realtime-routes.ts:1201`), `realtime.live` (`realtime-routes.ts:752,1114,1156,1193`; the `kind` list is in `shared/realtime-route.ts:250-283`, emitted by `live-route.ts`, `apikey-call.ts` and `memory/live.ts`). The page uses only an anonymous `onmessage` and dispatches on `type` in `src/main.ts:2728` `onServerEvent`. SSE frames are assembled by hand in four places in `app.ts` (302-307, 341, 1205-1208, 1221). `/api/chat` has its own per-request stream events (delta, delegate, delegate_blocked, delegated, memory_notice, memory_revoked, done, error).
+**SSE events (`/api/events`, type `shared/types.ts:208-217`)**: `hello` (`app.ts:1221`), `task.updated` (350), `task.deleted` (354), `settings.updated` (`notifyAll` 1205), `memory.presence_changed` (1243), `realtime.host` (`realtime-routes.ts:1201`), `realtime.live` (`realtime-routes.ts:752,1114,1156,1193`; the `kind` list is in `shared/realtime-route.ts:250-283`, emitted by `live-route.ts`, `apikey-call.ts` and `memory/live.ts`). The page uses only an anonymous `onmessage` and dispatches on `type` in `src/main.ts:2728` `onServerEvent`. SSE frames `data: …\n\n` are assembled by hand in five places in `app.ts` (296 realtime sideband, 346 `broadcast`, 1125 `streamChat`, 1209 `notifyAll`, 1222 `hello`), with the keep-alive at 366. `/api/chat` has its own per-request stream events (delta, delegate, delegate_blocked, delegated, memory_notice, memory_revoked, done, error).
 
 **Settings files (configDir)**
 
@@ -211,7 +211,7 @@ Each item carries evidence and the cost of not fixing it. P1 is being paid now; 
 
 ### P1-3　Settings and preferences live in four kinds of place
 
-- Evidence: 11 stores use `prefs-file.ts`; 16 other files each do their own tmp+rename (`alarms.ts:615`, `providers.ts:172`, `chatgpt-auth.ts:511`, `codex-auth.ts:588`, `proactive.ts:106`, `nous.ts:687`, `voice-cost-log.ts:54`, `identity-store.ts:388`, `memories-google.ts:219`, `task-migration.ts:158`, `sealed-vault.ts:123`, `memory/store.ts:347`, `store.ts:1013`, `voice-relay/store.ts:84`, `lgtv/store.ts:39`, `prefs-file.ts:100`); the comment at `sealed-vault.ts:11` says it is "the same as memory/store.ts". `clock-settings.ts` and `home-corner-settings.ts` differ only in comments once the domain word is renamed.
+- Evidence: 11 stores use `prefs-file.ts` (the shared helper writes at `prefs-file.ts:100`); 15 other modules each do their own tmp+rename (`alarms.ts:615`, `providers.ts:172`, `chatgpt-auth.ts:511`, `codex-auth.ts:588`, `proactive.ts:106`, `nous.ts:687`, `voice-cost-log.ts:54`, `identity-store.ts:388`, `memories-google.ts:219`, `task-migration.ts:158`, `sealed-vault.ts:123`, `memory/store.ts:347`, `store.ts:1013`, `voice-relay/store.ts:84`, `lgtv/store.ts:39`); the comment at `sealed-vault.ts:11` says it is "the same as memory/store.ts". `clock-settings.ts` and `home-corner-settings.ts` differ only in comments, the `unreadable` message string and import order once the domain word is renamed.
 - The page keeps a second copy: `DAY_NIGHT_KEY` / `LUMA_THRESHOLDS_KEY` in `src/voice-volume.ts` (:10-12) in localStorage; `main.ts:1588 dayNightPrefs()` reads the core first and falls back to localStorage, with migration code at `:1649`.
 - Defaults written twice: the call limit `src/call-guard.ts:12 DEFAULT_MAX_CALL_MS` vs `shared/voice-prefs.ts`; `gpt-realtime` / `marin` in `desktop/main.mjs:61-62` and `server/config.ts:136-137`; `maxConcurrent 4` in `desktop/main.mjs` and `server/runner.ts:57`; the `REALTIME_ROUTES` labels in `desktop/main.mjs:53` and `shared/realtime-route.ts:15`.
 - The desktop copies shared: `WAKE_STATE_REASONS` (`settings-menu.mjs:19`), `WAKE_THRESHOLD_OFFSETS` (:88), `DEFAULT_WAKE_SILENCE_S` (:99), the audio sanitizer (:229), `formatCallClock` (:761), five text tables; `preload.cjs:10,26-62` copies again.
@@ -219,7 +219,7 @@ Each item carries evidence and the cost of not fixing it. P1 is being paid now; 
 
 ### P1-4　`server/home-bridge.ts`: 1,655 lines, three paths in one file
 
-- Evidence: constants 37-86, types 87-212, reading normalisation 214-283, command parsing 285-392, target matching 393-477, `planFor` 626, AIFA 667-767, infrared 768-843, three reply mappers 844-927, `class HomeBridge` 928-1511 (`sendCommands` 1142, `sendAifa` 1159, `sendIr` 1242, `discoverAifa` 1425, `home` 1488), parsers 1512-1654. The only importers are `app.ts:18`, `nous.ts:29`, `home-overview.ts:9`, `adapters/home.ts:3` and 4 tests.
+- Evidence: constants 37-86, types 87-212, reading normalisation 214-283, command parsing 285-392, target matching 393-477, `planFor` 626, AIFA 667-767, infrared 768-843, three reply mappers 844-927, `class HomeBridge` 928-1511 (`sendCommands` 1142, `sendAifa` 1159, `sendIr` 1242, `discoverAifa` 1425, `home` 1484), parsers 1512-1654. The only importers are `app.ts:18`, `nous.ts:29`, `home-overview.ts:9`, `adapters/home.ts:3` and 4 tests.
 - Cost of leaving it: H2–H4 (`docs/12` §6) will pile device policy and room commands into the same file; AIFA / infrared changes touch the `/commands` path that H1 already verified by voice at home. The good news: few importers, mostly pure functions, and `home-bridge.test.ts` covers all three paths with a fake hub, so the split is low risk.
 
 ### P1-5　Docs disagree with the code
@@ -247,7 +247,7 @@ Each item carries evidence and the cost of not fixing it. P1 is being paid now; 
 
 ### P2-6　`server/app.ts`: a 1,369-line hand-written route chain
 
-- Evidence: 85 routes in one `if` chain; `localizeSettings(settings.view(pageSource(…)))` repeated 18 times; the same "not saved (cannot write settings file…)" try/catch repeated 12 times (436-679); validation runs twice (`app.ts` parses the patch, `PrefsFile.parse` re-validates on read); SSE frames assembled by hand in four places; `app.ts:285` does `new ApiKeyRoute` itself (the composition root should be `nous.ts`); `app.ts:1083-1086` reads the Home adapter's private result fields `data.legacy` / `data.http_error` / `data.rethrow`.
+- Evidence: 85 routes in one `if` chain; `localizeSettings(settings.view(pageSource(…)))` repeated 18 times; the same "not saved (cannot write settings file…)" try/catch repeated 12 times (436-679); validation runs twice (`app.ts` parses the patch, `PrefsFile.parse` re-validates on read); SSE frames assembled by hand in five places; `app.ts:285` does `new ApiKeyRoute` itself (the composition root should be `nous.ts`); `app.ts:1083-1086` reads the Home adapter's private result fields `data.legacy` / `data.http_error` / `data.rethrow`.
 - Cost of leaving it: every new settings file adds about 25 near-identical lines to `app.ts`; route order determines behaviour (an earlier `startsWith` swallows later routes) with no test guaranteeing it.
 
 ### P2-7　Four import cycles
@@ -263,7 +263,7 @@ Each item carries evidence and the cost of not fixing it. P1 is being paid now; 
 
 ### P2-9　Duplicated small helpers
 
-- `normalizeSpoken` three times with different semantics (`live-route.ts:118`, `memory/live.ts:241`, `voice-relay/catalog.ts:47`); `hostOf` (`codex-responses.ts:339`, `web-search.ts:185`); the OAuth callback page and constants (`chatgpt-auth.ts:27-35,545`, `codex-auth.ts:30-34,645`); the `face-` / `speaker-` / `wake-runtime.ts` triplets and the three `serve*Runtime` in `app.ts:1328-1368`; two command grammars on the page, `intent.ts` and `voice-command.ts`.
+- `normalizeSpoken` three times with different semantics (`live-route.ts:118`, `memory/live.ts:241`, `voice-relay/catalog.ts:47`); `hostOf` (`codex-responses.ts:339`, `web-search.ts:185`); the OAuth callback page and constants (`chatgpt-auth.ts:27-35,545`, `codex-auth.ts:30-34,645`); the `face-` / `speaker-` / `wake-runtime.ts` triplets; `app.ts:1328-1368` already has a shared `serveVerifiedRuntime`, but only the speaker route uses it, and `serveFaceRuntime` and `serveWakeRuntime` still each copy the same body; two command grammars on the page, `intent.ts` and `voice-command.ts`.
 - Cost of leaving it: a spoken-matching rule changed in one place and missed in two; adding a file type to the runtime hash check means three edits.
 
 ### P3-10　Test infrastructure
@@ -274,7 +274,7 @@ Each item carries evidence and the cost of not fixing it. P1 is being paid now; 
 ### P3-11　Naming
 
 - `shared/seconds-menu.ts` (§P1-5), `shared/realtime-route.ts`, "memories = photo memories" vs "memory = family memory", `settings.json` which only holds the provider.
-- Cost of leaving it: low; but renaming is cheapest now while importers are few (`seconds-menu`: 4 source files plus 7 tests).
+- Cost of leaving it: low; but renaming is cheapest now while importers are few (`seconds-menu`: 5 source files plus 7 tests).
 
 ## 3. Restructuring plan
 
@@ -285,11 +285,11 @@ Principles: one PR per step, **no behaviour change** (HTTP responses, SSE, setti
 | S0 | **This document and the metrics script** (this PR): `docs/23`, `scripts/architecture-metrics.mjs`, the validation record, index entries | Docs and one read-only script | None | Full verification green |
 | S1 | **Doc sync**: fix every sentence in the §P1-5 table; index the 9 missing validation records; complete the prototype README structure tree | `README.md`, `prototype/ambient-shell/README.md`, `docs/Current_Implementation_Status.md`, `docs/11`, `docs/12`, `docs/README.md`, `docs/validation/README.md` (all with .en) | None | Bilingual check plus manual check of each sentence against the code |
 | S2 | **Architecture guard test**: `tests/architecture.test.ts` reuses the logic of `scripts/architecture-metrics.mjs` to lock in: zero cross-layer imports, no more than the current 4 import cycles (allowlist), no more than the current 16 files over 800 lines (allowlist that can only shrink) | 1 new test; the script becomes an importable module | Low | The test passes on the baseline; a deliberate cross-layer import makes it fail |
-| S3 | **Rename `shared/seconds-menu.ts` → `shared/menu-prefs.ts`**, and move the `MenuPrefSetting` type into `shared/prefs.ts` to break the shared type cycle | 4 source files and 7 tests change import paths | Low | `tsc` green; `describeMenuPrefs` output snapshot identical |
+| S3 | **Rename `shared/seconds-menu.ts` → `shared/menu-prefs.ts`**, and move the `MenuPrefSetting` type into `shared/prefs.ts` to break the shared type cycle | 5 source files (including `desktop/settings-menu.d.mts`) and 7 tests change import paths | Low | `tsc` green; `describeMenuPrefs` output snapshot identical |
 | S4 | **Shared atomic-write helper**: `server/fs-atomic.ts` offers `writeAtomic(path, data, mode)`; the 5 simplest callers switch first (`providers.ts`, the log in `proactive.ts`, `voice-cost-log.ts`, `lgtv/store.ts`, memory-enabled in `nous.ts`); the durable write in `sealed-vault.ts` / `memory/store.ts` stays and is assessed in a second PR | 1 new file plus 5 files about -10 lines each | Low | Existing store tests; the written files are byte-identical |
-| S5 | **PrefsFile store factory**: `createPrefsStore(spec, file, defaults)` in `server/prefs-store.ts` replaces the identical template in the 11 `*-settings.ts` files; each file keeps a one-line export to preserve import paths | 11 files slimmed | Low | The 11 settings tests pass unchanged; `settings.view()` JSON identical |
-| S6 | **`app.ts` settings route table**: the 13 `/api/settings/*` routes become one table (path → store → parsePatch), removing the 18 localize lines and the 12 error templates; validation runs once | `app.ts` about -200 lines; new `server/routes/settings.ts` | Medium-low | `http.test.ts` and `backend-i18n.test.ts` unchanged; error text, status codes and response JSON compared byte for byte |
-| S7 | **Break the runtime cycle and move `ApiKeyRoute`**: contracts such as `RouteStartError` / `RouteCall` / `SessionContext` / `HostGone` move to `server/realtime-contracts.ts`; `ApiKeyRoute` moves from `realtime-routes.ts:1232` to `server/apikey-route.ts` (mirroring `live-route.ts`); `app.ts:285` no longer does `new ApiKeyRoute`, `nous.ts` injects it | `realtime-routes.ts` -60, `apikey-call.ts`, `app.ts`, `nous.ts` | Medium-low | `realtime-routes.test.ts`, `apikey-route.test.ts`, `live-integration.test.ts` pass unchanged; the metrics script shows cycles 4 → 3 |
+| S5 | **PrefsFile store factory**: `createPrefsStore(spec, file, defaults)` in `server/prefs-store.ts` replaces the identical template in the 11 PrefsFile stores (9 `*-settings.ts` plus `memories.ts`, `proactive.ts`); each file keeps a one-line export to preserve import paths | 11 files slimmed | Low | Existing tests pass unchanged: `audio-` / `camera-` / `clock-` / `voice-` / `wake-settings`, `camera-prefs`, `prefs`, `day-night-mode`, `home-corner`, `memories-http`, `memories-google`, `proactive`, `proactive-calendar`, `apikey-integration`, `live-integration` (`face-tuning.json` is covered only indirectly through `/api/settings/camera-tuning` in `http.test.ts`); `settings.view()` JSON identical |
+| S6 | **`app.ts` settings route table**: the 13 `/api/settings/*` routes become one table (path → store → parsePatch), removing the 18 localize lines and the 12 error templates; the second validation on read-back in `PrefsFile.parse` stays until a test proves the two validators equivalent, then a separate PR removes it | `app.ts` about -200 lines; new `server/routes/settings.ts` | Medium-low | `http.test.ts` and `backend-i18n.test.ts` unchanged; error text, status codes and response JSON compared byte for byte |
+| S7 | **Break the runtime cycle and move `ApiKeyRoute`**: contracts such as `RouteStartError` / `RouteCall` / `SessionContext` / `HostGone` move to `server/realtime-contracts.ts`; `ApiKeyRoute` moves from `realtime-routes.ts:1232` to `server/apikey-route.ts` (mirroring `live-route.ts`); `app.ts:285` no longer does `new ApiKeyRoute`, `nous.ts` injects it (risk: `createApp` currently defaults to building `ApiKeyRoute` when `realtimeRoutes` is absent; confirm no test relies on that default before switching to injection, otherwise keep the default and only move it) | `realtime-routes.ts` -60, `apikey-call.ts`, `app.ts`, `nous.ts` | Medium-low | `realtime-routes.test.ts`, `apikey-route.test.ts`, `live-integration.test.ts` pass unchanged; the metrics script shows cycles 4 → 3 |
 | S8 | **Single source for the tool list**: `HOST_TOOLS`, the keys of `HOST_TIMEOUT_MS` and `RealtimeToolName` are all derived from `HostToolName` in `shared/realtime-route.ts`; home argument limits keep only the `adapters/home.ts` schema, referenced by `realtime.ts` and `app.ts` | 4 files | Low | Tool schema JSON and the `realtimeToolRules` text byte-identical (add a snapshot test) |
 | S9 | **Split `home-bridge.ts` into a folder**: `server/home/{hub-client,parse,commands,aifa,infrared,bridge}.ts`; `home-bridge.ts` becomes a re-export barrel so the 4 importers and the tests keep their paths | 1 file → 7 files, pure moves | Medium-low | `home-bridge.test.ts`, `integration-home-facade.test.ts`, `home-corner.test.ts` unchanged; the request sequence the fake hub receives is byte-identical |
 | S10 | **Shared base for the two page paths**: extract `src/voice-path-shared.ts` (greeting timing, early-speech detection, `CallGuard` / `ApprovalQueue` construction, `LiveCoreEvent` memory handling) for `RealtimeVoice` and `LiveVoice`; each class keeps its connection and audio differences | `realtime.ts`, `live-voice.ts` about -150 lines each | Medium | `realtime-voice.test.ts`, `live-voice.test.ts`, `realtime-local-commands.test.ts`, `id02-mac-fixes.test.ts` unchanged; event-sequence fixtures identical on both paths |

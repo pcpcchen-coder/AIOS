@@ -17,7 +17,7 @@
 | 檢查 | 指令 | 結果 |
 |---|---|---|
 | 型別檢查 | `npx tsc --noEmit` | 通過，2.5 秒 |
-| 單元與整合測試 | `npx vitest run` | 172 個測試檔通過；3,188 項通過、6 項跳過；54 秒 |
+| 單元與整合測試 | `npx vitest run` | 172 個測試檔通過；3,194 項中 3,188 項通過、6 項跳過；54 秒。跳過數依環境而異：同一容器稍後重跑是 3,189 項通過、5 項跳過（`apikey-integration.test.ts:193` 等用 `describe.skipIf(!realLockAvailable)`） |
 | 前端建置 | `npx vite build` | 通過；警告 `zh-tw-opencc` chunk 1,070 kB 超過 500 kB |
 | 桌面主程式語法 | `node --check desktop/main.mjs` | 通過 |
 | 隔離 mock 流程 | `node scripts/verify-aios.mjs` | PASS，66 秒（型別、測試、建置、隔離 mock 任務與對話 HTTP） |
@@ -62,7 +62,7 @@
 
 ### 3.4 設定檔寫入
 
-- 自己呼叫 `renameSync` 的 server 檔：16 個（`alarms`、`chatgpt-auth`、`codex-auth`、`identity-store`、`integrations/voice-relay/store`、`lgtv/store`、`memories-google`、`memory/store`、`nous`、`prefs-file`、`proactive`、`providers`、`sealed-vault`、`store`、`task-migration`、`voice-cost-log`）。
+- 自己呼叫 `renameSync` 的 server 檔：16 個，其中 `prefs-file.ts` 是共用 helper 本身，所以繞過它的是 15 個（`alarms`、`chatgpt-auth`、`codex-auth`、`identity-store`、`integrations/voice-relay/store`、`lgtv/store`、`memories-google`、`memory/store`、`nous`、`prefs-file`、`proactive`、`providers`、`sealed-vault`、`store`、`task-migration`、`voice-cost-log`）。
 - import `prefs-file.ts` 的 server 檔：11 個（`audio-`、`camera-`、`clock-`、`day-night-`、`face-tuning-`、`home-corner-`、`realtime-`、`voice-`、`wake-settings`、`memories`、`proactive`）。`proactive.ts` 兩邊都算：設定走 PrefsFile，每日紀錄自己寫。
 - `server/app.ts`：`localizeSettings(settings.view(pageSource` 出現 18 次；錯誤字串「沒有保存（無法寫入設定檔」出現 12 次。
 
