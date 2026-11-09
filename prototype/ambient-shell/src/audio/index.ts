@@ -18,13 +18,14 @@ export type { WakeCallWatch } from "./wake-call.ts";
 export function createWakeController(
   host: WakeHost,
   keywordPort: (() => MessagePort | null) | null,
-  devices: { mic: MicOpener | null; output: EarconOutput },
+  devices: { mic: MicOpener | null; output: EarconOutput; retryInterruptedInput?: boolean },
 ): WakeController {
   // 門檻調整值在每次建立擷取 worker 時讀 controller 目前的設定（建構完成之後才會被呼叫）。
   const controller: WakeController = new WakeController(host, {
     mic: devices.mic,
     capture: browserCapture(keywordPort, () => controller.thresholdOffset),
     earcon: browserEarcon(devices.output),
+    retryInterruptedInput: devices.retryInterruptedInput,
   });
   return controller;
 }
