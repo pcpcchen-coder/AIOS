@@ -6,10 +6,10 @@
   "playbook": "feature",
   "branch": "claude/web-search-picker",
   "commit_sha": "",
-  "status": "running",
+  "status": "passed",
   "started_at": "2026-11-09T22:40:46.148Z",
-  "updated_at": "2026-11-09T23:50:29.294Z",
-  "ended_at": null,
+  "updated_at": "2026-11-09T23:50:33.695Z",
+  "ended_at": "2026-11-09T23:50:33.695Z",
   "steps": [
     {
       "id": "how",
@@ -178,6 +178,13 @@
       "step_id": "fix",
       "status": "passed",
       "note": "All review findings fixed; checks green"
+    },
+    {
+      "at": "2026-11-09T23:50:33.695Z",
+      "type": "run_finished",
+      "step_id": null,
+      "status": "passed",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
