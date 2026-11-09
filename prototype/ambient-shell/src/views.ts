@@ -1,4 +1,4 @@
-import type { AlarmsView } from "../shared/alarm.ts";
+import { RING_LENGTH_CHOICES, RING_TONES, type AlarmsView, type RingTone } from "../shared/alarm.ts";
 import { repeatText } from "../shared/alarm-schedule.ts";
 import { TERMINAL_CAMERA_SCOPE } from "./terminal-camera.ts";
 import { WITHDRAWN_TEXT } from "./protected-tasks.ts";
@@ -56,7 +56,9 @@ export interface ViewActions {
   /** CLK-1「右上角時鐘與天氣」的兩個顯示開關。 */
   updateClock?(patch: ClockPrefsPatch): void;
   /** ALARM-1：「鬧鐘與定時器」開關與清除（POST /api/settings/alarms、/api/alarms/clear）。 */
-  updateAlarms?(patch: { enabled?: boolean }): void;
+  updateAlarms?(patch: { enabled?: boolean; ring_tone?: RingTone; ring_s?: number }): void;
+  /** ALARM-3：試聽鈴聲 4 秒。 */
+  previewTone?(tone: RingTone): void;
   clearAlarms?(): void;
   /** ALARM-2：設定頁的鬧鐘管理（POST /api/alarms/alarms/*）。 */
   addAlarm?(input: { time: string; repeat: string; label: string }): void;
@@ -1205,6 +1207,39 @@ export function renderAlarmSettings(view: AlarmsView, actions: ViewActions): HTM
   const label = h("input", { type: "text", maxlength: "40", placeholder: t("名字（可不填）"), "aria-label": t("鬧鐘名字") }) as HTMLInputElement;
   const add = button("新增鬧鐘", () => actions.addAlarm?.({ time: time.value, repeat: repeat.value, label: label.value }), "btn--primary");
   add.disabled = !actions.addAlarm || !on;
+  // ALARM-3：鈴聲（三種，可試聽）與響多久。
+  const TONE_TEXT: Record<RingTone, [string, string]> = {
+    classic: ["經典短嗶", "四聲短嗶，清楚但不刺耳"],
+    chime: ["柔和鐘聲", "三個下行的鐘聲，比較溫和"],
+    pulse: ["急促電子音", "快速的高音短嗶，最容易叫醒"],
+  };
+  const toneRows = RING_TONES.map((tone) => {
+    const selected = view.prefs.ring_tone === tone;
+    const pick = button(selected ? "使用中" : "使用", () => actions.updateAlarms?.({ ring_tone: tone }), selected ? "btn--primary" : "");
+    pick.setAttribute("aria-pressed", String(selected));
+    pick.setAttribute("aria-label", t("{0}：{1}", t(TONE_TEXT[tone][0]), selected ? t("使用中") : t("使用")));
+    pick.disabled = !actions.updateAlarms || !on;
+    const listen = button("試聽", () => actions.previewTone?.(tone), "btn--ghost");
+    listen.setAttribute("aria-label", t("試聽 {0}", t(TONE_TEXT[tone][0])));
+    listen.disabled = !actions.previewTone;
+    return h("li", { class: "pref", "data-ring-tone": tone }, h("div", { class: "provider-text" }, h("strong", {}, t(TONE_TEXT[tone][0])), h("span", { class: "muted small" }, t(TONE_TEXT[tone][1]))), h("div", { class: "actions" }, listen, pick));
+  });
+  const length = h("select", { "aria-label": t("響鈴長度") }) as HTMLSelectElement;
+  for (const s of RING_LENGTH_CHOICES) {
+    const opt = h("option", { value: String(s) }, t("{0} 分鐘", s / 60)) as HTMLOptionElement;
+    if (s === view.prefs.ring_s) {
+      opt.setAttribute("selected", "");
+      opt.selected = true;
+    }
+    length.append(opt);
+  }
+  if (!(RING_LENGTH_CHOICES as readonly number[]).includes(view.prefs.ring_s)) {
+    const opt = h("option", { value: String(view.prefs.ring_s) }, t("{0} 秒", view.prefs.ring_s)) as HTMLOptionElement;
+    opt.selected = true;
+    length.prepend(opt);
+  }
+  length.disabled = !actions.updateAlarms || !on;
+  length.addEventListener("change", () => actions.updateAlarms?.({ ring_s: Number(length.value) }));
   return h(
     "section",
     { class: "camera-settings alarm-settings" },
@@ -1215,6 +1250,9 @@ export function renderAlarmSettings(view: AlarmsView, actions: ViewActions): HTM
       h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("鬧鐘與定時器")), h("span", { class: "muted small" }, t("用說的設定（「計時 10 分鐘」「泡麵 3 分鐘」）；時間到時在建立的那台響，那台不在線時每個畫面都響。關掉後不響，已建立的保留。"))), b),
       h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("清除全部")), h("span", { class: "muted small" }, count ? t("目前有 {0} 個定時器或鬧鐘；清除會一併停止響鈴與刪掉紀錄。", count) : t("刪掉所有定時器、鬧鐘、響鈴與紀錄。"))), clear),
     ),
+    h("h4", {}, t("鈴聲")),
+    h("ul", { class: "pref-list" }, ...toneRows, h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("響鈴長度")), h("span", { class: "muted small" }, t("時間到後響多久；沒人停就自動停止並記錄。"))), length)),
+    h("p", { class: "muted small" }, t("到期前 30 秒畫面開始倒數，最後 10 秒每秒「滴」一聲（只在會響的那台）。")),
     h("h4", {}, t("鬧鐘清單")),
     alarmRows.length ? h("ul", { class: "pref-list alarm-list" }, ...alarmRows) : h("p", { class: "muted small" }, t("還沒有鬧鐘。可以說「明天早上 7 點叫我」「每個工作天 6:30 叫我」，或在下面新增。")),
     h("div", { class: "alarm-add" }, time, repeat, label, add),

@@ -2254,3 +2254,44 @@ body.has-surface .timer-chip {
   min-width: 0;
   flex: 1 1 120px;
 }
+
+/* ALARM-3：到期前 30 秒的倒數（data-visibility-reason="alarm_countdown"）。不擋操作，最後 10 秒變成琥珀色。 */
+.alarm-countdown {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 35;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(4px, 1vh, 12px);
+  padding: clamp(14px, 3vh, 32px) clamp(24px, 5vw, 64px);
+  border-radius: 28px;
+  background: rgba(3, 5, 11, 0.72);
+  border: 1px solid var(--panel-border);
+  color: var(--text);
+  text-align: center;
+  pointer-events: none;
+  max-width: calc(100vw - 32px);
+}
+.alarm-countdown-label {
+  font-size: clamp(1.1rem, 3.4vh, 2.2rem);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.alarm-countdown-secs {
+  font-size: clamp(4rem, 20vh, 12rem);
+  font-weight: 200;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.alarm-countdown--final {
+  border-color: rgba(255, 179, 92, 0.6);
+}
+.alarm-countdown--final .alarm-countdown-secs {
+  color: var(--amber);
+}
+body.alarm-ringing .alarm-countdown {
+  display: none;
+}

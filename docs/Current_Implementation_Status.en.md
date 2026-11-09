@@ -7,6 +7,8 @@
 
 2026-11-05 addendum: the Raspberry Pi row now reflects this evening’s deployment and hardware record. Historical evidence scopes in other rows are unchanged.
 
+2026-11-09 addendum (countdown and ringtones): the “Timers and ringing” row adds ALARM-3 (branch `claude/alarm-countdown`): a 30-second on-screen countdown before it is due, a tick every second for the last 10 seconds, and three ringtones plus a ring length chosen in settings; cloud tests and headless Chromium only; see the [validation](validation/alarm-timer-3-2026-11-09.en.md).
+
 2026-11-09 addendum (alarms): the “Timers and ringing” row adds ALARM-2 alarms (branch `claude/alarm-clock`), cloud tests and headless Chromium only; see the [validation](validation/alarm-timer-2-2026-11-09.en.md).
 
 2026-11-09 addendum (timers): adds the “Timers and ringing (ALARM-1)” row (branch `claude/alarm-timer`), cloud tests and headless Chromium only; see the [validation](validation/alarm-timer-1-2026-11-09.en.md).

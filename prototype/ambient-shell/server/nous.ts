@@ -505,6 +505,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     onChange: (status) => {
       log(status.connected ? `終端機已連線：${status.terminals.map((t) => t.id).join("、")}` : "終端機已斷線（心跳逾時）");
       options.onTerminalChange?.(status);
+      // ALARM-3：終端機連上或斷線（心跳）會改變「到期時在哪裡響」，重推設定讓倒數只出現在會響的頁面。
+      notify();
     },
   });
   const server = createApp({

@@ -117,6 +117,7 @@ describe("audio privacy (static)", () => {
       `${join("audio", "earcon.ts")}: osc.connect(gain).connect(ctx.destination);`,
       "processing-sound.ts: master.connect(ctx.destination);",
       "alarm-sound.ts: s.connect(g).connect(c.destination);",
+      "alarm-sound.ts: osc.connect(g).connect(c.destination);",
       "main.ts: const audio = new Audio();",
       "realtime.ts: const audio = new Audio();",
       `${join("speaker", "recorder.ts")}: node.connect(mute).connect(ctx.destination);`,
@@ -137,6 +138,8 @@ describe("audio privacy (static)", () => {
     expect(ring).toMatch(/await Promise\.race\(\[output\.sink\(c\)\.catch\(\(\) => undefined\)/);
     expect(ring).toMatch(/output\?\.release\(c\);/);
     expect(text("main.ts")).toMatch(/createSound: \(\) => browserRingSound\(\{ sink: \(ctx\) => audioDevices\.sink\(ctx\), release: \(ctx\) => audioDevices\.release\(ctx\) \}\),/);
+    // ALARM-3 倒數滴答：同樣先導到選定的輸出
+    expect(text("main.ts")).toMatch(/createTicks: \(\) => browserTickSound\(\{ sink: \(ctx\) => audioDevices\.sink\(ctx\), release: \(ctx\) => audioDevices\.release\(ctx\) \}\),/);
     // 處理中提示音（George 2026-11-02）：開始出聲前先 output.sink(ctx)（等太久照系統預設），淡出後 release；main.ts 注入 audioDevices
     const cueSound = text("processing-sound.ts");
     expect(cueSound).toMatch(/ready = Promise\.race\(\[output\.sink\(ctx\)\.catch\(\(\) => undefined\)/);
