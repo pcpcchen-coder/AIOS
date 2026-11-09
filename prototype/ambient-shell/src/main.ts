@@ -70,6 +70,8 @@ import {
   renderArtifact,
   renderError,
   renderNotice,
+  renderSearch,
+  applySearchHighlight,
   renderProgress,
   renderSettings,
   renderConfirm,
@@ -95,6 +97,8 @@ import { voiceVolumeOutput } from "../shared/voice-volume.ts";
 import { activeOverride, currentLight, dayNightToolOutput, decideDayNight, INITIAL_LIGHT, nextLight, nightEffects, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type DayNightToolRequest, type LightState, type LumaThresholds, type NightEffects } from "../shared/day-night.ts";
 import { LightMeter, type LightWorkerLike } from "./light-meter.ts";
 import type { VoiceVolumePanelState } from "./views.ts";
+import { SearchPanelController } from "./search-panel.ts";
+import { searchToolOutput } from "../shared/web-search.ts";
 import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import {
   PushToTalk,
@@ -290,6 +294,22 @@ let memoriesTicker: ReturnType<typeof setInterval> | null = null;
 /** 還沒回來的即時語音查詢（每次查詢一個遞增編號；最多算 CUE_TIMING.searchTimeoutMs）。 */
 const realtimeSearches = new Set<number>();
 let nextRealtimeSearch = 0;
+/**
+ * 即時語音的查詢結果畫面（George 2026-11-09）：編號候選 → 使用者選一則 → 重點跟讀 → 播放結束 N 秒後收起。
+ * searchSurfaceId：目前顯示查詢結果的那張畫面；倒數到了只收起同一張。searchEpoch：通話結束就加一，晚到的查詢結果不再顯示。
+ */
+let searchSurfaceId: string | null = null;
+let searchEpoch = 0;
+const searchPanel = new SearchPanelController({
+  closeAfterMs: () => voicePrefs().search_close_s * 1000,
+  changed: () => {
+    const state = searchPanel.state;
+    if (shell.surface?.kind === "search" && state?.mode === "reading") applySearchHighlight(surfaceRoot, state.active);
+  },
+  autoClose: () => {
+    if (shell.surface?.kind === "search" && shell.surface.surface_id === searchSurfaceId) dispatch({ type: "dismiss" });
+  },
+});
 /** 念話中的句數（speakText 可能重疊；同喚醒防護的計數）。 */
 let speechActive = 0;
 const processingCue = new ProcessingCue({
@@ -453,6 +473,7 @@ const realtimeCallbacks: RealtimeCallbacks = {
   onPhase: (phase) => {
     // HIST-1 Mac F1（審查 M3）：播放與開口的時間給本機指令的回音判斷。
     realtimeCommands.notePhase(phase);
+    searchPanel.setPhase(phase);
     renderRealtimeState(phase);
   },
   onUserTranscript: (text) => {
@@ -465,9 +486,13 @@ const realtimeCallbacks: RealtimeCallbacks = {
   },
   // 鏡頭指令照舊（本機照做、這句話仍送到 AI）；其他只有整句是明確的畫面指令、而且不是剛才助理念的話（回音）才在本機執行。
   onLocalCommand: (text) => matchCameraCommand(text) === null && realtimeCommands.handle(text) !== null,
-  onAssistantPartial: (text) => realtimeCommands.noteAssistantPartial(text),
+  onAssistantPartial: (text) => {
+    realtimeCommands.noteAssistantPartial(text);
+    searchPanel.assistantPartial(text);
+  },
   onAssistantTranscript: (text) => {
     realtimeCommands.noteAssistant(text);
+    searchPanel.assistantFinal(text);
     showTranscript("assistant", text);
   },
   onDelegate: delegateFromRealtime,
@@ -483,6 +508,11 @@ const realtimeCallbacks: RealtimeCallbacks = {
   // MEM-4a：App 裡由核心依這條路徑的記憶同意給真實標題或外殼（George 2026-10-30）；瀏覽器版照舊。
   onGetTasks: async () => ({ ok: true, tasks: protectedTasks.available ? taskSummary(await protectedTasks.voiceTasks(realtimeTicket?.route === "live" ? "live" : "api_key")) : taskSummary() }),
   onWebSearch: webSearchFromRealtime,
+  onShowSearchResult: (index) => {
+    const output = searchPanel.pick(index);
+    if (output.ok === true) showSearchSurface();
+    return output;
+  },
   onHomeStatus: homeStatusFromRealtime,
   onHomeControl: homeControlFromRealtime,
   onHomeConfirm: homeConfirmFromRealtime,
@@ -501,6 +531,9 @@ const realtimeCallbacks: RealtimeCallbacks = {
     // 費用防護自己結束（idle、max_duration）：原因交給 API key 路徑的費用紀錄（live 由 LiveVoice 的 end 帶）。
     if (code && realtimeTicket?.route === "api_key") noteEndReason(realtimeTicket.session_id, code);
     realtimeCommands.reset();
+    searchEpoch++;
+    searchPanel.clear();
+    if (shell.surface?.kind === "search") dispatch({ type: "dismiss" });
     wakeGreetingInteraction = null;
     ambient.endInteraction();
     endRealtimeTicket();
@@ -2496,6 +2529,7 @@ async function webSearchFromRealtime(query: string): Promise<Record<string, unkn
   brain.pulse("step", classifyDomain(query));
   // 查詢還沒回來的期間算「處理中」（電子腦的樣子；通話中只有畫面、不出聲）。請求一直沒回來時 30 秒後不再算。
   const searchId = nextRealtimeSearch++;
+  const epoch = searchEpoch;
   const releaseSearch = () => {
     clearTimeout(searchTimer);
     if (realtimeSearches.delete(searchId)) render();
@@ -2509,15 +2543,40 @@ async function webSearchFromRealtime(query: string): Promise<Record<string, unkn
     // （事件串流重連時核心會結束它的紀錄，但通話本身還在，查詢不能因此失敗）。
     const ticketed = realtimeTicket && (realtimeTicket.route === "live" || realtimeCoreTools.length > 0);
     const result = await api.webSearch(query, ticketed ? ticketOf(realtimeTicket!) : undefined);
-    if (result.sources.length) showSubtitle(`來源：${result.sources.map((s) => s.title).slice(0, 3).join("、")}`);
-    return { ok: true, answer: result.answer, sources: result.sources.map((s) => s.title) };
+    const shown = epoch === searchEpoch && searchPanel.results(query, result.candidates ?? []) !== null && showSearchSurface();
+    if (!shown && result.sources.length) showSubtitle(`來源：${result.sources.map((s) => s.title).slice(0, 3).join("、")}`);
+    return searchToolOutput({ answer: result.answer, candidates: result.candidates ?? [] });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    showSubtitle(message);
+    const shown = epoch === searchEpoch && (searchPanel.failed(query, message), showSearchSurface());
+    if (!shown) showSubtitle(message);
     return { ok: false, error: message };
   } finally {
     releaseSearch();
   }
+}
+
+/**
+ * 顯示查詢結果畫面。確認卡開著時不換掉它（換掉＝拒絕）：結果留著，使用者之後選一則時再顯示。
+ * 已經顯示查詢結果時沿用同一張畫面（內容由 renderSurface 依狀態重畫）；釘住的設定畫面會蓋回來，那時也只留著結果。
+ */
+function showSearchSurface(): boolean {
+  const s = shell.surface;
+  if (s?.kind === "confirm") {
+    searchPanel.hidden();
+    return false;
+  }
+  if (s?.kind === "search" && s.surface_id === searchSurfaceId) {
+    render();
+    return true;
+  }
+  dispatch({ type: "show.search", request_id: userRequest() });
+  if (shell.surface?.kind !== "search") {
+    searchPanel.hidden();
+    return false;
+  }
+  searchSurfaceId = shell.surface.surface_id;
+  return true;
 }
 
 /** AIL-1：API key 路徑的整合工具轉交核心執行；頁面只顯示核心回的固定句（不是模型的話）。 */
@@ -2695,12 +2754,14 @@ function dispatch(event: ShellEvent): void {
   const leftConfirm = shell.surface?.kind === "confirm" && next.surface?.surface_id !== shell.surface.surface_id ? shell.surface.request_id : null;
   const leftFamily = shell.surface?.kind === "family" && next.surface?.surface_id !== shell.surface.surface_id;
   const leftMemory = shell.surface?.kind === "memory" && next.surface?.surface_id !== shell.surface.surface_id;
+  const leftSearch = shell.surface?.kind === "search" && next.surface?.kind !== "search";
   const enteredFamily = next.surface?.kind === "family" && next.surface.surface_id !== shell.surface?.surface_id;
   shell = next;
   wakeMemoriesNow();
   // 收起只關畫面：停止取樣並丟掉記憶體中的樣本與 session，不刪已存的家人資料。
   if (leftFamily) familyView.close();
   if (leftMemory && next.surface?.kind !== "memory") memoryView.close();
+  if (leftSearch) searchPanel.hidden();
   if (enteredFamily) familyView.open(familyOpenMode);
   familyOpenMode = "list";
   // 家人辨識畫面開著時不做看著說話的同步辨識（核心也拒絕）；收起後重新確認（gallery 可能剛改過）。
@@ -3849,6 +3910,8 @@ function renderSurface(): void {
   const key = getLocale() + ":" + (
     s.kind === "family" || s.kind === "memory" || s.kind === "history"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
+      : s.kind === "search"
+      ? `${s.surface_id}:${searchPanelKey()}` // 跟讀亮起不重建（applySearchHighlight），換模式或換一則才重畫
       : s.kind === "settings"
       ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${gpuDrawing}:${voiceVolumeKey()}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置、整合狀態（SP-1）或這台裝置的音量與亮暗門檻變了也重畫
       : s.kind === "progress"
@@ -3873,6 +3936,7 @@ function renderSurface(): void {
   else if (s.kind === "memory") el = memoryView.element;
   // 成果紀錄自己更新內容（搜尋、詳細頁、刪除確認時不重建）。
   else if (s.kind === "history") el = historyView.element;
+  else if (s.kind === "search" && searchPanel.state) el = renderSearch(searchPanel.state, actions);
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
   else if (s.kind === "settings") {
     // SP-1：設定頁打開時才查整合服務狀態（NOUS_AIL=on 才有）；不在背景輪詢。
@@ -3897,6 +3961,12 @@ function renderSurface(): void {
   el.scrollTop = scrollTop;
   renderedKey = key;
   if (pointedZone) applyPointing();
+}
+
+function searchPanelKey(): string {
+  const state = searchPanel.state;
+  if (!state) return "none";
+  return `${state.mode}:${state.mode === "reading" ? state.candidate.n : ""}:${state.query}`;
 }
 
 async function loadArtifact(artifactId: string, task?: Task): Promise<void> {

@@ -30,13 +30,14 @@ function rowOf(rows: SecondsSetting[], key: string): SecondsSetting {
 }
 
 describe("seconds pref specs", () => {
-  it("covers all five seconds settings", () => {
+  it("covers all six seconds settings", () => {
     expect(SECONDS.map(([id]) => id)).toEqual([
       "CAMERA_PREFS.look_to_talk_s",
       "CAMERA_PREFS.look_to_talk_cooldown_s",
       "VOICE_PREFS.voice_idle_s",
       "VOICE_PREFS.realtime_idle_s",
       "VOICE_PREFS.realtime_max_call_s",
+      "VOICE_PREFS.search_close_s",
     ]);
   });
 
@@ -65,7 +66,7 @@ describe("factor pref specs", () => {
 
 describe("VOICE_PREFS", () => {
   it("defaults keep today's timings (90 s voice mode, 120 s realtime)", () => {
-    expect(DEFAULT_VOICE_PREFS).toEqual({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 1200 });
+    expect(DEFAULT_VOICE_PREFS).toEqual({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 1200, search_close_s: 8 });
   });
 
   it("parseVoicePatch accepts bounds and rejects unknown keys, wrong types, out-of-range and off-step values", () => {
@@ -135,6 +136,7 @@ describe("describeMenuPrefs (tray rows: seconds and factor)", () => {
       ["voice_idle_s", "seconds", "voice"],
       ["realtime_idle_s", "seconds", "voice"],
       ["realtime_max_call_s", "seconds", "voice"],
+      ["search_close_s", "seconds", "voice"],
     ]);
     expect(zoomRow(rows)).toEqual({
       key: "brain_zoom_max",
@@ -262,6 +264,7 @@ describe("describeSeconds", () => {
       ["voice_idle_s", "voice", "語音", "/api/settings/voice"],
       ["realtime_idle_s", "voice", "語音", "/api/settings/voice"],
       ["realtime_max_call_s", "voice", "語音", "/api/settings/voice"],
+      ["search_close_s", "voice", "語音", "/api/settings/voice"],
     ]);
     for (const r of rows) {
       const checked = r.options.filter((o) => o.checked);
@@ -284,7 +287,7 @@ describe("describeSeconds", () => {
   });
 
   it("inserts an off-preset live value in order as a checked 「（目前）」 option", () => {
-    const rows = describeSeconds({ camera: { ...camera, look_to_talk_s: 1.6 }, voice: { voice_idle_s: 70, realtime_idle_s: 120, realtime_max_call_s: 1200 }, voiceWritable: true, realtime });
+    const rows = describeSeconds({ camera: { ...camera, look_to_talk_s: 1.6 }, voice: { voice_idle_s: 70, realtime_idle_s: 120, realtime_max_call_s: 1200, search_close_s: 8 }, voiceWritable: true, realtime });
     const look = rowOf(rows, "look_to_talk_s");
     expect(look.options.map((o) => [o.label, o.checked])).toEqual([
       ["1 秒", false], ["1.5 秒（預設）", false], ["1.6 秒（目前）", true], ["2 秒", false], ["3 秒", false],
@@ -297,7 +300,7 @@ describe("describeSeconds", () => {
     for (const source of [{ camera: { ...camera, enabled: false } }, {}]) {
       const rows = describeSeconds({ ...source, voice: DEFAULT_VOICE_PREFS, voiceWritable: true, realtime });
       expect(rows.filter((r) => r.group === "camera").map((r) => r.disabled_reason)).toEqual([CAMERA_DISABLED_REASON, CAMERA_DISABLED_REASON]);
-      expect(rows.filter((r) => r.group === "voice").map((r) => r.disabled_reason)).toEqual([null, null, null]);
+      expect(rows.filter((r) => r.group === "voice").map((r) => r.disabled_reason)).toEqual([null, null, null, null]);
     }
   });
 

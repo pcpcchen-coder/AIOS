@@ -99,6 +99,11 @@ describe("NOUS_WAKE off is byte-identical to the pre-wake build", () => {
     expect(parsed.alarms).toMatchObject({ prefs: { enabled: true, ring_s: 300, ramp_s: 30, late_ring_max_s: 1800, snooze_s: 540, alarm_min_volume: 30 }, timers: [], alarms: [], snoozes: [], rings: [], notice: null, write_path: "/api/settings/alarms" });
     expect(parsed.integrations?.tools.every((name) => name.startsWith("app__timer__") || name.startsWith("app__alarm__"))).toBe(true);
     const { audio: _audio, proactive: _proactive, memories: _memories, clock: _clock, home_corner: _homeCorner, day_night: _dayNight, alarms: _alarms, integrations: _integrations, ...rest } = parsed;
+    // 第九個刻意的例外（George 2026-11-09「查詢結果收起秒數」）：voice.search_close_s 與 seconds 的同名一列不綁旗標，一定存在；
+    // 拿掉這兩處後其餘逐位元組相同。
+    expect(rest.voice?.search_close_s).toBe(8);
+    if (rest.voice) delete (rest.voice as Partial<typeof rest.voice>).search_close_s;
+    if (rest.seconds) rest.seconds = rest.seconds.filter((row) => row.key !== "search_close_s");
     const body = JSON.stringify(rest);
     expect(body).toMatchSnapshot();
     expect(menuJson(rest as SettingsView)).toMatchSnapshot();

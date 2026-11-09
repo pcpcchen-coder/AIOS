@@ -100,6 +100,7 @@ describe("RealtimeBridge", () => {
     const session = JSON.parse(String(api.calls[0].init.body)).session;
     expect(session.tools.map((t: { name?: string; type: string }) => t.name ?? t.type)).toEqual([
       "web_search",
+      "show_search_result",
       "delegate_task",
       "get_tasks",
       "set_voice_volume",

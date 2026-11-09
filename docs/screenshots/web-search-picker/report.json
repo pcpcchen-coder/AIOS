@@ -1,0 +1,14 @@
+{
+  "fixture": "SIMULATED search response (page.route) and directly invoked realtime callbacks in the real built page; isolated mock core; no microphone, voice model or web search",
+  "shots": [
+    "search-candidates.zh-TW.png",
+    "search-reading-point2.zh-TW.png",
+    "search-reading-unsummarized.zh-TW.png",
+    "search-failed.zh-TW.png",
+    "settings-search-close.zh-TW.png",
+    "search-reading-point2.en.png"
+  ],
+  "errors": [],
+  "autoClose": "failed panel closed 8 s after speaking → listening (real timer, default search_close_s)",
+  "passed": true
+}

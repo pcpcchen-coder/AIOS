@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseMcp } from "../server/config.ts";
 import { parseResponse, WebSearch, WebSearchError } from "../server/web-search.ts";
+import { matchSpokenPoint, parseCandidates, pickToolOutput, searchToolOutput } from "../shared/web-search.ts";
 
 // 假的 /v1/responses：驗證請求形狀與回應解析；fixture 內容不代表真實搜尋結果。
 
@@ -48,6 +49,10 @@ describe("WebSearch", () => {
         { title: "A 氣象", url: "https://example.com/a" },
         { title: "example.org", url: "https://example.org/b" },
       ],
+      candidates: [
+        { n: 1, title: "A 氣象", url: "https://example.com/a", host: "example.com", points: [], summarized: false },
+        { n: 2, title: "example.org", url: "https://example.org/b", host: "example.org", points: [], summarized: false },
+      ],
       model: "gpt-fixture",
     });
     expect(api.bodies[0]).toMatchObject({
@@ -78,7 +83,133 @@ describe("WebSearch", () => {
   });
 
   it("parseResponse ignores non-message items", () => {
-    expect(parseResponse({ output: [{ type: "web_search_call" }] })).toEqual({ answer: "", sources: [] });
+    expect(parseResponse({ output: [{ type: "web_search_call" }] })).toEqual({ text: "", sources: [] });
+  });
+});
+
+// 搜尋模型回的文字（fixture，不是真實的搜尋結果）。
+const ANSWER = "台股今天收 23,456.78 點，漲 1.2%（fixture）。";
+const CITES = [
+  { title: "A 財經", url: "https://news.example.com/a" },
+  { title: "B 新聞", url: "https://www.example.org/b" },
+];
+const CANDIDATES = {
+  candidates: [
+    { title: "台股收盤", url: "https://news.example.com/a", points: ["加權指數收 23,456.78 點", "成交量 4,321 億元", "外資買超 120 億元"] },
+    { title: "半導體領漲", url: "https://www.example.org/b#top", points: ["台積電上漲 1.2%", "聯發科持平"] },
+    { title: "盤後分析", url: "https://c.example.net/x", points: [] },
+  ],
+};
+
+describe("parseCandidates", () => {
+  it("splits the spoken answer from a fenced JSON block and numbers up to three candidates", () => {
+    const parsed = parseCandidates(`${ANSWER}\n\n\`\`\`json\n${JSON.stringify(CANDIDATES)}\n\`\`\``, CITES);
+    expect(parsed.answer).toBe(ANSWER);
+    expect(parsed.candidates).toEqual([
+      { n: 1, title: "台股收盤", url: "https://news.example.com/a", host: "news.example.com", points: ["加權指數收 23,456.78 點", "成交量 4,321 億元", "外資買超 120 億元"], summarized: true },
+      { n: 2, title: "半導體領漲", url: "https://www.example.org/b#top", host: "example.org", points: ["台積電上漲 1.2%", "聯發科持平"], summarized: true },
+      { n: 3, title: "盤後分析", url: "https://c.example.net/x", host: "c.example.net", points: [], summarized: false },
+    ]);
+  });
+
+  it("accepts trailing JSON without a fence and keeps it out of the answer", () => {
+    const parsed = parseCandidates(`${ANSWER}\n${JSON.stringify(CANDIDATES)}`, CITES);
+    expect(parsed.answer).toBe(ANSWER);
+    expect(parsed.candidates.map((c) => c.title)).toEqual(["台股收盤", "半導體領漲", "盤後分析"]);
+  });
+
+  it("malformed JSON falls back to the citations with no invented points, and the broken block is not spoken", () => {
+    const parsed = parseCandidates(`${ANSWER}\n\`\`\`json\n{"candidates":[{"title":"台股收盤","url":\n\`\`\``, CITES);
+    expect(parsed.answer).toBe(ANSWER);
+    expect(parsed.candidates).toEqual([
+      { n: 1, title: "A 財經", url: "https://news.example.com/a", host: "news.example.com", points: [], summarized: false },
+      { n: 2, title: "B 新聞", url: "https://www.example.org/b", host: "example.org", points: [], summarized: false },
+    ]);
+    expect(parseCandidates(`${ANSWER}\n{"candidates": [`, CITES).answer).toBe(ANSWER);
+  });
+
+  it("no JSON at all: answer unchanged, candidates from citations", () => {
+    expect(parseCandidates(ANSWER, CITES)).toMatchObject({ answer: ANSWER, candidates: [{ n: 1, summarized: false }, { n: 2, summarized: false }] });
+    expect(parseCandidates(ANSWER, [])).toEqual({ answer: ANSWER, candidates: [] });
+  });
+
+  it("caps at three, dedupes by URL (ignoring #fragment and trailing slash), drops non-http items and clips five points", () => {
+    const many = {
+      candidates: [
+        { title: "一", url: "https://a.example/x", points: ["1", "2", "3", "4", "5", "6"] },
+        { title: "一（重複）", url: "https://a.example/x/#p", points: ["重複"] },
+        { title: "壞網址", url: "javascript:alert(1)", points: ["x"] },
+        { title: "二", url: "https://b.example/", points: ["b"] },
+        { title: "三", url: "https://c.example/", points: ["c"] },
+        { title: "四", url: "https://d.example/", points: ["d"] },
+      ],
+    };
+    const parsed = parseCandidates(`答案\n\`\`\`json\n${JSON.stringify(many)}\n\`\`\``, []);
+    expect(parsed.candidates.map((c) => [c.n, c.title])).toEqual([[1, "一"], [2, "二"], [3, "三"]]);
+    expect(parsed.candidates[0].points).toEqual(["1", "2", "3", "4", "5"]);
+  });
+
+  it("WebSearch.search returns structured candidates from the model's JSON block", async () => {
+    const body = { model: "gpt-fixture", output: [{ type: "message", content: [{ type: "output_text", text: `${ANSWER}\n\`\`\`json\n${JSON.stringify(CANDIDATES)}\n\`\`\``, annotations: [] }] }] };
+    const api = fake([new Response(JSON.stringify(body), { status: 200 })]);
+    const result = await new WebSearch({ ...opts, fetch: api.fetch }).search("台股");
+    expect(result.answer).toBe(ANSWER);
+    expect(result.candidates).toHaveLength(3);
+    expect(String(api.bodies[0].instructions)).toMatch(/json/);
+  });
+});
+
+describe("tool outputs for the voice model", () => {
+  const candidates = parseCandidates(`${ANSWER}\n${JSON.stringify(CANDIDATES)}`, CITES).candidates;
+
+  it("web_search with several candidates lists numbers, titles and hosts only (no points before the pick)", () => {
+    const out = searchToolOutput({ answer: ANSWER, candidates });
+    expect(out.candidates).toEqual([
+      { n: 1, title: "台股收盤", host: "news.example.com" },
+      { n: 2, title: "半導體領漲", host: "example.org" },
+      { n: 3, title: "盤後分析", host: "c.example.net" },
+    ]);
+    expect(JSON.stringify(out)).not.toContain("外資買超");
+    expect(out.next).toMatch(/show_search_result/);
+  });
+
+  it("web_search with one candidate hands its points over directly; an unsummarized one says there are none", () => {
+    expect(searchToolOutput({ answer: ANSWER, candidates: [candidates[0]] })).toMatchObject({ points: candidates[0].points });
+    expect(searchToolOutput({ answer: ANSWER, candidates: [candidates[2]] })).not.toHaveProperty("points");
+  });
+
+  it("show_search_result output carries the picked points", () => {
+    expect(pickToolOutput(candidates[1])).toMatchObject({ ok: true, n: 2, title: "半導體領漲", host: "example.org", points: ["台積電上漲 1.2%", "聯發科持平"] });
+    expect(pickToolOutput(candidates[2])).toMatchObject({ ok: true, points: [], note: expect.stringContaining("沒有摘要") });
+  });
+});
+
+describe("matchSpokenPoint (read-along)", () => {
+  const zh = ["加權指數收 23,456.78 點", "成交量 4,321 億元", "外資買超 120 億元"];
+  const en = ["The index closed at 23,456.78 points", "Turnover reached 432.1 billion", "Foreign investors bought 12 billion"];
+
+  it.each([
+    ["", null],
+    ["好，我念第二則。", null],
+    ["加權指數收兩萬三千多點", 0],
+    ["加權指數收 23456.78 點。成交量４，３２１億元", 1],
+    ["成交量 4321 億元，外資買超一百二十億", 2],
+    ["外資買超 120 億元。回到加權指數收盤", 0],
+  ] as const)("zh 「%s」 → %s", (spoken, expected) => {
+    expect(matchSpokenPoint(spoken, zh)).toBe(expected);
+  });
+
+  it.each([
+    ["Let me read it.", null],
+    ["The index closed at twenty-three thousand", 0],
+    ["the index is at 23,456.78 and turnover was 432.1 billion", 1],
+    ["Foreign investors bought a lot", 2],
+  ] as const)("en 「%s」 → %s", (spoken, expected) => {
+    expect(matchSpokenPoint(spoken, en)).toBe(expected);
+  });
+
+  it("a key shared by two points is not distinctive (no guess)", () => {
+    expect(matchSpokenPoint("2026 年", ["2026 年營收創高", "2026 年獲利下滑"])).toBe(null);
   });
 });
 

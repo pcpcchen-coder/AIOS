@@ -8,6 +8,8 @@ export interface VoicePrefs {
   realtime_idle_s: number;
   /** 即時語音每通最長多久（費用防護，George 2026-11-06）：到上限前一分鐘提醒，到了就結束；頁面與核心都會執行。 */
   realtime_max_call_s: number;
+  /** 即時語音上網查詢的結果畫面：念完（播放真的結束）後幾秒收起（George 2026-11-09）。 */
+  search_close_s: number;
 }
 
 export type VoicePrefsPatch = Partial<VoicePrefs>;
@@ -32,6 +34,11 @@ export const VOICE_PREFS = {
     kind: "seconds", default: 1200, min: 300, max: 3600, step: 60, presets: [600, 1200, 1800, 3600],
     label: "每通即時語音最長多久",
     hint: "從連上算起；到上限前一分鐘提醒，到了就結束（通話中也算）",
+  },
+  search_close_s: {
+    kind: "seconds", default: 8, min: 3, max: 60, step: 1, presets: [3, 5, 8, 15, 30, 60],
+    label: "查詢結果收起秒數",
+    hint: "語音念完後幾秒收起查詢結果畫面；列出編號、等你選的時候不會自動收起",
   },
 } as const satisfies PrefSpecs<VoicePrefs>;
 

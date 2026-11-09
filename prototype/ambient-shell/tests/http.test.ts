@@ -513,9 +513,9 @@ describe("HTTP API", () => {
   it("語音閒置秒數：驗證輸入、保存到 voice.json、推送 settings.updated，回應帶新的 seconds 列", async () => {
     const none = await start();
     const defaults = (await (await fetch(`${none.base}/api/settings`)).json()) as SettingsView;
-    expect(defaults.voice).toEqual({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 1200 });
+    expect(defaults.voice).toEqual({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 1200, search_close_s: 8 });
     expect(defaults.seconds?.map((r) => r.key)).toEqual([
-      "active", "look_to_talk", "look_to_talk_s", "look_to_talk_cooldown_s", "look_to_talk_greet", "look_to_talk_greet_name", "stop_gesture", "brain_zoom_max", "voice_idle_s", "realtime_idle_s", "realtime_max_call_s",
+      "active", "look_to_talk", "look_to_talk_s", "look_to_talk_cooldown_s", "look_to_talk_greet", "look_to_talk_greet_name", "stop_gesture", "brain_zoom_max", "voice_idle_s", "realtime_idle_s", "realtime_max_call_s", "search_close_s",
     ]);
     expect(defaults.seconds?.filter((r) => r.group === "camera").every((r) => r.disabled_reason !== null)).toBe(true);
     expect(defaults.camera_preview_disabled_reason).toBe("鏡頭未啟用（.env 設定 NOUS_CAMERA=on 後重新啟動）");
@@ -544,7 +544,7 @@ describe("HTTP API", () => {
     const res = await post("/api/settings/voice", { voice_idle_s: 60 });
     expect(res.status).toBe(200);
     const view = (await res.json()) as SettingsView;
-    expect(view.voice).toEqual({ voice_idle_s: 60, realtime_idle_s: 120, realtime_max_call_s: 1200 });
+    expect(view.voice).toEqual({ voice_idle_s: 60, realtime_idle_s: 120, realtime_max_call_s: 1200, search_close_s: 8 });
     const row = numberRow(view, "voice_idle_s");
     expect(row).toMatchObject({ value: 60, value_label: "1 分鐘", disabled_reason: null, write_path: "/api/settings/voice" });
     expect(row.options.filter((o) => o.checked).map((o) => o.value)).toEqual([60]);
@@ -562,7 +562,7 @@ describe("HTTP API", () => {
     await new Promise((r) => server!.close(r));
 
     const again = await start(5, undefined, undefined, undefined, undefined, { dir });
-    expect(((await (await fetch(`${again.base}/api/settings`)).json()) as SettingsView).voice).toEqual({ voice_idle_s: 60, realtime_idle_s: 120, realtime_max_call_s: 1200 });
+    expect(((await (await fetch(`${again.base}/api/settings`)).json()) as SettingsView).voice).toEqual({ voice_idle_s: 60, realtime_idle_s: 120, realtime_max_call_s: 1200, search_close_s: 8 });
   });
 
   it("語音設定寫檔失敗：回 500 與可讀原因，記憶體不變", async () => {

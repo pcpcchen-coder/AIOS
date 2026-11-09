@@ -72,7 +72,7 @@ export type Provider = "claude" | "chatgpt" | "mock";
 /** 測試在編譯期比對 src/approval.ts 的 ApprovalDecision。 */
 export type ApprovalDecision = "approve" | "reject";
 /** 即時語音的模型工具；測試在編譯期比對 server/realtime.ts。 */
-export type RealtimeToolName = "web_search" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control" | "set_voice_volume" | "set_day_night";
+export type RealtimeToolName = "web_search" | "show_search_result" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control" | "set_voice_volume" | "set_day_night";
 
 /** 鏡頭規則的效果（CameraCommand 去掉字幕 say）。 */
 export type CameraEffect = { preview: boolean } | { set: { active?: boolean; look_to_talk?: boolean; look_to_talk_greet?: boolean; stop_gesture?: boolean } };
@@ -325,6 +325,8 @@ export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
     needs: { text: "即時語音", live: "realtime_available" } },
   get_tasks: { try: ["任務做好了沒", "報告寫到哪了"], does: "AI 查詢真實任務狀態後用說的回答", needs: { text: "即時語音", live: "realtime_available" } },
   web_search: { try: ["新竹今天會下雨嗎"], does: "AI 上網查詢後回答，字幕顯示來源", needs: { text: "即時語音與上網查詢（ChatGPT 方案路徑用 Codex 額度；API key 路徑需要 OPENAI_API_KEY）", live: "realtime_web_search" } },
+  show_search_result: { try: ["第二個", "看第一則"], does: "查詢有兩則以上的結果時畫面列出編號，選一則後畫面顯示那一則的重點，AI 依序念、念到的那一點亮起；念完後依設定的秒數自動收起",
+    needs: { text: "即時語音與上網查詢（同上）", live: "realtime_web_search" } },
   delegate_task: { try: ["幫我寫一份下週出差規劃"], does: "AI 判斷是較長的工作時交辦成背景任務，進度顯示在電子腦下方",
     needs: { text: "即時語音", live: "realtime_available" } },
   home_status: { try: ["客廳現在幾度"], does: "查武陵居的感測值與設備狀態",

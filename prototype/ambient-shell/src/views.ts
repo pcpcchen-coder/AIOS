@@ -27,6 +27,7 @@ import { WAKE_THRESHOLD_OFFSETS, type WakePrefsPatch, type WakeSettingsView } fr
 import { VOICE_VOLUME_DEFAULT, VOICE_VOLUME_MAX, VOICE_VOLUME_MIN, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
 import { brightOptions, darkOptions, DEFAULT_LUMA_THRESHOLDS, NIGHT_VOLUME_DEFAULT, type LumaThresholds, type DayNightDecision, type DayNightMode, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type LightLevel } from "../shared/day-night.ts";
 import { frameStatsText, PERFORMANCE_PROFILES, PERFORMANCE_TEXT, rendererText, type FrameStats, type PerformanceProfile, type RendererReadout } from "./performance.ts";
+import { SEARCH_TEXT, type SearchPanel } from "./search-panel.ts";
 import { STEP_ICON, TASK_STATUS_LABEL, formatClock, formatCount, formatDuration } from "./format.ts";
 
 export interface ViewActions {
@@ -1009,7 +1010,7 @@ function renderVoiceSettings(voice: VoicePrefs, realtimeAvailable: boolean, acti
     plus.disabled = value >= spec.max;
     minus.setAttribute("aria-label", msg`${t(spec.label)}減少`);
     plus.setAttribute("aria-label", msg`${t(spec.label)}增加`);
-    const hint = (key === "realtime_idle_s" || key === "realtime_max_call_s") && !realtimeAvailable ? msg`${t(spec.hint)}；即時語音目前不可用` : t(spec.hint);
+    const hint = (key === "realtime_idle_s" || key === "realtime_max_call_s" || key === "search_close_s") && !realtimeAvailable ? msg`${t(spec.hint)}；即時語音目前不可用` : t(spec.hint);
     list.append(
       h(
         "li",
@@ -1437,6 +1438,66 @@ function renderCameraSettings(camera: CameraSettings, realtimeAvailable: boolean
 
 export function renderNotice(message: string, actions: ViewActions): HTMLElement {
   return surfaceShell("notice", h("p", { class: "notice-text" }, t(message)), footer(actions));
+}
+
+/**
+ * 即時語音的查詢結果（docs/10 §5 的例外，George 2026-11-09）：候選、選定那一則的重點（念到的那一點亮起）或失敗。
+ * 標題、網站、重點與錯誤都是資料（不翻譯）；查詢詞是模型寫的查詢。
+ */
+export function renderSearch(panel: SearchPanel, actions: ViewActions): HTMLElement {
+  const close = h(
+    "footer",
+    { class: "surface-footer" },
+    button(t("收起"), actions.dismiss, "btn--ghost"),
+    h("span", { class: "hint" }, t(SEARCH_TEXT.dismissHint)),
+  );
+  let body: HTMLElement[];
+  if (panel.mode === "candidates") {
+    const list = h("ol", { class: "search-candidates" });
+    for (const c of panel.candidates) {
+      const badge = h("span", { class: "search-badge" }, String(c.n));
+      badge.setAttribute("aria-label", t(SEARCH_TEXT.badge, c.n));
+      list.append(h(
+        "li",
+        { class: "search-candidate", "data-selectable": "", "data-label": c.title },
+        badge,
+        h("div", { class: "search-candidate-text" }, h("p", { class: "search-title" }, raw(c.title)), h("p", { class: "search-host" }, raw(c.host))),
+      ));
+    }
+    body = [h("p", { class: "eyebrow search-eyebrow" }, t(SEARCH_TEXT.candidatesEyebrow)), h("p", { class: "search-query" }, raw(panel.query)), list];
+  } else if (panel.mode === "reading") {
+    const c = panel.candidate;
+    const points = c.summarized
+      ? h("ol", { class: "search-points", "aria-label": SEARCH_TEXT.points }, ...c.points.map((p, i) => h(
+        "li",
+        { class: `search-point${panel.active === i ? " is-active" : panel.active !== null ? " is-dim" : ""}`, ...(panel.active === i ? { "aria-current": "true" } : {}) },
+        raw(p),
+      )))
+      : h("p", { class: "search-unsummarized" }, t(SEARCH_TEXT.unsummarized));
+    body = [
+      h("p", { class: "eyebrow search-eyebrow" }, t(SEARCH_TEXT.readingEyebrow, c.n)),
+      h("h2", { class: "search-title" }, raw(c.title)),
+      points,
+      h("p", { class: "search-host" }, h("span", { class: "search-source-label" }, t(SEARCH_TEXT.source)), " ", raw(c.host)),
+    ];
+  } else {
+    body = [
+      h("p", { class: "eyebrow search-eyebrow" }, t(SEARCH_TEXT.failedEyebrow)),
+      h("p", { class: "search-query" }, raw(panel.query)),
+      h("p", { class: "search-error" }, raw(panel.error)),
+    ];
+  }
+  return h("section", { class: `surface surface--search surface--search-${panel.mode}`, role: "region", "aria-label": SEARCH_TEXT.region }, ...body, close);
+}
+
+/** 跟讀：只換亮起的那一點，不重建畫面（念的時候每個片段都可能換點）。 */
+export function applySearchHighlight(root: ParentNode, active: number | null): void {
+  root.querySelectorAll<HTMLElement>(".search-point").forEach((el, i) => {
+    el.classList.toggle("is-active", active === i);
+    el.classList.toggle("is-dim", active !== null && active !== i);
+    if (active === i) el.setAttribute("aria-current", "true");
+    else el.removeAttribute("aria-current");
+  });
 }
 
 export type ConfirmDetail =
