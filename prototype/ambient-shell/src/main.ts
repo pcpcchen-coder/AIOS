@@ -319,8 +319,8 @@ function applyLiveMute(): void {
 }
 /** 鈴響時喚醒控制器必須帶著 alarm 防護（中途才建立或重建的控制器也要補上）。 */
 function syncAlarmGuard(): void {
-  // ALARM-3：倒數的滴答與試聽鈴聲也一樣不能觸發喚醒。
-  const want = alarmRing.ringing || alarmRing.countingDown ? wake : null;
+  // ALARM-3：倒數的滴答與試聽鈴聲也一樣不能觸發喚醒（倒數的前 20 秒沒有聲音，喚醒照常，可以說「取消」「再加 5 分鐘」）。
+  const want = alarmRing.ringing || alarmRing.audible ? wake : null;
   if (alarmGuardOwner === want) return;
   alarmGuardOwner?.end("alarm");
   alarmGuardOwner = want;
@@ -942,7 +942,7 @@ function stopWakeCall(): void {
  */
 function onWakeTrigger(trigger: WakeTrigger): void {
   // ALARM-1 備援：防護計數萬一不同步（控制器關掉又打開會歸零），鈴響時的喚醒一律不開始通話。
-  if (alarmRing.ringing) {
+  if (alarmRing.ringing || alarmRing.audible) {
     alarmGuardOwner?.end("alarm");
     alarmGuardOwner = null;
     syncAlarmGuard();

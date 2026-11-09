@@ -14,7 +14,7 @@ George asked on 2026-11-09: "The alarm should start showing on screen when 30 se
 - **30-second countdown:** 30 seconds before a timer, alarm or snooze is due, the centre of the screen shows "“泡麵” is almost due" (noodles) with the seconds in large digits (`data-visibility-reason="alarm_countdown"`). It does not block anything (no clicks, no focus); when it is due the ring screen takes over. Timers get it too (George said alarms; it is just as useful before a timer ends, and can be removed if unwanted).
 - **Only on the device that will ring:** the core adds `here` to every timer, alarm and snooze in `settings.alarms` ("would it ring on this page if due now", from the current connections), and the page counts down only when `here` is true.
 - **A tick every second for the last 10 seconds:** a short sound of about 60 ms at 1760 Hz, from the chosen speaker, at the same volume as alarms (conversation volume, at least 30%). The ticks at 10, 9 … 1 seconds are scheduled at once on the AudioContext clock, so they stay on time even when a background window's timers are throttled; nothing is scheduled at the due moment (the ringtone follows). The seconds turn amber for the last 10 seconds.
-- **Wake guard:** during the countdown and while previewing a ringtone, wake detection is paused as well (the ticks cannot trigger the wake word); memories are put away; the processing cue pauses; a Pi screen turned off at night comes back on.
+- **Wake guard:** during the ticks in the last 10 seconds and while previewing a ringtone, wake detection is paused (the ticks cannot trigger the wake word); the first 20 seconds of the countdown are silent, so the wake word still works and you can say "cancel" or "add 5 minutes". During the countdown memories are put away, the processing cue pauses, and a Pi screen turned off at night comes back on.
 - **Three ringtones (synthesized locally, no external assets):**
 
 | Ringtone | Sound | Loop |
@@ -32,7 +32,7 @@ George asked on 2026-11-09: "The alarm should start showing on screen when 30 se
 | Command | Result |
 |---|---|
 | `npm run typecheck` | Passed |
-| `npx vitest run` | 171 files, 3172 passed, 5 skipped |
+| `npx vitest run` | 171 files, 3173 passed, 5 skipped |
 | `npm run build` | Passed (only the existing chunk-size warning) |
 
 New `tests/alarm-countdown.test.ts` (5 tests): the three ringtones and the default, an unknown ringtone refused; each ringtone's loop length, no clipping, starting silent, and its own rhythm (classic silent after four beeps, chime still decaying, pulse eight beeps); ringtone and length surviving a restart; tick timing (starting exactly 10 seconds before gives one tick at 0 … 9 seconds from now, joining late schedules only the rest, none at the due moment); `here` true only on the page that will ring, switching to every page when the device that set it disconnects. `tests/audio-privacy.test.ts` adds that the ticks also go through the sound output setting.
@@ -45,6 +45,19 @@ New `tests/alarm-countdown.test.ts` (5 tests): the three ringtones and the defau
 - In settings, choosing "Urgent pulse" and "10 minutes" gave the core `ring_tone` `pulse` and `ring_s` 600; "Preview" could be pressed.
 
 Screenshots (headless, not on the real devices): [countdown in the last 10 seconds](alarm-timer-3-2026-11-09/pi-countdown-final-1920x1080-HEADLESS.png), [ringtones in settings](alarm-timer-3-2026-11-09/settings-tones-HEADLESS.png).
+
+<a id="21-獨立審查與修正"></a>
+### 2.1 Independent review and fixes
+
+| Finding | Fix |
+|---|---|
+| After a page connected or disconnected, other pages' "would it ring here" was not refreshed: a page that would not ring could count down, or the page that would ring might not | Settings are re-pushed when a page source first connects or its last stream closes, and when a terminal heartbeat connects or times out; test added |
+| When the wake guard count was reset, the backstop did not cover the countdown or preview | A wake detection during ringing, ticks or preview never starts a call |
+| The wake word was blocked for the whole 30 seconds, so "cancel" or "add 5 minutes" could not be said | Blocked only during the ticks and previews |
+| A preview could overlap a ring or ticks that started meanwhile | The preview stops when ringing or ticks start; no preview while ringing |
+| Ticks could start late when a background window's per-second timer was throttled | An extra check is scheduled for exactly 10.5 seconds before |
+| A timer's ticks used the alarm minimum volume | Uses the item's kind |
+| (Smaller) The seconds changed every second but had aria-live | Removed so screen readers do not read it every second |
 
 <a id="3-已知限制"></a>
 ## 3. Known limitations
@@ -64,5 +77,5 @@ Screenshots (headless, not on the real devices): [countdown in the last 10 secon
 1. Update the Mac App and reload the Pi page. In settings, under "Ringtone", press "Preview" for each of the three, pick one with "Use", and set the length to 1 minute.
 2. On the Pi say 「計時 1 分鐘」 (timer for 1 minute): 30 seconds before, the countdown appears; in the last 10 seconds there is a tick every second (Pi speaker); when due it switches to your ringtone and stops by itself after 1 minute.
 3. Set a 1-minute timer in the Mac window: check the Pi neither counts down nor ticks (only the device that will ring).
-4. Say the wake word during a countdown: check no call starts (wake is paused during the ticks).
+4. Say the wake word in the first 20 seconds of the countdown and then "cancel": check it cancels; say the wake word during the ticks in the last 10 seconds: check no call starts.
 5. Alarms: set an alarm 2 minutes ahead and check the same countdown and ticks; after snoozing, the countdown also appears before it rings again 9 minutes later.

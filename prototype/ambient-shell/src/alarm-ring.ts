@@ -65,6 +65,8 @@ export class AlarmRing {
   private countdown: HTMLElement | null = null;
   private ticks: TickSound | null = null;
   private ticksFor: string | null = null;
+  private tickTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastAudible = false;
   private countdownActive = false;
   private preview: { sound: RingSound; timer: ReturnType<typeof setTimeout> } | null = null;
   private soonTimer: ReturnType<typeof setTimeout> | null = null;
@@ -80,9 +82,15 @@ export class AlarmRing {
     return this.countdownActive;
   }
 
+  /** ALARM-3：倒數的滴答排著或正在試聽鈴聲（只有這時要擋喚醒；前 20 秒還能用喚醒詞取消或延長）。 */
+  get audible(): boolean {
+    return this.ticks !== null || this.preview !== null;
+  }
+
   /** ALARM-3：設定頁試聽一種鈴聲 4 秒（用這台裝置的鬧鐘音量；喚醒防護照樣生效）。 */
   previewTone(tone: RingTone): void {
     this.stopPreview();
+    if (this.ringingNow || this.ticks) return;
     const sound = this.options.createSound();
     void sound.start({ tone, peak: this.peakFor("alarm"), rampS: 0, elapsedMs: 0 });
     this.preview = { sound, timer: setTimeout(() => this.stopPreview(), 4000) };
@@ -220,6 +228,7 @@ export class AlarmRing {
       return;
     }
     if (this.soundRing === ring.id && this.sound) return;
+    this.stopPreview();
     this.sound?.stop();
     const sound = this.options.createSound();
     this.sound = sound;
@@ -305,13 +314,13 @@ export class AlarmRing {
   }
 
   /** 30 秒內要在這個頁面響的（定時器、鬧鐘、貪睡）中最早的一個；到期後 3 秒內仍算（等核心推響鈴）。 */
-  private upcoming(now: number): { key: string; label: string; at: number } | null {
+  private upcoming(now: number): { key: string; label: string; at: number; kind: RingKind } | null {
     const view = this.view;
     if (!view?.prefs.enabled) return null;
     const items = [
-      ...view.timers.filter((x) => x.state === "running" && x.ends_at !== null && x.here !== false).map((x) => ({ key: `t:${x.id}:${x.ends_at}`, label: x.label ?? t("定時器"), at: x.ends_at! })),
-      ...view.alarms.filter((x) => x.enabled && x.next_at !== null && x.here !== false).map((x) => ({ key: `a:${x.id}:${x.next_at}`, label: x.label ?? t("鬧鐘"), at: x.next_at! })),
-      ...view.snoozes.filter((x) => x.here !== false).map((x) => ({ key: `z:${x.id}:${x.due_at}`, label: x.label ?? t("鬧鐘"), at: x.due_at })),
+      ...view.timers.filter((x) => x.state === "running" && x.ends_at !== null && x.here !== false).map((x) => ({ key: `t:${x.id}:${x.ends_at}`, label: x.label ?? t("定時器"), at: x.ends_at!, kind: "timer" as const })),
+      ...view.alarms.filter((x) => x.enabled && x.next_at !== null && x.here !== false).map((x) => ({ key: `a:${x.id}:${x.next_at}`, label: x.label ?? t("鬧鐘"), at: x.next_at!, kind: "alarm" as const })),
+      ...view.snoozes.filter((x) => x.here !== false).map((x) => ({ key: `z:${x.id}:${x.due_at}`, label: x.label ?? t("鬧鐘"), at: x.due_at, kind: "alarm" as const })),
     ].filter((x) => x.at - now <= COUNTDOWN_S * 1000 && x.at - now > -3000);
     return items.sort((a, b) => a.at - b.at)[0] ?? null;
   }
@@ -321,6 +330,8 @@ export class AlarmRing {
     const now = this.serverNow();
     const item = this.ringingNow ? null : this.upcoming(now);
     if (!item) {
+      if (this.tickTimer !== null) clearTimeout(this.tickTimer);
+      this.tickTimer = null;
       this.countdown?.remove();
       this.countdown = null;
       this.ticks?.stop();
@@ -333,8 +344,8 @@ export class AlarmRing {
       const root = document.createElement("div");
       root.className = "alarm-countdown";
       root.dataset.visibilityReason = "alarm_countdown";
+      // 秒數每秒變，不要每秒念：只有出現時的「快到了」那一句給報讀器（role=timer 預設不主動念）。
       root.setAttribute("role", "timer");
-      root.setAttribute("aria-live", "polite");
       const label = document.createElement("div");
       label.className = "alarm-countdown-label";
       const secs = document.createElement("div");
@@ -348,18 +359,24 @@ export class AlarmRing {
     this.countdown.querySelector<HTMLElement>(".alarm-countdown-secs")!.textContent = String(Math.ceil(left / 1000));
     this.countdown.classList.toggle("alarm-countdown--final", left <= COUNTDOWN_TICK_S * 1000);
     if (left <= COUNTDOWN_TICK_S * 1000 + 500 && left > 0 && this.ticksFor !== item.key) {
+      this.stopPreview();
       this.ticks?.stop();
       this.ticks = this.options.createTicks();
       this.ticksFor = item.key;
-      void this.ticks.start(left, this.peakFor("alarm"));
+      void this.ticks.start(left, this.peakFor(item.kind));
     }
+    // 背景視窗的每秒計時器可能被節流：另外排一個剛好在「剩 10.5 秒」的檢查，滴答準時開始。
+    if (this.tickTimer !== null) clearTimeout(this.tickTimer);
+    this.tickTimer = this.ticksFor === item.key ? null : setTimeout(() => this.renderCountdown(), Math.max(0, left - COUNTDOWN_TICK_S * 1000 - 500));
     this.syncCountdownActive();
   }
 
   private syncCountdownActive(): void {
     const active = this.countdown !== null || this.preview !== null;
-    if (active === this.countdownActive) return;
+    const audible = this.audible;
+    if (active === this.countdownActive && audible === this.lastAudible) return;
     this.countdownActive = active;
+    this.lastAudible = audible;
     this.options.onCountdownChange(active);
   }
 

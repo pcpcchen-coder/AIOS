@@ -1192,6 +1192,24 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     res.end();
   }
 
+  let sourceChangeQueued = false;
+  function queueSourceChange(): void {
+    if (sourceChangeQueued) return;
+    sourceChangeQueued = true;
+    setTimeout(() => {
+      sourceChangeQueued = false;
+      notifyAll();
+    }, 200).unref?.();
+  }
+
+  function notifyAll(): void {
+    const updateSequence = ++sequence;
+    for (const { response, source } of clients.values()) {
+      const event: ServerEvent = { type: "settings.updated", sequence: updateSequence, settings: settings.view(source) };
+      response.write(`data: ${JSON.stringify(event)}\n\n`);
+    }
+  }
+
   function openEvents(req: IncomingMessage, res: ServerResponse): void {
     res.writeHead(200, {
       "Content-Type": "text/event-stream; charset=utf-8",
@@ -1202,9 +1220,14 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     const source = pageSource(new URL(req.url ?? "/", "http://localhost").searchParams.get("terminal"));
     const hello: ServerEvent = { type: "hello", sequence: ++sequence, settings: settings.view(source), tasks: store.publicList(), client_id: clientId };
     res.write(`data: ${JSON.stringify(hello)}\n\n`);
+    const sourceCount = (s: string) => [...clients.values()].filter((c) => c.source === s).length;
+    const firstOfSource = sourceCount(source) === 0;
     clients.set(clientId, { response: res, source });
+    // ALARM-3：某個頁面來源第一次連上或最後一條串流斷掉時，其他頁面的「到期時會不會在這裡響」（倒數）會變，重推設定。
+    if (firstOfSource && options.alarms) queueSourceChange();
     req.on("close", () => {
       clients.delete(clientId);
+      if (sourceCount(source) === 0 && options.alarms) queueSourceChange();
       // 這條串流擁有的 live 工作階段立刻結束（不假裝重連）。
       sessions?.clientClosed(clientId);
     });
@@ -1213,13 +1236,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
   return Object.assign(server, {
     realtimeSessions: sessions,
     /** 設定或登入狀態改變時呼叫，推送給所有畫面。 */
-    notifySettings: () => {
-      const updateSequence = ++sequence;
-      for (const { response, source } of clients.values()) {
-        const event: ServerEvent = { type: "settings.updated", sequence: updateSequence, settings: settings.view(source) };
-        response.write(`data: ${JSON.stringify(event)}\n\n`);
-      }
-    },
+    notifySettings: () => notifyAll(),
     /** ALARM-1：現在有 SSE 串流的頁面來源（"main" 或終端機識別碼）。 */
     connectedSources: (): Set<string> => new Set([...clients.values()].map((c) => c.source)),
     /** RPI-ID：本次人物世代改變（不含內容）；每個頁面（含 Pi）自己用 status 重讀。Mac 主視窗另有 IPC 通知。 */

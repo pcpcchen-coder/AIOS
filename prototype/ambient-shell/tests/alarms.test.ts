@@ -381,7 +381,7 @@ describe("HTTP: api_key route forwarding, settings.alarms and /api/alarms/*", ()
     const base = `http://localhost:${port}`;
     const post = (path: string, body: unknown, terminal?: string) => fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", ...(terminal ? { "X-Nous-Terminal": terminal } : {}) }, body: JSON.stringify(body) });
     const alarms = async (terminal?: string) => ((await (await fetch(`${base}/api/settings`, { headers: terminal ? { "X-Nous-Terminal": terminal } : {} })).json()) as { alarms: AlarmsView }).alarms;
-    return { c, clock, post, alarms };
+    return { c, clock, post, alarms, base };
   }
 
   it("a timer started from the Pi's call rings on the Pi page only; stop and ack come back through /api/alarms", async () => {
@@ -401,6 +401,41 @@ describe("HTTP: api_key route forwarding, settings.alarms and /api/alarms/*", ()
     const stopped = (await (await a.post("/api/alarms/stop", { by: "gesture" }, "rpi4")).json()) as { alarms: AlarmsView };
     expect(stopped.alarms.rings).toEqual([]);
     expect(a.c.recentLog().at(-1)).toMatchObject({ outcome: "stopped", by: "gesture", heard: true });
+  });
+
+  it("ALARM-3: a page connecting or leaving re-pushes settings so other pages' countdown (here) stays right", async () => {
+    const a = await app();
+    const base = a.base;
+    const events = async (terminal: string | null, ctl: AbortController) => {
+      const res = await fetch(`${base}/api/events${terminal ? `?terminal=${terminal}` : ""}`, { signal: ctl.signal });
+      const reader = res.body!.getReader();
+      const seen: string[] = [];
+      void (async () => {
+        try {
+          for (;;) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            seen.push(new TextDecoder().decode(value));
+          }
+        } catch {
+          // 中止
+        }
+      })();
+      return seen;
+    };
+    const pi = new AbortController();
+    const seen = await events("rpi4", pi);
+    await new Promise((r) => setTimeout(r, 400));
+    const before = seen.join("").split("settings.updated").length;
+    const mac = new AbortController();
+    await events(null, mac);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(seen.join("").split("settings.updated").length).toBeGreaterThan(before);
+    const mid = seen.join("").split("settings.updated").length;
+    mac.abort();
+    await new Promise((r) => setTimeout(r, 500));
+    expect(seen.join("").split("settings.updated").length).toBeGreaterThan(mid);
+    pi.abort();
   });
 
   it("settings: adding a one-off alarm keeps its date; a repeating one ignores it", async () => {
