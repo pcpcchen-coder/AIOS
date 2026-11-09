@@ -8,16 +8,16 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T22:40:46.148Z",
-  "updated_at": "2026-11-09T22:40:55.209Z",
+  "updated_at": "2026-11-09T22:44:30.118Z",
   "ended_at": null,
   "steps": [
     {
       "id": "how",
       "title": "how",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-11-09T22:40:55.209Z",
-      "ended_at": null,
-      "note": "",
+      "ended_at": "2026-11-09T22:44:30.118Z",
+      "note": "3 explorers (tool roundtrip, surfaces/settings, playback events); explainer synthesis done in main thread",
       "evidence": []
     },
     {
@@ -89,6 +89,13 @@
       "step_id": "how",
       "status": "running",
       "note": ""
+    },
+    {
+      "at": "2026-11-09T22:44:30.118Z",
+      "type": "step_updated",
+      "step_id": "how",
+      "status": "passed",
+      "note": "3 explorers (tool roundtrip, surfaces/settings, playback events); explainer synthesis done in main thread"
     }
   ],
   "provenance": "Agent self-reported"
