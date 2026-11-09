@@ -58,6 +58,7 @@ export class AlarmRing {
   private chip: HTMLElement | null = null;
   private notice: HTMLElement | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
+  private soonTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: AlarmRingOptions) {}
 
@@ -144,14 +145,25 @@ export class AlarmRing {
     const changed = ringing !== this.ringingNow;
     this.ringingNow = ringing;
     this.renderSound(ring);
-    this.renderOverlay(ring, rings.length);
+    this.renderOverlay(ring, rings);
     this.renderChip();
     this.renderNotice();
-    const timers = this.view?.prefs.enabled ? this.view.timers.length + this.view.snoozes.length + this.view.alarms.filter((a) => a.enabled).length : 0;
-    if ((timers || ring) && this.ticker === null) this.ticker = setInterval(() => this.tick(), 1000);
-    else if (!timers && !ring && this.ticker !== null) {
+    // 每秒更新只在有定時器、貪睡、響鈴或一小時內的鬧鐘時；更遠的鬧鐘只排一次「進入一小時內」的重畫。
+    const view = this.view?.prefs.enabled ? this.view : null;
+    const now = this.serverNow();
+    const nextAlarms = view ? view.alarms.filter((a) => a.enabled && a.next_at !== null).map((a) => a.next_at!) : [];
+    const soon = nextAlarms.some((at) => at - now <= ALARM_SOON_MS);
+    const live = !!ring || !!view?.timers.length || !!view?.snoozes.length || soon;
+    if (live && this.ticker === null) this.ticker = setInterval(() => this.tick(), 1000);
+    else if (!live && this.ticker !== null) {
       clearInterval(this.ticker);
       this.ticker = null;
+    }
+    if (this.soonTimer !== null) clearTimeout(this.soonTimer);
+    this.soonTimer = null;
+    if (!live && nextAlarms.length) {
+      const wait = Math.min(...nextAlarms) - ALARM_SOON_MS - now;
+      this.soonTimer = setTimeout(() => this.render(), Math.min(Math.max(1000, wait + 500), 2 ** 31 - 1));
     }
     if (changed) {
       document.body.classList.toggle("alarm-ringing", ringing);
@@ -194,12 +206,18 @@ export class AlarmRing {
     });
   }
 
+  /** 響鈴畫面的大字時間：用核心的時區（和鬧鐘時間一致，Pi 的瀏覽器時區不同時也一樣）。 */
   private clockText(): string {
-    const d = new Date(this.serverNow());
-    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    try {
+      return new Intl.DateTimeFormat("en-GB", { timeZone: this.view?.time_zone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(this.serverNow()));
+    } catch {
+      const d = new Date(this.serverNow());
+      return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
   }
 
-  private renderOverlay(ring: RingView | null, count: number): void {
+  private renderOverlay(ring: RingView | null, rings: readonly RingView[]): void {
+    const count = rings.length;
     if (!ring) {
       this.overlay?.remove();
       this.overlay = null;
@@ -243,7 +261,7 @@ export class AlarmRing {
     root.querySelector<HTMLElement>(".alarm-ring-title")!.textContent = count > 1 ? `${ringTitle(ring)}${t("（還有 {0} 個）", count - 1)}` : ringTitle(ring);
     // ALARM-2：只有鬧鐘有貪睡（按需出現）。
     const snooze = root.querySelector<HTMLButtonElement>(".alarm-ring-snooze")!;
-    const canSnooze = ring.kind === "alarm";
+    const canSnooze = rings.some((r) => r.kind === "alarm");
     snooze.hidden = !canSnooze;
     snooze.textContent = t("貪睡 {0} 分鐘", Math.round((this.view?.prefs.snooze_s ?? 540) / 60));
     root.querySelector<HTMLElement>(".alarm-ring-hint")!.textContent = canSnooze ? t("也可以舉起手掌、按 Esc 或空白鍵停止；通話中說「停」或「貪睡」") : t("也可以舉起手掌、按 Esc 或空白鍵，或在通話中說「停」");

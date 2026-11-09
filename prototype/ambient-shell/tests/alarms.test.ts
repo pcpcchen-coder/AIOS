@@ -403,6 +403,14 @@ describe("HTTP: api_key route forwarding, settings.alarms and /api/alarms/*", ()
     expect(a.c.recentLog().at(-1)).toMatchObject({ outcome: "stopped", by: "gesture", heard: true });
   });
 
+  it("settings: adding a one-off alarm keeps its date; a repeating one ignores it", async () => {
+    const a = await app();
+    expect((await a.post("/api/alarms/alarms/add", { time: "07:00", repeat: "once", date: "2030-01-02", label: "x" })).status).toBe(200);
+    expect((await a.post("/api/alarms/alarms/add", { time: "07:00", repeat: "weekdays", date: "2030-01-02" })).status).toBe(200);
+    expect(a.c.alarms().map((x) => [x.date, x.days.length])).toEqual([["2030-01-02", 0], [null, 5]]);
+    expect((await a.post("/api/alarms/alarms/add", { time: "07:00", repeat: "custom" })).status).toBe(400);
+  });
+
   it("settings: turn off and on, reject bad values, clear all", async () => {
     const a = await app();
     expect((await a.post("/api/settings/alarms", { ring_s: 5 })).status).toBe(400);

@@ -62,10 +62,10 @@ In `shared/voice-commands.ts` the section is renamed "Timers and alarms" and gai
 | Command | Result |
 |---|---|
 | `npm run typecheck` | Passed |
-| `npx vitest run` | 170 files, 3161 passed, 5 skipped |
+| `npx vitest run` | 170 files, 3167 passed, 5 skipped |
 | `npm run build` | Passed (only the existing chunk-size warning) |
 
-New `tests/alarm-clock.test.ts` (18 tests, fake clock): parsing times and repeat rules; the daylight-saving gap and overlap, a daily 07:00 alarm across the start of daylight saving (two rings 23 hours apart, both at local 07:00); weekday alarms skipping the weekend and crossing midnight; "7 tomorrow" ringing once and then turning off; a past time without a date meaning tomorrow, an explicit past date refused; weekday alarms; snooze ringing again after 9 minutes and cleared by stopping; timers cannot be snoozed; a Mac asleep through an alarm ringing 15 minutes late, three days asleep logging only one miss and scheduling the next one; restart restoring alarms and snoozes, reading an ALARM-1 version 1 file; recomputing on a time-zone change; on/off, deletion by time or name, asking when ambiguous; keeping the Mac awake only within 12 hours; both routes having `app__alarm__*` and the speaking rule; tools setting weekdays, chosen weekdays, a date, and rejecting bad input, the alarm ringing on the device that set it, snooze and cancelling snoozes; a fixture for the ChatGPT-plan route (`LiveToolCaller`); snooze and stop phrases; the minimum volume.
+New `tests/alarm-clock.test.ts` (23 tests, fake clock; including the 5 regressions in section 4.1) and 1 test in `tests/alarms.test.ts` (adding a one-off alarm over HTTP keeps its date): parsing times and repeat rules; the daylight-saving gap and overlap, a daily 07:00 alarm across the start of daylight saving (two rings 23 hours apart, both at local 07:00); weekday alarms skipping the weekend and crossing midnight; "7 tomorrow" ringing once and then turning off; a past time without a date meaning tomorrow, an explicit past date refused; weekday alarms; snooze ringing again after 9 minutes and cleared by stopping; timers cannot be snoozed; a Mac asleep through an alarm ringing 15 minutes late, three days asleep logging only one miss and scheduling the next one; restart restoring alarms and snoozes, reading an ALARM-1 version 1 file; recomputing on a time-zone change; on/off, deletion by time or name, asking when ambiguous; keeping the Mac awake only within 12 hours; both routes having `app__alarm__*` and the speaking rule; tools setting weekdays, chosen weekdays, a date, and rejecting bad input, the alarm ringing on the device that set it, snooze and cancelling snoozes; a fixture for the ChatGPT-plan route (`LiveToolCaller`); snooze and stop phrases; the minimum volume.
 
 Changed existing test: the eighth exception in `tests/wake-flag-off.test.ts` adds the alarm fields and `app__alarm__*`.
 
@@ -76,6 +76,24 @@ Changed existing test: the eighth exception in `tests/wake-flag-off.test.ts` add
 - The settings page (Mac size) listed 2 alarms; adding "06:45 週末慢跑 (weekends)" gave the core one more alarm with `days` 0 and 6; deleting "倒垃圾" left 2.
 
 Screenshots (headless, not on the real devices): [Pi alarm ringing](alarm-timer-2-2026-11-09/pi-alarm-ring-1920x1080-HEADLESS.png), [alarms in settings](alarm-timer-2-2026-11-09/alarm-settings-HEADLESS.png).
+
+<a id="41-獨立審查與修正"></a>
+### 4.1 Independent review and fixes
+
+Another agent read the diff, ran scenarios against the real `AlarmCenter`, and listed 7 findings plus 3 smaller ones, all fixed:
+
+| Finding | Fix |
+|---|---|
+| On a time-zone change, an alarm already due was pushed forward, neither ringing nor being logged | Due alarms are not recomputed; they ring (late) or are logged as missed by the due rules, and only the rest are recomputed |
+| After a time-zone change, a one-off whose time had passed stayed "on but never rings" | Turned off and logged as missed |
+| Adding or switching an alarm right after a time-zone change stopped the other alarms from being recomputed | Every alarm operation runs a check first (time-zone change and due items) |
+| Adding over HTTP dropped a one-off alarm's date (inverted condition) | Fixed, with a test |
+| Turning the master switch off and on again reported alarms from the off period as missed | Turning on recomputes from now; past one-offs turn off; snoozes are cancelled |
+| The page re-rendered every second whenever any alarm existed | Every second only with timers, snoozes, ringing or an alarm within the hour; otherwise one re-render when the next alarm comes within the hour |
+| With a timer and an alarm ringing together and the timer last, "Snooze" was hidden | Looks at every ring in progress |
+| (Smaller) Deleting or turning off a ringing alarm left it ringing | Stops it too and logs it |
+| (Smaller) The ring screen's large clock used the page's time zone | Uses the core's time zone |
+| (Smaller) The settings heading "鬧鐘" was singular in English | Now 「鬧鐘清單」 (Alarms) |
 
 <a id="5-已知限制"></a>
 ## 5. Known limitations

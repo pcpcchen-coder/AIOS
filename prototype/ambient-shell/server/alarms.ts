@@ -116,6 +116,18 @@ export class AlarmCenter {
       next.log = this.appendLog(next.log, next.rings.map((r) => this.logEntry(r, "stopped", now, "settings")));
       next.rings = [];
     }
+    if (parsed.enabled === true && !this.enabled) {
+      // 重新打開：關著的期間鬧鐘本來就不該響，不算錯過。從現在重算下一次；已經過了的單次鬧鐘關掉；貪睡取消。
+      const now = this.clock.now();
+      const tz = this.timeZone();
+      next.alarms = next.alarms.map((a) => {
+        if (!a.enabled) return a;
+        const at = nextOccurrence(a, now, tz);
+        return at === null ? { ...a, enabled: false, next_at: null } : { ...a, next_at: at };
+      });
+      next.snoozes = [];
+      next.time_zone = tz;
+    }
     this.commit(next);
     return this.prefs();
   }
@@ -155,6 +167,8 @@ export class AlarmCenter {
 
   /** 新增鬧鐘。time「07:00」；days 空＝單次（date 不給就是下一次的這個時間）。 */
   setAlarm(input: { time: unknown; days: number[]; date?: unknown; label?: unknown; origin?: string | null }): AlarmOp {
+    // 先處理時區改變與到期的（避免下面寫入新時區後，其他鬧鐘再也不重算）。
+    this.tick();
     if (!this.enabled) return { ok: false, code: "disabled", message: "鬧鐘與定時器已在設定關閉。" };
     const clock = parseClock(input.time);
     if (!clock) return { ok: false, code: "invalid", message: "時間要像 07:00（24 小時制）。" };
@@ -178,6 +192,8 @@ export class AlarmCenter {
 
   /** 開或關一個鬧鐘。打開單次鬧鐘時，日期已過就改成下一次的這個時間。 */
   setAlarmEnabled(ref: unknown, enabled: boolean): AlarmOp {
+    // 先處理時區改變與到期的（避免下面寫入新時區後，其他鬧鐘再也不重算）。
+    this.tick();
     if (!this.enabled) return { ok: false, code: "disabled", message: "鬧鐘與定時器已在設定關閉。" };
     const found = this.resolveAlarm(ref, enabled ? false : true);
     if (!found.ok) return found;
@@ -188,23 +204,29 @@ export class AlarmCenter {
       const date = next.days.length ? null : (next.date && nextOccurrence(next, now, tz) !== null ? next.date : nextDateFor(next.hour, next.minute, now, tz));
       next = { ...next, date, next_at: nextOccurrence({ ...next, date }, now, tz) };
     }
-    // 關掉時一併取消它的貪睡。
+    // 關掉時一併取消它的貪睡，正在響的也停掉。
     const snoozes = enabled ? this.state.snoozes : this.state.snoozes.filter((z) => z.alarm_id !== next.id);
-    this.commit({ ...this.state, alarms: this.state.alarms.map((a) => (a.id === next.id ? next : a)), snoozes, time_zone: tz });
+    const { rings, log } = enabled ? { rings: this.state.rings, log: this.state.log } : this.dropRingsOf(new Set([next.id]), now);
+    this.commit({ ...this.state, alarms: this.state.alarms.map((a) => (a.id === next.id ? next : a)), snoozes, rings, log, time_zone: tz });
     return { ok: true, alarm: next };
   }
 
   /** 刪除一個或全部鬧鐘（連同貪睡）。 */
   deleteAlarm(ref: unknown, all = false): { ok: true; deleted: AlarmView[] } | AlarmRefError | { ok: false; code: "disabled"; message: string } {
+    // 先處理時區改變與到期的（避免下面寫入新時區後，其他鬧鐘再也不重算）。
+    this.tick();
     if (!this.enabled) return { ok: false, code: "disabled", message: "鬧鐘與定時器已在設定關閉。" };
+    const now = this.clock.now();
     if (all) {
       const deleted = this.state.alarms.map(alarmView);
-      if (deleted.length || this.state.snoozes.length) this.commit({ ...this.state, alarms: [], snoozes: this.state.snoozes.filter((z) => z.alarm_id === null) });
+      const { rings, log } = this.dropRingsOf(new Set(this.state.alarms.map((a) => a.id)), now);
+      if (deleted.length || this.state.snoozes.length) this.commit({ ...this.state, alarms: [], rings, log, snoozes: this.state.snoozes.filter((z) => z.alarm_id === null) });
       return { ok: true, deleted };
     }
     const found = this.resolveAlarm(ref, null);
     if (!found.ok) return found;
-    this.commit({ ...this.state, alarms: this.state.alarms.filter((a) => a.id !== found.alarm.id), snoozes: this.state.snoozes.filter((z) => z.alarm_id !== found.alarm.id) });
+    const { rings, log } = this.dropRingsOf(new Set([found.alarm.id]), now);
+    this.commit({ ...this.state, alarms: this.state.alarms.filter((a) => a.id !== found.alarm.id), rings, log, snoozes: this.state.snoozes.filter((z) => z.alarm_id !== found.alarm.id) });
     return { ok: true, deleted: [alarmView(found.alarm)] };
   }
 
@@ -341,10 +363,20 @@ export class AlarmCenter {
     if (prefs.enabled) {
       const tz = this.timeZone();
       // 時區改變（或舊檔沒有記時區）：重算每個開著的鬧鐘的下一次。
+      // 已經到期的（next_at ≤ now）不重算，照下面的到期規則響或記錄錯過；單次鬧鐘的當地時間在新時區已經過了：關掉並記錄錯過。
       let alarms = this.state.alarms;
       let tzChanged = false;
+      const zoneMissed: AlarmRecord[] = [];
       if (this.state.time_zone !== tz && alarms.length) {
-        alarms = alarms.map((a) => (a.enabled ? { ...a, next_at: nextOccurrence(a, now, tz) } : a));
+        alarms = alarms.map((a) => {
+          if (!a.enabled || (a.next_at !== null && a.next_at <= now)) return a;
+          const next = nextOccurrence(a, now, tz);
+          if (next === null && !a.days.length) {
+            zoneMissed.push(a);
+            return { ...a, enabled: false, next_at: null };
+          }
+          return { ...a, next_at: next };
+        });
         tzChanged = true;
         this.options.log?.(`鬧鐘／定時器：時區是 ${tz}，重算鬧鐘的下一次`);
       }
@@ -355,6 +387,7 @@ export class AlarmCenter {
       if (due.length || dueAlarms.length || dueSnoozes.length || expired.length || tzChanged) {
         const started: RingRecord[] = [];
         const log: RingLogEntry[] = expired.map((r) => this.logEntry(r, "auto_stopped", Math.min(now, r.started_at + prefs.ring_s * 1000)));
+        for (const a of zoneMissed) log.push({ at: now, kind: "alarm", label: a.label, due_at: a.next_at ?? now, outcome: "missed", late_ms: 0, heard: false });
         const late = (kind: RingKind, label: string | null, dueAt: number, origin: string | null, alarmId: string | null) => {
           const lateMs = now - dueAt;
           if (lateMs > prefs.late_ring_max_s * 1000) {
@@ -451,6 +484,13 @@ export class AlarmCenter {
     if (partial.length === 1) return { ok: true, timer: partial[0]! };
     if (partial.length > 1) return { ok: false, code: "ambiguous", message: "有好幾個定時器符合，請說是哪一個。", candidates: partial.map(describe) };
     return { ok: false, code: "not_found", message: `找不到叫「${String(ref).slice(0, 40)}」的定時器。`, candidates: pool.map(describe) };
+  }
+
+  /** 刪除或關掉鬧鐘時，它正在響的鈴一起停（記錄為停止、來源 settings）。 */
+  private dropRingsOf(ids: ReadonlySet<string>, now: number): { rings: RingRecord[]; log: RingLogEntry[] } {
+    const drop = this.state.rings.filter((r) => r.alarm_id && ids.has(r.alarm_id));
+    if (!drop.length) return { rings: this.state.rings, log: this.state.log };
+    return { rings: this.state.rings.filter((r) => !drop.includes(r)), log: this.appendLog(this.state.log, drop.map((r) => this.logEntry(r, "stopped", now, "settings"))) };
   }
 
   /** 找鬧鐘：ID、名字（完全相同優先，其次包含）或時間（「07:00」「7:00」）。沒給 ref 時只有一個才用它。 */

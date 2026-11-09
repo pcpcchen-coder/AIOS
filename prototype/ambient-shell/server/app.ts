@@ -557,7 +557,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       } else if (path === "/api/alarms/alarms/add") {
         const days = repeatDays(body.repeat, body.days);
         if (!days) throw new HttpError(400, "鬧鐘的重複規則不正確");
-        const r = saved(() => alarms.setAlarm({ time: body.time, days, date: days.length ? body.date : undefined, label: body.label, origin: source }));
+        const r = saved(() => alarms.setAlarm({ time: body.time, days, date: days.length ? undefined : body.date, label: body.label, origin: source }));
         if (!r.ok) throw new HttpError(r.code === "disabled" ? 409 : 400, r.message);
       } else if (path === "/api/alarms/alarms/enable" || path === "/api/alarms/alarms/delete") {
         if (typeof body.id !== "string" || body.id.length > 40) throw new HttpError(400, "id is required");

@@ -1120,5 +1120,6 @@
   "這個時間已經過了。": "That time has already passed.",
   "最多 20 個鬧鐘。": "At most 20 alarms.",
   "重複規則看不懂（custom 要給 days，例如 mon,wed,fri）。": "The repeat rule was not understood (custom needs days, for example mon,wed,fri).",
-  "鬧鐘的重複規則不正確": "Invalid alarm repeat rule"
+  "鬧鐘的重複規則不正確": "Invalid alarm repeat rule",
+  "鬧鐘清單": "Alarms"
 }

@@ -1177,7 +1177,7 @@ export function renderAlarmSettings(view: AlarmsView, actions: ViewActions): HTM
       h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("鬧鐘與定時器")), h("span", { class: "muted small" }, t("用說的設定（「計時 10 分鐘」「泡麵 3 分鐘」）；時間到時在建立的那台響，那台不在線時每個畫面都響。關掉後不響，已建立的保留。"))), b),
       h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("清除全部")), h("span", { class: "muted small" }, count ? t("目前有 {0} 個定時器或鬧鐘；清除會一併停止響鈴與刪掉紀錄。", count) : t("刪掉所有定時器、鬧鐘、響鈴與紀錄。"))), clear),
     ),
-    h("h4", {}, t("鬧鐘")),
+    h("h4", {}, t("鬧鐘清單")),
     alarmRows.length ? h("ul", { class: "pref-list alarm-list" }, ...alarmRows) : h("p", { class: "muted small" }, t("還沒有鬧鐘。可以說「明天早上 7 點叫我」「每個工作天 6:30 叫我」，或在下面新增。")),
     h("div", { class: "alarm-add" }, time, repeat, label, add),
     h("p", { class: "muted small" }, t("響鈴的音量跟這台裝置的對話音量（日間／夜間）；{0} 秒內由小漸強，響 {1} 分鐘沒人停就自動停止並記錄。", view.prefs.ramp_s, Math.round(view.prefs.ring_s / 60))),

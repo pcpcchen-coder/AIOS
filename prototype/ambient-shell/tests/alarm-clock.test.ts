@@ -189,6 +189,63 @@ describe("AlarmCenter alarms (fake clock, Asia/Taipei)", () => {
     expect(wallTime(c.alarms()[0]!.next_at!, "Asia/Tokyo")).toMatchObject({ hour: 7, minute: 0 });
   });
 
+  it("review: an alarm already due when the time zone changes still rings late instead of vanishing", () => {
+    const tz = { v: TPE };
+    const { c, clock } = make(tpe("2026-11-09", 13, 0), { tz });
+    c.setAlarm({ time: "14:00", days: [0, 1, 2, 3, 4, 5, 6] });
+    clock.sleep(65 * 60_000); // 14:05 台北醒來，時區換成東京
+    tz.v = "Asia/Tokyo";
+    c.tick();
+    expect(c.rings()[0]).toMatchObject({ kind: "alarm", late_ms: 5 * 60_000 });
+  });
+
+  it("review: a one-off whose local time has already passed in the new zone turns off and is logged as missed", () => {
+    const tz = { v: TPE };
+    const { c, clock } = make(tpe("2026-11-09", 12, 0), { tz });
+    c.setAlarm({ time: "14:00", days: [] });
+    tz.v = "Pacific/Kiritimati"; // UTC+14：台北 12:00 時當地已經過 18:00
+    clock.advance(30_000);
+    expect(c.alarms()[0]).toMatchObject({ enabled: false, next_at: null });
+    expect(c.recentLog().at(-1)).toMatchObject({ kind: "alarm", outcome: "missed" });
+  });
+
+  it("review: adding an alarm right after a zone change still recomputes the older ones", () => {
+    const tz = { v: TPE };
+    const { c } = make(tpe("2026-11-09", 12, 0), { tz });
+    c.setAlarm({ time: "20:00", days: [1, 2, 3, 4, 5] });
+    tz.v = "America/Los_Angeles";
+    c.setAlarm({ time: "21:00", days: [1, 2, 3, 4, 5] });
+    const la = c.alarms().map((a) => wallTime(a.next_at!, "America/Los_Angeles"));
+    expect(la.map((w) => w.hour)).toEqual([20, 21]);
+  });
+
+  it("review: turning the feature back on does not report alarms that passed while it was off", () => {
+    const { c, clock } = make(tpe("2026-11-09", 6, 0));
+    c.setAlarm({ time: "06:30", days: [0, 1, 2, 3, 4, 5, 6] });
+    c.setAlarm({ time: "06:40", days: [] });
+    c.updatePrefs({ enabled: false });
+    clock.to(tpe("2026-11-09", 6, 50));
+    c.updatePrefs({ enabled: true });
+    expect(c.rings()).toEqual([]);
+    expect(c.recentLog().filter((e) => e.outcome === "missed")).toEqual([]);
+    expect(c.alarms()).toMatchObject([{ enabled: true, next_at: tpe("2026-11-10", 6, 30) }, { enabled: false, next_at: null }]);
+  });
+
+  it("review: deleting or turning off a ringing alarm stops its ring", () => {
+    const { c, clock } = make(tpe("2026-11-09", 6, 0));
+    c.setAlarm({ time: "06:30", days: [0, 1, 2, 3, 4, 5, 6], label: "a" });
+    clock.to(tpe("2026-11-09", 6, 30));
+    expect(c.rings()).toHaveLength(1);
+    c.setAlarmEnabled("a", false);
+    expect(c.rings()).toEqual([]);
+    c.setAlarmEnabled("a", true);
+    clock.to(tpe("2026-11-10", 6, 30));
+    expect(c.rings()).toHaveLength(1);
+    c.deleteAlarm("a");
+    expect(c.rings()).toEqual([]);
+    expect(c.recentLog().at(-1)).toMatchObject({ outcome: "stopped", by: "settings" });
+  });
+
   it("turn off, turn on (a past one-off moves to its next time), delete by time or name, ambiguity", () => {
     const { c, clock } = make(tpe("2026-11-09", 6, 0));
     c.setAlarm({ time: "06:30", days: [], label: "吃藥" });
