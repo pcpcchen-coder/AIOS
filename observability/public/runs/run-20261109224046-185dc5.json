@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T22:40:46.148Z",
-  "updated_at": "2026-11-09T22:44:34.210Z",
+  "updated_at": "2026-11-09T23:00:49.405Z",
   "ended_at": null,
   "steps": [
     {
@@ -23,10 +23,10 @@
     {
       "id": "architect",
       "title": "architect",
-      "status": "running",
+      "status": "passed",
       "started_at": "2026-11-09T22:44:34.210Z",
-      "ended_at": null,
-      "note": "Design drafted; awaiting owner confirmation",
+      "ended_at": "2026-11-09T23:00:49.400Z",
+      "note": "Design confirmed by owner; arena skipped: single code-coupled owner, design fixed by owner decisions",
       "evidence": []
     },
     {
@@ -103,6 +103,13 @@
       "step_id": "architect",
       "status": "running",
       "note": "Design drafted; awaiting owner confirmation"
+    },
+    {
+      "at": "2026-11-09T23:00:49.405Z",
+      "type": "step_updated",
+      "step_id": "architect",
+      "status": "passed",
+      "note": "Design confirmed by owner; arena skipped: single code-coupled owner, design fixed by owner decisions"
     }
   ],
   "provenance": "Agent self-reported"
