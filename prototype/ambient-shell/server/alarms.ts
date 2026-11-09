@@ -139,9 +139,10 @@ export class AlarmCenter {
     return {
       prefs,
       server_now: now,
-      timers: prefs.enabled ? this.state.timers.map(timerView) : [],
-      alarms: this.state.alarms.map(alarmView),
-      snoozes: prefs.enabled ? this.state.snoozes.map((z) => ({ id: z.id, label: z.label, due_at: z.due_at })) : [],
+      // ALARM-3：here＝到期時會不會在這個頁面響（照現在的連線算；真正響的地方在到期時才決定）。頁面只在這裡顯示 30 秒倒數。
+      timers: prefs.enabled ? this.state.timers.map((t) => ({ ...timerView(t), here: this.hereFor(t.origin, source) })) : [],
+      alarms: this.state.alarms.map((a) => ({ ...alarmView(a), here: this.hereFor(a.origin, source) })),
+      snoozes: prefs.enabled ? this.state.snoozes.map((z) => ({ id: z.id, label: z.label, due_at: z.due_at, here: this.hereFor(z.origin, source) })) : [],
       rings: prefs.enabled
         ? this.state.rings.map((r) => ({
             id: r.id, kind: r.kind, alarm_id: r.alarm_id ?? null, label: r.label, due_at: r.due_at, started_at: r.started_at, late_ms: r.late_ms,
@@ -447,6 +448,11 @@ export class AlarmCenter {
       for (const z of this.state.snoozes) next = Math.min(next, z.due_at);
     }
     this.timer = this.clock.setTimeout(() => this.tick(), Math.max(0, next - now));
+  }
+
+  private hereFor(origin: string | null, source: string): boolean {
+    const targets = this.targetsFor(origin);
+    return targets === "all" || targets.includes(source);
   }
 
   /** 建立的那台在線就只在那台響；不在線（Pi 斷線）或不知道是誰建立的，每個畫面都響。 */

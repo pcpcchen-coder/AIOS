@@ -33,9 +33,20 @@ export interface AlarmPrefs {
   snooze_s: number;
   /** ALARM-2：鬧鐘的最低音量（%）：對話音量比這個小時用這個（定時器不套用）。 */
   alarm_min_volume: number;
+  /** ALARM-3：時間到的鈴聲（三種，本機合成）。 */
+  ring_tone: RingTone;
 }
 
-export const DEFAULT_ALARM_PREFS: AlarmPrefs = { enabled: true, ring_s: 300, ramp_s: 30, late_ring_max_s: 1800, snooze_s: 540, alarm_min_volume: 30 };
+/** ALARM-3（George 2026-11-09）：三種鈴聲。classic＝四聲短嗶；chime＝柔和的鐘聲；pulse＝急促的電子音。 */
+export const RING_TONES = ["classic", "chime", "pulse"] as const;
+export type RingTone = (typeof RING_TONES)[number];
+/** 設定頁可選的響鈴長度（秒）。 */
+export const RING_LENGTH_CHOICES = [60, 180, 300, 600, 900] as const;
+/** ALARM-3：到期前多久開始在螢幕上倒數（秒）；最後幾秒每秒一聲「滴」。 */
+export const COUNTDOWN_S = 30;
+export const COUNTDOWN_TICK_S = 10;
+
+export const DEFAULT_ALARM_PREFS: AlarmPrefs = { enabled: true, ring_s: 300, ramp_s: 30, late_ring_max_s: 1800, snooze_s: 540, alarm_min_volume: 30, ring_tone: "classic" };
 
 export const ALARM_PREF_RANGES = {
   ring_s: { min: 30, max: 1800 },
@@ -57,6 +68,9 @@ export function parseAlarmPrefsPatch(input: unknown): AlarmPrefsPatch {
     if (key === "enabled") {
       if (typeof value !== "boolean") throw new AlarmPatchError("enabled 必須是 true 或 false");
       out.enabled = value;
+    } else if (key === "ring_tone") {
+      if (!(RING_TONES as readonly unknown[]).includes(value)) throw new AlarmPatchError(`ring_tone 必須是 ${RING_TONES.join("、")}`);
+      out.ring_tone = value as RingTone;
     } else if (key === "ring_s" || key === "ramp_s" || key === "late_ring_max_s" || key === "snooze_s" || key === "alarm_min_volume") {
       const range = ALARM_PREF_RANGES[key];
       if (typeof value !== "number" || !Number.isInteger(value) || value < range.min || value > range.max) throw new AlarmPatchError(`${key} 必須是 ${range.min}–${range.max} 的整數`);
@@ -150,6 +164,8 @@ export interface RingLogEntry {
 // ---- 頁面看到的（settings.alarms） ----
 
 export interface TimerView {
+  /** ALARM-3：到期時會不會在這個頁面響（倒數只在這裡顯示）。view 依頁面來源算；工具用的清單沒有。 */
+  here?: boolean;
   id: string;
   label: string | null;
   state: "running" | "paused";
@@ -161,6 +177,8 @@ export interface TimerView {
 }
 
 export interface AlarmView {
+  /** ALARM-3：到期時會不會在這個頁面響（倒數只在這裡顯示）。view 依頁面來源算；工具用的清單沒有。 */
+  here?: boolean;
   id: string;
   label: string | null;
   /** 「07:00」。 */
@@ -172,6 +190,8 @@ export interface AlarmView {
 }
 
 export interface SnoozeView {
+  /** ALARM-3：到期時會不會在這個頁面響（倒數只在這裡顯示）。view 依頁面來源算；工具用的清單沒有。 */
+  here?: boolean;
   id: string;
   label: string | null;
   due_at: number;

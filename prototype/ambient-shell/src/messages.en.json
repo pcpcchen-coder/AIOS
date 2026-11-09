@@ -1121,5 +1121,20 @@
   "最多 20 個鬧鐘。": "At most 20 alarms.",
   "重複規則看不懂（custom 要給 days，例如 mon,wed,fri）。": "The repeat rule was not understood (custom needs days, for example mon,wed,fri).",
   "鬧鐘的重複規則不正確": "Invalid alarm repeat rule",
-  "鬧鐘清單": "Alarms"
+  "鬧鐘清單": "Alarms",
+  "經典短嗶": "Classic beeps",
+  "四聲短嗶，清楚但不刺耳": "Four short beeps, clear but not harsh",
+  "柔和鐘聲": "Soft chime",
+  "三個下行的鐘聲，比較溫和": "Three falling chime notes, gentler",
+  "急促電子音": "Urgent pulse",
+  "快速的高音短嗶，最容易叫醒": "Fast high beeps, the hardest to sleep through",
+  "使用": "Use",
+  "試聽": "Preview",
+  "試聽 {0}": "Preview {0}",
+  "響鈴長度": "Ring length",
+  "{0} 分鐘": "{0} min",
+  "時間到後響多久；沒人停就自動停止並記錄。": "How long it rings once due; if nobody stops it, it stops by itself and this is logged.",
+  "到期前 30 秒畫面開始倒數，最後 10 秒每秒「滴」一聲（只在會響的那台）。": "30 seconds before it is due the screen starts counting down, with a tick every second for the last 10 seconds (only on the device that will ring).",
+  "鈴聲": "Ringtone",
+  "「{0}」快到了": "“{0}” is almost due"
 }

@@ -6,6 +6,8 @@
 
 2026-11-05 補記：本頁 Raspberry Pi 一列已按本晚部署與實機紀錄更新，其他列的歷史證據範圍不變。
 
+2026-11-09 補記（倒數與鈴聲）：「定時器與響鈴」一列加上 ALARM-3（分支 `claude/alarm-countdown`）：到期前 30 秒畫面倒數、最後 10 秒每秒一聲滴、三種鈴聲與響鈴長度可在設定頁選，只有雲端測試與無頭 Chromium，見[驗證](validation/alarm-timer-3-2026-11-09.md)。
+
 2026-11-09 補記（鬧鐘）：「定時器與響鈴」一列加上 ALARM-2 鬧鐘（分支 `claude/alarm-clock`），只有雲端測試與無頭 Chromium，見[驗證](validation/alarm-timer-2-2026-11-09.md)。
 
 2026-11-09 補記（定時器）：新增「定時器與響鈴（ALARM-1）」一列（分支 `claude/alarm-timer`），只有雲端測試與無頭 Chromium，見[驗證](validation/alarm-timer-1-2026-11-09.md)。

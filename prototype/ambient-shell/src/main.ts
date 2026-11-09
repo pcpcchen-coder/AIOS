@@ -1,6 +1,6 @@
 import { t, msg, getLocale, setLocale, onLocaleChange, transcriptText, applyStaticTranslations, type Locale } from "./i18n.ts";
 import { AlarmRing } from "./alarm-ring.ts";
-import { browserRingSound } from "./alarm-sound.ts";
+import { browserRingSound, browserTickSound } from "./alarm-sound.ts";
 import { ALARM_WRITE_PATH, ringPeakVolume } from "../shared/alarm.ts";
 import "./style.css";
 import { computeProgress, isActive, queueText, sortForProgress } from "../shared/progress.ts";
@@ -319,7 +319,8 @@ function applyLiveMute(): void {
 }
 /** 鈴響時喚醒控制器必須帶著 alarm 防護（中途才建立或重建的控制器也要補上）。 */
 function syncAlarmGuard(): void {
-  const want = alarmRing.ringing ? wake : null;
+  // ALARM-3：倒數的滴答與試聽鈴聲也一樣不能觸發喚醒。
+  const want = alarmRing.ringing || alarmRing.countingDown ? wake : null;
   if (alarmGuardOwner === want) return;
   alarmGuardOwner?.end("alarm");
   alarmGuardOwner = want;
@@ -332,6 +333,14 @@ const alarmRing = new AlarmRing({
     render();
   }),
   peak: (kind, alarmMin) => ringPeakVolume(voiceVolume.current, kind === "alarm" ? alarmMin : 0),
+  createTicks: () => browserTickSound({ sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) }),
+  onCountdownChange: () => {
+    syncAlarmGuard();
+    if (alarmRing.countingDown) wakeMemoriesNow();
+    syncMemories();
+    syncProcessingCue();
+    syncScreen();
+  },
   onRingingChange: (ringing) => {
     syncAlarmGuard();
     applyLiveMute();
@@ -3150,6 +3159,9 @@ const actions: ViewActions = {
       (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘與定時器設定沒有保存：${(err as Error).message}` }),
     );
   },
+  previewTone(tone) {
+    alarmRing.previewTone(tone);
+  },
   addAlarm(input) {
     const requestId = userRequest();
     void api.alarmPost("/api/alarms/alarms/add", input).then(
@@ -3457,7 +3469,7 @@ function memoriesBusy(): boolean {
     || processingCue.active
     || shell.surface !== null || shell.listening
     || speechActive > 0
-    || alarmRing.ringing
+    || alarmRing.ringing || alarmRing.countingDown
     || document.body.dataset.facing === "yes";
 }
 
@@ -3529,7 +3541,7 @@ function syncProcessingCue(phase = document.body.dataset.conversationState): boo
     owners: currentProcessingSource(),
     enabled: settings?.audio?.prefs.processing_cue !== false && !currentNightEffects().muteProcessingCue,
     callOn: realtime.on || realtimeStarting,
-    speaking: speechActive > 0 || conversation.playing || realtime.playing || phase === "speaking" || alarmRing.ringing,
+    speaking: speechActive > 0 || conversation.playing || realtime.playing || phase === "speaking" || alarmRing.ringing || alarmRing.countingDown,
     capturing: voice.capturing || conversation.capturing || realtime.capturing,
     hidden: document.visibilityState === "hidden",
   });

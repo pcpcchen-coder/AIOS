@@ -1,5 +1,5 @@
-import { ALARM_SOON_MS, formatCountdown, matchRingSnooze, matchRingStop, spokenDuration, timerRemainingMs, type AlarmsView, type RingKind, type RingLogEntry, type RingView, type StopSource, type TimerView } from "../shared/alarm.ts";
-import type { RingSound } from "./alarm-sound.ts";
+import { ALARM_SOON_MS, COUNTDOWN_S, COUNTDOWN_TICK_S, formatCountdown, matchRingSnooze, matchRingStop, spokenDuration, timerRemainingMs, type AlarmsView, type RingKind, type RingLogEntry, type RingTone, type RingView, type StopSource, type TimerView } from "../shared/alarm.ts";
+import type { RingSound, TickSound } from "./alarm-sound.ts";
 import { getLocale, t } from "./i18n.ts";
 
 // ALARM-1（George 2026-11-09）：頁面上的響鈴與倒數。真相在核心（settings.alarms，經 SSE 推來）；這裡只負責：
@@ -16,6 +16,10 @@ export interface AlarmRingOptions {
   peak(kind: RingKind, alarmMinPercent: number): number;
   /** 響鈴開始或結束（只算這個頁面要響的）。 */
   onRingingChange(ringing: boolean): void;
+  /** ALARM-3：最後 10 秒的滴答聲。 */
+  createTicks(): TickSound;
+  /** ALARM-3：倒數畫面出現或消失、或試聽鈴聲開始或結束（喚醒防護、回憶收起）。 */
+  onCountdownChange(active: boolean): void;
   host?: HTMLElement;
 }
 
@@ -58,12 +62,39 @@ export class AlarmRing {
   private chip: HTMLElement | null = null;
   private notice: HTMLElement | null = null;
   private ticker: ReturnType<typeof setInterval> | null = null;
+  private countdown: HTMLElement | null = null;
+  private ticks: TickSound | null = null;
+  private ticksFor: string | null = null;
+  private countdownActive = false;
+  private preview: { sound: RingSound; timer: ReturnType<typeof setTimeout> } | null = null;
   private soonTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly options: AlarmRingOptions) {}
 
   get ringing(): boolean {
     return this.ringingNow;
+  }
+
+  /** ALARM-3：到期前 30 秒的倒數畫面開著（或正在試聽鈴聲）。 */
+  get countingDown(): boolean {
+    return this.countdownActive;
+  }
+
+  /** ALARM-3：設定頁試聽一種鈴聲 4 秒（用這台裝置的鬧鐘音量；喚醒防護照樣生效）。 */
+  previewTone(tone: RingTone): void {
+    this.stopPreview();
+    const sound = this.options.createSound();
+    void sound.start({ tone, peak: this.peakFor("alarm"), rampS: 0, elapsedMs: 0 });
+    this.preview = { sound, timer: setTimeout(() => this.stopPreview(), 4000) };
+    this.syncCountdownActive();
+  }
+
+  private stopPreview(): void {
+    if (!this.preview) return;
+    clearTimeout(this.preview.timer);
+    this.preview.sound.stop();
+    this.preview = null;
+    this.syncCountdownActive();
   }
 
   /** 設定推來時呼叫（hello、settings.updated、HTTP 回應）。 */
@@ -146,6 +177,7 @@ export class AlarmRing {
     this.ringingNow = ringing;
     this.renderSound(ring);
     this.renderOverlay(ring, rings);
+    this.renderCountdown();
     this.renderChip();
     this.renderNotice();
     // 每秒更新只在有定時器、貪睡、響鈴或一小時內的鬧鐘時；更遠的鬧鐘只排一次「進入一小時內」的重畫。
@@ -173,6 +205,7 @@ export class AlarmRing {
 
   private tick(): void {
     this.renderChip();
+    this.renderCountdown();
     const clock = this.overlay?.querySelector<HTMLElement>(".alarm-ring-time");
     if (clock) clock.textContent = this.clockText();
   }
@@ -193,7 +226,7 @@ export class AlarmRing {
     this.soundRing = ring.id;
     const rampS = this.view?.prefs.ramp_s ?? 30;
     const id = ring.id;
-    void sound.start({ peak: this.peakFor(ring.kind), rampS, elapsedMs: Math.max(0, this.serverNow() - ring.started_at) }).then((playing) => {
+    void sound.start({ tone: this.view?.prefs.ring_tone ?? "classic", peak: this.peakFor(ring.kind), rampS, elapsedMs: Math.max(0, this.serverNow() - ring.started_at) }).then((playing) => {
       // 被新的鈴或停止取代：這次的結果不代表能不能出聲，不回報。
       if (this.sound !== sound || this.acked.has(id)) return;
       // 同一個鈴聲代表這個頁面所有正在響的鈴（好幾個定時器同時到）。
@@ -269,6 +302,65 @@ export class AlarmRing {
     const note = root.querySelector<HTMLElement>(".alarm-ring-note")!;
     note.textContent = late ?? "";
     note.hidden = !late;
+  }
+
+  /** 30 秒內要在這個頁面響的（定時器、鬧鐘、貪睡）中最早的一個；到期後 3 秒內仍算（等核心推響鈴）。 */
+  private upcoming(now: number): { key: string; label: string; at: number } | null {
+    const view = this.view;
+    if (!view?.prefs.enabled) return null;
+    const items = [
+      ...view.timers.filter((x) => x.state === "running" && x.ends_at !== null && x.here !== false).map((x) => ({ key: `t:${x.id}:${x.ends_at}`, label: x.label ?? t("定時器"), at: x.ends_at! })),
+      ...view.alarms.filter((x) => x.enabled && x.next_at !== null && x.here !== false).map((x) => ({ key: `a:${x.id}:${x.next_at}`, label: x.label ?? t("鬧鐘"), at: x.next_at! })),
+      ...view.snoozes.filter((x) => x.here !== false).map((x) => ({ key: `z:${x.id}:${x.due_at}`, label: x.label ?? t("鬧鐘"), at: x.due_at })),
+    ].filter((x) => x.at - now <= COUNTDOWN_S * 1000 && x.at - now > -3000);
+    return items.sort((a, b) => a.at - b.at)[0] ?? null;
+  }
+
+  /** ALARM-3（George 2026-11-09）：到期前 30 秒在螢幕上倒數；最後 10 秒每秒一聲滴。響鈴開始後由響鈴畫面接手。 */
+  private renderCountdown(): void {
+    const now = this.serverNow();
+    const item = this.ringingNow ? null : this.upcoming(now);
+    if (!item) {
+      this.countdown?.remove();
+      this.countdown = null;
+      this.ticks?.stop();
+      this.ticks = null;
+      this.ticksFor = null;
+      this.syncCountdownActive();
+      return;
+    }
+    if (!this.countdown) {
+      const root = document.createElement("div");
+      root.className = "alarm-countdown";
+      root.dataset.visibilityReason = "alarm_countdown";
+      root.setAttribute("role", "timer");
+      root.setAttribute("aria-live", "polite");
+      const label = document.createElement("div");
+      label.className = "alarm-countdown-label";
+      const secs = document.createElement("div");
+      secs.className = "alarm-countdown-secs";
+      root.append(label, secs);
+      (this.options.host ?? document.body).append(root);
+      this.countdown = root;
+    }
+    const left = Math.max(0, item.at - now);
+    this.countdown.querySelector<HTMLElement>(".alarm-countdown-label")!.textContent = t("「{0}」快到了", item.label);
+    this.countdown.querySelector<HTMLElement>(".alarm-countdown-secs")!.textContent = String(Math.ceil(left / 1000));
+    this.countdown.classList.toggle("alarm-countdown--final", left <= COUNTDOWN_TICK_S * 1000);
+    if (left <= COUNTDOWN_TICK_S * 1000 + 500 && left > 0 && this.ticksFor !== item.key) {
+      this.ticks?.stop();
+      this.ticks = this.options.createTicks();
+      this.ticksFor = item.key;
+      void this.ticks.start(left, this.peakFor("alarm"));
+    }
+    this.syncCountdownActive();
+  }
+
+  private syncCountdownActive(): void {
+    const active = this.countdown !== null || this.preview !== null;
+    if (active === this.countdownActive) return;
+    this.countdownActive = active;
+    this.options.onCountdownChange(active);
   }
 
   private renderChip(): void {
