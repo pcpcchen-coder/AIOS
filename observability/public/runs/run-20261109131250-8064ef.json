@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T13:12:50.661Z",
-  "updated_at": "2026-11-09T13:46:56.097Z",
+  "updated_at": "2026-11-09T13:47:00.123Z",
   "ended_at": null,
   "steps": [
     {
@@ -77,10 +77,10 @@
     {
       "id": "pr",
       "title": "pr",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-11-09T13:47:00.122Z",
       "ended_at": null,
-      "note": "",
+      "note": "8 review findings fixed; 3143 tests; verify-aios PASS; headless Mac+Pi ring re-run",
       "evidence": []
     }
   ],
@@ -167,6 +167,13 @@
       "type": "step_updated",
       "step_id": "verify",
       "status": "passed",
+      "note": "8 review findings fixed; 3143 tests; verify-aios PASS; headless Mac+Pi ring re-run"
+    },
+    {
+      "at": "2026-11-09T13:47:00.123Z",
+      "type": "step_updated",
+      "step_id": "pr",
+      "status": "running",
       "note": "8 review findings fixed; 3143 tests; verify-aios PASS; headless Mac+Pi ring re-run"
     }
   ],
