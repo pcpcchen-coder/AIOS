@@ -7,6 +7,11 @@ export const TIMER_MIN_S = 1;
 export const TIMER_MAX_S = 24 * 3600;
 /** 同時存在的定時器上限（含暫停的）。 */
 export const MAX_TIMERS = 10;
+/** ALARM-2：鬧鐘數上限。 */
+export const MAX_ALARMS = 20;
+/** ALARM-2：多久之內有鬧鐘就算「快到了」（右下角按需顯示；Mac App 阻止閒置睡眠）。 */
+export const ALARM_SOON_MS = 60 * 60_000;
+export const ALARM_AWAKE_MS = 12 * 3600_000;
 export const LABEL_MAX = 40;
 /** 響鈴紀錄保留幾筆。 */
 export const RING_LOG_MAX = 50;
@@ -24,14 +29,20 @@ export interface AlarmPrefs {
   ramp_s: number;
   /** 晚了多久以內仍補響（秒）；超過只記錄錯過。 */
   late_ring_max_s: number;
+  /** ALARM-2：貪睡多久（秒）。 */
+  snooze_s: number;
+  /** ALARM-2：鬧鐘的最低音量（%）：對話音量比這個小時用這個（定時器不套用）。 */
+  alarm_min_volume: number;
 }
 
-export const DEFAULT_ALARM_PREFS: AlarmPrefs = { enabled: true, ring_s: 300, ramp_s: 30, late_ring_max_s: 1800 };
+export const DEFAULT_ALARM_PREFS: AlarmPrefs = { enabled: true, ring_s: 300, ramp_s: 30, late_ring_max_s: 1800, snooze_s: 540, alarm_min_volume: 30 };
 
 export const ALARM_PREF_RANGES = {
   ring_s: { min: 30, max: 1800 },
   ramp_s: { min: 0, max: 120 },
   late_ring_max_s: { min: 0, max: 6 * 3600 },
+  snooze_s: { min: 60, max: 1800 },
+  alarm_min_volume: { min: 0, max: 100 },
 } as const;
 
 export class AlarmPatchError extends Error {}
@@ -46,7 +57,7 @@ export function parseAlarmPrefsPatch(input: unknown): AlarmPrefsPatch {
     if (key === "enabled") {
       if (typeof value !== "boolean") throw new AlarmPatchError("enabled 必須是 true 或 false");
       out.enabled = value;
-    } else if (key === "ring_s" || key === "ramp_s" || key === "late_ring_max_s") {
+    } else if (key === "ring_s" || key === "ramp_s" || key === "late_ring_max_s" || key === "snooze_s" || key === "alarm_min_volume") {
       const range = ALARM_PREF_RANGES[key];
       if (typeof value !== "number" || !Number.isInteger(value) || value < range.min || value > range.max) throw new AlarmPatchError(`${key} 必須是 ${range.min}–${range.max} 的整數`);
       out[key] = value;
@@ -73,10 +84,40 @@ export type TimerRecord =
   | (TimerBase & { state: "running"; ends_at: number })
   | (TimerBase & { state: "paused"; remaining_ms: number });
 
+export const RING_KINDS = ["timer", "alarm"] as const;
+export type RingKind = (typeof RING_KINDS)[number];
+
+/** ALARM-2：鬧鐘。時間是牆上時鐘（本機時區）；next_at 是核心算好的下一次（epoch），關掉或單次已響過是 null。 */
+export interface AlarmRecord {
+  id: string;
+  label: string | null;
+  hour: number;
+  minute: number;
+  /** 重複的星期幾（0＝星期日）；空的＝單次。 */
+  days: number[];
+  /** 單次的當地日期（YYYY-MM-DD）。 */
+  date: string | null;
+  enabled: boolean;
+  next_at: number | null;
+  created_at: number;
+  origin: string | null;
+}
+
+/** ALARM-2：貪睡中（due_at 再響）。 */
+export interface SnoozeRecord {
+  id: string;
+  alarm_id: string | null;
+  label: string | null;
+  due_at: number;
+  origin: string | null;
+}
+
 /** 正在響的鈴。targets：要在哪些頁面響（"all"＝每個畫面）。 */
 export interface RingRecord {
   id: string;
-  kind: "timer";
+  kind: RingKind;
+  /** ALARM-2：鬧鐘（或它的貪睡）響的是哪一個鬧鐘；定時器是 null。 */
+  alarm_id?: string | null;
   label: string | null;
   /** 本來應該響的時間。 */
   due_at: number;
@@ -88,14 +129,14 @@ export interface RingRecord {
   heard_by: string[];
 }
 
-export const RING_OUTCOMES = ["stopped", "auto_stopped", "missed", "cancelled"] as const;
+export const RING_OUTCOMES = ["stopped", "auto_stopped", "missed", "cancelled", "snoozed"] as const;
 export type RingOutcome = (typeof RING_OUTCOMES)[number];
 export const STOP_SOURCES = ["button", "gesture", "voice", "typed", "key", "tool", "settings"] as const;
 export type StopSource = (typeof STOP_SOURCES)[number];
 
 export interface RingLogEntry {
   at: number;
-  kind: "timer";
+  kind: RingKind;
   label: string | null;
   due_at: number;
   outcome: RingOutcome;
@@ -119,9 +160,26 @@ export interface TimerView {
   remaining_ms: number | null;
 }
 
+export interface AlarmView {
+  id: string;
+  label: string | null;
+  /** 「07:00」。 */
+  time: string;
+  days: number[];
+  date: string | null;
+  enabled: boolean;
+  next_at: number | null;
+}
+
+export interface SnoozeView {
+  id: string;
+  label: string | null;
+  due_at: number;
+}
+
 export interface RingView {
   id: string;
-  kind: "timer";
+  kind: RingKind;
   label: string | null;
   due_at: number;
   started_at: number;
@@ -137,7 +195,12 @@ export interface AlarmsView {
   /** 核心產生這份資料的時間：頁面用它校正自己的時鐘（Pi 的時鐘可能和 Mac 不同）。 */
   server_now: number;
   timers: TimerView[];
+  /** ALARM-2。 */
+  alarms: AlarmView[];
+  snoozes: SnoozeView[];
   rings: RingView[];
+  /** ALARM-2：算鬧鐘用的時區（核心的系統時區）。 */
+  time_zone: string;
   /** 最近一次自動停止或錯過（頁面按需顯示「錯過了」；使用者看到後可清掉）。 */
   notice: RingLogEntry | null;
   write_path: typeof ALARM_WRITE_PATH;
@@ -177,6 +240,14 @@ export function cleanLabel(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const text = value.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim().slice(0, LABEL_MAX);
   return text || null;
+}
+
+/** ALARM-2：鬧鐘響時的本機貪睡語（整句）。 */
+const RING_SNOOZE = /^(?:貪睡|再睡一下|再睡(?:\d+|[一二三四五六七八九十]+)?分鐘?|再五分鐘|等一下再叫我?|晚點再叫我?|snooze|fiveminutesmore|later)(?:了|吧|啦|喔)?$/i;
+
+export function matchRingSnooze(text: string): boolean {
+  const t = text.trim().replace(/[\s，。！？、,.!?~～]+/g, "").replace(/^(?:nous|努斯|諾斯)/i, "");
+  return !!t && t.length <= 16 && RING_SNOOZE.test(t);
 }
 
 /**

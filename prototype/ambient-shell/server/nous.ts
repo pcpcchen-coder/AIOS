@@ -63,6 +63,7 @@ import { defaultGogRunner, resolveGogPath } from "./integrations/gog/runner.ts";
 import { MEMORIES_GOOGLE_REASON } from "../shared/memories.ts";
 import { AlarmCenter } from "./alarms.ts";
 import { TimerAdapter } from "./integrations/adapters/timer.ts";
+import { AlarmAdapter } from "./integrations/adapters/alarm.ts";
 import type { RingRecord } from "../shared/alarm.ts";
 import { MAIN_SOURCE } from "../shared/terminal.ts";
 import { fitBriefing, fitsLiveAppend, ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
@@ -307,28 +308,16 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   );
   // ALARM-1：定時器由核心保存與排程（不需要 NOUS_AIL）；工具是整合層的內建 Adapter（app.timer.*），兩條語音路徑共用。
   let pageConnected: (source: string) => boolean = () => false;
-  let awake = false;
-  let alarmsReady: AlarmCenter | null = null;
   const alarms = new AlarmCenter({
     dir: config.configDir,
     log,
     isConnected: (source) => pageConnected(source),
     onRingStart: (ring) => options.alarms?.onRingStart?.(ring),
-    onChange: () => {
-      notify();
-      // 建構時讀回檔案就可能改變狀態（到期、錯過）：那時 alarmsReady 還是 null，啟動後下面再算一次。
-      if (!alarmsReady) return;
-      const needed = alarmsReady.awakeNeeded();
-      if (needed !== awake) {
-        awake = needed;
-        options.alarms?.onAwakeChange?.(needed);
-      }
-    },
+    // 有定時器在跑、正在響、貪睡中或 12 小時內有鬧鐘：App 阻止閒置睡眠（AlarmCenter 每次檢查都重算）。
+    onAwakeChange: (needed) => options.alarms?.onAwakeChange?.(needed),
+    onChange: () => notify(),
   });
-  alarmsReady = alarms;
-  awake = alarms.awakeNeeded();
-  if (awake) options.alarms?.onAwakeChange?.(true);
-  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } }, [{ adapter: new TimerAdapter(alarms), enabled: () => alarms.enabled }]);
+  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } }, [{ adapter: new TimerAdapter(alarms), enabled: () => alarms.enabled }, { adapter: new AlarmAdapter(alarms), enabled: () => alarms.enabled }]);
   // PRO-2：CAL-1 有註冊時，認出行程擁有者（George）才說今天的行程（核心自己讀，不經模型）。
   const calendarReader = calendarReaderFrom(ail?.registry);
   const proactive = new ProactiveBriefing({ settings: proactiveSettings, log: new ProactiveDailyLog({ dir: config.configDir, log }), weather, calendar: calendarReader, logLine: log });

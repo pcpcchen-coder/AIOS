@@ -637,7 +637,7 @@ function syncAlarmBlocker(needed) {
 function showAlarmNotification(ring) {
   // 只在 Mac 也要響時通知（Pi 上建立、Pi 在線的定時器只在 Pi 響）。
   if (!Notification.isSupported() || (ring.targets !== "all" && !ring.targets.includes("main"))) return;
-  const title = ring.label ? t("「{0}」時間到", ring.label) : t("定時器時間到");
+  const title = ring.kind === "alarm" ? (ring.label ? t("鬧鐘：「{0}」", ring.label) : t("鬧鐘")) : ring.label ? t("「{0}」時間到", ring.label) : t("定時器時間到");
   const body = ring.late_ms >= 60_000 ? t("晚了 {0} 分鐘才響（Mac 睡眠或 Nous 沒在執行）。", Math.round(ring.late_ms / 60_000)) : t("在 Nous 畫面按「停止」或舉起手掌停止。");
   const note = new Notification({ title, body, silent: false });
   note.on("click", () => {
