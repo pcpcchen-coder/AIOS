@@ -331,7 +331,7 @@ const alarmRing = new AlarmRing({
     applySettings(value, true);
     render();
   }),
-  peak: () => ringPeakVolume(voiceVolume.current),
+  peak: (kind, alarmMin) => ringPeakVolume(voiceVolume.current, kind === "alarm" ? alarmMin : 0),
   onRingingChange: (ringing) => {
     syncAlarmGuard();
     applyLiveMute();
@@ -3148,6 +3148,36 @@ const actions: ViewActions = {
         render();
       },
       (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘與定時器設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  addAlarm(input) {
+    const requestId = userRequest();
+    void api.alarmPost("/api/alarms/alarms/add", input).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘沒有新增：${(err as Error).message}` }),
+    );
+  },
+  setAlarmEnabled(id, enabled) {
+    const requestId = userRequest();
+    void api.alarmPost("/api/alarms/alarms/enable", { id, enabled }).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘沒有改：${(err as Error).message}` }),
+    );
+  },
+  deleteAlarm(id) {
+    const requestId = userRequest();
+    void api.alarmPost("/api/alarms/alarms/delete", { id }).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘沒有刪除：${(err as Error).message}` }),
     );
   },
   clearAlarms() {

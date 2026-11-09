@@ -94,10 +94,10 @@ describe("NOUS_WAKE off is byte-identical to the pre-wake build", () => {
     expect(parsed.home_corner).toEqual({ enabled: false, prefs: { main: false, terminal: true }, write_path: "/api/settings/home-corner" });
     // 第七個刻意的例外（George 2026-11-08 DN-2「日夜間模式」）：settings.day_night 不綁旗標（預設 22–07、沒有手動切換），一定存在；拿掉後其餘逐位元組相同。
     expect(parsed.day_night).toMatchObject({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true }, override: null, saved: false, write_path: "/api/settings/day-night" });
-    // 第八個刻意的例外（George 2026-11-09 ALARM-1「定時器」）：settings.alarms 不綁旗標（預設開），一定存在；定時器工具是核心內建的
-    // 整合工具（不需要 NOUS_AIL），所以 settings.integrations 只列 app__timer__*。拿掉這兩個欄位後其餘逐位元組相同。
-    expect(parsed.alarms).toMatchObject({ prefs: { enabled: true, ring_s: 300, ramp_s: 30, late_ring_max_s: 1800 }, timers: [], rings: [], notice: null, write_path: "/api/settings/alarms" });
-    expect(parsed.integrations?.tools.every((name) => name.startsWith("app__timer__"))).toBe(true);
+    // 第八個刻意的例外（George 2026-11-09 ALARM-1「定時器」、ALARM-2「鬧鐘」）：settings.alarms 不綁旗標（預設開），一定存在；定時器與鬧鐘工具是核心內建的
+    // 整合工具（不需要 NOUS_AIL），所以 settings.integrations 只列 app__timer__* 與 app__alarm__*。拿掉這兩個欄位後其餘逐位元組相同。
+    expect(parsed.alarms).toMatchObject({ prefs: { enabled: true, ring_s: 300, ramp_s: 30, late_ring_max_s: 1800, snooze_s: 540, alarm_min_volume: 30 }, timers: [], alarms: [], snoozes: [], rings: [], notice: null, write_path: "/api/settings/alarms" });
+    expect(parsed.integrations?.tools.every((name) => name.startsWith("app__timer__") || name.startsWith("app__alarm__"))).toBe(true);
     const { audio: _audio, proactive: _proactive, memories: _memories, clock: _clock, home_corner: _homeCorner, day_night: _dayNight, alarms: _alarms, integrations: _integrations, ...rest } = parsed;
     const body = JSON.stringify(rest);
     expect(body).toMatchSnapshot();

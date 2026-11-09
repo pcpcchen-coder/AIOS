@@ -2172,7 +2172,8 @@ body[data-night-dim="on"].has-surface::after {
   font-size: 0.85em;
   color: var(--muted);
 }
-body.alarm-ringing .timer-chip {
+body.alarm-ringing .timer-chip,
+body.has-surface .timer-chip {
   display: none;
 }
 
@@ -2210,4 +2211,46 @@ body.alarm-ringing .timer-chip {
   .timer-chip {
     max-width: calc(100vw - 32px);
   }
+}
+
+/* ALARM-2：響鈴畫面的「停止」與「貪睡」（貪睡只在鬧鐘時出現）。 */
+.alarm-ring-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: clamp(10px, 2vw, 24px);
+}
+.alarm-ring-snooze {
+  margin-top: clamp(6px, 2vh, 20px);
+  min-width: min(70vw, 260px);
+  min-height: 64px;
+  padding: 14px 30px;
+  border: 2px solid var(--panel-border);
+  border-radius: 999px;
+  background: rgba(110, 210, 255, 0.08);
+  color: var(--text);
+  font-size: clamp(1.2rem, 3.4vh, 2rem);
+  cursor: pointer;
+}
+.alarm-ring-snooze[hidden] {
+  display: none;
+}
+.timer-chip-row[data-state="snooze"] .timer-chip-left,
+.timer-chip-row[data-state="alarm"] .timer-chip-left {
+  color: var(--cyan);
+}
+.alarm-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.alarm-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.alarm-add input[type="text"] {
+  min-width: 0;
+  flex: 1 1 120px;
 }

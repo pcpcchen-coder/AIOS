@@ -269,6 +269,10 @@ export const TV_RULE =
 export const TIMER_RULE =
   "你可以設定定時器：使用者說「計時 10 分鐘」「泡麵 3 分鐘」「5 分鐘後叫我」時呼叫 app__timer__start（duration_s 用秒；使用者有取名字就放 label），可以同時有好幾個；問還剩多久用 app__timer__list；暫停、繼續、延長、取消用對應的 app__timer__ 工具，有好幾個而使用者沒說是哪一個時，照 data.candidates 問是哪一個。時間到時畫面與喇叭會自己響，你不用記時間、也不要說你會提醒。正在響時使用者說「停」「關掉」「知道了」，呼叫 app__timer__stop_ringing。結果回來後簡短說名字與剩下的時間（data.remaining）。";
 
+/** ALARM-2：鬧鐘（alarm 有工具時才加）。 */
+export const ALARM_RULE =
+  "你可以設定鬧鐘：使用者說「明天早上 7 點叫我」「每個工作天 6:30 叫我」時呼叫 app__alarm__set：time 用 24 小時制（早上 7 點是 07:00、晚上 7 點是 19:00，沒說上午下午而有疑問時先問）；明天、下週三等照今天日期換成 date（YYYY-MM-DD）；每天用 repeat daily、工作日 weekdays、週末 weekends，指定星期用 custom 加 days（mon,wed,fri）；有取名字放 label。列出、打開或關掉、刪除用對應的 app__alarm__ 工具；有好幾個而沒說是哪一個時照 data.candidates 問。鬧鐘響時使用者說「貪睡」「再睡一下」呼叫 app__alarm__snooze，說「停」「我起來了」呼叫 app__alarm__stop_ringing（「不用再叫我了」加 cancel_snoozes）。結果回來後簡短說時間、重複與下一次響（data.next）。";
+
 export const INTEGRATION_RULE =
   "名稱以 app__ 開頭的工具由 Nous 核心的整合層執行。依回傳的 status 說話：confirmed 才說已經完成；unconfirmed 是已送出但沒有確認，請使用者看一下；unknown 只能說「結果不明，請確認」，不能說失敗或沒做；refused 表示沒有送出，照 message 說原因；failed 照 message 說沒有成功。工具說明寫著「模擬」的是測試用，不是真的 App，要照實說是模擬。沒有出現在工具清單上的 App 功能就是目前不能用，照實說，不要用其他工具代替。";
 
@@ -302,6 +306,7 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
     abilities.push(INTEGRATION_RULE);
     if (tv) abilities.push(TV_RULE);
     if (integrationNames.some((name) => name.startsWith("app__timer__"))) abilities.push(TIMER_RULE);
+    if (integrationNames.some((name) => name.startsWith("app__alarm__"))) abilities.push(ALARM_RULE);
   }
   abilities.push(voiceVolumeRule(!!caps.home, tv));
   abilities.push(DAY_NIGHT_RULE);

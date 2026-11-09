@@ -343,10 +343,13 @@ export const TIMER_ASK: readonly AskTheAi[] = [
     needs: { text: "即時語音，設定頁「鬧鐘與定時器」開著（預設開）", live: "realtime_available" } },
   { try: ["泡麵還剩多久", "有哪些定時器"], does: "說各個定時器剩下的時間", needs: { text: "即時語音", live: "realtime_available" } },
   { try: ["暫停泡麵", "繼續", "再加 5 分鐘", "取消雞蛋的定時器", "全部取消"], does: "暫停、繼續、延長或取消；有好幾個而沒說是哪一個時，AI 會問", needs: { text: "即時語音", live: "realtime_available" } },
+  { try: ["明天早上 7 點叫我", "每個工作天 6:30 叫我", "週一三五晚上 9 點提醒我倒垃圾"], does: "設定鬧鐘（ALARM-2）：單次或重複（每天、工作日、週末、指定星期），可以取名字；用這台 Mac 的時區，跨夏令時間照當地時間響；在設定的那台裝置響，一小時內的鬧鐘右下角按需顯示倒數",
+    needs: { text: "即時語音，設定頁「鬧鐘與定時器」開著（預設開）", live: "realtime_available" } },
+  { try: ["有哪些鬧鐘", "關掉明天的鬧鐘", "刪掉 6:30 的鬧鐘"], does: "列出、打開或關掉、刪除鬧鐘（設定頁也可以管理）", needs: { text: "即時語音", live: "realtime_available" } },
 ];
 
 export const CONTROLS: readonly Control[] = [
-  { id: "ring-stop", how: "定時器響鈴時", does: "按「停止」、Esc 或空白鍵、舉起張開的手掌（需要鏡頭與「手掌停止播報」），或打字／通話中整句說「停」「好了」「知道了」「關掉」就停止響鈴（每個畫面一起停）；鈴聲期間喚醒詞暫停（避免鈴聲誤觸），沒有通話時不能用說的停止。響 5 分鐘沒人停會自動停止並記錄" },
+  { id: "ring-stop", how: "定時器或鬧鐘響鈴時", does: "按「停止」、Esc 或空白鍵、舉起張開的手掌（需要鏡頭與「手掌停止播報」），或打字／通話中整句說「停」「好了」「知道了」「關掉」「我起來了」就停止響鈴（每個畫面一起停）；鬧鐘另有「貪睡」按鈕，打字或通話中說「貪睡」「再睡一下」9 分鐘後再響。鈴聲期間喚醒詞暫停（避免鈴聲誤觸），沒有通話時不能用說的停止。響 5 分鐘沒人停會自動停止並記錄" },
   { id: "esc", how: "Esc", does: "即時語音 Nous 說話時：打斷（ChatGPT 方案路徑沒有取消回覆的指令，只會把這段回覆靜音）；即時語音中有畫面開著：只收起畫面；語音模式念回覆時：打斷；其他時候：收起畫面並結束語音" },
   { id: "voice-pill", how: "點右上角的語音指示", does: "結束語音模式或即時語音" },
   { id: "palm", how: "舉起張開的手掌", does: "停止 Nous 說話，不取消任務（需要鏡頭與「手掌停止播報」）" },
@@ -454,7 +457,7 @@ export function commandSections(ctx: CommandContext | null): TableSection[] {
         const row = ASK_THE_AI[tool];
         return { id: `ai-${tool}`, cells: [quote(row.try), row.does, `需要${row.needs.text}`], unmet: unmet(row.needs.live, ctx) };
       }) },
-    { id: "timers", title: "定時器（即時語音，由模型判斷，不保證）", intro: "定時器由 Nous 核心保存與排程，重新啟動後還在；Mac 睡眠時核心會停住，醒來後 30 分鐘內補響並說晚了多久，超過只記錄錯過。", columns: ["可以這樣問", "AI 可能會做什麼", "條件"],
+    { id: "timers", title: "定時器與鬧鐘（即時語音，由模型判斷，不保證）", intro: "定時器與鬧鐘由 Nous 核心保存與排程，重新啟動後還在；Mac 睡眠時核心會停住，醒來後 30 分鐘內補響並說晚了多久，超過只記錄錯過。", columns: ["可以這樣問", "AI 可能會做什麼", "條件"],
       rows: TIMER_ASK.map((row, i) => ({ id: `timer-${i}`, cells: [quote(row.try), row.does, `需要${row.needs.text}`], unmet: unmet(row.needs.live, ctx) })) },
     { id: "controls", title: "不用說話", intro: null, columns: ["操作", "作用"],
       rows: CONTROLS.map((c) => ({ id: c.id, cells: [c.how, c.seconds ? `${c.does}；${secondsText(c.seconds, ctx)}` : c.does], unmet: null })) },

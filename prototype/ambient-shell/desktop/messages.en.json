@@ -217,5 +217,7 @@
   "「{0}」時間到": "“{0}” is done",
   "定時器時間到": "Timer is done",
   "晚了 {0} 分鐘才響（Mac 睡眠或 Nous 沒在執行）。": "Rang {0} minutes late (the Mac was asleep or Nous was not running).",
-  "在 Nous 畫面按「停止」或舉起手掌停止。": "Press “Stop” on the Nous screen or raise your palm to stop it."
+  "在 Nous 畫面按「停止」或舉起手掌停止。": "Press “Stop” on the Nous screen or raise your palm to stop it.",
+  "鬧鐘：「{0}」": "Alarm: “{0}”",
+  "鬧鐘": "Alarm"
 }

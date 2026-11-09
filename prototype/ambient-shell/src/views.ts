@@ -1,4 +1,5 @@
 import type { AlarmsView } from "../shared/alarm.ts";
+import { repeatText } from "../shared/alarm-schedule.ts";
 import { TERMINAL_CAMERA_SCOPE } from "./terminal-camera.ts";
 import { WITHDRAWN_TEXT } from "./protected-tasks.ts";
 import { t, msg, getLocale, setLocale, useLocale, uiText } from "./i18n.ts";
@@ -57,6 +58,10 @@ export interface ViewActions {
   /** ALARM-1：「鬧鐘與定時器」開關與清除（POST /api/settings/alarms、/api/alarms/clear）。 */
   updateAlarms?(patch: { enabled?: boolean }): void;
   clearAlarms?(): void;
+  /** ALARM-2：設定頁的鬧鐘管理（POST /api/alarms/alarms/*）。 */
+  addAlarm?(input: { time: string; repeat: string; label: string }): void;
+  setAlarmEnabled?(id: string, enabled: boolean): void;
+  deleteAlarm?(id: string): void;
   updateHomeCorner?(patch: HomeCornerPrefsPatch): void;
   /** MEMO-1「回憶模式」。 */
   updateMemories?(patch: MemoriesPrefsPatch): void;
@@ -1143,7 +1148,25 @@ export function renderAlarmSettings(view: AlarmsView, actions: ViewActions): HTM
   const clear = button("清除全部", () => actions.clearAlarms?.(), "btn--ghost");
   clear.disabled = !actions.clearAlarms;
   clear.setAttribute("data-alarm-clear", "");
-  const count = view.timers.length;
+  const count = view.timers.length + view.alarms.length;
+  // ALARM-2：鬧鐘清單只在設定頁（不是常駐畫面）：時間、重複、開關與刪除，以及新增一個。
+  const alarmRows = view.alarms.map((a) => {
+    const toggle = button(a.enabled ? "開" : "關", () => actions.setAlarmEnabled?.(a.id, !a.enabled), a.enabled ? "btn--primary" : "");
+    toggle.setAttribute("aria-pressed", String(a.enabled));
+    toggle.setAttribute("aria-label", t("{0}：{1}", `${a.time}${a.label ? ` ${a.label}` : ""}`, a.enabled ? t("開") : t("關")));
+    toggle.disabled = !actions.setAlarmEnabled || !on;
+    const del = button("刪除", () => actions.deleteAlarm?.(a.id), "btn--ghost");
+    del.disabled = !actions.deleteAlarm || !on;
+    const when = a.days.length ? repeatText(a.days, getLocale() === "en" ? "en" : "zh-TW") : a.date ?? "";
+    const next = a.next_at !== null ? t("下一次 {0}", new Date(a.next_at).toLocaleString(getLocale() === "en" ? "en-US" : "zh-TW", { timeZone: view.time_zone, month: "numeric", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false })) : t("不會響");
+    return h("li", { class: "pref", "data-alarm-id": a.id }, h("div", { class: "provider-text" }, h("strong", {}, `${a.time}${a.label ? `　${a.label}` : ""}`), h("span", { class: "muted small" }, `${when} · ${next}`)), h("div", { class: "actions" }, toggle, del));
+  });
+  const time = h("input", { type: "time", value: "07:00", "aria-label": t("鬧鐘時間") }) as HTMLInputElement;
+  const repeat = h("select", { "aria-label": t("重複") }) as HTMLSelectElement;
+  for (const [value, label] of [["once", "單次"], ["daily", "每天"], ["weekdays", "工作日"], ["weekends", "週末"]] as const) repeat.append(h("option", { value }, t(label)));
+  const label = h("input", { type: "text", maxlength: "40", placeholder: t("名字（可不填）"), "aria-label": t("鬧鐘名字") }) as HTMLInputElement;
+  const add = button("新增鬧鐘", () => actions.addAlarm?.({ time: time.value, repeat: repeat.value, label: label.value }), "btn--primary");
+  add.disabled = !actions.addAlarm || !on;
   return h(
     "section",
     { class: "camera-settings alarm-settings" },
@@ -1152,9 +1175,13 @@ export function renderAlarmSettings(view: AlarmsView, actions: ViewActions): HTM
       "ul",
       { class: "pref-list" },
       h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("鬧鐘與定時器")), h("span", { class: "muted small" }, t("用說的設定（「計時 10 分鐘」「泡麵 3 分鐘」）；時間到時在建立的那台響，那台不在線時每個畫面都響。關掉後不響，已建立的保留。"))), b),
-      h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("清除全部")), h("span", { class: "muted small" }, count ? t("目前有 {0} 個定時器；清除會一併停止響鈴與刪掉紀錄。", count) : t("刪掉所有定時器、響鈴與紀錄。"))), clear),
+      h("li", { class: "pref" }, h("div", { class: "provider-text" }, h("strong", {}, t("清除全部")), h("span", { class: "muted small" }, count ? t("目前有 {0} 個定時器或鬧鐘；清除會一併停止響鈴與刪掉紀錄。", count) : t("刪掉所有定時器、鬧鐘、響鈴與紀錄。"))), clear),
     ),
+    h("h4", {}, t("鬧鐘")),
+    alarmRows.length ? h("ul", { class: "pref-list alarm-list" }, ...alarmRows) : h("p", { class: "muted small" }, t("還沒有鬧鐘。可以說「明天早上 7 點叫我」「每個工作天 6:30 叫我」，或在下面新增。")),
+    h("div", { class: "alarm-add" }, time, repeat, label, add),
     h("p", { class: "muted small" }, t("響鈴的音量跟這台裝置的對話音量（日間／夜間）；{0} 秒內由小漸強，響 {1} 分鐘沒人停就自動停止並記錄。", view.prefs.ramp_s, Math.round(view.prefs.ring_s / 60))),
+    h("p", { class: "muted small" }, t("鬧鐘不會比 {0}% 更小聲；貪睡 {1} 分鐘。鬧鐘用這台 Mac 的時區（{2}）。", view.prefs.alarm_min_volume, Math.round(view.prefs.snooze_s / 60), view.time_zone)),
   );
 }
 

@@ -1,4 +1,4 @@
-import { formatCountdown, matchRingStop, spokenDuration, timerRemainingMs, type AlarmsView, type RingLogEntry, type RingView, type StopSource, type TimerView } from "../shared/alarm.ts";
+import { ALARM_SOON_MS, formatCountdown, matchRingSnooze, matchRingStop, spokenDuration, timerRemainingMs, type AlarmsView, type RingKind, type RingLogEntry, type RingView, type StopSource, type TimerView } from "../shared/alarm.ts";
 import type { RingSound } from "./alarm-sound.ts";
 import { getLocale, t } from "./i18n.ts";
 
@@ -12,8 +12,8 @@ export interface AlarmRingOptions {
   createSound(): RingSound;
   /** POST /api/alarms/*（失敗時丟錯）。 */
   post(path: string, body: Record<string, unknown>): Promise<void>;
-  /** 這台裝置現在的響鈴音量（0–1）。 */
-  peak(): number;
+  /** 這台裝置現在的響鈴音量（0–1）；鬧鐘另有最低音量（ALARM-2）。 */
+  peak(kind: RingKind, alarmMinPercent: number): number;
   /** 響鈴開始或結束（只算這個頁面要響的）。 */
   onRingingChange(ringing: boolean): void;
   host?: HTMLElement;
@@ -30,6 +30,7 @@ export function ringsHere(view: AlarmsView | null | undefined): RingView[] {
 
 /** 響鈴大字的第二行（「泡麵」時間到／晚了幾分鐘）。 */
 export function ringTitle(ring: Pick<RingView, "label" | "kind">): string {
+  if (ring.kind === "alarm") return ring.label ? t("鬧鐘：「{0}」", ring.label) : t("鬧鐘");
   return ring.label ? t("「{0}」時間到", ring.label) : t("定時器時間到");
 }
 
@@ -39,7 +40,7 @@ export function lateText(lateMs: number): string | null {
 }
 
 export function noticeText(entry: RingLogEntry): string {
-  const name = entry.label ? t("「{0}」", entry.label) : t("定時器");
+  const name = entry.label ? t("「{0}」", entry.label) : entry.kind === "alarm" ? t("鬧鐘") : t("定時器");
   if (entry.outcome === "missed") return t("{0} 錯過了：晚了 {1} 才發現，沒有補響", name, spokenDuration(entry.late_ms, getLocale()));
   return entry.heard ? t("{0} 響了一段時間沒人停，已自動停止", name) : t("{0} 已自動停止；沒有畫面回報真的出聲", name);
 }
@@ -87,14 +88,34 @@ export class AlarmRing {
     return true;
   }
 
-  /** 打字或逐字稿：正在響而且整句是停止的意思才停。 */
+  /** ALARM-2：貪睡（只有鬧鐘；同時在響的定時器一起停）。回傳有沒有貪睡到。 */
+  snooze(by: StopSource): boolean {
+    const here = this.activeRings();
+    if (!here.some((r) => r.kind === "alarm")) return false;
+    for (const r of here) this.silenced.add(r.id);
+    this.render();
+    void this.options.post("/api/alarms/snooze", { by }).catch(() => {
+      for (const r of here) this.silenced.delete(r.id);
+      this.render();
+    });
+    return true;
+  }
+
+  /** 打字或逐字稿：正在響而且整句是停止（或鬧鐘的貪睡）的意思才處理。 */
   stopByText(text: string, by: StopSource = "voice"): boolean {
-    return this.ringing && matchRingStop(text) && this.stop(by);
+    if (!this.ringing) return false;
+    if (matchRingSnooze(text) && this.snooze(by)) return true;
+    return matchRingStop(text) && this.stop(by);
   }
 
   /** 音量改變（日夜間、對話音量）。 */
   refreshVolume(): void {
-    this.sound?.setPeak(this.options.peak());
+    const ring = this.activeRings().at(-1);
+    if (ring) this.sound?.setPeak(this.peakFor(ring.kind));
+  }
+
+  private peakFor(kind: RingKind): number {
+    return this.options.peak(kind, this.view?.prefs.alarm_min_volume ?? 30);
   }
 
   /** 語言改變時重畫。 */
@@ -126,7 +147,7 @@ export class AlarmRing {
     this.renderOverlay(ring, rings.length);
     this.renderChip();
     this.renderNotice();
-    const timers = this.view?.prefs.enabled ? this.view.timers.length : 0;
+    const timers = this.view?.prefs.enabled ? this.view.timers.length + this.view.snoozes.length + this.view.alarms.filter((a) => a.enabled).length : 0;
     if ((timers || ring) && this.ticker === null) this.ticker = setInterval(() => this.tick(), 1000);
     else if (!timers && !ring && this.ticker !== null) {
       clearInterval(this.ticker);
@@ -160,7 +181,7 @@ export class AlarmRing {
     this.soundRing = ring.id;
     const rampS = this.view?.prefs.ramp_s ?? 30;
     const id = ring.id;
-    void sound.start({ peak: this.options.peak(), rampS, elapsedMs: Math.max(0, this.serverNow() - ring.started_at) }).then((playing) => {
+    void sound.start({ peak: this.peakFor(ring.kind), rampS, elapsedMs: Math.max(0, this.serverNow() - ring.started_at) }).then((playing) => {
       // 被新的鈴或停止取代：這次的結果不代表能不能出聲，不回報。
       if (this.sound !== sound || this.acked.has(id)) return;
       // 同一個鈴聲代表這個頁面所有正在響的鈴（好幾個定時器同時到）。
@@ -203,10 +224,16 @@ export class AlarmRing {
       stop.className = "alarm-ring-stop";
       stop.textContent = t("停止");
       stop.addEventListener("click", () => this.stop("button"));
+      const snooze = document.createElement("button");
+      snooze.type = "button";
+      snooze.className = "alarm-ring-snooze";
+      snooze.addEventListener("click", () => this.snooze("button"));
+      const actions = document.createElement("div");
+      actions.className = "alarm-ring-actions";
+      actions.append(stop, snooze);
       const hint = document.createElement("div");
       hint.className = "alarm-ring-hint";
-      hint.textContent = t("也可以舉起手掌、按 Esc 或空白鍵，或在通話中說「停」");
-      root.append(time, title, note, stop, hint);
+      root.append(time, title, note, actions, hint);
       (this.options.host ?? document.body).append(root);
       this.overlay = root;
       stop.focus({ preventScroll: true });
@@ -214,6 +241,12 @@ export class AlarmRing {
     const root = this.overlay;
     root.querySelector<HTMLElement>(".alarm-ring-time")!.textContent = this.clockText();
     root.querySelector<HTMLElement>(".alarm-ring-title")!.textContent = count > 1 ? `${ringTitle(ring)}${t("（還有 {0} 個）", count - 1)}` : ringTitle(ring);
+    // ALARM-2：只有鬧鐘有貪睡（按需出現）。
+    const snooze = root.querySelector<HTMLButtonElement>(".alarm-ring-snooze")!;
+    const canSnooze = ring.kind === "alarm";
+    snooze.hidden = !canSnooze;
+    snooze.textContent = t("貪睡 {0} 分鐘", Math.round((this.view?.prefs.snooze_s ?? 540) / 60));
+    root.querySelector<HTMLElement>(".alarm-ring-hint")!.textContent = canSnooze ? t("也可以舉起手掌、按 Esc 或空白鍵停止；通話中說「停」或「貪睡」") : t("也可以舉起手掌、按 Esc 或空白鍵，或在通話中說「停」");
     const late = lateText(ring.late_ms);
     const note = root.querySelector<HTMLElement>(".alarm-ring-note")!;
     note.textContent = late ?? "";
@@ -223,7 +256,15 @@ export class AlarmRing {
   private renderChip(): void {
     const view = this.view;
     const timers: TimerView[] = view?.prefs.enabled ? [...view.timers] : [];
-    if (!timers.length) {
+    const now0 = this.serverNow();
+    // ALARM-2：貪睡中與一小時內的鬧鐘也按需顯示倒數（不是鬧鐘清單）。
+    const extra = view?.prefs.enabled
+      ? [
+          ...view.snoozes.map((z) => ({ name: z.label ?? t("鬧鐘"), prefix: t("貪睡"), at: z.due_at, kind: "snooze" })),
+          ...view.alarms.filter((a) => a.enabled && a.next_at !== null && a.next_at - now0 <= ALARM_SOON_MS).map((a) => ({ name: a.label ?? t("鬧鐘"), prefix: a.time, at: a.next_at!, kind: "alarm" })),
+        ]
+      : [];
+    if (!timers.length && !extra.length) {
       this.chip?.remove();
       this.chip = null;
       return;
@@ -237,6 +278,7 @@ export class AlarmRing {
       (this.options.host ?? document.body).append(chip);
       this.chip = chip;
     }
+    this.chip.dataset.visibilityReason = timers.length ? "timer_running" : extra.some((x) => x.kind === "snooze") ? "alarm_snoozed" : "alarm_soon";
     const now = this.serverNow();
     timers.sort((a, b) => timerRemainingMs(a, now) - timerRemainingMs(b, now));
     const rows = timers.slice(0, 3).map((timer) => {
@@ -257,6 +299,19 @@ export class AlarmRing {
       more.className = "timer-chip-more";
       more.textContent = t("還有 {0} 個", timers.length - 3);
       rows.push(more);
+    }
+    for (const item of extra.sort((a, b) => a.at - b.at).slice(0, 2)) {
+      const row = document.createElement("div");
+      row.className = "timer-chip-row";
+      row.dataset.state = item.kind;
+      const name = document.createElement("span");
+      name.className = "timer-chip-name";
+      name.textContent = item.name;
+      const left = document.createElement("span");
+      left.className = "timer-chip-left";
+      left.textContent = `${item.prefix} ${formatCountdown(item.at - now)}`;
+      row.append(name, left);
+      rows.push(row);
     }
     this.chip.replaceChildren(...rows);
   }

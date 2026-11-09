@@ -67,6 +67,7 @@ import { HOME_TOOL } from "./integrations/adapters/home.ts";
 import type { IntegrationToolId } from "../shared/integrations.ts";
 import { ALARM_WRITE_PATH, AlarmPatchError, STOP_SOURCES, type StopSource } from "../shared/alarm.ts";
 import type { AlarmCenter } from "./alarms.ts";
+import { repeatDays } from "../shared/alarm-schedule.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
@@ -549,6 +550,20 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         const r = saved(() => alarms.cancel(body.id));
         if (!r.ok && r.code !== "none" && r.code !== "not_found") throw new HttpError(409, r.message);
       } else if (path === "/api/alarms/clear") saved(() => alarms.clearAll());
+      // ALARM-2：貪睡（響鈴畫面的按鈕、打字或通話中說「貪睡」）與設定頁的鬧鐘管理。
+      else if (path === "/api/alarms/snooze") {
+        const by: StopSource = (STOP_SOURCES as readonly unknown[]).includes(body.by) ? (body.by as StopSource) : "button";
+        saved(() => alarms.snoozeRings(by));
+      } else if (path === "/api/alarms/alarms/add") {
+        const days = repeatDays(body.repeat, body.days);
+        if (!days) throw new HttpError(400, "鬧鐘的重複規則不正確");
+        const r = saved(() => alarms.setAlarm({ time: body.time, days, date: days.length ? body.date : undefined, label: body.label, origin: source }));
+        if (!r.ok) throw new HttpError(r.code === "disabled" ? 409 : 400, r.message);
+      } else if (path === "/api/alarms/alarms/enable" || path === "/api/alarms/alarms/delete") {
+        if (typeof body.id !== "string" || body.id.length > 40) throw new HttpError(400, "id is required");
+        const r = saved(() => (path.endsWith("/enable") ? alarms.setAlarmEnabled(body.id, body.enabled === true) : alarms.deleteAlarm(body.id)));
+        if (!r.ok && r.code !== "none" && r.code !== "not_found") throw new HttpError(409, r.message);
+      }
       else throw new HttpError(404, "not found");
       return sendJson(res, 200, localizeSettings(settings.view(source), normalizeLocale(req.headers["x-nous-locale"])));
     }
