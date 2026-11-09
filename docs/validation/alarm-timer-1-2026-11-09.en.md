@@ -79,10 +79,10 @@ The page that started the call: on the API-key route `/api/integrations/call` lo
 |---|---|
 | `npm ci` | Passed |
 | `npm run typecheck` | Passed |
-| `npx vitest run` | 169 files, 3140 passed, 5 skipped |
+| `npx vitest run` | 169 files, 3143 passed, 5 skipped |
 | `npm run build` | Passed (only the existing chunk-size warning) |
 
-New `tests/alarms.test.ts` (25 tests, fake clock): rings on time and only on the device that set it, rings everywhere when the Pi is disconnected, several timers and operations by name (with candidates), ranges and the 10-timer limit, auto-stop after 5 minutes with a notice, stop log, a late ring after 20 minutes of sleep that records how late, a missed log after 2 hours of sleep, noticing within 30 seconds without a resume event, restart recovery (paused, late ring, restart while ringing), an unreadable file, daylight saving (a 1-hour timer started 01:30 US Eastern on 2026-03-08 rings at wall-clock 03:30), turning off and on, clear all; with `NOUS_AIL` off both routes have `app__timer__*`; fixtures for the ChatGPT-plan route (`LiveToolCaller`) and the API-key route (`/api/integrations/call` with `X-Nous-Terminal: rpi4`); HTTP settings, stop, ack, clear; stop phrases, countdown format, volume and fade-in, ringtone waveform, wake guard.
+New `tests/alarms.test.ts` (28 tests, fake clock): rings on time and only on the device that set it, rings everywhere when the Pi is disconnected, several timers and operations by name (with candidates), ranges and the 10-timer limit, auto-stop after 5 minutes with a notice, stop log, a late ring after 20 minutes of sleep that records how late, a missed log after 2 hours of sleep, noticing within 30 seconds without a resume event, restart recovery (paused, late ring, restart while ringing), an unreadable file, daylight saving (a 1-hour timer started 01:30 US Eastern on 2026-03-08 rings at wall-clock 03:30), turning off and on, clear all, a write failure during a scheduled check not throwing and retrying in 10 seconds, extending past 24 hours in total being refused; with `NOUS_AIL` off the "App integrations" status lists no services; with `NOUS_AIL` off both routes have `app__timer__*`; fixtures for the ChatGPT-plan route (`LiveToolCaller`) and the API-key route (`/api/integrations/call` with `X-Nous-Terminal: rpi4`); HTTP settings, stop, ack, clear; stop phrases, countdown format, volume and fade-in, ringtone waveform, wake guard.
 
 Changed existing tests: `tests/wake-flag-off.test.ts` adds an eighth deliberate exception (`settings.alarms`, and `settings.integrations` listing only `app__timer__*`); everything else is still byte-identical. `tests/audio-privacy.test.ts` adds the ringtone to "every place that makes sound goes through the sound output setting".
 
@@ -95,6 +95,22 @@ Changed existing tests: `tests/wake-flag-off.test.ts` adds an eighth deliberate 
 
 Screenshots (headless, not on the real devices): [Pi 1920×1080 ringing](alarm-timer-1-2026-11-09/pi-ring-1920x1080-HEADLESS.png), [Mac 1440×900 ringing](alarm-timer-1-2026-11-09/mac-ring-1440x900-HEADLESS.png), [Mac countdown](alarm-timer-1-2026-11-09/mac-countdown-1440x900-HEADLESS.png).
 
+<a id="41-獨立審查與修正"></a>
+### 4.1 Independent review and fixes
+
+Another agent read the diff and listed 8 findings, all fixed (the 7th was already changed before the review):
+
+| Finding | Fix |
+|---|---|
+| A page that loads while already ringing (reload, late ring) creates its wake controller afterwards, without the guard | The `alarm` guard is applied when the controller is created and after it is turned off and on; a wake detection while ringing never starts a call (backstop) |
+| A write failure during a scheduled check threw out of the timer, crashing the core or stopping the scheduler | `tick()` catches it, logs it and retries in 10 seconds |
+| With `NOUS_AIL` off, settings showed an "App integrations" section with a single untranslated `timer` row | Built-in tools are left out of the status; the section is not drawn when `settings.integrations.builtin_only`; stale comments updated |
+| The ringing mute and live voice's own mute overwrote each other | Combined: `liveAudio.muted = live voice wants it || ringing`; a new call follows the same rule |
+| New strings lacked English | Added the fixed tool messages and HTTP errors; settings errors are now a fixed sentence |
+| A superseded ringtone reported "could not play" | No report when superseded; when sound plays, every ring ringing on this page is reported together |
+| A Pi-only ring also posted a Mac notification | Notify only when the Mac should ring too |
+| Extending could exceed 24 hours | Refused |
+
 <a id="5-已知限制"></a>
 ## 5. Known limitations
 
@@ -105,6 +121,7 @@ Screenshots (headless, not on the real devices): [Pi 1920×1080 ringing](alarm-t
 - **During a call the ringtone reaches the microphone:** per George's decision the call is not hung up, so the ringtone may be sent to the realtime model (billed as usual); Nous's answers are muted while ringing.
 - Time zones and daylight saving: timers count only elapsed time (epoch) and are not affected by the time zone; local alarm times and daylight saving are left to ALARM-2 (using the local time zone from #96).
 - Naming family members (who stopped it, whose timer) is not in this batch.
+- On the API-key route the subtitle shows the tool message: sentences containing a name or length (for example 「已開始『泡麵』3 分鐘的定時器。」, "started the 3-minute 'noodles' timer") stay in Chinese in the English interface (the same existing approach as the LG TV); what Nous says aloud is answered by the model in the interface language.
 
 <a id="6-回退"></a>
 ## 6. Rollback

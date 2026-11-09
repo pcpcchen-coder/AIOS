@@ -1069,5 +1069,19 @@
   "刪掉所有定時器、響鈴與紀錄。": "Delete every timer, ringing alarm and log entry.",
   "鬧鐘與定時器設定沒有保存：{0}": "Alarm and timer settings were not saved: {0}",
   "沒有清除：{0}": "Not cleared: {0}",
-  "響鈴的音量跟這台裝置的對話音量（日間／夜間）；{0} 秒內由小漸強，響 {1} 分鐘沒人停就自動停止並記錄。": "Ringing follows this device's conversation volume (day/night); it fades up over {0} seconds and stops by itself after {1} minutes if nobody stops it, and that is logged."
+  "響鈴的音量跟這台裝置的對話音量（日間／夜間）；{0} 秒內由小漸強，響 {1} 分鐘沒人停就自動停止並記錄。": "Ringing follows this device's conversation volume (day/night); it fades up over {0} seconds and stops by itself after {1} minutes if nobody stops it, and that is logged.",
+  "現在沒有定時器。": "There are no timers right now.",
+  "鈴聲已停止。": "The ringing has stopped.",
+  "現在沒有在響的定時器。": "No timer is ringing right now.",
+  "現在沒有定時器，不用取消。": "There are no timers to cancel.",
+  "鬧鐘與定時器已在設定關閉，沒有執行。": "Alarms and timers are turned off in settings; nothing was done.",
+  "鬧鐘與定時器已在設定關閉。": "Alarms and timers are turned off in settings.",
+  "有好幾個定時器，請說是哪一個。": "There are several timers; please say which one.",
+  "有好幾個定時器符合，請說是哪一個。": "Several timers match; please say which one.",
+  "沒有在跑的定時器可以暫停。": "No running timer to pause.",
+  "沒有暫停中的定時器。": "No timer is paused.",
+  "長度要在 1 秒到 24 小時之間。": "The length must be between 1 second and 24 hours.",
+  "最多同時 10 個定時器。": "At most 10 timers at once.",
+  "延長的時間要在 1 秒到 24 小時之間。": "The added time must be between 1 second and 24 hours.",
+  "延長後會超過 24 小時。": "Extending would go past 24 hours."
 }

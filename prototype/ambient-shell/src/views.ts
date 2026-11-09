@@ -515,7 +515,7 @@ export function renderSettings(
     settings.alarms && renderAlarmSettings(settings.alarms, actions),
     settings.home_corner && renderHomeCornerSettings(settings.home_corner, actions),
     settings.memories && renderMemoriesSettings(settings.memories, actions, false),
-    settings.integrations && options.integrations && renderIntegrationStatus(options.integrations, actions),
+    settings.integrations && !settings.integrations.builtin_only && options.integrations && renderIntegrationStatus(options.integrations, actions),
     settings.voice_relay === true && options.voiceRelay && renderVoiceRelay(options.voiceRelay, actions),
     // 家人辨識只在 macOS App（加密保存需要 safeStorage）；瀏覽器版照實說不可用，不提供任何操作。
     settings.identity && !settings.identity.available && h("p", { class: "muted small" }, msg`家人辨識：${uiText(settings.identity.disabled_reason ?? "不可用")}`),
@@ -564,7 +564,7 @@ function renderDesktopAccounts(settings: SettingsView, message: string | null, a
     settings.home_corner && renderHomeCornerSettings(settings.home_corner, actions),
     // MEMO-1：選單列「回憶模式」與這裡都能改，寫入同一個 memories.json。
     settings.memories && renderMemoriesSettings(settings.memories, actions, true),
-    settings.integrations && integrations && renderIntegrationStatus(integrations, actions),
+    settings.integrations && !settings.integrations.builtin_only && integrations && renderIntegrationStatus(integrations, actions),
     settings.voice_relay === true && voiceRelay && renderVoiceRelay(voiceRelay, actions),
     h("p", { class: "muted small" }, t(DESKTOP_SETTINGS_NOTE)),
     footer(actions),

@@ -312,7 +312,19 @@ voiceVolume.onChange(() => alarmRing.refreshVolume());
  * 處理中音效暫停、通話不掛斷但 Nous 的聲音靜音（George 2026-11-09「較溫和」）。
  */
 let alarmGuardOwner: WakeController | null = null;
-let alarmMutedAudio: HTMLAudioElement | null = null;
+/** 即時語音自己要的靜音（停播、記憶 hold、本機指令那一輪）；鈴響時另外疊上靜音，兩者合成，不互相蓋掉。 */
+let liveWantsMuted = false;
+function applyLiveMute(): void {
+  if (liveAudio) liveAudio.muted = liveWantsMuted || alarmRing.ringing;
+}
+/** 鈴響時喚醒控制器必須帶著 alarm 防護（中途才建立或重建的控制器也要補上）。 */
+function syncAlarmGuard(): void {
+  const want = alarmRing.ringing ? wake : null;
+  if (alarmGuardOwner === want) return;
+  alarmGuardOwner?.end("alarm");
+  alarmGuardOwner = want;
+  want?.begin("alarm");
+}
 const alarmRing = new AlarmRing({
   createSound: () => browserRingSound({ sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) }),
   post: (path, body) => api.alarmPost(path, body).then((value) => {
@@ -321,20 +333,12 @@ const alarmRing = new AlarmRing({
   }),
   peak: () => ringPeakVolume(voiceVolume.current),
   onRingingChange: (ringing) => {
+    syncAlarmGuard();
+    applyLiveMute();
     if (ringing) {
-      alarmGuardOwner = wake;
-      wake?.begin("alarm");
-      if (liveAudio && !liveAudio.muted) {
-        liveAudio.muted = true;
-        alarmMutedAudio = liveAudio;
-      }
       globalThis.speechSynthesis?.pause();
       wakeMemoriesNow();
     } else {
-      alarmGuardOwner?.end("alarm");
-      alarmGuardOwner = null;
-      if (alarmMutedAudio && alarmMutedAudio === liveAudio) alarmMutedAudio.muted = false;
-      alarmMutedAudio = null;
       globalThis.speechSynthesis?.resume();
     }
     syncMemories();
@@ -776,6 +780,9 @@ function trackedPlayRemote(stream: MediaStream): () => void {
   audio.autoplay = true;
   audio.srcObject = stream;
   liveAudio = audio;
+  // 新的通話從沒有靜音開始；鈴正在響時照樣靜音。
+  liveWantsMuted = false;
+  applyLiveMute();
   liveAudioPaused = false;
   void audio.play().catch(() => {});
   return () => {
@@ -830,7 +837,8 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
         stopped: async (evidence) => (await api.realtimeStopped(ticket, evidence)).accepted,
         playback: async () => void (await api.realtimePlayback(ticket)),
         setMuted: (muted) => {
-          if (liveAudio) liveAudio.muted = muted;
+          liveWantsMuted = muted;
+          applyLiveMute();
         },
         audioPaused: () => liveAudioPaused && (!liveAudio || liveAudio.paused),
         cancelSpeech: () => {
@@ -861,7 +869,8 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
       subscribe: (handlers) => subscribeSession(ticket.session_id, handlers),
       watchLevel: browserWatchLevel,
       setMuted: (muted) => {
-        if (liveAudio) liveAudio.muted = muted;
+        liveWantsMuted = muted;
+        applyLiveMute();
       },
       speak: (text) => void speakText(text, { locale: realtimeLocale }).catch(() => undefined),
       quietPowerEnd: !!window.nousDesktop,
@@ -923,6 +932,13 @@ function stopWakeCall(): void {
  * 即時語音不能用時照實說原因。路徑、計費通知、改路徑與同意說明都沿用 startRealtime／openRealtime。
  */
 function onWakeTrigger(trigger: WakeTrigger): void {
+  // ALARM-1 備援：防護計數萬一不同步（控制器關掉又打開會歸零），鈴響時的喚醒一律不開始通話。
+  if (alarmRing.ringing) {
+    alarmGuardOwner?.end("alarm");
+    alarmGuardOwner = null;
+    syncAlarmGuard();
+    return;
+  }
   wakeMemoriesNow();
   const now = performance.now();
   const action = wakeTriggerAction({
@@ -1177,6 +1193,8 @@ function syncWake(view: WakeSettingsView | undefined): void {
     });
     // WK-02：喚醒觸發開始 wake_word 即時語音（取代 WK-01a 預設的「聽到了」字幕）。
     wake.setTriggerHandler(onWakeTrigger);
+    // ALARM-1：載入時已經在響（重新整理、晚響）：新的控制器一建立就帶上防護。
+    syncAlarmGuard();
     // 載入前已經開始的 Web Speech 或即時語音照實告訴它（不會在通話或 Web Speech 中途搶麥克風）。
     if (voice.active || conversation.on) wake.webSpeech(true);
     if (servicePaused) wake.service(true);
@@ -1205,6 +1223,7 @@ function disposeWake(): void {
   wakeVoice?.dispose();
   wakeVoice = null;
   wake.dispose();
+  if (alarmGuardOwner === wake) alarmGuardOwner = null;
   wake = null;
   wakeDeferred = false;
   wakeDisposePending = false;
@@ -2937,7 +2956,7 @@ let integrationPanel: IntegrationPanelState = { view: null, loading: false, erro
 let integrationFetchedAt = 0;
 /** 30 秒內不重查（重新整理畫面不會一直打核心）；force＝「重新檢查」。 */
 function ensureIntegrationStatus(force = false): void {
-  if (!settings?.integrations || integrationPanel.loading) return;
+  if (!settings?.integrations || settings.integrations.builtin_only || integrationPanel.loading) return;
   if (!force && integrationFetchedAt && Date.now() - integrationFetchedAt < 30_000) return;
   integrationPanel = { ...integrationPanel, loading: true, error: false };
   integrationFetchedAt = Date.now();

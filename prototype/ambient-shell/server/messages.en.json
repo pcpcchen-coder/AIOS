@@ -620,5 +620,22 @@
   "暫停、繼續、延長或取消；有好幾個而沒說是哪一個時，AI 會問": "Pauses, resumes, extends or cancels; with several timers and none named, the AI asks which one",
   "需要即時語音，設定頁「鬧鐘與定時器」開著（預設開）": "Requires realtime and “Alarms and timers” on in settings (on by default)",
   "定時器響鈴時": "While a timer rings",
-  "按「停止」、Esc 或空白鍵、舉起張開的手掌（需要鏡頭與「手掌停止播報」），或打字／通話中整句說「停」「好了」「知道了」「關掉」就停止響鈴（每個畫面一起停）；鈴聲期間喚醒詞暫停（避免鈴聲誤觸），沒有通話時不能用說的停止。響 5 分鐘沒人停會自動停止並記錄": "Press “Stop”, Esc or Space, raise an open palm (needs the camera and palm stop), or type or say during a call a whole sentence such as 「停」「好了」「知道了」「關掉」 (stop, OK, got it, turn it off) to stop ringing on every screen. The wake word is paused while it rings so the ringtone cannot trigger it, so without a call you cannot stop it by voice. After 5 minutes with nobody stopping it, it stops by itself and this is logged"
+  "按「停止」、Esc 或空白鍵、舉起張開的手掌（需要鏡頭與「手掌停止播報」），或打字／通話中整句說「停」「好了」「知道了」「關掉」就停止響鈴（每個畫面一起停）；鈴聲期間喚醒詞暫停（避免鈴聲誤觸），沒有通話時不能用說的停止。響 5 分鐘沒人停會自動停止並記錄": "Press “Stop”, Esc or Space, raise an open palm (needs the camera and palm stop), or type or say during a call a whole sentence such as 「停」「好了」「知道了」「關掉」 (stop, OK, got it, turn it off) to stop ringing on every screen. The wake word is paused while it rings so the ringtone cannot trigger it, so without a call you cannot stop it by voice. After 5 minutes with nobody stopping it, it stops by itself and this is logged",
+  "鬧鐘與定時器的設定值不正確": "Invalid alarm and timer setting",
+  "定時器沒有保存（無法寫入設定檔）": "The timer was not saved (could not write the settings file)",
+  "ring_id is required": "ring_id is required",
+  "現在沒有定時器。": "There are no timers right now.",
+  "鈴聲已停止。": "The ringing has stopped.",
+  "現在沒有在響的定時器。": "No timer is ringing right now.",
+  "現在沒有定時器，不用取消。": "There are no timers to cancel.",
+  "鬧鐘與定時器已在設定關閉，沒有執行。": "Alarms and timers are turned off in settings; nothing was done.",
+  "鬧鐘與定時器已在設定關閉。": "Alarms and timers are turned off in settings.",
+  "有好幾個定時器，請說是哪一個。": "There are several timers; please say which one.",
+  "有好幾個定時器符合，請說是哪一個。": "Several timers match; please say which one.",
+  "沒有在跑的定時器可以暫停。": "No running timer to pause.",
+  "沒有暫停中的定時器。": "No timer is paused.",
+  "長度要在 1 秒到 24 小時之間。": "The length must be between 1 second and 24 hours.",
+  "最多同時 10 個定時器。": "At most 10 timers at once.",
+  "延長的時間要在 1 秒到 24 小時之間。": "The added time must be between 1 second and 24 hours.",
+  "延長後會超過 24 小時。": "Extending would go past 24 hours."
 }

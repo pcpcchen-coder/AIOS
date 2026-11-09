@@ -15,6 +15,7 @@ import {
 
 const SCHEMA_VERSION = 1;
 const NOTICE_MAX_AGE_MS = 12 * 3600_000;
+const RETRY_MS = 10_000;
 
 export interface SchedulerClock {
   now(): number;
@@ -153,6 +154,8 @@ export class AlarmCenter {
   extend(ref: unknown, addS: number): TimerOp {
     if (!Number.isFinite(addS) || addS < TIMER_MIN_S || addS > TIMER_MAX_S) return { ok: false, code: "invalid", message: "延長的時間要在 1 秒到 24 小時之間。" };
     const add = Math.round(addS * 1000);
+    const found = this.resolve(ref, null, "現在沒有定時器。");
+    if (found.ok && found.timer.duration_ms + add > TIMER_MAX_S * 1000) return { ok: false, code: "invalid", message: "延長後會超過 24 小時。" };
     return this.modify(ref, null, (t) => (t.state === "running" ? { ...t, ends_at: t.ends_at + add, duration_ms: t.duration_ms + add } : { ...t, remaining_ms: t.remaining_ms + add, duration_ms: t.duration_ms + add }), "現在沒有定時器。");
   }
 
@@ -209,6 +212,19 @@ export class AlarmCenter {
   /** 檢查到期與自動停止，再排下一次檢查。Mac 醒來時由 App 呼叫；平常由自己的計時器呼叫。 */
   tick(): void {
     if (this.disposed) return;
+    try {
+      this.check();
+    } catch (err) {
+      // 寫檔失敗（磁碟滿、權限）：不讓排程或整個核心掛掉；狀態沒變，10 秒後再試（照實記 log，不假裝已開始響）。
+      this.options.log?.(`鬧鐘／定時器：檢查到期時沒辦法保存（${(err as Error).message}），10 秒後再試`);
+      if (this.timer !== null) this.clock.clearTimeout(this.timer);
+      this.timer = this.clock.setTimeout(() => this.tick(), RETRY_MS);
+      return;
+    }
+    this.schedule();
+  }
+
+  private check(): void {
     if (this.timer !== null) this.clock.clearTimeout(this.timer);
     this.timer = null;
     const now = this.clock.now();
@@ -243,7 +259,6 @@ export class AlarmCenter {
         }
       }
     }
-    this.schedule();
   }
 
   dispose(): void {

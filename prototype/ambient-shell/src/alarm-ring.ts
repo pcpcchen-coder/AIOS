@@ -161,9 +161,15 @@ export class AlarmRing {
     const rampS = this.view?.prefs.ramp_s ?? 30;
     const id = ring.id;
     void sound.start({ peak: this.options.peak(), rampS, elapsedMs: Math.max(0, this.serverNow() - ring.started_at) }).then((playing) => {
-      if (this.acked.has(id)) return;
-      this.acked.add(id);
-      void this.options.post("/api/alarms/ack", { ring_id: id, playing, ...(playing ? {} : { reason: "audio_context_not_running" }) }).catch(() => undefined);
+      // 被新的鈴或停止取代：這次的結果不代表能不能出聲，不回報。
+      if (this.sound !== sound || this.acked.has(id)) return;
+      // 同一個鈴聲代表這個頁面所有正在響的鈴（好幾個定時器同時到）。
+      const ids = playing ? [...new Set([id, ...this.activeRings().map((r) => r.id)])] : [id];
+      for (const ringId of ids) {
+        if (this.acked.has(ringId)) continue;
+        this.acked.add(ringId);
+        void this.options.post("/api/alarms/ack", { ring_id: ringId, playing, ...(playing ? {} : { reason: "audio_context_not_running" }) }).catch(() => undefined);
+      }
     });
   }
 

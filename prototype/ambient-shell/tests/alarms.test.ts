@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { createServer as createNetServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -246,6 +246,26 @@ describe("AlarmCenter (fake clock)", () => {
     expect(c.awakeNeeded()).toBe(true);
   });
 
+  it("a write failure during a scheduled check does not throw out of the timer; it logs and retries in 10 s", () => {
+    const { c, clock, dir, logs } = center();
+    c.startTimer({ duration_s: 5, label: "x" });
+    // 暫存檔的位置被資料夾占住：寫檔一定失敗（root 也一樣）。
+    mkdirSync(join(dir, "alarms.json.tmp"));
+    expect(() => clock.advance(5_000)).not.toThrow();
+    expect(c.rings()).toEqual([]);
+    expect(logs.join("\n")).toMatch(/沒辦法保存/);
+    rmSync(join(dir, "alarms.json.tmp"), { recursive: true });
+    clock.advance(10_000);
+    expect(c.rings()[0]).toMatchObject({ label: "x", late_ms: 10_000 });
+  });
+
+  it("extending past 24 hours in total is refused", () => {
+    const { c } = center();
+    c.startTimer({ duration_s: 86_000 });
+    expect(c.extend(undefined, 1_000)).toMatchObject({ ok: false, code: "invalid" });
+    expect(c.extend(undefined, 400)).toMatchObject({ ok: true });
+  });
+
   it("clearAll removes timers, rings and the log but keeps settings", () => {
     const { c, clock, dir } = center();
     c.updatePrefs({ ring_s: 60 });
@@ -272,6 +292,13 @@ describe("app.timer.* tools (built in; no NOUS_AIL)", () => {
     expect(realtimeToolRules({ webSearch: false, mcp: [], home: false, integrations: (l) => a.registry.functionSpecs("live", l) }).join("\n")).toContain("app__timer__start");
     c.updatePrefs({ enabled: false });
     expect(a.registry.functionSpecs("live")).toEqual([]);
+  });
+
+  it("with NOUS_AIL off the integration layer is built-in only and the status panel lists no services", async () => {
+    const { c } = center();
+    const a = ail(c);
+    expect(a.builtinOnly).toBe(true);
+    expect(await a.status.view()).toEqual({ services: [] });
   });
 
   it("start records the page that started the call; list reports remaining time; refused results carry candidates", async () => {

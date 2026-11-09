@@ -147,7 +147,10 @@ export interface AppOptions {
   webSearch?: WebSearch;
   /** 武陵居中控的查詢與控制（docs/12 H0、H1）；未提供時不可用。 */
   home?: HomeBridge;
-  /** AIL-1：整合層（NOUS_AIL=on 才有）。未提供時沒有 /api/integrations/*（一律 404）、settings 沒有 integrations 欄位。 */
+  /**
+   * AIL-1：整合層。未提供時沒有 /api/integrations/*（一律 404）、settings 沒有 integrations 欄位。ALARM-1 起核心一定提供
+   * （至少有內建的定時器）；NOUS_AIL 關閉時 settings.integrations.builtin_only 為 true，頁面不顯示「App 整合」狀態。
+   */
   integrations?: Integrations;
   /** 雙目鏡頭設定（docs/11，通常是 CameraSettingsStore）；未提供或未啟用時頁面不允許使用鏡頭。 */
   camera?: CameraSettingsSource;
@@ -329,7 +332,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         ...(options.dayNight ? { day_night: options.dayNight.view() } : {}),
         ...(options.alarms ? { alarms: options.alarms.view(source) } : {}),
         ...(options.memories ? { memories: options.memories.view() } : {}),
-        ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name) } } : {}),
+        ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name), ...(options.integrations.builtinOnly ? { builtin_only: true } : {}) } } : {}),
         // VCR-2：只有註冊了 voice_relay 才有這個鍵（沒有時輸出和之前完全相同）。
         ...(options.integrations?.voiceRelay ? { voice_relay: true } : {}),
       };
@@ -528,8 +531,9 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         try {
           return work();
         } catch (err) {
-          if (err instanceof AlarmPatchError) throw new HttpError(400, err.message);
-          throw new HttpError(500, `定時器沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+          if (err instanceof AlarmPatchError) throw new HttpError(400, "鬧鐘與定時器的設定值不正確");
+          console.warn(`鬧鐘／定時器：沒有保存（${(err as Error).message}）`);
+          throw new HttpError(500, "定時器沒有保存（無法寫入設定檔）");
         }
       };
       if (path === ALARM_WRITE_PATH) saved(() => alarms.updatePrefs(body as Record<string, unknown>));

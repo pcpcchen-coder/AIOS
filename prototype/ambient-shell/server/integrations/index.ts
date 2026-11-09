@@ -20,6 +20,8 @@ export interface Integrations {
   registry: IntegrationRegistry;
   dispatcher: IntegrationDispatcher;
   status: IntegrationStatusBoard;
+  /** ALARM-1：NOUS_AIL 關閉、整合層只有核心內建工具（設定頁不顯示「App 整合」狀態）。 */
+  builtinOnly: boolean;
   /** VCR-2：voice_relay 有註冊時才有（設定頁的語音中繼診斷用；不給模型）。 */
   voiceRelay?: VoiceRelayAdapter;
 }
@@ -136,5 +138,5 @@ export function createIntegrations(config: Config["ail"], log: (line: string) =>
     else log(id === "voice_relay" && !config.vcr ? "整合層：voice_relay 未啟用（NOUS_VCR=off），略過" : `整合層：${id} 未啟用，略過`);
   }
   const audit = (e: AuditEntry) => log(`整合層：${e.requestId.slice(0, 8)} ${e.tool} ${e.route} → ${e.status}${e.reason ? `（${e.reason}）` : ""} ${e.ms} ms`);
-  return { registry, dispatcher: new IntegrationDispatcher(registry, { audit }), status: new IntegrationStatusBoard(registry), ...(voiceRelay ? { voiceRelay } : {}) };
+  return { registry, dispatcher: new IntegrationDispatcher(registry, { audit }), status: new IntegrationStatusBoard(registry, { hidden: new Set(builtinEnabled.keys()) }), builtinOnly: !config.enabled, ...(voiceRelay ? { voiceRelay } : {}) };
 }
