@@ -345,7 +345,13 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     clientVersion: config.nousVersion,
     capabilities: () => ({ webSearch: true, home: home.available }),
     // memoryOn：這通記憶開著而且有 codex 同意（LiveMemoryBinding.memoryActive）才加記憶規則；否則和 MEM-2 之前一樣。
-    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp, memory: !!memoryOn, ...(calendarReader ? { calendarBriefing: true } : {}), ...(dayNight.coreMode() === "night" ? { night: true } : {}) }, ctx.locale),
+    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), {
+      integrations: liveCaps().integrations,
+      mcp: config.realtimeMcp,
+      memory: !!memoryOn,
+      calendarBriefing: !!calendarReader,
+      night: dayNight.coreMode() === "night",
+    }, ctx.locale),
     // PRO-2：行程問句的回答（核心從 sideband 聽）。
     followUp: (sessionId: string) => proactive.followUp(sessionId),
     // MEM-4b：voice（受保護的語音交辦）只改 delegate_task 的處理，不影響說明與工具表。
