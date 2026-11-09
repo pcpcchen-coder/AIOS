@@ -8,7 +8,7 @@
   "commit_sha": "",
   "status": "running",
   "started_at": "2026-11-09T22:40:46.148Z",
-  "updated_at": "2026-11-09T23:27:16.158Z",
+  "updated_at": "2026-11-09T23:27:20.623Z",
   "ended_at": null,
   "steps": [
     {
@@ -59,8 +59,8 @@
     {
       "id": "review",
       "title": "review",
-      "status": "pending",
-      "started_at": null,
+      "status": "running",
+      "started_at": "2026-11-09T23:27:20.623Z",
       "ended_at": null,
       "note": "",
       "evidence": []
@@ -145,6 +145,13 @@
       "step_id": "verify",
       "status": "passed",
       "note": "tsc, vitest 3232 pass/5 skip, vite build, node --check, verify-aios PASS, bilingual check, diff --check, headless screenshots reviewed"
+    },
+    {
+      "at": "2026-11-09T23:27:20.623Z",
+      "type": "step_updated",
+      "step_id": "review",
+      "status": "running",
+      "note": ""
     }
   ],
   "provenance": "Agent self-reported"
