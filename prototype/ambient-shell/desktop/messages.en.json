@@ -213,5 +213,9 @@
   "自動：依夜間時段 {0}:00–{1}:00 與各裝置的鏡頭": "Automatic: by the night hours {0}:00–{1}:00 and each device's camera",
   "手動切換：維持日間模式到 {0}": "Manual: staying in day mode until {0}",
   "手動切換：維持夜間模式到 {0}": "Manual: staying in night mode until {0}",
-  "日夜間設定沒有保存": "Day/night settings were not saved"
+  "日夜間設定沒有保存": "Day/night settings were not saved",
+  "「{0}」時間到": "“{0}” is done",
+  "定時器時間到": "Timer is done",
+  "晚了 {0} 分鐘才響（Mac 睡眠或 Nous 沒在執行）。": "Rang {0} minutes late (the Mac was asleep or Nous was not running).",
+  "在 Nous 畫面按「停止」或舉起手掌停止。": "Press “Stop” on the Nous screen or raise your palm to stop it."
 }

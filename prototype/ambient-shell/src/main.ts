@@ -1,4 +1,7 @@
 import { t, msg, getLocale, setLocale, onLocaleChange, transcriptText, applyStaticTranslations, type Locale } from "./i18n.ts";
+import { AlarmRing } from "./alarm-ring.ts";
+import { browserRingSound } from "./alarm-sound.ts";
+import { ALARM_WRITE_PATH, ringPeakVolume } from "../shared/alarm.ts";
 import "./style.css";
 import { computeProgress, isActive, queueText, sortForProgress } from "../shared/progress.ts";
 import { DEFAULT_FACE_TUNING } from "../shared/face-tuning.ts";
@@ -302,6 +305,44 @@ const processingCue = new ProcessingCue({
   onPing: () => brain.cuePing(),
 });
 const cueGuardOwners: (WakeController | null)[] = [];
+voiceVolume.onChange(() => alarmRing.refreshVolume());
+
+/**
+ * ALARM-1：這個頁面的響鈴與倒數（真相在核心的 settings.alarms）。響鈴期間：喚醒偵測暫停（鈴聲不能觸發喚醒）、回憶模式收起、
+ * 處理中音效暫停、通話不掛斷但 Nous 的聲音靜音（George 2026-11-09「較溫和」）。
+ */
+let alarmGuardOwner: WakeController | null = null;
+let alarmMutedAudio: HTMLAudioElement | null = null;
+const alarmRing = new AlarmRing({
+  createSound: () => browserRingSound({ sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) }),
+  post: (path, body) => api.alarmPost(path, body).then((value) => {
+    applySettings(value, true);
+    render();
+  }),
+  peak: () => ringPeakVolume(voiceVolume.current),
+  onRingingChange: (ringing) => {
+    if (ringing) {
+      alarmGuardOwner = wake;
+      wake?.begin("alarm");
+      if (liveAudio && !liveAudio.muted) {
+        liveAudio.muted = true;
+        alarmMutedAudio = liveAudio;
+      }
+      globalThis.speechSynthesis?.pause();
+      wakeMemoriesNow();
+    } else {
+      alarmGuardOwner?.end("alarm");
+      alarmGuardOwner = null;
+      if (alarmMutedAudio && alarmMutedAudio === liveAudio) alarmMutedAudio.muted = false;
+      alarmMutedAudio = null;
+      globalThis.speechSynthesis?.resume();
+    }
+    syncMemories();
+    syncProcessingCue();
+    // DN-3：Pi 夜間關著螢幕時，響鈴算「忙」，螢幕立刻亮起來。
+    syncScreen();
+  },
+});
 
 const tasks = new Map<string, Task>();
 const artifacts = new Map<string, Artifact>();
@@ -403,6 +444,8 @@ const realtimeCallbacks: RealtimeCallbacks = {
   },
   onUserTranscript: (text) => {
     showTranscript("user", text);
+    // ALARM-1：通話中鈴響時，整句是「停」「關掉」「知道了」就在本機停鈴（不等模型）。
+    alarmRing.stopByText(text, "voice");
     handleCameraCommand(text);
     // 說「收起」：記憶預設選人那一行也只藏起來（核心照常選定）。
     if (matchVoiceCommand(text)?.kind === "dismiss") presenceNotice.hide();
@@ -976,6 +1019,7 @@ function applyEffectiveSettings(value: SettingsView, preserveEntry = false): voi
   syncAudioPrefs(value);
   clockCorner.setEnabled(value.clock?.enabled === true);
   homeCorner.setEnabled(value.home_corner?.enabled === true);
+  alarmRing.sync(value.alarms);
   // DN-2：核心的日夜間設定或手動切換可能變了（另一台裝置、選單列、語音）。
   migrateDayNightPrefs();
   syncLightMeter();
@@ -1756,6 +1800,8 @@ const sense = new SenseController({
     ambient.update(snapshot);
   },
   interruptSpeech: () => {
+    // ALARM-1：鈴響時舉手掌＝停止響鈴（不再往下打斷其他東西）。
+    if (alarmRing.stop("gesture")) return;
     // WK-01a：喚醒提示音播放中張掌＝取消這次喚醒（不觸發）。
     if (wake?.cancelEarcon()) return;
     // 即時語音還在連線（還沒打招呼）時舉手掌：直接結束這次語音，不再打招呼（ID-02 第 9 步）。
@@ -2776,6 +2822,11 @@ function latestArtifactTask(): Task | undefined {
 async function handleCommand(text: string, source: "typed" | "speech" = "typed"): Promise<void> {
   // WK-02：喚醒開始的通話中使用者打字＝有人在，這通不再因為沒出聲而自動結束。
   if (source === "typed") wakeCall?.disarm();
+  // ALARM-1：鈴響時打「停」「好了」或按麥克風說，就在本機停鈴（不送給 AI）。
+  if (alarmRing.stopByText(text, source === "typed" ? "typed" : "voice")) {
+    dispatch({ type: "input.close" });
+    return;
+  }
   if (handleCameraCommand(text)) {
     dispatch({ type: "input.close" });
     return;
@@ -3070,6 +3121,26 @@ const actions: ViewActions = {
       (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`主動提醒設定沒有保存：${(err as Error).message}` }),
     );
   },
+  updateAlarms(patch) {
+    const requestId = userRequest();
+    void api.alarmPost(ALARM_WRITE_PATH, patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘與定時器設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  clearAlarms() {
+    const requestId = userRequest();
+    void api.alarmPost("/api/alarms/clear", {}).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`沒有清除：${(err as Error).message}` }),
+    );
+  },
   updateClock(patch) {
     const requestId = userRequest();
     void api.updateClock(patch).then(
@@ -3337,6 +3408,7 @@ function memoriesBusy(): boolean {
     || processingCue.active
     || shell.surface !== null || shell.listening
     || speechActive > 0
+    || alarmRing.ringing
     || document.body.dataset.facing === "yes";
 }
 
@@ -3408,7 +3480,7 @@ function syncProcessingCue(phase = document.body.dataset.conversationState): boo
     owners: currentProcessingSource(),
     enabled: settings?.audio?.prefs.processing_cue !== false && !currentNightEffects().muteProcessingCue,
     callOn: realtime.on || realtimeStarting,
-    speaking: speechActive > 0 || conversation.playing || realtime.playing || phase === "speaking",
+    speaking: speechActive > 0 || conversation.playing || realtime.playing || phase === "speaking" || alarmRing.ringing,
     capturing: voice.capturing || conversation.capturing || realtime.capturing,
     hidden: document.visibilityState === "hidden",
   });
@@ -3830,6 +3902,12 @@ canvas.addEventListener("click", (e) => {
 window.addEventListener("keydown", (e) => {
   if (e.isComposing) return;
   dismissFirstHint();
+  // ALARM-1：鈴響時 Esc 或空白鍵＝停止響鈴（只做這件事）。
+  if (alarmRing.ringing && (e.key === "Escape" || e.key === " ")) {
+    e.preventDefault();
+    alarmRing.stop("key");
+    return;
+  }
   if (e.key === "Escape") {
     e.preventDefault();
     // WK-01a：喚醒提示音播放中按 Esc＝取消這次喚醒（不觸發），其他不動。
@@ -3995,6 +4073,7 @@ onSpeechActivity((speaking) => {
 });
 document.addEventListener("visibilitychange", () => syncProcessingCue());
 onLocaleChange(() => {
+  alarmRing.refreshLocale();
   const selected = getLocale();
   const revision = settingsRevision;
   void api.getSettings(selected).then(value => {

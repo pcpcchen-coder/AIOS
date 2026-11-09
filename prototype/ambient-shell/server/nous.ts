@@ -61,6 +61,10 @@ import { FolderMemoriesSource, memoriesFeature, MemoriesSettingsStore } from "./
 import { GooglePhotosCache, googleMemories, GooglePicker, SIPS_PATH, sipsConverter } from "./memories-google.ts";
 import { defaultGogRunner, resolveGogPath } from "./integrations/gog/runner.ts";
 import { MEMORIES_GOOGLE_REASON } from "../shared/memories.ts";
+import { AlarmCenter } from "./alarms.ts";
+import { TimerAdapter } from "./integrations/adapters/timer.ts";
+import type { RingRecord } from "../shared/alarm.ts";
+import { MAIN_SOURCE } from "../shared/terminal.ts";
 import { fitBriefing, fitsLiveAppend, ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
@@ -109,6 +113,11 @@ export interface NousOptions {
   onTerminalChange?: (status: TerminalStatus) => void;
   /** PRO-1：查天氣用的 fetch（測試注入假的 Open-Meteo；未提供時用全域 fetch）。 */
   weatherFetch?: typeof fetch;
+  /**
+   * ALARM-1：定時器的 App 掛勾。onRingStart：開始響鈴（App 發系統通知當備援）；onAwakeChange：有定時器在跑或正在響
+   * （App 據此阻止系統閒置睡眠）。未提供時只在頁面響。
+   */
+  alarms?: { onRingStart?(ring: RingRecord): void; onAwakeChange?(needed: boolean): void };
 }
 
 export interface TasksInjection {
@@ -199,6 +208,8 @@ export interface NousHandle {
   };
   /** 終端機（Pi kiosk）心跳的連線狀態；不是服務模式開關。 */
   terminals: { status(): TerminalStatus };
+  /** ALARM-1：Mac 醒來時檢查錯過的定時器；有定時器在跑或正在響時 awakeNeeded 為 true（App 阻止閒置睡眠）。 */
+  alarms: { tick(): void; awakeNeeded(): boolean };
   /**
    * 費用防護（2026-11-06）：App 主程序在 Mac 鎖定（scope "app"：只結束 App 主視窗開始的通話）或睡眠（全部）時結束即時語音
    * （通知頁面、寫費用原因、向上游掛斷）。沒有即時語音時什麼都不做。
@@ -293,7 +304,30 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     new FolderMemoriesSource({ dir: config.memoriesDir, create: true, log }),
     googleMemories(googleCache, googlePicker),
   );
-  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } });
+  // ALARM-1：定時器由核心保存與排程（不需要 NOUS_AIL）；工具是整合層的內建 Adapter（app.timer.*），兩條語音路徑共用。
+  let pageConnected: (source: string) => boolean = () => false;
+  let awake = false;
+  let alarmsReady: AlarmCenter | null = null;
+  const alarms = new AlarmCenter({
+    dir: config.configDir,
+    log,
+    isConnected: (source) => pageConnected(source),
+    onRingStart: (ring) => options.alarms?.onRingStart?.(ring),
+    onChange: () => {
+      notify();
+      // 建構時讀回檔案就可能改變狀態（到期、錯過）：那時 alarmsReady 還是 null，啟動後下面再算一次。
+      if (!alarmsReady) return;
+      const needed = alarmsReady.awakeNeeded();
+      if (needed !== awake) {
+        awake = needed;
+        options.alarms?.onAwakeChange?.(needed);
+      }
+    },
+  });
+  alarmsReady = alarms;
+  awake = alarms.awakeNeeded();
+  if (awake) options.alarms?.onAwakeChange?.(true);
+  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } }, [{ adapter: new TimerAdapter(alarms), enabled: () => alarms.enabled }]);
   // PRO-2：CAL-1 有註冊時，認出行程擁有者（George）才說今天的行程（核心自己讀，不經模型）。
   const calendarReader = calendarReaderFrom(ail?.registry);
   const proactive = new ProactiveBriefing({ settings: proactiveSettings, log: new ProactiveDailyLog({ dir: config.configDir, log }), weather, calendar: calendarReader, logLine: log });
@@ -326,7 +360,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     followUp: (sessionId: string) => proactive.followUp(sessionId),
     // MEM-4b：voice（受保護的語音交辦）只改 delegate_task 的處理，不影響說明與工具表。
     caller: (ctx, mem, voice) =>
-      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}), ...(ail ? { integrations: { dispatcher: ail.dispatcher, sessionId: ctx.sessionId } } : {}) }),
+      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}), ...(ail ? { integrations: { dispatcher: ail.dispatcher, sessionId: ctx.sessionId, ...(ctx.page ? { page: ctx.page } : {}) } } : {}) }),
     // MEM-2：每通通話一個記憶 binding（server/memory/live.ts）；瀏覽器版沒有記憶層。
     // MEM-3：頁面的確認卡（MCP、家電）開著時不開語音記憶卡（兩條路徑一致）。
     ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open, page: ctx.page }) ?? null } : {}),
@@ -504,6 +538,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     webSearch,
     home,
     ...(ail ? { integrations: ail } : {}),
+    alarms,
     camera,
     faceTuning,
     voice,
@@ -535,6 +570,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     distDir: options.distDir,
   });
   notify = server.notifySettings;
+  pageConnected = (source) => server.connectedSources().has(source) && (source === MAIN_SOURCE || terminals.status().terminals.some((t) => t.id === source));
   notifyPresence = server.notifyMemoryPresence;
 
   // 只綁本機位址，不對區域網路開放。
@@ -587,6 +623,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
       },
     },
     terminals: { status: () => terminals.status() },
+    // ALARM-1：Mac 醒來時立刻檢查錯過的定時器；awakeNeeded 給 App 決定要不要阻止閒置睡眠。
+    alarms: { tick: () => alarms.tick(), awakeNeeded: () => alarms.awakeNeeded() },
     // 費用防護：Mac 鎖定（只結束 App 主視窗的通話）或睡眠（全部）時，desktop/main.mjs 經這裡結束即時語音。
     realtime: { endAll: (reason: "os_lock" | "suspend", scope?: "app" | "all") => server.realtimeSessions?.endAll(reason, scope) ?? Promise.resolve() },
     ...(options.tasks ? { tasks: (() => {
@@ -600,6 +638,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         identity?.shutdown();
         void memory?.shutdown();
         terminals.dispose();
+        alarms.dispose();
         // MEM-4c：結束 App 時丟棄解密內容與索引（只是放掉參照，不是安全抹除）。
         if (plaintextTimer) clearInterval(plaintextTimer);
         store.dropPlaintext("quit");

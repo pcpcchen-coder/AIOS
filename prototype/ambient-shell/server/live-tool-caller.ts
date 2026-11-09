@@ -174,7 +174,7 @@ export interface LiveToolCallerOptions {
    * AIL-1：整合層（NOUS_AIL=on 才有）。app__ 開頭的工具在核心由 Dispatcher 執行（不經頁面），和頁面工具共用 maxHostCalls 上限；
    * 工具時限不超過 60 秒（< MAX_HOST_TIMEOUT_MS），所以 DELEGATION_BUDGET_MS 不變。
    */
-  integrations?: { dispatcher: IntegrationDispatcher; sessionId: string };
+  integrations?: { dispatcher: IntegrationDispatcher; sessionId: string; page?: string };
 }
 
 export class LiveToolCaller {
@@ -269,12 +269,12 @@ export class LiveToolCaller {
               output = { ok: false, error: `這次交辦的工具呼叫已達上限（${CALLER_LIMITS.maxHostCalls} 次），沒有執行；請使用者再說一次。` };
             } else {
               hostCalls++;
-              const { dispatcher, sessionId } = this.options.integrations;
+              const { dispatcher, sessionId, page } = this.options.integrations;
               const started = this.now();
               const key = `${hostCalls}:${call.call_id}`;
               const sideEffect = dispatcher.effectOf(call.name) !== "read";
               if (sideEffect) unsettled.add(key);
-              output = toModelOutput(await untilAborted(dispatcher.execute({ tool: call.name, args: call.arguments, route: "live", actor: "agent", sessionId, signal: combined }), combined));
+              output = toModelOutput(await untilAborted(dispatcher.execute({ tool: call.name, args: call.arguments, route: "live", actor: "agent", sessionId, signal: combined, ...(page ? { page } : {}) }), combined));
               if (output.status !== "unknown") unsettled.delete(key);
               executed.push({ name: call.name, output });
               tools.push({ name: call.name, ok: output.ok === true, ms: this.now() - started });

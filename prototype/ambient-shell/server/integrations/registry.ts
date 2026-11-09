@@ -19,7 +19,7 @@ interface Entry {
 
 export interface RegistryOptions {
   /** 核心設定啟用的 Adapter ID（NOUS_AIL_SERVICES）。不在清單上的 Adapter 可以註冊（給狀態頁看），但沒有任何工具可用。 */
-  enabled: ReadonlySet<string>;
+  enabled: { has(adapterId: string): boolean };
 }
 
 export class IntegrationRegistry {

@@ -1,3 +1,4 @@
+import type { AlarmsView } from "./alarm.ts";
 import type { FaceTuningView } from "./face-tuning.ts";
 import type { Locale } from "./i18n.mjs";
 import type { CameraSettings } from "./sense.ts";
@@ -175,6 +176,8 @@ export interface SettingsView {
   home_corner?: HomeCornerSettingsView;
   /** DN-2：核心共用的日夜間設定與手動切換（Mac 與 Pi 共用；鏡頭亮度各頁面自己量）。 */
   day_night?: DayNightSettingsView;
+  /** ALARM-1：定時器與響鈴（核心保存與排程；只有這個頁面要響的鈴 here 是 true）。 */
+  alarms?: AlarmsView;
   /** MEMO-1 回憶模式：設定與來源狀態（只有數量，不含檔名或路徑）。 */
   memories?: MemoriesSettingsView;
 }

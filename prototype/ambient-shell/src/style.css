@@ -2071,3 +2071,143 @@ body[data-night-dim="on"].has-surface::after {
     transition-duration: 0.4s;
   }
 }
+
+/* ALARM-1：定時器響鈴（只在這個頁面要響時出現；data-visibility-reason="alarm_ringing"）。大字時間、名稱與「停止」，
+   不是常駐畫面；停止或自動停止後整個移除。z-index 高於 Surface 與時鐘，低於系統確認對話。 */
+.alarm-ring {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(10px, 2.2vh, 26px);
+  padding: 16px;
+  background: radial-gradient(ellipse at center, rgba(255, 179, 92, 0.18), rgba(3, 5, 11, 0.92) 70%);
+  color: var(--text);
+  text-align: center;
+  animation: alarm-ring-in 240ms ease-out;
+}
+@keyframes alarm-ring-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.alarm-ring-time {
+  font-size: clamp(4rem, 22vh, 14rem);
+  font-weight: 200;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.alarm-ring-title {
+  font-size: clamp(1.6rem, 6vh, 3.6rem);
+  font-weight: 500;
+  color: var(--amber);
+  max-width: 92vw;
+  overflow-wrap: anywhere;
+}
+.alarm-ring-note {
+  font-size: clamp(1rem, 2.6vh, 1.5rem);
+  color: var(--muted);
+}
+.alarm-ring-stop {
+  margin-top: clamp(6px, 2vh, 20px);
+  min-width: min(70vw, 320px);
+  min-height: 64px;
+  padding: 14px 36px;
+  border: 2px solid var(--amber);
+  border-radius: 999px;
+  background: rgba(255, 179, 92, 0.16);
+  color: var(--text);
+  font-size: clamp(1.4rem, 4vh, 2.4rem);
+  font-weight: 600;
+  cursor: pointer;
+}
+.alarm-ring-stop:focus-visible {
+  outline: 3px solid var(--cyan);
+  outline-offset: 4px;
+}
+.alarm-ring-hint {
+  font-size: clamp(0.85rem, 1.8vh, 1.1rem);
+  color: var(--muted);
+  max-width: 92vw;
+}
+
+/* 有定時器時右下角按需顯示倒數（data-visibility-reason="timer_running"）；沒有定時器就移除。 */
+.timer-chip {
+  position: fixed;
+  right: max(16px, 1.6vw);
+  bottom: max(16px, 2vh);
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: clamp(140px, 14vw, 260px);
+  max-width: min(46vw, 320px);
+  padding: 8px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.timer-chip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: clamp(1rem, 2.4vh, 1.6rem);
+}
+.timer-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.timer-chip-row[data-state="paused"] .timer-chip-left {
+  color: var(--amber);
+}
+.timer-chip-more {
+  font-size: 0.85em;
+  color: var(--muted);
+}
+body.alarm-ringing .timer-chip {
+  display: none;
+}
+
+/* 自動停止或錯過的一行說明（data-visibility-reason="alarm_missed_or_auto_stopped"）；按「知道了」清掉。 */
+.alarm-notice {
+  position: fixed;
+  left: 50%;
+  bottom: max(16px, 2vh);
+  z-index: 7;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(92vw, 640px);
+  padding: 8px 10px 8px 16px;
+  border: 1px solid rgba(255, 179, 92, 0.45);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: clamp(0.9rem, 2vh, 1.15rem);
+}
+.alarm-notice-ok {
+  flex: none;
+  padding: 6px 14px;
+  border: 1px solid var(--panel-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+@media (max-width: 640px) {
+  .alarm-notice {
+    border-radius: 14px;
+  }
+  .timer-chip {
+    max-width: calc(100vw - 32px);
+  }
+}

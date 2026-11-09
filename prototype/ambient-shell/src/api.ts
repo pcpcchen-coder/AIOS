@@ -119,6 +119,8 @@ export const api = {
   weatherNow: (signal?: AbortSignal) => call<WeatherNowView>("GET", WEATHER_NOW_PATH, undefined, getLocale(), false, signal),
   /** HOME-1「左上角家中狀態」的顯示開關（Mac 視窗、Pi 終端機）。 */
   updateHomeCorner: (patch: HomeCornerPrefsPatch) => call<SettingsView>("POST", HOME_CORNER_WRITE_PATH, patch),
+  /** ALARM-1：/api/settings/alarms 與 /api/alarms/*（停止、回報出聲、清掉通知、取消定時器、全部清除）；回應是最新的設定。 */
+  alarmPost: (path: string, body: Record<string, unknown>) => call<SettingsView>("POST", path, body),
   /** HOME-1：左上角的室內讀值、燈與冷氣（唯讀，沒有參數）。 */
   homeOverview: (signal?: AbortSignal) => call<HomeOverviewView>("GET", HOME_OVERVIEW_PATH, undefined, getLocale(), false, signal),
   /** MEMO-1「回憶模式」。 */

@@ -184,11 +184,23 @@ These are not fixed phrases. AI decides whether to use tools from meaning.
 | 「客廳現在幾度」 | Query Wuling Home sensors/device state | Requires realtime and controller SMARTHOME_URL, SMARTHOME_TOKEN |
 | 「客廳主燈關掉」「書桌燈調到 60%」「色溫調到 3000K」「冷氣調 26 度」「電視大聲一點」 | Control one device and report controller readback: success only if confirmed; sent/unconfirmed requires checking. AIFA power/temperature/mode/fan and IR one-key commands have no readback, only “sent, please confirm.” Powering off AIFA also cancels controller timers; Nous explains without knowing whether timers existed. One device at a time | Requires realtime and Wuling controller SMARTHOME_URL, SMARTHOME_TOKEN |
 
+<a id="定時器即時語音由模型判斷不保證"></a>
+#### Timers (realtime, model decides, no guarantee)
+
+Timers are saved and scheduled by the Nous core and survive a restart. While the Mac sleeps the core stops; after waking it still rings timers that are up to 30 minutes late and says how late, and only logs older ones as missed.
+
+| Ask | Possible AI action | Conditions |
+|---|---|---|
+| 「計時 10 分鐘」「泡麵 3 分鐘」「5 分鐘後叫我」 | Sets a timer (it can have a name, and several can run at once). When it ends it rings on the device where it was set (every screen if that device is offline); a countdown shows in the bottom-right corner while timers exist | Requires realtime and “Alarms and timers” on in settings (on by default) |
+| 「泡麵還剩多久」「有哪些定時器」 | Says how much time each timer has left | Requires realtime |
+| 「暫停泡麵」「繼續」「再加 5 分鐘」「取消雞蛋的定時器」「全部取消」 | Pauses, resumes, extends or cancels; with several timers and none named, the AI asks which one | Requires realtime |
+
 <a id="不用說話"></a>
 #### Without speaking
 
 | Operation | Effect |
 |---|---|
+| While a timer rings | Press “Stop”, Esc or Space, raise an open palm (needs the camera and palm stop), or type or say during a call a whole sentence such as 「停」「好了」「知道了」「關掉」 (stop, OK, got it, turn it off) to stop ringing on every screen. The wake word is paused while it rings so the ringtone cannot trigger it, so without a call you cannot stop it by voice. After 5 minutes with nobody stopping it, it stops by itself and this is logged |
 | Esc | During realtime playback, interrupt (ChatGPT plan can only mute this reply, not cancel generation). With a realtime view open, hide view only. During browser voice playback, interrupt. Otherwise dismiss and end voice |
 | Click top-right voice indicator | End browser/realtime voice |
 | Raise open palm | Stop Nous playback without task cancellation, requiring camera and palm stop |

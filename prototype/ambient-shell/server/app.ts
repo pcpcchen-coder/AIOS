@@ -65,6 +65,8 @@ import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
 import { VoiceRelayStoreError } from "./integrations/voice-relay/store.ts";
 import { HOME_TOOL } from "./integrations/adapters/home.ts";
 import type { IntegrationToolId } from "../shared/integrations.ts";
+import { ALARM_WRITE_PATH, AlarmPatchError, STOP_SOURCES, type StopSource } from "../shared/alarm.ts";
+import type { AlarmCenter } from "./alarms.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
@@ -214,6 +216,8 @@ export interface AppOptions {
    */
   /** DN-2：日夜間模式的共用設定與手動切換（settings.day_night 與 POST /api/settings/day-night）。未提供時兩者都沒有。 */
   dayNight?: { view(): DayNightSettingsView; update(patch: DayNightPatch): DayNightSettingsView };
+  /** ALARM-1：定時器與響鈴（settings.alarms 與 /api/settings/alarms、/api/alarms/*）。未提供時都沒有。 */
+  alarms?: AlarmCenter;
   homeCorner?: { view(source: string): HomeCornerSettingsView; update(patch: HomeCornerPrefsPatch): HomeCornerPrefs; overview(): Promise<HomeOverviewView> };
   /**
    * MEMO-1：回憶模式（設定與本機資料夾的照片、影片）。未提供時 settings 沒有 memories，相關路由 404。
@@ -269,7 +273,7 @@ class HttpError extends Error {
   }
 }
 
-export function createApp(options: AppOptions): Server & { notifySettings(): void; notifyMemoryPresence(): void; realtimeSessions: RealtimeSessions | null } {
+export function createApp(options: AppOptions): Server & { notifySettings(): void; notifyMemoryPresence(): void; connectedSources(): Set<string>; realtimeSessions: RealtimeSessions | null } {
   const { store, runner, auth, chat, realtime, webSearch, home, codexAuth } = options;
   /** SSE 串流：client_id → 回應。工具呼叫只送到擁有工作階段的那一條。 */
   const clients = new Map<string, { response: ServerResponse; source: string }>();
@@ -323,6 +327,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         ...(options.clock ? { clock: options.clock.view(source) } : {}),
         ...(options.homeCorner ? { home_corner: options.homeCorner.view(source) } : {}),
         ...(options.dayNight ? { day_night: options.dayNight.view() } : {}),
+        ...(options.alarms ? { alarms: options.alarms.view(source) } : {}),
         ...(options.memories ? { memories: options.memories.view() } : {}),
         ...(options.integrations ? { integrations: { tools: options.integrations.registry.functionSpecs("api_key").map((t) => t.name) } } : {}),
         // VCR-2：只有註冊了 voice_relay 才有這個鍵（沒有時輸出和之前完全相同）。
@@ -515,6 +520,35 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       }
       return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
+    if (options.alarms && method === "POST" && (path === ALARM_WRITE_PATH || path.startsWith("/api/alarms/"))) {
+      const alarms = options.alarms;
+      const source = pageSource(req.headers["x-nous-terminal"]);
+      const body = await readJson(req);
+      const saved = <T>(work: () => T): T => {
+        try {
+          return work();
+        } catch (err) {
+          if (err instanceof AlarmPatchError) throw new HttpError(400, err.message);
+          throw new HttpError(500, `定時器沒有保存（無法寫入設定檔：${(err as Error).message}）`);
+        }
+      };
+      if (path === ALARM_WRITE_PATH) saved(() => alarms.updatePrefs(body as Record<string, unknown>));
+      else if (path === "/api/alarms/stop") {
+        const by: StopSource = (STOP_SOURCES as readonly unknown[]).includes(body.by) ? (body.by as StopSource) : "button";
+        saved(() => alarms.stopRings(by));
+      } else if (path === "/api/alarms/ack") {
+        if (typeof body.ring_id !== "string" || body.ring_id.length > 40) throw new HttpError(400, "ring_id is required");
+        saved(() => alarms.ack(body.ring_id as string, source, body.playing === true, typeof body.reason === "string" ? body.reason : undefined));
+      } else if (path === "/api/alarms/notice/clear") saved(() => alarms.clearNotice());
+      else if (path === "/api/alarms/timers/cancel") {
+        if (typeof body.id !== "string" || body.id.length > 40) throw new HttpError(400, "id is required");
+        const r = saved(() => alarms.cancel(body.id));
+        if (!r.ok && r.code !== "none" && r.code !== "not_found") throw new HttpError(409, r.message);
+      } else if (path === "/api/alarms/clear") saved(() => alarms.clearAll());
+      else throw new HttpError(404, "not found");
+      return sendJson(res, 200, localizeSettings(settings.view(source), normalizeLocale(req.headers["x-nous-locale"])));
+    }
+
     if (options.dayNight && method === "POST" && path === DAY_NIGHT_WRITE_PATH) {
       let patch: DayNightPatch;
       try {
@@ -834,7 +868,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       res.on("close", () => {
         if (!res.writableEnded) controller.abort();
       });
-      return sendJson(res, 200, await options.integrations.dispatcher.execute({ tool: name, args, route, actor: "agent", sessionId, signal: controller.signal }));
+      const page = sessions.pageOf(sessionId);
+      return sendJson(res, 200, await options.integrations.dispatcher.execute({ tool: name, args, route, actor: "agent", sessionId, signal: controller.signal, ...(page ? { page } : {}) }));
     }
 
     if (method === "POST" && path === "/api/realtime/web-search") {
@@ -1166,6 +1201,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         response.write(`data: ${JSON.stringify(event)}\n\n`);
       }
     },
+    /** ALARM-1：現在有 SSE 串流的頁面來源（"main" 或終端機識別碼）。 */
+    connectedSources: (): Set<string> => new Set([...clients.values()].map((c) => c.source)),
     /** RPI-ID：本次人物世代改變（不含內容）；每個頁面（含 Pi）自己用 status 重讀。Mac 主視窗另有 IPC 通知。 */
     notifyMemoryPresence: () => broadcast({ type: "memory.presence_changed", sequence: ++sequence }),
   });

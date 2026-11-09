@@ -22,6 +22,8 @@ export interface DispatchRequest {
   actor: "user" | "agent";
   sessionId: string;
   signal?: AbortSignal;
+  /** ALARM-1：開始這通的頁面（定時器在建立的那台響）。 */
+  page?: string;
 }
 
 export interface AuditEntry {
@@ -122,7 +124,7 @@ export class IntegrationDispatcher {
       request.signal?.addEventListener("abort", onAbort, { once: true });
     });
     try {
-      const work = found.adapter.execute(id, checked.value, { actor: request.actor, route: request.route, sessionId: request.sessionId, requestId, signal });
+      const work = found.adapter.execute(id, checked.value, { actor: request.actor, route: request.route, sessionId: request.sessionId, requestId, signal, ...(request.page ? { page: request.page } : {}) });
       // 中止或逾時後 Adapter 可能還在跑：不再等它，但它之後丟的錯不能變成未處理的 rejection。
       work.catch(() => undefined);
       const outcome = await Promise.race([work.then((value) => ({ value })), stop.then((why) => ({ why }))]);

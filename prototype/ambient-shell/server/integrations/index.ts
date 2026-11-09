@@ -96,11 +96,29 @@ export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
   },
 };
 
-export function createIntegrations(config: Config["ail"], log: (line: string) => void = () => undefined, known: Record<string, AdapterFactory> = KNOWN_ADAPTERS, deps: AdapterDeps = {}): Integrations | null {
-  if (!config.enabled) return null;
-  const enabled = new Set(config.services.filter((id) => Object.hasOwn(known, id)));
-  for (const id of config.services) if (!enabled.has(id)) log(`整合層：NOUS_AIL_SERVICES 的 ${id} 不是已審核的 Adapter，略過`);
-  const registry = new IntegrationRegistry({ enabled });
+/**
+ * ALARM-1：核心內建的本機工具（定時器）。不看 NOUS_AIL：NOUS_AIL 關閉時整合層只有這些。enabled 每次查詢時讀
+ * （設定頁的「鬧鐘與定時器」開關），關掉時工具不出現在清單、呼叫回 refused disabled。
+ */
+export interface BuiltinAdapter {
+  adapter: IntegrationAdapter;
+  enabled(): boolean;
+}
+
+export function createIntegrations(config: Config["ail"], log: (line: string) => void = () => undefined, known: Record<string, AdapterFactory> = KNOWN_ADAPTERS, deps: AdapterDeps = {}, builtins: readonly BuiltinAdapter[] = []): Integrations | null {
+  if (!config.enabled && !builtins.length) return null;
+  const services = config.enabled ? config.services : [];
+  const enabled = new Set(services.filter((id) => Object.hasOwn(known, id)));
+  for (const id of services) if (!enabled.has(id)) log(`整合層：NOUS_AIL_SERVICES 的 ${id} 不是已審核的 Adapter，略過`);
+  const builtinEnabled = new Map(builtins.map((b) => [b.adapter.id, b.enabled] as const));
+  const registry = new IntegrationRegistry({ enabled: { has: (id) => builtinEnabled.get(id)?.() ?? enabled.has(id) } });
+  for (const b of builtins) {
+    try {
+      registry.register(b.adapter);
+    } catch (err) {
+      log(`整合層：內建的 ${b.adapter.id} 註冊失敗，略過（${err instanceof Error ? err.message.slice(0, 200) : "unknown error"}）`);
+    }
+  }
   let voiceRelay: VoiceRelayAdapter | undefined;
   for (const id of enabled) {
     let adapter: IntegrationAdapter | null;
