@@ -4,7 +4,7 @@
 
 # 架構守門測試 S2（2026-11-10）
 
-對應文件：[23 架構盤點與重整計畫](../23_Architecture_Review_2026-11.md) §3 的 S2；基準數字的算法見[架構盤點的量測與基準線](architecture-review-2026-11-09.md)。**這是靜態分析加上雲端容器的自動化測試，不是產品 gate，也不是實機驗收；它只證明分層與規模沒有比基準更差，不代表任何功能可用。**
+對應文件：[23 架構盤點與重整計畫](../23_Architecture_Review_2026-11.md) §3 的 S2；基準數字的算法見[架構盤點的量測與基準線](architecture-review-2026-11-09.md)。**這是靜態分析加上雲端容器的自動化測試，不是產品 gate，也不是實機驗收；它只證明分層與規模沒有在不知情的情況下比基準更差，不代表任何功能可用。**
 
 ## 1. 範圍
 
@@ -27,9 +27,9 @@
 | 規則 | 判定 | 允許清單 |
 |---|---|---|
 | 跨層 import | 必須是 0。允許的方向：`server→{server,shared}`、`src→{src,shared}`、`desktop→{desktop,shared}`、`shared→shared` | 無 |
-| import 環 | 找到的每一組環（強連通分量，含 type-only import）必須是允許清單某一組的子集合：環可以變小、分裂或消失，不能長大，也不能出現新的 | 4 組（見下） |
-| 超過 800 行的檔 | 每一個都必須在允許清單內；新檔與其他檔須維持在 800 行以內 | 16 個（見下） |
-| 清單大小 | 環的清單不多於 4 組、18 個檔；大檔清單不多於 16 個且不重複 | — |
+| import 環 | 「環」指 import 圖的強連通分量（兩個檔以上，含 type-only import）。找到的每一個分量必須是允許清單某一組的子集合：分量可以變小、分裂或消失，不能包含清單外的檔。分量內部多一條 import 不會被擋（見第 6 節） | 4 組（見下） |
+| 超過 800 行的檔 | 每一個都必須在允許清單內；新檔與其他檔須維持在 800 行以內，或依 3.2 的例外加入清單 | 16 個（見下） |
+| 清單上限 | 環的清單不多於 `MAX_ALLOWED_CYCLES`（4）組、`MAX_ALLOWED_CYCLE_FILES`（18）個檔；大檔清單不多於 `MAX_ALLOWED_LARGE_FILES`（16）個且不重複。加項目時要一起調高常數，讓這件事在 diff 裡看得見 | — |
 | 不是空量測 | 四層都量到，來源檔多於 200 個 | — |
 
 允許的 4 組環（基準 `3cc1401`）：
@@ -39,7 +39,9 @@
 3. `server/memories-google.ts`、`server/memories.ts`
 4. `src/api.ts`、`src/realtime-session.ts`、`src/realtime-tools.ts`、`src/realtime.ts`
 
-允許的 16 個大檔（括號內是基準行數，只供對照，不參與判斷）：`src/main.ts`（4,211）、`server/memory/service.ts`（2,613）、`src/views.ts`（2,028）、`server/identity-service.ts`（1,684）、`server/home-bridge.ts`（1,655）、`desktop/main.mjs`（1,523）、`server/app.ts`（1,369）、`server/memory/live.ts`（1,361）、`server/realtime-routes.ts`（1,275）、`src/family-view.ts`（1,259）、`src/realtime.ts`（1,080）、`server/store.ts`（1,029）、`src/live-voice.ts`（884）、`src/brain.ts`（873）、`src/memory-view.ts`（836）、`server/live-route.ts`（811）。行數用 `text.split("\n").length`（比 `wc -l` 多 1）。
+允許的 16 個大檔（括號內是基準行數，只供對照，不參與判斷）：`src/main.ts`（4,211）、`server/memory/service.ts`（2,613）、`src/views.ts`（2,028）、`server/identity-service.ts`（1,684）、`server/home-bridge.ts`（1,655）、`desktop/main.mjs`（1,523）、`server/app.ts`（1,369）、`server/memory/live.ts`（1,361）、`server/realtime-routes.ts`（1,275）、`src/family-view.ts`（1,259）、`src/realtime.ts`（1,080）、`server/store.ts`（1,029）、`src/live-voice.ts`（884）、`src/brain.ts`（873）、`src/memory-view.ts`（836）、`server/live-route.ts`（811）。行數用 `text.split("\n").length`（檔尾有換行的檔比 `wc -l` 多 1）。
+
+目前接近上限、下一個功能可能就會碰到的檔（2026-11-10 用同一個算法量）：`desktop/settings-menu.mjs` 785、`server/integrations/adapters/lg-tv.ts` 751、`server/nous.ts` 705、`server/apikey-call.ts` 701、`server/alarms.ts` 695。它們超過 800 行時測試會失敗，處理方式見 3.2。
 
 ### 3.1 大檔規則的選擇
 
@@ -47,9 +49,12 @@
 
 ### 3.2 怎麼更新清單
 
-- 兩份清單都寫在 `tests/architecture.test.ts`，**只能刪、不能加**。
+- 兩份清單與三個上限常數都寫在 `tests/architecture.test.ts`。預設是只刪不加。
 - 拆掉一組環、把某個檔移出環，或把大檔拆到 800 行以內之後，在同一個 PR 刪掉對應項目。
-- 測試因為新的環或新的大檔失敗時，改程式（把共用型別移到 `shared/`、拆出小模組），不要加項目。往清單加項目會被「清單大小」那一條擋下。
+- 測試因為新的環或新的大檔失敗時，先考慮改程式：把共用型別移到 `shared/`、拆出小模組、解開環。
+- **有意識的例外**（目前功能便利性優先）：功能 PR 若現在拆檔或解環不合理，**可以**加一筆項目，條件是 (1) 項目旁邊加一行註解寫原因；(2) 同時調高對應的上限常數；(3) 在 PR 說明提到。這個測試的目的是讓變差是被看見、被決定的，不是擋住功能。
+- 跨層 import 沒有允許清單（基準是 0）。真的需要例外時，在同一個 PR 為這條規則加一份允許清單（每筆一行原因）、更新本紀錄，並在 PR 說明提到。
+- 每個失敗訊息都會寫出規則、該怎麼做、上述例外與本文件的路徑。
 
 ## 4. 反向自我測試（fixture）
 
@@ -78,7 +83,15 @@
 ## 6. 限制
 
 - 靜態分析，以正規表示式找相對路徑的 import，不解析語法樹；註解或字串裡長得像 import 的文字也會被算進去（偏向多報），非相對路徑的 import 不看。
-- 不量執行時行為，也不檢查模組內部的品質；通過不代表架構良好，只代表沒有比基準更差。
+- CommonJS 的 `require()` 不看（來源裡唯一的 `.cjs` 是 `desktop/preload.cjs`），所以經 `require()` 的跨層或環不會被發現。
+- 環的檢查是以強連通分量為單位，不是逐條邊或逐個基本環：
+  - 已在清單內的分量裡多一條 import、或多一個基本環，只要成員沒有超出清單就會通過。
+  - 分量變小之後，在清單項目還沒收緊之前，可以再長回清單記錄的那一組而不被擋。
+  - 把清單的一筆項目換成另一筆（總數不變）不會碰到上限常數，只會在 diff 裡看得見。
+  - type-only import 也算邊；型別環在執行期無害，但同樣會讓測試失敗。
+- 所以「沒有新的環」的準確說法是：沒有出現包含清單外檔案的強連通分量。
+- 不量執行時行為，也不檢查模組內部的品質；通過不代表架構良好，只代表沒有在不知情的情況下比基準更差。
+- 例外規則靠註解、上限常數與 PR 說明讓人看見，測試本身無法檢查原因是否合理或 PR 說明有沒有寫。
 - 大檔清單內的檔可以繼續變大（見 3.1）。清單內的檔降到 800 行以下後若沒有刪掉項目，之後又長回來不會被擋。
 - 盤點紀錄 3.6 的測試分類會變成 173 檔，新測試依「檔案全文含 `server/app.ts`」的規則被歸在「伺服器 HTTP」（23 → 24），實際上它不啟動伺服器；這是分類用正規表示式的限制，沒有修改分類規則。
 - 測試全綠只是 mock／fixture 的程式檢查，不是 G0–G3 或任何 Mac／Pi gate。

@@ -4,7 +4,7 @@
 
 # Architecture guard test S2 (2026-11-10)
 
-Companion documents: step S2 in §3 of [23 Architecture review and restructuring plan](../23_Architecture_Review_2026-11.en.md); how the baseline numbers are computed is in [Measurements and baseline for the architecture review](architecture-review-2026-11-09.en.md). **This is static analysis plus automated tests in a cloud container. It is not a product gate and not real-device acceptance; it only shows that layering and size have not become worse than the baseline, and says nothing about whether any feature works.**
+Companion documents: step S2 in §3 of [23 Architecture review and restructuring plan](../23_Architecture_Review_2026-11.en.md); how the baseline numbers are computed is in [Measurements and baseline for the architecture review](architecture-review-2026-11-09.en.md). **This is static analysis plus automated tests in a cloud container. It is not a product gate and not real-device acceptance; it only shows that layering and size have not become worse than the baseline without someone noticing, and says nothing about whether any feature works.**
 
 ## 1. Scope
 
@@ -27,9 +27,9 @@ The test measures the prototype directory that contains the test file (the paren
 | Rule | Verdict | Allowlist |
 |---|---|---|
 | Cross-layer imports | Must be 0. Allowed directions: `server→{server,shared}`, `src→{src,shared}`, `desktop→{desktop,shared}`, `shared→shared` | None |
-| Import cycles | Every cycle found (a strongly connected component, type-only imports included) must be a subset of one allowlist entry: a cycle may shrink, split or disappear, but may not grow, and no new cycle may appear | 4 entries (below) |
-| Files over 800 lines | Each one must be in the allowlist; new files and all other files must stay at 800 lines or fewer | 16 files (below) |
-| Allowlist size | The cycle allowlist has at most 4 entries and 18 files; the large-file allowlist has at most 16 entries and no duplicates | — |
+| Import cycles | A "cycle" here is a strongly connected component of the import graph (two or more files, type-only imports included). Every component found must be a subset of one allowlist entry: a component may shrink, split or disappear, but may not contain a file outside the allowlist. An extra import inside a component is not caught (see section 6) | 4 entries (below) |
+| Files over 800 lines | Each one must be in the allowlist; new files and all other files must stay at 800 lines or fewer, or be added to the allowlist under the override in 3.2 | 16 files (below) |
+| Allowlist caps | The cycle allowlist has at most `MAX_ALLOWED_CYCLES` (4) entries and `MAX_ALLOWED_CYCLE_FILES` (18) files; the large-file allowlist has at most `MAX_ALLOWED_LARGE_FILES` (16) entries and no duplicates. Adding an entry means bumping the constant too, so the change is visible in the diff | — |
 | Not an empty measurement | All four layers are measured and there are more than 200 source files | — |
 
 The 4 allowed cycles (baseline `3cc1401`):
@@ -39,7 +39,9 @@ The 4 allowed cycles (baseline `3cc1401`):
 3. `server/memories-google.ts`, `server/memories.ts`
 4. `src/api.ts`, `src/realtime-session.ts`, `src/realtime-tools.ts`, `src/realtime.ts`
 
-The 16 allowed large files (baseline line counts in parentheses are for reference only and take no part in the verdict): `src/main.ts` (4,211), `server/memory/service.ts` (2,613), `src/views.ts` (2,028), `server/identity-service.ts` (1,684), `server/home-bridge.ts` (1,655), `desktop/main.mjs` (1,523), `server/app.ts` (1,369), `server/memory/live.ts` (1,361), `server/realtime-routes.ts` (1,275), `src/family-view.ts` (1,259), `src/realtime.ts` (1,080), `server/store.ts` (1,029), `src/live-voice.ts` (884), `src/brain.ts` (873), `src/memory-view.ts` (836), `server/live-route.ts` (811). Lines are counted with `text.split("\n").length` (one more than `wc -l`).
+The 16 allowed large files (baseline line counts in parentheses are for reference only and take no part in the verdict): `src/main.ts` (4,211), `server/memory/service.ts` (2,613), `src/views.ts` (2,028), `server/identity-service.ts` (1,684), `server/home-bridge.ts` (1,655), `desktop/main.mjs` (1,523), `server/app.ts` (1,369), `server/memory/live.ts` (1,361), `server/realtime-routes.ts` (1,275), `src/family-view.ts` (1,259), `src/realtime.ts` (1,080), `server/store.ts` (1,029), `src/live-voice.ts` (884), `src/brain.ts` (873), `src/memory-view.ts` (836), `server/live-route.ts` (811). Lines are counted with `text.split("\n").length` (one more than `wc -l` for files ending in a newline).
+
+Files close to the limit today, which the next feature may push over (measured on 2026-11-10 with the same method): `desktop/settings-menu.mjs` 785, `server/integrations/adapters/lg-tv.ts` 751, `server/nous.ts` 705, `server/apikey-call.ts` 701, `server/alarms.ts` 695. The test fails when one of them passes 800 lines; see 3.2 for what to do.
 
 ### 3.1 The choice made for the large-file rule
 
@@ -47,9 +49,12 @@ Only allowlist membership is checked; **there is no cap on how much an allowlist
 
 ### 3.2 How to update the allowlists
 
-- Both allowlists live in `tests/architecture.test.ts`, and **entries may only be removed, never added**.
+- Both allowlists and the three cap constants live in `tests/architecture.test.ts`. The default is to remove entries, not add them.
 - After breaking a cycle, moving a file out of a cycle, or splitting a large file down to 800 lines or fewer, remove the matching entry in the same PR.
-- When the test fails because of a new cycle or a new large file, change the code (move shared types to `shared/`, split out a small module) instead of adding an entry. Adding an entry is stopped by the "allowlist size" rule.
+- When the test fails because of a new cycle or a new large file, first consider changing the code: move shared types to `shared/`, split out a small module, break the cycle.
+- **Conscious override** (feature convenience is the current priority): when splitting the file or breaking the cycle is not reasonable right now, a feature PR **may** add an entry, provided that (1) a one-line comment next to the entry gives the reason; (2) the matching cap constant is bumped in the same change; (3) the PR description mentions it. The purpose of this test is to make a regression something that is seen and decided, not to block features.
+- Cross-layer imports have no allowlist (the baseline is 0). If an exception is really needed, add an allowlist for that rule in the same PR (one-line reason per entry), update this record, and mention it in the PR description.
+- Every failure message states the rule, what to do, the override above and the path of this document.
 
 ## 4. Negative self-test (fixture)
 
@@ -78,7 +83,15 @@ Environment: Linux cloud container, Node.js v22, dependencies from the existing 
 ## 6. Limits
 
 - Static analysis that finds relative-path imports with a regular expression, without parsing a syntax tree; text in a comment or string that looks like an import is counted too (it errs towards over-reporting), and non-relative imports are ignored.
-- It does not measure runtime behaviour or the quality inside a module; passing does not mean the architecture is good, only that it is no worse than the baseline.
+- CommonJS `require()` is not seen (the only `.cjs` source is `desktop/preload.cjs`), so a cross-layer import or cycle made through `require()` goes undetected.
+- The cycle check works on strongly connected components, not on individual edges or elementary cycles:
+  - A new import, or a new elementary cycle, inside a component that is already allowlisted passes as long as its members stay within the entry.
+  - After a component shrinks, it can grow back to the set recorded in the allowlist without being caught, until the entry is tightened.
+  - Swapping one allowlist entry for another (same totals) does not trip the cap constants; it is only visible in the diff.
+  - Type-only imports count as edges; a type-only cycle is harmless at runtime but still fails the test.
+- So the accurate form of "no new cycle" is: no strongly connected component containing a file outside the allowlist has appeared.
+- It does not measure runtime behaviour or the quality inside a module; passing does not mean the architecture is good, only that it has not become worse than the baseline without someone noticing.
+- The override relies on the comment, the cap constants and the PR description to be seen; the test itself cannot check whether the reason is sound or whether the PR description mentions it.
 - Allowlisted large files can keep growing (see 3.1). If an allowlisted file drops to 800 lines or fewer and its entry is not removed, growing back later is not caught.
 - The test classification in §3.6 of the review record becomes 173 files, and the new test is counted under "server HTTP" (23 → 24) by the "file text contains `server/app.ts`" rule although it starts no server; this is a limit of the regular-expression classification, and the classification rule was not changed.
 - A green test run is only a code check on mock/fixture data, not G0–G3 or any Mac/Pi gate.
