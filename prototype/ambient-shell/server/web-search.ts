@@ -3,6 +3,9 @@
 // 只在本機核心執行，API key 與權杖都不進瀏覽器。
 
 import { CodexError, type CodexResponses } from "./codex-responses.ts";
+import { hostOf, parseCandidates, type WebSearchResult, type WebSource } from "../shared/web-search.ts";
+
+export type { SearchCandidate, WebSearchResult, WebSource } from "../shared/web-search.ts";
 
 const API = "https://api.openai.com/v1";
 /** 一次上網查詢的上限。ChatGPT 方案路徑的 Codex 那一輪也用這個時限（含第一次查模型清單），所以兩條路徑一樣。 */
@@ -24,18 +27,6 @@ export interface WebSearchOptions {
 /** 這次查詢由誰計費：API key 路徑用 OPENAI_API_KEY，ChatGPT 方案路徑用 Codex 額度。 */
 export type SearchVia = "api_key" | "codex";
 
-export interface WebSource {
-  title: string;
-  url: string;
-}
-
-export interface WebSearchResult {
-  ok: true;
-  answer: string;
-  sources: WebSource[];
-  model: string;
-}
-
 export class WebSearchError extends Error {
   constructor(message: string, readonly status: number, options?: ErrorOptions) {
     super(message, options);
@@ -47,6 +38,10 @@ const INSTRUCTIONS = [
   "根據搜尋結果，用繁體中文（台灣用語）簡短回答，120 字以內。",
   "先講結論，再給具體數字、日期、時間與地點；查到的資料若有時效，說明是哪個時間點的資料。",
   "搜尋結果不足或互相矛盾時直接說明，不要猜。",
+  "答案之後另起一行，輸出一個 ```json 區塊（畫面顯示用，不會被念出），格式：",
+  '{"candidates":[{"title":"來源標題","url":"https://…","points":["重點一","重點二"]}]}',
+  "candidates 最多 3 則、各來自不同的來源網址，依相關程度排序；每則 2 到 5 個重點，每個重點 40 字以內、用繁體中文，數字、單位與日期照來源原文。",
+  "重點只能寫搜尋結果裡有的內容；某個來源沒有可用的重點時 points 給空陣列，不要編。答案本身不要包含這個 JSON。",
 ].join("\n");
 
 export class WebSearch {
@@ -83,8 +78,9 @@ export class WebSearch {
         tools: [{ type: "web_search", external_web_access: true, user_location: { type: "approximate", country: this.options.country, timezone: this.options.timezone } }],
         signal,
       });
-      if (!turn.text) throw new WebSearchError("上網查詢沒有得到可用的答案。", 502);
-      return { ok: true, answer: turn.text, sources: turn.citations, model: turn.model };
+      const parsed = parseCandidates(turn.text, turn.citations);
+      if (!parsed.answer && !parsed.candidates.some((c) => c.summarized)) throw new WebSearchError("上網查詢沒有得到可用的答案。", 502);
+      return { ok: true, answer: parsed.answer, sources: turn.citations, candidates: parsed.candidates, model: turn.model };
     } catch (err) {
       if (err instanceof WebSearchError) throw err;
       if (err instanceof CodexError) {
@@ -134,9 +130,10 @@ export class WebSearch {
       throw new WebSearchError(`上網查詢失敗（HTTP ${res.status}）：${errorMessage(raw)}`, 502);
     }
     const data = (await res.json()) as ResponsesBody;
-    const parsed = parseResponse(data);
-    if (!parsed.answer) throw new WebSearchError("上網查詢沒有得到可用的答案。", 502);
-    return { ok: true, ...parsed, model: data.model ?? model };
+    const { text, sources } = parseResponse(data);
+    const parsed = parseCandidates(text, sources);
+    if (!parsed.answer && !parsed.candidates.some((c) => c.summarized)) throw new WebSearchError("上網查詢沒有得到可用的答案。", 502);
+    return { ok: true, answer: parsed.answer, sources, candidates: parsed.candidates, model: data.model ?? model };
   }
 
   private async post(body: Record<string, unknown>, signal?: AbortSignal): Promise<Response> {
@@ -163,8 +160,8 @@ interface ResponsesBody {
   }[];
 }
 
-/** 取出最終文字與 url_citation 來源（依網址去重）。 */
-export function parseResponse(data: ResponsesBody): { answer: string; sources: WebSource[] } {
+/** 取出最終文字（含候選的 JSON 區塊，交給 parseCandidates 分開）與 url_citation 來源（依網址去重）。 */
+export function parseResponse(data: ResponsesBody): { text: string; sources: WebSource[] } {
   const texts: string[] = [];
   const sources = new Map<string, WebSource>();
   for (const item of data.output ?? []) {
@@ -179,15 +176,7 @@ export function parseResponse(data: ResponsesBody): { answer: string; sources: W
       }
     }
   }
-  return { answer: texts.join("").trim(), sources: [...sources.values()].slice(0, 5) };
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return url;
-  }
+  return { text: texts.join("").trim(), sources: [...sources.values()].slice(0, 5) };
 }
 
 function errorMessage(raw: string): string {

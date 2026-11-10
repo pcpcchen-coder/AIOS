@@ -5,6 +5,7 @@ import type { ApprovalOutcome, ApprovalRequest, HomeResult, RealtimeCallbacks } 
 import { taiwanText } from "./zh-tw.ts";
 import { parseVoiceVolumeArgs } from "../shared/voice-volume.ts";
 import { parseDayNightToolArgs } from "../shared/day-night.ts";
+import { SEARCH_ERRORS } from "../shared/web-search.ts";
 
 // 兩條即時語音路徑共用的工具執行器與確認卡佇列，從 RealtimeVoice（src/realtime.ts）原樣搬出：
 //   API key：RealtimeVoice 收到 response.function_call_arguments.done → executeRealtimeTool → function_call_output
@@ -154,7 +155,7 @@ export async function executeRealtimeTool(name: string, rawArgs: string, ctx: To
   const { callbacks, approvals, generation } = ctx;
   let output: Record<string, unknown>;
   try {
-    const args = JSON.parse(rawArgs || "{}") as { title?: unknown; query?: unknown; target?: unknown; metric?: unknown; command?: unknown; value?: unknown };
+    const args = JSON.parse(rawArgs || "{}") as { title?: unknown; query?: unknown; target?: unknown; metric?: unknown; command?: unknown; value?: unknown; index?: unknown };
     if (name === "end_conversation") {
       ctx.end();
       return;
@@ -171,6 +172,12 @@ export async function executeRealtimeTool(name: string, rawArgs: string, ctx: To
         callbacks.onToolActivity(`上網查詢：${query}`);
         output = await callbacks.onWebSearch(query);
       }
+    } else if (name === "show_search_result") {
+      const index = typeof args.index === "number" ? args.index : typeof args.index === "string" ? Number(args.index) : NaN;
+      // 已經結束的通話（generation 換了）不能打開新通話的結果。
+      if (ctx.stale(generation) || !callbacks.onShowSearchResult) output = { ok: false, error: SEARCH_ERRORS.none };
+      else if (!Number.isInteger(index) || index < 1 || index > 3) output = { ok: false, error: SEARCH_ERRORS.outOfRange };
+      else output = callbacks.onShowSearchResult(index);
     } else if (name === "home_status") {
       const target = typeof args.target === "string" ? args.target.trim() : "";
       const metric = typeof args.metric === "string" && args.metric.trim() ? args.metric.trim() : null;

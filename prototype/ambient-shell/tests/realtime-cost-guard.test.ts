@@ -556,7 +556,7 @@ describe("call meter, prefs and end reasons", () => {
 
   it("the page reads the cap from settings.voice (default 20 min)", () => {
     expect(maxCallMs(undefined)).toBe(1_200_000);
-    expect(maxCallMs({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 600 })).toBe(600_000);
+    expect(maxCallMs({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 600, search_close_s: 8 })).toBe(600_000);
   });
 
   it("the page may report the guard reasons; anything else is still ignored", () => {

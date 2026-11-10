@@ -6,6 +6,8 @@
 
 2026-11-05 補記：本頁 Raspberry Pi 一列已按本晚部署與實機紀錄更新，其他列的歷史證據範圍不變。
 
+2026-11-09 補記（查詢結果挑選）：「瀏覽器語音、WebRTC 雙路徑」的即時語音上網查詢加上編號候選、說「第二個」選一則（新工具 `show_search_result`，兩條路徑共用）、重點跟讀亮起與念完後自動收起（設定「查詢結果收起秒數」，預設 8 秒）（分支 `claude/web-search-picker`）；只有單元測試與 SIMULATED 無頭 Chromium 截圖，兩條路徑的真實語音與真實搜尋輸出格式未驗證，見[驗證](validation/web-search-picker-2026-11-09.md)。
+
 2026-11-09 補記（倒數與鈴聲）：「定時器與響鈴」一列加上 ALARM-3（分支 `claude/alarm-countdown`）：到期前 30 秒畫面倒數、最後 10 秒每秒一聲滴、三種鈴聲與響鈴長度可在設定頁選，只有雲端測試與無頭 Chromium，見[驗證](validation/alarm-timer-3-2026-11-09.md)。
 
 2026-11-09 補記（鬧鐘）：「定時器與響鈴」一列加上 ALARM-2 鬧鐘（分支 `claude/alarm-clock`），只有雲端測試與無頭 Chromium，見[驗證](validation/alarm-timer-2-2026-11-09.md)。

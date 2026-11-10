@@ -15,10 +15,10 @@ describe("VoiceSettingsStore", () => {
   it("defaults without a file; saved values override; survives a restart", () => {
     const dir = mkdtempSync(join(tmpdir(), "nous-voice-"));
     const a = make(dir);
-    expect(a.store.view()).toEqual({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 1200 });
-    expect(a.store.update({ realtime_idle_s: 300 })).toEqual({ voice_idle_s: 90, realtime_idle_s: 300, realtime_max_call_s: 1200 });
+    expect(a.store.view()).toEqual({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 1200, search_close_s: 8 });
+    expect(a.store.update({ realtime_idle_s: 300 })).toEqual({ voice_idle_s: 90, realtime_idle_s: 300, realtime_max_call_s: 1200, search_close_s: 8 });
     expect(a.changes()).toBe(1);
-    expect(make(dir).store.view()).toEqual({ voice_idle_s: 90, realtime_idle_s: 300, realtime_max_call_s: 1200 });
+    expect(make(dir).store.view()).toEqual({ voice_idle_s: 90, realtime_idle_s: 300, realtime_max_call_s: 1200, search_close_s: 8 });
   });
 
   it("writes only the changed keys with mode 0600 and is idempotent", () => {
@@ -44,7 +44,7 @@ describe("VoiceSettingsStore", () => {
     const dir = mkdtempSync(join(tmpdir(), "nous-voice-"));
     writeFileSync(join(dir, "voice.json"), JSON.stringify({ schema_version: 1, prefs: { voice_idle_s: 95, realtime_idle_s: 180, made_up: 1 } }));
     const { store, logs } = make(dir);
-    expect(store.view()).toEqual({ voice_idle_s: 90, realtime_idle_s: 180, realtime_max_call_s: 1200 });
+    expect(store.view()).toEqual({ voice_idle_s: 90, realtime_idle_s: 180, realtime_max_call_s: 1200, search_close_s: 8 });
     expect(logs).toHaveLength(1);
     expect(logs[0]).toContain("2 項設定被忽略");
   });
@@ -57,7 +57,7 @@ describe("VoiceSettingsStore", () => {
     const dir = mkdtempSync(join(tmpdir(), "nous-voice-"));
     writeFileSync(join(dir, "voice.json"), content);
     const { store, logs } = make(dir);
-    expect(store.view()).toEqual({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 1200 });
+    expect(store.view()).toEqual({ voice_idle_s: 90, realtime_idle_s: 120, realtime_max_call_s: 1200, search_close_s: 8 });
     expect(logs).toHaveLength(1);
     expect(logs[0]).toContain("語音閒置秒數用預設值");
   });

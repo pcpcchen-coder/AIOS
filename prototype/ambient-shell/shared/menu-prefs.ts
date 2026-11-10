@@ -94,7 +94,7 @@ export function describeMenuPrefs(source: SecondsSource): MenuPrefSetting[] {
   }
   for (const [key, spec] of numberSpecs(VOICE_PREFS)) {
     let note: string = spec.hint;
-    if ((key === "realtime_idle_s" || key === "realtime_max_call_s") && !source.realtime?.available) note = `即時語音目前不可用（${source.realtime?.detail ?? "未設定"}）`;
+    if ((key === "realtime_idle_s" || key === "realtime_max_call_s" || key === "search_close_s") && !source.realtime?.available) note = `即時語音目前不可用（${source.realtime?.detail ?? "未設定"}）`;
     rows.push(row(key, "voice", "語音", spec, source.voice[key], source.voiceWritable ? null : VOICE_UNSAVED_REASON, note, "/api/settings/voice"));
   }
   return rows;

@@ -1142,5 +1142,19 @@
   "門檻恢復預設（{0}／{1}）": "Reset thresholds ({0}/{1})",
   "數字是鏡頭畫面的平均亮度（0–255）。先看上面的「鏡頭亮度」讀數：開燈與關燈各記一個數字，把「算暗」設在關燈值之上、「算亮」設在開燈值之下，中間留一段不切換。只存在這台裝置。": "The numbers are the camera picture's average brightness (0–255). Watch the \"Camera brightness\" reading above: note one number with the lights on and one with them off, set \"Dark below\" above the lights-off value and \"Bright above\" below the lights-on value, and leave a gap between them where nothing switches. Saved on this device only.",
   "門檻沒有保存：{0}": "Thresholds were not saved: {0}",
-  "門檻不合法：算暗要比算亮至少低 5": "Invalid thresholds: \"dark\" must be at least 5 below \"bright\""
+  "門檻不合法：算暗要比算亮至少低 5": "Invalid thresholds: \"dark\" must be at least 5 below \"bright\"",
+  "查詢結果": "Search results",
+  "查詢結果 · 說「第二個」選一則": "Search results · say “the second one” to pick",
+  "查詢結果 · 第 {0} 則": "Search results · result {0}",
+  "查詢失敗": "Search failed",
+  "上網查詢逾時，請稍後再問一次": "The web search timed out; please ask again in a moment",
+  "上網查詢目前不可用": "Web search is not available right now",
+  "上網查詢的帳號或金鑰沒有授權": "The web search account or key is not authorized",
+  "連不上查詢服務": "Could not reach the search service",
+  "上網查詢失敗": "Web search failed",
+  "網址沒有經來源核對": "URL not matched to a cited source",
+  "第 {0} 則": "Result {0}",
+  "這則沒有摘要，只有來源": "No summary for this result, only the source",
+  "重點": "Key points",
+  "也可以說「收起」": "You can also say “dismiss”"
 }

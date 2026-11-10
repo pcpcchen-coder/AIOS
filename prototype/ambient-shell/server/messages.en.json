@@ -67,6 +67,8 @@
   "AI 查詢真實任務狀態後用說的回答": "Query actual task state and answer aloud",
   "AI 上網查詢後回答，字幕顯示來源": "Search online and answer with caption sources",
   "需要即時語音與上網查詢（ChatGPT 方案路徑用 Codex 額度；API key 路徑需要 OPENAI_API_KEY）": "Requires realtime and web search; ChatGPT plan uses Codex quota, API-key route requires OPENAI_API_KEY",
+  "查詢有兩則以上的結果時畫面列出編號，選一則後畫面顯示那一則的重點，AI 依序念、念到的那一點亮起；念完後依設定的秒數自動收起": "When a search has two or more results the screen numbers them; after you pick one, the screen shows its key points, the AI reads them in order, and the point being read lights up; the panel closes after the configured seconds once speech ends",
+  "需要即時語音與上網查詢（同上）": "Requires realtime and web search (as above)",
   "AI 判斷是較長的工作時交辦成背景任務，進度顯示在電子腦下方": "Delegate longer work as background tasks with progress below the brain",
   "查武陵居的感測值與設備狀態": "Query Wuling Home sensors/device state",
   "需要即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）": "Requires realtime and Wuling controller SMARTHOME_URL, SMARTHOME_TOKEN",

@@ -187,6 +187,7 @@ export const HOST_TIMEOUT_MS: Record<HostToolName, number> = {
   home_control: 62_000,
   home_status: 20_000,
   web_search: WEB_SEARCH_TIMEOUT_MS + HOST_REPLY_MARGIN_MS,
+  show_search_result: 5_000 + HOST_REPLY_MARGIN_MS,
   delegate_task: 10_000,
   get_tasks: 5_000,
   end_conversation: 5_000,

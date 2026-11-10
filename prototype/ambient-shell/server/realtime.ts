@@ -94,6 +94,23 @@ const WEB_SEARCH_TOOL = {
   },
 } as const;
 
+/** 使用者從 web_search 列出的編號結果選一則（「第二個」）：畫面換成那一則的重點，回傳重點給模型依序念。 */
+const SHOW_SEARCH_RESULT_TOOL = {
+  type: "function",
+  name: "show_search_result",
+  description:
+    "使用者從剛才 web_search 列出的編號結果選了一則（例如「第二個」「看第一則」）時呼叫：畫面顯示那一則的重點，並回傳重點讓你依序念。只用在這次對話剛查過的結果。",
+  parameters: {
+    type: "object",
+    properties: { index: { type: "integer", minimum: 1, maximum: 3, description: "使用者選的編號（1 到 3）" } },
+    required: ["index"],
+    additionalProperties: false,
+  },
+} as const;
+
+/** 只有能上網查詢時才提供的工具。 */
+const WEB_SEARCH_TOOL_NAMES: readonly string[] = [WEB_SEARCH_TOOL.name, SHOW_SEARCH_RESULT_TOOL.name];
+
 export const HOME_STATUS_TOOL = {
   type: "function",
   name: "home_status",
@@ -143,6 +160,7 @@ export const HOME_CONTROL_TOOL = {
 /** 模型可以呼叫的工具：上網查詢由本機核心代查，交辦工作與查詢進度由瀏覽器端用既有的任務 API 處理。 */
 export const REALTIME_TOOLS = [
   WEB_SEARCH_TOOL,
+  SHOW_SEARCH_RESULT_TOOL,
   {
     type: "function",
     name: "delegate_task",
@@ -217,7 +235,7 @@ export const RECALL_MEMORY_TOOL = {
 
 /** 依實際可用的能力組出工作階段的工具清單：函式工具＋遠端 MCP 伺服器。 */
 export function buildRealtimeTools(caps: RealtimeCapabilities, locale: Locale = "zh-TW"): Record<string, unknown>[] {
-  const functions = REALTIME_TOOLS.filter((t) => caps.webSearch || t.name !== "web_search").map(tool => tool.name === "delegate_task" && locale === "en"
+  const functions = REALTIME_TOOLS.filter((t) => caps.webSearch || !WEB_SEARCH_TOOL_NAMES.includes(t.name)).map(tool => tool.name === "delegate_task" && locale === "en"
     ? { ...tool, parameters: { ...tool.parameters, properties: { title: { ...tool.parameters.properties.title, description: "Describe the requested output in one sentence in English, preserving user names and identifiers." } } } }
     : tool);
   const mcp = caps.mcp.map((server) => ({ type: "mcp", ...server }));
@@ -254,6 +272,10 @@ export function voiceVolumeRule(home: boolean, tv = false): string {
 }
 
 /** DN-2：切換日夜間模式的說話規則（兩條路徑相同）。 */
+/** 查詢結果的挑選與跟讀（George 2026-11-09）：兩條路徑共用；畫面的編號、重點與亮起由頁面依工具結果處理。 */
+export const SEARCH_PICK_RULE =
+  "web_search 回傳兩則以上的 candidates 時，畫面已列出編號結果：可以先用一句話講結論，再簡短說出各則的編號和標題（第一則…第二則…第三則…），問使用者要看哪一則；這時先不要念內容。使用者選了（「第二個」「看第一則」）就呼叫 show_search_result，index 填那個編號；然後依序念回傳的 points，每點一句，用那一點開頭的字開始，數字照念、不要改寫。只有一則時 web_search 已直接回傳 points，照同樣方式念。show_search_result 回傳錯誤（沒有這一則、還沒有查詢結果）時照實說。";
+
 export const DAY_NIGHT_RULE =
   "使用者要切換日間或夜間模式時呼叫 set_day_night（不是調音量，也不是開關燈）。結果回來後說現在是日間還是夜間；有 until 時說會維持到幾點、之後自動恢復；ok 是 false 時照 error 說沒有切換。";
 
@@ -285,6 +307,7 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
   if (caps.webSearch) {
     abilities.push(
       "你可以上網：需要即時或最新資訊（天氣、新聞、股價、匯率、營業時間、交通、最近的事）時，立刻呼叫 web_search，不要憑記憶回答。呼叫前先說一句「我查一下」。回答講結論和數字，來源會顯示在畫面上，不用念網址。",
+      SEARCH_PICK_RULE,
     );
   }
   if (caps.home) {
@@ -389,7 +412,7 @@ export function buildLiveInstructions(
     ...voicePersonaRules(locale),
     "使用者隨時會插話；被打斷後以使用者的新內容為準，不要重複剛才的話。",
     ...(caps.night ? [NIGHT_TONE_RULE] : []),
-    "需要做事時（上網查詢、查家裡狀態、控制家電、調整你說話的音量、切換日夜間模式、交辦背景工作、查任務進度、結束對話），一律交辦（delegate），每個請求只交辦一次，等結果回來。",
+    "需要做事時（上網查詢、選查詢結果的第幾則、查家裡狀態、控制家電、調整你說話的音量、切換日夜間模式、交辦背景工作、查任務進度、結束對話），一律交辦（delegate），每個請求只交辦一次，等結果回來。",
     ...(integrations.some(({ name }) => name === "app__timer__start") ? [
       "「計時一分鐘」「倒數一分鐘」「一分鐘後提醒我」等定時器請求一律交辦，連同時間和名稱交給核心。查詢、暫停、繼續、延長、取消定時器或停止響鈴也要交辦。不要在對話裡自己計時、數秒或承諾提醒。等核心回報成功才說已設定。",
     ] : []),
@@ -398,6 +421,7 @@ export function buildLiveInstructions(
     ] : []),
     "只轉述交辦結果；結果回來之前不能說已經做好、查到或開了（例如不能說「燈開了」）。結果說失敗或不確定時照實說。",
     "交辦結果在 speakable 頻道時，用自己的話自然說出；commentary 頻道是安靜的背景，不要念出來。不要提到交辦、頻道或系統。",
+    "交辦結果是查詢結果的編號標題或某一則的重點時，照順序念，每點一句、用那一點開頭的字開始，數字照念、不要改寫或省略。",
     "使用者說「確認執行」或「取消」時也照樣交辦；你不能替使用者確認任何事。",
     "收到以「（系統通知）」開頭的內容時，用一句話轉告使用者，不要逐字念。",
     "收到以「（開場）」開頭的內容時，只說其中「」裡的那一句招呼（核心從固定清單挑的，例如「嗨，George」「早安」；一字不改，不加字、不提問、不猜名字），不要念出或轉述這段內容的其他部分。",

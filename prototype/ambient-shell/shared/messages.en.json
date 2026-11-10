@@ -298,6 +298,8 @@
   "tokens 是頁面加總 response.done 回報的數字（約略），不是帳單": "Tokens are the page's sum of response.done usage (approximate), not a bill",
   "每通即時語音最長多久": "Maximum length of each realtime voice call",
   "從連上算起；到上限前一分鐘提醒，到了就結束（通話中也算）": "Counted from connection; you get a reminder one minute before the limit and the call ends when it is reached (applies to calls in progress)",
+  "查詢結果收起秒數": "Seconds before closing search results",
+  "語音念完後幾秒收起查詢結果畫面；列出編號、等你選的時候不會自動收起": "How many seconds after the voice finishes reading before the search results panel closes; the numbered list stays open while waiting for your pick",
   "終端機 {0}": "Terminal {0}",
   "每通即時語音到上限": "Each realtime voice call reaches its limit",
   "從連上算起，到上限前一分鐘字幕加提示音，到了就結束（一直說話也不延長；頁面與本機核心都會結束）": "Counted from connection: a caption and cue one minute before the limit, then the call ends (talking does not extend it; both the page and the local core end it)",

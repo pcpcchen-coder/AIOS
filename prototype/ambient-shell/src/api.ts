@@ -1,3 +1,4 @@
+import type { WebSearchResult } from "../shared/web-search.ts";
 import type { FaceTuning } from "../shared/face-tuning.ts";
 import { AUDIO_WRITE_PATH, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import type { ProactivePrefsPatch } from "../shared/proactive.ts";
@@ -205,7 +206,7 @@ export const api = {
   codexLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/codex/logout", {}),
   /** 即時語音的上網查詢：API key 路徑用 OPENAI_API_KEY；ChatGPT 方案路徑的工作階段（帶 ticket）用 Codex 額度。 */
   webSearch: (query: string, ticket?: RealtimeTicket) =>
-    call<{ ok: true; answer: string; sources: { title: string; url: string }[]; model: string }>("POST", "/api/realtime/web-search", ticket ? { query, ...ticket } : { query }),
+    call<WebSearchResult>("POST", "/api/realtime/web-search", ticket ? { query, ...ticket } : { query }),
   /** 武陵居家電狀態（唯讀）：由本機核心帶權杖查中控，權杖不進瀏覽器。 */
   homeStatus: (target: string, metric: string | null) =>
     call<HomeStatusResult>("POST", "/api/home/status", metric ? { target, metric } : { target }),

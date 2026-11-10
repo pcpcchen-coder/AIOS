@@ -81,7 +81,7 @@ export const DELEGATION_BUDGET_MS = CALLER_LIMITS.maxTurns * CALLER_LIMITS.turnT
 /** 確認卡結束後多久內，「確認執行／取消」的交辦算是在回答那張卡。 */
 export const APPROVAL_WINDOW_MS = 8_000;
 
-const HOST_TOOLS: readonly HostToolName[] = ["web_search", "delegate_task", "get_tasks", "end_conversation", "home_status", "home_control", "set_voice_volume", "set_day_night"];
+const HOST_TOOLS: readonly HostToolName[] = ["web_search", "show_search_result", "delegate_task", "get_tasks", "end_conversation", "home_status", "home_control", "set_voice_volume", "set_day_night"];
 
 /**
  * 工具表：buildRealtimeTools(caps) 去掉 MCP（MCP 在 ChatGPT 方案路徑不可用）。名稱、說明、參數都和 API key 路徑相同：
@@ -104,6 +104,9 @@ export function buildCallerInstructions(caps: RealtimeCapabilities, tasks: Itera
     ...realtimeToolRules({ ...caps, mcp: [] }),
     "外部服務（MCP）在這條路徑不能用；使用者要求時照實說，需要時請他到設定（macOS App：選單列「即時語音」）把路徑切換到 API key。",
     locale === "en" ? "Final response: one to three sentences in English, reporting only facts returned by tools. Do not mention tool names or JSON." : "最後一則訊息：一到三句繁體中文（台灣用語），只講工具回傳的事實；不要提工具名稱或 JSON。",
+    ...(caps.webSearch ? [locale === "en"
+      ? "Exception for web search results: the final response may list the numbered titles (first…, second…, third…) and ask which one, or read the points returned by show_search_result in order, one short sentence per point starting with the point's own words, numbers verbatim; at most six short sentences."
+      : "查詢結果例外：最後一則訊息可以列出編號標題（第一則…第二則…第三則…）並問要看哪一則，或依序念 show_search_result 回傳的 points（每點一句、用那一點開頭的字開始、數字照原文），最多六句短句。"] : []),
     "沒有呼叫工具就不能說做好了；工具失敗照實說；工具回傳 status 是 unknown 時只能說「結果不明，請確認」。",
     ...(caps.memory ? ["保存、更正與忘記記憶由畫面確認卡或使用者說出的確認詞處理；你沒有寫入記憶的工具，不能說已記住或已忘記。"] : []),
     "needs_confirmation：說要對哪台設備做什麼，請使用者按畫面上的確認卡或說「確認執行」；你不能確認。",

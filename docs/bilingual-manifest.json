@@ -97,8 +97,8 @@
       "source": "docs/10_Distance_UI_18inch_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/10_Distance_UI_18inch_2026-10.en.md",
-      "sourceSha256": "84a0a57ad45bd77f90c79de833e6fa23a22c0acd2bd3c8ac857dfd3728e01d49",
-      "translationSha256": "138232a4b79b1e31451414835ee5b9f958e5fa973510019a16f704da48fc9afa"
+      "sourceSha256": "d1883914473e50d85e8e6846765f4e2211489a474526e9e09d9c703ca929d2ab",
+      "translationSha256": "12022a1d77aa45cf73b42bea9f9d69090d53a109feedbf0ef8ebcee71b4424f2"
     },
     {
       "source": "docs/11_Stereo_Camera_Interaction_2026-10.md",
@@ -193,8 +193,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "869b36c540f09aa4703123481d650da38fa556e7d52a6690ac1fdca3cd2201bc",
-      "translationSha256": "a0fa5b2d884e05a085b3c20d89d8850620ca10ce01d6b3deff8510e6b719e231"
+      "sourceSha256": "8a4da842618f3225fff7d6b0d603d62881950c45c1e359beb3272ed7ba24ad1b",
+      "translationSha256": "49e0128fd815a964658cbc9a07fe17fb3bd1c552a6558cfecf487dfb57818b44"
     },
     {
       "source": "docs/README.md",
@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "802e5006a5ac3739a2111027de9a19a71b1ee1b773f47322115a470e6698ad86",
-      "translationSha256": "20f4c4ed5fd2e25debcfdd2d179171e1fd0f9905e8c6e7815d1d515fd4403a64"
+      "sourceSha256": "44874815902bfb8445a1fdfe5d2bbcde26285e32fc4e97b088119afec246af18",
+      "translationSha256": "f4196909c42aff2c1ad9bdb4174f0023dc72c5dbf408a26933d84ed22c6a3574"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -925,6 +925,13 @@
       "translationSha256": "b506e58428b3a67637a47fa2fcd6be8d136f88bd06b903efc10bb9c4aa4d15a0"
     },
     {
+      "source": "docs/validation/web-search-picker-2026-11-09.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/web-search-picker-2026-11-09.en.md",
+      "sourceSha256": "0304e7b6d3a143deccb145c0f30a5ab92629342c6ec2f302606e4238f49b22fc",
+      "translationSha256": "bdcecd203f7938a2add5b50c35e630dab9410c0e4d5035c4b27a1e5a3401bc59"
+    },
+    {
       "source": "docs/validation/wk-00-mac-2026-10-31.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/wk-00-mac-2026-10-31.en.md",
@@ -970,8 +977,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "2cb887d0459279e1a0823cb98c29cbeb18153767baa0497632fe8a66c28c8259",
-      "translationSha256": "f20209869f37967c77b633ebed69de05c4ee8542fdc74719c84ea5ad01d1ec9d"
+      "sourceSha256": "2e9886ad52360d9069bcc388b2fba7c3892ee4c40356b71aad30ecec181fe764",
+      "translationSha256": "3088d19350ff77f5ba6acd0d63ff68ee36734b5a8ad0a0e262e6c454616891d5"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

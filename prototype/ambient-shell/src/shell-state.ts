@@ -19,8 +19,10 @@ export type VisibilityReason =
  * 使用者輸入或選單列點擊，visibility_reason 為 user_request（不冒用外部動作的確認 ID）。
  * history：成果紀錄（HIST-1），只由使用者的說法（「搜尋成果 香菜」）、進度卡的「搜尋全部成果」或選單列「成果紀錄…」打開；
  * visibility_reason 一律 user_request，request_id 是那一次輸入或點擊。模型工具不能打開。
+ * search：即時語音上網查詢的結果（編號候選、選定那一則的重點、失敗）；使用者說出的問題讓模型查詢，結果回來時登記一個
+ * user_request。內容在頁面的 SearchPanelController，不在 Surface。
  */
-export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation" | "confirm" | "family" | "memory" | "history";
+export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation" | "confirm" | "family" | "memory" | "history" | "search";
 
 export interface Surface {
   surface_id: string;
@@ -56,6 +58,8 @@ export type ShellEvent =
   | { type: "show.memory"; request_id: string }
   /** 成果紀錄；request_id 是那一輪打字、說話、按鈕或選單列點擊。查詢詞由畫面自己保存。 */
   | { type: "show.history"; request_id: string }
+  /** 即時語音的查詢結果；request_id 是查詢結果回來時登記的使用者請求。 */
+  | { type: "show.search"; request_id: string }
   /** 外部動作的確認卡；request_id 為確認請求 id，由 Presentation Policy 對照待確認清單。 */
   | { type: "show.confirm"; request_id: string; message: string }
   | { type: "dismiss" };
@@ -179,6 +183,13 @@ export function reduceShell(state: ShellState, event: ShellEvent): ShellState {
         listening: false,
         foreground_task_id: null,
         surface: surface("history", event.request_id),
+      };
+    case "show.search":
+      return {
+        mode: "presenting",
+        listening: false,
+        foreground_task_id: null,
+        surface: surface("search", event.request_id),
       };
     case "show.confirm":
       return {

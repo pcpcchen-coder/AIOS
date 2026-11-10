@@ -52,6 +52,8 @@ export interface RealtimeCallbacks {
   onDayNight?(request: DayNightToolRequest): Promise<Record<string, unknown>>;
   /** 模型要上網查詢；回傳答案與來源，交還給模型。 */
   onWebSearch(query: string): Promise<Record<string, unknown>>;
+  /** 使用者選了查詢結果的第幾則（1–3）：畫面換成那一則的重點；回傳重點，或這次通話還沒有查詢結果、沒有這一則。 */
+  onShowSearchResult?(index: number): Record<string, unknown>;
   /** 模型要查家電狀態（唯讀）；回傳中控的真實讀值，交還給模型。 */
   onHomeStatus(target: string, metric: string | null): Promise<Record<string, unknown>>;
   /** 模型要控制一台家電；回傳中控的真實結果（或需要確認），交還給模型。 */
