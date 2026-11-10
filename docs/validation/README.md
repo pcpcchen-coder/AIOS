@@ -10,7 +10,7 @@
 
 | 紀錄 | 證據範圍與限制 |
 |---|---|
-| [架構守門測試 S2](architecture-guard-2026-11-10.md) | 2026-11-10：`tests/architecture.test.ts` 用 `scripts/architecture-metrics.mjs`（改成可 import）檢查跨層 import 為 0、import 環（強連通分量）必須是允許清單 4 組之一的子集合、超過 800 行的檔必須在允許清單的 16 個之內（預設只刪不加；功能 PR 可依有意識的例外加項目：一行原因、調高上限常數、PR 說明提到；清單內的檔不限制再長多少）；fixture 假目錄的反向自我測試證明規則會失敗。173 檔 3,196 項通過、6 項跳過，verify-aios PASS。靜態分析與雲端 mock 測試，不是產品 gate；分支 `claude/arch-s2-guard-test`，尚未合併 |
+| [架構守門測試 S2](architecture-guard-2026-11-10.md) | 2026-11-10：`tests/architecture.test.ts` 用 `scripts/architecture-metrics.mjs`（改成可 import）只守兩件事：跨層 import 為 0、import 環（強連通分量）必須是允許清單 4 組之一的子集合（預設只刪不加；功能 PR 可依有意識的例外加項目：一行原因、調高上限常數、PR 說明提到）。依 George 2026-11-10 的決定，檔案大小不守（原規劃的「超過 800 行」那一條已拿掉；量測腳本仍回報基準上的 16 個，只供參考）。fixture 假目錄的反向自我測試證明規則會失敗。173 檔 3,196 項通過、5 項跳過；verify-aios 在第一版提交上 PASS。靜態分析與雲端 mock 測試，不是產品 gate；分支 `claude/arch-s2-guard-test`，尚未合併 |
 | [架構盤點的量測與基準線](architecture-review-2026-11-09.md) | 2026-11-09：[23 架構盤點](../23_Architecture_Review_2026-11.md)引用的數字怎麼算（`scripts/architecture-metrics.mjs`：分層行數、16 個超過 800 行的檔、0 個跨層 import、4 組 import 環、15 個繞過 `prefs-file.ts` 的寫檔模組對 11 個使用它的 store、13 個同名方法、172 個測試檔的分類、26 個沒有直接測試的模組）與 main `416a1ab` 的基準線（172 檔 3,188 項通過、6 項跳過，verify-aios PASS）。靜態分析與雲端 mock 測試，不是產品 gate |
 | [鏡頭亮暗門檻設定 LUX-1](light-thresholds-2026-11-09.md) | 2026-11-09：設定頁可調「低於這個值算暗」「高於這個值算亮」（預設 95／115，5–250、每格 5、至少差 5），每台裝置各自保存；順手修正設定頁不會因這台裝置的音量或門檻改變而重畫；單元測試與無頭 Chromium；**Pi 與 Mac 實機未驗證** |
 | [倒數、滴答與鈴聲 ALARM-3](alarm-timer-3-2026-11-09.md) | 2026-11-09：到期前 30 秒畫面倒數（只在會響的那台）、最後 10 秒每秒一聲滴、三種本機合成鈴聲（可試聽）與響鈴長度（1–15 分鐘）。雲端測試與無頭 Chromium（倒數出現、10 個滴答、鈴聲接手、設定保存），**Mac 與 Pi 實機未執行** |

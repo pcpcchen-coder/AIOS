@@ -4,7 +4,9 @@
 
 # Architecture guard test S2 (2026-11-10)
 
-Companion documents: step S2 in §3 of [23 Architecture review and restructuring plan](../23_Architecture_Review_2026-11.en.md); how the baseline numbers are computed is in [Measurements and baseline for the architecture review](architecture-review-2026-11-09.en.md). **This is static analysis plus automated tests in a cloud container. It is not a product gate and not real-device acceptance; it only shows that layering and size have not become worse than the baseline without someone noticing, and says nothing about whether any feature works.**
+Companion documents: step S2 in §3 of [23 Architecture review and restructuring plan](../23_Architecture_Review_2026-11.en.md); how the baseline numbers are computed is in [Measurements and baseline for the architecture review](architecture-review-2026-11-09.en.md). **This is static analysis plus automated tests in a cloud container. It is not a product gate and not real-device acceptance; it only shows that cross-layer imports and import cycles have not become worse than the baseline without someone noticing, and says nothing about whether any feature works.**
+
+**Note added 2026-11-10 (George's decision):** the project is still in active development, so files are not limited to 800 lines for now; large files will be tidied later, together (S6–S14 in 23 §3). The "files over 800 lines" rule of the planned S2 has therefore been **removed from the guard test**, which now guards cross-layer imports and import cycles only. The metrics script still reports the number of files over 800 lines (16 on the baseline) for information only; it is not a limit and makes no test fail.
 
 ## 1. Scope
 
@@ -16,9 +18,9 @@ Companion documents: step S2 in §3 of [23 Architecture review and restructuring
 
 - `collectImportGraph(shellDir)`: size and import graph only (file count, line count, files over 800 lines, fan-in/fan-out, cross-layer imports, import cycles). It needs only the layer directories and skips layers that do not exist, so it can measure a fake directory built for a test.
 - `collectMetrics(shellDir)`: the above plus the review-specific numbers (route matches, file-writing styles, test classification and so on); it needs the complete `prototype/ambient-shell`.
-- Also exported: `DEFAULT_SHELL_DIR`, `LAYERS`, `ALLOWED_IMPORTS`, `LINE_LIMIT` (800).
+- Also exported: `DEFAULT_SHELL_DIR`, `LAYERS`, `ALLOWED_IMPORTS`, `LINE_LIMIT` (800, used for reporting only).
 - Command-line behaviour is unchanged: results are printed only when the file is executed directly (it compares `process.argv[1]` with the real path of the file); when imported it prints nothing and does nothing.
-- Before/after comparison: `node scripts/architecture-metrics.mjs` and `--json` were run on the same sources before and after the refactor and compared byte for byte with `cmp`; both are identical (both runs were on 2026-11-10, so `measured_at` is the same too).
+- Before/after comparison: `node scripts/architecture-metrics.mjs` and `--json` were run on the same sources before and after the refactor and compared byte for byte with `cmp`; both are identical (both runs were on 2026-11-10, so `measured_at` is the same too). After the test file was added, only the test-classification line differs (172 → 173 files, "pure" 65 → 66).
 
 ## 3. Guard rules
 
@@ -28,9 +30,10 @@ The test measures the prototype directory that contains the test file (the paren
 |---|---|---|
 | Cross-layer imports | Must be 0. Allowed directions: `server→{server,shared}`, `src→{src,shared}`, `desktop→{desktop,shared}`, `shared→shared` | None |
 | Import cycles | A "cycle" here is a strongly connected component of the import graph (two or more files, type-only imports included). Every component found must be a subset of one allowlist entry: a component may shrink, split or disappear, but may not contain a file outside the allowlist. An extra import inside a component is not caught (see section 6) | 4 entries (below) |
-| Files over 800 lines | Each one must be in the allowlist; new files and all other files must stay at 800 lines or fewer, or be added to the allowlist under the override in 3.2 | 16 files (below) |
-| Allowlist caps | The cycle allowlist has at most `MAX_ALLOWED_CYCLES` (4) entries and `MAX_ALLOWED_CYCLE_FILES` (18) files; the large-file allowlist has at most `MAX_ALLOWED_LARGE_FILES` (16) entries and no duplicates. Adding an entry means bumping the constant too, so the change is visible in the diff | — |
+| Allowlist caps | The cycle allowlist has at most `MAX_ALLOWED_CYCLES` (4) entries and `MAX_ALLOWED_CYCLE_FILES` (18) files. Adding an entry means bumping the constant too, so the change is visible in the diff | — |
 | Not an empty measurement | All four layers are measured and there are more than 200 source files | — |
+
+File size is outside the guard (see the note at the top).
 
 The 4 allowed cycles (baseline `3cc1401`):
 
@@ -39,28 +42,20 @@ The 4 allowed cycles (baseline `3cc1401`):
 3. `server/memories-google.ts`, `server/memories.ts`
 4. `src/api.ts`, `src/realtime-session.ts`, `src/realtime-tools.ts`, `src/realtime.ts`
 
-The 16 allowed large files (baseline line counts in parentheses are for reference only and take no part in the verdict): `src/main.ts` (4,211), `server/memory/service.ts` (2,613), `src/views.ts` (2,028), `server/identity-service.ts` (1,684), `server/home-bridge.ts` (1,655), `desktop/main.mjs` (1,523), `server/app.ts` (1,369), `server/memory/live.ts` (1,361), `server/realtime-routes.ts` (1,275), `src/family-view.ts` (1,259), `src/realtime.ts` (1,080), `server/store.ts` (1,029), `src/live-voice.ts` (884), `src/brain.ts` (873), `src/memory-view.ts` (836), `server/live-route.ts` (811). Lines are counted with `text.split("\n").length` (one more than `wc -l` for files ending in a newline).
+### 3.1 How to update the allowlist
 
-Files close to the limit today, which the next feature may push over (measured on 2026-11-10 with the same method): `desktop/settings-menu.mjs` 785, `server/integrations/adapters/lg-tv.ts` 751, `server/nous.ts` 705, `server/apikey-call.ts` 701, `server/alarms.ts` 695. The test fails when one of them passes 800 lines; see 3.2 for what to do.
-
-### 3.1 The choice made for the large-file rule
-
-Only allowlist membership is checked; **there is no cap on how much an allowlisted file may still grow**. Reason: the current priority is feature convenience (`CLAUDE.md`, 2026-10-31), and ordinary feature work still touches `src/main.ts` and `server/app.ts`; a per-file line cap would make everyday feature PRs fail in CI. Slimming these large files is the job of S6–S14 in 23 §3.
-
-### 3.2 How to update the allowlists
-
-- Both allowlists and the three cap constants live in `tests/architecture.test.ts`. The default is to remove entries, not add them.
-- After breaking a cycle, moving a file out of a cycle, or splitting a large file down to 800 lines or fewer, remove the matching entry in the same PR.
-- When the test fails because of a new cycle or a new large file, first consider changing the code: move shared types to `shared/`, split out a small module, break the cycle.
-- **Conscious override** (feature convenience is the current priority): when splitting the file or breaking the cycle is not reasonable right now, a feature PR **may** add an entry, provided that (1) a one-line comment next to the entry gives the reason; (2) the matching cap constant is bumped in the same change; (3) the PR description mentions it. The purpose of this test is to make a regression something that is seen and decided, not to block features.
+- The cycle allowlist and the two cap constants live in `tests/architecture.test.ts`. The default is to remove entries, not add them.
+- After breaking a cycle or moving a file out of a cycle, remove the matching entry in the same PR.
+- When the test fails because of a new cycle, first consider changing the code: move shared types to `shared/`, split out a small module, break the cycle.
+- **Conscious override** (feature convenience is the current priority, `CLAUDE.md` 2026-10-31): when breaking the cycle is not reasonable right now, a feature PR **may** add an entry, provided that (1) a one-line comment next to the entry gives the reason; (2) the matching cap constant is bumped in the same change; (3) the PR description mentions it. The purpose of this test is to make a regression something that is seen and decided, not to block features.
 - Cross-layer imports have no allowlist (the baseline is 0). If an exception is really needed, add an allowlist for that rule in the same PR (one-line reason per entry), update this record, and mention it in the PR description.
 - Every failure message states the rule, what to do, the override above and the path of this document.
 
 ## 4. Negative self-test (fixture)
 
-The test builds a fake directory tree in the system temporary directory (a fixture, unrelated to product sources, deleted when the test ends) containing: `server/bad.ts` importing `src/page.ts` (cross-layer), `shared/a.ts` and `shared/b.ts` importing each other (a cycle, one side type-only), and an 801-line `src/huge.ts`; the controls are a file of exactly 800 lines, an import in an allowed direction, and a `.d.ts` and a `*.test.ts` that must be excluded. It asserts that the metrics script reports exactly these three violations, and that the three guard rules, using the same functions, all flag them.
+The test builds a fake directory tree in the system temporary directory (a fixture, unrelated to product sources, created in `beforeAll` and deleted in `afterAll`) containing: `server/bad.ts` importing `src/page.ts` (cross-layer), and `shared/a.ts` and `shared/b.ts` importing each other (a cycle, one side type-only); the controls are an import in an allowed direction, and a `.d.ts` and a `*.test.ts` that must be excluded. It asserts that the metrics script reports exactly these two violations, and that the two guard rules, using the same functions, both flag them.
 
-It was also checked once by hand on the real sources (then reverted, not committed): appending `import type {} from "../server/store.ts";` to `shared/domain.ts` made `npx vitest run tests/architecture.test.ts` fail 2 of 8 tests — the cross-layer rule reported `shared/domain.ts -> server/store.ts`, and the cycle rule reported one new cycle of 11 files.
+It was also checked by hand on the real sources (then reverted, not committed): appending `import type {} from "../server/store.ts";` to `shared/domain.ts` made `npx vitest run tests/architecture.test.ts` fail 2 of 7 tests — the cross-layer rule reported `shared/domain.ts -> server/store.ts`, and the cycle rule reported one new cycle of 11 files; the failure messages contain the rule, what to do, the override and the path of this document.
 
 ## 5. Verification results
 
@@ -68,12 +63,12 @@ Environment: Linux cloud container, Node.js v22, dependencies from the existing 
 
 | Check | Command | Result |
 |---|---|---|
-| Type check | `npx tsc --noEmit` | Passed |
-| Guard test alone | `npx vitest run tests/architecture.test.ts` | 1 test file, 8 tests passed |
-| Unit and integration tests | `npx vitest run` | 173 test files passed; of 3,202 tests, 3,196 passed and 6 were skipped; 54 seconds (1 file and 8 tests more than the baseline, which is this test) |
-| Front-end build | `npx vite build` | Passed; the existing warning about a chunk over 500 kB is unchanged |
-| Desktop main syntax | `node --check desktop/main.mjs` | Passed |
-| Isolated mock flow | `node scripts/verify-aios.mjs` | PASS; its test run was 173 files, 3,197 passed, 5 skipped (the skip count depends on the environment, see the baseline record). The rpi4 terminal kit dry-run printed a skip because the container has no `ssh-keygen`, so that part ran partially |
+| Type check | `npx tsc --noEmit` | Passed (re-run after the large-file rule was removed) |
+| Guard test alone | `npx vitest run tests/architecture.test.ts` | 1 test file, 7 tests passed (re-run after the large-file rule was removed) |
+| Unit and integration tests | `npx vitest run` | 173 test files passed; of 3,201 tests, 3,196 passed and 5 were skipped; 51 seconds (re-run after the large-file rule was removed; 1 file and 7 tests more than the baseline, which is this test; the skip count depends on the environment, see the baseline record) |
+| Front-end build | `npx vite build` | Passed; the existing warning about a chunk over 500 kB is unchanged (run on the first commit `efb47bf`; only the test file and documents changed afterwards, so it was not re-run) |
+| Desktop main syntax | `node --check desktop/main.mjs` | Passed (as above, run on `efb47bf`) |
+| Isolated mock flow | `node scripts/verify-aios.mjs` | PASS (as above, run on `efb47bf`, when its test run was 173 files, 3,197 passed, 5 skipped). The rpi4 terminal kit dry-run printed a skip because the container has no `ssh-keygen`, so that part ran partially |
 | Metrics script output | `node scripts/architecture-metrics.mjs`, `--json` | Byte-for-byte identical before and after the refactor |
 | Bilingual documents | `node scripts/check-bilingual-docs.mjs` | Passed |
 | Whitespace | `git diff --check` | Passed |
@@ -82,6 +77,7 @@ Environment: Linux cloud container, Node.js v22, dependencies from the existing 
 
 ## 6. Limits
 
+- File size is not guarded: any file may pass 800 lines or keep growing without failing a test (George's decision of 2026-11-10).
 - Static analysis that finds relative-path imports with a regular expression, without parsing a syntax tree; text in a comment or string that looks like an import is counted too (it errs towards over-reporting), and non-relative imports are ignored.
 - CommonJS `require()` is not seen (the only `.cjs` source is `desktop/preload.cjs`), so a cross-layer import or cycle made through `require()` goes undetected.
 - The cycle check works on strongly connected components, not on individual edges or elementary cycles:
@@ -90,8 +86,7 @@ Environment: Linux cloud container, Node.js v22, dependencies from the existing 
   - Swapping one allowlist entry for another (same totals) does not trip the cap constants; it is only visible in the diff.
   - Type-only imports count as edges; a type-only cycle is harmless at runtime but still fails the test.
 - So the accurate form of "no new cycle" is: no strongly connected component containing a file outside the allowlist has appeared.
-- It does not measure runtime behaviour or the quality inside a module; passing does not mean the architecture is good, only that it has not become worse than the baseline without someone noticing.
+- It does not measure runtime behaviour or the quality inside a module; passing does not mean the architecture is good, only that these two things have not become worse than the baseline without someone noticing.
 - The override relies on the comment, the cap constants and the PR description to be seen; the test itself cannot check whether the reason is sound or whether the PR description mentions it.
-- Allowlisted large files can keep growing (see 3.1). If an allowlisted file drops to 800 lines or fewer and its entry is not removed, growing back later is not caught.
-- The test classification in §3.6 of the review record becomes 173 files, and the new test is counted under "server HTTP" (23 → 24) by the "file text contains `server/app.ts`" rule although it starts no server; this is a limit of the regular-expression classification, and the classification rule was not changed.
+- The test classification in §3.6 of the review record becomes 173 files, with the new test counted as "pure" (65 → 66); the review record itself holds the 2026-11-09 baseline numbers and was not changed.
 - A green test run is only a code check on mock/fixture data, not G0–G3 or any Mac/Pi gate.
