@@ -11,7 +11,7 @@ import { VOICE_COST_FILE, VOICE_COST_KEEP, VoiceCostLog } from "../server/voice-
 import type { VoiceCostRecord } from "../shared/voice-cost.ts";
 
 // S4（docs/23 §3）：server/fs-atomic.ts 的 writeAtomic，以及五個改用它的呼叫者寫出的檔與搬之前逐位元組相同。
-// 「搬之前」的寫法照 3cc1401 的原始碼抄在下面的 legacy 物件裡，只當比對基準，不是產品程式。
+// 「搬之前」的寫法照 3cc1401 的原始碼重現在下面的 legacy 物件裡，只當比對基準，不是產品程式。
 // 全部在暫存資料夾裡做；Windows 沒有 POSIX 權限，權限的斷言在那裡略過。
 
 const posix = process.platform !== "win32";
@@ -131,7 +131,9 @@ describe("writeAtomic", () => {
   });
 });
 
-// ---- 搬之前的寫法（3cc1401 逐字抄下，只把 this.file／this.path 換成參數）----
+// ---- 搬之前的寫法（照 3cc1401；寫檔的那幾行逐字相同，this.file／this.path 換成參數）----
+// 不是每一段都是原樣的一個函式：voiceCost 把 record()、lines()、write() 三個方法攤平成一個；
+// proactive 只留寫檔段，沒有 log 呼叫，也沒有 mark() 前面的日期與 Set 記帳（鍵直接由參數給）。
 const legacy = {
   // server/providers.ts:172-176 writeJson
   providers(path: string, value: unknown): void {
@@ -228,21 +230,23 @@ const pairing: LgtvPairing = { version: 1, host: "192.0.2.10", client_key: "fixt
 describe("migrated callers produce the same files as before S4", () => {
   // 每個案例：old 在一個新資料夾用舊寫法寫，now 在另一個新資料夾走現在的呼叫者；兩邊的 snapshot 要完全相同。
   // sub 是資料夾底下還不存在的子路徑，用來比「上層不在時」的行為（建不建、建成什麼權限）。
-  const cases: { name: string; sub: string[]; old(dir: string): void; now(dir: string): void }[] = [
-    { name: "providers.ts settings.json", sub: [], old: (d) => legacy.providers(join(d, "settings.json"), { provider: "mock" }), now: (d) => manager(d).select("mock") },
+  const cases: { name: string; sub: string[]; tmp: string; old(dir: string): void; now(dir: string): void; once?: { old(dir: string): void; now(dir: string): void } }[] = [
+    { name: "providers.ts settings.json", sub: [], tmp: "settings.json.tmp", old: (d) => legacy.providers(join(d, "settings.json"), { provider: "mock" }), now: (d) => manager(d).select("mock") },
     {
-      name: "proactive.ts proactive-log.json", sub: ["cfg"],
+      name: "proactive.ts proactive-log.json", sub: ["cfg"], tmp: "proactive-log.json.tmp",
       old: (d) => legacy.proactive(d, join(d, "proactive-log.json"), "2026-11-10", ["weather", "行事曆"]),
       now: (d) => new ProactiveDailyLog({ dir: d }).mark("2026-11-10", ["weather", "行事曆"]),
     },
     {
-      name: "voice-cost-log.ts voice-cost.jsonl", sub: ["cfg"],
+      name: "voice-cost-log.ts voice-cost.jsonl", sub: ["cfg"], tmp: `${VOICE_COST_FILE}.tmp`,
       old: (d) => { legacy.voiceCost(join(d, VOICE_COST_FILE), costRecord(1)); legacy.voiceCost(join(d, VOICE_COST_FILE), costRecord(2)); },
       now: (d) => { const log = new VoiceCostLog({ dir: d }); log.record(costRecord(1)); log.record(costRecord(2)); },
+      // 只寫一次：寫兩次的話第二次會重新建立暫存檔，看不出第一次有沒有 chmod。
+      once: { old: (d) => legacy.voiceCost(join(d, VOICE_COST_FILE), costRecord(1)), now: (d) => new VoiceCostLog({ dir: d }).record(costRecord(1)) },
     },
-    { name: "lgtv/store.ts lgtv.json", sub: ["cfg"], old: (d) => legacy.lgtv(join(d, "lgtv.json"), pairing), now: (d) => writePairing(join(d, "lgtv.json"), pairing) },
+    { name: "lgtv/store.ts lgtv.json", sub: ["cfg"], tmp: `lgtv.json.${process.pid}.tmp`, old: (d) => legacy.lgtv(join(d, "lgtv.json"), pairing), now: (d) => writePairing(join(d, "lgtv.json"), pairing) },
     {
-      name: "nous.ts memory-enabled.json", sub: ["cfg"],
+      name: "nous.ts memory-enabled.json", sub: ["cfg"], tmp: "memory-enabled.json.tmp",
       old: (d) => legacy.memoryEnabled(join(d, "memory-enabled.json"), true),
       now: (d) => memoryEnabledHint(join(d, "memory-enabled.json")).set(true),
     },
@@ -255,6 +259,22 @@ describe("migrated callers produce the same files as before S4", () => {
     now(b);
     expect(snapshot(b)).toEqual(snapshot(a));
     expect((snapshot(b) as { files: unknown[] }).files).toHaveLength(1);
+  });
+
+  it.each(cases)("$name: same result when a stale temp file with mode 0644 is already there", ({ name, tmp, old, now, once }) => {
+    // 上次寫到一半留下的暫存檔（0644）：有 chmodTemp 的呼叫者（voice-cost-log、lgtv）寫出來仍是 0600，
+    // 其餘三個照舊沿用暫存檔原本的權限（proactive 之後還會 chmod 正式檔）。少了 chmodTemp 這裡就會不同。
+    const [a, b] = [temp(), temp()];
+    for (const dir of [a, b]) {
+      writeFileSync(join(dir, tmp), "stale", { mode: 0o644 });
+      chmodSync(join(dir, tmp), 0o644);
+    }
+    (once?.old ?? old)(a);
+    (once?.now ?? now)(b);
+    expect(snapshot(b)).toEqual(snapshot(a));
+    const files = readdirSync(b);
+    expect(files).toHaveLength(1);
+    if (posix) expect(modeOf(join(b, files[0]!))).toBe(name.startsWith("providers") || name.startsWith("nous") ? 0o644 : 0o600);
   });
 
   it.each(cases)("$name: same result when the target is blocked by a directory", ({ old, now }) => {

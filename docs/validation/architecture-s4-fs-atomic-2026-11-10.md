@@ -22,7 +22,7 @@
 | `server/voice-cost-log.ts` | `write` 改成 `writeAtomic(…, { mode: 0o600, mkdir: 0o700, chmodTemp: true })`；只留 500 筆的 `slice` 與只記 log 的 catch 留在原地 |
 | `server/lgtv/store.ts` | `writePairing` 改成 `writeAtomic(…, { mode: 0o600, mkdir: 0o700, chmodTemp: true, tempSuffix: ".<pid>.tmp" })`；之後對正式檔的 `chmodSync`（失敗會丟出）留在原地 |
 | `server/nous.ts` | `memoryEnabledHint().set` 改成 `writeAtomic(…, { mode: 0o600, mkdir: true })` |
-| `tests/fs-atomic.test.ts` | 新增，21 項 |
+| `tests/fs-atomic.test.ts` | 新增，26 項 |
 
 五個來源檔合計 +18／-32 行（淨 -14 行）。`writeAtomic` 的選項：
 
@@ -40,7 +40,7 @@
 
 ## 3. 語意對照表
 
-`grep -rn "renameSync" prototype/ambient-shell/server` 在 `3cc1401` 找到 16 個檔（`memories-google.ts` 另有兩處是搬下載檔，不是寫設定）。「搬」欄：✅ 已搬、— 這批不搬。
+`grep -rn "renameSync" prototype/ambient-shell/server` 在 `3cc1401` 找到 16 個檔（`memories-google.ts` 另有兩處是搬下載檔，不是寫設定）。
 
 ### 3.1 已搬的五個（搬之前的語意，搬之後相同）
 
@@ -88,9 +88,10 @@ A＝和已搬的 `proactive.ts` 同型；B＝簡單但各有一點不同；D＝d
 
 ### 4.2 自動比對
 
-`tests/fs-atomic.test.ts` 的第二個 `describe` 把 `3cc1401` 的五段舊寫法逐字抄成 `legacy`，和現在的呼叫者各在一個新的暫存資料夾裡執行，再比兩邊的 snapshot（資料夾權限、每個檔名、內容的 hex、檔案權限）：
+`tests/fs-atomic.test.ts` 的第二個 `describe` 把 `3cc1401` 的五段舊寫法重現成 `legacy`（寫檔的那幾行逐字相同，但不是每一段都是原樣的一個函式：`legacy.voiceCost` 是把 `record()`、`lines()`、`write()` 三個方法攤平成一個；`legacy.proactive` 只留寫檔段，沒有 log 呼叫，也沒有 `mark()` 前面的日期與 `Set` 記帳），和現在的呼叫者各在一個新的暫存資料夾裡執行，再比兩邊的 snapshot（資料夾權限、每個檔名、內容的 hex、檔案權限）：
 
 - 正常寫入 5 項：兩邊完全相同，而且資料夾裡只有 1 個檔（沒有留下暫存檔）。除了 `providers.ts`（本來就不建資料夾）之外，都從還不存在的子資料夾開始，所以也比到「上層資料夾建成什麼權限」。
+- 已經有一個 0o644 的舊暫存檔 5 項：兩邊結果相同。有 `chmodTemp` 的兩個（`voice-cost-log.ts`、`lgtv/store.ts`）寫出來仍是 0o600；`providers.ts` 與 `nous.ts` 沿用暫存檔的 0o644（搬之前就是這樣）；`proactive.ts` 靠之後對正式檔的 chmod 變成 0o600。`voice-cost-log.ts` 這一項只寫一次（寫兩次時第二次會重新建立暫存檔，看不出差別）；暫時把它的 `chmodTemp` 拿掉，這一項會失敗，確認過之後已還原。
 - 目標被非空資料夾佔住（rename 失敗）5 項：兩邊「丟不丟錯」與失敗後資料夾內容相同（`proactive.ts` 不留暫存檔、不丟；`voice-cost-log.ts` 留暫存檔、不丟；其餘三個留暫存檔、丟出）。
 
 既有測試沒有修改：`voice-cost-log.test.ts`、`proactive.test.ts`、`proactive-calendar.test.ts`、`proactive-http.test.ts`、`integration-lg-tv.test.ts`，以及經 `ProviderManager.select` 與 `memoryEnabledHint` 的 HTTP／整合測試，都在第 5 節的全套測試裡通過。
@@ -100,8 +101,8 @@ A＝和已搬的 `proactive.ts` 同型；B＝簡單但各有一點不同；D＝d
 | 檢查 | 指令 | 結果 |
 |---|---|---|
 | 型別檢查 | `npx tsc --noEmit` | 通過 |
-| 新測試 | `npx vitest run tests/fs-atomic.test.ts` | 1 個檔、21 項通過 |
-| 單元與整合測試 | `npx vitest run` | 173 個測試檔通過；3,215 項中 3,209 項通過、6 項跳過；94 秒。基準是 172 檔 3,194 項（3,188 通過、6 跳過）：多的 1 檔 21 項就是 `fs-atomic.test.ts` |
+| 新測試 | `npx vitest run tests/fs-atomic.test.ts` | 1 個檔、26 項通過 |
+| 單元與整合測試 | `npx vitest run` | 173 個測試檔通過；3,220 項中 3,215 項通過、5 項跳過；60 秒。基準是 172 檔 3,194 項：多的 1 檔 26 項就是 `fs-atomic.test.ts`。加入舊暫存檔案例之前的那一次是 3,215 項中 3,209 項通過、6 項跳過；跳過數依環境而異（見第 6 節） |
 | 前端建置 | `npx vite build` | 通過；警告 `zh-tw-opencc` chunk 超過 500 kB（與基準相同） |
 | 桌面主程式語法 | `node --check desktop/main.mjs` | 通過 |
 | 隔離 mock 流程 | `node scripts/verify-aios.mjs` | PASS |
@@ -112,6 +113,7 @@ A＝和已搬的 `proactive.ts` 同型；B＝簡單但各有一點不同；D＝d
 ## 6. 限制
 
 - 只在 Linux 容器（root、umask 022）跑過。macOS 的權限語意與 Linux 相同但沒有實測；Windows 沒有 POSIX 權限，測試在那裡略過權限斷言，也沒有實跑。
+- 全套測試的跳過數依環境而異：同一個容器先後兩次是 6 項與 5 項（`apikey-integration.test.ts` 等用 `describe.skipIf(!realLockAvailable)`，基準紀錄也記過同樣的現象），和這批的變更無關。
 - 以 root 執行，所以「權限不足」這類失敗沒有被測到；失敗案例用的是「目標被非空資料夾佔住」「上層是一般檔案」。
 - 比對的是每個呼叫者一組代表性輸入，不是所有輸入；「內容相同」另外靠第 4.1 節的對照：傳給寫檔函式的字串運算式沒有改。
 - `chmodSync` 失敗的路徑（`voice-cost-log.ts`、`lgtv/store.ts`）只靠讀碼對照，沒有自動測試。

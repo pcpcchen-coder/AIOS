@@ -23,7 +23,7 @@ Companion document: [23 Architecture review and restructuring plan](../23_Archit
 | `server/voice-cost-log.ts` | `write` became `writeAtomic(…, { mode: 0o600, mkdir: 0o700, chmodTemp: true })`; the `slice` that keeps 500 records and the catch that only logs stay where they were |
 | `server/lgtv/store.ts` | `writePairing` became `writeAtomic(…, { mode: 0o600, mkdir: 0o700, chmodTemp: true, tempSuffix: ".<pid>.tmp" })`; the later `chmodSync` on the final file (which throws on failure) stays where it was |
 | `server/nous.ts` | `memoryEnabledHint().set` became `writeAtomic(…, { mode: 0o600, mkdir: true })` |
-| `tests/fs-atomic.test.ts` | New, 21 tests |
+| `tests/fs-atomic.test.ts` | New, 26 tests |
 
 The five source files total +18 / -32 lines (net -14). The options of `writeAtomic`:
 
@@ -89,9 +89,10 @@ The string expressions the five callers pass in were not changed (check with `gi
 
 ### 4.2 Automated comparison
 
-The second `describe` in `tests/fs-atomic.test.ts` copies the five old code blocks from `3cc1401` verbatim into `legacy`, runs each of them and the current caller in its own fresh temp directory, and compares the two snapshots (directory mode, every file name, the content as hex, the file mode):
+The second `describe` in `tests/fs-atomic.test.ts` reproduces the five old code blocks from `3cc1401` as `legacy` (the lines that write the file are verbatim, but not every block is one original function as it stood: `legacy.voiceCost` is the three methods `record()`, `lines()` and `write()` flattened into one; `legacy.proactive` keeps only the write section, without the log call and without the date and `Set` bookkeeping at the top of `mark()`), runs each of them and the current caller in its own fresh temp directory, and compares the two snapshots (directory mode, every file name, the content as hex, the file mode):
 
 - Normal write, 5 tests: both sides are identical, and the directory holds exactly 1 file (no temp file left behind). Except for `providers.ts` (which never created directories), each starts from a subdirectory that does not exist yet, so the comparison also covers which mode the parent directory is created with.
+- A stale 0o644 temp file is already there, 5 tests: both sides give the same result. The two callers with `chmodTemp` (`voice-cost-log.ts`, `lgtv/store.ts`) still end up at 0o600; `providers.ts` and `nous.ts` keep the temp file's 0o644 (as they did before the move); `proactive.ts` reaches 0o600 through its later chmod on the final file. The `voice-cost-log.ts` case writes only once (with two writes the second one creates the temp file afresh and the difference is invisible); with its `chmodTemp` temporarily removed this test fails, which was confirmed and then reverted.
 - Target blocked by a non-empty directory (the rename fails), 5 tests: whether an error is thrown and the directory contents after the failure are the same on both sides (`proactive.ts` leaves no temp file and does not throw; `voice-cost-log.ts` leaves the temp file and does not throw; the other three leave the temp file and throw).
 
 No existing test was modified: `voice-cost-log.test.ts`, `proactive.test.ts`, `proactive-calendar.test.ts`, `proactive-http.test.ts`, `integration-lg-tv.test.ts`, and the HTTP / integration tests that go through `ProviderManager.select` and `memoryEnabledHint`, all pass in the full run in section 5.
@@ -101,8 +102,8 @@ No existing test was modified: `voice-cost-log.test.ts`, `proactive.test.ts`, `p
 | Check | Command | Result |
 |---|---|---|
 | Type check | `npx tsc --noEmit` | Passed |
-| New tests | `npx vitest run tests/fs-atomic.test.ts` | 1 file, 21 tests passed |
-| Unit and integration tests | `npx vitest run` | 173 test files passed; 3,209 of 3,215 tests passed, 6 skipped; 94 s. The baseline is 172 files and 3,194 tests (3,188 passed, 6 skipped): the extra file and 21 tests are `fs-atomic.test.ts` |
+| New tests | `npx vitest run tests/fs-atomic.test.ts` | 1 file, 26 tests passed |
+| Unit and integration tests | `npx vitest run` | 173 test files passed; 3,215 of 3,220 tests passed, 5 skipped; 60 s. The baseline is 172 files and 3,194 tests: the extra file and 26 tests are `fs-atomic.test.ts`. The run before the stale-temp cases were added gave 3,209 of 3,215 passed with 6 skipped; the skip count depends on the environment (see section 6) |
 | Front-end build | `npx vite build` | Passed; warning that the `zh-tw-opencc` chunk exceeds 500 kB (same as the baseline) |
 | Desktop main-process syntax | `node --check desktop/main.mjs` | Passed |
 | Isolated mock flow | `node scripts/verify-aios.mjs` | PASS |
@@ -113,6 +114,7 @@ No existing test was modified: `voice-cost-log.test.ts`, `proactive.test.ts`, `p
 ## 6. Limits
 
 - Run only in a Linux container (root, umask 022). macOS has the same permission semantics as Linux but was not measured; Windows has no POSIX permissions, the tests skip the mode assertions there, and nothing was run there.
+- The skip count of the full run depends on the environment: two runs in the same container gave 6 and then 5 (`apikey-integration.test.ts` and others use `describe.skipIf(!realLockAvailable)`, and the baseline record noted the same effect); it is unrelated to this batch.
 - Running as root means "permission denied" failures were not exercised; the failure cases use "target blocked by a non-empty directory" and "the parent is a regular file".
 - The comparison uses one representative input per caller, not every input; "same content" additionally rests on section 4.1: the string expressions passed to the write were not changed.
 - The paths where `chmodSync` fails (`voice-cost-log.ts`, `lgtv/store.ts`) are covered only by reading the code side by side, not by an automated test.

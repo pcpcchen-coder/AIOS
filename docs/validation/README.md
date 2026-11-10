@@ -10,7 +10,7 @@
 
 | 紀錄 | 證據範圍與限制 |
 |---|---|
-| [架構重整 S4：共用原子寫檔 helper](architecture-s4-fs-atomic-2026-11-10.md) | 2026-11-10：`server/fs-atomic.ts` 的 `writeAtomic` 與五個改用它的呼叫者（`providers.ts`、`proactive.ts` 的每日紀錄、`voice-cost-log.ts`、`lgtv/store.ts`、`nous.ts` 的 memory-enabled）；16 個寫檔模組的語意對照表、沒搬的 11 個與原因；`tests/fs-atomic.test.ts` 21 項（含舊寫法對新呼叫者的位元組、權限、資料夾權限與失敗後殘留比對）。Linux 雲端容器的自動化測試，沒有在 macOS 或 Windows 上跑，不是產品 gate |
+| [架構重整 S4：共用原子寫檔 helper](architecture-s4-fs-atomic-2026-11-10.md) | 2026-11-10：`server/fs-atomic.ts` 的 `writeAtomic` 與五個改用它的呼叫者（`providers.ts`、`proactive.ts` 的每日紀錄、`voice-cost-log.ts`、`lgtv/store.ts`、`nous.ts` 的 memory-enabled）；16 個寫檔模組的語意對照表、沒搬的 11 個與原因；`tests/fs-atomic.test.ts` 26 項（含舊寫法對新呼叫者的位元組、權限、資料夾權限、舊暫存檔與失敗後殘留比對）。Linux 雲端容器的自動化測試，沒有在 macOS 或 Windows 上跑，不是產品 gate |
 | [架構盤點的量測與基準線](architecture-review-2026-11-09.md) | 2026-11-09：[23 架構盤點](../23_Architecture_Review_2026-11.md)引用的數字怎麼算（`scripts/architecture-metrics.mjs`：分層行數、16 個超過 800 行的檔、0 個跨層 import、4 組 import 環、15 個繞過 `prefs-file.ts` 的寫檔模組對 11 個使用它的 store、13 個同名方法、172 個測試檔的分類、26 個沒有直接測試的模組）與 main `416a1ab` 的基準線（172 檔 3,188 項通過、6 項跳過，verify-aios PASS）。靜態分析與雲端 mock 測試，不是產品 gate |
 | [鏡頭亮暗門檻設定 LUX-1](light-thresholds-2026-11-09.md) | 2026-11-09：設定頁可調「低於這個值算暗」「高於這個值算亮」（預設 95／115，5–250、每格 5、至少差 5），每台裝置各自保存；順手修正設定頁不會因這台裝置的音量或門檻改變而重畫；單元測試與無頭 Chromium；**Pi 與 Mac 實機未驗證** |
 | [倒數、滴答與鈴聲 ALARM-3](alarm-timer-3-2026-11-09.md) | 2026-11-09：到期前 30 秒畫面倒數（只在會響的那台）、最後 10 秒每秒一聲滴、三種本機合成鈴聲（可試聽）與響鈴長度（1–15 分鐘）。雲端測試與無頭 Chromium（倒數出現、10 個滴答、鈴聲接手、設定保存），**Mac 與 Pi 實機未執行** |

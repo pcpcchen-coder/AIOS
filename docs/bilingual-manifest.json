@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "4091a18e506e5e20b3bc0923556039d7941e4545a814dbbb49ca7c53a1311865",
-      "translationSha256": "d7b23f07f9d4c1395512a9f51ce6a160273332eea4ea694b95138aa209b0f87c"
+      "sourceSha256": "7096f13e33234b64355ffb9f884bc7202dbeb5c7d6aadf4bd6bc584b606af94c",
+      "translationSha256": "009fe669a5e0e588349f529f9ca69f16414169d2be889fff7a6074a87572c972"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -354,8 +354,8 @@
       "source": "docs/validation/architecture-s4-fs-atomic-2026-11-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/architecture-s4-fs-atomic-2026-11-10.en.md",
-      "sourceSha256": "a678b25da99aee6bca70f1f23a928eaa2f9f9f51123601409a83ca23810cfd4c",
-      "translationSha256": "751b562af7bf1c2a40a0cced601f85f847987982c8b578b1906df560de3fc89f"
+      "sourceSha256": "7d3d6bf46f0164edfb0a7526319d8d85e0b2f6c9aa97482e2fbd40926cc8ddec",
+      "translationSha256": "180df5485a400df6418d432d7a164ef34c2600be6f6790e6f508cb20f3c5e912"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
