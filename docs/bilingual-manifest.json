@@ -181,8 +181,8 @@
       "source": "docs/23_Architecture_Review_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/23_Architecture_Review_2026-11.en.md",
-      "sourceSha256": "d43983410c4ef1aa2027d39936d975a2e242cfaa66b0e171d429ca1ea51ad995",
-      "translationSha256": "505a4b06ca9f4731e8c8ffd01dad2acba3146899a5a6cb5d2c9cc64eb43a4b67"
+      "sourceSha256": "4cd4b405883d91b192aeecfbbbabdaa52356b9d8912a174ab21be3de4ec9ab72",
+      "translationSha256": "732aef652b64e171898551d47b6f00aead2eb4642ed55890bf806403b55a8b06"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "7e696f5b431f420575d43e5684d2655331a6c85a6a33163ffbc054096ba7ca73",
-      "translationSha256": "411d70879e4196d1329368b0022e590faa3f125d17ca2461877c07aaa296dd42"
+      "sourceSha256": "e82b338cb3c62871f3f65ad2e10cdd2f1df183e1faae75b1be571fc92629d3c1",
+      "translationSha256": "14919743be42d9f3b76a826352e5d37c98d042c2c4e3d29c110b733f4febec50"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -384,6 +384,13 @@
       "translation": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.en.md",
       "sourceSha256": "4d75f464e8ee44de196b99296cfffa512918891c3ba2b8c64e9605d42ec283be",
       "translationSha256": "e31b79a1605393287ca68f1b252b1d9a889209e9b19b3f5341f84f510f5d9924"
+    },
+    {
+      "source": "docs/validation/architecture-s8-tool-names-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s8-tool-names-2026-11-10.en.md",
+      "sourceSha256": "a11dcfe29b7b9ca19bcf99b14efb94ae9f79952fb87530266a1719654b1588a9",
+      "translationSha256": "3e2a84d22ddfb1dd98326fe9a04ba1f9fae71cb807a0202e0fa60a884cb90ccf"
     },
     {
       "source": "docs/validation/architecture-s9-home-split-2026-11-10.md",
@@ -991,8 +998,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "4662e127163424f1d09016469ce72be429e58dad8e41f9638e6da9086ac4352f",
-      "translationSha256": "e697dee4a3adeadba2fc855a50e8a28ccb87e4a1797fa8199593a9ec8fd37ff6"
+      "sourceSha256": "0deab2a37c9d0f057f79c5fede257035c1e44d09a05e447a943178f2bdaf80aa",
+      "translationSha256": "1b3f08ac4c77df996da5dbcc29e239fb529e90e835c7500ab55eab016c79cde1"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

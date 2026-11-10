@@ -543,7 +543,8 @@ prototype/ambient-shell/
 ├── wake-runtime/           # 喚醒引擎 KWS wasm 與模型（npm run wake:setup -- --product；不進 git、不進 dist）
 ├── shared/                 # 前後端共用型別與進度計算；prefs.ts、voice-prefs.ts（設定規格）、
 │                           # menu-prefs.ts（選單列鏡頭開關、秒數與倍率；原名 seconds-menu.ts）、voice-commands.ts（指令表唯一來源）、
-│                           # memory.ts（家庭記憶）、memories.ts（回憶模式）、integrations.ts、alarm.ts、wake.ts、day-night.ts 等
+│                           # memory.ts（家庭記憶）、memories.ts（回憶模式）、integrations.ts、alarm.ts、wake.ts、day-night.ts 等；
+│                           # realtime-route.ts 的 HOST_TOOL_NAMES 是即時語音頁面工具名單的唯一來源，home.ts 的 HOME_ARG_MAX 是家電參數長度上限
 └── tests/                  # vitest
 ```
 

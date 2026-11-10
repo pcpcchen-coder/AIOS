@@ -1,5 +1,5 @@
 import { toolResult, type IntegrationToolId, type ToolResult, type ToolResultStatus } from "../../../shared/integrations.ts";
-import type { HomeControlResult, HomeStatusResult } from "../../../shared/home.ts";
+import { HOME_ARG_MAX, type HomeControlResult, type HomeStatusResult } from "../../../shared/home.ts";
 import { HomeBridgeError, type ControlRequest } from "../../home-bridge.ts";
 import type { HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 
@@ -39,7 +39,7 @@ const TOOLS: readonly ToolDefinition[] = [
     description: "（Facade）home_status 經整合層呼叫 HomeBridge.status；模型看到的是原本的 home_status。",
     inputSchema: {
       type: "object",
-      properties: { target: { type: "string", minLength: 1, maxLength: 100 }, metric: { type: "string", maxLength: 40 } },
+      properties: { target: { type: "string", minLength: 1, maxLength: HOME_ARG_MAX.target }, metric: { type: "string", maxLength: HOME_ARG_MAX.metric } },
       required: ["target"],
       additionalProperties: false,
     },
@@ -54,7 +54,7 @@ const TOOLS: readonly ToolDefinition[] = [
     description: "（Facade）home_control 經整合層呼叫 HomeBridge.control；設備政策與確認卡由 HomeBridge 與頁面處理，不變。",
     inputSchema: {
       type: "object",
-      properties: { target: { type: "string", minLength: 1, maxLength: 100 }, command: { type: "string", minLength: 1, maxLength: 40 }, value: { type: "scalar", maxLength: 40 } },
+      properties: { target: { type: "string", minLength: 1, maxLength: HOME_ARG_MAX.target }, command: { type: "string", minLength: 1, maxLength: HOME_ARG_MAX.command }, value: { type: "scalar", maxLength: HOME_ARG_MAX.value } },
       required: ["target", "command"],
       additionalProperties: false,
     },

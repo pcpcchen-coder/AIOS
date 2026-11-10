@@ -1,6 +1,6 @@
 import type { Locale } from "../shared/i18n.mjs";
 import { exactApproval } from "../shared/approval.ts";
-import { RESULT_UNKNOWN_TEXT, SIDE_EFFECT_TOOLS, type HostToolName } from "../shared/realtime-route.ts";
+import { HOST_TOOL_NAMES, RESULT_UNKNOWN_TEXT, SIDE_EFFECT_TOOLS, type HostToolName } from "../shared/realtime-route.ts";
 import type { Task } from "../shared/types.ts";
 import { CodexError, type CodexInputItem, type CodexResponses, type CodexToolSpec, type FunctionToolSpec } from "./codex-responses.ts";
 import { buildRealtimeTools, realtimeToolRules, taskLines, type RealtimeCapabilities } from "./realtime.ts";
@@ -81,7 +81,8 @@ export const DELEGATION_BUDGET_MS = CALLER_LIMITS.maxTurns * CALLER_LIMITS.turnT
 /** 確認卡結束後多久內，「確認執行／取消」的交辦算是在回答那張卡。 */
 export const APPROVAL_WINDOW_MS = 8_000;
 
-const HOST_TOOLS: readonly HostToolName[] = ["web_search", "show_search_result", "delegate_task", "get_tasks", "end_conversation", "home_status", "home_control", "set_voice_volume", "set_day_night"];
+/** 交給頁面執行的工具：shared/realtime-route.ts 的單一名單（只用在 includes，順序沒有作用）。 */
+const HOST_TOOLS: readonly HostToolName[] = HOST_TOOL_NAMES;
 
 /**
  * 工具表：buildRealtimeTools(caps) 去掉 MCP（MCP 在 ChatGPT 方案路徑不可用）。名稱、說明、參數都和 API key 路徑相同：
