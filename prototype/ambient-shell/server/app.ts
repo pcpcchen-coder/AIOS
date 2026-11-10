@@ -16,18 +16,16 @@ import { ExecutionError } from "./runner.ts";
 import { RealtimeError, type RealtimeBridge } from "./realtime.ts";
 import { WebSearchError, type WebSearch } from "./web-search.ts";
 import { HomeBridgeError, type ControlRequest, type HomeBridge } from "./home-bridge.ts";
-import { FaceTuningError, parseFaceTuningPatch, type FaceTuning, type FaceTuningView } from "../shared/face-tuning.ts";
-import { CameraPatchError, parseCameraPatch, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
+import type { FaceTuning, FaceTuningView } from "../shared/face-tuning.ts";
+import type { CameraPrefsPatch, CameraSettings } from "../shared/sense.ts";
 import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/menu-prefs.ts";
-import { DEFAULT_VOICE_PREFS, parseVoicePatch, VoicePatchError, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
+import { DEFAULT_VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
 import { ApiKeyRoute, FallbackRequired, RealtimeSessions, RouteStartError, SessionError, type RealtimeRoute } from "./realtime-routes.ts";
 import type { CodexAuth } from "./codex-auth.ts";
 import {
   APPROVAL_CARD_OUTCOMES,
   LIVE_INPUT_KINDS,
-  parseRealtimePatch,
-  RealtimePatchError,
   STOP_REPLY_RESPONSE_ID,
   type ApprovalCardOutcome,
   type ApprovalReport,
@@ -40,8 +38,8 @@ import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity
 import { faceRuntimePath, readVerifiedFaceRuntime } from "./face-runtime.ts";
 import { readVerifiedSpeakerRuntime, speakerRuntimePath } from "./speaker-runtime.ts";
 import { readVerifiedWakeRuntime, wakeRuntimePath } from "./wake-runtime.ts";
-import { AUDIO_WRITE_PATH, AudioPatchError, DEFAULT_AUDIO_PREFS, parseAudioPatch, type AudioPrefs, type AudioPrefsPatch } from "../shared/audio-devices.ts";
-import { effectiveWakeThresholds, parseWakePatch, WAKE_ID, WakePatchError, type WakeKeywordConfig, type WakePrefs, type WakePrefsPatch, type WakeRuntimeState } from "../shared/wake.ts";
+import { AUDIO_WRITE_PATH, DEFAULT_AUDIO_PREFS, type AudioPrefs, type AudioPrefsPatch } from "../shared/audio-devices.ts";
+import { effectiveWakeThresholds, WAKE_ID, type WakeKeywordConfig, type WakePrefs, type WakePrefsPatch, type WakeRuntimeState } from "../shared/wake.ts";
 import wakeManifest from "../shared/wake-runtime.json" with { type: "json" };
 import { parsePageEndReason, parseVoiceUsage } from "../shared/voice-cost.ts";
 import { parseCostLimit, type VoiceCostLog } from "./voice-cost-log.ts";
@@ -52,11 +50,11 @@ import type { VoiceRoute } from "./memory/live.ts";
 import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
-import { HOME_CORNER_WRITE_PATH, HOME_OVERVIEW_PATH, HomeCornerPatchError, parseHomeCornerPatch, type HomeCornerPrefs, type HomeCornerPrefsPatch, type HomeCornerSettingsView, type HomeOverviewView } from "../shared/home-corner.ts";
-import { DAY_NIGHT_WRITE_PATH, DayNightPatchError, isScreenState, parseDayNightPatch, TERMINAL_DISPLAY_PATH, type DayNightPatch, type DayNightSettingsView, type ScreenState } from "../shared/day-night.ts";
-import { CLOCK_WRITE_PATH, ClockPatchError, parseClockPatch, WEATHER_NOW_PATH, type ClockPrefs, type ClockPrefsPatch, type ClockSettingsView, type WeatherNowView } from "../shared/clock.ts";
-import { parseProactivePatch, ProactivePatchError, type ProactivePrefs, type ProactivePrefsPatch, type ProactiveSettingsView } from "../shared/proactive.ts";
-import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_MEDIA_PREFIX, MEMORIES_WRITE_PATH, MemoriesPatchError, parseMemoriesPatch, type MemoriesItem, type MemoriesPrefs, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
+import { HOME_OVERVIEW_PATH, type HomeCornerPrefs, type HomeCornerPrefsPatch, type HomeCornerSettingsView, type HomeOverviewView } from "../shared/home-corner.ts";
+import { isScreenState, TERMINAL_DISPLAY_PATH, type DayNightPatch, type DayNightSettingsView, type ScreenState } from "../shared/day-night.ts";
+import { WEATHER_NOW_PATH, type ClockPrefs, type ClockPrefsPatch, type ClockSettingsView, type WeatherNowView } from "../shared/clock.ts";
+import type { ProactivePrefs, ProactivePrefsPatch, ProactiveSettingsView } from "../shared/proactive.ts";
+import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_MEDIA_PREFIX, type MemoriesItem, type MemoriesPrefs, type MemoriesPrefsPatch, type MemoriesSettingsView } from "../shared/memories.ts";
 import { parseByteRange } from "./memories.ts";
 import type { MemoriesGooglePart } from "./memories-google.ts";
 import { isTerminalId, pageSource } from "../shared/terminal.ts";
@@ -68,6 +66,8 @@ import type { IntegrationToolId } from "../shared/integrations.ts";
 import { ALARM_WRITE_PATH, AlarmPatchError, STOP_SOURCES, type StopSource } from "../shared/alarm.ts";
 import type { AlarmCenter } from "./alarms.ts";
 import { repeatDays } from "../shared/alarm-schedule.ts";
+import { HttpError } from "./http-error.ts";
+import { findSettingsWrite } from "./routes/settings.ts";
 
 const MAX_BODY_BYTES = 16 * 1024;
 const MAX_TEXT_CHARS = 2000;
@@ -271,12 +271,6 @@ export interface VoiceSettingsSource {
   update(patch: VoicePrefsPatch): VoicePrefs;
 }
 
-class HttpError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
-  }
-}
-
 export function createApp(options: AppOptions): Server & { notifySettings(): void; notifyMemoryPresence(): void; connectedSources(): Set<string>; realtimeSessions: RealtimeSessions | null } {
   const { store, runner, auth, chat, realtime, webSearch, home, codexAuth } = options;
   /** SSE 串流：client_id → 回應。工具呼叫只送到擁有工作階段的那一條。 */
@@ -340,6 +334,9 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     },
     select: (provider: ExecutorMode) => options.settings.select(provider),
   };
+  /** 整份設定的回應：依頁面來源（X-Nous-Terminal）組出設定，再依請求的語言（X-Nous-Locale）翻譯。 */
+  const sendSettings = (req: IncomingMessage, res: ServerResponse, source = pageSource(req.headers["x-nous-terminal"])): void =>
+    sendJson(res, 200, localizeSettings(settings.view(source), normalizeLocale(req.headers["x-nous-locale"])));
   const hosts = allowedHosts(options.port, options.devPort);
 
   const broadcast = (event: ServerEvent) => {
@@ -403,126 +400,12 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
 
   async function handleApi(req: IncomingMessage, res: ServerResponse, path: string, params: URLSearchParams): Promise<void> {
     const method = req.method ?? "GET";
-    if (method === "GET" && path === "/api/settings") return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    if (method === "POST" && path === "/api/settings/provider") {
-      const body = await readJson(req);
-      const provider = body.provider;
-      if (provider !== "claude" && provider !== "chatgpt" && provider !== "mock") throw new HttpError(400, "unknown provider");
-      try {
-        settings.select(provider);
-      } catch (err) {
-        throw new HttpError(409, (err as Error).message);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    }
-    if (method === "POST" && path === "/api/settings/camera") {
-      if (!options.camera) throw new HttpError(409, "鏡頭未設定");
-      let patch: CameraPrefsPatch;
-      try {
-        patch = parseCameraPatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof CameraPatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      // App（cameraEnable: "main_process"）：頁面（以及任何本機頁面腳本）只能關掉鏡頭或改其他設定；打開只能由 App 主程序
-      // 在原生說明之後經 NousHandle.camera 做（同 /api/settings/wake 的 wake_listen）。整個請求拒絕，什麼都不保存。
-      // 關掉一定安全，所以照收。終端機／瀏覽器版（"http"）照舊可以打開。
-      if (cameraEnableStrict && patch.active === true) throw new HttpError(403, "鏡頭只能從 App 打開");
-      // update 會呼叫 onChange（→ notifySettings），這裡不重複廣播。
-      try {
-        options.camera.update(patch);
-      } catch (err) {
-        // 寫檔失敗：伺服器記憶體沒有改，回報真實原因，不顯示假成功。
-        throw new HttpError(500, `鏡頭設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    }
-    if (method === "POST" && path === "/api/settings/camera-tuning") {
-      if (!options.faceTuning || !options.camera?.view().enabled) throw new HttpError(409, "鏡頭未啟用");
-      const body = await readJson(req);
-      try {
-        if (body && typeof body === "object" && (body as Record<string, unknown>).reset === true) options.faceTuning.reset();
-        else {
-          const { calibrated, ...rest } = (body ?? {}) as Record<string, unknown>;
-          options.faceTuning.update(parseFaceTuningPatch(rest), calibrated === true);
-        }
-      } catch (err) {
-        if (err instanceof FaceTuningError) throw new HttpError(400, err.message);
-        throw new HttpError(500, `校正值沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    }
-    if (method === "POST" && path === "/api/settings/voice") {
-      if (!options.voice) throw new HttpError(409, "語音設定未設定");
-      let patch: VoicePrefsPatch;
-      try {
-        patch = parseVoicePatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof VoicePatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      try {
-        options.voice.update(patch);
-      } catch (err) {
-        throw new HttpError(500, `語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    }
-    if (method === "POST" && path === AUDIO_WRITE_PATH) {
-      if (!options.audio) throw new HttpError(409, "聲音裝置設定未設定");
-      let patch: AudioPrefsPatch;
-      try {
-        patch = parseAudioPatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof AudioPatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      try {
-        // update 會呼叫 onChange（→ notifySettings → SSE settings.updated），頁面與選單列都會更新。
-        options.audio.update(patch);
-      } catch (err) {
-        throw new HttpError(500, `聲音裝置設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    }
-    if (options.wake && method === "POST" && path === "/api/settings/wake") {
-      let patch: WakePrefsPatch;
-      try {
-        patch = parseWakePatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof WakePatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      // 頁面（以及任何本機頁面腳本）只能記下麥克風或關掉；打開只能由 App 主程序在原生說明之後經 NousHandle.wake 做
-      // （ADR-0003 §2.3）。關掉一定安全，所以這裡照收。
-      if (patch.wake_listen === true) throw new HttpError(403, "常駐喚醒聆聽只能從 App 選單列打開");
-      // SP-02a：只憑聲音叫名字的測試開關同樣只能由主程序在原生說明之後打開。
-      if (patch.voice_name_test === true) throw new HttpError(403, "只憑聲音叫名字只能從 App 選單列打開");
-      try {
-        options.wake.update(patch);
-      } catch (err) {
-        // 寫檔失敗：記憶體沒有改（仍是保存前的值），回報真實原因，不顯示假成功。
-        throw new HttpError(500, `常駐喚醒聆聽設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    }
+    if (method === "GET" && path === "/api/settings") return sendSettings(req, res);
+    // 設定寫入（POST /api/settings/*）：路由表在 server/routes/settings.ts；寫入成功後回整份設定。
+    const settingsWrite = findSettingsWrite(method, path);
+    if (settingsWrite && (await settingsWrite(options, () => readJson(req)))) return sendSettings(req, res);
     if (options.clock && method === "GET" && path === WEATHER_NOW_PATH) {
       return sendJson(res, 200, await options.clock.weatherNow(normalizeLocale(req.headers["x-nous-locale"])));
-    }
-    if (options.clock && method === "POST" && path === CLOCK_WRITE_PATH) {
-      let patch: ClockPrefsPatch;
-      try {
-        patch = parseClockPatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof ClockPatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      try {
-        options.clock.update(patch);
-      } catch (err) {
-        throw new HttpError(500, `時鐘設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (options.alarms && method === "POST" && (path === ALARM_WRITE_PATH || path.startsWith("/api/alarms/"))) {
       const alarms = options.alarms;
@@ -565,72 +448,11 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         if (!r.ok && r.code !== "none" && r.code !== "not_found") throw new HttpError(409, r.message);
       }
       else throw new HttpError(404, "not found");
-      return sendJson(res, 200, localizeSettings(settings.view(source), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendSettings(req, res, source);
     }
 
-    if (options.dayNight && method === "POST" && path === DAY_NIGHT_WRITE_PATH) {
-      let patch: DayNightPatch;
-      try {
-        patch = parseDayNightPatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof DayNightPatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      try {
-        options.dayNight.update(patch);
-      } catch (err) {
-        throw new HttpError(500, `日夜間設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    }
     if (options.homeCorner && method === "GET" && path === HOME_OVERVIEW_PATH) {
       return sendJson(res, 200, await options.homeCorner.overview());
-    }
-    if (options.homeCorner && method === "POST" && path === HOME_CORNER_WRITE_PATH) {
-      let patch: HomeCornerPrefsPatch;
-      try {
-        patch = parseHomeCornerPatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof HomeCornerPatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      try {
-        options.homeCorner.update(patch);
-      } catch (err) {
-        throw new HttpError(500, `家中狀態設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    }
-    if (options.proactive && method === "POST" && path === "/api/settings/proactive") {
-      let patch: ProactivePrefsPatch;
-      try {
-        patch = parseProactivePatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof ProactivePatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      try {
-        options.proactive.update(patch);
-      } catch (err) {
-        if (err instanceof ProactivePatchError) throw new HttpError(400, err.message);
-        throw new HttpError(500, `主動提醒設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
-    }
-    if (options.memories && method === "POST" && path === MEMORIES_WRITE_PATH) {
-      let patch: MemoriesPrefsPatch;
-      try {
-        patch = parseMemoriesPatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof MemoriesPatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      try {
-        options.memories.update(patch);
-      } catch (err) {
-        throw new HttpError(500, `回憶模式設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     // MEMO-2：Google 相簿挑選。回應是整份設定（含 picker_uri），選單列與頁面直接套用。
     const google = options.memories?.google;
@@ -638,7 +460,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const result = await google.pick();
       if (result === "unavailable") throw new HttpError(409, google.view().unavailable_reason ?? "Google 相簿不可用");
       if (result === "busy") throw new HttpError(409, "已經在挑選 Google 相簿");
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendSettings(req, res);
     }
     if (google && method === "POST" && (path === MEMORIES_GOOGLE_PATHS.cancel || path === MEMORIES_GOOGLE_PATHS.clear)) {
       if (path === MEMORIES_GOOGLE_PATHS.cancel) google.cancel();
@@ -649,7 +471,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
           throw new HttpError(500, "Google 相簿快取沒有清除完");
         }
       }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendSettings(req, res);
     }
     if (google && method === "GET" && path === MEMORIES_GOOGLE_PATHS.qr) {
       const svg = google.qrSvg();
@@ -662,23 +484,6 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (options.memories && path.startsWith(MEMORIES_MEDIA_PREFIX)) {
       if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");
       return serveMemoriesMedia(req, res, method, options.memories.file(path.slice(MEMORIES_MEDIA_PREFIX.length)));
-    }
-    if (method === "POST" && path === "/api/settings/realtime") {
-      if (!options.realtimePrefs) throw new HttpError(409, "即時語音路徑設定未設定");
-      let patch: RealtimePrefsPatch;
-      try {
-        patch = parseRealtimePatch(await readJson(req));
-      } catch (err) {
-        if (err instanceof RealtimePatchError) throw new HttpError(400, err.message);
-        throw err;
-      }
-      try {
-        // 只影響下一次開始；正在進行的工作階段維持原本的路徑（RealtimeSessions 只在 start 讀偏好）。
-        options.realtimePrefs.update(patch);
-      } catch (err) {
-        throw new HttpError(500, `即時語音設定沒有保存（無法寫入設定檔：${(err as Error).message}）`);
-      }
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
     }
     if (method === "POST" && path === "/api/chat") return streamChat(req, res);
     if (method === "POST" && path === "/api/realtime/start") {
@@ -926,7 +731,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (method === "POST" && path === "/api/auth/codex/cancel") {
       await readJson(req);
       codexAuth?.cancel();
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendSettings(req, res);
     }
     if (method === "POST" && path === "/api/auth/codex/logout") {
       await readJson(req);
@@ -971,7 +776,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (method === "POST" && path === "/api/auth/chatgpt/cancel") {
       await readJson(req);
       auth.cancelPending();
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendSettings(req, res);
     }
     if (method === "POST" && path === "/api/auth/chatgpt/logout") {
       await readJson(req);
@@ -981,7 +786,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     if (method === "POST" && path === "/api/auth/chatgpt/welcome-ack") {
       await readJson(req);
       auth.ackWelcome();
-      return sendJson(res, 200, localizeSettings(settings.view(pageSource(req.headers["x-nous-terminal"])), normalizeLocale(req.headers["x-nous-locale"])));
+      return sendSettings(req, res);
     }
     if (method === "GET" && path === "/api/tasks") return sendJson(res, 200, store.publicList());
     if (method === "GET" && path === "/api/events") return openEvents(req, res);
