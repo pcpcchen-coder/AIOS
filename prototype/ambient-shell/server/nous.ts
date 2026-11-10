@@ -1,8 +1,8 @@
 import { normalizeLocale, type Locale } from "../shared/i18n.mjs";
 import { appendBriefing } from "../shared/proactive.ts";
 import { liveGreetingText } from "../shared/sense.ts";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:net";
 import { parseEnv } from "node:util";
 import { createApp } from "./app.ts";
@@ -13,6 +13,7 @@ import { ChatGPTAuth } from "./chatgpt-auth.ts";
 import { ChatGPTExecutor } from "./chatgpt-executor.ts";
 import { ClaudeExecutor } from "./claude-executor.ts";
 import { loadConfig } from "./config.ts";
+import { writeAtomic } from "./fs-atomic.ts";
 import { MockExecutor } from "./mock-executor.ts";
 import { ProviderManager } from "./providers.ts";
 import { buildLiveInstructions, RealtimeBridge } from "./realtime.ts";
@@ -682,9 +683,7 @@ export function memoryEnabledHint(file: string): { get(): boolean; set(enabled: 
       try { return (JSON.parse(readFileSync(file, "utf8")) as { enabled?: unknown }).enabled === true; } catch { return false; }
     },
     set: (enabled) => {
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(`${file}.tmp`, JSON.stringify({ enabled }), { mode: 0o600 });
-      renameSync(`${file}.tmp`, file);
+      writeAtomic(file, JSON.stringify({ enabled }), { mode: 0o600, mkdir: true });
     },
   };
 }

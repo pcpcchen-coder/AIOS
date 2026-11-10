@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Locale } from "../shared/i18n.mjs";
 import {
@@ -25,6 +25,7 @@ import {
   type WeatherPlaceId,
 } from "../shared/proactive.ts";
 import { localHour } from "../shared/sense.ts";
+import { writeAtomic } from "./fs-atomic.ts";
 import { localToday, systemTimeZone } from "./local-date.ts";
 import { PrefsFile } from "./prefs-file.ts";
 import { chunkForAppend } from "../shared/frameless.ts";
@@ -100,14 +101,7 @@ export class ProactiveDailyLog {
     for (const k of keys) this.keys.add(k);
     try {
       mkdirSync(this.options.dir, { recursive: true, mode: 0o700 });
-      const tmp = `${this.path}.tmp`;
-      try {
-        writeFileSync(tmp, JSON.stringify({ schema_version: 1, date: today, keys: [...this.keys] }), { mode: 0o600 });
-        renameSync(tmp, this.path);
-      } catch (err) {
-        rmSync(tmp, { force: true });
-        throw err;
-      }
+      writeAtomic(this.path, JSON.stringify({ schema_version: 1, date: today, keys: [...this.keys] }), { mode: 0o600, removeTempOnError: true });
       try {
         chmodSync(this.path, 0o600);
       } catch {
