@@ -182,6 +182,7 @@ export const HOST_REPLY_MARGIN_MS = 2_000;
 /**
  * 每個工具等頁面回覆的時限。home_control＝home-bridge UTTERANCE_MS（60 秒）＋2 秒；
  * web_search＝WEB_SEARCH_TIMEOUT_MS（30 秒；Codex 那一輪的時限也是它，含第一次查模型清單）＋2 秒。
+ * 鍵由 HostToolName（shared/realtime-route.ts HOST_TOOL_NAMES）在編譯期檢查：少一個或多一個都編譯不過。
  */
 export const HOST_TIMEOUT_MS: Record<HostToolName, number> = {
   home_control: 62_000,

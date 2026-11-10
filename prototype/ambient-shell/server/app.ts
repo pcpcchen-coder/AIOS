@@ -65,6 +65,7 @@ import { handleVoiceRelayRoute } from "./integrations/voice-relay/routes.ts";
 import { VoiceRelayStoreError } from "./integrations/voice-relay/store.ts";
 import { HOME_TOOL } from "./integrations/adapters/home.ts";
 import type { IntegrationToolId } from "../shared/integrations.ts";
+import { HOME_ARG_MAX } from "../shared/home.ts";
 import { ALARM_WRITE_PATH, AlarmPatchError, STOP_SOURCES, type StopSource } from "../shared/alarm.ts";
 import type { AlarmCenter } from "./alarms.ts";
 import { repeatDays } from "../shared/alarm-schedule.ts";
@@ -939,7 +940,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const target = typeof body.target === "string" ? body.target.trim() : "";
       const metric = typeof body.metric === "string" ? body.metric.trim() : null;
       if (!target) throw new HttpError(400, "target is required");
-      if (target.length > 100 || (metric?.length ?? 0) > 40) throw new HttpError(400, "target or metric is too long");
+      if (target.length > HOME_ARG_MAX.target || (metric?.length ?? 0) > HOME_ARG_MAX.metric) throw new HttpError(400, "target or metric is too long");
       return sendJson(res, 200, await homeCall(() => home!.status(target, metric), HOME_TOOL.status, { target, ...(metric !== null ? { metric } : {}) }));
     }
     if (method === "POST" && path === "/api/home/control") {
@@ -948,8 +949,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const command = typeof body.command === "string" ? body.command.trim() : "";
       const value = body.value ?? null;
       if (!target || !command) throw new HttpError(400, "target and command are required");
-      if (target.length > 100 || command.length > 40) throw new HttpError(400, "target or command is too long");
-      if (!(value === null || typeof value === "boolean" || typeof value === "number" || (typeof value === "string" && value.length <= 40))) {
+      if (target.length > HOME_ARG_MAX.target || command.length > HOME_ARG_MAX.command) throw new HttpError(400, "target or command is too long");
+      if (!(value === null || typeof value === "boolean" || typeof value === "number" || (typeof value === "string" && value.length <= HOME_ARG_MAX.value))) {
         throw new HttpError(400, "value must be a short string, a number or a boolean");
       }
       return sendJson(res, 200, await homeCall(() => home!.control({ target, command, value: value as ControlRequest["value"] }), HOME_TOOL.control, { target, command, ...(value !== null ? { value } : {}) }));

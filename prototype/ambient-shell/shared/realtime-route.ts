@@ -167,8 +167,20 @@ export interface FallbackOffer {
 
 // ---- 核心 → 頁面（SSE /api/events，只送給擁有工作階段的那條串流） ----
 
+/**
+ * 頁面執行的即時語音工具名稱：唯一的執行期來源（docs/23 S8）。加工具時改這裡，其餘地方由型別或測試擋下：
+ * - shared/voice-commands.ts 的 RealtimeToolName 是這個型別的別名，ASK_THE_AI 少一列就編譯不過；
+ * - server/realtime-routes.ts 的 HOST_TIMEOUT_MS 是 Record<HostToolName, number>，少一個鍵就編譯不過；
+ * - server/live-tool-caller.ts 的 HOST_TOOLS 就是這個陣列；
+ * - server/realtime.ts 的工具 schema 與 src/realtime-tools.ts 的分支由 tests/realtime-tool-names.test.ts 與
+ *   tests/voice-commands.test.ts 比對。
+ * 這個陣列的順序沒有對外行為（只用在 includes）；模型看到的工具順序在 server/realtime.ts，指令表的列順序在 ASK_THE_AI。
+ * 不含核心自己執行的 recall_memory、整合層的 app__ 工具與 MCP。
+ */
+export const HOST_TOOL_NAMES = ["web_search", "show_search_result", "delegate_task", "get_tasks", "end_conversation", "home_status", "home_control", "set_voice_volume", "set_day_night"] as const;
+
 /** 工具名稱；tests/voice-commands.test.ts 在編譯期比對 server/realtime.ts 的 REALTIME_TOOLS。 */
-export type HostToolName = "web_search" | "show_search_result" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control" | "set_voice_volume" | "set_day_night";
+export type HostToolName = (typeof HOST_TOOL_NAMES)[number];
 
 /** 有外部副作用的工具：逾時或結果遺失時只能說「結果不明，請確認」，不能說失敗。 */
 export const SIDE_EFFECT_TOOLS: readonly HostToolName[] = ["home_control", "delegate_task"];
