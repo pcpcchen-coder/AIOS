@@ -27,8 +27,8 @@
       "source": "README.md",
       "sourceLanguage": "zh-TW",
       "translation": "README.en.md",
-      "sourceSha256": "b6a074e0186a951b42f62acaaa215e97df9690221b2d2bacd9aee83fea5959c2",
-      "translationSha256": "ff6ac8aac943755f0f511275df998c91ddb954cfa385566d451527d697cb37e5"
+      "sourceSha256": "99e0d93a2bb058e7a6b6f8ba3e2a8ebdf6f4bb36c9d74c33ef488ca7b5a1bafc",
+      "translationSha256": "4d3537ffd953289b0e0f46e66efffbcc34b0baf3b619398c1441bdd99c25ed07"
     },
     {
       "source": "SETUP.md",
@@ -181,8 +181,8 @@
       "source": "docs/23_Architecture_Review_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/23_Architecture_Review_2026-11.en.md",
-      "sourceSha256": "01f12f60c39954087d99dda5afa3ee8cef342b3b45ff3ae30d11349e6f72a172",
-      "translationSha256": "4b32b326cd659cf1a11398ea4065809d827b0465df59190bf122563b497fa4cf"
+      "sourceSha256": "7bb63b14433bbd6dd14d53ed801c4bfbe1708e2909a4cf2d6def401c6d576bdd",
+      "translationSha256": "87afd8a73336845be0f00048c3681c1e2ae39a32a31387f937b20911471ee8a7"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -200,8 +200,8 @@
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "429358b18ef3655abef27dbef4fd4603262e055842415a108b507c98e9cdb646",
-      "translationSha256": "65f13ed640fcbda682bcbadb2e9ae93a06cf7194f9bafb17d3aed71440e4119e"
+      "sourceSha256": "9848e73678cab5addfe3b07e652bd14dfdff0633d77b0376d3a06f9b03bb4412",
+      "translationSha256": "47dab0873ec64594f0e1bbd58b09ac4feea4fae24ce25ecce7db26fad4748e41"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "849ecfa71e24a010bbcbbddac91ba09b49aa4e558110dcfa4e9794dc09ae8e50",
-      "translationSha256": "e23d4e1f02334f32fe0e1ffae261a15d129163a0bfe95c178934aab0fec1a03f"
+      "sourceSha256": "5deabc3a2cf65d7feb1f8f3a8795aa0f5d02c6ac330a3ee49c556c5142ce63cc",
+      "translationSha256": "ee2433fdba8c7419e1ac3b660b68d1a85a029ca25f98765b7a9f4de24792872b"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -942,8 +942,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "03b9d29b56e269297b068a7379e3f02a0121b96bbb1bf1e08a3a0605dd2142da",
-      "translationSha256": "43ea33a64d84915863fd179989b5c93d150f63962d535c0b02657a687a23d9fc"
+      "sourceSha256": "f2b1dafd62334d3b2102bf8177532eba454e59fbd3a7f093173b1b2a7a263dc0",
+      "translationSha256": "5d25cdb68a6186792bb268672887bd959378995e22500e6d6feaf3076cadf49c"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

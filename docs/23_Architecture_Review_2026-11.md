@@ -4,7 +4,7 @@
 
 # Nous 23 — 架構盤點與重整計畫（2026-11）
 
-版本：v0.1 · 日期：2026-11-09 · 狀態：**提案，等 George 同意後才動程式**。本文只盤點與規劃，沒有改任何產品程式。數字由 [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs) 算出，計算方式與輸出見 [驗證紀錄](validation/architecture-review-2026-11-09.md)。基準：main `416a1ab`（PR #138 之後）。
+版本：v0.1 · 日期：2026-11-09 · 狀態：**提案，等 George 同意後才動程式**。本文只盤點與規劃，沒有改任何產品程式。數字由 [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs) 算出，計算方式與輸出見 [驗證紀錄](validation/architecture-review-2026-11-09.md)。基準：main `416a1ab`（PR #138 之後）。2026-11-10 補記：本文的 PR #139 已於 2026-11-10 合併；George 同日同意 S1–S5（各自一個 PR）。S6–S14 仍等同意，S6 起沒有同意前不搬移程式。
 
 本文的行號都是基準 commit 的行號，之後會漂移；請以檔名與函式名為準。
 

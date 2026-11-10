@@ -4,7 +4,7 @@
 
 # Nous 23 — Architecture review and restructuring plan (2026-11)
 
-Version: v0.1 · Date: 2026-11-09 · Status: **proposal; no code moves until George approves**. This document only surveys and plans; no product code was changed. The numbers come from [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs); the method and output are in the [validation record](validation/architecture-review-2026-11-09.en.md). Baseline: main `416a1ab` (after PR #138).
+Version: v0.1 · Date: 2026-11-09 · Status: **proposal; no code moves until George approves**. This document only surveys and plans; no product code was changed. The numbers come from [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs); the method and output are in the [validation record](validation/architecture-review-2026-11-09.en.md). Baseline: main `416a1ab` (after PR #138). Note added 2026-11-10: this document's PR #139 merged on 2026-11-10, and George approved S1–S5 the same day (each as its own PR). S6–S14 still wait for approval; from S6 onward, no code moves until approved.
 
 Line numbers refer to the baseline commit and will drift; use file and function names as the anchor.
 

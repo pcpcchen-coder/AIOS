@@ -331,7 +331,7 @@ npm run speaker:setup             # 家人聲音登記：CAM++ zh_en advanced �
 ```
 
 - **資料**：只存加密的臉部特徵與名稱，不存照片。資料金鑰以 Electron safeStorage 包裝，gallery 用 AES-256-GCM；每次登記或刪除都換新金鑰。刪除與登記前跳系統確認視窗。刪除後新的資料無法還原，但在此之前的 Time Machine 備份或 APFS 本機快照可能仍保有舊的加密檔（應用程式金鑰不輪換），畫面與確認視窗都照實說明。
-- **邊界**：身分資料（姓名、識別碼、特徵）只走 Electron IPC 到核心，不走本機 HTTP；`GET /api/settings` 的 `identity` 只有可用狀態與人數。推論在 module worker（`src/sense/identity-worker.ts`，產品中唯一能讀像素的檔案），像素不離開 worker；模型與 wasm 不進 `dist`，由核心核對雜湊後從 `/face-runtime/` 提供，JS 回應帶 `connect-src 'self'` 的 CSP。
+- **邊界**：身分資料（姓名、識別碼、特徵）只走 Electron IPC 到核心，不走本機 HTTP；`GET /api/settings` 的 `identity` 只有可用狀態與人數。推論在 module worker（`src/sense/identity-worker.ts`，產品中唯一能讀像素的檔案），像素不離開 worker；模型與 wasm 不進 `dist`，由核心核對雜湊後從 `/face-runtime/` 提供，JS 回應帶 `connect-src 'self'` 的 CSP。2026-11-10 補記：上面兩句後來各多一個例外。① 讀像素的檔案現在有兩個：`src/sense/light-worker.ts`（VOL-2）也讀像素，只把畫格縮成 64×36 算平均亮度、回傳一個數字，`tests/camera-privacy.test.ts` 只允許這兩個檔案。② Pi 終端機頁面（RPI-ID）經本機 HTTP `POST /api/terminal/identity` 送 `ambient_status`／`ambient_probe`／`greeting`／`voice_probe`／`call_voice`（`shared/terminal.ts` 的 `TERMINAL_IDENTITY_OPS`、`server/terminal-routes.ts`）；登記、刪除與管理仍只在 Mac 上走 IPC。
 - **聲音登記（SP-01）**：家人列表的「錄製聲音」，或新增家人時選「只錄聲音」「兩個都做」。每段先響一聲提示音，依序念 5 次喚醒詞（Hey Nous／Hello Nous）與 3 句短句；太小聲或太短就重念，每段最多 3 次。推論在 `src/speaker/worker.ts`，麥克風樣本經 AudioWorklet 直送 worker，只存加密的 192 維聲音特徵、不存錄音；常駐喚醒有開時向它借麥克風，用完歸還。**這一項只登記**；一致性與重複門檻未校準。2026-11-10 補記（原文寫「通話中還不會用聲音認人或稱名」）：用聲音認人在下面的 SP-02a（喚醒時）與 SP-02b（通話中，預設關閉），門檻同樣未校準。見 [SP-00／SP-01 驗證](../../docs/validation/sp-00-2026-11-01.md)。
 - **喚醒時認聲音（SP-02a）**：常駐喚醒開著時，喚醒詞那一段與連線前說的話在本機算聲音特徵（只送特徵給核心，不送雲端），問候決策時和臉一起判斷：臉聲一致才叫名字，聲音認成別人或不支持就不叫。家人辨識畫面的「試認聲音」念一次喚醒詞、一句短句，看各自認成誰。校準前只憑聲音不叫名字；選單列「喚醒詞」段的「只憑聲音也叫名字（測試）」預設關閉，打開後喚醒時認不出臉也會以聲音叫名字（門檻未校準，可能叫錯人）。見 [SP-02a 驗證](../../docs/validation/sp-02a-2026-11-01.md)。
 - **通話中辨認說話者（SP-02b）**：選單列「喚醒詞」段的勾選框，預設關閉。開著時通話中每 6 秒一段在本機比對聲音（Nous 說話的那一段丟掉），只送特徵給核心：本次人物沒有選定、聲音認出家人時問一次「這次用 X 的偏好嗎？」，回答「是」才選定；聲音像另一位家人只記 log，不打斷。需要家庭記憶已開啟、人物已連結到家人辨識。2026-11-10 補記：2026-11-02 起問句改成「我要用 X 的記憶，好嗎？」，沒有說不要就選定（`server/memory/live.ts`；見[記憶預設選人驗證](../../docs/validation/memory-voice-default-2026-11-02.md)，Mac 試用未執行）。見 [SP-02b 驗證](../../docs/validation/sp-02b-2026-11-01.md)。
@@ -376,7 +376,7 @@ npm run face:bench -- --output <repo 外的資料夾>   # headless 量測（需�
 
 成果紀錄（HIST-1）搜尋的是同一份 `data/` 裡的一般任務與成果：每次查詢都在核心記憶體內比對（簡繁對照、中文二字片段、英文詞），不建立或寫入搜尋索引，也不記錄查詢文字。刪除會同時移除任務與成果、寫回兩個 JSON 檔，並以 `task.deleted` 事件通知所有畫面。受保護（加密）成果與記憶帶入任務尚未實作（MEM-4a、MEM-4c），見 [HIST-1 驗證紀錄](../../docs/validation/history-hist1-2026-10-30.md)。
 
-2026-11-10 補記：上一段最後一句已過時。MEM-4a 與 MEM-4c 已合併：macOS App 的任務與成果加密保存在 `data/sealed/`（`server/sealed-vault.ts`，舊明文由 `server/task-migration.ts` 搬遷一次），App 內的成果搜尋用只在 RAM 的倒排索引（`server/protected-index.ts`）；瀏覽器版仍是明文 JSON。背景任務帶記憶另需 `NOUS_MEMORY_ROUTES` 列出 `task`，預設關閉。這些只有 Linux 雲端測試，Mac gate 未執行，見 [MEM-4a](../../docs/validation/memory-mem4a-2026-10-30.md)、[MEM-4c](../../docs/validation/memory-mem4c-2026-10-30.md)。前一段的「沒有知識庫或跨裝置記憶」仍成立；家庭記憶（`server/memory/`）只在 macOS App、預設關閉。
+2026-11-10 補記：上一段最後一句已過時。MEM-4a 與 MEM-4c 已合併：macOS App 的任務與成果加密保存在 `data/sealed/`（`server/sealed-vault.ts`，舊明文由 `server/task-migration.ts` 搬遷一次），App 內的成果搜尋用只在 RAM 的倒排索引（`server/protected-index.ts`）；瀏覽器版仍是明文 JSON。背景任務帶記憶另需 `NOUS_MEMORY_ROUTES` 列出 `task`，預設關閉。這些只有 Linux 雲端測試，Mac gate 未執行，見 [MEM-4a](../../docs/validation/memory-mem4a-2026-10-30.md)、[MEM-4c](../../docs/validation/memory-mem4c-2026-10-30.md)。前一段的「沒有知識庫或跨裝置記憶」仍成立；家庭記憶（`server/memory/`）預設關閉；記憶核心與管理只在 macOS App；Pi 終端機頁面只能經 `POST /api/terminal/memory` 做 `status`／`suspend`／`select`／`card_view`／`card_answer`（`shared/terminal.ts`、`server/app.ts`）。
 
 ## 與產品紅線的對照
 
@@ -480,7 +480,7 @@ prototype/ambient-shell/
 │   │   ├── gog/            # gog 命令列的共用執行方式
 │   │   └── voice-relay/    # Voice Command Relay（docs/19；NOUS_VCR 預設 off）：命令目錄、解析、政策、輸出與 HTTP 路由
 │   ├── lgtv/               # 客廳 LG 電視（LGTV-1、LGTV-2）：SSAP 用戶端、Wake-on-LAN、App 與輸入對照、配對金鑰、YouTube 目標
-│   ├── memory/             # 家庭記憶（docs/16 MEM-0～MEM-5b；只在 macOS App）：service.ts（規則入口）、store.ts（加密快照）、
+│   ├── memory/             # 家庭記憶（docs/16 MEM-0～MEM-5b；核心與管理只在 macOS App，Pi 終端機頁面只有 POST /api/terminal/memory 的五個操作）：service.ts（規則入口）、store.ts（加密快照）、
 │   │                       # parse.ts、retrieve.ts、live.ts（ChatGPT 方案即時語音）、suggest.ts、boundary.ts
 │   ├── sealed-vault.ts     # 任務與成果的加密保存（MEM-4a；只有 macOS App，瀏覽器版照舊明文）
 │   ├── task-ipc.ts / task-migration.ts   # 加密任務的 IPC 處理；舊明文一次搬遷
@@ -491,7 +491,11 @@ prototype/ambient-shell/
 │   ├── memories.ts / memories-meta.ts / memories-google.ts  # 回憶模式（MEMO-1 本機資料夾與中繼資料、MEMO-2 Google 相簿 Picker）
 │   ├── terminal-routes.ts / terminal-presence.ts / terminal-display.ts   # 終端機（Pi）：認人、心跳、螢幕狀態
 │   ├── prefs-file.ts       # 設定檔共用：逐鍵驗證、讀不懂時 fail closed、原子寫入
-│   ├── *-settings.ts       # 各設定檔：realtime、camera、voice、audio、wake、clock、home-corner、day-night、face-tuning
+│   ├── realtime-settings.ts # 路徑偏好與聲音（realtime.json）
+│   ├── camera-settings.ts  # 鏡頭使用者設定（camera.json）
+│   ├── voice-settings.ts   # 語音閒置秒數（voice.json）
+│   ├── audio-settings.ts / wake-settings.ts / clock-settings.ts   # 聲音裝置（audio.json）、喚醒偏好（wake.json）、時鐘與天氣顯示（clock.json）
+│   ├── home-corner-settings.ts / day-night-settings.ts / face-tuning-settings.ts   # 家中狀態顯示（home-corner.json）、日夜間模式（day-night.json）、人臉校正（face-tuning.json）
 │   ├── identity-service.ts # 家人辨識核心：管理 session、登記、刪除、比對與證據、看著說話的問候決策與組句（Mac 經 IPC；Pi 終端機經 terminal-routes.ts）
 │   ├── identity-store.ts   # 家人資料加密保存（safeStorage 包裝的金鑰＋AES-256-GCM、原子替換）
 │   ├── greeting-picker.ts  # 看著說話的開場句挑選
@@ -529,7 +533,7 @@ npm run typecheck
 - ChatGPT 文字引擎的預覽授權與 Codex 即時語音路徑都受帳號、方案及上游介面限制。以當次登入結果與官方用量頁為準；本 repo 尚無完整計費核對證據。
 - 瀏覽器語音模式用內建的 Web Speech API（雲端辨識）與 speechSynthesis（電腦語音），沒有本地喚醒詞；路線是「語音轉文字 → AI 對話 → 文字轉語音」三段串接，延遲比 ChatGPT 的語音對語音模型長。
 - 插話靠「比對聽到的字和正在念的字」分辨回音與使用者：大多數字都在念的內容裡就當回音，出現新的字或「停／等一下」就打斷。用喇叭時同音異字的回音可能誤觸插話，戴耳機最準。念完 2.5 秒內與剛念內容相同的長句會被忽略。語音模式只用模擬的語音 API（含模擬喇叭回音）做過自動化測試，麥克風與喇叭未在實機驗證。
-- 鏡頭互動依 docs/11 實作在場、面向、停止手勢與手臂指向（未經實機驗證，未做雙目校正）；不做眼睛視線。沒有知識層。2026-11-10 補記（原文寫「沒有記憶與知識層」）：家庭記憶 MEM-0～MEM-5b 已合併（`server/memory/`），只在 macOS App、預設關閉、首次同意後才開，Mac gate 都未執行；瀏覽器版沒有記憶。
+- 鏡頭互動依 docs/11 實作在場、面向、停止手勢與手臂指向（未經實機驗證，未做雙目校正）；不做眼睛視線。沒有知識層。2026-11-10 補記（原文寫「沒有記憶與知識層」）：家庭記憶 MEM-0～MEM-5b 已合併（`server/memory/`），預設關閉、首次同意後才開，Mac gate 都未執行；記憶核心與管理只在 macOS App；Pi 終端機頁面只能經 `POST /api/terminal/memory` 做 `status`／`suspend`／`select`／`card_view`／`card_answer`（`shared/terminal.ts`、`server/app.ts`）；一般瀏覽器版沒有記憶。
 - 鏡頭畫面與鏡頭設定的自動化測試用假鏡頭與假模型（啟動／關閉不重複回報、載入中或播放中關閉不留下模型與舊畫面）；兩格畫面的顯示與左右眼差異已在 Chromium 以真實 MediaPipe 播放合成的雙目影像檢查（`docs/validation/camera-preview-2026-10-21.md`），**未在 AR0144 實機上驗證**；每幀多三次縮小繪圖的負擔尚未量測。
 - `NOUS_CAMERA` 決定頁面是否允許使用鏡頭，改了要重新啟動核心；設定畫面（macOS App：選單列）的「鏡頭」開關只能在已允許時開關鏡頭。安裝項目（鏡頭名稱、左右眼順序、螢幕寬度、鏡頭偏移）只能在 `.env` 改。
 - 常駐喚醒聆聽「Hello Nous」（`NOUS_WAKE=on`，預設關閉）：要先 `npm run wake:setup -- --product` 安裝引擎，再從選單列打開「常駐喚醒聆聽」，步驟見 [INSTALL](INSTALL.md)。偵測只在本機，聲音只在記憶體停留約 2 秒；叫醒後才開即時語音。2026-10-31 只在 George 一個人的聲音上驗證過（命令列即時 7/10、App 內 4/4，只說「Hello」不觸發），其他家人與 8 小時電視誤觸發還沒測，見 [WK-00 Mac 試跑](../../docs/validation/wk-00-mac-2026-10-31.md)。即時語音、按下說話或語音模式使用中時喚醒偵測會暫停。旗標關閉時頁面標頭、`/api/settings` 與選單和之前逐位元組相同。
