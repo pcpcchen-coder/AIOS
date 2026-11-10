@@ -7,7 +7,7 @@ import {
   type FaceTuning,
   type FaceTuningView,
 } from "../shared/face-tuning.ts";
-import { PrefsFile } from "./prefs-file.ts";
+import { PrefsStore } from "./prefs-store.ts";
 
 // 人臉辨識的校正值（configDir/face-tuning.json）。只有這裡寫入；「校正人臉辨識」按「套用」或「還原預設」時更新。
 // 檔案只存改過的鍵；讀不懂或某個鍵不合法時退回預設（預設就是校正功能出現前的行為，沒有安全疑慮）。
@@ -32,24 +32,14 @@ export interface FaceTuningStoreOptions {
   now?(): Date;
 }
 
-export class FaceTuningStore {
-  private readonly file: PrefsFile<Stored>;
-
-  constructor(private readonly options: FaceTuningStoreOptions) {
-    this.file = new PrefsFile<Stored>({
-      dir: options.dir,
-      name: "face-tuning.json",
-      version: 1,
-      parse: parseStored,
-      failClosed: {},
-      unreadable: "人臉辨識校正值用預設",
-      log: options.log,
-    });
+export class FaceTuningStore extends PrefsStore<Stored, FaceTuningStoreOptions> {
+  constructor(options: FaceTuningStoreOptions) {
+    super({ name: "face-tuning.json", parse: parseStored, failClosed: {}, unreadable: "人臉辨識校正值用預設" }, options);
   }
 
   view(): FaceTuningView {
     const saved = this.file.saved;
-    const tuning = Object.fromEntries(FACE_TUNING_KEYS.map((k) => [k, saved[k] ?? DEFAULT_FACE_TUNING[k]])) as unknown as FaceTuning;
+    const tuning = this.resolve(FACE_TUNING_KEYS, DEFAULT_FACE_TUNING);
     // 檔案被手改成不合理的範圍：整組退回預設，不用一半。
     try {
       checkFaceTuning(tuning);
@@ -71,8 +61,7 @@ export class FaceTuningStore {
     const current = this.view();
     const merged = { ...current, ...patch };
     checkFaceTuning(merged);
-    this.file.update({ ...patch, ...(calibrated ? { calibrated_at: (this.options.now?.() ?? new Date()).toISOString() } : {}) });
-    this.options.onChange();
+    this.commit({ ...patch, ...(calibrated ? { calibrated_at: (this.options.now?.() ?? new Date()).toISOString() } : {}) });
     return this.view();
   }
 

@@ -26,7 +26,7 @@ import {
 } from "../shared/proactive.ts";
 import { localHour } from "../shared/sense.ts";
 import { localToday, systemTimeZone } from "./local-date.ts";
-import { PrefsFile } from "./prefs-file.ts";
+import { PrefsStore } from "./prefs-store.ts";
 import { chunkForAppend } from "../shared/frameless.ts";
 
 /** ChatGPT 方案路徑的整段招呼放得進一段 session.context.append（「（開場）」標記只在第一段）。 */
@@ -42,25 +42,14 @@ import { CalendarAsk, CalendarToday, type CalendarReader, type CallFollowUp } fr
 // - 核心決定要說什麼（shared/proactive.ts 的模板＋快取裡的資料），模型只照念。天氣不在快取裡（查不到、還沒查好）就這次不說、
 //   也不記成已說，下一次招呼再試。
 
-export class ProactiveSettingsStore {
-  private readonly file: PrefsFile<ProactivePrefs>;
-
-  constructor(private readonly options: { dir: string; onChange(): void; log?(message: string): void }) {
-    this.file = new PrefsFile<ProactivePrefs>({
-      dir: options.dir,
-      name: "proactive.json",
-      version: 1,
-      parse: parseProactivePatch,
-      // 讀不懂時退回預設（主動說天氣沒有隱私疑慮；總開關仍可關）。
-      failClosed: {},
-      unreadable: "主動提醒用預設值",
-      log: options.log,
-    });
+export class ProactiveSettingsStore extends PrefsStore<ProactivePrefs> {
+  constructor(options: { dir: string; onChange(): void; log?(message: string): void }) {
+    // 讀不懂時退回預設（主動說天氣沒有隱私疑慮；總開關仍可關）。
+    super({ name: "proactive.json", parse: parseProactivePatch, failClosed: {}, unreadable: "主動提醒用預設值" }, options);
   }
 
   view(): ProactivePrefs {
-    const saved = this.file.saved;
-    const prefs = Object.fromEntries(PROACTIVE_PREF_KEYS.map((key) => [key, saved[key] ?? DEFAULT_PROACTIVE_PREFS[key]])) as unknown as ProactivePrefs;
+    const prefs = this.resolve(PROACTIVE_PREF_KEYS, DEFAULT_PROACTIVE_PREFS);
     // 檔案被手改成開始 ≥ 結束：時段退回預設（不猜使用者的意思）。
     if (prefs.start_hour >= prefs.end_hour) return { ...prefs, start_hour: DEFAULT_PROACTIVE_PREFS.start_hour, end_hour: DEFAULT_PROACTIVE_PREFS.end_hour };
     return prefs;
@@ -70,8 +59,7 @@ export class ProactiveSettingsStore {
   update(patch: ProactivePrefsPatch): ProactivePrefs {
     const next = { ...this.view(), ...patch };
     if (next.start_hour >= next.end_hour) throw new ProactivePatchError("時段的開始要早於結束");
-    this.file.update(patch);
-    this.options.onChange();
+    this.commit(patch);
     return this.view();
   }
 }

@@ -460,6 +460,7 @@ prototype/ambient-shell/
 │   ├── camera-settings.ts  # 鏡頭使用者設定（camera.json）
 │   ├── voice-settings.ts   # 語音閒置秒數（voice.json）
 │   ├── prefs-file.ts       # 設定檔共用：逐鍵驗證、讀不懂時 fail closed、原子寫入
+│   ├── prefs-store.ts      # 設定 store 共用基底：建立 PrefsFile、保存值疊預設值、寫檔後通知（11 個 store 繼承）
 │   ├── identity-service.ts # 家人辨識核心：管理 session、登記、刪除、比對與證據、看著說話的問候決策與組句（只經 IPC，不走 HTTP）
 │   ├── identity-store.ts   # 家人資料加密保存（safeStorage 包裝的金鑰＋AES-256-GCM、原子替換）
 │   ├── face-runtime.ts     # 模型與 onnxruntime wasm 的雜湊核對與 /face-runtime/

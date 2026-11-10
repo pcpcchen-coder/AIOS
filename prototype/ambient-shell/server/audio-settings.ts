@@ -1,5 +1,5 @@
 import { AUDIO_PREF_KEYS, DEFAULT_AUDIO_PREFS, parseAudioPatch, type AudioPrefs, type AudioPrefsPatch } from "../shared/audio-devices.ts";
-import { PrefsFile } from "./prefs-file.ts";
+import { PrefsStore } from "./prefs-store.ts";
 
 // 聲音輸入／輸出裝置的選擇（configDir/audio.json；George 2026-11-01）。這個檔案只有這裡寫入；不綁任何 .env 旗標。
 // null＝系統預設。檔案讀不懂、或某個鍵不合法時一律當成 null（回到系統預設，沒有安全疑慮）。
@@ -14,24 +14,13 @@ export interface AudioSettingsStoreOptions {
   log?(message: string): void;
 }
 
-export class AudioSettingsStore {
-  private readonly file: PrefsFile<AudioPrefs>;
-
-  constructor(private readonly options: AudioSettingsStoreOptions) {
-    this.file = new PrefsFile<AudioPrefs>({
-      dir: options.dir,
-      name: "audio.json",
-      version: 1,
-      parse: parseAudioPatch,
-      failClosed: { ...DEFAULT_AUDIO_PREFS },
-      unreadable: "聲音輸入與輸出都用系統預設",
-      log: options.log,
-    });
+export class AudioSettingsStore extends PrefsStore<AudioPrefs, AudioSettingsStoreOptions> {
+  constructor(options: AudioSettingsStoreOptions) {
+    super({ name: "audio.json", parse: parseAudioPatch, failClosed: { ...DEFAULT_AUDIO_PREFS }, unreadable: "聲音輸入與輸出都用系統預設" }, options);
   }
 
   view(): AudioPrefs {
-    const saved = this.file.saved;
-    return Object.fromEntries(AUDIO_PREF_KEYS.map((key) => [key, saved[key] ?? DEFAULT_AUDIO_PREFS[key]])) as unknown as AudioPrefs;
+    return this.resolve(AUDIO_PREF_KEYS, DEFAULT_AUDIO_PREFS);
   }
 
   /**
@@ -42,8 +31,7 @@ export class AudioSettingsStore {
     const next: AudioPrefsPatch = { ...patch };
     if (patch.input_device_id === null) next.input_label = null;
     if (patch.output_device_id === null) next.output_label = null;
-    this.file.update(next);
-    this.options.onChange();
+    this.commit(next);
     return this.view();
   }
 }
