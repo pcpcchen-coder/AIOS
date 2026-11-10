@@ -24,7 +24,8 @@ export class PrefsStore<S, O extends PrefsStoreOptions = PrefsStoreOptions> {
   protected readonly file: PrefsFile<S>;
 
   constructor(spec: PrefsStoreSpec<S>, protected readonly options: O) {
-    this.file = new PrefsFile<S>({ dir: options.dir, version: 1, log: options.log, ...spec });
+    // spec 放前面：就算傳進來的物件比 PrefsStoreSpec 寬，也蓋不掉 dir、version、log。
+    this.file = new PrefsFile<S>({ ...spec, dir: options.dir, version: 1, log: options.log });
   }
 
   /** 依 keys 的順序，每個鍵取「保存的值 ?? 預設值」；defaults 多出來的鍵不會帶進結果。 */

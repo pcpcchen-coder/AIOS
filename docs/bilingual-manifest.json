@@ -181,8 +181,8 @@
       "source": "docs/23_Architecture_Review_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/23_Architecture_Review_2026-11.en.md",
-      "sourceSha256": "7c519ca57f979f822feadc461503ccf8f23890395641223981b08edcafa83b7f",
-      "translationSha256": "5138cf31b8720d98b61813eb7ebf141a6c894bbb5d2348d92266ffcab501de60"
+      "sourceSha256": "8bb9fd7e8a0f62aee74994b7a3ab8ac90a25816bcccf876eaa95abb2f4ca648c",
+      "translationSha256": "39cf191f99bb3dfa133b27d43a60831deef7fde66dcaa88cdd3f7ebbda755bc1"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "4c9a8e425f5744cef6feb788142564bffc96a35ae5f7c9826c66142b55eb0c48",
-      "translationSha256": "6bdedc1e86ba25d3eb2be4bc7558f9c70b44c1b4a640684dd7897927ce63cc40"
+      "sourceSha256": "0e79b677dc4e1b79f57b1a2913c2bfb777644cc31c7828066de9a7d99ef3459b",
+      "translationSha256": "841d16a9bfa9e1cdf1337ed82d34f5dc6a0619f3234c7aa3340ca50e24995d6d"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -354,8 +354,8 @@
       "source": "docs/validation/architecture-s5-prefs-store-2026-11-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/architecture-s5-prefs-store-2026-11-10.en.md",
-      "sourceSha256": "ec5e6bd762fb8336a09a545201d45d64527c8672270171a8443dc6b86e401da6",
-      "translationSha256": "b76136db0fb359dc244e3334b5210fb6aa3439f3f79f044060301605d29690f1"
+      "sourceSha256": "ee66863814d4636257c4b77be7bacc705c9a748acf8d5ee40dff92a5d6aeac21",
+      "translationSha256": "9305590d826310cab177b581f95806a7cb16f3bfe5bc7de4f69a647dc8ef2ae1"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",

@@ -1,7 +1,7 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { ClockSettingsStore } from "../server/clock-settings.ts";
 import { PrefsFile } from "../server/prefs-file.ts";
 import { PrefsStore, type PrefsStoreOptions } from "../server/prefs-store.ts";
@@ -51,9 +51,16 @@ class DemoStore extends PrefsStore<DemoPrefs> {
   }
 }
 
+/** 這個測試建立的暫存資料夾；每項測試結束後全部刪掉。 */
+const created: string[] = [];
 function tmp(): string {
-  return mkdtempSync(join(tmpdir(), "nous-prefs-store-"));
+  const dir = mkdtempSync(join(tmpdir(), "nous-prefs-store-"));
+  created.push(dir);
+  return dir;
 }
+afterEach(() => {
+  for (const dir of created.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 function make(dir: string, failClosed?: Partial<DemoPrefs>) {
   const logs: string[] = [];
@@ -168,7 +175,7 @@ describe("PrefsStore", () => {
     expect(logs).toHaveLength(1);
   });
 
-  it("寫檔失敗：丟錯、記憶體不變、不呼叫 onChange、不留下 .tmp", () => {
+  it("寫入 .tmp 就失敗（.tmp 已經是資料夾）：丟錯、記憶體不變、不呼叫 onChange、原本的設定檔不變", () => {
     const dir = tmp();
     const { store, changes } = make(dir);
     store.update({ level: 5 });
@@ -181,6 +188,28 @@ describe("PrefsStore", () => {
     expect(readFileSync(join(dir, "demo.json"), "utf8")).toBe(text({ level: 5 }));
     // PrefsFile 的清理是 rmSync(tmp, { force: true })：刪不掉資料夾時原本的寫檔錯誤被這個錯誤取代；資料夾還在。
     expect(existsSync(join(dir, "demo.json.tmp", "keep"))).toBe(true);
+  });
+
+  it("renameSync 失敗（設定檔的位置是非空資料夾）：丟出 rename 的錯誤、.tmp 檔被清掉、記憶體不變、不呼叫 onChange", () => {
+    const dir = tmp();
+    const { store, changes } = make(dir);
+    // 建好 store 之後才把 demo.json 變成非空資料夾：.tmp 寫得進去，rename 蓋不過去（不靠權限，root 執行也成立）。
+    mkdirSync(join(dir, "demo.json"));
+    writeFileSync(join(dir, "demo.json", "keep"), "x");
+    let thrown: NodeJS.ErrnoException | null = null;
+    try {
+      store.update({ level: 6 });
+    } catch (err) {
+      thrown = err as NodeJS.ErrnoException;
+    }
+    // 丟出來的是 renameSync 的錯誤（清理成功，沒有被別的錯誤取代）。
+    expect(thrown?.syscall).toBe("rename");
+    // PrefsFile 的清理 rmSync(tmp, { force: true }) 把剛寫好的 .tmp 檔刪掉：資料夾裡只剩原本那個擋路的資料夾。
+    expect(readdirSync(dir)).toEqual(["demo.json"]);
+    expect(existsSync(join(dir, "demo.json.tmp"))).toBe(false);
+    expect(readdirSync(join(dir, "demo.json"))).toEqual(["keep"]);
+    expect(store.view()).toEqual(DEMO_DEFAULTS);
+    expect(changes()).toBe(0);
   });
 
   it("沒有傳 log 時用 console.warn（PrefsFile 的預設）", () => {

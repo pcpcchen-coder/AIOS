@@ -69,9 +69,9 @@
 
 ### 3.1 新增的測試
 
-`tests/prefs-store.test.ts`，21 項，全部用 `mkdtempSync` 的暫存資料夾：
+`tests/prefs-store.test.ts`，22 項，全部用 `mkdtempSync` 的暫存資料夾（每項結束後在 `afterEach` 刪掉）：
 
-- `PrefsStore`（用測試裡定義的最小 store，16 項）：沒有檔案時是預設值、鍵的順序照 `keys`、不建立檔案；`update` 寫出的 JSON 逐字比對（2 個空白縮排、結尾沒有換行）、檔案 0600、資料夾 0700、不留 `.tmp`；同樣的 patch 再送一次檔案不變但 `onChange` 仍呼叫；保存的 `null` 視同沒有保存；`resolve` 不帶 `defaults` 多出來的鍵；逐鍵驗證（壞掉的鍵丟掉並記 log、在 `failClosed` 裡的鍵用 `failClosed` 的值、其餘照用）；檔案讀不懂的 6 種情況都 fail closed、記一筆 log、**不覆寫檔案**；讀不懂之後第一次 `update` 寫出 `failClosed` 疊上 patch；`failClosed` 是 `{}` 時退回預設；寫檔失敗時丟錯、記憶體不變、不呼叫 `onChange`；沒有傳 `log` 時用 `console.warn`；真實的 `ClockSettingsStore` 寫出的位元組、權限與 log 字串。
+- `PrefsStore`（用測試裡定義的最小 store，17 項）：沒有檔案時是預設值、鍵的順序照 `keys`、不建立檔案；`update` 寫出的 JSON 逐字比對（2 個空白縮排、結尾沒有換行）、檔案 0600、資料夾 0700、不留 `.tmp`；同樣的 patch 再送一次檔案不變但 `onChange` 仍呼叫；保存的 `null` 視同沒有保存；`resolve` 不帶 `defaults` 多出來的鍵；逐鍵驗證（壞掉的鍵丟掉並記 log、在 `failClosed` 裡的鍵用 `failClosed` 的值、其餘照用）；檔案讀不懂的 6 種情況都 fail closed、記一筆 log、**不覆寫檔案**；讀不懂之後第一次 `update` 寫出 `failClosed` 疊上 patch；`failClosed` 是 `{}` 時退回預設；寫檔失敗的兩條路徑都丟錯、記憶體不變、不呼叫 `onChange`：（一）寫 `.tmp` 就失敗（`.tmp` 已經是資料夾）時原本的設定檔不變，而 `rmSync(tmp, { force: true })` 刪不掉資料夾，所以那個 `.tmp` 資料夾**還在**，丟出來的是清理的錯誤；（二）`renameSync` 失敗（設定檔的位置是非空資料夾）時丟出 rename 的錯誤，剛寫好的 `.tmp` 檔**被清掉**；沒有傳 `log` 時用 `console.warn`；真實的 `ClockSettingsStore` 寫出的位元組、權限與 log 字串。
 - `PrefsFile` 直接測試（5 項；這個模組先前沒有任何測試直接 import）：`path` 與空的 `saved`；`update` 合併與 `schema_version`、版本不符視為讀不懂；`replace` 整份換掉且複製傳入的物件；讀不懂時 `saved` 是 `failClosed` 的複本；既有檔案權限較寬時寫入後收回 0600。
 
 預期的檔案內容是照重整前的程式推出來的：`JSON.stringify({ schema_version: 1, prefs }, null, 2)`、`writeFileSync(tmp, …, { mode: 0o600 })`、`renameSync`、`chmodSync(path, 0o600)`。
@@ -91,7 +91,7 @@
 | 檢查 | 指令 | 結果 |
 |---|---|---|
 | 型別檢查 | `npx tsc --noEmit` | 通過 |
-| 單元與整合測試 | `npx vitest run` | 173 個測試檔通過；3,215 項中 3,210 項通過、5 項跳過；50 秒。比基準多 1 個檔、21 項（就是 `tests/prefs-store.test.ts`）。跳過數依環境而異（基準紀錄是 6 或 5 項） |
+| 單元與整合測試 | `npx vitest run` | 173 個測試檔通過；3,216 項中 3,211 項通過、5 項跳過；約 50 秒。比基準多 1 個檔、22 項（就是 `tests/prefs-store.test.ts`）。跳過數依環境而異（基準紀錄是 6 或 5 項） |
 | 前端建置 | `npx vite build` | 通過；仍有 chunk 超過 500 kB 的警告（與基準相同） |
 | 桌面主程式語法 | `node --check desktop/main.mjs` | 通過 |
 | 隔離 mock 流程 | `node scripts/verify-aios.mjs` | PASS |
@@ -106,6 +106,8 @@
 - 只有雲端容器的 fixture 測試；沒有在 Mac 或 Pi 上用真實的 `~/.config/nous/*.json` 啟動過。設定檔格式沒有改，不需要搬移資料，但這一點是由測試與讀程式得出，不是實機觀察。
 - §3.2 的差異比對沒有提交，之後無法直接重跑；輸入組合是人工挑的，不是窮舉。
 - `face-tuning.json` 在 repo 的既有測試裡仍然只經 `http.test.ts` 間接測到；這一批沒有為它加專屬測試。
-- `PrefsFile` 寫檔失敗後清理 `.tmp` 的路徑只測了一種失敗方式（`.tmp` 已經是資料夾）。
+- 獨立審查另外自己跑了一次重整前後的差異比對：11 個 store、676 筆紀錄、0 筆不同；同樣沒有提交。
+- 全套測試的跳過數依環境而異（有的測試用 `describe.skipIf`），同一份程式在不同次執行可能是 5 或 6 項。
+- `PrefsFile` 寫檔失敗只測了兩種方式（`.tmp` 已經是資料夾、設定檔的位置是非空資料夾）；磁碟滿或權限不足沒有測。
 - 這一批不處理 23 §P1-3 的其他項目：`app.ts` 的 13 條設定路由（S6）、繞過 `prefs-file.ts` 的 15 個寫檔模組（S4）、讀回時的第二次驗證。
 - 全套測試通過只是程式檢查，不是 G0–G3 或任何 Mac／Pi gate。

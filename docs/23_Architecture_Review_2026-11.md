@@ -190,7 +190,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 | fixture／replay | 30 | `tests/fixtures/*`：fake-sideband、fake-chatgpt、apikey 等 |
 | 純函式 | 65 | shared 與純邏輯 |
 
-- 26 個來源模組沒有任何測試直接 import（清單在驗證紀錄）；其中有邏輯的是 `src/alarm-ring.ts`（471 行）、`src/clock-corner.ts`、`server/prefs-file.ts`（只經 11 個 store 間接測）、`server/sideband.ts`（被 fixture 取代）。`src/main.ts` 與 `desktop/main.mjs` 本來就只能經瀏覽器腳本測。
+- 26 個來源模組沒有任何測試直接 import（清單在驗證紀錄）；其中有邏輯的是 `src/alarm-ring.ts`（471 行）、`src/clock-corner.ts`、`server/prefs-file.ts`（只經 11 個 store 間接測；2026-11-10 補記：S5 之後 `tests/prefs-store.test.ts` 直接測它，沒有直接測試的模組少 1 個）、`server/sideband.ts`（被 fixture 取代）。`src/main.ts` 與 `desktop/main.mjs` 本來就只能經瀏覽器腳本測。
 - 外部服務全部是假的，而且都有標示（Anthropic 假 fetch、OpenAI 旁路 fixture、Codex／ChatGPT 假伺服器、假中控、假 webOS 電視、假 Soloist、假 gog、假 Open-Meteo）；只有 `day-night-volume.test.ts` 與 `wake-wasm-build.test.ts` 用了 fake 卻沒在開頭標 mock／fixture。
 - 瀏覽器腳本 `scripts/verify-*.mjs` 六支都跑 mock provider，不在 vitest 內。
 - 實機證據只在部分紀錄且都是局部：Mac（HIST-1、ID-02、WK-00、SP-00／02a／02b、live-voice §4、MEM-0 鑰匙圈探針）、Pi 4（`rpi-deployment-fixes`、`memories-idle-after-call`、`day-night-badge` 的亮度讀數）、家中開關燈口頭確認（H1）。其餘 60 多份都是 fixture、mock 或無頭 Chromium。沒有任何紀錄能把 G0–G3 改成通過。

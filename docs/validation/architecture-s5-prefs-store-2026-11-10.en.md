@@ -69,9 +69,9 @@ Unchanged from the outside for every store: exported class and type names, const
 
 ### 3.1 New tests
 
-`tests/prefs-store.test.ts`, 21 tests, all in `mkdtempSync` temporary directories:
+`tests/prefs-store.test.ts`, 22 tests, all in `mkdtempSync` temporary directories (removed in `afterEach` after each test):
 
-- `PrefsStore` (using a minimal store defined in the test, 16 tests): defaults when there is no file, key order following `keys`, no file created; the JSON written by `update` compared character by character (2-space indent, no trailing newline), file mode 0600, directory mode 0700, no `.tmp` left behind; sending the same patch again leaves the file unchanged but still calls `onChange`; a saved `null` counts as not saved; `resolve` does not carry extra keys from `defaults`; per-key validation (bad keys dropped and logged, keys present in `failClosed` take the `failClosed` value, the rest are used); all 6 kinds of unreadable file fail closed, log one line and **do not overwrite the file**; the first `update` after an unreadable file writes `failClosed` with the patch on top; with `failClosed` set to `{}` it falls back to defaults; a failed write throws, leaves memory unchanged and does not call `onChange`; without `log` it uses `console.warn`; and the bytes, mode and log string written by the real `ClockSettingsStore`.
+- `PrefsStore` (using a minimal store defined in the test, 17 tests): defaults when there is no file, key order following `keys`, no file created; the JSON written by `update` compared character by character (2-space indent, no trailing newline), file mode 0600, directory mode 0700, no `.tmp` left behind; sending the same patch again leaves the file unchanged but still calls `onChange`; a saved `null` counts as not saved; `resolve` does not carry extra keys from `defaults`; per-key validation (bad keys dropped and logged, keys present in `failClosed` take the `failClosed` value, the rest are used); all 6 kinds of unreadable file fail closed, log one line and **do not overwrite the file**; the first `update` after an unreadable file writes `failClosed` with the patch on top; with `failClosed` set to `{}` it falls back to defaults; both failed-write paths throw, leave memory unchanged and do not call `onChange`: (1) when writing `.tmp` itself fails (`.tmp` is already a directory) the existing settings file is unchanged, and because `rmSync(tmp, { force: true })` cannot remove a directory that `.tmp` directory is **still there** and the error thrown is the clean-up error; (2) when `renameSync` fails (the settings file location is a non-empty directory) the rename error is thrown and the freshly written `.tmp` file is **removed**; without `log` it uses `console.warn`; and the bytes, mode and log string written by the real `ClockSettingsStore`.
 - Direct `PrefsFile` tests (5 tests; no test imported this module directly before): `path` and an empty `saved`; `update` merging and `schema_version`, with a version mismatch treated as unreadable; `replace` swapping the whole content and copying the object passed in; `saved` being a copy of `failClosed` when unreadable; and an existing file with a wider mode being brought back to 0600 after a write.
 
 The expected file contents were derived from the pre-refactor code: `JSON.stringify({ schema_version: 1, prefs }, null, 2)`, `writeFileSync(tmp, …, { mode: 0o600 })`, `renameSync`, `chmodSync(path, 0o600)`.
@@ -91,7 +91,7 @@ That test depends on the old code in a temporary directory, was deleted after ru
 | Check | Command | Result |
 |---|---|---|
 | Type check | `npx tsc --noEmit` | Passed |
-| Unit and integration tests | `npx vitest run` | 173 test files passed; 3,210 of 3,215 tests passed, 5 skipped; 50 s. That is 1 file and 21 tests more than the baseline (exactly `tests/prefs-store.test.ts`). The skip count depends on the environment (the baseline record shows 6 or 5) |
+| Unit and integration tests | `npx vitest run` | 173 test files passed; 3,211 of 3,216 tests passed, 5 skipped; about 50 s. That is 1 file and 22 tests more than the baseline (exactly `tests/prefs-store.test.ts`). The skip count depends on the environment (the baseline record shows 6 or 5) |
 | Front-end build | `npx vite build` | Passed; the warning about a chunk over 500 kB remains (same as the baseline) |
 | Desktop main syntax | `node --check desktop/main.mjs` | Passed |
 | Isolated mock flow | `node scripts/verify-aios.mjs` | PASS |
@@ -106,6 +106,8 @@ The existing tests listed for S5 in 23 §3 (`audio-` / `camera-` / `clock-` / `v
 - Fixture tests in a cloud container only; the app was not started on a Mac or Pi against real `~/.config/nous/*.json` files. The settings file format did not change and no data migration is needed, but that conclusion comes from tests and reading the code, not from observation on a real device.
 - The comparison in §3.2 was not committed and cannot be re-run directly later; its input combinations were hand-picked, not exhaustive.
 - In the repo's existing tests, `face-tuning.json` is still covered only indirectly through `http.test.ts`; this batch did not add a dedicated test for it.
-- The `.tmp` clean-up path after a failed `PrefsFile` write was tested with only one kind of failure (`.tmp` already being a directory).
+- The independent review ran its own before/after comparison as well: 11 stores, 676 compared records, 0 mismatches; likewise not committed.
+- The skip count of the full run depends on the environment (some tests use `describe.skipIf`); the same code can show 5 or 6 skipped on different runs.
+- Failed `PrefsFile` writes were tested in only two ways (`.tmp` already being a directory, and the settings file location being a non-empty directory); a full disk or missing permissions were not tested.
 - This batch does not address the other items in 23 §P1-3: the 13 settings routes in `app.ts` (S6), the 15 modules that write files without `prefs-file.ts` (S4), or the second validation on read-back.
 - A fully green test run is only a code check; it is not G0–G3 or any Mac / Pi gate.
