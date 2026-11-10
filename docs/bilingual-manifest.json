@@ -181,8 +181,8 @@
       "source": "docs/23_Architecture_Review_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/23_Architecture_Review_2026-11.en.md",
-      "sourceSha256": "d4cc1117923b5af28b13f46306fd71782648ca4f1012c20c7e283ea2520d4ae4",
-      "translationSha256": "92de3bb0c8a57fc7d9d8d584b2510c268f8b727bfff00f00d0bcba9204f7867a"
+      "sourceSha256": "d43983410c4ef1aa2027d39936d975a2e242cfaa66b0e171d429ca1ea51ad995",
+      "translationSha256": "505a4b06ca9f4731e8c8ffd01dad2acba3146899a5a6cb5d2c9cc64eb43a4b67"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "cfa999fadf085c9043535a47c0ee1f7393c8e86d8cbea22b185de819e50ab0a9",
-      "translationSha256": "a1dcf965460d0ebba99c4ff6b5aac246101475a98b6ddda92d29e538094aeb93"
+      "sourceSha256": "7e696f5b431f420575d43e5684d2655331a6c85a6a33163ffbc054096ba7ca73",
+      "translationSha256": "411d70879e4196d1329368b0022e590faa3f125d17ca2461877c07aaa296dd42"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -347,8 +347,8 @@
       "source": "docs/validation/architecture-guard-2026-11-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/architecture-guard-2026-11-10.en.md",
-      "sourceSha256": "4ed9734c89911ce998ceab0700b7b393787cda8ef48d66c00f7ca57624cc9af0",
-      "translationSha256": "2a27fdb290958583fac2c706d96b4d79df5cbae30464a15513051462a09b85a0"
+      "sourceSha256": "061aae7679ab54c0fd3809558da3e45d60ba902998e8ae3e8afd06f152c7522a",
+      "translationSha256": "f774c815da11e072065a84ef8de4dcd371f26a06b0e5a7c0e732b667ebc3e1c5"
     },
     {
       "source": "docs/validation/architecture-review-2026-11-09.md",
@@ -377,6 +377,13 @@
       "translation": "docs/validation/architecture-s5-prefs-store-2026-11-10.en.md",
       "sourceSha256": "ee66863814d4636257c4b77be7bacc705c9a748acf8d5ee40dff92a5d6aeac21",
       "translationSha256": "9305590d826310cab177b581f95806a7cb16f3bfe5bc7de4f69a647dc8ef2ae1"
+    },
+    {
+      "source": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.en.md",
+      "sourceSha256": "4d75f464e8ee44de196b99296cfffa512918891c3ba2b8c64e9605d42ec283be",
+      "translationSha256": "e31b79a1605393287ca68f1b252b1d9a889209e9b19b3f5341f84f510f5d9924"
     },
     {
       "source": "docs/validation/architecture-s9-home-split-2026-11-10.md",
@@ -984,8 +991,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "7b88a678184d6682afb1f2e53aff6a4c99533306fe2e38db1e79f1e487513349",
-      "translationSha256": "f181f4b611c62ae35426dea9868920131f5b5edf0a7f1abe8a0eb4562366dda6"
+      "sourceSha256": "4662e127163424f1d09016469ce72be429e58dad8e41f9638e6da9086ac4352f",
+      "translationSha256": "e697dee4a3adeadba2fc855a50e8a28ccb87e4a1797fa8199593a9ec8fd37ff6"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

@@ -488,7 +488,9 @@ prototype/ambient-shell/
 │   ├── chatgpt-executor.ts # ChatGPT 方案用量：/v1/responses 串流
 │   ├── mock-executor.ts
 │   ├── realtime.ts         # 即時語音 API key 路徑（RealtimeBridge）＋兩條路徑共用的工具表與規則
-│   ├── realtime-routes.ts  # RealtimeRoute 介面、選路徑（planStart）、工作階段與擁有者、ApiKeyRoute
+│   ├── realtime-routes.ts  # 選路徑（planStart）、工作階段與擁有者；re-export 契約與 ApiKeyRoute
+│   ├── realtime-contracts.ts # 即時語音契約：RealtimeRoute、RouteCall、SessionContext、RouteStartError、ToolHost、工具時限（只 import shared/）
+│   ├── apikey-route.ts     # ApiKeyRoute：API key 路徑的薄轉接層（對稱 live-route.ts）
 │   ├── apikey-call.ts      # API key 即時語音的記憶與核心旁路（MEM-3）
 │   ├── live-route.ts       # 即時語音 ChatGPT 方案路徑：Codex 通話建立＋sideband
 │   ├── sideband.ts         # 即時語音控制連線（WebSocket）共用工具

@@ -3,13 +3,13 @@
 // 只在本機核心執行，API key 與權杖都不進瀏覽器。
 
 import { CodexError, type CodexResponses } from "./codex-responses.ts";
-import { hostOf, parseCandidates, type WebSearchResult, type WebSource } from "../shared/web-search.ts";
+import { hostOf, parseCandidates, WEB_SEARCH_TIMEOUT_MS, type WebSearchResult, type WebSource } from "../shared/web-search.ts";
 
 export type { SearchCandidate, WebSearchResult, WebSource } from "../shared/web-search.ts";
 
 const API = "https://api.openai.com/v1";
-/** 一次上網查詢的上限。ChatGPT 方案路徑的 Codex 那一輪也用這個時限（含第一次查模型清單），所以兩條路徑一樣。 */
-export const WEB_SEARCH_TIMEOUT_MS = 30_000;
+// WEB_SEARCH_TIMEOUT_MS：S7（2026-11-10）起定義在 shared/web-search.ts（server/realtime-contracts.ts 的 HOST_TIMEOUT_MS 也用它），這裡照舊 re-export。
+export { WEB_SEARCH_TIMEOUT_MS };
 const TIMEOUT_MS = WEB_SEARCH_TIMEOUT_MS;
 
 export interface WebSearchOptions {

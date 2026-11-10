@@ -42,6 +42,8 @@ The 4 allowed cycles (baseline `3cc1401`):
 3. `server/memories-google.ts`, `server/memories.ts`
 4. `src/api.ts`, `src/realtime-session.ts`, `src/realtime-tools.ts`, `src/realtime.ts`
 
+**Note added 2026-11-10 (S7):** the list above is the allowlist as of baseline `3cc1401`. After S7 broke entry 2, the allowlist in the test has 3 entries and 9 files (entry 1 also dropped the renamed `shared/seconds-menu.ts`), with `MAX_ALLOWED_CYCLES` at 3 and `MAX_ALLOWED_CYCLE_FILES` at 9; see the [S7 record](architecture-s7-realtime-contracts-2026-11-10.en.md). The current allowlist is whatever `tests/architecture.test.ts` says.
+
 ### 3.1 How to update the allowlist
 
 - The cycle allowlist and the two cap constants live in `tests/architecture.test.ts`. The default is to remove entries, not add them.
