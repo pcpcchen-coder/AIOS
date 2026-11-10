@@ -491,6 +491,7 @@ prototype/ambient-shell/
 │   ├── memories.ts / memories-meta.ts / memories-google.ts  # 回憶模式（MEMO-1 本機資料夾與中繼資料、MEMO-2 Google 相簿 Picker）
 │   ├── terminal-routes.ts / terminal-presence.ts / terminal-display.ts   # 終端機（Pi）：認人、心跳、螢幕狀態
 │   ├── prefs-file.ts       # 設定檔共用：逐鍵驗證、讀不懂時 fail closed、原子寫入
+│   ├── prefs-store.ts      # 設定 store 共用基底：建立 PrefsFile、保存值疊預設值、寫檔後通知（11 個 store 繼承）
 │   ├── fs-atomic.ts        # 共用的「先寫暫存檔再 rename」（writeAtomic）；簡單的設定檔與紀錄檔用，不 fsync
 │   ├── realtime-settings.ts # 路徑偏好與聲音（realtime.json）
 │   ├── camera-settings.ts  # 鏡頭使用者設定（camera.json）

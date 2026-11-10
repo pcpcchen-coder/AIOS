@@ -17,36 +17,24 @@ import {
   type MemoriesSettingsView,
   type MemoriesSourceStatus,
 } from "../shared/memories.ts";
-import { PrefsFile } from "./prefs-file.ts";
+import { PrefsStore } from "./prefs-store.ts";
 import { nearestPlace, readMediaMeta } from "./memories-meta.ts";
 import type { MemoriesGooglePart } from "./memories-google.ts";
 
 // MEMO-1：回憶模式的設定（memories.json）與本機資料夾來源。資料夾路徑只來自 NOUS_MEMORIES_DIR 或預設值，
 // 不接受 HTTP 指定；回應只有不透明的 id，不含檔名或路徑。
 
-export class MemoriesSettingsStore {
-  private readonly file: PrefsFile<MemoriesPrefs>;
-
-  constructor(private readonly options: { dir: string; onChange(): void; log?(message: string): void }) {
-    this.file = new PrefsFile<MemoriesPrefs>({
-      dir: options.dir,
-      name: "memories.json",
-      version: 1,
-      parse: parseMemoriesPatch,
-      failClosed: { enabled: false },
-      unreadable: "回憶模式保持關閉",
-      log: options.log,
-    });
+export class MemoriesSettingsStore extends PrefsStore<MemoriesPrefs> {
+  constructor(options: { dir: string; onChange(): void; log?(message: string): void }) {
+    super({ name: "memories.json", parse: parseMemoriesPatch, failClosed: { enabled: false }, unreadable: "回憶模式保持關閉" }, options);
   }
 
   view(): MemoriesPrefs {
-    const saved = this.file.saved;
-    return Object.fromEntries(MEMORIES_PREF_KEYS.map((key) => [key, saved[key] ?? DEFAULT_MEMORIES_PREFS[key]])) as unknown as MemoriesPrefs;
+    return this.resolve(MEMORIES_PREF_KEYS, DEFAULT_MEMORIES_PREFS);
   }
 
   update(patch: MemoriesPrefsPatch): MemoriesPrefs {
-    this.file.update(patch);
-    this.options.onChange();
+    this.commit(patch);
     return this.view();
   }
 }

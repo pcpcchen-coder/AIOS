@@ -2,7 +2,7 @@ import {
   activeOverride, DAY_NIGHT_WRITE_PATH, DayNightPatchError, decideDayNight, DEFAULT_DAY_NIGHT_PREFS, overrideUntil, parseDayNightPatch, parseStoredOverride,
   type DayNightOverride, type DayNightPatch, type DayNightPrefs, type DayNightSettingsView,
 } from "../shared/day-night.ts";
-import { PrefsFile } from "./prefs-file.ts";
+import { PrefsStore } from "./prefs-store.ts";
 
 // DN-2（George 2026-11-08）：日夜間模式的共用設定與手動切換（configDir/day-night.json；只有這裡寫入）。
 // Mac 主視窗與 Pi 頁面都讀這一份；鏡頭亮度仍由各頁面自己量。檔案讀不懂時退回預設（沒有隱私或費用疑慮）。
@@ -19,21 +19,12 @@ function parseStoredKey(input: unknown): Partial<Stored> {
   return out;
 }
 
-export class DayNightSettingsStore {
-  private readonly file: PrefsFile<Stored>;
+export class DayNightSettingsStore extends PrefsStore<Stored> {
   private readonly now: () => number;
 
-  constructor(private readonly options: { dir: string; onChange(): void; log?(message: string): void; now?: () => number }) {
+  constructor(options: { dir: string; onChange(): void; log?(message: string): void; now?: () => number }) {
+    super({ name: "day-night.json", parse: parseStoredKey, failClosed: {}, unreadable: "日夜間模式用預設值" }, options);
     this.now = options.now ?? Date.now;
-    this.file = new PrefsFile<Stored>({
-      dir: options.dir,
-      name: "day-night.json",
-      version: 1,
-      parse: parseStoredKey,
-      failClosed: {},
-      unreadable: "日夜間模式用預設值",
-      log: options.log,
-    });
   }
 
   prefs(): DayNightPrefs {
@@ -67,8 +58,7 @@ export class DayNightSettingsStore {
     const next: Partial<Stored> = { ...prefs };
     if (override === "auto") next.override = null;
     else if (override) next.override = { mode: override, until: overrideUntil(this.now(), scope ?? "now", { ...this.prefs(), ...prefs }), scope: scope ?? "now" };
-    this.file.update(next);
-    this.options.onChange();
+    this.commit(next);
     return this.view();
   }
 }
