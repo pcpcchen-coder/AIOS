@@ -68,7 +68,12 @@
 
 改動的檔案：`shared/realtime-route.ts`、`shared/voice-commands.ts`、`shared/home.ts`、`server/live-tool-caller.ts`、`server/realtime-routes.ts`（只有註解）、`server/realtime.ts`（只有註解）、`server/integrations/adapters/home.ts`、`server/app.ts`；新增 `tests/realtime-tool-names.test.ts` 與它的 snapshot。
 
-**加一個頁面工具時現在要改的地方**：`HOST_TOOL_NAMES`（一處）之後，編譯器會要求 `HOST_TIMEOUT_MS` 與 `ASK_THE_AI` 補上；`server/realtime.ts` 的 schema 與 `src/realtime-tools.ts` 的分支沒補會在 `tests/realtime-tool-names.test.ts` 失敗（schema 另外在 `tsc` 的 `expectTypeOf` 失敗）。`HOST_TOOLS` 不用再改。
+**加一個頁面工具時要改的地方**（不是只改一處；少了 `HOST_TOOLS` 這一份手寫名單，其餘仍要補）：
+
+1. 在 `shared/realtime-route.ts` 的 `HOST_TOOL_NAMES` 加名稱。
+2. `tsc` 接著會要求補 `server/realtime-routes.ts` 的 `HOST_TIMEOUT_MS` 與 `shared/voice-commands.ts` 的 `ASK_THE_AI`（之後跑 `npm run docs:commands`）。
+3. 自己要加：`server/realtime.ts` 的工具 schema（與規則文字）、`src/realtime-tools.ts` 的分支。沒加時 `tests/realtime-tool-names.test.ts` 失敗（schema 另外在 `tsc` 的 `expectTypeOf` 失敗）。
+4. 更新 `tests/realtime-tool-names.test.ts` 的特徵名單（`CANONICAL`、`TIMEOUT_KEY_ORDER`、`ASK_ORDER`、`MODEL_ORDER`、逾時數值）與 snapshot。
 
 **與 23 §3 原文的差異**：
 
@@ -100,7 +105,7 @@
 
 - `HOST_TOOL_NAMES` 的內容與順序等於重構前的 union，名稱不重複。
 - 編譯期（`expectTypeOf`，由 `tsc --noEmit` 檢查）：`RealtimeToolName`、`keyof typeof HOST_TIMEOUT_MS`、工具 schema 的名稱 union 都等於 `HostToolName`。
-- 執行期：逾時表的鍵、`ASK_THE_AI` 的鍵、`buildRealtimeTools()` 與 `liveCallerTools()`（上網＋家電）的名稱、頁面執行器的分支名稱，排序後都等於 `HOST_TOOL_NAMES`；`SIDE_EFFECT_TOOLS` 都在名單裡。
+- 執行期：逾時表的鍵、`ASK_THE_AI` 的鍵、`buildRealtimeTools()` 與 `liveCallerTools()`（上網＋家電）的名稱，排序後都等於 `HOST_TOOL_NAMES`（頁面執行器的分支名稱由 §4.1 那一項比對，不重複）；`SIDE_EFFECT_TOOLS` 都在名單裡。
 - 保留的差異：`recall_memory`、整合工具、MCP 不在名單裡。
 - `HOME_ARG_MAX` 的四個數字；Facade schema 的 `maxLength` 等於它；`app.ts` 與 `adapters/home.ts` 的原始碼引用 `HOME_ARG_MAX`。
 
@@ -113,7 +118,7 @@
 | 特徵測試（未修改的 main） | `npx vitest run tests/realtime-tool-names.test.ts` | 1 檔、35 項通過，寫出 53 份 snapshot；第二次執行 35 項通過、沒有寫入 |
 | 型別檢查 | `npx tsc --noEmit` | 通過（重構前後各一次） |
 | 新測試（重構後） | `npx vitest run tests/realtime-tool-names.test.ts` | 1 檔、40 項通過；snapshot 檔雜湊不變 |
-| 單元與整合測試 | `npx vitest run` | 177 個測試檔通過；3,354 項中 3,348 項通過、6 項跳過；約 72 秒。新檔占 40 項 |
+| 單元與整合測試 | `npx vitest run` | 177 個測試檔、3,354 項（新檔占 40 項）。重構後第一次執行 3,348 項通過、6 項跳過；提交後的執行（作者兩次與獨立審查）是 3,349 項通過、5 項跳過。跳過數依環境而異。另有一次執行出現 1 項失敗、沒有記下是哪一項，見 §5 |
 | 前端建置 | `npx vite build` | 通過；仍有 chunk 大小的警告 |
 | 桌面主程式語法 | `node --check desktop/main.mjs` | 通過 |
 | 指令表 | `npm run docs:commands` | 「README.md 的指令表已是最新」，工作目錄沒有因此變動 |
@@ -129,6 +134,8 @@
 - 7 組能力是人工挑的代表組合，不是所有開關的窮舉；整合工具用的是測試裡寫的一個假規格，不是真實 Registry 的 `app__tv__`／`app__timer__`／`app__alarm__`（那幾條規則文字由既有測試涵蓋）。
 - `HOST_TOOLS` 沒有匯出，成員是用行為觀察的；它的順序本來就沒有對外行為，沒有測。
 - 頁面執行器用正規表示式讀原始碼比對分支名稱：只能發現「少一個或多一個名稱」，不能證明分支做的事正確（那由既有的 `realtime-tools` 相關測試負責）。
+- 讀原始碼文字的檢查（`src/realtime-tools.ts` 的分支名稱、`app.ts` 與 `adapters/home.ts` 裡的 `HOME_ARG_MAX.` 字樣）是刻意寫得脆弱的特徵檢查：改寫法就會失敗，失敗時要人判斷是否仍然一致。
+- 測試裡的 `freePort()`（先開一個埠探測、關掉後再 listen）和另外 17 個使用同樣 helper 的檔案（`tests/` 底下，含 fixtures）有同一個競爭條件：兩者之間埠可能被別的行程占用。§4.3 提到的那一次全套執行出現 1 項失敗、沒有記下是哪一項（當時同時在改文件並執行雙語檢查），這可能是原因之一，沒有證實；之後 4 次全套執行沒有重現。
 - `src/realtime-tools.ts` 的參數仍是 `string`，沒有編譯期的窮舉檢查；改成 `HostToolName` 會動到頁面兩條語音路徑的呼叫端，不在這一批。
 - `server/realtime.ts` 的家電工具 schema 仍然沒有 `maxLength`：模型送出過長的參數時，由 `/api/home/*` 回 400。要不要把上限告訴模型是行為變更，這一批不做。
 - 這一批不處理 23 §P1-2 的其他項目（頁面兩路的重複方法、核心兩路各做一次的 `recall_memory`／`delegate_task`）。

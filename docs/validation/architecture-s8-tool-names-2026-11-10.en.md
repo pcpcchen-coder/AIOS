@@ -68,7 +68,12 @@ All of these differences are preserved; none was merged into the single list.
 
 Files changed: `shared/realtime-route.ts`, `shared/voice-commands.ts`, `shared/home.ts`, `server/live-tool-caller.ts`, `server/realtime-routes.ts` (comment only), `server/realtime.ts` (comment only), `server/integrations/adapters/home.ts`, `server/app.ts`; new `tests/realtime-tool-names.test.ts` and its snapshot.
 
-**What to change now when adding a page tool**: after `HOST_TOOL_NAMES` (one place), the compiler demands the entries in `HOST_TIMEOUT_MS` and `ASK_THE_AI`; a missing schema in `server/realtime.ts` or a missing branch in `src/realtime-tools.ts` fails in `tests/realtime-tool-names.test.ts` (the schema also fails the `expectTypeOf` under `tsc`). `HOST_TOOLS` no longer needs editing.
+**What to change when adding a page tool** (it is not a one-place change; the hand-written `HOST_TOOLS` list is gone, the rest still has to be added):
+
+1. Add the name to `HOST_TOOL_NAMES` in `shared/realtime-route.ts`.
+2. `tsc` then forces the entries in `HOST_TIMEOUT_MS` in `server/realtime-routes.ts` and `ASK_THE_AI` in `shared/voice-commands.ts` (run `npm run docs:commands` afterwards).
+3. You must add yourself: the tool schema (and rule text) in `server/realtime.ts` and the branch in `src/realtime-tools.ts`. Without them `tests/realtime-tool-names.test.ts` fails (the schema also fails the `expectTypeOf` under `tsc`).
+4. Update the characterization lists in `tests/realtime-tool-names.test.ts` (`CANONICAL`, `TIMEOUT_KEY_ORDER`, `ASK_ORDER`, `MODEL_ORDER`, the timeout values) and the snapshot.
 
 **Differences from the text of 23 §3**:
 
@@ -100,7 +105,7 @@ The last `describe` (5 tests) in the same file uses the new exports and could no
 
 - The content and order of `HOST_TOOL_NAMES` equal the former union, with no duplicate names.
 - Compile time (`expectTypeOf`, checked by `tsc --noEmit`): `RealtimeToolName`, `keyof typeof HOST_TIMEOUT_MS` and the union of tool schema names all equal `HostToolName`.
-- Runtime: the keys of the timeout table, the keys of `ASK_THE_AI`, the names from `buildRealtimeTools()` and `liveCallerTools()` (web + home) and the branch names of the page executor all equal `HOST_TOOL_NAMES` once sorted; every `SIDE_EFFECT_TOOLS` entry is in the list.
+- Runtime: the keys of the timeout table, the keys of `ASK_THE_AI`, and the names from `buildRealtimeTools()` and `liveCallerTools()` (web + home) all equal `HOST_TOOL_NAMES` once sorted (the page executor's branch names are compared by the §4.1 test, not repeated here); every `SIDE_EFFECT_TOOLS` entry is in the list.
 - Preserved differences: `recall_memory`, integration tools and MCP are not in the list.
 - The four numbers of `HOME_ARG_MAX`; the Facade schema's `maxLength` values equal them; the sources of `app.ts` and `adapters/home.ts` reference `HOME_ARG_MAX`.
 
@@ -113,7 +118,7 @@ To add this block, the test file changed after the refactor in its imports (addi
 | Characterization tests (untouched main) | `npx vitest run tests/realtime-tool-names.test.ts` | 1 file, 35 tests passed, 53 snapshots written; on the second run 35 passed and nothing was written |
 | Type check | `npx tsc --noEmit` | Passed (once before and once after the refactor) |
 | New tests (after the refactor) | `npx vitest run tests/realtime-tool-names.test.ts` | 1 file, 40 tests passed; snapshot file hash unchanged |
-| Unit and integration tests | `npx vitest run` | 177 test files passed; of 3,354 tests 3,348 passed and 6 were skipped; about 72 seconds. The new file accounts for 40 |
+| Unit and integration tests | `npx vitest run` | 177 test files, 3,354 tests (the new file accounts for 40). The first run after the refactor: 3,348 passed, 6 skipped; the runs on the committed tree (two by the author and the independent review): 3,349 passed, 5 skipped. The skip count is environment-dependent. One other run had 1 failing test whose name was not recorded; see §5 |
 | Front-end build | `npx vite build` | Passed; the chunk-size warning remains |
 | Desktop main syntax | `node --check desktop/main.mjs` | Passed |
 | Command table | `npm run docs:commands` | "README.md 的指令表已是最新"; the working tree did not change because of it |
@@ -129,6 +134,8 @@ To add this block, the test file changed after the refactor in its imports (addi
 - The 7 capability sets are hand-picked representatives, not an exhaustive enumeration of every switch; the integration tool is a fake spec written in the test, not the real Registry's `app__tv__` / `app__timer__` / `app__alarm__` (those rule texts are covered by existing tests).
 - `HOST_TOOLS` is not exported, so its members were observed through behaviour; its order never had external behaviour and is not tested.
 - The page executor is compared by reading its source with a regular expression: this only detects "one name missing or one extra", and does not prove that a branch does the right thing (the existing `realtime-tools` tests are responsible for that).
+- The checks that read source text (the branch names in `src/realtime-tools.ts`, and the `HOME_ARG_MAX.` references in `app.ts` and `adapters/home.ts`) are deliberately brittle characterization checks: rewriting the code makes them fail, and a person then has to judge whether things are still consistent.
+- The test's `freePort()` helper (open a port to probe, close it, then listen) has the same race as the 17 other files using the same helper (under `tests/`, fixtures included): another process can take the port in between. The one full-suite run mentioned in §4.3 that had 1 failing test, whose name was not recorded (docs were being edited and the bilingual check was running at the same time), may have been caused by this; that is not confirmed, and it was not reproduced in 4 later full runs.
 - The parameter of `src/realtime-tools.ts` is still a `string`, with no compile-time exhaustiveness check; changing it to `HostToolName` would touch the callers on both page voice paths and is outside this batch.
 - The home tool schemas in `server/realtime.ts` still have no `maxLength`: when the model sends an over-long argument, `/api/home/*` answers 400. Whether to tell the model the limits is a behaviour change and is not done in this batch.
 - This batch does not address the other items of 23 §P1-2 (the duplicated methods of the two page paths, and `recall_memory` / `delegate_task` implemented once per core path).

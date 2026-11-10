@@ -233,13 +233,12 @@ describe("單一來源：每份名單都和 HOST_TOOL_NAMES 一致", () => {
     expectTypeOf<(typeof REALTIME_TOOLS)[number]["name"] | (typeof HOME_STATUS_TOOL)["name"] | (typeof HOME_CONTROL_TOOL)["name"]>().toEqualTypeOf<HostToolName>();
   });
 
-  it("執行期：逾時表、指令表、模型工具表、頁面執行器的名稱集合相同", () => {
+  it("執行期：逾時表、指令表、模型工具表的名稱集合相同", () => {
     expect(Object.keys(HOST_TIMEOUT_MS).sort()).toEqual(names);
     expect(Object.keys(ASK_THE_AI).sort()).toEqual(names);
     expect(buildRealtimeTools({ webSearch: true, home: true, mcp: [] }).map((t) => t.name as string).sort()).toEqual(names);
     expect(liveCallerTools({ webSearch: true, home: true, mcp: [] }).map((t) => (t.type === "function" ? t.name : "")).sort()).toEqual(names);
-    const source = readFileSync(new URL("../src/realtime-tools.ts", import.meta.url), "utf8");
-    expect([...new Set([...source.matchAll(/\bname === "([a-z_]+)"/g)].map((m) => m[1]!))].sort()).toEqual(names);
+    // 頁面執行器的分支名稱在上面的「特徵：頁面的工具執行器」比對（對 CANONICAL，而 CANONICAL 等於 HOST_TOOL_NAMES）。
     for (const name of SIDE_EFFECT_TOOLS) expect(HOST_TOOL_NAMES).toContain(name);
   });
 

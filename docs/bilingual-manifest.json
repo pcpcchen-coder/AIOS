@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "7a6bb96169ced39db73e07ca3cbc9b5795e98cfebcbb4e4abacd7b347d6ec052",
-      "translationSha256": "418fb65f24849bc38320628347bc75e46f38316c324baf3bb9df6c4815c58b84"
+      "sourceSha256": "58580151465df24e337f1c649d67e08b10d81a802d0b8c21b45866ca6548509c",
+      "translationSha256": "4d4c02f37126476f5157cc924c480af4561cb2ac68cc9180481baa5b220af4eb"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -382,8 +382,8 @@
       "source": "docs/validation/architecture-s8-tool-names-2026-11-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/architecture-s8-tool-names-2026-11-10.en.md",
-      "sourceSha256": "f82b48802b0ecfbdd04a56e989a894773e05a262f41917fdeb1aa404201dde02",
-      "translationSha256": "b1ea57b1b336ce069f17661d5369fb92565c6a43c50e958b347def4445712576"
+      "sourceSha256": "a11dcfe29b7b9ca19bcf99b14efb94ae9f79952fb87530266a1719654b1588a9",
+      "translationSha256": "3e2a84d22ddfb1dd98326fe9a04ba1f9fae71cb807a0202e0fa60a884cb90ccf"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
