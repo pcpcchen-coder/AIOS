@@ -229,7 +229,7 @@ The brain contains six functional regions. Brightness, names, and pulses reflect
 | Mathematics | Calculation, logic, data analysis, and programming topics/task steps. |
 | Art | Design, stories, aesthetics, and creative topics/task steps. |
 | Auditory | Actual browser capture and explicitly labeled audio-related topics. |
-| Visual | Image, photo, and observation topic classification; currently no camera or image-analysis flow. |
+| Visual | Image, photo, and observation topic classification. Note added 2026-11-10 (the original text said "currently no camera or image-analysis flow"): the camera sensing pipeline exists (`src/sense/`: presence, facing, gestures, family recognition; `src/sense/light-worker.ts` only computes mean brightness), but camera events do not light the visual region and there is no flow that lets the AI analyze image content; the visual region is still lit only by topic classification and task-step `domain`. |
 | Planning | Task planning and decomposition/scheduling topics/task steps. |
 
 Task planners label each step `domain`; Claude, ChatGPT, and mock executors pass it into task events. Old data without domain labels still loads. Conversation topics derive from the current valid input turn. Old replies cannot relight regions after interruption, failure, completion, or dismissal. Background tasks still contribute actual execution activity.
@@ -350,9 +350,9 @@ npm run speaker:setup             # 家人聲音登記：CAM++ zh_en advanced �
                                   # macOS 另外複製到 ~/Library/Application Support/Nous/speaker-runtime/
 ```
 
-- **Voice enrollment (SP-01)**: “Record voice” in the member list, or choose “Voice only” or “Both” when adding a member. Each segment starts with a chime; read 5 wake words (Hey Nous / Hello Nous) then 3 short sentences. Too quiet or too short asks again, up to 3 tries per segment. Inference runs in `src/speaker/worker.ts`; microphone samples go from the AudioWorklet straight to the worker. Only encrypted 192-d voice features are stored, never recordings. With wake listening on, the microphone is leased from it and returned afterwards. **Enrollment only: calls do not yet recognise or name anyone by voice.** Consistency and duplicate thresholds are uncalibrated. See [SP-00 / SP-01 validation](../../docs/validation/sp-00-2026-11-01.en.md).
+- **Voice enrollment (SP-01)**: “Record voice” in the member list, or choose “Voice only” or “Both” when adding a member. Each segment starts with a chime; read 5 wake words (Hey Nous / Hello Nous) then 3 short sentences. Too quiet or too short asks again, up to 3 tries per segment. Inference runs in `src/speaker/worker.ts`; microphone samples go from the AudioWorklet straight to the worker. Only encrypted 192-d voice features are stored, never recordings. With wake listening on, the microphone is leased from it and returned afterwards. **This item is enrollment only.** Consistency and duplicate thresholds are uncalibrated. Note added 2026-11-10 (the original text said calls do not yet recognise or name anyone by voice): voice recognition is in SP-02a (at wake) and SP-02b (during calls, off by default) below, with thresholds equally uncalibrated. See [SP-00 / SP-01 validation](../../docs/validation/sp-00-2026-11-01.en.md).
 - **Voice recognition at wake (SP-02a)**: with wake listening on, the wake-word span and what is said before the connection are turned into voice features locally (only features go to the core, nothing to the cloud) and judged together with the face at the greeting decision: a name only when face and voice agree, none when the voice points at someone else or does not support the face. “Test voice” in the Family recognition screen reads one wake word and one sentence and shows who each was recognised as. No naming by voice alone before calibration; “Name by voice alone (test)” in the menu bar's “Wake word” section is off by default, and when on, a wake names people by voice even when the face is not recognised (thresholds uncalibrated; the wrong person may be named). See [SP-02a validation](../../docs/validation/sp-02a-2026-11-01.en.md).
-- **Speaker recognition during calls (SP-02b)**: a checkbox in the menu bar's “Wake word” section, off by default. When on, each 6 s window of a call is compared locally (windows where Nous speaks are discarded) and only features go to the core: with no person selected and a recognised family voice, Nous asks once “Use X's preferences this time?” and selects only on “yes”; a voice that sounds like another member is only logged, without interruption. Needs family memory turned on and the person linked to family recognition. See [SP-02b validation](../../docs/validation/sp-02b-2026-11-01.en.md).
+- **Speaker recognition during calls (SP-02b)**: a checkbox in the menu bar's “Wake word” section, off by default. When on, each 6 s window of a call is compared locally (windows where Nous speaks are discarded) and only features go to the core: with no person selected and a recognised family voice, Nous asks once “Use X's preferences this time?” and selects only on “yes”; a voice that sounds like another member is only logged, without interruption. Needs family memory turned on and the person linked to family recognition. Note added 2026-11-10: since 2026-11-02 the question is 「我要用 X 的記憶，好嗎？」 ("I'll use X's memory, okay?") and the person is selected unless the user says no (`server/memory/live.ts`; see [memory default-person validation](../../docs/validation/memory-voice-default-2026-11-02.en.md); the Mac trial has not run). See [SP-02b validation](../../docs/validation/sp-02b-2026-11-01.en.md).
 - **Voice calibration (SP-03a)**: “Voice calibration” in the Family recognition screen. Record your own voice (10 wake words plus 10 sentences) and let the Mac's built-in speech voices speak stranger wake words and sentences through the speakers; the core stores only scores and proposes thresholds. “Apply proposed thresholds” needs a native confirm; after that, another round of stranger voices (50 per segment kind) must all go unrecognised before that segment kind allows naming by voice alone. “Clear calibration data” returns to the starting values. Not yet calibrated on the Mac. See [SP-03a validation](../../docs/validation/sp-03a-2026-11-01.en.md).
 - **Data**: Save encrypted features/names, never photos. Electron safeStorage wraps data keys and AES-256-GCM encrypts gallery. Rotate keys on every enrollment/deletion. Native confirmation precedes both. Deleted entries cannot be recovered from new data, but preexisting Time Machine/APFS snapshots may retain old encrypted files because the application key does not rotate. UI and confirmation dialogs explain this.
 - **Boundaries**: Names, IDs, and features travel only through Electron IPC to core, not local HTTP. `GET /api/settings` `identity` contains availability/count only. Module worker `src/sense/identity-worker.ts` is the sole production pixel reader; pixels remain inside. Models/wasm stay outside `dist`, hash-verified and served by core at `/face-runtime/`. JS responses have `connect-src 'self'` CSP.
@@ -361,7 +361,7 @@ npm run speaker:setup             # 家人聲音登記：CAM++ zh_en advanced �
 - **Sessions**: Only main-window pages within 10 seconds of menu click can open. Dismissal, 10-minute idle, 15-minute duration, reload/navigation, or core restart ends them. First screen open loads family data; startup does not touch Keychain. Unavailable keys, possibly denied access, allow retry. Only corruption offers clear-all.
 - **Development**: Vite `npm run dev:web` proxies `/api` and `/face-runtime/` to core 8787, but browsers cannot open recognition. Use macOS App.
 - **Browser unavailable**: No equivalent safeStorage encryption. Full settings truthfully state family recognition unavailable in browser.
-- **Hardware**: George verbally reported Mac ID-01 enrollment, recognition, and palm stop working. See [ID-01 validation](../../docs/validation/family-id-01-2026-10-25.en.md). ID-02 awaits Mac. Data/design rules are in [ADR-0001](../../docs/adr/ADR-0001-local-family-recognition.en.md).
+- **Hardware**: George verbally reported Mac ID-01 enrollment, recognition, and palm stop working. See [ID-01 validation](../../docs/validation/family-id-01-2026-10-25.en.md). ID-02 awaits Mac (note added 2026-11-10: a [Mac ID-02 record](../../docs/validation/family-id-02-mac-2026-10-31.en.md) exists from 2026-10-31, partially complete and not released, with fixes awaiting re-verification). Data/design rules are in [ADR-0001](../../docs/adr/ADR-0001-local-family-recognition.en.md).
 
 <a id="人臉-spikedocs14-id-00開發工具"></a>
 ### Face spike (docs/14 ID-00, developer tool)
@@ -398,6 +398,8 @@ Tasks/artifacts persist in gitignored `data/` and can be recalled after restart.
 
 Results history (HIST-1) searches the ordinary tasks and results in the same `data/`. Each query is matched in core memory (Traditional/Simplified folding, Chinese two-character fragments, English words); no search index is built or written, and query text is not logged. Deleting removes both the task and its result, rewrites both JSON files, and notifies every view with a `task.deleted` event. Protected (encrypted) results and memory in tasks are not implemented yet (MEM-4a, MEM-4c); see the [HIST-1 validation record](../../docs/validation/history-hist1-2026-10-30.en.md).
 
+Note added 2026-11-10: the last sentence of the previous paragraph is outdated. MEM-4a and MEM-4c are merged: the macOS App stores tasks and results encrypted in `data/sealed/` (`server/sealed-vault.ts`; old plaintext is migrated once by `server/task-migration.ts`), and in-App results search uses a RAM-only inverted index (`server/protected-index.ts`); the browser build still stores plaintext JSON. Memory in background tasks additionally requires `task` in `NOUS_MEMORY_ROUTES` and is off by default. These have Linux cloud tests only and the Mac gates have not run; see [MEM-4a](../../docs/validation/memory-mem4a-2026-10-30.en.md) and [MEM-4c](../../docs/validation/memory-mem4c-2026-10-30.en.md). The earlier statement "without knowledge-base or cross-device memory" still holds; family memory (`server/memory/`) is macOS App only and off by default.
+
 <a id="與產品紅線的對照"></a>
 ## Product red-line comparison
 
@@ -420,28 +422,62 @@ APIs additionally accept local Host and same-origin Origin only, requiring JSON 
 
 ```
 prototype/ambient-shell/
-├── index.html
+├── index.html / history.html   # 主頁面與成果紀錄獨立網頁（/history，HIST-1）
 ├── src/                    # 前端（Vite + TypeScript，無框架）
-│   ├── brain.ts            # 電子腦：Canvas 2D 粒子／神經連線，30 FPS 上限，支援減少動態
-│   ├── shell-state.ts      # Shell 狀態 reducer（ambient / working / presenting / recoverable_error + 聆聽疊層）
+│   ├── brain.ts            # 電子腦：粒子／神經連線的狀態、腦區活化與光脈衝，算出每格的 BrainFrame；上限 30 FPS（平衡 20、省電 12），支援減少動態
+│   ├── brain-frame.ts      # 每一格的繪製輸入（brain.ts 算好，兩種繪製方式共用）
+│   ├── brain-canvas.ts     # Canvas 2D 繪製（預設）與區名
+│   ├── brain-webgl.ts      # WebGL 繪製（設定「使用 GPU 繪製」，失敗時改回 Canvas）
+│   ├── region-activity.ts  # 腦區活動來源（任務步驟、主題分類、麥克風收音、語音播放）
+│   ├── performance.ts      # 這台裝置的畫面效能（完整／平衡／省電）
+│   ├── shell-state.ts      # Shell 狀態 reducer（ambient / working / presenting / confirming / recoverable_error + 聆聽疊層；釘住設定畫面）
 │   ├── presentation-policy.ts
 │   ├── intent.ts           # 確定性指令判斷
-│   ├── views.ts            # 進度、成果、失敗畫面
+│   ├── voice-command.ts    # 即時語音中由本機處理的指令（進度、看結果、搜尋成果、收起）
+│   ├── desktop-command.ts  # macOS App 選單列指令對到頁面動作
+│   ├── views.ts            # 進度、成果、失敗、設定畫面
+│   ├── api.ts / i18n.ts / format.ts / icons.ts   # 核心 API 用戶端、介面語言、格式與圖示
 │   ├── realtime.ts         # 即時語音 API key 路徑的頁面模組（RealtimeVoice）
 │   ├── live-voice.ts       # 即時語音 ChatGPT 方案路徑的頁面模組（LiveVoice）
 │   ├── realtime-tools.ts   # 兩條路徑共用的工具執行器與確認卡佇列
 │   ├── realtime-session.ts # 頁面的接縫（RealtimeSession、openRealtime）
+│   ├── call-guard.ts / call-lifecycle.ts   # 即時語音費用防護（閒置、時限、頁面隱藏與鎖定）
+│   ├── early-speech.ts     # 連線中與問候前，本機判斷使用者是否已經開口
+│   ├── approval.ts         # 確認語句（規則在 shared/approval.ts）
 │   ├── voice.ts            # 按下說話與連續語音對話模式（Web Speech API + speechSynthesis，需同意）
+│   ├── voice-volume.ts     # 對話音量的頁面狀態（VOL-1、VOL-2 日間／夜間）
+│   ├── light-meter.ts      # 每 30 秒取一格交給亮度 worker（VOL-2）
+│   ├── audio-devices.ts    # 聲音輸入／輸出裝置選擇
 │   ├── conversation.ts     # 語音與文字共用的回合、歷史、取消及可見性
 │   ├── speech-text.ts      # 語音模式要念的短句（由任務狀態計算）
 │   ├── echo.ts             # 插話／回音判斷、逐句切分
+│   ├── zh-tw.ts            # 語音逐字稿轉台灣繁體（OpenCC，另外載入）
+│   ├── audio/              # 常駐喚醒聆聽（NOUS_WAKE，預設關閉）：AudioFrontEnd（front-end.ts）、擷取 worklet 與 worker、
+│   │                       # 2 秒環形緩衝（ring.ts）、sherpa-onnx KWS wasm 偵測器（detector.ts）、自我觸發防護、提示音、喚醒通話無人聲結束
+│   ├── speaker/            # 家人聲音（SP-01～SP-03a）：錄音器、fbank、音量式 VAD、講者 worker（唯一算聲音特徵）、喚醒時認聲音
 │   ├── family-view.ts      # 「家人辨識」畫面（ID-01；只經 IPC 與核心往來）
 │   ├── family-enroll.ts    # 登記取樣規則（純邏輯）
-│   ├── sense/identity-*.ts # 家人辨識的 module worker（唯一能讀像素）、取樣器、看著說話時的同步辨識（identity-ambient）與訊息格式
+│   ├── face-calibration.ts / face-calibration-view.ts   # 「校正人臉辨識」的量測、建議與畫面
+│   ├── identity-bridge.ts  # 家人辨識與記憶的傳輸選擇（Mac 主視窗走 IPC，Pi 終端機走 HTTP）
+│   ├── memory-view.ts      # 「記憶」畫面（MEM-1：首次設定、澄清、選人物、記憶管理）
+│   ├── protected-tasks.ts  # 加密保存任務的讀回（MEM-4a，可信主視窗經 IPC）
+│   ├── history-view.ts / history-page.ts   # 成果紀錄（HIST-1）：App 內畫面與獨立網頁
+│   ├── alarm-ring.ts / alarm-sound.ts      # 定時器與鬧鐘的響鈴畫面、倒數與本機合成鈴聲（ALARM-1～3）
+│   ├── memories.ts         # 回憶模式的畫面（MEMO-1：閒置時輪播照片與影片；不是家庭記憶）
+│   ├── clock-corner.ts / clock-feed.ts / weather-icons.ts   # 右上角時鐘與天氣（CLK-1）
+│   ├── home-corner.ts / home-feed.ts / home-icons.ts        # 左上角家中狀態（HOME-1）
+│   ├── processing-cue.ts / processing-sound.ts              # 背景處理中的提示與聲納提示音
+│   ├── settings-entry.ts   # Pi 終端頁面右下角的設定按鈕（SET-1）
+│   ├── terminal-camera.ts / terminal-heartbeat.ts / screen-reporter.ts   # 終端機（Pi）頁面：鏡頭、心跳、螢幕開關回報
+│   ├── sense/              # 雙目鏡頭感知（docs/11）：pipeline.ts、processor.ts、trackers.ts、geometry.ts、controller.ts
+│   ├── sense/identity-*.ts # 家人辨識的 module worker（identity-worker.ts，可讀像素）、取樣器、看著說話時的同步辨識（identity-ambient）與訊息格式
+│   ├── sense/light-worker.ts # 環境亮度 worker（VOL-2；另一個可讀像素的檔案，只回傳一個平均亮度數字）
 │   ├── look-timeline.ts    # 看著說話問候的時序（只有毫秒，印到 DevTools console）
 │   ├── sense/face/         # YuNet／SFace 前後處理與畫格品質（純函式）
 │   └── main.ts
 ├── server/                 # 本機核心（Node http + SSE）
+│   ├── nous.ts             # 啟動本機核心（終端機版 index.ts 與 macOS App 共用的組合根）
+│   ├── app.ts / http-guard.ts / page-headers.ts / config.ts / index.ts   # HTTP 路由與 SSE、Host／Origin 檢查、頁面標頭、設定
 │   ├── runner.ts           # 任務排程、取消、重試、步驟回報
 │   ├── providers.ts        # 可切換的 AI 引擎（Claude／ChatGPT／模擬）
 │   ├── prompts.ts          # 兩個引擎共用的提示詞與計畫格式
@@ -449,29 +485,54 @@ prototype/ambient-shell/
 │   ├── claude-executor.ts  # Claude 規劃與串流執行
 │   ├── chatgpt-auth.ts     # Sign in with ChatGPT（OAuth、ID token 驗證、refresh、登出）
 │   ├── chatgpt-executor.ts # ChatGPT 方案用量：/v1/responses 串流
+│   ├── mock-executor.ts
 │   ├── realtime.ts         # 即時語音 API key 路徑（RealtimeBridge）＋兩條路徑共用的工具表與規則
 │   ├── realtime-routes.ts  # RealtimeRoute 介面、選路徑（planStart）、工作階段與擁有者、ApiKeyRoute
+│   ├── apikey-call.ts      # API key 即時語音的記憶與核心旁路（MEM-3）
 │   ├── live-route.ts       # 即時語音 ChatGPT 方案路徑：Codex 通話建立＋sideband
+│   ├── sideband.ts         # 即時語音控制連線（WebSocket）共用工具
 │   ├── live-tool-caller.ts # 把交辦變成同一組工具呼叫（Codex Responses）
 │   ├── codex-auth.ts       # 即時語音用的 Codex 登入（不碰 ~/.codex）
 │   ├── codex-responses.ts  # Codex Responses 用戶端（交辦推論、hosted web_search）
-│   ├── realtime-settings.ts # 路徑偏好與聲音（realtime.json）
+│   ├── web-search.ts       # 即時語音的上網查詢（Responses API web_search）
+│   ├── voice-cost-log.ts   # F6 費用紀錄（voice-cost.jsonl）
 │   ├── home-bridge.ts      # 武陵居中控查詢與控制：名稱比對、讀值整理、送指令與確認卡；AIFA 冷氣與紅外線按鍵（docs/12 H0、H1、H1b）
-│   ├── camera-settings.ts  # 鏡頭使用者設定（camera.json）
-│   ├── voice-settings.ts   # 語音閒置秒數（voice.json）
+│   ├── home-overview.ts    # 左上角家中狀態的唯讀內容（HOME-1；快取 30 秒）
+│   ├── integrations/       # App Integration Layer（AIL-1，docs/18；NOUS_AIL 預設關閉）：Registry、Dispatcher、政策、Schema、按需狀態
+│   │   ├── adapters/       # mock、home（AIL-2 Facade）、gmail-gog、google-calendar、weather、lg-tv、spotify-soloist（只有健康檢查）、
+│   │   │                   # voice-relay，以及內建的 timer、alarm（不需要 NOUS_AIL）
+│   │   ├── gog/            # gog 命令列的共用執行方式
+│   │   └── voice-relay/    # Voice Command Relay（docs/19；NOUS_VCR 預設 off）：命令目錄、解析、政策、輸出與 HTTP 路由
+│   ├── lgtv/               # 客廳 LG 電視（LGTV-1、LGTV-2）：SSAP 用戶端、Wake-on-LAN、App 與輸入對照、配對金鑰、YouTube 目標
+│   ├── memory/             # 家庭記憶（docs/16 MEM-0～MEM-5b；只在 macOS App）：service.ts（規則入口）、store.ts（加密快照）、
+│   │                       # parse.ts、retrieve.ts、live.ts（ChatGPT 方案即時語音）、suggest.ts、boundary.ts
+│   ├── sealed-vault.ts     # 任務與成果的加密保存（MEM-4a；只有 macOS App，瀏覽器版照舊明文）
+│   ├── task-ipc.ts / task-migration.ts   # 加密任務的 IPC 處理；舊明文一次搬遷
+│   ├── protected-index.ts  # 受保護成果的 RAM 倒排索引（MEM-4c，不寫檔）
+│   ├── history.ts / search-terms.ts      # 成果紀錄搜尋（HIST-1）與比對 token
+│   ├── alarms.ts           # 定時器與鬧鐘的保存與排程（alarms.json）
+│   ├── proactive.ts / proactive-calendar.ts / weather.ts   # 主動提醒（PRO-1 天氣、PRO-2 行程）
+│   ├── memories.ts / memories-meta.ts / memories-google.ts  # 回憶模式（MEMO-1 本機資料夾與中繼資料、MEMO-2 Google 相簿 Picker）
+│   ├── terminal-routes.ts / terminal-presence.ts / terminal-display.ts   # 終端機（Pi）：認人、心跳、螢幕狀態
 │   ├── prefs-file.ts       # 設定檔共用：逐鍵驗證、讀不懂時 fail closed、原子寫入
-│   ├── identity-service.ts # 家人辨識核心：管理 session、登記、刪除、比對與證據、看著說話的問候決策與組句（只經 IPC，不走 HTTP）
+│   ├── *-settings.ts       # 各設定檔：realtime、camera、voice、audio、wake、clock、home-corner、day-night、face-tuning
+│   ├── identity-service.ts # 家人辨識核心：管理 session、登記、刪除、比對與證據、看著說話的問候決策與組句（Mac 經 IPC；Pi 終端機經 terminal-routes.ts）
 │   ├── identity-store.ts   # 家人資料加密保存（safeStorage 包裝的金鑰＋AES-256-GCM、原子替換）
-│   ├── face-runtime.ts     # 模型與 onnxruntime wasm 的雜湊核對與 /face-runtime/
+│   ├── greeting-picker.ts  # 看著說話的開場句挑選
+│   ├── face-runtime.ts / speaker-runtime.ts / wake-runtime.ts   # 模型與 wasm 的雜湊核對與 /face-runtime/、/speaker-runtime/、/wake-runtime/
 │   ├── commands-page.ts    # 唯讀指令表頁 GET /help/commands（無 script、嚴格 CSP）
-│   ├── mock-executor.ts
-│   ├── store.ts            # JSON 持久化
-│   └── app.ts / http-guard.ts / config.ts / index.ts
+│   ├── localization.ts / local-date.ts   # 核心訊息語言、本機時區的今天日期
+│   └── store.ts            # JSON 持久化
+├── desktop/                # macOS App（Electron）：main.mjs、preload.cjs、settings-menu.mjs，以及 identity／memory／tasks 的 IPC 過濾
+├── scripts/                # 安裝與工具腳本（face／speaker／wake／vision setup、tv-pair、指令表產生）
 ├── spike/face/             # ID-00 人臉 spike（開發工具，不接進產品；見 docs/adr/ADR-0001）
+├── spike/wake/             # WK-00 喚醒詞 spike 與方向性診斷頁（direction/；開發工具，不接進產品）
 ├── face-runtime/           # 家人辨識的模型與 wasm（npm run face:setup -- --product；不進 git、不進 dist）
 ├── speaker-runtime/        # 家人聲音登記的講者模型與 wasm（npm run speaker:setup；不進 git、不進 dist）
+├── wake-runtime/           # 喚醒引擎 KWS wasm 與模型（npm run wake:setup -- --product；不進 git、不進 dist）
 ├── shared/                 # 前後端共用型別與進度計算；prefs.ts、voice-prefs.ts（設定規格）、
-│                           # seconds-menu.ts（選單列鏡頭開關、秒數與倍率）、voice-commands.ts（指令表唯一來源）
+│                           # seconds-menu.ts（選單列鏡頭開關、秒數與倍率）、voice-commands.ts（指令表唯一來源）、
+│                           # memory.ts（家庭記憶）、memories.ts（回憶模式）、integrations.ts、alarm.ts、wake.ts、day-night.ts 等
 └── tests/                  # vitest
 ```
 
@@ -494,7 +555,7 @@ Coverage includes progress calculation, intent, Shell transitions (hide without 
 - ChatGPT preview authorization and Codex realtime depend on accounts, plans, and upstream interfaces. Use actual login results and official usage pages. Complete billing comparison evidence is absent.
 - Browser voice uses Web Speech API cloud recognition and speechSynthesis, without local wake words. STT → AI → TTS has higher latency than ChatGPT speech-to-speech.
 - Interruption compares heard text with current playback: mostly matching characters means echo; new words or stop/wait interrupt. Speaker homophones may falsely trigger, with headphones most reliable. Long matching sentences within 2.5 seconds after playback are ignored. Automated voice tests use fake speech APIs and speaker echo, without physical mic/speaker validation.
-- docs/11 camera presence, facing, stop, and pointing lack hardware validation and stereo calibration, and do not track eyes. No memory/knowledge layer.
+- docs/11 camera presence, facing, stop, and pointing lack hardware validation and stereo calibration, and do not track eyes. No knowledge layer. Note added 2026-11-10 (the original text said "No memory/knowledge layer"): family memory MEM-0–MEM-5b is merged (`server/memory/`), macOS App only, off by default and enabled only after first-time consent; none of the Mac gates has run; the browser build has no memory.
 - Camera/settings tests use fakes, checking no duplicate start/stop and no lingering models/frames when disabled during loading/playback. Chromium with real MediaPipe and synthetic stereo imagery checked two previews and eye differences (`docs/validation/camera-preview-2026-10-21.md`), **not actual AR0144**. Cost of three extra scaled draws per frame remains unmeasured.
 - `NOUS_CAMERA` permits camera at page-policy level and requires core restart to change. UI/menu toggles work only when permitted. Installation fields, including device name, eye order, display width, and camera offset, are `.env` only.
 - Always-on wake listening for "Hello Nous" (`NOUS_WAKE=on`, off by default): install the engine with `npm run wake:setup -- --product` first, then turn on "Always-on wake listening" in the menu bar; see [INSTALL](INSTALL.en.md). Detection is local only and audio stays in memory for about 2 seconds; a realtime call opens only after a wake. As of 2026-10-31 it has been verified only on George's voice (7/10 live on the command line, 4/4 in the App, "Hello" alone does not trigger); other family members and the 8-hour TV false-wake test are not done yet, see [WK-00 Mac trial](../../docs/validation/wk-00-mac-2026-10-31.en.md). Wake detection pauses while realtime voice, push-to-talk or voice mode is in use. With the flag off, page headers, `/api/settings`, and the menu are byte-identical to before.
@@ -503,7 +564,7 @@ Coverage includes progress calculation, intent, Shell transitions (hide without 
 - ChatGPT-plan realtime gpt-live-1-codex has partial real login/call logs and verbal post-fix temperature success, without full end-to-end/billing acceptance. Undocumented endpoints/alpha headers can break on upstream changes. Startup reports error or disclosed API-key fallback by route rules. No MCP; Esc mutes without cancellation. Delegation may wait up to 187 seconds, calculated in validation.
 - Agent tools: realtime web_search; remote MCP only on API-key route; task/text search when engines support it, otherwise explicit no-tool fallback. Local-file reading/writing and complete external Action Gate are absent. MCP approval-required actions use cards and fixed spoken phrases per action.
 - Home control is one device, without room commands. Only AIFA AC; IR one key at a time. Neither has readback, only sent/please-confirm. Non-AIFA AC/wireless buttons unsupported. Home tools exist only in realtime, not browser recognition/text chat.
-- Single user, single display, plaintext local JSON.
+- Single user, single display, plaintext local JSON. Note added 2026-11-10: this holds only for the terminal / browser build. The macOS App stores tasks and results encrypted (MEM-4a, `server/sealed-vault.ts`), and family recognition and family memory are encrypted files too; the settings files (`<configDir>/*.json`) remain plaintext. A Raspberry Pi terminal page (`?terminal=`) can also connect to the same core; see [current state](../../docs/Current_Implementation_Status.en.md).
 
 <a id="與正式規格的關係"></a>
 ## Relationship to formal specifications
