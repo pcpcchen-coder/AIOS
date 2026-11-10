@@ -178,6 +178,13 @@
       "translationSha256": "e75c4a2356ce3e818d6f2a24d0bf4039c03c314d7a87ce8e52c8b9c086163edf"
     },
     {
+      "source": "docs/23_Architecture_Review_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/23_Architecture_Review_2026-11.en.md",
+      "sourceSha256": "efa83c1cfb166051a7f517e565af2c48a79e6c1c076c8f885ce4c61a1e649568",
+      "translationSha256": "3aeffea12060bfc64def3192b38506695c81a626d4da4206af474be67ab8153c"
+    },
+    {
       "source": "docs/BILINGUAL.md",
       "mode": "inline",
       "sha256": "d2ba4d1c494863262594e6d315bcc32759e377756ad7b7de0680e757955cc0cc"
@@ -193,8 +200,8 @@
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "e90de73fbfebb57c1a17cbcefe292e9ef62803625b6e73cd1cde510d8249eed9",
-      "translationSha256": "995faa6d04299a8e87fa26afad3119f1f8587ecbbd2f34f994ea332b45d1ee4e"
+      "sourceSha256": "cae9ded1945a9e8e47010af8e3a0f71afd16cc208a7c01767df1fced40780c98",
+      "translationSha256": "a5fe6c54b17a12d225fed12a78bd67d6a66bb6fa46f86161f76bff41a176f4bc"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
@@ -298,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "f6db947682461adf735feb68966622109ac642443b4764bca0b71ee69baff110",
-      "translationSha256": "2e8be842f4f98a035fe03daccba8d61bdbc8fbab16b07d091820e4c0bfd56bd4"
+      "sourceSha256": "b4fed8366b6fc5eaca21615794c00051c0a08a6abe65d5a002108a1809a8b393",
+      "translationSha256": "ef6966700df663fd13e0f2efd728775d4e8f8bdd489f4700c381af9a3a2dc68d"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -335,6 +342,13 @@
       "translation": "docs/validation/alarm-timer-3-2026-11-09.en.md",
       "sourceSha256": "116a11c2b42b5c3fea90ce6fb588ac7d7e5b7c5b6f9fe637d8b002d4ced1bcfd",
       "translationSha256": "1517be66cdde14e0aca78b028e35c50915de9e5be4ed5e34b8fad1f069dad233"
+    },
+    {
+      "source": "docs/validation/architecture-review-2026-11-09.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-review-2026-11-09.en.md",
+      "sourceSha256": "ae03f0a6cf53d3a2ea3ec701fee7f4b415d0b1ab0e989d8d3f8f5cc7a23298a3",
+      "translationSha256": "0e382ffaee0bc27fecf41ab8b0d99eb896767b6aed32420df6dfd763c34b76b5"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
