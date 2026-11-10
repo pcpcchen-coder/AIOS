@@ -8,6 +8,8 @@
 
 > **2026-10-24 閱讀導覽**：目前程式與缺口見 [實作現況](Current_Implementation_Status.md)，新功能建議見 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md)。程式基準為 `1f44c6b`（2026-10-23）。原型使用 Node HTTP、SSE、TypeScript、Vite 與 Electron，已有瀏覽器 STT／TTS 與 WebRTC 即時語音雙路；本地喚醒、Tauri、完整 Agent SDK 與本文件的校正視線流程仍屬目標設計。
 >
+> **2026-11-10 補記**：上面寫本地喚醒仍屬目標設計，是 2026-10-24 的狀態。之後本機喚醒詞已在原型實作，放在旗標 `NOUS_WAKE` 之後、預設關閉；Mac 上只有部分實機證據（只有 George 一人，其他家人與長時間誤觸發未測），見 [實作現況](Current_Implementation_Status.md)「本機喚醒詞」一列。這不改變本文件的規格、gate 或驗收要求。
+>
 > [11 雙目鏡頭互動設計](11_Stereo_Camera_Interaction_2026-10.md) 明確修訂遠距互動路徑。現有感測是 `presence`、是否面向螢幕、停止手勢及三區手臂指向；頭向不等於眼動，程式存在不代表準確率或硬體 gate 已通過。遠距目標選取以語音編號為主、手臂指向為輔。以下視線規格保留為後續研發與驗收要求，不可套用到頭向後宣稱已完成 gaze。新評估中的 F0–F10、Q0–Q4 不取代 G0–G3。
 
 ## 1. 產品定義與範圍

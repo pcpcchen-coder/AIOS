@@ -4,7 +4,7 @@
 
 # Nous 23 — 架構盤點與重整計畫（2026-11）
 
-版本：v0.1 · 日期：2026-11-09 · 狀態：**提案，等 George 同意後才動程式**。本文只盤點與規劃，沒有改任何產品程式。數字由 [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs) 算出，計算方式與輸出見 [驗證紀錄](validation/architecture-review-2026-11-09.md)。基準：main `416a1ab`（PR #138 之後）。
+版本：v0.1 · 日期：2026-11-09 · 狀態：**提案，等 George 同意後才動程式**。本文只盤點與規劃，沒有改任何產品程式。數字由 [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs) 算出，計算方式與輸出見 [驗證紀錄](validation/architecture-review-2026-11-09.md)。基準：main `416a1ab`（PR #138 之後）。2026-11-10 補記：本文的 PR #139 已於 2026-11-10 合併；George 同日同意 S1–S5（各自一個 PR）。S6–S14 仍等同意，S6 起沒有同意前不搬移程式。
 
 本文的行號都是基準 commit 的行號，之後會漂移；請以檔名與函式名為準。
 
@@ -246,6 +246,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 | `shared/realtime-route.ts` | 名稱像放 `RealtimeRoute` | `RealtimeRoute` 介面在 `server/realtime-routes.ts:85`；此檔只有線上契約 |
 
 - 不改的代價：CLAUDE.md 規定 Agent 先讀 README 與狀態文件；讀到「沒有記憶層」「明文 JSON」會做出錯的設計決定或重建已存在的東西。
+- **2026-11-10 補記（S1 文件同步）**：S1（分支 `claude/arch-s1-doc-sync`）已處理上表除最後兩列以外的每一列，做法是在原句旁加上有日期的補記，不改寫歷史文字，也不改任何程式：根 `README.md`、原型 `README.md`（含結構樹重寫）、`docs/Current_Implementation_Status.md`、`docs/11`、`docs/12`、`docs/06`、`docs/07`、`docs/README.md` 與 `docs/validation/README.md`（補上 9 列），中英文同步。最後兩列（`shared/seconds-menu.ts`、`shared/realtime-route.ts` 的命名）屬於其他批次，沒有動。上表保留盤點當時（main `416a1ab`）的行號與說法，S1 之後行號會位移。兩點說明：表中「3,188 項」是通過數，總數是 3,194 項（6 項跳過），S1 寫進文件的是[量測紀錄](validation/architecture-review-2026-11-09.md)的完整數字；`docs/12` 的 `home_status` 查詢確實仍不快取，30 秒快取只在 HOME-1 的 `GET /api/home/overview`，補記照這個區別寫。S1 沒有把任何 gate（G0–G3）或「待實作」硬體項目改成完成，沒有實機證據的項目仍標 fixture 或未驗證。
 
 ### P2-6　`server/app.ts` 1,369 行手寫路由鏈
 
@@ -277,6 +278,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 
 - `shared/seconds-menu.ts`（§P1-5）、`shared/realtime-route.ts`、「memories＝照片回憶」對「memory＝家庭記憶」、`settings.json` 其實只放供應商。
 - 不改的代價：低；但改名最好趁現在 importer 還少（`seconds-menu` 5 個來源檔＋7 個測試）。
+- **2026-11-10 補記**：`shared/seconds-menu.ts` 已在分支 `claude/arch-s3-menu-prefs` 改名為 `shared/menu-prefs.ts`（S3，尚未合併）；上面與 §P1-5、§P2-7 的敘述保留盤點當時的檔名。其餘三項命名未動。見[驗證紀錄](validation/architecture-s3-menu-prefs-2026-11-10.md)。
 
 ## 3. 重整計畫
 
@@ -286,9 +288,10 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 |---|---|---|---|---|
 | S0 | **本文與量測腳本**（這個 PR）：`docs/23`、`scripts/architecture-metrics.mjs`、驗證紀錄、索引 | 只有文件與一支唯讀腳本 | 無 | 全套驗證綠 |
 | S1 | **文件同步**：修 §P1-5 表列的每一句；補索引 9 份驗證紀錄；原型 README 結構樹補齊 | `README.md`、`prototype/ambient-shell/README.md`、`docs/Current_Implementation_Status.md`、`docs/11`、`docs/12`、`docs/README.md`、`docs/validation/README.md`（都含 .en） | 無 | 雙語檢查＋人工核對每句對應程式 |
-| S2 | **架構守門測試**：`tests/architecture.test.ts` 用 `scripts/architecture-metrics.mjs` 的邏輯鎖住：跨層 import 為 0、import 環不多於現在 4 組（允許清單）、超過 800 行的檔不多於現在 16 個（允許清單，只能減不能加） | 新增 1 個測試；腳本抽成可 import 的模組 | 低 | 測試在基準上通過；故意加一個跨層 import 會失敗 |
+| S2 | **架構守門測試**：`tests/architecture.test.ts` 用 `scripts/architecture-metrics.mjs` 的邏輯鎖住：跨層 import 為 0、import 環不多於現在 4 組（允許清單）、超過 800 行的檔不多於現在 16 個（允許清單，只能減不能加）。**2026-11-10 補記：**已在分支 `claude/arch-s2-guard-test` 實作（尚未合併）；實際只守兩條：跨層 import 為 0；每個 import 環（強連通分量，含 type-only）必須是允許清單 4 組之一的子集合。環的清單預設只刪不加，但功能 PR 現在解環不合理時可依「有意識的例外」加項目（一行原因註解、調高上限常數、PR 說明提到）。**「超過 800 行的檔」那一條依 George 2026-11-10 的決定拿掉**：專案仍在開發中，現在不限制檔案行數，大檔之後與 S6–S14 一起整理；量測腳本仍回報檔數，只供參考。見[驗證紀錄](validation/architecture-guard-2026-11-10.md) | 新增 1 個測試；腳本抽成可 import 的模組 | 低 | 測試在基準上通過；故意加一個跨層 import 會失敗 |
 | S3 | **改名 `shared/seconds-menu.ts` → `shared/menu-prefs.ts`**，順手把 `MenuPrefSetting` 型別搬到 `shared/prefs.ts` 解掉 shared 的型別環 | 5 個來源檔（含 `desktop/settings-menu.d.mts`）、7 個測試改 import 路徑 | 低 | `tsc` 綠；`describeMenuPrefs` 輸出 snapshot 相同 |
-| S4 | **共用原子寫檔 helper**：`server/fs-atomic.ts` 提供 `writeAtomic(path, data, mode)`，先讓 5 個最簡單的呼叫者改用（`providers.ts`、`proactive.ts` 的 log、`voice-cost-log.ts`、`lgtv/store.ts`、`nous.ts` 的 memory-enabled）；`sealed-vault.ts`／`memory/store.ts` 的 durable 寫法保留、第二個 PR 再評估 | 1 新檔＋5 檔各 -10 行 | 低 | 既有 store 測試；寫出的檔逐位元組相同 |
+| | ↳ **2026-11-10 補記**：S3 已在分支 `claude/arch-s3-menu-prefs` 完成（尚未合併）。型別沒有搬到 `shared/prefs.ts`（`sense.ts` 與 `voice-prefs.ts` 都 import `prefs.ts`，搬過去會多一組環），改放新檔 `shared/menu-prefs-types.ts`，`menu-prefs.ts` 原樣 re-export；`menu-prefs.ts` 已離開型別環，`types.ts` ↔ `realtime-route.ts` ↔ `voice-cost.ts` 仍在（環數仍是 4 組）。見[驗證紀錄](validation/architecture-s3-menu-prefs-2026-11-10.md) | | | |
+| S4 | **共用原子寫檔 helper**：`server/fs-atomic.ts` 提供 `writeAtomic(path, data, mode)`，先讓 5 個最簡單的呼叫者改用（`providers.ts`、`proactive.ts` 的 log、`voice-cost-log.ts`、`lgtv/store.ts`、`nous.ts` 的 memory-enabled）；`sealed-vault.ts`／`memory/store.ts` 的 durable 寫法保留、第二個 PR 再評估。**2026-11-10 註記**：已實作（分支 `claude/arch-s4-fs-atomic`，尚未合併）。簽名改為 `writeAtomic(path, data, options)`（`mode`、`tempSuffix`、`mkdir`、`chmodTemp`、`removeTempOnError`，預設都不做），五個呼叫者各自只開原本就有的步驟；自己呼叫 `renameSync` 的 server 檔 16 → 12（含 `prefs-file.ts` 與 `fs-atomic.ts` 本身）。實際是 5 檔合計 -14 行，不是各 -10 行。見[驗證紀錄](validation/architecture-s4-fs-atomic-2026-11-10.md) | 1 新檔＋5 檔各 -10 行 | 低 | 既有 store 測試；寫出的檔逐位元組相同 |
 | S5 | **PrefsFile store 工廠**：`server/prefs-store.ts` 的 `createPrefsStore(spec, file, defaults)` 取代 11 個 PrefsFile store（9 個 `*-settings.ts` 加 `memories.ts`、`proactive.ts`）的相同樣板；各檔留一行 export 維持 import 路徑 | 11 檔瘦身 | 低 | 既有測試不改即綠：`audio-`／`camera-`／`clock-`／`voice-`／`wake-settings`、`camera-prefs`、`prefs`、`day-night-mode`、`home-corner`、`memories-http`、`memories-google`、`proactive`、`proactive-calendar`、`apikey-integration`、`live-integration`（`face-tuning.json` 只經 `http.test.ts` 的 `/api/settings/camera-tuning` 間接測）；`settings.view()` JSON 相同。**2026-11-10 已做**（分支 `claude/arch-s5-prefs-store`，未合併）：實際做成基底類別 `PrefsStore<S, O>`（只有建構、`resolve(keys, defaults)`、`commit(patch)` 三件事），不是 `createPrefsStore` 工廠；11 個 store 都改成繼承它，類別名稱、建構參數與方法簽章不變，各檔仍保留自己的 `view()`／`update()`。11 檔合計 1,053 → 925 行，加上新檔 41 行。既有測試檔沒有修改。紀錄見 [驗證紀錄](validation/architecture-s5-prefs-store-2026-11-10.md) |
 | S6 | **`app.ts` 設定路由表**：13 條 `/api/settings/*` 改成一張表（path → store → parsePatch），消掉 18 次 localize 與 12 次錯誤樣板；`PrefsFile.parse` 讀回時的第二次驗證先保留，等測試證明兩處驗證等價再另開 PR 移除 | `app.ts` -200 行左右；新增 `server/routes/settings.ts` | 中低 | `http.test.ts` 與 `backend-i18n.test.ts` 不改；錯誤訊息、狀態碼、回應 JSON 逐位元組比對 |
 | S7 | **解執行期環＋搬 `ApiKeyRoute`**：`RouteStartError`／`RouteCall`／`SessionContext`／`HostGone` 等契約移到 `server/realtime-contracts.ts`；`ApiKeyRoute` 從 `realtime-routes.ts:1232` 搬到 `server/apikey-route.ts`（對稱 `live-route.ts`）；`app.ts:285` 不再自己 `new ApiKeyRoute`，由 `nous.ts` 注入（風險：`createApp` 沒帶 `realtimeRoutes` 時目前預設建 `ApiKeyRoute`，改成注入前要先確認沒有測試依賴這個預設，否則保留預設只搬位置） | `realtime-routes.ts` -60、`apikey-call.ts`、`app.ts`、`nous.ts` | 中低 | `realtime-routes.test.ts`、`apikey-route.test.ts`、`live-integration.test.ts` 不改即綠；量測腳本顯示環數 4 → 3 |
