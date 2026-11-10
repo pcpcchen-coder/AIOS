@@ -4,7 +4,7 @@
 
 # Nous 23 — 架構盤點與重整計畫（2026-11）
 
-版本：v0.1 · 日期：2026-11-09 · 狀態：**提案，等 George 同意後才動程式**。本文只盤點與規劃，沒有改任何產品程式。數字由 [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs) 算出，計算方式與輸出見 [驗證紀錄](validation/architecture-review-2026-11-09.md)。基準：main `416a1ab`（PR #138 之後）。
+版本：v0.1 · 日期：2026-11-09 · 狀態：**提案，等 George 同意後才動程式**。本文只盤點與規劃，沒有改任何產品程式。數字由 [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs) 算出，計算方式與輸出見 [驗證紀錄](validation/architecture-review-2026-11-09.md)。基準：main `416a1ab`（PR #138 之後）。2026-11-10 補記：本文的 PR #139 已於 2026-11-10 合併；George 同日同意 S1–S5（各自一個 PR）。S6–S14 仍等同意，S6 起沒有同意前不搬移程式。
 
 本文的行號都是基準 commit 的行號，之後會漂移；請以檔名與函式名為準。
 
@@ -246,6 +246,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 | `shared/realtime-route.ts` | 名稱像放 `RealtimeRoute` | `RealtimeRoute` 介面在 `server/realtime-routes.ts:85`；此檔只有線上契約 |
 
 - 不改的代價：CLAUDE.md 規定 Agent 先讀 README 與狀態文件；讀到「沒有記憶層」「明文 JSON」會做出錯的設計決定或重建已存在的東西。
+- **2026-11-10 補記（S1 文件同步）**：S1（分支 `claude/arch-s1-doc-sync`）已處理上表除最後兩列以外的每一列，做法是在原句旁加上有日期的補記，不改寫歷史文字，也不改任何程式：根 `README.md`、原型 `README.md`（含結構樹重寫）、`docs/Current_Implementation_Status.md`、`docs/11`、`docs/12`、`docs/06`、`docs/07`、`docs/README.md` 與 `docs/validation/README.md`（補上 9 列），中英文同步。最後兩列（`shared/seconds-menu.ts`、`shared/realtime-route.ts` 的命名）屬於其他批次，沒有動。上表保留盤點當時（main `416a1ab`）的行號與說法，S1 之後行號會位移。兩點說明：表中「3,188 項」是通過數，總數是 3,194 項（6 項跳過），S1 寫進文件的是[量測紀錄](validation/architecture-review-2026-11-09.md)的完整數字；`docs/12` 的 `home_status` 查詢確實仍不快取，30 秒快取只在 HOME-1 的 `GET /api/home/overview`，補記照這個區別寫。S1 沒有把任何 gate（G0–G3）或「待實作」硬體項目改成完成，沒有實機證據的項目仍標 fixture 或未驗證。
 
 ### P2-6　`server/app.ts` 1,369 行手寫路由鏈
 

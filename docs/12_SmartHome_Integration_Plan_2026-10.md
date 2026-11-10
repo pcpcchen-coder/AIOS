@@ -106,7 +106,7 @@ AIOS 本機核心 HomeBridge（新）── REST v1 + SSE，Bearer 範圍權杖 
 - **只在設定為 `confirm` 的設備出現**。
 - **確認卡**：琥珀色，顯示動作、設備、房間與數值。
 - **固定語句**：`src/approval.ts` 判斷。「確認執行」才送出；只說「好」不算；說「取消」、60 秒逾時或收起確認卡都不送。
-- **要調整的地方**：目前確認佇列只服務 MCP 的 `mcp_approval_request`，要擴充成也能處理 HomeBridge 的 `needs_confirmation`。HomeBridge 的確認由本機核心執行指令，不經 OpenAI。
+- **要調整的地方**：目前確認佇列只服務 MCP 的 `mcp_approval_request`，要擴充成也能處理 HomeBridge 的 `needs_confirmation`。HomeBridge 的確認由本機核心執行指令，不經 OpenAI。2026-11-10 補記：這項已在 H1 做完，`src/realtime-tools.ts` 的共用確認卡佇列會處理 `home_control` 回的 `needs_confirmation`（見 §6 H1）；H1 沒有任何設備會觸發，仍要等 H2 的設備政策。
 
 ## 3. 畫面（延續 10 的遠距規則）
 
@@ -179,7 +179,12 @@ AIOS 本機核心 HomeBridge（新）── REST v1 + SSE，Bearer 範圍權杖 
 
 驗證見 [`docs/validation/smarthome-h1-2026-10-22.md`](validation/smarthome-h1-2026-10-22.md)：假中控測試與真實中控程式（示例配置，沒有真實設備）。本文件狀態列另記家中開關燈口頭確認；仍缺完整逐項設備結果、量測與 §3 的大圖示結果畫面，不改寫原批次測試範圍。
 
-**H0 實作對照（2026-10-21）**：`prototype/ambient-shell/server/home-bridge.ts`（設定、讀 `GET /api/v1/home`、本機名稱比對、讀值整理）、`POST /api/home/status`、即時語音的 `home_status` 工具與字幕錨點。每次查詢都向中控取最新資料，不快取讀值。驗證見 [`docs/validation/smarthome-h0-2026-10-21.md`](validation/smarthome-h0-2026-10-21.md)。後續家中查溫度的 log 與口頭結果見 [live 語音 §4](validation/live-voice-2026-10-23.md#4-真實結果george-家中測試)；仍缺完整量測與 §3 的大數字錨點畫面。
+**H0 實作對照（2026-10-21）**：`prototype/ambient-shell/server/home-bridge.ts`（設定、讀 `GET /api/v1/home`、本機名稱比對、讀值整理）、`POST /api/home/status`、即時語音的 `home_status` 工具與字幕錨點。每次查詢都向中控取最新資料，不快取讀值。驗證見 [`docs/validation/smarthome-h0-2026-10-21.md`](validation/smarthome-h0-2026-10-21.md)。2026-11-10 補記：`home_status` 查詢仍然不快取；之後加的左上角家中狀態（HOME-1，`GET /api/home/overview`，`server/home-overview.ts`）是另一條唯讀路線，快取 30 秒（控制後讀到的結果只快取 5 秒），只有假中控與無頭 Chromium 驗證，見 [HOME-1 驗證](validation/home-corner-2026-11-07.md)。後續家中查溫度的 log 與口頭結果見 [live 語音 §4](validation/live-voice-2026-10-23.md#4-真實結果george-家中測試)；仍缺完整量測與 §3 的大數字錨點畫面。
+
+**2026-11-10 補記（H1b 之後加上、本文件原本沒寫的兩件事）**：
+
+- **AIL-2 Facade**（2026-11-05）：`NOUS_AIL=on` 且 `NOUS_AIL_SERVICES` 列出 `home`、中控已設定時，`/api/home/status`、`control`、`confirm` 由 `server/app.ts` 的 `homeCall` 改經整合層的 Dispatcher 呼叫 HomeBridge（`server/integrations/adapters/home.ts`）；HTTP 回應、送給中控的請求與模型看到的 `home_status`／`home_control` 都不變，沒有列出時照原本直接呼叫。只有假中控的逐筆比對，見 [AIL-2 驗證](validation/ail-2-home-facade-2026-11-05.md)。
+- **電視改路**（2026-11-07）：`NOUS_AIL_SERVICES` 列出 `lg_tv` 且設定了電視 IP 時，`home_control` 對客廳電視不送中控，回 `refused`／`unsupported` 與固定訊息 `TV_MOVED`（`server/home-bridge.ts`），請模型改用 `app.tv.*`；其他房間的電視不受影響。只有 fixture，真實電視未驗證，見 [LGTV-1 驗證](validation/lgtv-1-2026-11-07.md)。
 
 ## 7. 測試
 
