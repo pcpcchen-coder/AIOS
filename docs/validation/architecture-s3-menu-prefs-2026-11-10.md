@@ -56,7 +56,7 @@ src/api.ts <-> src/realtime-session.ts <-> src/realtime-tools.ts <-> src/realtim
 
 ## 4. 行為不變的證據
 
-- 測試除了 import 路徑以外沒有改，全數通過（見 §5）。直接呼叫 `describeMenuPrefs`／`describeSeconds` 的測試：`tests/prefs.test.ts`（24 處，含每一列的鍵、選項、標籤、停用原因與 `describeSeconds` 過濾）、`desktop-menu.test.ts`、`settings-view.test.ts`、`backend-i18n.test.ts`、`desktop-i18n.test.ts`、`service-mode.test.ts`；`http.test.ts` 經 `/api/settings` 的 `SettingsView.seconds` 與 `isNumberRow` 間接驗。
+- 測試除了 import 路徑以外沒有改，全數通過（見 §5）。直接呼叫 `describeMenuPrefs`／`describeSeconds` 的測試：`tests/prefs.test.ts`（24 行、27 處，含每一列的鍵、選項、標籤、停用原因與 `describeSeconds` 過濾）、`desktop-menu.test.ts`、`settings-view.test.ts`、`backend-i18n.test.ts`、`desktop-i18n.test.ts`、`service-mode.test.ts`；`http.test.ts` 經 `/api/settings` 的 `SettingsView.seconds` 與 `isNumberRow` 間接驗。
 - 一次性比對（腳本用完即刪，未提交）：把 `3cc1401` 的 `seconds-menu.ts` 與新的 `menu-prefs.ts` 同時載入，對 8 種鏡頭設定 × 3 種即時語音狀態 × 2 種語音可寫狀態共 48 組輸入，各呼叫 `describeMenuPrefs` 與 `describeSeconds`（96 個輸出）並加上 `cameraPreviewDisabledReason`，JSON 序列化後 SHA-256 相同（`15ccccafe87c4213…`）；兩個模組的執行期匯出名稱清單相同（7 個）。
 - `tests/__snapshots__/` 只有 `wake-flag-off.test.ts.snap`，沒有內嵌舊檔名；`desktop/scripts/`、`scripts/`、`package.json`、`tsconfig*.json`、`vite.config.ts`、`spike/` 都沒有引用舊檔名。
 
@@ -66,7 +66,7 @@ src/api.ts <-> src/realtime-session.ts <-> src/realtime-tools.ts <-> src/realtim
 |---|---|---|
 | 型別檢查 | `npx tsc --noEmit` | 通過 |
 | 型別檢查（含 spike） | `npm run typecheck` | 通過（主專案、`spike/face`、`spike/wake` 三個 tsconfig） |
-| 單元與整合測試 | `npx vitest run` | 172 個測試檔通過；3,194 項中 3,188 項通過、6 項跳過；53 秒（與基準相同的檔數與項數） |
+| 單元與整合測試 | `npx vitest run` | 172 個測試檔通過；3,194 項中 3,188 項通過、6 項跳過；53 秒（與基準相同的檔數與項數；跳過數依環境而異，獨立審查重跑是 3,189 項通過、5 項跳過） |
 | 前端建置 | `npx vite build` | 通過；同基準的 chunk 超過 500 kB 警告 |
 | 桌面主程式語法 | `node --check desktop/main.mjs` | 通過 |
 | 隔離 mock 流程 | `node scripts/verify-aios.mjs` | PASS |

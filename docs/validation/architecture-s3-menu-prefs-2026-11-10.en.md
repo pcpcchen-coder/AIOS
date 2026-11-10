@@ -56,7 +56,7 @@ The other numbers from the metrics script change only because there is one more 
 
 ## 4. Evidence of no behaviour change
 
-- Tests are unchanged apart from import paths and all pass (see §5). Tests that call `describeMenuPrefs` / `describeSeconds` directly: `tests/prefs.test.ts` (24 references, covering each row's key, options, labels, disabled reasons, and the `describeSeconds` filter), `desktop-menu.test.ts`, `settings-view.test.ts`, `backend-i18n.test.ts`, `desktop-i18n.test.ts`, `service-mode.test.ts`; `http.test.ts` checks them indirectly through `SettingsView.seconds` from `/api/settings` and `isNumberRow`.
+- Tests are unchanged apart from import paths and all pass (see §5). Tests that call `describeMenuPrefs` / `describeSeconds` directly: `tests/prefs.test.ts` (27 references on 24 lines, covering each row's key, options, labels, disabled reasons, and the `describeSeconds` filter), `desktop-menu.test.ts`, `settings-view.test.ts`, `backend-i18n.test.ts`, `desktop-i18n.test.ts`, `service-mode.test.ts`; `http.test.ts` checks them indirectly through `SettingsView.seconds` from `/api/settings` and `isNumberRow`.
 - One-off comparison (script deleted after use, not committed): the `seconds-menu.ts` from `3cc1401` and the new `menu-prefs.ts` were loaded side by side; for 48 inputs (8 camera settings × 3 realtime states × 2 voice-writable states), `describeMenuPrefs` and `describeSeconds` were each called (96 outputs) plus `cameraPreviewDisabledReason`, and the SHA-256 of the JSON serialization is identical (`15ccccafe87c4213…`); the two modules' runtime export name lists are identical (7 names).
 - `tests/__snapshots__/` contains only `wake-flag-off.test.ts.snap` and does not embed the old file name; `desktop/scripts/`, `scripts/`, `package.json`, `tsconfig*.json`, `vite.config.ts`, and `spike/` do not reference the old file name.
 
@@ -66,7 +66,7 @@ The other numbers from the metrics script change only because there is one more 
 |---|---|---|
 | Type check | `npx tsc --noEmit` | Passed |
 | Type check (with spikes) | `npm run typecheck` | Passed (three tsconfigs: main project, `spike/face`, `spike/wake`) |
-| Unit and integration tests | `npx vitest run` | 172 test files passed; 3,188 of 3,194 tests passed, 6 skipped; 53 s (same file and test counts as the baseline) |
+| Unit and integration tests | `npx vitest run` | 172 test files passed; 3,188 of 3,194 tests passed, 6 skipped; 53 s (same file and test counts as the baseline; the skip count is environment-dependent, and the independent review re-run gave 3,189 passed, 5 skipped) |
 | Frontend build | `npx vite build` | Passed; same chunk-over-500 kB warning as the baseline |
 | Desktop main syntax | `node --check desktop/main.mjs` | Passed |
 | Isolated mock flow | `node scripts/verify-aios.mjs` | PASS |
