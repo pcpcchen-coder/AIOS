@@ -111,8 +111,8 @@
       "source": "docs/12_SmartHome_Integration_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/12_SmartHome_Integration_Plan_2026-10.en.md",
-      "sourceSha256": "0be4b11801ae20b72b887b65bbb2dfa5eac53f4efde0476fed3396014204022b",
-      "translationSha256": "96fa7123c02861f519640ffc6f2079893b81e923676f68491690848809bd1654"
+      "sourceSha256": "dc79fae0a5b8a934d46b66faa12279987f606664fd0735972e2332cae9853900",
+      "translationSha256": "e4ca7946ba8d58b9c371c13d49a9abc19e00908d3e54edfb554ad59ddebf701c"
     },
     {
       "source": "docs/13_Feature_Expansion_Assessment_2026-10-24.md",
@@ -181,8 +181,8 @@
       "source": "docs/23_Architecture_Review_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/23_Architecture_Review_2026-11.en.md",
-      "sourceSha256": "fc71f4a2fb82f91a389c0024425a8e06ee4438e3e365afe4e6acd67c50075b8a",
-      "translationSha256": "a747ea530f4279c1f50ebb7b8c4f6e3a649d3fa93d7c9d18e29dc9f6c29690f7"
+      "sourceSha256": "d4cc1117923b5af28b13f46306fd71782648ca4f1012c20c7e283ea2520d4ae4",
+      "translationSha256": "92de3bb0c8a57fc7d9d8d584b2510c268f8b727bfff00f00d0bcba9204f7867a"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "44874815902bfb8445a1fdfe5d2bbcde26285e32fc4e97b088119afec246af18",
-      "translationSha256": "f4196909c42aff2c1ad9bdb4174f0023dc72c5dbf408a26933d84ed22c6a3574"
+      "sourceSha256": "cfa999fadf085c9043535a47c0ee1f7393c8e86d8cbea22b185de819e50ab0a9",
+      "translationSha256": "a1dcf965460d0ebba99c4ff6b5aac246101475a98b6ddda92d29e538094aeb93"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -377,6 +377,13 @@
       "translation": "docs/validation/architecture-s5-prefs-store-2026-11-10.en.md",
       "sourceSha256": "ee66863814d4636257c4b77be7bacc705c9a748acf8d5ee40dff92a5d6aeac21",
       "translationSha256": "9305590d826310cab177b581f95806a7cb16f3bfe5bc7de4f69a647dc8ef2ae1"
+    },
+    {
+      "source": "docs/validation/architecture-s9-home-split-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s9-home-split-2026-11-10.en.md",
+      "sourceSha256": "3ada5922e8ebfdc677fff687c3a60c31c15cc7ec88d6d9de743f6ae10bb161fc",
+      "translationSha256": "91c8a8813bbc9ba34e1882cbd70248fb91737840db168bde9355ef8cb2bfa23a"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
@@ -977,8 +984,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "2e9886ad52360d9069bcc388b2fba7c3892ee4c40356b71aad30ecec181fe764",
-      "translationSha256": "3088d19350ff77f5ba6acd0d63ff68ee36734b5a8ad0a0e262e6c454616891d5"
+      "sourceSha256": "7b88a678184d6682afb1f2e53aff6a4c99533306fe2e38db1e79f1e487513349",
+      "translationSha256": "f181f4b611c62ae35426dea9868920131f5b5edf0a7f1abe8a0eb4562366dda6"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

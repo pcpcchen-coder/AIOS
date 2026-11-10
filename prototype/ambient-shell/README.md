@@ -473,7 +473,9 @@ prototype/ambient-shell/
 │   ├── codex-responses.ts  # Codex Responses 用戶端（交辦推論、hosted web_search）
 │   ├── web-search.ts       # 即時語音的上網查詢（Responses API web_search）
 │   ├── voice-cost-log.ts   # F6 費用紀錄（voice-cost.jsonl）
-│   ├── home-bridge.ts      # 武陵居中控查詢與控制：名稱比對、讀值整理、送指令與確認卡；AIFA 冷氣與紅外線按鍵（docs/12 H0、H1、H1b）
+│   ├── home-bridge.ts      # 武陵居中控（docs/12 H0、H1、H1b）對外的匯出入口：只重新匯出 server/home/，import 路徑不變
+│   ├── home/               # 武陵居中控查詢與控制：types.ts（型別、錯誤類別、逾時）、parse.ts（中控 JSON）、readings.ts（讀值整理）、commands.ts（指令解析、名稱比對、控制計畫）、
+│   │                       # aifa.ts（AIFA 冷氣）、infrared.ts（紅外線按鍵）、bridge.ts（HomeBridge：送指令與確認卡）
 │   ├── home-overview.ts    # 左上角家中狀態的唯讀內容（HOME-1；快取 30 秒）
 │   ├── integrations/       # App Integration Layer（AIL-1，docs/18；NOUS_AIL 預設關閉）：Registry、Dispatcher、政策、Schema、按需狀態
 │   │   ├── adapters/       # mock、home（AIL-2 Facade）、gmail-gog、google-calendar、weather、lg-tv、spotify-soloist（只有健康檢查）、
