@@ -11,7 +11,7 @@
 - 分支 `claude/arch-s7-realtime-contracts`，建立在 main `1b61d08` 之上；尚未合併，沒有 push。George 於 2026-11-10 同意 S6–S9。
 - Linux 雲端容器、Node.js v22.23.4、vitest 5.0.3、esbuild 0.28.2。`prototype/ambient-shell/node_modules` 是指到主要 checkout 的符號連結，沒有提交。沒有麥克風、鏡頭、Mac、Pi、OpenAI 或 ChatGPT 連線。
 - 新增 2 個檔：`server/realtime-contracts.ts`（176 行）、`server/apikey-route.ts`（70 行）。
-- 修改 8 個原始檔：`server/realtime-routes.ts`（1,275 → 1,083 行）、`server/apikey-call.ts`、`server/codex-auth.ts`、`server/live-route.ts`、`server/live-tool-caller.ts`、`server/memory/live.ts`、`server/web-search.ts`、`shared/web-search.ts`。前四個小檔與 `memory/live.ts` 各只改一行 import 路徑。
+- 修改 8 個原始檔：`server/realtime-routes.ts`（1,275 → 1,083 行）、`server/apikey-call.ts`、`server/codex-auth.ts`、`server/live-route.ts`、`server/live-tool-caller.ts`、`server/memory/live.ts`、`server/web-search.ts`、`shared/web-search.ts`。`apikey-call.ts`、`codex-auth.ts`、`live-route.ts` 與 `memory/live.ts` 各只改一行 import 路徑；`live-tool-caller.ts` 改 15 行（import 與把 `LiveCallerMemory` 介面換成 re-export）。量測腳本的「沒有測試直接 import 的模組」多了兩個新檔（它們經 `realtime-routes.ts` 的 re-export 被測到）。
 - 修改 1 個測試檔：`tests/architecture.test.ts`，只改允許清單、上限常數與註解。其他測試檔都沒有修改。
 - `server/app.ts` 與 `server/nous.ts` **沒有修改**：`createApp` 沒帶 `realtimeRoutes` 時照舊自己 `new ApiKeyRoute(...)`，import 路徑也照舊是 `./realtime-routes.ts`（見第 7 節與原規劃的差異）。
 
