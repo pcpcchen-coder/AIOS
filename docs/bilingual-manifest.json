@@ -181,8 +181,8 @@
       "source": "docs/23_Architecture_Review_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/23_Architecture_Review_2026-11.en.md",
-      "sourceSha256": "fc71f4a2fb82f91a389c0024425a8e06ee4438e3e365afe4e6acd67c50075b8a",
-      "translationSha256": "a747ea530f4279c1f50ebb7b8c4f6e3a649d3fa93d7c9d18e29dc9f6c29690f7"
+      "sourceSha256": "d7d6bac13f25bbbcc8364ba724dfe1eb51774982b773c86d89bbfcf8a84177c8",
+      "translationSha256": "f3fc70341c71520c2662347f249b398d253e7e22a3e36515003d44b6219374e7"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "44874815902bfb8445a1fdfe5d2bbcde26285e32fc4e97b088119afec246af18",
-      "translationSha256": "f4196909c42aff2c1ad9bdb4174f0023dc72c5dbf408a26933d84ed22c6a3574"
+      "sourceSha256": "cf8fe70c4b0a9c9abe9be486af19fb54bbbf2924e3bbcce078d4ee25dad2df34",
+      "translationSha256": "86b54721b358021b6334495ade3327de6e2741206d14d0cec3cb060d015fc874"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -347,8 +347,8 @@
       "source": "docs/validation/architecture-guard-2026-11-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/architecture-guard-2026-11-10.en.md",
-      "sourceSha256": "4ed9734c89911ce998ceab0700b7b393787cda8ef48d66c00f7ca57624cc9af0",
-      "translationSha256": "2a27fdb290958583fac2c706d96b4d79df5cbae30464a15513051462a09b85a0"
+      "sourceSha256": "061aae7679ab54c0fd3809558da3e45d60ba902998e8ae3e8afd06f152c7522a",
+      "translationSha256": "f774c815da11e072065a84ef8de4dcd371f26a06b0e5a7c0e732b667ebc3e1c5"
     },
     {
       "source": "docs/validation/architecture-review-2026-11-09.md",
@@ -377,6 +377,13 @@
       "translation": "docs/validation/architecture-s5-prefs-store-2026-11-10.en.md",
       "sourceSha256": "ee66863814d4636257c4b77be7bacc705c9a748acf8d5ee40dff92a5d6aeac21",
       "translationSha256": "9305590d826310cab177b581f95806a7cb16f3bfe5bc7de4f69a647dc8ef2ae1"
+    },
+    {
+      "source": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.en.md",
+      "sourceSha256": "d4beee023305b151c46dee271141adf3bcc32c7236dc715bb19afd4847d7a857",
+      "translationSha256": "42576d703a93f542e004752b2264b97d3b1de56ee68de18f4af0e43a1ddde5af"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
@@ -977,8 +984,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "2e9886ad52360d9069bcc388b2fba7c3892ee4c40356b71aad30ecec181fe764",
-      "translationSha256": "3088d19350ff77f5ba6acd0d63ff68ee36734b5a8ad0a0e262e6c454616891d5"
+      "sourceSha256": "d64024e734361f9e878b91cbc7359e98c47d1d6372540e7e2249f80501d5ff31",
+      "translationSha256": "59660f29486e60cc386f2f147d892101653eb7bdad11df48093b756d8fc8ffde"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

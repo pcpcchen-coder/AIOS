@@ -4,7 +4,7 @@ import { parseGaEvent, type GaEvent } from "../shared/realtime-ga.ts";
 import { CORE_TOOLS, LIVE_STOP_REPORT_MS, type CoreToolName, type LiveCoreEvent, type LiveMemoryReason, type StopReplyTurn } from "../shared/realtime-route.ts";
 import { delegatePolicy, MAX_RECALLS, type LiveCallPort, type LiveMemoryPort, type RevokeWhy } from "./memory/live.ts";
 import { APIKEY_TIMEOUTS_MS, type RealtimeBridge } from "./realtime.ts";
-import { RouteStartError, type CallCloseReason, type RouteCall, type SessionContext } from "./realtime-routes.ts";
+import { RouteStartError, type CallCloseReason, type RouteCall, type SessionContext } from "./realtime-contracts.ts";
 import type { SidebandSocket } from "./sideband.ts";
 import { taiwanTranscript, warmTaiwan } from "../shared/zh-tw-opencc.ts";
 import { convertsLocale, isPromptEcho } from "../shared/zh-tw.ts";

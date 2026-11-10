@@ -5,7 +5,7 @@ import type { Task } from "../shared/types.ts";
 import { CodexError, type CodexInputItem, type CodexResponses, type CodexToolSpec, type FunctionToolSpec } from "./codex-responses.ts";
 import { buildRealtimeTools, realtimeToolRules, taskLines, type RealtimeCapabilities } from "./realtime.ts";
 import { delegatePolicy, DELEGATE_ONCE_OUTPUT, exactVoiceConfirm, MAX_RECALLS, type VoiceDelegatePort } from "./memory/live.ts";
-import { HOST_TIMEOUT_MS, HostGone, type ApprovalSnapshot, type ToolHost } from "./realtime-routes.ts";
+import { HOST_TIMEOUT_MS, HostGone, type ApprovalSnapshot, type LiveCallerMemory, type ToolHost } from "./realtime-contracts.ts";
 import { fromWireName } from "../shared/integrations.ts";
 import { toModelOutput, type IntegrationDispatcher } from "./integrations/dispatcher.ts";
 import { todayLine } from "./local-date.ts";
@@ -136,17 +136,8 @@ export function approvalGuard(text: string, approval: ApprovalSnapshot, now: num
   return null;
 }
 
-/**
- * MEM-2：這通 live 通話的記憶（server/memory/live.ts 的 LiveMemoryBinding 提供）。
- * blocked：這通已經送過記憶，delegate_task 改成問使用者；recall：recall_memory（唯讀、經 lease.deliver）；
- * delegateBlocked：通知頁面出「要交辦這件事嗎？」卡（標題是 sideband 最近一則使用者原句）。
- */
-export interface LiveCallerMemory {
-  blocked(): boolean;
-  recall(query: string, signal: AbortSignal): Promise<Record<string, unknown>>;
-  /** title：觸發交辦的使用者原句；null 時不出卡。 */
-  delegateBlocked(title: string | null): void;
-}
+/** MEM-2：這通 live 通話的記憶接口；S7（2026-11-10）起定義在 server/realtime-contracts.ts，這裡照舊 re-export。 */
+export type { LiveCallerMemory };
 
 /** recall_memory 每次交辦最多呼叫幾次（每次都受 8 筆、4 KB 限制；MEM-3 起定義在 server/memory/live.ts，API key 路徑每一輪也用它）。 */
 export { MAX_RECALLS };
