@@ -9,6 +9,8 @@ Version v0.1 · Specification date 2026-09-16 · Authority clarification updated
 
 > **Reading guide, 2026-10-24**: See [implementation status](Current_Implementation_Status.en.md) for code/gaps and [feature expansion assessment](13_Feature_Expansion_Assessment_2026-10-24.en.md) for proposals. Baseline `1f44c6b` (2026-10-23). The Node HTTP/SSE, TypeScript, Vite, Electron prototype has browser STT/TTS and two WebRTC live-voice paths. Local wake, Tauri, full Agent SDK, and calibrated gaze remain target designs.
 >
+> **Note added 2026-11-10**: The statement above that local wake remains a target design reflects 2026-10-24. Since then a local wake word has been implemented in the prototype behind the `NOUS_WAKE` flag, off by default; the Mac has only partial hardware evidence (George alone; other family members and long-duration false triggers are untested). See the "local wake word" row in [implementation status](Current_Implementation_Status.en.md). This does not change this document's specification, gates, or acceptance requirements.
+>
 > [11 stereo camera interaction](11_Stereo_Camera_Interaction_2026-10.en.md) explicitly revises distant interaction. Current sensing covers `presence`, facing the screen, stop gestures, and three-zone arm pointing. Head direction is not eye tracking. Existing code does not prove accuracy or hardware gates. Distant selection uses spoken numbers first, arm pointing second. The gaze specification below remains a research/acceptance requirement. Applying it to head direction does not complete gaze. F0–F10 and Q0–Q4 do not replace G0–G3.
 
 <a id="1-產品定義與範圍"></a>

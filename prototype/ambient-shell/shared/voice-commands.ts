@@ -3,7 +3,7 @@
 // tests/voice-commands.test.ts 把每一句丟進真正的比對函式：結果不同、某條規則／意圖／確認語句／插話詞／模型工具
 // 沒有列、或「在哪裡有效」與 LOCAL_ROUTING 推算的不同，測試就失敗。
 import { formatSeconds, type SecondsPrefSpec } from "./prefs.ts";
-import type { CameraSecondsKey, SecondsKey } from "./seconds-menu.ts";
+import type { CameraSecondsKey, SecondsKey } from "./menu-prefs.ts";
 import { CAMERA_PREFS } from "./sense.ts";
 import type { SettingsView } from "./types.ts";
 import { VOICE_PREFS } from "./voice-prefs.ts";

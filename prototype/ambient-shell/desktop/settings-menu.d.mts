@@ -1,5 +1,5 @@
 // desktop/settings-menu.mjs 的型別（給 tests/desktop-menu.test.ts；App 本身直接跑 .mjs）。
-import type { MenuPrefSetting } from "../shared/seconds-menu.ts";
+import type { MenuPrefSetting } from "../shared/menu-prefs.ts";
 import type { SettingsView } from "../shared/types.ts";
 import type { WakePrefs, WakeReason, WakeReport, WakeState } from "../shared/wake.ts";
 import type { AudioMenuReport, AudioPrefsPatch, AudioSettingsView } from "../shared/audio-devices.ts";
