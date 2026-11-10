@@ -11,6 +11,7 @@
 | 紀錄 | 證據範圍與限制 |
 |---|---|
 | [架構盤點的量測與基準線](architecture-review-2026-11-09.md) | 2026-11-09：[23 架構盤點](../23_Architecture_Review_2026-11.md)引用的數字怎麼算（`scripts/architecture-metrics.mjs`：分層行數、16 個超過 800 行的檔、0 個跨層 import、4 組 import 環、15 個繞過 `prefs-file.ts` 的寫檔模組對 11 個使用它的 store、13 個同名方法、172 個測試檔的分類、26 個沒有直接測試的模組）與 main `416a1ab` 的基準線（172 檔 3,188 項通過、6 項跳過，verify-aios PASS）。靜態分析與雲端 mock 測試，不是產品 gate |
+| [架構重整 S3：seconds-menu 改名 menu-prefs](architecture-s3-menu-prefs-2026-11-10.md) | 2026-11-10：`shared/seconds-menu.ts` 改名為 `shared/menu-prefs.ts`，列的型別搬到 `shared/menu-prefs-types.ts`（原樣 re-export）；shared 型別環從 4 個成員縮成 3 個（環數仍是 4 組），`describeMenuPrefs`／`describeSeconds` 96 個輸出前後雜湊相同，172 個測試檔通過。行為不變；只有雲端容器的靜態檢查與自動化測試，沒有啟動 App |
 | [鏡頭亮暗門檻設定 LUX-1](light-thresholds-2026-11-09.md) | 2026-11-09：設定頁可調「低於這個值算暗」「高於這個值算亮」（預設 95／115，5–250、每格 5、至少差 5），每台裝置各自保存；順手修正設定頁不會因這台裝置的音量或門檻改變而重畫；單元測試與無頭 Chromium；**Pi 與 Mac 實機未驗證** |
 | [倒數、滴答與鈴聲 ALARM-3](alarm-timer-3-2026-11-09.md) | 2026-11-09：到期前 30 秒畫面倒數（只在會響的那台）、最後 10 秒每秒一聲滴、三種本機合成鈴聲（可試聽）與響鈴長度（1–15 分鐘）。雲端測試與無頭 Chromium（倒數出現、10 個滴答、鈴聲接手、設定保存），**Mac 與 Pi 實機未執行** |
 | [鬧鐘 ALARM-2](alarm-timer-2-2026-11-09.md) | 2026-11-09：`app.alarm.*`（單次與重複、開關、刪除、貪睡 9 分鐘）；本機時區牆上時間與夏令時間、換時區重算；單次響過自動關、重複只補一次；最低音量 30%；12 小時內有鬧鐘就防睡；設定頁管理。假時鐘、兩路 fixture 與無頭 Chromium，**Mac 與 Pi 實機未執行** |
