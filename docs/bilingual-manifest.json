@@ -111,8 +111,8 @@
       "source": "docs/12_SmartHome_Integration_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/12_SmartHome_Integration_Plan_2026-10.en.md",
-      "sourceSha256": "0be4b11801ae20b72b887b65bbb2dfa5eac53f4efde0476fed3396014204022b",
-      "translationSha256": "96fa7123c02861f519640ffc6f2079893b81e923676f68491690848809bd1654"
+      "sourceSha256": "dc79fae0a5b8a934d46b66faa12279987f606664fd0735972e2332cae9853900",
+      "translationSha256": "e4ca7946ba8d58b9c371c13d49a9abc19e00908d3e54edfb554ad59ddebf701c"
     },
     {
       "source": "docs/13_Feature_Expansion_Assessment_2026-10-24.md",
@@ -181,8 +181,8 @@
       "source": "docs/23_Architecture_Review_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/23_Architecture_Review_2026-11.en.md",
-      "sourceSha256": "bfb2aebe752ebedcb72b2928a67c6595f14ead96fc40eddd561cab44fd4fb7fa",
-      "translationSha256": "755d5bced7dad06b4f007bce6d150f928499b42ef05bcb76c5940ec8b61ccbb1"
+      "sourceSha256": "4cd4b405883d91b192aeecfbbbabdaa52356b9d8912a174ab21be3de4ec9ab72",
+      "translationSha256": "732aef652b64e171898551d47b6f00aead2eb4642ed55890bf806403b55a8b06"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "58580151465df24e337f1c649d67e08b10d81a802d0b8c21b45866ca6548509c",
-      "translationSha256": "4d4c02f37126476f5157cc924c480af4561cb2ac68cc9180481baa5b220af4eb"
+      "sourceSha256": "e82b338cb3c62871f3f65ad2e10cdd2f1df183e1faae75b1be571fc92629d3c1",
+      "translationSha256": "14919743be42d9f3b76a826352e5d37c98d042c2c4e3d29c110b733f4febec50"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -347,8 +347,8 @@
       "source": "docs/validation/architecture-guard-2026-11-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/architecture-guard-2026-11-10.en.md",
-      "sourceSha256": "4ed9734c89911ce998ceab0700b7b393787cda8ef48d66c00f7ca57624cc9af0",
-      "translationSha256": "2a27fdb290958583fac2c706d96b4d79df5cbae30464a15513051462a09b85a0"
+      "sourceSha256": "061aae7679ab54c0fd3809558da3e45d60ba902998e8ae3e8afd06f152c7522a",
+      "translationSha256": "f774c815da11e072065a84ef8de4dcd371f26a06b0e5a7c0e732b667ebc3e1c5"
     },
     {
       "source": "docs/validation/architecture-review-2026-11-09.md",
@@ -379,11 +379,25 @@
       "translationSha256": "9305590d826310cab177b581f95806a7cb16f3bfe5bc7de4f69a647dc8ef2ae1"
     },
     {
+      "source": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.en.md",
+      "sourceSha256": "4d75f464e8ee44de196b99296cfffa512918891c3ba2b8c64e9605d42ec283be",
+      "translationSha256": "e31b79a1605393287ca68f1b252b1d9a889209e9b19b3f5341f84f510f5d9924"
+    },
+    {
       "source": "docs/validation/architecture-s8-tool-names-2026-11-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/architecture-s8-tool-names-2026-11-10.en.md",
       "sourceSha256": "a11dcfe29b7b9ca19bcf99b14efb94ae9f79952fb87530266a1719654b1588a9",
       "translationSha256": "3e2a84d22ddfb1dd98326fe9a04ba1f9fae71cb807a0202e0fa60a884cb90ccf"
+    },
+    {
+      "source": "docs/validation/architecture-s9-home-split-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s9-home-split-2026-11-10.en.md",
+      "sourceSha256": "3ada5922e8ebfdc677fff687c3a60c31c15cc7ec88d6d9de743f6ae10bb161fc",
+      "translationSha256": "91c8a8813bbc9ba34e1882cbd70248fb91737840db168bde9355ef8cb2bfa23a"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
@@ -984,8 +998,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "d81728a4fb763579a0f37cf713b49df5ebcaa58eb0bff318bf75d3ee146256de",
-      "translationSha256": "cc3f9be9b1c83e9cde8550f7abeed2a452cef808e64c7132f27c8ac41cceff49"
+      "sourceSha256": "0deab2a37c9d0f057f79c5fede257035c1e44d09a05e447a943178f2bdaf80aa",
+      "translationSha256": "1b3f08ac4c77df996da5dbcc29e239fb529e90e835c7500ab55eab016c79cde1"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

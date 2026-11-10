@@ -11,7 +11,7 @@ import { confirmLine, type LiveCallPort, type LiveMemoryPort, type RevokeWhy, ty
 import type { CallFollowUp } from "./proactive-calendar.ts";
 import { taiwanTranscript, warmTaiwan } from "../shared/zh-tw-opencc.ts";
 import { convertsLocale } from "../shared/zh-tw.ts";
-import { RouteStartError, type ApprovalSnapshot, type CallCloseReason, type LiveControl, type Readiness, type RealtimeRoute, type RouteCall, type SessionContext } from "./realtime-routes.ts";
+import { RouteStartError, type ApprovalSnapshot, type CallCloseReason, type LiveControl, type Readiness, type RealtimeRoute, type RouteCall, type SessionContext } from "./realtime-contracts.ts";
 
 // 即時語音的 ChatGPT 方案路徑：gpt-live-1-codex，用 Nous 自己的 Codex 登入。負責 chatgpt.com 的通話建立與
 // api.openai.com 的 sideband；網址、標頭與 frameless 的線路事件只在這個檔案（與共用的 shared/frameless.ts 解析器）。

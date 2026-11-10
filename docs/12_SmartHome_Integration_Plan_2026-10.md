@@ -186,6 +186,8 @@ AIOS 本機核心 HomeBridge（新）── REST v1 + SSE，Bearer 範圍權杖 
 - **AIL-2 Facade**（2026-11-05）：`NOUS_AIL=on` 且 `NOUS_AIL_SERVICES` 列出 `home`、中控已設定時，`/api/home/status`、`control`、`confirm` 由 `server/app.ts` 的 `homeCall` 改經整合層的 Dispatcher 呼叫 HomeBridge（`server/integrations/adapters/home.ts`）；HTTP 回應、送給中控的請求與模型看到的 `home_status`／`home_control` 都不變，沒有列出時照原本直接呼叫。只有假中控的逐筆比對，見 [AIL-2 驗證](validation/ail-2-home-facade-2026-11-05.md)。
 - **電視改路**（2026-11-07）：`NOUS_AIL_SERVICES` 列出 `lg_tv` 且設定了電視 IP 時，`home_control` 對客廳電視不送中控，回 `refused`／`unsupported` 與固定訊息 `TV_MOVED`（`server/home-bridge.ts`），請模型改用 `app.tv.*`；其他房間的電視不受影響。只有 fixture，真實電視未驗證，見 [LGTV-1 驗證](validation/lgtv-1-2026-11-07.md)。
 
+**2026-11-10 補記（程式位置，架構重整 S9）**：HomeBridge 的程式現在在 `prototype/ambient-shell/server/home/`：`types.ts`（型別、`HomeBridgeError`、逾時常數）、`parse.ts`（`parseHome`、`parseAifa`）、`readings.ts`（讀值整理）、`commands.ts`（`parseCommand`、名稱比對、`planFor`、`commandsReply`、`TV_MOVED`）、`aifa.ts`（`buildClimate`、`aifaReply`）、`infrared.ts`（`matchKey`、`irReply`）、`bridge.ts`（`HomeBridge` 類別：`control`／`confirm`、`sendCommands`／`sendAifa`／`sendIr`）。`server/home-bridge.ts` 留作只重新匯出的入口，匯出的名稱與 import 路徑都不變；上面各段寫「`server/home-bridge.ts`」「三條路徑都在這個檔案」的地方，指的是這個入口與它背後的資料夾。這是純搬移，行為沒有改；只用假中控 fixture 驗證，沒有碰到真實設備，H1 的家中開關燈請 George 在合併後再確認一次。見 [`docs/validation/architecture-s9-home-split-2026-11-10.md`](validation/architecture-s9-home-split-2026-11-10.md)。
+
 ## 7. 測試
 
 - **假中控**：

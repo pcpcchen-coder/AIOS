@@ -42,6 +42,8 @@
 3. `server/memories-google.ts`、`server/memories.ts`
 4. `src/api.ts`、`src/realtime-session.ts`、`src/realtime-tools.ts`、`src/realtime.ts`
 
+**2026-11-10 補記（S7）：**上面是基準 `3cc1401` 當時的清單。S7 解開第 2 組之後，測試裡的清單是 3 組、9 個檔（第 1 組也拿掉了已改名的 `shared/seconds-menu.ts`），`MAX_ALLOWED_CYCLES` 是 3、`MAX_ALLOWED_CYCLE_FILES` 是 9；見 [S7 紀錄](architecture-s7-realtime-contracts-2026-11-10.md)。目前的清單以 `tests/architecture.test.ts` 為準。
+
 ### 3.1 怎麼更新清單
 
 - 環的清單與兩個上限常數都寫在 `tests/architecture.test.ts`。預設是只刪不加。

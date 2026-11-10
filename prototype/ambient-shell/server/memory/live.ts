@@ -4,7 +4,7 @@ import { MEMORY_CLAIM, type MemoryReceiptStatus } from "../../shared/memory.ts";
 import type { LiveCoreEvent, LiveMemoryReason } from "../../shared/realtime-route.ts";
 import type { ExecutorMode, Task } from "../../shared/types.ts";
 import { memoryBlock } from "../chat.ts";
-import type { LiveCallerMemory } from "../live-tool-caller.ts";
+import type { LiveCallerMemory } from "../realtime-contracts.ts";
 import type { ContextLease, MemorySession } from "./boundary.ts";
 import { parseMemoryText, toTraditional, unselectPhrase } from "./parse.ts";
 import type { ContextFact } from "./retrieve.ts";
