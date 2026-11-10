@@ -455,6 +455,8 @@ prototype/ambient-shell/
 ├── server/                 # 本機核心（Node http + SSE）
 │   ├── nous.ts             # 啟動本機核心（終端機版 index.ts 與 macOS App 共用的組合根）
 │   ├── app.ts / http-guard.ts / page-headers.ts / config.ts / index.ts   # HTTP 路由與 SSE、Host／Origin 檢查、頁面標頭、設定
+│   ├── http-error.ts       # 帶 HTTP 狀態碼的錯誤（app.ts 與 routes/ 共用）
+│   ├── routes/settings.ts  # POST /api/settings/* 的寫入路由表（12 條；app.ts 的 handleApi 查表，/api/settings/alarms 留在 app.ts）
 │   ├── runner.ts           # 任務排程、取消、重試、步驟回報
 │   ├── providers.ts        # 可切換的 AI 引擎（Claude／ChatGPT／模擬）
 │   ├── prompts.ts          # 兩個引擎共用的提示詞與計畫格式
