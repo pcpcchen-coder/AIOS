@@ -16,7 +16,9 @@ import { collectImportGraph, LAYERS, type ImportGraph } from "../../../scripts/a
 const shellDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DOC = "docs/validation/architecture-guard-2026-11-10.md";
 
-// ---- 允許清單：既有的 import 環（基準 3cc1401，共 4 組）----
+// ---- 允許清單：既有的 import 環（基準 3cc1401 時共 4 組；S7 之後 3 組）----
+// 2026-11-10（docs/23 §3 的 S7）：server 的 8 檔執行期環（realtime-routes ↔ apikey-call 等）已整組解開並從清單刪除；
+// shared 那一組已不含 shared/seconds-menu.ts，一併收緊。上限常數同步調低（4 → 3 組、18 → 9 個檔）。
 // 「環」指 import 圖的強連通分量（兩個檔以上，type-only import 也算）。
 // 規則：找到的每一個分量必須是下列某一組的子集合，所以分量可以變小、分裂或消失，不能長出清單外的檔。
 // 分量內部多一條 import 不會被擋（分量的成員沒變）；詳見驗證紀錄的限制。
@@ -26,16 +28,12 @@ const DOC = "docs/validation/architecture-guard-2026-11-10.md";
 // 條件是：(1) 項目旁邊加一行註解寫原因；(2) 同時調高下方對應的上限常數；(3) 在 PR 說明提到這件事。
 // 這個測試的目的是讓變差是「被看見、被決定的」，不是擋住功能。
 const ALLOWED_CYCLES: readonly (readonly string[])[] = [
-  ["shared/realtime-route.ts", "shared/seconds-menu.ts", "shared/types.ts", "shared/voice-cost.ts"],
-  [
-    "server/apikey-call.ts", "server/codex-auth.ts", "server/codex-responses.ts", "server/live-tool-caller.ts",
-    "server/memory/live.ts", "server/proactive-calendar.ts", "server/realtime-routes.ts", "server/web-search.ts",
-  ],
+  ["shared/realtime-route.ts", "shared/types.ts", "shared/voice-cost.ts"],
   ["server/memories-google.ts", "server/memories.ts"],
   ["src/api.ts", "src/realtime-session.ts", "src/realtime-tools.ts", "src/realtime.ts"],
 ];
-const MAX_ALLOWED_CYCLES = 4; // 加一組環時一起調高（見上方「有意識的例外」）
-const MAX_ALLOWED_CYCLE_FILES = 18; // 環內多一個檔時一起調高
+const MAX_ALLOWED_CYCLES = 3; // 加一組環時一起調高（見上方「有意識的例外」）
+const MAX_ALLOWED_CYCLE_FILES = 9; // 環內多一個檔時一起調高
 
 // 兩條守門規則各自回傳違規清單（空陣列＝通過）。真實原始碼與下方的 fixture 反向測試共用同一組函式。
 function crossLayerViolations(graph: ImportGraph): string[] {
