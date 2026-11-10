@@ -4,7 +4,7 @@
 
 # Nous 23 — Architecture review and restructuring plan (2026-11)
 
-Version: v0.1 · Date: 2026-11-09 · Status: **proposal; no code moves until George approves**. This document only surveys and plans; no product code was changed. The numbers come from [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs); the method and output are in the [validation record](validation/architecture-review-2026-11-09.en.md). Baseline: main `416a1ab` (after PR #138).
+Version: v0.1 · Date: 2026-11-09 · Status: **proposal; no code moves until George approves**. This document only surveys and plans; no product code was changed. The numbers come from [`scripts/architecture-metrics.mjs`](../scripts/architecture-metrics.mjs); the method and output are in the [validation record](validation/architecture-review-2026-11-09.en.md). Baseline: main `416a1ab` (after PR #138). Note added 2026-11-10: this document's PR #139 merged on 2026-11-10, and George approved S1–S5 the same day (each as its own PR). S6–S14 still wait for approval; from S6 onward, no code moves until approved.
 
 Line numbers refer to the baseline commit and will drift; use file and function names as the anchor.
 
@@ -244,6 +244,7 @@ Each item carries evidence and the cost of not fixing it. P1 is being paid now; 
 | `shared/realtime-route.ts` | the name suggests it holds `RealtimeRoute` | the `RealtimeRoute` interface is at `server/realtime-routes.ts:85`; this file holds only the wire contract |
 
 - Cost of leaving it: CLAUDE.md tells agents to read the README and the status document first; reading "no memory layer" or "plaintext JSON" leads to wrong design decisions or rebuilding what exists.
+- **Note added 2026-11-10 (S1 doc sync)**: S1 (branch `claude/arch-s1-doc-sync`) addressed every row of the table above except the last two, by adding dated notes beside the original sentences rather than rewriting historical text, and without changing any code: the root `README.md`, the prototype `README.md` (including a rewritten structure tree), `docs/Current_Implementation_Status.md`, `docs/11`, `docs/12`, `docs/06`, `docs/07`, `docs/README.md`, and `docs/validation/README.md` (9 rows added), in both languages. The last two rows (the naming of `shared/seconds-menu.ts` and `shared/realtime-route.ts`) belong to other batches and were not touched. The table keeps the line numbers and wording from the time of the review (main `416a1ab`); line numbers shift after S1. Two clarifications: the "3,188 tests" in the table is the passed count, the total being 3,194 (6 skipped), and S1 wrote the full figures from the [measurement record](validation/architecture-review-2026-11-09.en.md) into the docs; in `docs/12`, `home_status` queries are indeed still uncached, and the 30-second cache applies only to HOME-1's `GET /api/home/overview`, so the note is written with that distinction. S1 did not promote any gate (G0–G3) or pending hardware item to done; items without real-device evidence remain marked fixture or unverified.
 
 ### P2-6　`server/app.ts`: a 1,369-line hand-written route chain
 
