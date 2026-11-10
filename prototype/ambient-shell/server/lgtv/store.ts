@@ -1,5 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { chmodSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { writeAtomic } from "../fs-atomic.ts";
 import { normalizeMac } from "./wol.ts";
 
 // LGTV-1：配對金鑰只存在 Mac 核心本機的 <configDir>/lgtv.json（0600）。只有配對指令（npm run tv:pair）會寫；
@@ -37,11 +38,7 @@ export function readPairing(file: string): LgtvPairing | null {
 
 /** 寫配對檔（先寫暫存檔、0600，再改名）。 */
 export function writePairing(file: string, pairing: LgtvPairing): void {
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(pairing, null, 2), { mode: 0o600 });
-  chmodSync(tmp, 0o600);
-  renameSync(tmp, file);
+  writeAtomic(file, JSON.stringify(pairing, null, 2), { mode: 0o600, mkdir: 0o700, chmodTemp: true, tempSuffix: `.${process.pid}.tmp` });
   chmodSync(file, 0o600);
 }
 
