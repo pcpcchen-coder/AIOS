@@ -2,7 +2,7 @@ import type { AlarmsView } from "./alarm.ts";
 import type { FaceTuningView } from "./face-tuning.ts";
 import type { Locale } from "./i18n.mjs";
 import type { CameraSettings } from "./sense.ts";
-import type { MenuPrefSetting } from "./seconds-menu.ts";
+import type { MenuPrefSetting } from "./menu-prefs-types.ts";
 import type { VoicePrefs } from "./voice-prefs.ts";
 import type { RealtimeRouteFields, RealtimeServerEvent } from "./realtime-route.ts";
 import type { IdentityStatus } from "./identity.ts";

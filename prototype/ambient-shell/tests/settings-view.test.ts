@@ -3,7 +3,7 @@
 // setAttribute、append、addEventListener 與文字；DOMPurify 換成替身）。
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SettingsView } from "../shared/types.ts";
-import { describeMenuPrefs } from "../shared/seconds-menu.ts";
+import { describeMenuPrefs } from "../shared/menu-prefs.ts";
 import { DEFAULT_CAMERA_PREFS } from "../shared/sense.ts";
 import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
 import type { RealtimeInfo } from "../shared/types.ts";

@@ -1,5 +1,5 @@
 // 選單列「鏡頭與語音設定」子選單的範本（純函式，不載入 Electron，tests/desktop-menu.test.ts 直接測）。
-// 照核心給的 settings.seconds 畫：鍵、範圍、選項、標籤、單位、寫入路徑、停用原因都由核心推導（shared/seconds-menu.ts），
+// 照核心給的 settings.seconds 畫：鍵、範圍、選項、標籤、單位、寫入路徑、停用原因都由核心推導（shared/menu-prefs.ts），
 // 這裡不寫任何設定鍵、秒數或倍率，只依 kind 決定畫法：bool 畫成 checkbox，其餘（seconds／factor）畫成一組 radio 的子選單。
 // 這個 App 的設定以選單列為主體：視窗裡的設定頁只剩帳號與登入（瀏覽器版才有完整設定畫面）。
 

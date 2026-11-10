@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { formatFactor, formatSeconds, onStep, snapToStep, stepPref, type NumberPrefSpec, type SecondsPrefSpec } from "../shared/prefs.ts";
-import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, describeSeconds, isNumberRow, VOICE_UNSAVED_REASON, type MenuBoolSetting, type MenuNumberSetting, type MenuPrefSetting, type SecondsSetting } from "../shared/seconds-menu.ts";
+import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, describeSeconds, isNumberRow, VOICE_UNSAVED_REASON, type MenuBoolSetting, type MenuNumberSetting, type MenuPrefSetting, type SecondsSetting } from "../shared/menu-prefs.ts";
 import { CAMERA_PREFS, DEFAULT_CAMERA_PREFS, parseCameraPatch, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VOICE_PREFS, VoicePatchError } from "../shared/voice-prefs.ts";
 

@@ -7,7 +7,7 @@ import { setNativeLocale, t as nativeT } from "../desktop/localization.mjs";
 import { WAKE_COMMANDS } from "../src/audio/controller.ts";
 import { DEFAULT_WAKE_SILENCE_S, parseWakePatch, WAKE_REASON_LABEL, WAKE_SILENCE_OPTIONS_S, WAKE_STATE_LABEL, WAKE_STATE_REASONS, WAKE_TEXT, type WakeReport } from "../shared/wake.ts";
 import { DESKTOP_COMMANDS, runDesktopCommand } from "../src/desktop-command.ts";
-import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, VOICE_UNSAVED_REASON } from "../shared/seconds-menu.ts";
+import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, VOICE_UNSAVED_REASON } from "../shared/menu-prefs.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
 import type { SettingsView } from "../shared/types.ts";
 import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity.ts";

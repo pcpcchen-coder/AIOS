@@ -18,7 +18,7 @@ import { WebSearchError, type WebSearch } from "./web-search.ts";
 import { HomeBridgeError, type ControlRequest, type HomeBridge } from "./home-bridge.ts";
 import { FaceTuningError, parseFaceTuningPatch, type FaceTuning, type FaceTuningView } from "../shared/face-tuning.ts";
 import { CameraPatchError, parseCameraPatch, type CameraPrefsPatch, type CameraSettings } from "../shared/sense.ts";
-import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/seconds-menu.ts";
+import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/menu-prefs.ts";
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VoicePatchError, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
 import { ApiKeyRoute, FallbackRequired, RealtimeSessions, RouteStartError, SessionError, type RealtimeRoute } from "./realtime-routes.ts";

@@ -22,7 +22,7 @@ import { TaskRunner } from "../server/runner.ts";
 import { TaskStore } from "../server/store.ts";
 import type { SettingsView, Task } from "../shared/types.ts";
 import { commandSections } from "../shared/voice-commands.ts";
-import { isNumberRow, type MenuNumberSetting } from "../shared/seconds-menu.ts";
+import { isNumberRow, type MenuNumberSetting } from "../shared/menu-prefs.ts";
 
 /** 選單列的數值列（秒數與倍率）。 */
 function numberRow(view: SettingsView, key: string): MenuNumberSetting {

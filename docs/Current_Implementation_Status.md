@@ -101,7 +101,7 @@ AIOS 已有可執行的 Nous 桌面原型。先使用或延伸 [`prototype/ambie
 
 核心只綁 `127.0.0.1`，Host／Origin 只允許本機。Quest 的 localhost 是 Quest 自己；對外連線需要另外設計有認證的 HTTPS 裝置入口，不直接放寬既有防護。
 
-鏡頭開關（2026-10-31，分支 `claude/camera-enable-main-only`，尚未合併）：macOS App 以嚴格模式啟動核心，`POST /api/settings/camera` 收到 `active: true` 回 403，鏡頭只由主程序在原生說明之後打開，鏡頭設定關著時主程序也不把鏡頭影像權限給頁面的 `getUserMedia`；終端機／瀏覽器版依使用者決定照舊可以從頁面打開，頁面腳本仍可打開鏡頭、只靠瀏覽器權限提示把關。只有 Linux 自動測試，Mac 手動核對未執行，見[驗證](validation/camera-enable-main-only-2026-10-31.md)。
+鏡頭開關（2026-10-31，分支 `claude/camera-enable-main-only`，尚未合併）：macOS App 以嚴格模式啟動核心，`POST /api/settings/camera` 收到 `active: true` 回 403，鏡頭只由主程序在原生說明之後打開，鏡頭設定關著時主程序也不把鏡頭影像權限給頁面的 `getUserMedia`；終端機／瀏覽器版依使用者決定照舊可以從頁面打開，頁面腳本仍可打開鏡頭、只靠瀏覽器權限提示把關。只有 Linux 自動測試，Mac 手動核對未執行，見[驗證](validation/camera-enable-main-only-2026-10-31.md)。2026-11-10 補記：這個分支已合併，main `416a1ab` 的 `server/app.ts` 有 `cameraEnableStrict`（`desktop/main.mjs` 以 `cameraEnable: "main_process"` 啟動核心）；本段開頭的「尚未合併」是 2026-10-31 當時的狀態。Mac 手動核對仍未執行。
 
 Presentation Policy 目前只允許可核對的 `user_request` 與 `action_confirmation`。訂閱提醒、自動背景浮現、永久空間任務牆尚未支援。注視只選定，不能視為當次操作授權。
 
@@ -112,6 +112,8 @@ OpenClaw 是部分語音協議、常數與實作做法的參考來源，沒有 G
 App 與網頁已加入繁體中文／English 切換與保存，包含原生選單、設定、狀態、無障礙文字及新對話／任務語言。原有 58 份專案文件已完整提供雙語；後續 Agent 須依雙語規範同步更新。此批次 69 個測試檔、1,086 項通過、1 項原有跳過，另完成隔離 mock 核心的 5 項網頁及 3 項 Electron 語言流程；既有 9 項瀏覽器回歸通過。真模型與實體英語音訊尚待驗收，沒有發布或替換正式 App。見[語言指南](development/localization.md)及[本次證據](validation/bilingual-2026-10-26.md)。
 
 ## 最新可核對的驗證
+
+2026-11-09 於 main `416a1ab`（PR #138 之後；Linux 雲端容器、Node.js v22.23.4）：`npx tsc --noEmit` 通過；`npx vitest run` 172 個測試檔通過，3,194 項測試中 3,188 項通過、6 項跳過（跳過數依環境而異）；`npx vite build` 通過；`node scripts/verify-aios.mjs` PASS（型別、測試、建置、隔離 mock 任務與對話 HTTP）；雙語文件檢查通過。全部是 mock 與 fixture 的程式檢查，沒有麥克風、鏡頭、Mac、Pi、中控、電視或真實帳號，不是產品 gate 或實機驗收。指令與數字見[架構盤點的量測與基準線](validation/architecture-review-2026-11-09.md)。（2026-11-10 補記；以下各段是較早的紀錄，保留作歷史。）
 
 2026-10-31 於 main `9778b41`（Linux 雲端容器、Node.js 22.22.0）執行 `scripts/verify-aios.mjs`：型別檢查、96 個測試檔 1,822 項通過與 4 項跳過、Vite build、隔離 mock 任務／成果保存及直接對話 HTTP 流程都通過。這是 mock 與 fixture 的程式檢查，不是實機驗收。PR #43 起，GitHub Actions 的 [`aios-product-ci.yml`](../.github/workflows/aios-product-ci.yml) 在每個 PR 與 main 上執行同一支 mock 驗證與 pstack 檢查。
 

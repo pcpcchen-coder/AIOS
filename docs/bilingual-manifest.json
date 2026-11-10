@@ -27,8 +27,8 @@
       "source": "README.md",
       "sourceLanguage": "zh-TW",
       "translation": "README.en.md",
-      "sourceSha256": "69a61e5b3b3af11aa60fd2aefb28673174c0305a25b4bbe7011dfbc9920a0f90",
-      "translationSha256": "cd1dd1230aefdfc79ad98fd190ddf014a1eb8b9d99d10340be696e9f8341fe98"
+      "sourceSha256": "99e0d93a2bb058e7a6b6f8ba3e2a8ebdf6f4bb36c9d74c33ef488ca7b5a1bafc",
+      "translationSha256": "4d3537ffd953289b0e0f46e66efffbcc34b0baf3b619398c1441bdd99c25ed07"
     },
     {
       "source": "SETUP.md",
@@ -76,15 +76,15 @@
       "source": "docs/06_Ambient_Voice_Gaze_Experience.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/06_Ambient_Voice_Gaze_Experience.en.md",
-      "sourceSha256": "72533e4b13513b5353e6df1786340f5cbfcd3efb2f8598df6cb0360777dd35fd",
-      "translationSha256": "f0a6c5485deefeb28cc1650f222c12e3e722c506524615f339104c1b53dc8d08"
+      "sourceSha256": "edb9012caf628384f80708176736ce85e3d76ef671f6753f37190f775a87ac90",
+      "translationSha256": "fdcbd66235296bce5d213d3804151e75c1b21266175fe75ccb6ffc0ffd19b528"
     },
     {
       "source": "docs/07_Ambient_Implementation_and_Acceptance.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/07_Ambient_Implementation_and_Acceptance.en.md",
-      "sourceSha256": "16d9d559cef8394b6a672933c3b2525c2567025dd8f3b9ba4a5ebef16ff14461",
-      "translationSha256": "9c7c4b60f9c03a1f993d22b5ea8afeb8967357294aaea90844a81fc2fca40db6"
+      "sourceSha256": "f6b2b40fd299c7db0f38b0f49d1952bccef1a37e29743d1fdcfb9fa4c652b8be",
+      "translationSha256": "841549680e19c117286dad5e23e4b22d8cbb059fe2c4b1f9c8ac18edc98ac8db"
     },
     {
       "source": "docs/08_Consolidation_and_Update_2026-10.md",
@@ -104,15 +104,15 @@
       "source": "docs/11_Stereo_Camera_Interaction_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/11_Stereo_Camera_Interaction_2026-10.en.md",
-      "sourceSha256": "2e3ffe17a97f153932526d295d4c8c1f24131d704006673f2966468464f6669b",
-      "translationSha256": "47152e23c63ca0b897f918bfb8934144a89fc6847a2226a37b4bbfc052ef0d17"
+      "sourceSha256": "a3a27ac1cfbbc676b6a6e839c5daae7c02f2d6ca44ffa4d6ada330f996caa403",
+      "translationSha256": "0f571c721c9e658bb38cd2976fba730b585977f7f62aa72717d2717fc91e1201"
     },
     {
       "source": "docs/12_SmartHome_Integration_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/12_SmartHome_Integration_Plan_2026-10.en.md",
-      "sourceSha256": "bec9e87a354499e5c81dbb1656d4052517f1cef7c0151e63d9de611bfc9f33b9",
-      "translationSha256": "04f3e649a6cd3c27d544d956c31dcfd134f678ecdb6c7cde4ed2598c056915d2"
+      "sourceSha256": "0be4b11801ae20b72b887b65bbb2dfa5eac53f4efde0476fed3396014204022b",
+      "translationSha256": "96fa7123c02861f519640ffc6f2079893b81e923676f68491690848809bd1654"
     },
     {
       "source": "docs/13_Feature_Expansion_Assessment_2026-10-24.md",
@@ -178,6 +178,13 @@
       "translationSha256": "e75c4a2356ce3e818d6f2a24d0bf4039c03c314d7a87ce8e52c8b9c086163edf"
     },
     {
+      "source": "docs/23_Architecture_Review_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/23_Architecture_Review_2026-11.en.md",
+      "sourceSha256": "fc71f4a2fb82f91a389c0024425a8e06ee4438e3e365afe4e6acd67c50075b8a",
+      "translationSha256": "a747ea530f4279c1f50ebb7b8c4f6e3a649d3fa93d7c9d18e29dc9f6c29690f7"
+    },
+    {
       "source": "docs/BILINGUAL.md",
       "mode": "inline",
       "sha256": "d2ba4d1c494863262594e6d315bcc32759e377756ad7b7de0680e757955cc0cc"
@@ -186,15 +193,15 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "12f2561a1bd7357044085477d0381f1eadc1a63fa6cf42896979a418ab725bd4",
-      "translationSha256": "4a8201a92108689ede2e7607598bc624cbc05bfdb761ded5850aadf831b67c95"
+      "sourceSha256": "8a4da842618f3225fff7d6b0d603d62881950c45c1e359beb3272ed7ba24ad1b",
+      "translationSha256": "49e0128fd815a964658cbc9a07fe17fb3bd1c552a6558cfecf487dfb57818b44"
     },
     {
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "e90de73fbfebb57c1a17cbcefe292e9ef62803625b6e73cd1cde510d8249eed9",
-      "translationSha256": "995faa6d04299a8e87fa26afad3119f1f8587ecbbd2f34f994ea332b45d1ee4e"
+      "sourceSha256": "9848e73678cab5addfe3b07e652bd14dfdff0633d77b0376d3a06f9b03bb4412",
+      "translationSha256": "47dab0873ec64594f0e1bbd58b09ac4feea4fae24ce25ecce7db26fad4748e41"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
@@ -298,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "1e4f51c82541db0dfc0705e693649f38892a6ac63ecc3f1a174a8fccf38f8fa2",
-      "translationSha256": "65e3cc62868ea288d6ff4b4d9de5e4f85b5895ad33bb1a79141191886b68f3c5"
+      "sourceSha256": "44874815902bfb8445a1fdfe5d2bbcde26285e32fc4e97b088119afec246af18",
+      "translationSha256": "f4196909c42aff2c1ad9bdb4174f0023dc72c5dbf408a26933d84ed22c6a3574"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -335,6 +342,41 @@
       "translation": "docs/validation/alarm-timer-3-2026-11-09.en.md",
       "sourceSha256": "116a11c2b42b5c3fea90ce6fb588ac7d7e5b7c5b6f9fe637d8b002d4ced1bcfd",
       "translationSha256": "1517be66cdde14e0aca78b028e35c50915de9e5be4ed5e34b8fad1f069dad233"
+    },
+    {
+      "source": "docs/validation/architecture-guard-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-guard-2026-11-10.en.md",
+      "sourceSha256": "4ed9734c89911ce998ceab0700b7b393787cda8ef48d66c00f7ca57624cc9af0",
+      "translationSha256": "2a27fdb290958583fac2c706d96b4d79df5cbae30464a15513051462a09b85a0"
+    },
+    {
+      "source": "docs/validation/architecture-review-2026-11-09.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-review-2026-11-09.en.md",
+      "sourceSha256": "ae03f0a6cf53d3a2ea3ec701fee7f4b415d0b1ab0e989d8d3f8f5cc7a23298a3",
+      "translationSha256": "0e382ffaee0bc27fecf41ab8b0d99eb896767b6aed32420df6dfd763c34b76b5"
+    },
+    {
+      "source": "docs/validation/architecture-s3-menu-prefs-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s3-menu-prefs-2026-11-10.en.md",
+      "sourceSha256": "13ca32d294eb3485ba227803add2e1dd7523504a08055871e979e265aa6ef9b2",
+      "translationSha256": "801cc6e9eec1ef250cfe0122cd6551210ba696b1c920b0cbb3ce1709acb7a995"
+    },
+    {
+      "source": "docs/validation/architecture-s4-fs-atomic-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s4-fs-atomic-2026-11-10.en.md",
+      "sourceSha256": "7d3d6bf46f0164edfb0a7526319d8d85e0b2f6c9aa97482e2fbd40926cc8ddec",
+      "translationSha256": "180df5485a400df6418d432d7a164ef34c2600be6f6790e6f508cb20f3c5e912"
+    },
+    {
+      "source": "docs/validation/architecture-s5-prefs-store-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s5-prefs-store-2026-11-10.en.md",
+      "sourceSha256": "ee66863814d4636257c4b77be7bacc705c9a748acf8d5ee40dff92a5d6aeac21",
+      "translationSha256": "9305590d826310cab177b581f95806a7cb16f3bfe5bc7de4f69a647dc8ef2ae1"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
@@ -935,8 +977,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "13fdf17316d3b234882048987aac9b2b314d176bee200b8e37f612455837e601",
-      "translationSha256": "e0f3da24c4a0277a509d150a530749b18ad2e21bd95ab28d4bfb3cac3a2fc937"
+      "sourceSha256": "2e9886ad52360d9069bcc388b2fba7c3892ee4c40356b71aad30ecec181fe764",
+      "translationSha256": "3088d19350ff77f5ba6acd0d63ff68ee36734b5a8ad0a0e262e6c454616891d5"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

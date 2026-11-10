@@ -110,7 +110,7 @@ Model responses must follow returned data without filling gaps:
 - **Only `confirm` devices**.
 - Amber card with action/device/room/value.
 - `src/approval.ts` requires fixed “確認執行.” “Yes” is insufficient. Cancel, 60-second timeout, dismissal send nothing.
-- Extend the MCP-only `mcp_approval_request` queue for HomeBridge `needs_confirmation`. Local core executes confirmation without OpenAI.
+- Extend the MCP-only `mcp_approval_request` queue for HomeBridge `needs_confirmation`. Local core executes confirmation without OpenAI. Note added 2026-11-10: this was done in H1; the shared approval queue in `src/realtime-tools.ts` handles the `needs_confirmation` returned by `home_control` (see §6 H1). No device triggers it in H1; it still waits for the H2 device policy.
 
 <a id="3-畫面延續-10-的遠距規則"></a>
 ## 3. Display (10's distant rules)
@@ -187,7 +187,12 @@ See [H1b validation](validation/smarthome-h1b-2026-10-22.en.md): fake hub, timin
 
 See [H1 validation](validation/smarthome-h1-2026-10-22.en.md): fake hub and real example hub, no real devices. Status above adds verbal home light confirmation, without changing original test scope. Complete device-by-device results, measurements, and §3 large icons remain missing.
 
-**H0 implementation, 2026-10-21**: `prototype/ambient-shell/server/home-bridge.ts` config, `GET /api/v1/home`, local matching/readings, `POST /api/home/status`, live tool/caption anchors. Every query fetches hub data, without reading cache. See [H0](validation/smarthome-h0-2026-10-21.en.md), later home temperature logs/verbal reports in [live voice §4](validation/live-voice-2026-10-23.en.md#4-真實結果george-家中測試). Full measurements and §3 numeric anchors remain missing.
+**H0 implementation, 2026-10-21**: `prototype/ambient-shell/server/home-bridge.ts` config, `GET /api/v1/home`, local matching/readings, `POST /api/home/status`, live tool/caption anchors. Every query fetches hub data, without reading cache. Note added 2026-11-10: `home_status` queries are still uncached; the later top-left home status corner (HOME-1, `GET /api/home/overview`, `server/home-overview.ts`) is a separate read-only path cached for 30 seconds (a result read after a control is cached for only 5 seconds), verified only with a fake hub and headless Chromium, see [HOME-1 validation](validation/home-corner-2026-11-07.en.md). See [H0](validation/smarthome-h0-2026-10-21.en.md), later home temperature logs/verbal reports in [live voice §4](validation/live-voice-2026-10-23.en.md#4-真實結果george-家中測試). Full measurements and §3 numeric anchors remain missing.
+
+**Note added 2026-11-10 (two things added after H1b that this document did not describe)**:
+
+- **AIL-2 Facade** (2026-11-05): when `NOUS_AIL=on`, `NOUS_AIL_SERVICES` lists `home`, and the hub is configured, `/api/home/status`, `control`, and `confirm` go through `homeCall` in `server/app.ts`, which calls HomeBridge via the integration layer's Dispatcher (`server/integrations/adapters/home.ts`). HTTP responses, requests sent to the hub, and the model-visible `home_status` / `home_control` are unchanged; when `home` is not listed, the original direct call is used. Verified only by request-by-request comparison against a fake hub; see [AIL-2 validation](validation/ail-2-home-facade-2026-11-05.en.md).
+- **TV rerouting** (2026-11-07): when `NOUS_AIL_SERVICES` lists `lg_tv` and a TV IP is configured, `home_control` sends nothing to the hub for the living-room TV and returns `refused` / `unsupported` with the fixed message `TV_MOVED` (`server/home-bridge.ts`), asking the model to use `app.tv.*` instead; TVs in other rooms are unaffected. Fixture only, not verified on a real TV; see [LGTV-1 validation](validation/lgtv-1-2026-11-07.en.md).
 
 <a id="7-測試"></a>
 ## 7. Tests
