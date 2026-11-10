@@ -278,6 +278,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 
 - `shared/seconds-menu.ts`（§P1-5）、`shared/realtime-route.ts`、「memories＝照片回憶」對「memory＝家庭記憶」、`settings.json` 其實只放供應商。
 - 不改的代價：低；但改名最好趁現在 importer 還少（`seconds-menu` 5 個來源檔＋7 個測試）。
+- **2026-11-10 補記**：`shared/seconds-menu.ts` 已在分支 `claude/arch-s3-menu-prefs` 改名為 `shared/menu-prefs.ts`（S3，尚未合併）；上面與 §P1-5、§P2-7 的敘述保留盤點當時的檔名。其餘三項命名未動。見[驗證紀錄](validation/architecture-s3-menu-prefs-2026-11-10.md)。
 
 ## 3. 重整計畫
 
@@ -289,6 +290,7 @@ read: GET /api/settings → app.ts settings.view() aggregates → localizeSettin
 | S1 | **文件同步**：修 §P1-5 表列的每一句；補索引 9 份驗證紀錄；原型 README 結構樹補齊 | `README.md`、`prototype/ambient-shell/README.md`、`docs/Current_Implementation_Status.md`、`docs/11`、`docs/12`、`docs/README.md`、`docs/validation/README.md`（都含 .en） | 無 | 雙語檢查＋人工核對每句對應程式 |
 | S2 | **架構守門測試**：`tests/architecture.test.ts` 用 `scripts/architecture-metrics.mjs` 的邏輯鎖住：跨層 import 為 0、import 環不多於現在 4 組（允許清單）、超過 800 行的檔不多於現在 16 個（允許清單，只能減不能加） | 新增 1 個測試；腳本抽成可 import 的模組 | 低 | 測試在基準上通過；故意加一個跨層 import 會失敗 |
 | S3 | **改名 `shared/seconds-menu.ts` → `shared/menu-prefs.ts`**，順手把 `MenuPrefSetting` 型別搬到 `shared/prefs.ts` 解掉 shared 的型別環 | 5 個來源檔（含 `desktop/settings-menu.d.mts`）、7 個測試改 import 路徑 | 低 | `tsc` 綠；`describeMenuPrefs` 輸出 snapshot 相同 |
+| | ↳ **2026-11-10 補記**：S3 已在分支 `claude/arch-s3-menu-prefs` 完成（尚未合併）。型別沒有搬到 `shared/prefs.ts`（`sense.ts` 與 `voice-prefs.ts` 都 import `prefs.ts`，搬過去會多一組環），改放新檔 `shared/menu-prefs-types.ts`，`menu-prefs.ts` 原樣 re-export；`menu-prefs.ts` 已離開型別環，`types.ts` ↔ `realtime-route.ts` ↔ `voice-cost.ts` 仍在（環數仍是 4 組）。見[驗證紀錄](validation/architecture-s3-menu-prefs-2026-11-10.md) | | | |
 | S4 | **共用原子寫檔 helper**：`server/fs-atomic.ts` 提供 `writeAtomic(path, data, mode)`，先讓 5 個最簡單的呼叫者改用（`providers.ts`、`proactive.ts` 的 log、`voice-cost-log.ts`、`lgtv/store.ts`、`nous.ts` 的 memory-enabled）；`sealed-vault.ts`／`memory/store.ts` 的 durable 寫法保留、第二個 PR 再評估 | 1 新檔＋5 檔各 -10 行 | 低 | 既有 store 測試；寫出的檔逐位元組相同 |
 | S5 | **PrefsFile store 工廠**：`server/prefs-store.ts` 的 `createPrefsStore(spec, file, defaults)` 取代 11 個 PrefsFile store（9 個 `*-settings.ts` 加 `memories.ts`、`proactive.ts`）的相同樣板；各檔留一行 export 維持 import 路徑 | 11 檔瘦身 | 低 | 既有測試不改即綠：`audio-`／`camera-`／`clock-`／`voice-`／`wake-settings`、`camera-prefs`、`prefs`、`day-night-mode`、`home-corner`、`memories-http`、`memories-google`、`proactive`、`proactive-calendar`、`apikey-integration`、`live-integration`（`face-tuning.json` 只經 `http.test.ts` 的 `/api/settings/camera-tuning` 間接測）；`settings.view()` JSON 相同 |
 | S6 | **`app.ts` 設定路由表**：13 條 `/api/settings/*` 改成一張表（path → store → parsePatch），消掉 18 次 localize 與 12 次錯誤樣板；`PrefsFile.parse` 讀回時的第二次驗證先保留，等測試證明兩處驗證等價再另開 PR 移除 | `app.ts` -200 行左右；新增 `server/routes/settings.ts` | 中低 | `http.test.ts` 與 `backend-i18n.test.ts` 不改；錯誤訊息、狀態碼、回應 JSON 逐位元組比對 |

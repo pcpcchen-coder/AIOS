@@ -511,7 +511,7 @@ prototype/ambient-shell/
 ├── speaker-runtime/        # 家人聲音登記的講者模型與 wasm（npm run speaker:setup；不進 git、不進 dist）
 ├── wake-runtime/           # 喚醒引擎 KWS wasm 與模型（npm run wake:setup -- --product；不進 git、不進 dist）
 ├── shared/                 # 前後端共用型別與進度計算；prefs.ts、voice-prefs.ts（設定規格）、
-│                           # seconds-menu.ts（選單列鏡頭開關、秒數與倍率）、voice-commands.ts（指令表唯一來源）、
+│                           # menu-prefs.ts（選單列鏡頭開關、秒數與倍率；原名 seconds-menu.ts）、voice-commands.ts（指令表唯一來源）、
 │                           # memory.ts（家庭記憶）、memories.ts（回憶模式）、integrations.ts、alarm.ts、wake.ts、day-night.ts 等
 └── tests/                  # vitest
 ```
