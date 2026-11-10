@@ -111,8 +111,8 @@
       "source": "docs/12_SmartHome_Integration_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/12_SmartHome_Integration_Plan_2026-10.en.md",
-      "sourceSha256": "0be4b11801ae20b72b887b65bbb2dfa5eac53f4efde0476fed3396014204022b",
-      "translationSha256": "96fa7123c02861f519640ffc6f2079893b81e923676f68491690848809bd1654"
+      "sourceSha256": "dc79fae0a5b8a934d46b66faa12279987f606664fd0735972e2332cae9853900",
+      "translationSha256": "e4ca7946ba8d58b9c371c13d49a9abc19e00908d3e54edfb554ad59ddebf701c"
     },
     {
       "source": "docs/13_Feature_Expansion_Assessment_2026-10-24.md",
@@ -181,8 +181,8 @@
       "source": "docs/23_Architecture_Review_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/23_Architecture_Review_2026-11.en.md",
-      "sourceSha256": "1d1e7d928093a24514b9348f76131cbb3ce867ad563c46f909e903ee9474a760",
-      "translationSha256": "c4c4a05ef871e2fec4dbf89a9462c706c6ee67ffcc4cd40b794c821e4b83b63d"
+      "sourceSha256": "b7d68e629c1d1f832a52e76bb7ff66f9f7493ff755df1a9790ce5ea6adec7b2f",
+      "translationSha256": "c8455ed5a745d0a4c10f16fa6db74a252f5b6f925fd841335ea708b51df24a55"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -305,8 +305,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "3f78ed855e2df41b682dbfc5edd1dc433eb630cc8c9822a438878c30f43faf78",
-      "translationSha256": "6d45374c448f837ed58313255d95630f5ba7eae81c0913d5fb33894c9d942625"
+      "sourceSha256": "3f069f0ac3ce7c8e139d1f3ff76a5bbce37d55e6aa621bc2555149709f587b07",
+      "translationSha256": "3ba41e4467885997255fbbc6c9e6235a51edca51424cdc2929d41f0f358cf90c"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -347,8 +347,8 @@
       "source": "docs/validation/architecture-guard-2026-11-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/architecture-guard-2026-11-10.en.md",
-      "sourceSha256": "4ed9734c89911ce998ceab0700b7b393787cda8ef48d66c00f7ca57624cc9af0",
-      "translationSha256": "2a27fdb290958583fac2c706d96b4d79df5cbae30464a15513051462a09b85a0"
+      "sourceSha256": "061aae7679ab54c0fd3809558da3e45d60ba902998e8ae3e8afd06f152c7522a",
+      "translationSha256": "f774c815da11e072065a84ef8de4dcd371f26a06b0e5a7c0e732b667ebc3e1c5"
     },
     {
       "source": "docs/validation/architecture-review-2026-11-09.md",
@@ -384,6 +384,27 @@
       "translation": "docs/validation/architecture-s6-settings-routes-2026-11-10.en.md",
       "sourceSha256": "b4f3e7d46d06b8285f8867be8b321a2eddd74879d3de146cd727b7269fa458f1",
       "translationSha256": "0c2c7f6b1d22407a54f1e19617cae8d5b10d08bf984060040806fb2502b81ed7"
+    },
+    {
+      "source": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.en.md",
+      "sourceSha256": "4d75f464e8ee44de196b99296cfffa512918891c3ba2b8c64e9605d42ec283be",
+      "translationSha256": "e31b79a1605393287ca68f1b252b1d9a889209e9b19b3f5341f84f510f5d9924"
+    },
+    {
+      "source": "docs/validation/architecture-s8-tool-names-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s8-tool-names-2026-11-10.en.md",
+      "sourceSha256": "a11dcfe29b7b9ca19bcf99b14efb94ae9f79952fb87530266a1719654b1588a9",
+      "translationSha256": "3e2a84d22ddfb1dd98326fe9a04ba1f9fae71cb807a0202e0fa60a884cb90ccf"
+    },
+    {
+      "source": "docs/validation/architecture-s9-home-split-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s9-home-split-2026-11-10.en.md",
+      "sourceSha256": "3ada5922e8ebfdc677fff687c3a60c31c15cc7ec88d6d9de743f6ae10bb161fc",
+      "translationSha256": "91c8a8813bbc9ba34e1882cbd70248fb91737840db168bde9355ef8cb2bfa23a"
     },
     {
       "source": "docs/validation/audio-devices-2026-11-01.md",
@@ -984,8 +1005,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "ed76c18c5884031d752f060dac7114c905d58ea74213d87b170e2c59555a1ba1",
-      "translationSha256": "421cc587f5156a6c36021ca6a787c5aa75cec05ed7ac71d5a8e962059499ed57"
+      "sourceSha256": "95de67abbed80f2089992a11ec5729a763f33f4484b6b5918ae713a37e496687",
+      "translationSha256": "890ff3ff7b543c67de21c0b06eddbce3d636b1672e4861f729a4fa549d6d0375"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

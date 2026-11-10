@@ -3,6 +3,7 @@
 // tests/voice-commands.test.ts 把每一句丟進真正的比對函式：結果不同、某條規則／意圖／確認語句／插話詞／模型工具
 // 沒有列、或「在哪裡有效」與 LOCAL_ROUTING 推算的不同，測試就失敗。
 import { formatSeconds, type SecondsPrefSpec } from "./prefs.ts";
+import type { HostToolName } from "./realtime-route.ts";
 import type { CameraSecondsKey, SecondsKey } from "./menu-prefs.ts";
 import { CAMERA_PREFS } from "./sense.ts";
 import type { SettingsView } from "./types.ts";
@@ -71,8 +72,8 @@ export type LocalIntentKind = "voice_on" | "voice_off" | "settings" | "use_provi
 export type Provider = "claude" | "chatgpt" | "mock";
 /** 測試在編譯期比對 src/approval.ts 的 ApprovalDecision。 */
 export type ApprovalDecision = "approve" | "reject";
-/** 即時語音的模型工具；測試在編譯期比對 server/realtime.ts。 */
-export type RealtimeToolName = "web_search" | "show_search_result" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control" | "set_voice_volume" | "set_day_night";
+/** 即時語音的模型工具：和頁面執行的工具是同一組（shared/realtime-route.ts HOST_TOOL_NAMES）；測試在編譯期比對 server/realtime.ts。 */
+export type RealtimeToolName = HostToolName;
 
 /** 鏡頭規則的效果（CameraCommand 去掉字幕 say）。 */
 export type CameraEffect = { preview: boolean } | { set: { active?: boolean; look_to_talk?: boolean; look_to_talk_greet?: boolean; stop_gesture?: boolean } };

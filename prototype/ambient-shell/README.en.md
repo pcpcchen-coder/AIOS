@@ -490,7 +490,9 @@ prototype/ambient-shell/
 │   ├── chatgpt-executor.ts # ChatGPT 方案用量：/v1/responses 串流
 │   ├── mock-executor.ts
 │   ├── realtime.ts         # 即時語音 API key 路徑（RealtimeBridge）＋兩條路徑共用的工具表與規則
-│   ├── realtime-routes.ts  # RealtimeRoute 介面、選路徑（planStart）、工作階段與擁有者、ApiKeyRoute
+│   ├── realtime-routes.ts  # 選路徑（planStart）、工作階段與擁有者；re-export 契約與 ApiKeyRoute
+│   ├── realtime-contracts.ts # 即時語音契約：RealtimeRoute、RouteCall、SessionContext、RouteStartError、ToolHost、工具時限（只 import shared/）
+│   ├── apikey-route.ts     # ApiKeyRoute：API key 路徑的薄轉接層（對稱 live-route.ts）
 │   ├── apikey-call.ts      # API key 即時語音的記憶與核心旁路（MEM-3）
 │   ├── live-route.ts       # 即時語音 ChatGPT 方案路徑：Codex 通話建立＋sideband
 │   ├── sideband.ts         # 即時語音控制連線（WebSocket）共用工具
@@ -499,7 +501,9 @@ prototype/ambient-shell/
 │   ├── codex-responses.ts  # Codex Responses 用戶端（交辦推論、hosted web_search）
 │   ├── web-search.ts       # 即時語音的上網查詢（Responses API web_search）
 │   ├── voice-cost-log.ts   # F6 費用紀錄（voice-cost.jsonl）
-│   ├── home-bridge.ts      # 武陵居中控查詢與控制：名稱比對、讀值整理、送指令與確認卡；AIFA 冷氣與紅外線按鍵（docs/12 H0、H1、H1b）
+│   ├── home-bridge.ts      # 武陵居中控（docs/12 H0、H1、H1b）對外的匯出入口：只重新匯出 server/home/，import 路徑不變
+│   ├── home/               # 武陵居中控查詢與控制：types.ts（型別、錯誤類別、逾時）、parse.ts（中控 JSON）、readings.ts（讀值整理）、commands.ts（指令解析、名稱比對、控制計畫）、
+│   │                       # aifa.ts（AIFA 冷氣）、infrared.ts（紅外線按鍵）、bridge.ts（HomeBridge：送指令與確認卡）
 │   ├── home-overview.ts    # 左上角家中狀態的唯讀內容（HOME-1；快取 30 秒）
 │   ├── integrations/       # App Integration Layer（AIL-1，docs/18；NOUS_AIL 預設關閉）：Registry、Dispatcher、政策、Schema、按需狀態
 │   │   ├── adapters/       # mock、home（AIL-2 Facade）、gmail-gog、google-calendar、weather、lg-tv、spotify-soloist（只有健康檢查）、
@@ -541,7 +545,8 @@ prototype/ambient-shell/
 ├── wake-runtime/           # 喚醒引擎 KWS wasm 與模型（npm run wake:setup -- --product；不進 git、不進 dist）
 ├── shared/                 # 前後端共用型別與進度計算；prefs.ts、voice-prefs.ts（設定規格）、
 │                           # menu-prefs.ts（選單列鏡頭開關、秒數與倍率；原名 seconds-menu.ts）、voice-commands.ts（指令表唯一來源）、
-│                           # memory.ts（家庭記憶）、memories.ts（回憶模式）、integrations.ts、alarm.ts、wake.ts、day-night.ts 等
+│                           # memory.ts（家庭記憶）、memories.ts（回憶模式）、integrations.ts、alarm.ts、wake.ts、day-night.ts 等；
+│                           # realtime-route.ts 的 HOST_TOOL_NAMES 是即時語音頁面工具名單的唯一來源，home.ts 的 HOME_ARG_MAX 是家電參數長度上限
 └── tests/                  # vitest
 ```
 

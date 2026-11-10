@@ -157,7 +157,11 @@ export const HOME_CONTROL_TOOL = {
   },
 } as const;
 
-/** 模型可以呼叫的工具：上網查詢由本機核心代查，交辦工作與查詢進度由瀏覽器端用既有的任務 API 處理。 */
+/**
+ * 模型可以呼叫的工具：上網查詢由本機核心代查，交辦工作與查詢進度由瀏覽器端用既有的任務 API 處理。
+ * 這裡的順序就是送給模型的順序；名稱的集合（加上 home_status、home_control）必須等於 shared/realtime-route.ts 的
+ * HOST_TOOL_NAMES，由 tests/realtime-tool-names.test.ts 與 tests/voice-commands.test.ts 比對。
+ */
 export const REALTIME_TOOLS = [
   WEB_SEARCH_TOOL,
   SHOW_SEARCH_RESULT_TOOL,

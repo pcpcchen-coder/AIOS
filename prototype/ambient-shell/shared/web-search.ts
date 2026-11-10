@@ -2,6 +2,9 @@
 // parseCandidates：從搜尋模型的文字取出念給使用者的答案與最多 3 則候選；
 // matchSpokenPoint：助理念到哪一點（跟讀亮起）。兩者都不呼叫網路、不猜內容。
 
+/** 一次上網查詢的上限。ChatGPT 方案路徑的 Codex 那一輪也用這個時限（含第一次查模型清單），所以兩條路徑一樣。 */
+export const WEB_SEARCH_TIMEOUT_MS = 30_000;
+
 export interface WebSource {
   title: string;
   url: string;
