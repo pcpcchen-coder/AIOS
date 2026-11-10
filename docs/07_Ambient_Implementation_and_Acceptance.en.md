@@ -10,6 +10,8 @@ Version v0.1 · Plan date 2026-09-16 · Authority clarification updated 2026-10-
 > **Reading guide, 2026-10-24**: First read [implementation status](Current_Implementation_Status.en.md) and `prototype/ambient-shell`, then identify gate gaps here. See [feature expansion assessment](13_Feature_Expansion_Assessment_2026-10-24.en.md) for priorities. Baseline `1f44c6b` (2026-10-23). Brain, tasks/artifacts, dual voice paths, and sensing already exist. Do not restart at PR-01.
 >
 > The prototype does not establish local wake, formal monorepo, Tauri, Python kernel, Agent SDK, calibrated eyes, or full G0–G3 acceptance. [11](11_Stereo_Camera_Interaction_2026-10.en.md) head direction, stop gestures, and three-zone arms are not gaze calibration. Use spoken numbers at a distance. F0–F10 and Q0–Q4 are feature candidates/Quest stages, not replacements for G0–G3.
+>
+> **Note added 2026-11-10**: The statement above that the prototype does not establish local wake reflects 2026-10-24. Since then a local wake word has been implemented in the prototype behind the `NOUS_WAKE` flag, off by default; the Mac has only partial hardware evidence (George alone; other family members and long-duration false triggers are untested). See the "local wake word" row in [implementation status](Current_Implementation_Status.en.md). An implementation behind a flag with partial evidence is not acceptance of wake; this does not change this document's contracts, gates, or acceptance requirements.
 
 Source: [06 experience specification](06_Ambient_Voice_Gaze_Experience.en.md). This divides the product into deliverable work. Every number is an engineering target requiring calibration, not a performance promise.
 

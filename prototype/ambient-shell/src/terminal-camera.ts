@@ -1,5 +1,5 @@
 import { CAMERA_PREF_KEYS, DEFAULT_CAMERA_PREFS, parseCameraPatch, type CameraPrefs, type CameraPrefsPatch } from "../shared/sense.ts";
-import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/seconds-menu.ts";
+import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/menu-prefs.ts";
 import type { SettingsView } from "../shared/types.ts";
 import { isTerminalId } from "../shared/terminal.ts";
 import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
