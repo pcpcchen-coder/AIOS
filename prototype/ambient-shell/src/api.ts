@@ -1,11 +1,24 @@
+import type { WebSearchResult } from "../shared/web-search.ts";
 import type { FaceTuning } from "../shared/face-tuning.ts";
+import { AUDIO_WRITE_PATH, type AudioPrefsPatch } from "../shared/audio-devices.ts";
+import type { ProactivePrefsPatch } from "../shared/proactive.ts";
+import { TERMINAL_WINDOW_PATH, type WindowMode } from "../shared/terminal-window.ts";
+import { DAY_NIGHT_WRITE_PATH, TERMINAL_DISPLAY_PATH, type DayNightPatch, type ScreenState } from "../shared/day-night.ts";
+import { CLOCK_WRITE_PATH, WEATHER_NOW_PATH, type ClockPrefsPatch, type WeatherNowView } from "../shared/clock.ts";
+import { HOME_CORNER_WRITE_PATH, HOME_OVERVIEW_PATH, type HomeCornerPrefsPatch, type HomeOverviewView } from "../shared/home-corner.ts";
+import { MEMORIES_GOOGLE_PATHS, MEMORIES_ITEMS_PATH, MEMORIES_WRITE_PATH, type MemoriesItem, type MemoriesPrefsPatch } from "../shared/memories.ts";
 import { getLocale, type Locale } from "./i18n.ts";
 import type { HomeControlResult, HomeStatusResult } from "../shared/home.ts";
 import type { CameraPrefsPatch } from "../shared/sense.ts";
+import type { IdentityRequest, IdentityResponse } from "../shared/identity.ts";
+import type { MemoryPresenceResponse, MemoryRequest } from "../shared/memory.ts";
+import { pageTerminal, TERMINAL_HEADER, type TerminalPageReport } from "../shared/terminal.ts";
 import type { VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import type { WakePrefsPatch } from "../shared/wake.ts";
 import type { PageEndReason, VoiceStartSource, VoiceUsage } from "../shared/voice-cost.ts";
 import type { Artifact, ExecutorMode, ServerEvent, SettingsView, Task } from "../shared/types.ts";
+import type { IntegrationStatusView, ToolResult } from "../shared/integrations.ts";
+import type { IntentId, MusicService, RelayRefusal, RelayTrial, VoiceRelayPart, VoiceRelayPreview, VoiceRelayView } from "../shared/voice-relay.ts";
 import { historySearchPath, type HistoryDetail, type HistoryPage, type HistoryQuery } from "../shared/history.ts";
 import type { ApprovalReport, CallAnswer, FallbackOffer, LiveInputKind, RealtimePrefsPatch, StartDecision, StopEvidence, StopReplyTurn } from "../shared/realtime-route.ts";
 import { FallbackOfferError } from "./realtime-session.ts";
@@ -16,18 +29,52 @@ export interface RealtimeTicket {
   owner: string;
 }
 
+// ---- VCR-2：語音中繼診斷區的請求內容（核心嚴格檢查；多的鍵是 400） ----
+export interface VoiceRelaySlots { genre?: string; device?: string; on?: boolean; percent?: number; seconds?: number }
+export interface VoiceRelayPreviewBody { target_id: string; intent_id: IntentId; slots?: VoiceRelaySlots; template_id?: string; voice_profile_id?: string }
+export interface VoiceRelayPlayBody extends VoiceRelayPreviewBody { part: VoiceRelayPart }
+/** 播放回覆：診斷解析被拒絕（沒有播放）或統一結果（永遠不是 confirmed：音箱有沒有照做沒有回讀）。 */
+export type VoiceRelayPlayReply = ToolResult | { status: "refused"; reason: RelayRefusal };
+export interface VoiceRelayTargetBody { id?: string; locale: "zh-TW" | "en-US"; output_device_id: string; voice_id: string; music_service: MusicService }
+export interface VoiceRelayProfileBody { target_id: string; id?: string; voice_id: string; rate: number; gain_db: number; pause_ms: number; lead_ms: number; tail_ms: number }
+export interface VoiceRelayAdoptBody { target_id: string; intent_id: IntentId; template_id: string; template_version: number; voice_profile_id: string }
+export interface VoiceRelayUnadoptBody { target_id: string; template_id: string; template_version: number }
+export interface VoiceRelayTrialBody {
+  target_id: string;
+  template_id: string;
+  template_version: number;
+  voice_profile_id: string;
+  kind: RelayTrial["kind"];
+  wake: RelayTrial["wake"];
+  command: RelayTrial["command"];
+  evidence: RelayTrial["evidence"];
+}
+
 export class ApiError extends Error {
   constructor(readonly status: number, message: string, readonly body: Record<string, unknown> | null = null) {
     super(message);
   }
 }
 
-async function call<T>(method: "GET" | "POST", path: string, body?: unknown, locale: Locale = getLocale()): Promise<T> {
+/**
+ * RPI-ID：終端機頁面（沒有 App preload、網址帶合法的 ?terminal=）的每個 API 請求都帶 X-Nous-Terminal，核心才知道是哪個頁面在問
+ * （記憶候選、即時語音的候選與喚醒時窗）。Mac 主視窗與一般瀏覽器不帶。
+ */
+export function pageHeaders(): Record<string, string> {
+  if (typeof location === "undefined") return {};
+  const terminal = pageTerminal(location.search, !!(globalThis as { nousDesktop?: unknown }).nousDesktop);
+  return terminal ? { [TERMINAL_HEADER]: terminal } : {};
+}
+
+async function call<T>(method: "GET" | "POST", path: string, body?: unknown, locale: Locale = getLocale(), keepalive = false, signal?: AbortSignal): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, {
       method,
-      headers: { "X-Nous-Locale": locale, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      // 費用防護：頁面關閉時送出的結束請求（pagehide）要在卸載後仍送達。
+      ...(keepalive ? { keepalive: true } : {}),
+      ...(signal ? { signal } : {}),
+      headers: { "X-Nous-Locale": locale, ...pageHeaders(), ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
@@ -51,12 +98,41 @@ export const api = {
   deleteHistory: (taskId: string, request_id: string) =>
     call<{ ok: true; task_id: string; artifact_id: string | null }>("POST", `/api/history/${encodeURIComponent(taskId)}/delete`, { request_id, confirm: true }),
   redoTask: (taskId: string, request_id: string) => call<Task>("POST", `/api/tasks/${encodeURIComponent(taskId)}/retry`, { request_id, redo: true }),
+  /** 服務模式：終端機（Pi kiosk）頁面的心跳；只有識別碼。 */
+  terminalHeartbeat: (terminal: string) => call<{ ok: true }>("POST", "/api/terminal/heartbeat", { terminal }),
+  /** RPI-ID：終端機頁面的認人（只有特徵向量與和 IPC 相同的欄位）與「正在用 X 的記憶」；核心只放行列出的操作。 */
+  terminalIdentity: (terminal: string, request: IdentityRequest, page?: TerminalPageReport) => call<IdentityResponse>("POST", "/api/terminal/identity", page ? { terminal, request, page } : { terminal, request }),
+  terminalMemory: (terminal: string, request: MemoryRequest) => call<MemoryPresenceResponse>("POST", "/api/terminal/memory", { terminal, request }),
   selectProvider: (provider: ExecutorMode) => call<SettingsView>("POST", "/api/settings/provider", { provider }),
   /** 鏡頭使用者設定（保存在本機 camera.json）；回傳更新後的設定。 */
   updateCamera: (patch: CameraPrefsPatch) => call<SettingsView>("POST", "/api/settings/camera", patch),
   updateVoice: (patch: VoicePrefsPatch) => call<SettingsView>("POST", "/api/settings/voice", patch),
-  /** WK-01a：只有 NOUS_WAKE=on 時核心才有這個路由；頁面只用來記下真的在聽的麥克風（device_id）。 */
+  /** WK-01a：只有 NOUS_WAKE=on 時核心才有這個路由（頁面只能關掉或改秒數；麥克風改由 /api/settings/audio）。 */
   updateWake: (patch: WakePrefsPatch) => call<SettingsView>("POST", "/api/settings/wake", patch),
+  /** 聲音輸入／輸出裝置（audio.json；null＝系統預設）。 */
+  updateAudio: (patch: AudioPrefsPatch) => call<SettingsView>("POST", AUDIO_WRITE_PATH, patch),
+  /** PRO-1「主動提醒」（招呼後接今天的天氣）。 */
+  updateProactive: (patch: ProactivePrefsPatch) => call<SettingsView>("POST", "/api/settings/proactive", patch),
+  /** CLK-1「右上角時鐘與天氣」的顯示開關（Mac 視窗、Pi 終端機）。 */
+  updateClock: (patch: ClockPrefsPatch) => call<SettingsView>("POST", CLOCK_WRITE_PATH, patch),
+  updateDayNight: (patch: DayNightPatch) => call<SettingsView>("POST", DAY_NIGHT_WRITE_PATH, patch),
+  terminalDisplay: (terminal: string, screen: ScreenState) => call<{ ok: true }>("POST", TERMINAL_DISPLAY_PATH, { terminal, screen }),
+  terminalWindow: (terminal: string, mode: WindowMode) => call<{ ok: true }>("POST", TERMINAL_WINDOW_PATH, { terminal, mode }),
+  /** CLK-1：右上角時鐘的時區、核心時間與現在的天氣（唯讀，沒有參數）。 */
+  weatherNow: (signal?: AbortSignal) => call<WeatherNowView>("GET", WEATHER_NOW_PATH, undefined, getLocale(), false, signal),
+  /** HOME-1「左上角家中狀態」的顯示開關（Mac 視窗、Pi 終端機）。 */
+  updateHomeCorner: (patch: HomeCornerPrefsPatch) => call<SettingsView>("POST", HOME_CORNER_WRITE_PATH, patch),
+  /** ALARM-1：/api/settings/alarms 與 /api/alarms/*（停止、回報出聲、清掉通知、取消定時器、全部清除）；回應是最新的設定。 */
+  alarmPost: (path: string, body: Record<string, unknown>) => call<SettingsView>("POST", path, body),
+  /** HOME-1：左上角的室內讀值、燈與冷氣（唯讀，沒有參數）。 */
+  homeOverview: (signal?: AbortSignal) => call<HomeOverviewView>("GET", HOME_OVERVIEW_PATH, undefined, getLocale(), false, signal),
+  /** MEMO-1「回憶模式」。 */
+  updateMemories: (patch: MemoriesPrefsPatch) => call<SettingsView>("POST", MEMORIES_WRITE_PATH, patch),
+  memoriesItems: () => call<{ items: MemoriesItem[] }>("GET", MEMORIES_ITEMS_PATH),
+  /** MEMO-2：Google 相簿。pick 等到挑選連結建立好才回應（設定裡有 picker_uri）。 */
+  googlePick: () => call<SettingsView>("POST", MEMORIES_GOOGLE_PATHS.pick, {}),
+  googleCancel: () => call<SettingsView>("POST", MEMORIES_GOOGLE_PATHS.cancel, {}),
+  googleClear: () => call<SettingsView>("POST", MEMORIES_GOOGLE_PATHS.clear, {}),
   /** 人臉辨識校正值（face-tuning.json）：calibrated 表示這次是「校正人臉辨識」的套用；reset 還原預設。 */
   updateFaceTuning: (change: Partial<FaceTuning> | "reset", calibrated = false) =>
     call<SettingsView>("POST", "/api/settings/camera-tuning", change === "reset" ? { reset: true } : { ...change, ...(calibrated ? { calibrated: true } : {}) }),
@@ -73,6 +149,8 @@ export const api = {
       ...(source === "look_to_talk" || source === "wake_word" ? { source } : {}),
       ...(source === "wake_word" && wakeId ? { wake_id: wakeId } : {}),
       ...(rebuild ? { rebuild: true } : {}),
+      // 費用防護：macOS App 主視窗開始的通話（Mac 鎖定時核心只結束這些）。
+      ...((globalThis as { nousDesktop?: unknown }).nousDesktop ? { app: true } : {}),
     }, locale),
   /**
    * 即時語音：把 WebRTC SDP offer 交給本機核心，由它代為建立連線（API key 或 ChatGPT 方案）。
@@ -89,11 +167,31 @@ export const api = {
   },
   realtimeInput: (ticket: RealtimeTicket, kind: LiveInputKind, text: string) => call<{ ok: true }>("POST", "/api/realtime/input", { ...ticket, kind, text }),
   realtimeApproval: (ticket: RealtimeTicket, report: ApprovalReport) => call<{ ok: true }>("POST", "/api/realtime/approval", { ...ticket, ...report }),
+  /** AIL-1：API key 路徑的整合工具呼叫轉交核心執行（只有 NOUS_AIL=on）。 */
+  integrationCall: (ticket: RealtimeTicket, name: string, args: string) =>
+    call<Record<string, unknown>>("POST", "/api/integrations/call", { ...ticket, name, arguments: args }),
+  /** AIL-1：按需的整合服務狀態。 */
+  integrationStatus: () => call<IntegrationStatusView>("GET", "/api/integrations/status"),
+  // VCR-2：設定頁「語音中繼（實驗）」診斷區（核心沒有註冊 voice_relay 時這些路徑是 404）。
+  voiceRelay: () => call<VoiceRelayView>("GET", "/api/voice-relay"),
+  voiceRelayRefresh: () => call<VoiceRelayView>("POST", "/api/voice-relay/refresh", {}),
+  voiceRelayPreview: (body: VoiceRelayPreviewBody) => call<{ result: VoiceRelayPreview }>("POST", "/api/voice-relay/preview", body),
+  voiceRelayPlay: (body: VoiceRelayPlayBody) => call<VoiceRelayPlayReply>("POST", "/api/voice-relay/play", body),
+  voiceRelayAdopt: (body: VoiceRelayAdoptBody) => call<VoiceRelayView>("POST", "/api/voice-relay/adopt", body),
+  voiceRelayUnadopt: (body: VoiceRelayUnadoptBody) => call<VoiceRelayView>("POST", "/api/voice-relay/unadopt", body),
+  voiceRelayTarget: (body: VoiceRelayTargetBody) => call<VoiceRelayView>("POST", "/api/voice-relay/target", body),
+  voiceRelayProfile: (body: VoiceRelayProfileBody) => call<VoiceRelayView>("POST", "/api/voice-relay/profile", body),
+  voiceRelayTrial: (body: VoiceRelayTrialBody) => call<VoiceRelayView>("POST", "/api/voice-relay/trial", body),
+  voiceRelayEnabled: (body: { target_id: string; enabled: boolean }) => call<VoiceRelayView>("POST", "/api/voice-relay/enabled", body),
   realtimeHostResult: (ticket: RealtimeTicket, callId: string, output: Record<string, unknown>) =>
     call<{ ok: true; accepted: boolean }>("POST", "/api/realtime/host-result", { ...ticket, call_id: callId, output }),
   /** WK-02（F6）：可選的結束原因（no_voice）與 API key 路徑加總的 usage（核心的費用紀錄）。 */
-  realtimeEnd: (ticket: RealtimeTicket, end: { reason?: PageEndReason | null; usage?: VoiceUsage | null } = {}) =>
-    call<{ ok: true }>("POST", "/api/realtime/end", { ...ticket, ...(end.reason ? { reason: end.reason } : {}), ...(end.usage ? { usage: end.usage } : {}) }),
+  realtimeEnd: (ticket: RealtimeTicket, end: { reason?: PageEndReason | null; usage?: VoiceUsage | null; keepalive?: boolean } = {}) =>
+    call<{ ok: true }>("POST", "/api/realtime/end", { ...ticket, ...(end.reason ? { reason: end.reason } : {}), ...(end.usage ? { usage: end.usage } : {}) }, getLocale(), end.keepalive === true),
+  /** 費用防護：通話中每 15 秒報到（API key 路徑附這通加總的 usage）；核心 45 秒收不到就結束這通（client_lost）。 */
+  /** signal：呼叫端的逾時（src/call-lifecycle.ts 10 秒），卡住的請求不擋之後的報到。 */
+  realtimeAlive: (ticket: RealtimeTicket, usage: VoiceUsage | null, signal?: AbortSignal) =>
+    call<{ ok: true }>("POST", "/api/realtime/alive", { ...ticket, ...(usage ? { usage } : {}) }, getLocale(), false, signal),
   /** MEM-2：記憶撤銷後停播並核對的證據（只有布林值與毫秒數）。 */
   /** MEM-3：API key 路徑的頁面在資料通道收到播放結束（沒有內容、沒有時間戳）。 */
   realtimePlayback: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/playback", { ...ticket }),
@@ -110,7 +208,7 @@ export const api = {
   codexLogout: () => call<{ revoked: boolean; settings: SettingsView }>("POST", "/api/auth/codex/logout", {}),
   /** 即時語音的上網查詢：API key 路徑用 OPENAI_API_KEY；ChatGPT 方案路徑的工作階段（帶 ticket）用 Codex 額度。 */
   webSearch: (query: string, ticket?: RealtimeTicket) =>
-    call<{ ok: true; answer: string; sources: { title: string; url: string }[]; model: string }>("POST", "/api/realtime/web-search", ticket ? { query, ...ticket } : { query }),
+    call<WebSearchResult>("POST", "/api/realtime/web-search", ticket ? { query, ...ticket } : { query }),
   /** 武陵居家電狀態（唯讀）：由本機核心帶權杖查中控，權杖不進瀏覽器。 */
   homeStatus: (target: string, metric: string | null) =>
     call<HomeStatusResult>("POST", "/api/home/status", metric ? { target, metric } : { target }),
@@ -158,7 +256,7 @@ export async function streamChat(
   try {
     res = await fetch("/api/chat", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Nous-Locale": locale },
+      headers: { "Content-Type": "application/json", "X-Nous-Locale": locale, ...pageHeaders() },
       body: JSON.stringify({ messages, request_id, ...(memoryTurn ? { memory_turn: memoryTurn } : {}) }),
       signal,
     });
@@ -208,7 +306,8 @@ export interface EventHandlers {
 
 /** 以 SSE 接收真實任務事件；斷線時 EventSource 會自動重連，重連後收到完整快照。 */
 export function subscribeEvents(handlers: EventHandlers): () => void {
-  const source = new EventSource("/api/events");
+  const terminal = pageHeaders()[TERMINAL_HEADER];
+  const source = new EventSource(terminal ? `/api/events?terminal=${encodeURIComponent(terminal)}` : "/api/events");
   source.onopen = () => handlers.onConnectionChange(true);
   source.onerror = () => handlers.onConnectionChange(false);
   source.onmessage = (msg) => {

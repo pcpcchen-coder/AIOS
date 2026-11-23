@@ -1,0 +1,17 @@
+# AIOS Pi terminal config / AIOS Pi 終端設定
+# install.sh writes ~/.config/aios-terminal/terminal.conf (mode 600) from this layout.
+# install.sh 會依此格式寫入 ~/.config/aios-terminal/terminal.conf（權限 600）。
+# Values may contain only letters, digits and . _ : - ; no quotes, no spaces.
+# 值只能含英數字與 . _ : -；不加引號、不含空白。
+
+# macOS short user name / macOS 帳號短名稱
+AIOS_MAC_USER=
+
+# Mac hostname (e.g. mac-mini.local) or LAN IP / Mac 主機名稱（例如 mac-mini.local）或區網 IP
+AIOS_MAC_HOST=
+
+# Must equal the Nous App core port on the Mac / 必須等於 Mac 上 Nous App 核心的連接埠
+AIOS_PORT=8787
+
+# Mac Remote Login (SSH) port / Mac 遠端登入（SSH）連接埠
+AIOS_SSH_PORT=22

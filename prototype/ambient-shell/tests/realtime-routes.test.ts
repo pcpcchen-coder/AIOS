@@ -549,7 +549,8 @@ describe("WK-02 RealtimeSessions: wake_word source", () => {
     await t.sessions.call("v=0", d.session_id, d.owner);
     // 喚醒開始的通話：記憶的「看著說話」旗標照舊（有互動 ID 就是 true）
     expect(t.live.ctx?.lookToTalk).toBe(true);
-    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "live", session_id: d.session_id, source: "wake_word" });
+    // SP-02a：喚醒開始的互動另帶 wake_id（核心用它找這次喚醒的聲音證據）
+    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "live", session_id: d.session_id, source: "wake_word", wake_id: "int_00000000000000aa" });
     expect(t.sessions.wakeGreetingOpen()).toBe(false);
     expect(t.sessions.claimGreeting(d.interaction)).toBeNull();
     // 問候被跳過（沒有 claim）時，通話結束也結束放寬
@@ -577,7 +578,7 @@ describe("WK-02 RealtimeSessions: wake_word source", () => {
     expect(t.sessions.claimGreeting(d.interaction)).toBeNull(); // live 沒有連上
     const fb = err.offer.fallback!;
     await t.sessions.call("v=0", fb.session_id, fb.owner);
-    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "api_key", session_id: fb.session_id, source: "wake_word" });
+    expect(t.sessions.claimGreeting(d.interaction)).toEqual({ route: "api_key", session_id: fb.session_id, source: "wake_word", wake_id: "int_00000000000000bb" });
     expect(t.sessions.claimGreeting(d.interaction)).toBeNull();
     await t.sessions.end(fb.session_id, fb.owner);
     // 費用紀錄：live 沒連上（connect_failed）、API key 那通，兩筆都帶同一個 wake_id
@@ -735,7 +736,7 @@ describe("WK-02 POST /api/realtime/start: wake_word only with NOUS_WAKE on", () 
     const key = fakeRoute("api_key", "gpt-realtime");
     const records: VoiceCostRecord[] = [];
     const costLog = { record: (r: VoiceCostRecord) => void records.push(r), list: () => records.slice().reverse() } as unknown as VoiceCostLog;
-    const wake = { view: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5, keyword_overrides: null }), update: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5, keyword_overrides: null }), runtime: () => "missing" as const };
+    const wake = { view: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, keyword_overrides: null }), update: () => ({ wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, keyword_overrides: null }), runtime: () => "missing" as const };
     const probe = createNetServer();
     await new Promise<void>((r) => probe.listen(0, "127.0.0.1", r));
     const port = (probe.address() as AddressInfo).port;
@@ -778,5 +779,44 @@ describe("WK-02 POST /api/realtime/start: wake_word only with NOUS_WAKE on", () 
     expect(fourth).toMatchObject({ ok: false, wake_limited: true, retry_after_ms: expect.any(Number) });
     const records = (await (await fetch(`${a.base}/api/realtime/cost-records?limit=5`)).json()) as { records: unknown[] };
     expect(records.records).toHaveLength(1);
+  });
+});
+
+describe("PRO-1：weather prefetch when a greeting call starts", () => {
+  it("onGreetingStart fires for look-to-talk and wake-word starts only (not user starts or rebuilds); a throwing hook does not block the start", () => {
+    let starts = 0;
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: () => true, onGreetingStart: () => { starts++; throw new Error("boom"); } });
+    expect(sessions.start("sse_a", "user")).toMatchObject({ ok: true });
+    expect(starts).toBe(0);
+    expect(sessions.start("sse_a", "look_to_talk")).toMatchObject({ ok: true });
+    expect(starts).toBe(1);
+  });
+});
+
+describe("PRO-1 review fix：greeted(spoken)", () => {
+  it("a call without a core sideband records the briefing at once; an unknown session never does", async () => {
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: () => true });
+    const d = sessions.start("sse_a", "look_to_talk");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    let spoken = 0;
+    sessions.greeted("rt_other", false, () => spoken++);
+    expect(spoken).toBe(0);
+    sessions.greeted(d.session_id, false, () => spoken++);
+    expect(spoken).toBe(1);
+  });
+});
+
+describe("PRO-2：apiKeyListens", () => {
+  it("false without a core sideband (plain call) or for an unknown session", async () => {
+    const key = fakeRoute("api_key", "gpt-realtime");
+    const sessions = new RealtimeSessions({ routes: { api_key: key }, preference: () => "api_key", tasks: () => [], send: () => true });
+    const d = sessions.start("sse_a", "look_to_talk");
+    if (!d.ok) throw new Error("expected start");
+    await sessions.call("v=0", d.session_id, d.owner);
+    expect(sessions.apiKeyListens("rt_other")).toBe(false);
+    expect(sessions.apiKeyListens(d.session_id)).toBe(false);
   });
 });

@@ -55,7 +55,7 @@ Assume face 150 mm, eye region 30 mm, palm length 190 mm. Head angles for half o
 | **Stop gesture**, open palm | Medium, 95 px hand | Interrupt/pause TTS, like “stop” | No, playback only |
 | **Arm pointing** | Pending, shoulder/wrist 3D ray | Select left/center/right in ≤3 columns, selection only (06 §4.4) | No |
 | Eye gaze | Infeasible, ~15 px eyes | — | — |
-| Identity | Technically feasible, near quality needs tests | [14](14_Family_Recognition_and_Greeting_Plan_2026-10.en.md) planned on 2026-10-24, then unimplemented. Requires ADR, registration consent, local boundaries. | Never authorization |
+| Identity | Technically feasible, near quality needs tests | [14](14_Family_Recognition_and_Greeting_Plan_2026-10.en.md) planned on 2026-10-24, then unimplemented. Requires ADR, registration consent, local boundaries. Note added 2026-11-10: ID-00, ID-01, and ID-02 have since been implemented (`src/sense/identity-*.ts`, `src/sense/face/`, `server/identity-service.ts`, `server/identity-store.ts`); thresholds are uncalibrated and the ID-02 Mac acceptance is partially complete and not released; see [current state](Current_Implementation_Status.en.md) | Never authorization |
 
 **Arm estimate**: Wrist ~600 mm ahead of shoulder (~300 px at 2 m), moving ±60 mm (~30 px) to point at screen edges. ±77 mm depth noise gives ~±0.7° angle error, below 5.7° for a half-screen. Three zones are theoretically distinguishable but require §7 V3 measurements.
 
@@ -100,7 +100,7 @@ Nous Shell（既有狀態機）：PointerProvider 取代 06 的 GazeProvider 介
   - Only listed events leave SensePipeline.
   - Exception: On “show camera,” pipeline draws ~256×144 previews directly into two page canvases. No MediaStream exposure or pixel readback. Static checks prohibit `getImageData`, `toDataURL`, `toBlob`, `captureStream`, `createObjectURL`. No saving/tracing/upload. Preview is human-only, AI does not analyze it, and the visual brain region does not light because of it.
   - AI image inspection needs a separate ADR and per-image consent.
-- **Host policy**: Relax `app.ts` `Permissions-Policy: camera=()` only for SensePipeline origins, never generated UI.
+- **Host policy**: Relax `app.ts` `Permissions-Policy: camera=()` only for SensePipeline origins, never generated UI. Note added 2026-11-10: implemented in `server/page-headers.ts`: the main page gets `camera=(self)` when `NOUS_CAMERA=on` and `camera=()` when off; the standalone results-history page (`/history`) always gets `camera=()`.
 - **Indicator**: Minimal active-camera status (06 `sensor_status`). “Camera off” releases immediately.
 
 <a id="5-畫面回饋延續-10-的遠距-ui"></a>
@@ -138,6 +138,9 @@ George chose **A**. Revisit a second camera for Amazing Hand later.
 | `src/sense/processor.ts` | Per-frame landmarks → events |
 | `src/sense/pipeline.ts` | Camera, split eyes, local MediaPipe Pose/gestures wasm, requested preview |
 | `src/sense/controller.ts` | Events → shell, text scale, proximity brain zoom (2026-10-23), look-to-talk, optional stop, point highlight, departure dismissal/reject pending actions, voice camera commands |
+| `src/sense/identity-*.ts` (row added 2026-11-10) | Family recognition ([14](14_Family_Recognition_and_Greeting_Plan_2026-10.en.md) ID-01, ID-02): `identity-worker.ts` (module worker, may read pixels back), `identity-client.ts` (sampler), `identity-ambient.ts` (concurrent recognition during look-to-talk), `identity-protocol.ts` (message format). Thresholds uncalibrated |
+| `src/sense/face/` (row added 2026-11-10) | YuNet and SFace pre/post-processing (`yunet.ts`, `sface.ts`) and frame quality (`quality.ts`), pure functions |
+| `src/sense/light-worker.ts` (row added 2026-11-10) | Ambient brightness worker (VOL-2): shrinks the left-eye frame to 64×36, computes mean brightness, closes the frame, and returns a single number; the other file allowed to read pixels back. Thresholds rest on a single set of Pi measurements |
 
 See prototype README stereo section and INSTALL.
 

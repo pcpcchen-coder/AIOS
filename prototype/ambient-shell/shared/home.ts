@@ -2,6 +2,13 @@ import { translate, type Locale } from "./i18n.mjs";
 
 // 家電狀態查詢（docs/12 H0）與控制（H1）交還給模型與畫面的結果；前後端共用。
 
+/**
+ * home_status／home_control 參數的長度上限（字元數；docs/23 S8 的單一來源）。本機 API（server/app.ts 的 /api/home/status、
+ * /api/home/control）與整合層 Facade 的 inputSchema（server/integrations/adapters/home.ts）都引用這裡。
+ * 模型看到的工具 schema（server/realtime.ts HOME_STATUS_TOOL／HOME_CONTROL_TOOL）沒有 maxLength，維持不變。
+ */
+export const HOME_ARG_MAX = { target: 100, metric: 40, command: 40, value: 40 } as const;
+
 export interface Reading {
   name: string;
   /** null 表示中控沒有讀值，要說「沒有讀值」。 */

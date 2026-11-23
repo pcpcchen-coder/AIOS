@@ -92,6 +92,8 @@ v0.1's readable cards could not be understood at a glance from far away. Users h
 
 Email is an external side effect. Proposal: one-time setup authorization recorded in Action Gate when the recipient is **the user themself**. Other recipients need current confirmation (screen 07). Show failure truthfully.
 
+> **2026-11-09 exception (George's decision)**: the realtime voice web search results panel may show the search's key points and the source website (domain) on screen. When there are two or more results, it first lists numbered titles ("say 'the second one' to pick"); after the user picks one, the screen lists that result's 2–5 key points, the voice reads them in order and the point being read lights up (follow-along), and the panel closes a configured number of seconds (default 8) after playback ends. The exception covers only the search results panel; full reports still go to email. Implementation and limits: [`validation/web-search-picker-2026-11-09.en.md`](validation/web-search-picker-2026-11-09.en.md).
+
 Rules:
 
 1. **Two-second glance**: ≤one term (≤6 characters) + one graphic/number. Borrow NHTSA's two-second glance ceiling, pending §8 V1 measurement.

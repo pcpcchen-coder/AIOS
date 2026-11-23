@@ -51,7 +51,7 @@
 | **停止手勢**（張開手掌朝螢幕） | 中：手 95 px，手勢分類可行 | 打斷 TTS、暫停播報；等同說「停」 | 否（只停播報） |
 | **手臂指向** | 待測：用肩、腕的 3D 點估指向線 | 在 ≤ 3 欄的比較畫面中選「左／中／右」，等同 06 §4.4 的「指向只選定」 | 否 |
 | 眼睛視線 | 不可行：眼睛約 15 px | — | — |
-| 身分辨識 | 技術可行，近距品質需實測 | 2026-10-24 已整理 [14 家人辨識規劃](14_Family_Recognition_and_Greeting_Plan_2026-10.md)，尚未實作；實作前需 ADR、登記同意與本機資料邊界 | 不作授權依據 |
+| 身分辨識 | 技術可行，近距品質需實測 | 2026-10-24 已整理 [14 家人辨識規劃](14_Family_Recognition_and_Greeting_Plan_2026-10.md)，尚未實作；實作前需 ADR、登記同意與本機資料邊界。2026-11-10 補記：ID-00、ID-01、ID-02 之後已有程式（`src/sense/identity-*.ts`、`src/sense/face/`、`server/identity-service.ts`、`server/identity-store.ts`），門檻未校準，ID-02 的 Mac 驗收部分完成、未放行，見[現況](Current_Implementation_Status.md) | 不作授權依據 |
 
 **手臂指向的估算**：手腕在肩膀前方約 600 mm（2 m 處約 300 px），指向螢幕左右邊緣時，手腕橫向偏移約 ±60 mm（約 ±30 px）。深度雜訊 ±77 mm 換算指向角誤差約 ±0.7°，小於半邊螢幕所需的 5.7°。理論上可以分出三區，必須實測（§7 V3）。
 
@@ -94,7 +94,7 @@ Nous Shell（既有狀態機）：PointerProvider 取代 06 的 GazeProvider 介
   - 只有上面列出的事件離開 SensePipeline。
   - 例外：使用者要求「顯示鏡頭畫面」時，管線自己把縮小的畫面（約 256×144）畫到本頁的兩個預覽畫布。不交出 MediaStream，不讀回像素（前端不得使用 `getImageData`、`toDataURL`、`toBlob`、`captureStream`、`createObjectURL`，由靜態測試檢查），不寫檔、不進 trace、不外傳。預覽只給人看，AI 不分析這些畫面，電子腦的視覺區也不因此亮起。
   - 要讓 AI「看一眼」某個畫面時，需另立 ADR，並設計逐張同意的流程。
-- **宿主政策**：`app.ts` 目前的 `Permissions-Policy: camera=()` 需要放寬，但只開放給 SensePipeline 的來源，不開放給生成 UI（CLAUDE.md 紅線）。
+- **宿主政策**：`app.ts` 目前的 `Permissions-Policy: camera=()` 需要放寬，但只開放給 SensePipeline 的來源，不開放給生成 UI（CLAUDE.md 紅線）。2026-11-10 補記：已實作在 `server/page-headers.ts`：`NOUS_CAMERA=on` 時主頁面是 `camera=(self)`，關閉時是 `camera=()`；成果紀錄獨立網頁（`/history`）一律 `camera=()`。
 - **感測器指示**：鏡頭啟用時畫面角落顯示最小指示（06 `sensor_status`）。說「鏡頭關掉」立即釋放串流。
 
 ## 5. 畫面回饋（延續 10 的遠距 UI）
@@ -129,6 +129,9 @@ George 決定先採 **A**：鏡頭先接到 Nous 使用（雙目）。Amazing Ha
 | `src/sense/processor.ts` | 每幀關鍵點 → 事件 |
 | `src/sense/pipeline.ts` | 鏡頭、切左右眼、MediaPipe Pose 與手勢模型（本機 wasm）；使用者要求時畫鏡頭畫面 |
 | `src/sense/controller.ts` | 事件 → Shell：字級縮放、電子腦靠近放大（2026-10-23）、看向即說話、停止播報（可關閉）、指向亮框、離開時收起與拒絕待確認動作；鏡頭語音指令 |
+| `src/sense/identity-*.ts`（2026-11-10 補列） | 家人辨識（[14](14_Family_Recognition_and_Greeting_Plan_2026-10.md) ID-01、ID-02）：`identity-worker.ts`（module worker，可讀回像素）、`identity-client.ts`（取樣器）、`identity-ambient.ts`（看著說話時同步辨識）、`identity-protocol.ts`（訊息格式）。門檻未校準 |
+| `src/sense/face/`（2026-11-10 補列） | YuNet 與 SFace 的前後處理（`yunet.ts`、`sface.ts`）與畫格品質（`quality.ts`），純函式 |
+| `src/sense/light-worker.ts`（2026-11-10 補列） | 環境亮度 worker（VOL-2）：把左眼畫格縮成 64×36、算平均亮度後關閉畫格，只回傳一個數字；另一個可讀回像素的檔案。門檻只有一組 Pi 實測值 |
 
 設定與安裝見原型 README〈雙目鏡頭〉與 INSTALL。
 

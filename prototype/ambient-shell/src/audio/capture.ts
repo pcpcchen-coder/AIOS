@@ -12,7 +12,12 @@ import type { CaptureDeps, CaptureEvents, CaptureGraph, CaptureOptions } from ".
 /** stop() 等 worker 回報清空完成的上限。 */
 export const WORKER_CLOSE_TIMEOUT_MS = 100;
 
-export function browserCapture(): CaptureDeps {
+/**
+ * keywordPort（SP-02a）：每次建立喚醒 worker 時取一條新的 MessagePort（另一端已交給 speaker worker），在 init 時轉移給 worker；
+ * 偵測到喚醒詞時 worker 只把那一段樣本直接送過去。主執行緒只轉手 port，碰不到樣本。
+ * thresholdOffset：設定頁的「喚醒詞門檻調整」（shared/wake.ts 的 wake_threshold_offset），每次建立 worker 時讀一次、在 init 交給 worker。
+ */
+export function browserCapture(keywordPort: (() => MessagePort | null) | null = null, thresholdOffset: () => number = () => 0): CaptureDeps {
   return {
     async connect(stream: MediaStream, events: CaptureEvents, options: CaptureOptions = { overrides: null }): Promise<CaptureGraph> {
       const AudioCtx = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
@@ -74,7 +79,9 @@ export function browserCapture(): CaptureDeps {
         worker.onerror = () => {
           if (!stopped) events.failed("runtime_load_failed");
         };
-        worker.postMessage({ type: "init", sampleRate: ctx.sampleRate, mode: options.calibrate ? "calibrate" : "listen", overrides: options.overrides }, [channel.port2]);
+        // 矯正不做常駐偵測，也不把任何片段交給 speaker worker。
+        const toSpeaker = options.calibrate ? null : keywordPort?.() ?? null;
+        worker.postMessage({ type: "init", sampleRate: ctx.sampleRate, mode: options.calibrate ? "calibrate" : "listen", overrides: options.overrides, thresholdOffset: thresholdOffset() }, toSpeaker ? [channel.port2, toSpeaker] : [channel.port2]);
         node.port.postMessage({ type: "port" }, [channel.port1]);
         source = ctx.createMediaStreamSource(stream);
         source.connect(node);

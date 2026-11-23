@@ -4,6 +4,7 @@ import { ConversationSession } from "../src/conversation.ts";
 import type { ChatEvent } from "../src/api.ts";
 import type { Domain } from "../shared/domain.ts";
 import { makeTask, step } from "./fixtures.ts";
+import { processingSource } from "../src/processing-cue.ts";
 
 const idle: ActivitySnapshot = { tasks: [], reply: { kind: "idle" }, conversationVisible: false, capture: { push: false, continuous: false }, playback: false };
 const pending = { kind: "pending", requestId: "req_visual", user: "這3張照片", answer: "" } as const;
@@ -16,6 +17,20 @@ describe("region activity projection", () => {
     expect(activity.map(activityDescription)).toEqual(["數理區 · 模擬任務", "視覺區 · 主題分類", "聽覺區 · 麥克風收音", "聽覺區 · 麥克風收音", "語言區 · 語音播放"]);
     expect(activity[0]).toMatchObject({ owner: task.task_id, requestId: task.request_id, mock: true });
     expect(collectRegionActivity({ ...idle, tasks: [task] })).toHaveLength(1); // Collapsing a task does not cancel it.
+  });
+
+  it("the processing state uses the same real source as region focus: running tasks only; it adds no region of its own", () => {
+    const running = makeTask({ task_id: "r", plan_ready: true, steps: [{ ...step("計算", "running"), domain: "math" }] });
+    expect(processingSource({ tasks: [running], searches: [], connected: true, callOn: false })).toEqual(["task:r"]);
+    expect(collectRegionActivity({ ...idle, tasks: [running] }).map((a) => a.domain)).toEqual(["math"]);
+    for (const status of ["queued", "cancelling"] as const) {
+      const task = makeTask({ status, plan_ready: true, steps: [{ ...step("計算", "running"), domain: "math" }] });
+      expect(processingSource({ tasks: [task], searches: [], connected: true, callOn: false })).toEqual([]);
+      expect(collectRegionActivity({ ...idle, tasks: [task] })).toEqual([]);
+    }
+    // 即時語音的查詢只讓電子腦進入處理中，不點亮任何腦區（腦區仍由查詢事件的光脈衝與主題決定）
+    expect(processingSource({ tasks: [], searches: [0], connected: true, callOn: true })).toEqual(["search:0"]);
+    expect(collectRegionActivity(idle)).toEqual([]);
   });
 
   it("represents planning independently and ignores terminal tasks with stale running steps", () => {

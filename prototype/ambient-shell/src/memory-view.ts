@@ -1,6 +1,6 @@
 import { t, msg, getLocale, onLocaleChange } from "./i18n.ts";
 // 「記憶」Surface（docs/16 MEM-1）：按需出現，visibility_reason 一律是 user_request（觸發它的打字或選單列點擊）。
-// 內容：首次設定（四個獨立選項）、澄清卡（保存／改記全家共用／取消）、建立或選擇人物、臉部候選「這次用 X 的偏好？」、
+// 內容：首次設定（四個獨立選項）、澄清卡（保存／改記全家共用／取消）、建立或選擇人物、臉部候選「這次用 X 的偏好？」（2026-11-02 起由 PresenceNotice 取代，卡片型別保留）、
 // 全部忘記、「你記得我什麼？」清單（修改／忘記／釘選），以及從選單列「記憶…」打開的記憶管理。
 // MEM-2：即時語音的卡（SSE 只送卡片 ID，內容用 IPC card_view 取）：語音記住／更正／忘記的確認卡（也可以說確認詞）、
 // 臉部候選、挑選與查看卡，以及帶著記憶時的「要交辦這件事嗎？」（標題是使用者原句）。
@@ -16,6 +16,8 @@ import type {
   ClarifyChoice,
   MemoryResponse as MemoryResult,
   MemoryCardView,
+  MemoryPresenceResponse,
+  MemoryPresenceStatus,
   MemoryFactView,
   MemoryPresenceView,
   MemoryReceiptView,
@@ -26,14 +28,17 @@ import type {
   MemoryText,
   MemoryTurnView,
 } from "../shared/memory.ts";
+import type { LiveMemoryReason, RouteId } from "../shared/realtime-route.ts";
 
 export interface MemoryBridge {
   memory(request: MemoryRequest): Promise<MemoryResponse>;
 }
 
 export interface MemoryViewDeps {
-  /** macOS App 的 IPC；瀏覽器版為 null。 */
+  /** macOS App 的 IPC；瀏覽器版與終端機頁面為 null。 */
   bridge: MemoryBridge | null;
+  /** bridge 為 null 時顯示的說明；未提供時是瀏覽器版的說明（RPI-ID 的終端機改說管理在 Mac 進行）。 */
+  unavailableMessage?: string;
   /** 收起（dispatch dismiss）；只關畫面。 */
   dismiss(): void;
   /** 卡片處理完的結果（回條、下一張卡、要送的聊天）交回主程式。requestId 是原本那一輪。 */
@@ -112,6 +117,45 @@ export function presenceLabel(presence: MemoryPresenceView | null): string {
   return t("本次人物：未選定（只用全家共用的記憶）");
 }
 
+/**
+ * 對話 Surface（打字或語音聊天的回覆）上的本次人物標示。只有 Mac 的 App 的打字聊天經記憶（memory turn）；終端機頁面的聊天
+ * 從不帶記憶，所以照實寫「未用記憶」，不顯示人物（避免看起來像用了 X 的記憶）。
+ */
+export function conversationPersonLabel(presence: MemoryPresenceView | null, page: { bridge: boolean; enabled: boolean; terminal: boolean }): string {
+  if (!page.bridge || !page.enabled) return "";
+  return page.terminal ? t("未用記憶") : presenceLabel(presence);
+}
+
+/** 即時語音那一行的記憶狀態的輸入（核心回報的這通記憶狀態；不含內容）。 */
+export interface LiveMemoryLine {
+  route: RouteId | null;
+  live: { used: number; reason: LiveMemoryReason | null } | null;
+  presence: MemoryPresenceView | null;
+  /** 這個頁面有本次人物的記憶傳輸（App 的 IPC 或終端機的 HTTP）。 */
+  bridge: boolean;
+  enabled: boolean;
+  reasonText(route: RouteId, reason: LiveMemoryReason): string;
+}
+
+/**
+ * 即時語音那一行：這通的本次人物與記憶筆數（或沒有用到記憶的原因，依路徑）。記憶由核心依這通的路徑處理，所以 Mac 與終端機的頁面
+ * 用同一套規則；沒有記憶傳輸的一般瀏覽器不顯示。
+ */
+export function liveMemoryLabel(x: LiveMemoryLine): string {
+  const { route, live } = x;
+  if (route && live && live.reason === "route_off") return x.bridge && x.enabled ? t("此路徑未啟用記憶｜") : "";
+  if (route && live && x.bridge) {
+    const name = x.presence?.state === "selected" ? x.presence.name : null;
+    const why = t(live.reason ? x.reasonText(route, live.reason) : "未用記憶");
+    return name
+      ? live.used > 0 ? msg`本次人物：${name} · 記憶 ${live.used} 筆｜` : msg`本次人物：${name} · ${why}｜`
+      : live.used > 0 ? msg`本次人物：未選定 · 記憶 ${live.used} 筆｜` : msg`本次人物：未選定 · ${why}｜`;
+  }
+  // API key 路徑沒有記憶狀態（舊的核心或沒有事件串流）而記憶開著：照實標示沒有用到。
+  if (route === "api_key" && !live && x.bridge && x.enabled) return t("此路徑未啟用記憶｜");
+  return "";
+}
+
 const CHOICE_LABEL: Record<ClarifyChoice, string> = { save: "保存", household: "改記全家共用", cancel: "取消" };
 /** MEM-5b：工作決定卡的說明。 */
 export const WORK_SUMMARY_NOTE = "只保存你說的這句話，連到你選的工作；不會保存工作的標題或成果。這個工作被刪除，或它用到的記憶被忘記或更正時，這筆工作決定也會一起忘記；關閉記憶或撤回同意不會刪除它。";
@@ -163,7 +207,7 @@ export class MemoryView {
     this.editing = null;
     this.filter = "all";
     if (!this.deps.bridge) {
-      this.mode = { kind: "unavailable", message: MEMORY_BROWSER_UNAVAILABLE };
+      this.mode = { kind: "unavailable", message: this.deps.unavailableMessage ?? MEMORY_BROWSER_UNAVAILABLE };
       this.render();
       return;
     }
@@ -641,6 +685,151 @@ export class SuggestionPrompt {
       // 「不用」：這一行直接消失；「記住」：換成核心的回條（記在 X 名下了…）。
       this.state = choice === "decline" ? null : { phase: "done", requestId: st.requestId, receipts: res.receipts };
     }
+    this.deps.changed();
+  }
+}
+
+/**
+ * 記憶預設選人（George 2026-11-02，docs/validation/memory-voice-default-2026-11-02.md）：不出卡片，只有一行
+ * 「即將用 X 的記憶」（語音通話等選定時）或「正在用 X 的記憶」（已選定）與「不是我」。
+ * - 即時語音：SSE 只帶卡片 ID（memory_default）；人物名經 IPC card_view（等選定時）或 status（選定後）取。
+ * - 打字聊天：核心的 turn 帶 auto_selected，名字用 turn 回的 presence。
+ * - 「不是我」：等選定時＝card_answer decline（核心不選定、補全家共用的記憶、這次不再問）；選定後＝select 全家共用。
+ * - 不擋聊天；收起只把這一行藏起來（核心的選定照常）；本次人物世代改變就收掉（換人、暫停、撤銷）。
+ */
+export interface PresenceNoticeDeps {
+  /** App 的 IPC（完整回應）或終端機的 HTTP（只有本次人物的投影）。 */
+  bridge: { memory(request: MemoryRequest): Promise<MemoryResult | MemoryPresenceResponse> } | null;
+  /** 核心回的結果（本次人物、歷史清除、回條）交回主程式。 */
+  applied(view: Pick<MemoryTurnView, "receipts" | "presence" | "history_reset"> & { status?: MemoryPresenceStatus }): void;
+  /** 目前的本次人物（select 要帶這個世代的 select_card）。 */
+  presence(): MemoryPresenceView | null;
+  /** 狀態改變：請主程式重畫。 */
+  changed(): void;
+}
+
+type NoticeState =
+  | { phase: "proposed"; card: string; name: string; busy: boolean; error: string | null }
+  | { phase: "selected"; name: string; epoch: number; busy: boolean; error: string | null };
+
+export class PresenceNotice {
+  private state: NoticeState | null = null;
+  private hidden = false;
+  private gen = 0;
+  private element: HTMLElement | null = null;
+  private key = "";
+
+  constructor(private readonly deps: PresenceNoticeDeps) {}
+
+  /** 目前的階段（測試與主程式判斷用）。 */
+  get phase(): NoticeState["phase"] | null { return this.state?.phase ?? null; }
+
+  /** 即時語音：核心提出記憶預設選人（只有卡片 ID）；經 card_view 取人物名再顯示。 */
+  async propose(card: string): Promise<void> {
+    const gen = ++this.gen;
+    this.state = null;
+    this.hidden = false;
+    if (!this.deps.bridge) return;
+    const res = await this.call({ op: "card_view", card });
+    if (gen !== this.gen) return;
+    if (!res.ok || res.op !== "card_view" || res.card.kind !== "face_candidate") { this.deps.changed(); return; }
+    this.state = { phase: "proposed", card, name: res.card.name, busy: false, error: null };
+    this.deps.changed();
+  }
+
+  /** 打字聊天的 auto_selected（新的一次預設選人）：用核心回的本次人物顯示。 */
+  selected(presence: MemoryPresenceView | null): void {
+    this.gen++;
+    this.hidden = false;
+    this.state = presence?.state === "selected" && presence.name ? { phase: "selected", name: presence.name, epoch: presence.epoch, busy: false, error: null } : null;
+    this.deps.changed();
+  }
+
+  /**
+   * 即時語音的 selected：只把「等選定的那一行」換成已選定，人物用那張卡上的（不是重讀時剛好選定的別人）。
+   * 本次人物已經是另一位（例如「我是 Y」）時收掉，由一般的回條說明。收起的狀態保留到下一次新的提出。
+   */
+  confirm(card: string, presence: MemoryPresenceView | null): void {
+    const st = this.state;
+    if (st?.phase !== "proposed" || st.card !== card) return;
+    this.promote(st, presence);
+  }
+
+  private promote(st: Extract<NoticeState, { phase: "proposed" }>, presence: MemoryPresenceView | null): void {
+    this.gen++;
+    this.element = null;
+    this.state = presence?.state === "selected" && presence.name === st.name ? { phase: "selected", name: st.name, epoch: presence.epoch, busy: false, error: null } : null;
+    this.deps.changed();
+  }
+
+  /** 核心說這次不用（說了不要、按了不是我、候選失效）或通話結束：收掉。 */
+  clear(): void {
+    this.gen++;
+    this.state = null;
+    this.element = null;
+    this.deps.changed();
+  }
+
+  /** 通話結束：還在等選定的那一行收掉（核心也不會選定）；已選定的照舊顯示到本次人物改變。 */
+  callEnded(): void {
+    if (this.state?.phase === "proposed") this.clear();
+  }
+
+  /** 收起：只藏起這一行，不取消（核心照常選定）。 */
+  hide(): void {
+    if (!this.state || this.hidden) return;
+    this.hidden = true;
+    this.deps.changed();
+  }
+
+  /** 本次人物世代改變：等選定的那一行（卡片已作廢）與不是這個世代的「正在用」收掉。 */
+  presenceChanged(presence: MemoryPresenceView | null): void {
+    const st = this.state;
+    if (!st) return;
+    // 等選定的那一行：換成卡上那位家人（就是預設選定）才變成「正在用」，否則收掉。收起的狀態保留到下一次新的提出。
+    if (st.phase === "proposed") { this.promote(st, presence); return; }
+    if (!presence || presence.epoch !== st.epoch) this.clear();
+  }
+
+  render(): HTMLElement | null {
+    const st = this.state;
+    if (!st || this.hidden || !this.deps.bridge) return null;
+    const key = `${getLocale()}:${JSON.stringify(st)}`;
+    if (this.element && this.key === key) return this.element;
+    const box = h("div", { class: "presence-notice", role: "group", "aria-label": "本次人物", "data-visibility-reason": "user_request" });
+    box.append(h("span", { role: "status" }, st.phase === "proposed" ? msg`即將用 ${st.name} 的記憶` : msg`正在用 ${st.name} 的記憶`), " ",
+      button("不是我", () => void this.notMe(), "btn--ghost", st.busy));
+    box.setAttribute("title", t("家人辨識只提出候選（門檻未校準），不是授權；不是你的話按「不是我」，這次改用全家共用的記憶。"));
+    if (st.error) box.append(h("p", { class: "error-text", role: "alert" }, t(st.error)));
+    this.element = box;
+    this.key = key;
+    return box;
+  }
+
+  private async call(request: MemoryRequest): Promise<MemoryResult | MemoryPresenceResponse> {
+    try { return await this.deps.bridge!.memory(request); }
+    catch (err) { return { ok: false, code: "unavailable", message: `記憶沒有回應：${err instanceof Error ? err.message : String(err)}` }; }
+  }
+
+  private async notMe(): Promise<void> {
+    const st = this.state;
+    if (!st || st.busy) return;
+    const gen = ++this.gen;
+    this.state = { ...st, busy: true };
+    this.deps.changed();
+    const res = st.phase === "proposed"
+      ? await this.call({ op: "card_answer", card: st.card, choice: "decline" })
+      : await this.call({ op: "select", profile: null, ...(this.deps.presence()?.select_card ? { card: this.deps.presence()!.select_card } : {}) });
+    if (gen !== this.gen) return;
+    if (!res.ok) {
+      // 卡片已失效（已選定或換了人物）：照實顯示核心的原因。
+      this.state = { ...st, busy: false, error: res.message };
+      this.deps.changed();
+      return;
+    }
+    this.state = null;
+    this.element = null;
+    if (res.op === "card_answer" || res.op === "select") this.deps.applied(res);
     this.deps.changed();
   }
 }

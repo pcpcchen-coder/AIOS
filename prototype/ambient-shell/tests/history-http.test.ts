@@ -145,7 +145,8 @@ describe("history routes have the same local protections as the other /api route
 
   it("no realtime model tool can open or search the results history", () => {
     const names = buildRealtimeTools({ webSearch: true, home: true, mcp: [] }).map((t) => String(t.name));
-    expect(names.some((n) => /history|result|artifact/i.test(n))).toBe(false);
+    // show_search_result 顯示的是這次上網查詢的候選（search Surface），不是成果紀錄。
+    expect(names.filter((n) => n !== "show_search_result").some((n) => /history|result|artifact/i.test(n))).toBe(false);
   });
 });
 

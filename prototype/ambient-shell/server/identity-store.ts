@@ -1,7 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isValidFeature, type FaceModelVersion } from "../shared/identity.ts";
+import { isValidFeature, isValidSpeakerFeature, type CalibrationTrial, type FaceModelVersion, type SpeakerModelVersion, type VoiceSegment } from "../shared/identity.ts";
 
 // 家人辨識的登記資料（gallery）加密保存（ADR-0001 §2.2、§2.3；George 2026-10-25 決定用 Electron safeStorage）。
 //
@@ -15,7 +15,9 @@ import { isValidFeature, type FaceModelVersion } from "../shared/identity.ts";
 // - 解不開分兩種（審查 2026-10-25）：
 //   key_unavailable：SecretBox 解不開資料金鑰（例如沒有允許鑰匙圈存取）。可重試，不誘導清除。
 //   corrupt：格式不符、GCM 驗證失敗或內容損壞。不覆寫、不退回明文；只能經原生確認「清除全部家人資料」。
-// - 載入時逐一檢查特徵（128 維、有限值、‖v‖≈1）；不合格的人照實標 damaged，不參與比對。
+// - 載入時逐一檢查特徵（臉 128 維、聲音 192 維、有限值、‖v‖≈1）；不合格的人照實標 damaged，不參與比對。
+//   SP-01 起可以只有聲音（臉的 features 為空陣列）；臉與聲音都沒有才算 damaged。聲音欄位是加在 version 1 上的選填欄位，
+//   舊版核心載入時原樣保留（`...p`），只是會把只有聲音的人標成 damaged。
 // - 沒有防回滾：有人用舊的 gallery 檔整個替換新檔時，只要舊檔仍能用同一把應用程式金鑰解開就會被接受（ADR §2.2）。
 //   核心只在寫入前比對磁碟上的 gallery_version 與記憶體是否相同，防止同一台機器上兩個核心互相覆蓋。
 //
@@ -52,8 +54,17 @@ export interface StoredPerson {
   created_at: string;
   updated_at: string;
   model: FaceModelVersion;
-  /** 每張樣本一個 128 維、已 normalize 的特徵。 */
+  /** 每張樣本一個 128 維、已 normalize 的特徵。只有聲音的家人是空陣列。 */
   features: Float32Array[];
+  /** SP-01 聲音：喚醒詞與朗讀各自的 192 維特徵（已 normalize），以及登記時的講者模型版本。 */
+  voice?: StoredVoice;
+}
+
+export interface StoredVoice {
+  model: SpeakerModelVersion;
+  keyword: Float32Array[];
+  utterance: Float32Array[];
+  updated_at: string;
 }
 
 export interface GalleryData {
@@ -84,9 +95,24 @@ interface GalleryFile extends GalleryHeader {
   ciphertext: string;
 }
 
-interface PlainPerson extends Omit<StoredPerson, "features"> {
+interface PlainPerson extends Omit<StoredPerson, "features" | "voice"> {
   /** float32 little-endian 的 base64（只存在密文裡）。 */
   features: string[];
+  voice?: Omit<StoredVoice, "keyword" | "utterance"> & { keyword: string[]; utterance: string[] };
+}
+
+/**
+ * 聲音欄位解碼。valid=false 時照實標 damaged；形狀還認得（陣列與 model 都在）就保留解出來的特徵，下次存檔原樣寫回
+ * （和臉的壞特徵一樣，不在別人的變更時被靜默丟掉）；連形狀都不對才回 voice=null。
+ */
+function voiceFromPlain(v: PlainPerson["voice"]): { voice: StoredVoice | null; valid: boolean } {
+  if (!v || typeof v !== "object" || !Array.isArray(v.keyword) || !Array.isArray(v.utterance) || !v.model || typeof v.model !== "object") {
+    return { voice: null, valid: false };
+  }
+  const keyword = v.keyword.map((x) => featureFromBase64(String(x)));
+  const utterance = v.utterance.map((x) => featureFromBase64(String(x)));
+  const valid = keyword.length > 0 && utterance.length > 0 && [...keyword, ...utterance].every((f) => isValidSpeakerFeature(f));
+  return { voice: { model: v.model, keyword, utterance, updated_at: String(v.updated_at) }, valid };
 }
 
 export type BackupExclusion = "excluded" | "failed" | "pending" | "not_applicable";
@@ -115,6 +141,23 @@ function featureFromBase64(s: string): Float32Array {
   bytes.fill(0);
   return out;
 }
+
+/**
+ * SP-03a 聲音校準資料（voice-calibration.v1.json）：只有分數與標籤，不存錄音或特徵。整份 JSON 以 SecretBox（App 裡是 safeStorage）
+ * 加密；格式錯、解不開就當成沒有（校準可以重做），不影響 gallery。
+ * templates：記這筆分數是對哪一版聲音模板算的（person_id → voice.updated_at）；模板重錄或人物刪除後，那筆就不再採用。
+ */
+export interface StoredCalibrationTrial extends CalibrationTrial {
+  templates: Record<string, string>;
+}
+export interface CalibrationFileData {
+  model: SpeakerModelVersion;
+  trials: StoredCalibrationTrial[];
+  applied: { at: string; thresholds: Record<VoiceSegment, { match: number; margin: number }> } | null;
+}
+const CALIBRATION_FILE = "voice-calibration.v1.json";
+/** 最多保留幾筆（舊的先丟）。 */
+export const CALIBRATION_MAX_TRIALS = 2000;
 
 export class GalleryStore {
   readonly path: string;
@@ -194,6 +237,32 @@ export class GalleryStore {
     chmodSync(file, 0o600);
   }
 
+  /** SP-03a：讀校準資料；沒有、格式錯或解不開時 null。 */
+  loadCalibration(): CalibrationFileData | null {
+    try {
+      const file = JSON.parse(readFileSync(join(this.options.dir, CALIBRATION_FILE), "utf8")) as { schema_version?: unknown; sealed?: unknown };
+      if (file.schema_version !== 1 || typeof file.sealed !== "string") return null;
+      const data = JSON.parse(this.options.secretBox.open(Buffer.from(file.sealed, "base64"))) as CalibrationFileData;
+      if (!data || !Array.isArray(data.trials) || !data.model) return null;
+      return data;
+    } catch {
+      return null;
+    }
+  }
+
+  /** SP-03a：寫校準資料（整份重寫、原子替換、0600）。 */
+  saveCalibration(data: CalibrationFileData): void {
+    this.prepare();
+    const trimmed: CalibrationFileData = { ...data, trials: data.trials.slice(-CALIBRATION_MAX_TRIALS) };
+    const sealed = this.options.secretBox.seal(JSON.stringify(trimmed)).toString("base64");
+    this.writeAtomic(JSON.stringify({ schema_version: 1, sealed }), CALIBRATION_FILE);
+  }
+
+  /** SP-03a：清除校準資料（之後回到未校準的起點門檻）。 */
+  removeCalibration(): void {
+    rmSync(join(this.options.dir, CALIBRATION_FILE), { force: true });
+  }
+
   /** 磁碟上檔頭的 gallery_version（不解密）；沒有檔案是 null，讀不懂是 -1。寫入前用來確認沒有被別的程序改過。 */
   diskVersion(): number | null {
     if (!existsSync(this.path)) return null;
@@ -238,8 +307,11 @@ export class GalleryStore {
       if (!Array.isArray(parsed.people)) return { ok: false, reason: "corrupt" };
       const people = parsed.people.map((p) => {
         const features = Array.isArray(p.features) ? p.features.map(featureFromBase64) : [];
-        const damaged = features.length === 0 || features.some((f) => !isValidFeature(f));
-        return { ...p, features, ...(damaged ? { damaged: true } : {}) };
+        const decoded = p.voice === undefined ? null : voiceFromPlain(p.voice);
+        const faceBad = features.some((f) => !isValidFeature(f));
+        const damaged = faceBad || (decoded !== null && !decoded.valid) || (features.length === 0 && !decoded?.voice);
+        const { voice: _plainVoice, ...rest } = p;
+        return { ...rest, features, ...(decoded?.voice ? { voice: decoded.voice } : {}), ...(damaged ? { damaged: true } : {}) };
       });
       return { ok: true, data: { people }, key_generation: file.key_generation, gallery_version: file.gallery_version };
     } catch {
@@ -268,7 +340,11 @@ export class GalleryStore {
       const cipher = createCipheriv(CIPHER, dek, nonce);
       cipher.setAAD(aad(header));
       // damaged 是載入時的判斷，不存檔。
-      const people: PlainPerson[] = data.people.map(({ damaged: _damaged, ...p }) => ({ ...p, features: p.features.map(featureToBase64) }));
+      const people: PlainPerson[] = data.people.map(({ damaged: _damaged, voice, ...p }) => ({
+        ...p,
+        features: p.features.map(featureToBase64),
+        ...(voice ? { voice: { ...voice, keyword: voice.keyword.map(featureToBase64), utterance: voice.utterance.map(featureToBase64) } } : {}),
+      }));
       plain = Buffer.from(JSON.stringify({ people }), "utf8");
       const ciphertext = Buffer.concat([cipher.update(plain), cipher.final()]);
       const file: GalleryFile = {
@@ -294,7 +370,8 @@ export class GalleryStore {
     this.fsyncDir();
   }
 
-  private writeAtomic(text: string): void {
+  private writeAtomic(text: string, name?: string): void {
+    const target = name ? join(this.options.dir, name) : this.path;
     const tmp = join(this.options.dir, `${TMP_PREFIX}${randomBytes(6).toString("hex")}`);
     const fd = openSync(tmp, "wx", 0o600);
     try {
@@ -308,12 +385,12 @@ export class GalleryStore {
     }
     closeSync(fd);
     try {
-      renameSync(tmp, this.path);
+      renameSync(tmp, target);
     } catch (err) {
       rmSync(tmp, { force: true });
       throw err;
     }
-    chmodSync(this.path, 0o600);
+    chmodSync(target, 0o600);
     this.fsyncDir();
   }
 

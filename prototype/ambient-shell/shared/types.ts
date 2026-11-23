@@ -1,12 +1,19 @@
+import type { AlarmsView } from "./alarm.ts";
 import type { FaceTuningView } from "./face-tuning.ts";
 import type { Locale } from "./i18n.mjs";
 import type { CameraSettings } from "./sense.ts";
-import type { MenuPrefSetting } from "./seconds-menu.ts";
+import type { MenuPrefSetting } from "./menu-prefs-types.ts";
 import type { VoicePrefs } from "./voice-prefs.ts";
 import type { RealtimeRouteFields, RealtimeServerEvent } from "./realtime-route.ts";
 import type { IdentityStatus } from "./identity.ts";
 import type { MemorySettingsStatus } from "./memory.ts";
 import type { WakeSettingsView } from "./wake.ts";
+import type { AudioSettingsView } from "./audio-devices.ts";
+import type { ProactiveSettingsView } from "./proactive.ts";
+import type { ClockSettingsView } from "./clock.ts";
+import type { DayNightSettingsView } from "./day-night.ts";
+import type { HomeCornerSettingsView } from "./home-corner.ts";
+import type { MemoriesSettingsView } from "./memories.ts";
 // 前後端共用的資料契約（原型版）。
 // 正式版應改為 packages/shared/schemas 的版本化 JSON Schema（見 docs/07 §3）；
 // 這裡先用 TS 型別，schema_version 標為 proto-0.1 以免與正式契約混淆。
@@ -150,8 +157,30 @@ export interface SettingsView {
   identity?: IdentityStatus;
   /** 記憶層（16）：全體 SSE 與 settings 只放可用與否、是否開啟；人物與內容只經 IPC。 */
   memory?: MemorySettingsStatus;
+  /** 聲音輸入／輸出裝置的選擇（audio.json）；本機核心一定提供，未提供時兩者都用系統預設。 */
+  audio?: AudioSettingsView;
   /** WK-01a 常駐喚醒聆聽：只有 NOUS_WAKE=on 時才有（偏好與引擎核對結果；實際狀態以頁面的裝置事件為準）。 */
   wake?: WakeSettingsView;
+  /**
+   * AIL-1（docs/18）：只有 NOUS_AIL=on 時才有。tools＝API key 路徑上由核心整合層執行的函式名稱（app__<service>__<action>）；
+   * 頁面收到這些名稱的工具呼叫時轉交核心（POST /api/integrations/call），自己不執行。
+   */
+  /** builtin_only：NOUS_AIL 關閉，只有核心內建工具（定時器）；頁面不顯示「App 整合」狀態。 */
+  integrations?: { tools: string[]; builtin_only?: true };
+  /** VCR-2：只有核心註冊了 voice_relay（NOUS_AIL=on 且 NOUS_VCR=fake／mac）時才有（true）；設定頁據此畫「語音中繼（實驗）」診斷區。沒有註冊時沒有這個鍵。 */
+  voice_relay?: boolean;
+  /** PRO-1 主動提醒（招呼後接今天的天氣）：設定、實際地點與最近一次查天氣的狀態（不含天氣內容）。 */
+  proactive?: ProactiveSettingsView;
+  /** CLK-1 右上角時鐘與天氣：這個頁面要不要顯示（enabled）與兩個開關（Mac 視窗、終端機）。 */
+  clock?: ClockSettingsView;
+  /** HOME-1：左上角家中狀態（enabled 依頁面來源）。 */
+  home_corner?: HomeCornerSettingsView;
+  /** DN-2：核心共用的日夜間設定與手動切換（Mac 與 Pi 共用；鏡頭亮度各頁面自己量）。 */
+  day_night?: DayNightSettingsView;
+  /** ALARM-1：定時器與響鈴（核心保存與排程；只有這個頁面要響的鈴 here 是 true）。 */
+  alarms?: AlarmsView;
+  /** MEMO-1 回憶模式：設定與來源狀態（只有數量，不含檔名或路徑）。 */
+  memories?: MemoriesSettingsView;
 }
 
 /** API key 路徑（RealtimeBridge.info）提供的欄位；路徑與計費欄位由 RealtimeSessions 補上。 */
@@ -183,6 +212,8 @@ export type ServerEvent =
   | { type: "settings.updated"; sequence: number; settings: SettingsView }
   /** HIST-1：使用者在成果紀錄裡確認刪除了一個任務（與它的成果）。 */
   | { type: "task.deleted"; sequence: number; task_id: string; artifact_id: string | null }
+  /** RPI-ID：記憶的本次人物世代改變（換人、暫停、撤銷）。不含內容；頁面再用記憶的 status 讀新狀態。 */
+  | { type: "memory.presence_changed"; sequence: number }
   | RealtimeServerEvent;
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";

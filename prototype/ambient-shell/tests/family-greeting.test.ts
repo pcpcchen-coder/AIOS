@@ -208,7 +208,15 @@ describe("speakableName (I11：名稱注入)", () => {
     expect(greetingSentence(null)).toBe("我在");
     const longest = "王".repeat(16);
     expect(speakableName(longest)).toBe(longest);
-    for (const t of GREETING_TEMPLATES.filter((x) => x.named)) expect(Buffer.byteLength(liveGreetingText(t.render(longest)))).toBeLessThanOrEqual(500);
+    for (const locale of ["zh-TW", "en"] as const) {
+      for (const name of [longest, "𠀀".repeat(16)]) {
+        expect(speakableName(name)).toBe(name);
+        for (const template of GREETING_TEMPLATES.filter((x) => x.named)) {
+          const sentence = locale === "en" ? `Good evening, ${name}` : template.render(name);
+          expect(Buffer.byteLength(liveGreetingText(sentence, locale))).toBeLessThanOrEqual(500);
+        }
+      }
+    }
   });
 
   it("time slots (this computer's time zone, as home-bridge): 5–11 morning, 11–18 afternoon, 18+ evening; others none", () => {
@@ -1174,25 +1182,25 @@ describe("memoryCandidate (docs/16 §4: a face only proposes a person)", () => {
   it("is the last matched decision for 60 s on the same track, and never after multi-face, a new track or deletion", async () => {
     const c = core();
     const ids = await enroll(c, [["George", GEORGE], ["Mary", MARY]]);
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
     await frames(c, 7, GEORGE, 3);
     expect(text(await greet(c, id(1), 7))).toMatch(NAMED);
-    expect(c.svc.memoryCandidate()).toMatchObject({ person_id: ids.George, name: "George" });
+    expect(c.svc.memoryCandidate("main")).toMatchObject({ person_id: ids.George, name: "George" });
     expect(c.svc.memoryPeople()?.map(p => p.name).sort()).toEqual(["George", "Mary"]);
     // 新的追蹤世代開始：舊候選作廢。
     await frame(c, 8, GEORGE);
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
     // 多張臉：不給候選。
     await frames(c, 9, GEORGE, 3);
     await frame(c, 9, "multi");
     await greet(c, id(2), 9);
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
     // 60 秒後失效。
     await frames(c, 10, GEORGE, 3);
     await greet(c, id(3), 10);
-    expect(c.svc.memoryCandidate()).not.toBeNull();
+    expect(c.svc.memoryCandidate("main")).not.toBeNull();
     c.clock.now += 60_001;
-    expect(c.svc.memoryCandidate()).toBeNull();
+    expect(c.svc.memoryCandidate("main")).toBeNull();
   });
 });
 
@@ -1220,6 +1228,6 @@ describe("memory presence breaks (M-2)", () => {
     await frame(c, 3, GEORGE);
     expect(suspend).not.toHaveBeenCalled();
     await frame(c, 3, "multi");
-    expect(suspend).toHaveBeenCalledWith("multi_face");
+    expect(suspend).toHaveBeenCalledWith("multi_face", "main");
   });
 });

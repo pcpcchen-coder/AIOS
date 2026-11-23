@@ -2,6 +2,7 @@
 // 這裡沒有任何線路格式、權杖或帳號 ID；線路細節只在 server/live-route.ts 與 server/codex-responses.ts。
 
 import type { Task } from "./types.ts";
+import type { VoiceUsage } from "./voice-cost.ts";
 
 /** 兩條路徑。標籤、計費、聲音的表都以這份清單為鍵。 */
 export const ROUTE_IDS = ["live", "api_key"] as const;
@@ -123,8 +124,12 @@ export interface RealtimeRouteFields {
   routes: RouteOption[];
   /** 沒有接上 ChatGPT 方案路徑（測試或舊設定）時為 null。 */
   live_account: LiveAccountInfo | null;
-  /** 正在進行的工作階段（偏好改了也維持到它結束）。 */
-  active: null | { session_id: string; route: RouteId; billing_line: string };
+  /**
+   * 正在進行的工作階段（偏好改了也維持到它結束）。費用防護（2026-11-06）另帶：started_at（連上的時間，epoch ms；連線中為 null）、
+   * max_call_s（這通的上限秒數）、usage（API key 路徑頁面最近一次報到的加總，不是帳單；ChatGPT 方案與還沒報到時為 null）、
+   * page（開始的頁面：Mac 主視窗與一般瀏覽器是 "main"，終端機是識別碼）。
+   */
+  active: null | { session_id: string; route: RouteId; billing_line: string; started_at?: number | null; max_call_s?: number; usage?: VoiceUsage | null; page?: string };
 }
 
 /** POST /api/realtime/start 的回答：開麥克風前就決定好。 */
@@ -162,8 +167,21 @@ export interface FallbackOffer {
 
 // ---- 核心 → 頁面（SSE /api/events，只送給擁有工作階段的那條串流） ----
 
+/**
+ * 頁面執行的即時語音工具名稱：名稱的唯一執行期來源（docs/23 S8）。加一個工具不是只改這裡，步驟是：
+ * 1. 在這個陣列加名稱（server/live-tool-caller.ts 的 HOST_TOOLS 就是這個陣列，不用另外改）；
+ * 2. tsc 接著會要求補 server/realtime-routes.ts 的 HOST_TIMEOUT_MS（Record<HostToolName, number>）與
+ *    shared/voice-commands.ts 的 ASK_THE_AI（鍵型別 RealtimeToolName 是這個型別的別名）；
+ * 3. 自己要加 server/realtime.ts 的工具 schema 與 src/realtime-tools.ts 的分支（沒加時 tests/realtime-tool-names.test.ts
+ *    與 tests/voice-commands.test.ts 失敗）；
+ * 4. 更新 tests/realtime-tool-names.test.ts 的特徵名單與 snapshot。
+ * 這個陣列的順序沒有對外行為（只用在 includes）；模型看到的工具順序在 server/realtime.ts，指令表的列順序在 ASK_THE_AI。
+ * 不含核心自己執行的 recall_memory、整合層的 app__ 工具與 MCP。
+ */
+export const HOST_TOOL_NAMES = ["web_search", "show_search_result", "delegate_task", "get_tasks", "end_conversation", "home_status", "home_control", "set_voice_volume", "set_day_night"] as const;
+
 /** 工具名稱；tests/voice-commands.test.ts 在編譯期比對 server/realtime.ts 的 REALTIME_TOOLS。 */
-export type HostToolName = "web_search" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control";
+export type HostToolName = (typeof HOST_TOOL_NAMES)[number];
 
 /** 有外部副作用的工具：逾時或結果遺失時只能說「結果不明，請確認」，不能說失敗。 */
 export const SIDE_EFFECT_TOOLS: readonly HostToolName[] = ["home_control", "delegate_task"];
@@ -247,12 +265,20 @@ export type LiveCoreEvent =
   /** sideband 收到的逐字稿（資料通道沒有送時頁面用這份；依 item_id 去重）。 */
   | { kind: "transcript"; role: "user" | "assistant"; text: string; final: boolean; item_id: string | null }
   | { kind: "delegation"; id: string; state: "started" | "finished" | "failed" | "unknown" }
+  /** PRO-2：核心真的讀了今天的行程、請模型念出（只有這個代碼，不含行程內容）；頁面用它點亮規劃區。 */
+  | { kind: "briefing"; part: "schedule" }
   /** 有副作用的工具沒有在時限內回覆：照實說結果不明。 */
   | { kind: "tool_unknown"; name: HostToolName; message: string }
   /** MEM-2：這通通話送出的記憶筆數（累計）與沒有用到的原因；只有數字與代碼，人物名稱由頁面經 IPC 取得。 */
   | { kind: "memory"; used: number; reason: LiveMemoryReason | null; epoch: number }
   /** MEM-2：核心建立（open）或作廢（!open）一張記憶卡。只有不透明的卡片 ID；內容由頁面經 IPC card_view 取得。 */
   | { kind: "memory_card"; card: string; open: boolean }
+  /**
+   * 記憶預設選人（George 2026-11-02）：proposed＝核心問了（或沒有同意時只顯示）「我要用 X 的記憶，好嗎？」，等選定；
+   * selected＝已選定；declined＝這次不用（說了不要、按了「不是我」、候選失效或鏡頭和聲音不一致）。只有不透明的卡片 ID：
+   * 人物名由可信主視窗經 IPC（card_view 或 status）取得。
+   */
+  | { kind: "memory_default"; card: string; phase: "proposed" | "selected" | "declined" }
   /** MEM-2：固定句型的提示（拒絕原因、還沒有保存等）；不含使用者的話或記憶內容。 */
   | { kind: "memory_notice"; message: string }
   /** MEM-2：這通通話帶著記憶，交辦改成問使用者；title 是 sideband 最近一則使用者原句（不是模型改寫的文字）。 */
@@ -269,7 +295,25 @@ export type LiveCoreEvent =
   /** rebuild：MEM-2 撤銷記憶後頁面要自動開一通新的（MEM-3：走被撤銷那通的路徑、沒有備援、不問候、第一句是固定句）。 */
   | { kind: "closed"; reason: LiveCloseReason; message: string; rebuild?: boolean };
 
-export type LiveCloseReason = "ended" | "expired" | "connection_lost" | "auth" | "usage_limit" | "error" | "page_gone" | "memory_revoked";
+/**
+ * 費用防護（2026-11-06）：max_duration（核心的每通上限）、client_lost（頁面停止報到）、os_lock／suspend（App 螢幕鎖定、睡眠）。
+ * 頁面把不認得的原因當成一般結束（說出並顯示訊息）。
+ */
+export type LiveCloseReason = "ended" | "expired" | "connection_lost" | "auth" | "usage_limit" | "error" | "page_gone" | "memory_revoked" | "max_duration" | "client_lost" | "os_lock" | "suspend";
+
+/**
+ * 費用防護結束通話時的字幕（頁面與核心共用；英文在 shared/messages.en.json）。兩條路徑都用，所以不說「計費」或「額度」。
+ * warn：快到上限時（{0}＝上限分鐘數）。
+ */
+export const CALL_END_TEXT = {
+  max_duration: "已達通話上限，即時語音已結束。",
+  client_lost: "開始通話的頁面沒有回應，即時語音已結束。",
+  os_lock: "螢幕鎖定，即時語音已結束。",
+  suspend: "電腦進入睡眠，即時語音已結束。",
+  hidden: "頁面已在背景超過 30 秒，即時語音已結束。",
+  gone: "本機核心已結束這通即時語音。",
+  warn: "通話快滿 {0} 分鐘，一分鐘後會自動結束",
+} as const;
 
 /** realtime.host／realtime.live：MEM-3 起兩條路徑都會用（API key 路徑只在帶記憶規則、旁路接上時才有）。 */
 export type RealtimeServerEvent =

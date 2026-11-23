@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MEMORY_FILE, MemoryStore, newStoreOperation } from "../server/memory/store.ts";
-import { MEMORY_IDLE_MS, type MemoryContext } from "../server/memory/service.ts";
+import { DEFAULT_DECLINE_MS, MEMORY_IDLE_MS, type MemoryContext } from "../server/memory/service.ts";
 import type { MemoryCardView, MemoryReceiptView } from "../shared/memory.ts";
 import { realLockAvailable, testLockProvider } from "./fixtures/memory-lock.ts";
 import { CHATGPT, CLAUDE, enable, fakeBox, harness, manage, req, selectProfile, type Harness } from "./fixtures/memory-service.ts";
@@ -167,7 +167,7 @@ describe.skipIf(!realLockAvailable)("MemoryService: people stay separate (M03, M
     expect(receipts(chosen).map(x => [x.status, x.values])).toEqual([["selected", ["george"]], ["saved", ["george", "不吃香菜"]]]);
   });
 
-  it("M04: a face candidate is only a suggestion; confirmation selects, decline keeps household-only", async () => {
+  it("memory default (George 2026-11-02, replaces the M04 card): typed chat with a face candidate selects at once, the sentence uses that person's memory; 「不是我」 undoes it and is not re-asked", async () => {
     let candidate: { person_id: string; name: string; at: number } | null = null;
     const identity = { candidate: () => candidate, people: () => [{ person_id: "fam_000000000000000000000001", name: "George", minor: false }] };
     const h = make({ identity });
@@ -178,22 +178,68 @@ describe.skipIf(!realLockAvailable)("MemoryService: people stay separate (M03, M
     expect(await h.call({ op: "link_face", profile: george, person: "fam_000000000000000000000001", token: manage.manage })).toMatchObject({ ok: true, receipt: { status: "updated" } });
     await selectProfile(h, null);
     candidate = { person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now };
-    const offer = await h.turn("晚餐吃什麼");
-    expect(card(offer)).toMatchObject({ kind: "face_candidate", name: "George" });
-    expect((offer.chat as { memory_turn: string | null }).memory_turn).toBeNull();
-    // 每個辨識決策只問一次。
-    const declined = await h.call({ op: "card_answer", card: (card(offer) as { card: string }).card, choice: "decline" });
-    expect((declined.presence as { state: string }).state).toBe("unselected");
-    expect(card(await h.turn("晚餐吃什麼"))).toBeNull();
-    candidate = { ...candidate, at: h.clock.now + 1 };
     const turnId = req();
-    const offer2 = await h.turn("晚餐吃什麼", turnId);
-    const accepted = await h.call({ op: "card_answer", card: (card(offer2) as { card: string }).card, choice: "accept" });
-    expect(accepted.presence).toMatchObject({ state: "selected", name: "George" });
-    const chat = accepted.chat as { text: string; memory_turn: string };
+    const auto = await h.turn("晚餐吃什麼", turnId);
+    // 沒有卡片：直接選定，這一句接著用 George 的記憶送聊天；頁面顯示一行「正在用 George 的記憶」與「不是我」。
+    expect(card(auto)).toBeNull();
+    expect(auto.auto_selected).toBe(true);
+    expect(auto.presence).toMatchObject({ state: "selected", name: "George" });
+    expect(receipts(auto).map(r => [r.status, r.message, r.values])).toEqual([["selected", "本次人物：{0}（鏡頭認出）", ["George"]]]);
+    const chat = auto.chat as { text: string; memory_turn: string };
     expect(chat.text).toBe("晚餐吃什麼");
-    // 卡片回答後的 memory_turn 綁原本那一輪的 request_id。
     expect(await h.service.withChat({ nonce: chat.memory_turn, requestId: turnId, lastUser: chat.text, target: CLAUDE }, async ctx => ctx.facts.map(f => f.text))).toEqual(["不吃香菜"]);
+    // 「不是我」（畫面上的按鈕＝select 全家共用；打字也可以）：改用全家共用，同一個辨識決策不再自動選定。
+    const undo = await h.turn("不是我");
+    expect(undo.presence).toMatchObject({ state: "unselected" });
+    expect(receipts(undo).map(r => r.message)).toEqual(["已改用全家共用的記憶"]);
+    expect(undo.chat).toBeNull();
+    const again = await h.turn("晚餐吃什麼");
+    expect(again.auto_selected).toBeUndefined();
+    expect(again.presence).toMatchObject({ state: "unselected" });
+    // 沒有選定時，「不是我」只是一般的話（照樣送聊天）。
+    expect((await h.turn("不是我")).chat).toMatchObject({ text: "不是我" });
+    // 說過不要：10 分鐘內新的辨識決策也不再預設選定。
+    candidate = { ...candidate, at: h.clock.now + 1 };
+    expect((await h.turn("晚餐吃什麼")).presence).toMatchObject({ state: "unselected" });
+    // 過了 10 分鐘的新決策：再次預設選定；畫面上的「不是我」（select 全家共用）同樣復原。
+    h.clock.now += DEFAULT_DECLINE_MS + 1;
+    candidate = { ...candidate, at: h.clock.now + 1 };
+    const auto2 = await h.turn("晚餐吃什麼");
+    expect(auto2.presence).toMatchObject({ state: "selected", name: "George" });
+    const undo2 = await h.call({ op: "select", profile: null, card: (auto2.presence as { select_card: string }).select_card });
+    expect(undo2.presence).toMatchObject({ state: "unselected" });
+    // 「我是 X」與「不是我」的句子不會被預設選人搶先。
+    candidate = { ...candidate, at: h.clock.now + 2 };
+    expect((await h.turn("不是我")).presence).toMatchObject({ state: "unselected" });
+  });
+
+  it("memory default review 3/6: typed chat uses only a face candidate (never the in-call voice); a typed 「不是我」 with a face candidate pending declines it for the interaction", async () => {
+    type Hit = { person_id: string; name: string; at: number; source?: "face" | "voice" };
+    let candidate: Hit | null = null;
+    let face = null as Hit | null;
+    const identity = { candidate: () => candidate, faceCandidate: () => face, people: () => [{ person_id: "fam_000000000000000000000001", name: "George", minor: false }] };
+    const h = make({ identity });
+    await enable(h, "George");
+    await h.turn("記住，我不吃香菜");
+    const token = await h.call({ op: "list", manage: true }, { userInitiated: true });
+    const george = ((token.status as { profiles: { id: string }[] }).profiles)[0]!.id;
+    await h.call({ op: "link_face", profile: george, person: "fam_000000000000000000000001", token: token.manage });
+    await selectProfile(h, null);
+    // 只有通話中的聲音候選：打字聊天不預設選人。
+    candidate = { person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now, source: "voice" };
+    const voiceOnly = await h.turn("晚餐吃什麼");
+    expect(voiceOnly.auto_selected).toBeUndefined();
+    expect(voiceOnly.presence).toMatchObject({ state: "unselected" });
+    // 臉的候選還沒用：打「不是我」＝說不要（不送聊天、不選定），這次互動不再預設選人。
+    face = { person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now + 1, source: "face" };
+    candidate = face;
+    const no = await h.turn("不是我");
+    expect(no.chat).toBeNull();
+    expect(no.presence).toMatchObject({ state: "unselected" });
+    expect(receipts(no).map(r => r.message)).toEqual(["這次只用全家共用的記憶"]);
+    face = { ...face!, at: h.clock.now + 2 };
+    candidate = face;
+    expect((await h.turn("晚餐吃什麼")).presence).toMatchObject({ state: "unselected" });
   });
 
   it("M04: multi-face / tracking loss suspends; it can only downgrade", async () => {
@@ -660,11 +706,10 @@ describe.skipIf(!realLockAvailable)("MemoryService: review fixes", () => {
     expect(receipts(await fresh.turn("記住我不喝咖啡", id)).map(r => r.status)).toEqual(["saved"]);
     fresh.service.suspendAll();
     candidate = { person_id: "fam_000000000000000000000001", name: "George", at: fresh.clock.now };
-    const offer = await fresh.turn("記住我不喝咖啡", id);
-    expect(card(offer)).toMatchObject({ kind: "face_candidate" });
-    const accepted = await fresh.call({ op: "card_answer", card: (card(offer) as { card: string }).card, choice: "accept" });
-    // 換人後 request_id 快取已清：重新處理，依內容去重回 unchanged（不是重播舊的 saved）。
-    expect(receipts(accepted).map(r => r.status)).toEqual(["selected", "unchanged"]);
+    const auto = await fresh.turn("記住我不喝咖啡", id);
+    expect(card(auto)).toBeNull();
+    // 暫停時也預設選定；換人後 request_id 快取已清：重新處理，依內容去重回 unchanged（不是重播舊的 saved）。
+    expect(receipts(auto).map(r => r.status)).toEqual(["selected", "unchanged"]);
   });
 
   it("M-9: unlinkFace reports what actually happened", async () => {

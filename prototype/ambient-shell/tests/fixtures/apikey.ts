@@ -1,4 +1,5 @@
 import type { McpServerConfig } from "../../server/config.ts";
+import type { CallFollowUp } from "../../server/proactive-calendar.ts";
 import type { LiveMemoryBinding } from "../../server/memory/live.ts";
 import { RealtimeBridge } from "../../server/realtime.ts";
 import { ApiKeyRoute, HostGone, type RouteCall, type SessionContext } from "../../server/realtime-routes.ts";
@@ -59,7 +60,7 @@ export function gaBridge(ga: FakeGa, options: { mcp?: McpServerConfig[]; apiKey?
 }
 
 /** ApiKeyRoute（有記憶 harness 時接上 MemoryService.openVoice("api_key")）；bindings 記下每通的 binding。 */
-export function gaRoute(ga: FakeGa, h: Harness | null, options: { mcp?: McpServerConfig[]; updateAckMs?: number } = {}): { route: ApiKeyRoute; bindings: LiveMemoryBinding[]; logs: string[] } {
+export function gaRoute(ga: FakeGa, h: Harness | null, options: { mcp?: McpServerConfig[]; updateAckMs?: number; followUp?: (sessionId: string) => CallFollowUp | null } = {}): { route: ApiKeyRoute; bindings: LiveMemoryBinding[]; logs: string[] } {
   const bindings: LiveMemoryBinding[] = [];
   const logs: string[] = [];
   const route = new ApiKeyRoute(gaBridge(ga, options), true, "marin", {
@@ -72,6 +73,7 @@ export function gaRoute(ga: FakeGa, h: Harness | null, options: { mcp?: McpServe
     } : {}),
     log: (line) => void logs.push(line),
     ...(options.updateAckMs !== undefined ? { updateAckMs: options.updateAckMs } : {}),
+    ...(options.followUp ? { followUp: options.followUp } : {}),
   });
   return { route, bindings, logs };
 }

@@ -77,6 +77,21 @@ describe("WakeGuard (fake clock)", () => {
     expect(g.check()).toBeNull();
   });
 
+  it("drops while a processing-cue ping is sounding ('cue', George 2026-11-02); reset clears it", () => {
+    const clock = new FakeClock();
+    const g = new WakeGuard(clock.now);
+    g.begin("cue");
+    g.begin("cue");
+    g.end("cue");
+    expect(g.check()).toBe("cue");
+    g.end("cue");
+    expect(g.check()).toBeNull();
+    clock.advance(3000);
+    g.begin("cue");
+    g.reset();
+    expect(g.check()).toBeNull();
+  });
+
   it("extra end() calls never go negative, and drops do not extend the de-duplication window", () => {
     const clock = new FakeClock();
     const g = new WakeGuard(clock.now);

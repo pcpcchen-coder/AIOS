@@ -47,5 +47,6 @@ jobs:
             ${{ runner.temp }}/aios-verification-*/test.log
             ${{ runner.temp }}/aios-verification-*/build.log
             ${{ runner.temp }}/aios-verification-*/server.log
+            ${{ runner.temp }}/aios-verification-*/rpi4-terminal-kit.log
           if-no-files-found: warn
           retention-days: 7

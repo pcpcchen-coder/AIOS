@@ -161,6 +161,11 @@ export interface MemoryTurnView {
    * MEM-5a 記憶建議：只有卡片 ID（內容經 card_view 取）。不擋聊天：頁面在這一輪的回覆串流結束後，才在回覆下方顯示一行。
    */
   suggestion: { card: string } | null;
+  /**
+   * 記憶預設選人（George 2026-11-02）：這一輪打字前，核心依鏡頭認出的家人直接選定了本次人物（presence 是選定後的）。
+   * 頁面顯示一行「正在用 X 的記憶」與「不是我」（不擋聊天；按「不是我」＝select 全家共用）。
+   */
+  auto_selected?: boolean;
 }
 
 export type MemoryErrorCode = "bad_request" | "unavailable" | "not_user_initiated" | "no_manage" | "not_found" | "expired" | "conflict" | "declined" | "full" | "busy" | "closed";
@@ -174,6 +179,24 @@ export type MemoryResponse =
   /** MEM-2：SSE 只送卡片 ID，可信主視窗用 card_view 取內容；origin live＝即時語音的卡（回答後不續送聊天）。 */
   | { ok: true; op: "card_view"; card: MemoryCardView; origin: "typed" | "live" }
   | ({ ok: true; op: "edit" | "forget" | "pin" | "profile_delete" | "link_face" | "profile_minor" | "suggestions" } & { receipt: MemoryReceiptView; history_reset: boolean; status: MemoryStatusView })
+  | { ok: false; code: MemoryErrorCode; message: string };
+
+/**
+ * RPI-ID：終端機（POST /api/terminal/memory）拿到的本次人物狀態：只有 Pi 的「正在用 X 的記憶」、「不是我」與本次人物選單用到的
+ * 欄位（狀態、本次人物、人物的 ID 與名字）。記憶筆數、未成年與連結旗標、服務帳號與同意、建議旗標都不給。
+ */
+export interface MemoryPresenceStatus {
+  state: MemoryStatusView["state"];
+  presence: MemoryPresenceView;
+  profiles: Pick<MemoryProfileView, "id" | "name">[];
+}
+
+/** RPI-ID：終端機的記憶回應（allow-list 投影；server/terminal-routes.ts）。 */
+export type MemoryPresenceResponse =
+  | ({ ok: true; op: "status" } & MemoryPresenceStatus)
+  | ({ ok: true; op: "card_answer" | "select" } & Pick<MemoryTurnView, "receipts" | "presence" | "history_reset"> & { status: MemoryPresenceStatus })
+  | { ok: true; op: "suspend"; presence: MemoryPresenceView }
+  | { ok: true; op: "card_view"; card: Extract<MemoryCardView, { kind: "face_candidate" }>; origin: "typed" | "live" }
   | { ok: false; code: MemoryErrorCode; message: string };
 
 export type MemorySetupSubject = { kind: "household" } | { kind: "profile"; profile: string } | { kind: "name"; name: string };

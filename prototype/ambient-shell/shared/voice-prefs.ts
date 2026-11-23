@@ -6,6 +6,10 @@ export interface VoicePrefs {
   voice_idle_s: number;
   /** 即時語音：多久沒說話（也沒在回覆、查詢或等確認）就自動結束，避免忘記關而持續計費。 */
   realtime_idle_s: number;
+  /** 即時語音每通最長多久（費用防護，George 2026-11-06）：到上限前一分鐘提醒，到了就結束；頁面與核心都會執行。 */
+  realtime_max_call_s: number;
+  /** 即時語音上網查詢的結果畫面：念完（播放真的結束）後幾秒收起（George 2026-11-09）。 */
+  search_close_s: number;
 }
 
 export type VoicePrefsPatch = Partial<VoicePrefs>;
@@ -23,7 +27,18 @@ export const VOICE_PREFS = {
   realtime_idle_s: {
     kind: "seconds", default: 120, min: 30, max: 600, step: 10, presets: [60, 120, 180, 300, 600],
     label: "即時語音閒置多久自動結束",
-    hint: "從你最後一次開口、打字或 Nous 回覆完算起；回覆、查資料、等確認時不算（即時語音依用量計費）",
+    hint: "從你最後一次說完一句（聽得出字的話）、打字或 Nous 回覆你之後算起；回覆、查資料、等確認時不算（即時語音依用量計費）",
+  },
+  // 下限 5 分鐘、上限 60 分鐘，沒有「不限」（George 2026-11-06）。
+  realtime_max_call_s: {
+    kind: "seconds", default: 1200, min: 300, max: 3600, step: 60, presets: [600, 1200, 1800, 3600],
+    label: "每通即時語音最長多久",
+    hint: "從連上算起；到上限前一分鐘提醒，到了就結束（通話中也算）",
+  },
+  search_close_s: {
+    kind: "seconds", default: 8, min: 3, max: 60, step: 1, presets: [3, 5, 8, 15, 30, 60],
+    label: "查詢結果收起秒數",
+    hint: "語音念完後幾秒收起查詢結果畫面；列出編號、等你選的時候不會自動收起",
   },
 } as const satisfies PrefSpecs<VoicePrefs>;
 
@@ -38,6 +53,11 @@ export class VoicePatchError extends Error {}
 /** 邊界驗證（HTTP body、voice.json）；規則與 parseCameraPatch 相同。 */
 export function parseVoicePatch(input: unknown): VoicePrefsPatch {
   return parsePrefsPatch<VoicePrefs>(VOICE_PREFS, input, { noun: "語音設定", make: (m) => new VoicePatchError(m) });
+}
+
+/** 每通即時語音的上限（毫秒；頁面的 CallGuard 用）。收到核心的設定前用預設值。 */
+export function maxCallMs(voice: VoicePrefs | undefined): number {
+  return (voice?.realtime_max_call_s ?? DEFAULT_VOICE_PREFS.realtime_max_call_s) * 1000;
 }
 
 /** 頁面交給兩個閒置計時器的毫秒數（VoiceConversation、RealtimeVoice 的 idleMs）；收到核心的設定前用預設值。 */

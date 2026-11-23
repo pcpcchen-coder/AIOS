@@ -6,7 +6,7 @@ import { settingsMenu } from "../desktop/settings-menu.mjs";
 import { WakeCalibrationCore } from "../src/audio/calibration-core.ts";
 import { WakeController, type WakeCalibrationEvents, type WakeHost } from "../src/audio/controller.ts";
 import { kwsConfig, SherpaWasmDetector, type WakeDetector, type WakeScanner } from "../src/audio/detector.ts";
-import { AudioFrontEnd } from "../src/audio/front-end.ts";
+import { AudioFrontEnd, type MicOpener } from "../src/audio/front-end.ts";
 import { createRuntimeNet } from "../src/audio/runtime-net.ts";
 import { WakeSettingsStore } from "../server/wake-settings.ts";
 import { translate } from "../shared/i18n.mjs";
@@ -37,6 +37,9 @@ import {
 } from "../shared/wake.ts";
 import { FakeCapture, FakeClock, FakeEarcon, FakeMediaDevices, FakeStream, flush } from "./fixtures/wake.ts";
 import { builtTestManifest, engineControls, fakeGlue, fakeScope, upstreamApiModule, type FakeKwsModule } from "./fixtures/wake-wasm.ts";
+
+/** 麥克風開啟器（產品是 src/audio-devices.ts 的 audioDevices）：這裡直接經假的 MediaDevices 開，系統預設。 */
+const micOf = (media: FakeMediaDevices): MicOpener => ({ open: () => media.getUserMedia({ audio: true }) as unknown as Promise<MediaStream>, preferred: () => false });
 
 // 「矯正喚醒詞…」（George 2026-11-01）。假的麥克風、擷取圖與 Emscripten 模組都是 **fixture**：這些測試只證明流程、保存、
 // 門檻覆寫與錄音清除的程式路徑，**不證明偵測準確度**；家人的實測數字見 docs/validation/。
@@ -351,11 +354,10 @@ function controllerRig(overrides: WakeKeywordOverrides | null = null) {
     visible: () => true,
     onVisible: () => () => {},
     state: (r) => reports.push(r),
-    saveDeviceId: async () => {},
     newId: () => "int_0000000000000001",
   };
-  const c = new WakeController(host, { mediaDevices: media, capture, earcon });
-  const view = (listen: boolean, o = overrides): WakeSettingsView => ({ wake_listen: listen, device_id: null, wake_silence_s: 5, keyword_overrides: o, runtime: "ok" });
+  const c = new WakeController(host, { mic: micOf(media), capture, earcon });
+  const view = (listen: boolean, o = overrides): WakeSettingsView => ({ wake_listen: listen, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, keyword_overrides: o, runtime: "ok" });
   const events = { ready: vi.fn(), clip: vi.fn(), scan: vi.fn(), sweepDone: vi.fn(), aborted: vi.fn() } satisfies WakeCalibrationEvents;
   return { c, media, capture, earcon, reports, view, events };
 }
@@ -457,7 +459,7 @@ describe("WakeController/AudioFrontEnd: calibration pauses always-on listening a
 
   it("AudioFrontEnd refuses calibration when the engine is not ok, without opening the microphone", async () => {
     const media = new FakeMediaDevices();
-    const fe = new AudioFrontEnd({ mediaDevices: media, capture: new FakeCapture(), runtime: () => "missing" }, { state: () => {}, detected: () => {}, listening: () => {} });
+    const fe = new AudioFrontEnd({ mic: micOf(media), capture: new FakeCapture(), runtime: () => "missing" }, { state: () => {}, detected: () => {}, listening: () => {} });
     await expect(fe.calibrate({ started() {}, detected() {}, failed() {} }, { clip() {}, scan() {}, sweepDone() {} })).rejects.toMatchObject({ reason: "runtime_missing" });
     expect(media.calls).toEqual([]);
   });
@@ -499,7 +501,7 @@ describe("WakeCalibrationView: prompts with a ding and full-window cue, live res
     const applied: (WakeKeywordOverrides | null)[] = [];
     let events: WakeCalibrationEvents | null = null;
     const session = { ding: vi.fn(async () => true), beginClip: vi.fn(), endClip: vi.fn(), sweep: vi.fn(), discard: vi.fn(), stop: vi.fn() };
-    const settings: WakeSettingsView = { wake_listen: true, device_id: null, wake_silence_s: 5, keyword_overrides: overrides, runtime: "ok" };
+    const settings: WakeSettingsView = { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, keyword_overrides: overrides, runtime: "ok" };
     const dismiss = vi.fn();
     const view = new WakeCalibrationView({
       settings: () => settings,
@@ -619,7 +621,7 @@ describe("menu, native consent and translations", () => {
     chatgpt: { signed_in: false, email: null, plan_usage: false, needs_reauth: false, welcome_ack: false, pending_login: false, last_error: null },
     ...(wake ? { wake } : {}),
   } as unknown as SettingsView);
-  const wakeView = (runtime: "ok" | "missing", o: WakeKeywordOverrides | null = null): WakeSettingsView => ({ wake_listen: false, device_id: null, wake_silence_s: 5, keyword_overrides: o, runtime });
+  const wakeView = (runtime: "ok" | "missing", o: WakeKeywordOverrides | null = null): WakeSettingsView => ({ wake_listen: false, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, keyword_overrides: o, runtime });
 
   it("「矯正喚醒詞…」 sits in the wake section, is enabled only when the engine is ok, and its click goes to the main process", () => {
     const calibrateWake = vi.fn();

@@ -17,13 +17,16 @@
     "test": "vitest run",
     "vision:setup": "node scripts/vision-setup.mjs",
     "face:setup": "node scripts/face-setup.mjs",
+    "speaker:setup": "node scripts/speaker-setup.mjs",
     "face:spike": "vite --config spike/face/vite.config.ts",
     "face:bench": "node scripts/face-spike-bench.mjs",
     "wake:setup": "tsx scripts/wake-setup.mjs",
     "wake:spike": "tsx spike/wake/cli.ts",
     "wake:bench": "tsx spike/wake/bench.ts",
     "wake:page": "vite --config spike/wake/vite.config.ts",
-    "docs:commands": "tsx scripts/write-commands-doc.ts"
+    "wake:direction": "vite --config spike/wake/direction/vite.config.ts",
+    "docs:commands": "tsx scripts/write-commands-doc.ts",
+    "tv:pair": "tsx scripts/tv-pair.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.131.0",
@@ -31,10 +34,13 @@
     "dompurify": "3.4.17",
     "marked": "18.0.14",
     "onnxruntime-web": "1.30.0",
-    "opencc-js": "1.4.2"
+    "opencc-js": "1.4.2",
+    "qrcode-generator": "2.0.4",
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@types/node": "25.9.9",
+    "@types/ws": "8.18.1",
     "sherpa-onnx": "2.0.1",
     "sherpa-onnx-node": "2.0.1",
     "tsx": "4.23.15",

@@ -50,9 +50,9 @@ afterAll(() => {
 
 const SESSION = `ids_${"b".repeat(32)}`;
 const MODEL = { detector: "d", recognizer: "r", align: "a", preproc: "p" };
-const ready: IdentityManageStatus = { state: "ready", limited_reason: null, count: 0, max: FAMILY_MAX, needs_reenroll: 0, damaged: 0, gallery_version: 1, epoch: 1, models: "ok", backup_exclusion: "excluded", calibrated: false, naming_notice_seen: true };
-const george: FamilyMember = { person_id: `fam_${"1".repeat(24)}`, name: "George", minor: false, created_at: "2026-10-25T01:00:00.000Z", needs_reenroll: false, damaged: false };
-const kid: FamilyMember = { person_id: `fam_${"2".repeat(24)}`, name: "小明", minor: true, created_at: "2026-10-25T01:00:00.000Z", needs_reenroll: true, damaged: false };
+const ready: IdentityManageStatus = { state: "ready", limited_reason: null, count: 0, max: FAMILY_MAX, needs_reenroll: 0, damaged: 0, gallery_version: 1, epoch: 1, models: "ok", voice_models: "ok", backup_exclusion: "excluded", calibrated: false, naming_notice_seen: true };
+const george: FamilyMember = { person_id: `fam_${"1".repeat(24)}`, name: "George", minor: false, created_at: "2026-10-25T01:00:00.000Z", needs_reenroll: false, damaged: false, face: true, voice: "none" };
+const kid: FamilyMember = { person_id: `fam_${"2".repeat(24)}`, name: "小明", minor: true, created_at: "2026-10-25T01:00:00.000Z", needs_reenroll: true, damaged: false, face: true, voice: "none" };
 
 function manage(people: FamilyMember[], status: IdentityManageStatus = ready, op: "open_session" | "list" | "delete" = "open_session"): IdentityResponse {
   return { ok: true, op, session: SESSION, people, status: { ...status, count: people.length } };
@@ -90,6 +90,29 @@ describe("FamilyView", () => {
     expect(t.el.textContent).toContain("家人辨識：瀏覽器版不可用（只在 macOS App 提供）");
     expect(t.calls).toEqual([]);
     expect(t.el.getAttribute("data-visibility-reason")).toBe("user_request");
+  });
+
+  it("RPI-ID terminal page (no IPC bridge): says enrollment is done on the Mac, in zh-TW and English", async () => {
+    const { setLocale } = await import("../src/i18n.ts");
+    const view = new mod.FamilyView({
+      bridge: null,
+      unavailableMessage: "家人辨識：登記與管理請在 Mac 的 Nous App 進行（這台終端機只用來認人）。",
+      source: { sampleFrame: async () => null },
+      createWorker: () => ({ postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null }) as unknown as WorkerLike,
+      model: MODEL,
+      dismiss: () => {},
+    });
+    const el = view.element as unknown as FakeElement;
+    view.open();
+    expect(el.textContent).toContain("家人辨識：登記與管理請在 Mac 的 Nous App 進行（這台終端機只用來認人）。");
+    expect(el.textContent).not.toContain("瀏覽器版");
+    setLocale("en");
+    try {
+      view.open();
+      expect(el.textContent).toContain("Family recognition: enroll and manage family members in the Nous App on the Mac (this terminal only recognizes people).");
+    } finally {
+      setLocale("zh-TW");
+    }
   });
 
   it("opens a management session and lists people with registration date, minor and re-enrol marks; explanation is always shown", async () => {
@@ -266,5 +289,131 @@ describe("observationText", () => {
     expect(mod.observationText({ ...base, state: "unavailable", reason: "quality" }, [george])).toBe("品質不足");
     expect(mod.observationText({ ...base, state: "unavailable", reason: "collecting" }, [george])).toBe("辨識中…");
     expect(mod.observationText(null, [])).toBe("辨識中…");
+  });
+});
+
+// SP-01：聲音登記的入口（只有提供 voice 時，也就是 macOS App 才顯示）。錄音本身要 AudioContext 與 worker，只能在 Mac 上驗證。
+describe("FamilyView voice (SP-01)", () => {
+  const grandma: FamilyMember = { person_id: `fam_${"3".repeat(24)}`, name: "阿嬤", minor: false, created_at: "2026-11-01T01:00:00.000Z", needs_reenroll: false, damaged: false, face: false, voice: "enrolled" };
+  const both: FamilyMember = { ...george, voice: "enrolled" };
+
+  function makeVoice(reply: (req: IdentityRequest) => IdentityResponse | Promise<IdentityResponse>) {
+    const calls: IdentityRequest[] = [];
+    const view = new mod.FamilyView({
+      bridge: { identity: async (req) => (calls.push(req), reply(req)) },
+      source: { sampleFrame: async () => null },
+      createWorker: () => ({ postMessage: vi.fn(), terminate: vi.fn(), onmessage: null, onerror: null }) as unknown as WorkerLike,
+      model: MODEL,
+      dismiss: vi.fn(),
+      voice: {
+        mic: { acquire: async () => { throw new Error("no mic in tests"); }, release: vi.fn() },
+        createWorker: () => ({ postMessage: vi.fn(), terminate: vi.fn(), onmessage: null }),
+        model: { speaker: "s", preproc: "p", dim: 192 },
+      },
+    });
+    const el = view.element as unknown as FakeElement;
+    const buttons = (label: string) => el.all().filter((e) => e.tagName === "button" && e.textContent.startsWith(label));
+    return { view, el, calls, buttons };
+  }
+
+  it("shows face and voice status per member, with record / re-record / add face / delete voice where they apply", async () => {
+    const t = makeVoice(() => manage([george, grandma, both]));
+    t.view.open();
+    await flush();
+    const text = t.el.textContent;
+    expect(text).toContain("臉：已登記");
+    expect(text).toContain("臉：未登記");
+    expect(text).toContain("聲音：未登記");
+    expect(text).toContain("聲音：已登記");
+    expect(t.buttons("錄製聲音")).toHaveLength(1); // George
+    expect(t.buttons("重錄聲音")).toHaveLength(2); // 阿嬤、both
+    expect(t.buttons("補拍臉")).toHaveLength(1); // 阿嬤（只有聲音）
+    expect(t.buttons("刪除聲音")).toHaveLength(1); // 只有臉與聲音都有的那位；只有聲音的人用「刪除」
+    expect(t.buttons("錄製聲音")[0]!.disabled).toBe(false);
+  });
+
+  it("without the speaker model the record buttons are disabled and the reason is shown; the camera being off still allows a voice-only member", async () => {
+    const t = makeVoice(() => manage([george], { ...ready, voice_models: "missing" }));
+    t.view.open();
+    await flush();
+    expect(t.buttons("錄製聲音")[0]!.disabled).toBe(true);
+    expect(t.el.textContent).toContain("npm run speaker:setup");
+    const cameraOff = makeVoice(() => manage([], { ...ready, limited_reason: "鏡頭未啟用或已關閉；只能查看與刪除" }));
+    cameraOff.view.open();
+    await flush();
+    expect(cameraOff.buttons("新增家人")[0]!.disabled).toBe(false);
+  });
+
+  it("「錄製聲音」 asks for consent with the voice explanation before opening the microphone", async () => {
+    const t = makeVoice(() => manage([george]));
+    t.view.open();
+    await flush();
+    t.buttons("錄製聲音")[0]!.click();
+    expect(t.el.textContent).toContain("錄製聲音：George");
+    expect(t.el.textContent).toContain(mod.VOICE_EXPLANATION);
+    const start = t.buttons("開始錄音")[0]!;
+    expect(start.disabled).toBe(true);
+    const consent = t.el.all().find((e) => e.tagName === "input" && e.getAttribute("type") === "checkbox")!;
+    consent.checked = true;
+    for (const fn of consent.listeners.get("change") ?? []) fn();
+    expect(start.disabled).toBe(false);
+  });
+
+  it("「試認聲音」 appears only when someone has a voice enrolled, opens its own step labelled uncalibrated, and cancels back to the list (SP-02a)", async () => {
+    const none = makeVoice(() => manage([george]));
+    none.view.open();
+    await flush();
+    expect(none.buttons("試認聲音")).toHaveLength(0);
+    const t = makeVoice(() => manage([george, grandma]));
+    t.view.open();
+    await flush();
+    expect(t.buttons("試認聲音")).toHaveLength(1);
+    t.buttons("試認聲音")[0]!.click();
+    await flush();
+    expect(t.el.textContent).toContain("載入聲音模型、打開麥克風…");
+    expect(t.el.textContent).toContain(mod.UNCALIBRATED_LABEL);
+    expect(t.el.textContent).toContain("只憑聲音不會叫名字");
+    t.buttons("取消")[0]!.click();
+    expect(t.buttons("試認聲音")).toHaveLength(1);
+    expect(t.calls.some((c) => c.op === "voice_test")).toBe(false);
+    expect(mod.VOICE_TEST_PROMPTS.map((p) => p.kind)).toEqual(["keyword", "utterance"]);
+  });
+
+  it("「聲音校準」 (SP-03a) opens its own step, loads the report and offers record / apply / clear (no stranger playback without system voices)", async () => {
+    const report = {
+      voices: 1,
+      applied_at: null,
+      segments: (["keyword", "utterance"] as const).map((segment) => ({
+        segment, member_trials: 10, stranger_trials: 30, member_min: 0.81, member_median: 0.9, stranger_max: 0.32,
+        proposed: { match: 0.37, margin: 0.08 }, proposed_reject_rate: 0, current: { match: 0.5, margin: 0.08 }, applied: false,
+        verify: { stranger_trials: 0, false_accepts: 0, member_trials: 0, rejects: 0 }, calibrated: false,
+      })),
+    };
+    const t = makeVoice((req) => (req.op === "calib_status" ? ({ ok: true, op: "calib_status", report } as IdentityResponse) : manage([both])));
+    t.view.open();
+    await flush();
+    expect(t.buttons("聲音校準")).toHaveLength(1);
+    t.buttons("聲音校準")[0]!.click();
+    await flush();
+    expect(t.calls.at(-1)).toEqual({ op: "calib_status", session: SESSION });
+    expect(t.el.textContent).toContain("建議門檻 0.37");
+    expect(t.el.textContent).toContain("收集：你的樣本 10／10，陌生聲音 30／30");
+    expect(t.buttons("錄我的聲音")).toHaveLength(1);
+    expect(t.buttons("套用建議門檻")[0]!.disabled).toBe(false);
+    expect(t.buttons("播放陌生聲音")).toHaveLength(0);
+    expect(mod.CALIBRATION_MEMBER_PROMPTS.filter((p) => p.kind === "keyword")).toHaveLength(10);
+    expect(mod.CALIBRATION_MEMBER_PROMPTS.filter((p) => p.kind === "utterance")).toHaveLength(10);
+    t.buttons("完成")[0]!.click();
+    expect(t.buttons("聲音校準")).toHaveLength(1);
+  });
+
+  it("delete voice sends delete_voice for that person", async () => {
+    const t = makeVoice((req) => (req.op === "delete_voice" ? { ...manage([george], ready, "list"), op: "delete_voice" } as IdentityResponse : manage([both])));
+    t.view.open();
+    await flush();
+    t.buttons("刪除聲音")[0]!.click();
+    await flush();
+    expect(t.calls.at(-1)).toEqual({ op: "delete_voice", session: SESSION, person_id: both.person_id });
+    expect(t.el.textContent).toContain("已刪除「George」的聲音。");
   });
 });

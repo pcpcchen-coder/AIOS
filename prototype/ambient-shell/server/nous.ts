@@ -1,6 +1,8 @@
-import { type Locale } from "../shared/i18n.mjs";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { normalizeLocale, type Locale } from "../shared/i18n.mjs";
+import { appendBriefing } from "../shared/proactive.ts";
+import { liveGreetingText } from "../shared/sense.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createServer } from "node:net";
 import { parseEnv } from "node:util";
 import { createApp } from "./app.ts";
@@ -11,6 +13,7 @@ import { ChatGPTAuth } from "./chatgpt-auth.ts";
 import { ChatGPTExecutor } from "./chatgpt-executor.ts";
 import { ClaudeExecutor } from "./claude-executor.ts";
 import { loadConfig } from "./config.ts";
+import { writeAtomic } from "./fs-atomic.ts";
 import { MockExecutor } from "./mock-executor.ts";
 import { ProviderManager } from "./providers.ts";
 import { buildLiveInstructions, RealtimeBridge } from "./realtime.ts";
@@ -28,8 +31,10 @@ import { HomeBridge } from "./home-bridge.ts";
 import { TaskRunner } from "./runner.ts";
 import { memoryTaskViews, TaskStore, type PlaintextDropReason } from "./store.ts";
 import { checkFaceRuntime, FACE_MODEL_VERSION } from "./face-runtime.ts";
+import { checkSpeakerRuntime, SPEAKER_MODEL_VERSION } from "./speaker-runtime.ts";
 import { checkWakeRuntime } from "./wake-runtime.ts";
 import { WakeSettingsStore } from "./wake-settings.ts";
+import { AudioSettingsStore } from "./audio-settings.ts";
 import { GalleryStore, type SecretBox } from "./identity-store.ts";
 import { IdentityService, type ConfirmFn, type IdentityContext, type IdentityMemoryLink } from "./identity-service.ts";
 import type { IdentityResponse } from "../shared/identity.ts";
@@ -41,7 +46,28 @@ import { MemoryBoundary } from "./memory/boundary.ts";
 import { SealedVault, VaultError, type VaultFailure } from "./sealed-vault.ts";
 import type { MemoryLockProvider } from "./memory/store.ts";
 import { createTaskIpc } from "./task-ipc.ts";
+import { createIntegrations } from "./integrations/index.ts";
 import type { TasksResponse } from "../shared/protected-tasks.ts";
+import { TerminalPresence } from "./terminal-presence.ts";
+import { isTerminalId, type TerminalStatus } from "../shared/terminal.ts";
+import { WeatherService, weatherNowView } from "./weather.ts";
+import { ClockSettingsStore } from "./clock-settings.ts";
+import { DayNightSettingsStore } from "./day-night-settings.ts";
+import { TerminalDisplay } from "./terminal-display.ts";
+import { HomeCornerSettingsStore } from "./home-corner-settings.ts";
+import { HomeOverview } from "./home-overview.ts";
+import { systemTimeZone } from "./local-date.ts";
+import { calendarReaderFrom } from "./proactive-calendar.ts";
+import { FolderMemoriesSource, memoriesFeature, MemoriesSettingsStore } from "./memories.ts";
+import { GooglePhotosCache, googleMemories, GooglePicker, SIPS_PATH, sipsConverter } from "./memories-google.ts";
+import { defaultGogRunner, resolveGogPath } from "./integrations/gog/runner.ts";
+import { MEMORIES_GOOGLE_REASON } from "../shared/memories.ts";
+import { AlarmCenter } from "./alarms.ts";
+import { TimerAdapter } from "./integrations/adapters/timer.ts";
+import { AlarmAdapter } from "./integrations/adapters/alarm.ts";
+import type { RingRecord } from "../shared/alarm.ts";
+import { MAIN_SOURCE } from "../shared/terminal.ts";
+import { fitBriefing, fitsLiveAppend, ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
 
 // 啟動本機核心。終端機版（index.ts）與 macOS App 共用：路徑、連接埠與設定都由呼叫端決定。
 
@@ -82,6 +108,18 @@ export interface NousOptions {
    * 未提供或 "http"（終端機／瀏覽器版）時頁面照舊可以經 HTTP 打開，由瀏覽器的鏡頭權限提示與畫面指示點把關。
    */
   cameraEnable?: "main_process" | "http";
+  /**
+   * 服務模式：終端機的連線狀態改變（只來自 POST /api/terminal/heartbeat 的心跳，含逾時斷線）。App 用它更新選單列的
+   * 「服務模式：Pi 已連線／已斷線」。
+   */
+  onTerminalChange?: (status: TerminalStatus) => void;
+  /** PRO-1：查天氣用的 fetch（測試注入假的 Open-Meteo；未提供時用全域 fetch）。 */
+  weatherFetch?: typeof fetch;
+  /**
+   * ALARM-1：定時器的 App 掛勾。onRingStart：開始響鈴（App 發系統通知當備援）；onAwakeChange：有定時器在跑或正在響
+   * （App 據此阻止系統閒置睡眠）。未提供時只在頁面響。
+   */
+  alarms?: { onRingStart?(ring: RingRecord): void; onAwakeChange?(needed: boolean): void };
 }
 
 export interface TasksInjection {
@@ -126,12 +164,16 @@ export interface IdentityInjection {
   confirm: ConfirmFn;
   /** 模型與 onnxruntime wasm 的資料夾（App：userData/face-runtime；npm run face:setup -- --product 安裝）。 */
   modelDir?: string | null;
+  /** SP-01 講者模型與 onnxruntime wasm 的資料夾（App：userData/speaker-runtime；npm run speaker:setup 安裝）。 */
+  speakerModelDir?: string | null;
 }
 
 export interface NousHandle {
   port: number;
   url: string;
   close(): Promise<void>;
+  /** MEMO-1 回憶資料夾的路徑：只給 App 主程序（選單列「打開回憶資料夾」），不下發頁面。 */
+  memoriesDir: string;
   /** 只有注入 identity 時存在；主程序的 IPC 處理器把頁面的請求轉到這裡。 */
   identity?: {
     handle(request: unknown, ctx: IdentityContext): Promise<IdentityResponse>;
@@ -152,7 +194,7 @@ export interface NousHandle {
    * WK-01a：只有 NOUS_WAKE=on 時存在。「常駐喚醒聆聽」的開關只由 App 主程序在原生說明之後呼叫（同一個行程，不經 HTTP、
    * 不經 preload），頁面拿不到；頁面經 HTTP 只能記下麥克風或關掉（ADR-0003 §2.3）。寫檔失敗時丟錯、設定不變。
    */
-  wake?: { setListen(value: boolean): void };
+  wake?: { setListen(value: boolean): void; setVoiceNameTest(value: boolean): void };
   /**
    * 鏡頭「開關」：App（cameraEnable: "main_process"）由主程序在原生說明之後呼叫（同一個行程，不經 HTTP）；這時頁面經 HTTP
    * 只能關掉或改其他鏡頭設定（POST /api/settings/camera 收到 active: true 一律 403）。先寫 camera.json 再通知 settings；
@@ -166,6 +208,15 @@ export interface NousHandle {
      */
     isActive(): boolean;
   };
+  /** 終端機（Pi kiosk）心跳的連線狀態；不是服務模式開關。 */
+  terminals: { status(): TerminalStatus };
+  /** ALARM-1：Mac 醒來時檢查錯過的定時器；有定時器在跑或正在響時 awakeNeeded 為 true（App 阻止閒置睡眠）。 */
+  alarms: { tick(): void; awakeNeeded(): boolean };
+  /**
+   * 費用防護（2026-11-06）：App 主程序在 Mac 鎖定（scope "app"：只結束 App 主視窗開始的通話）或睡眠（全部）時結束即時語音
+   * （通知頁面、寫費用原因、向上游掛斷）。沒有即時語音時什麼都不做。
+   */
+  realtime: { endAll(reason: "os_lock" | "suspend", scope?: "app" | "all"): Promise<void> };
 }
 
 const LABEL = { claude: "Claude", chatgpt: "ChatGPT（Sign in with ChatGPT）", mock: "模擬（mock）" } as const;
@@ -184,6 +235,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const port = options.fallbackPort ? await freePort(config.port) : config.port;
 
   let notify = () => {};
+  let notifyPresence = () => {};
   const auth = new ChatGPTAuth({ dir: config.configDir, callbackPort: config.oauthPort, onChange: () => notify() });
   const providers = new ProviderManager({
     claude: config.apiKey
@@ -222,7 +274,54 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     timezone: config.searchTimezone,
     codex: codexSearch,
   });
-  const home = new HomeBridge({ url: config.smarthomeUrl, token: config.smarthomeToken });
+  // LGTV-1：lg_tv 有設定電視 IP 時，電視改由 app.tv.* 控制，中控的 home_control 不再控制電視（George 2026-11-07）。
+  const home = new HomeBridge({ url: config.smarthomeUrl, token: config.smarthomeToken, tvHandledElsewhere: config.ail.services.includes("lg_tv") && !!config.ail.tv?.host });
+  // AIL-1（docs/18）：NOUS_AIL=on 才有外部服務的 Adapter。ALARM-1 起整合層一定建立（內建的定時器 app.timer.*）；
+  // NOUS_AIL 關閉時只有它（settings.integrations.builtin_only），其他工具表、說明與 HTTP 路由和之前相同。
+  // AIL-2：HomeBridge 交給整合層包成 Facade（NOUS_AIL_SERVICES 列出 home 才註冊）。
+  // PRO-1：主動提醒（招呼後接今天的天氣）。天氣快取一份，招呼與整合層的 app.weather.today 共用。
+  const weather = new WeatherService({ log, ...(options.weatherFetch ? { fetch: options.weatherFetch } : {}) });
+  const proactiveSettings = new ProactiveSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  // CLK-1：右上角時鐘與天氣（顯示設定 clock.json；天氣和招呼共用同一份快取）。
+  const clockSettings = new ClockSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  // DN-2：日夜間模式的共用設定與手動切換（day-night.json；Mac 與 Pi 共用）。
+  const dayNight = new DayNightSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  // HOME-1：左上角家中狀態（顯示設定 home-corner.json；讀值來自 HomeBridge 的快照，唯讀、快取 30 秒）。
+  const homeCornerSettings = new HomeCornerSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
+  const homeOverview = new HomeOverview({ source: home });
+  // MEMO-1：回憶模式。資料夾不存在時以 0o700 建立（狀態「資料夾是空的」，比「找不到」好處理）。
+  // MEMO-2：Google 相簿（經 gog）。找不到 gog 或沒有帳號時仍有快取（之前挑選的照樣播放），挑選回報不可用的原因。
+  const googleCache = new GooglePhotosCache({ dir: join(config.configDir, "memories", "google"), log, onChange: () => notify() });
+  const gogPath = config.memoriesGoogle.invalid ? null : resolveGogPath(config.memoriesGoogle.gogPath);
+  const googleAccount = config.memoriesGoogle.account;
+  const googlePicker = config.memoriesGoogle.invalid ? { unavailable: config.memoriesGoogle.invalid }
+    : !gogPath ? { unavailable: MEMORIES_GOOGLE_REASON.noGog }
+    : !googleAccount ? { unavailable: MEMORIES_GOOGLE_REASON.noAccount }
+    : new GooglePicker({
+      gogPath, account: googleAccount, runner: defaultGogRunner, cache: googleCache, onChange: () => notify(),
+      // macOS 才有 sips：HEIC 轉 JPEG、縮到長邊 2048 px。其他系統不轉（HEIC 會被略過）。
+      ...(process.platform === "darwin" && existsSync(SIPS_PATH) ? { convertPhoto: sipsConverter(defaultGogRunner) } : {}),
+    });
+  const memories = memoriesFeature(
+    new MemoriesSettingsStore({ dir: config.configDir, onChange: () => notify(), log }),
+    new FolderMemoriesSource({ dir: config.memoriesDir, create: true, log }),
+    googleMemories(googleCache, googlePicker),
+  );
+  // ALARM-1：定時器由核心保存與排程（不需要 NOUS_AIL）；工具是整合層的內建 Adapter（app.timer.*），兩條語音路徑共用。
+  let pageConnected: (source: string) => boolean = () => false;
+  const alarms = new AlarmCenter({
+    dir: config.configDir,
+    log,
+    isConnected: (source) => pageConnected(source),
+    onRingStart: (ring) => options.alarms?.onRingStart?.(ring),
+    // 有定時器在跑、正在響、貪睡中或 12 小時內有鬧鐘：App 阻止閒置睡眠（AlarmCenter 每次檢查都重算）。
+    onAwakeChange: (needed) => options.alarms?.onAwakeChange?.(needed),
+    onChange: () => notify(),
+  });
+  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } }, [{ adapter: new TimerAdapter(alarms), enabled: () => alarms.enabled }, { adapter: new AlarmAdapter(alarms), enabled: () => alarms.enabled }]);
+  // PRO-2：CAL-1 有註冊時，認出行程擁有者（George）才說今天的行程（核心自己讀，不經模型）。
+  const calendarReader = calendarReaderFrom(ail?.registry);
+  const proactive = new ProactiveBriefing({ settings: proactiveSettings, log: new ProactiveDailyLog({ dir: config.configDir, log }), weather, calendar: calendarReader, logLine: log });
   const realtime = new RealtimeBridge({
     apiKey: config.openaiApiKey,
     model: config.realtimeModel,
@@ -231,8 +330,11 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     mcp: config.realtimeMcp,
     taskWebSearch: config.taskWebSearch,
     home: home.available,
+    ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("api_key", locale) } : {}),
+    ...(calendarReader ? { calendarBriefing: true } : {}),
+    night: () => dayNight.coreMode() === "night",
   });
-  const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available });
+  const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available, ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("live", locale) } : {}) });
   // MEM-2：ChatGPT 方案即時語音的記憶同意鍵（provider codex，獨立於 chatgpt）；沒有 Codex 登入時為 null。
   const liveTarget = () => codexTarget(codexAuth.accountSubject());
   // 開場句挑選（固定清單、依本機時段、避開上一次）：家人辨識的決策與 live 保底共用一個。
@@ -244,15 +346,23 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     clientVersion: config.nousVersion,
     capabilities: () => ({ webSearch: true, home: home.available }),
     // memoryOn：這通記憶開著而且有 codex 同意（LiveMemoryBinding.memoryActive）才加記憶規則；否則和 MEM-2 之前一樣。
-    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), { mcp: config.realtimeMcp, memory: !!memoryOn }, ctx.locale),
+    instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), {
+      integrations: liveCaps().integrations,
+      mcp: config.realtimeMcp,
+      memory: !!memoryOn,
+      calendarBriefing: !!calendarReader,
+      night: dayNight.coreMode() === "night",
+    }, ctx.locale),
+    // PRO-2：行程問句的回答（核心從 sideband 聽）。
+    followUp: (sessionId: string) => proactive.followUp(sessionId),
     // MEM-4b：voice（受保護的語音交辦）只改 delegate_task 的處理，不影響說明與工具表。
     caller: (ctx, mem, voice) =>
-      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}) }),
+      new LiveToolCaller({ locale: ctx.locale, responses: codex, caps: () => ({ ...liveCaps(), memory: !!mem }), host: ctx.host, tasks: ctx.tasks, approval: ctx.approval, now: ctx.now, log, ...(mem ? { memory: mem } : {}), ...(voice ? { voice } : {}), ...(ail ? { integrations: { dispatcher: ail.dispatcher, sessionId: ctx.sessionId, ...(ctx.page ? { page: ctx.page } : {}) } } : {}) }),
     // MEM-2：每通通話一個記憶 binding（server/memory/live.ts）；瀏覽器版沒有記憶層。
     // MEM-3：頁面的確認卡（MCP、家電）開著時不開語音記憶卡（兩條路徑一致）。
-    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
+    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openLive({ lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open, page: ctx.page }) ?? null } : {}),
     // 看著說話的問候（ID-02）：頁面只帶互動 ID，短句由家人辨識的核心決策組成；瀏覽器版（沒有 identity）一律「我在」。
-    greeting: liveGreetingSource(() => identity, greetings),
+    greeting: liveGreetingSource(() => identity, greetings, proactive),
     palmQuietDelegation: config.palmQuietDelegation,
     log,
   });
@@ -261,8 +371,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const apiKeyMemoryReleased = config.memoryRoutes.api_key;
   const apiKeyTarget = () => (apiKeyMemoryReleased ? openaiRealtimeTarget(config.openaiApiKey) : null);
   const apiKeyRoute = new ApiKeyRoute(realtime, !!config.openaiApiKey, config.realtimeVoice, {
-    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openVoice("api_key", { lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open }) ?? null } : {}),
+    ...(options.memory ? { memory: (ctx: SessionContext) => memory?.openVoice("api_key", { lookToTalk: !!ctx.lookToTalk, rebuild: !!ctx.rebuild, now: ctx.now, locale: ctx.locale, approvalOpen: () => ctx.approval().open, page: ctx.page }) ?? null } : {}),
     log,
+    followUp: (sessionId: string) => proactive.followUp(sessionId),
   });
   const camera = new CameraSettingsStore({ base: config.camera, dir: config.configDir, onChange: () => notify(), log });
   const voice = new VoiceSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
@@ -271,6 +382,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const wakeRuntime = config.wake ? checkWakeRuntime(options.wakeRuntimeDir ?? null) : null;
   if (wakeRuntime && wakeRuntime.state !== "ok") log(`喚醒引擎：${wakeRuntime.state}（${wakeRuntime.problems.join("、") || "清單沒有檔案或未設定資料夾"}）`);
   const wakeStore = config.wake ? new WakeSettingsStore({ dir: config.configDir, onChange: () => notify(), log }) : null;
+  // 聲音輸入／輸出（audio.json，不綁旗標）。wake.json 舊的 device_id 不搬（常駐聆聽跟著這裡，預設＝系統預設）。
+  const audio = new AudioSettingsStore({ dir: config.configDir, onChange: () => notify(), log });
   const wake = wakeStore && wakeRuntime
     ? { view: () => wakeStore.view(), update: (patch: Parameters<WakeSettingsStore["update"]>[0]) => wakeStore.update(patch), runtime: () => wakeRuntime.state }
     : undefined;
@@ -312,27 +425,43 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const runtime = checkFaceRuntime(options.identity?.modelDir ?? null);
   const faceRuntimeDir = runtime.state === "ok" ? (options.identity?.modelDir ?? null) : null;
   if (options.identity && runtime.state !== "ok") log(`家人辨識模型：${runtime.state}（${runtime.problems.join("、") || "未設定資料夾"}）`);
+  // SP-01：講者模型另外核對；不通過只停用錄製聲音，不影響臉。
+  const speakerRuntime = checkSpeakerRuntime(options.identity?.speakerModelDir ?? null);
+  const speakerRuntimeDir = speakerRuntime.state === "ok" ? (options.identity?.speakerModelDir ?? null) : null;
+  if (options.identity && speakerRuntime.state !== "ok") log(`家人聲音模型：${speakerRuntime.state}（${speakerRuntime.problems.join("、") || "未設定資料夾"}）`);
   const identity = options.identity
     ? new IdentityService({
         store: new GalleryStore({ dir: options.identity.dir, secretBox: options.identity.secretBox, excludeFromBackup: options.identity.excludeFromBackup, log }),
         confirm: options.identity.confirm,
-        camera: () => {
+        // 終端機的鏡頭在 Pi 本機開關：這裡只看 Mac 的鏡頭功能有沒有啟用，鏡頭是否真的在跑由 IdentityService 依那個頁面的回報判斷。
+        camera: (source) => {
           const cam = camera.view();
-          return cam.enabled && cam.active;
+          return cam.enabled && (isTerminalId(source) || cam.active);
         },
+        // 只給 Mac 主視窗；終端機的三個設定用頁面的回報（IdentityService）。
         ambient: () => {
           const cam = camera.view();
           return { look_to_talk: cam.look_to_talk, look_to_talk_greet: cam.look_to_talk_greet, look_to_talk_greet_name: cam.look_to_talk_greet_name };
         },
         runtime,
         model: FACE_MODEL_VERSION,
+        speakerRuntime,
+        speakerModel: SPEAKER_MODEL_VERSION,
+        // SP-02a 測試開關（wake.json；只有 NOUS_WAKE=on 才有）：喚醒時認不出臉，只憑聲音也叫名字。
+        voiceNameTest: () => wakeStore?.view().voice_name_test === true,
+        // SP-02b「通話中辨認說話者」（wake.json）。
+        speakerInCall: () => wakeStore?.view().speaker_in_call === true,
         // 問候決策只接受 /api/realtime/start 發出、真的連上的互動 ID（server 在下面建立，呼叫時已存在）。
         claimGreeting: greetingClaims(() => server.realtimeSessions),
-        // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）。
-        wakeGreetingOpen: () => server.realtimeSessions?.wakeGreetingOpen() ?? false,
+        // WK-02：喚醒開始、還沒決策的互動期間，同步辨識不需要「看著說話」設定（稱名設定仍要開）；RPI-ID：只看同一個頁面的喚醒。
+        wakeGreetingOpen: (source) => server.realtimeSessions?.wakeGreetingOpen(source) ?? false,
         // MEM-3：API key 路徑的問候決策（有沒有稱名）交給那通的旁路，問候結束後才問臉部候選。
-        apiKeyGreeted: (sessionId, named) => server.realtimeSessions?.greeted(sessionId, named),
+        apiKeyGreeted: (sessionId, named, spoken) => server.realtimeSessions?.greeted(sessionId, named, spoken),
         picker: greetings,
+        // PRO-1：招呼後接的主動提醒（只有稱名的家人算認出；其餘用這台裝置今天第一次的規則）。
+        briefing: proactive,
+        // PRO-2：API key 通話有核心旁路才問行程（聽得到回答）。
+        apiKeyListens: (sessionId) => server.realtimeSessions?.apiKeyListens(sessionId) ?? false,
         log,
         onChange: () => notify(),
         memory: (): IdentityMemoryLink | null => memory,
@@ -365,18 +494,32 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         holdResults: (taskIds) => store.hold(taskIds),
         onPlaintextDrop: (reason) => store.dropPlaintext(reason),
         confirm: memoryOpts.confirm,
-        identity: (): MemoryIdentityHooks | null => identity ? { candidate: () => identity.memoryCandidate(), people: () => identity.memoryPeople(), nameAllowed: () => camera.view().look_to_talk_greet_name } : null,
+        identity: (): MemoryIdentityHooks | null => identity ? { candidate: (page) => identity.memoryCandidate(page), faceCandidate: (page) => identity.memoryFaceCandidate(page), people: () => identity.memoryPeople(), nameAllowed: (page) => identity.namingAllowed(page) } : null,
         afterOpen: memoryOpts.excludeFromBackup ? () => memoryOpts.excludeFromBackup!(memoryOpts.dir) : undefined,
         // 上次執行時記憶是否開著：加密檔外只留這一個布林值（不含內容），讓重啟後第一次打字就能取用記憶，
         // 而記憶沒開時查狀態、一般聊天都不碰 Keychain。
         enabledHint: memoryEnabledHint(hintFile),
-        onPresence: memoryOpts.onPresence,
+        // RPI-ID：Mac 主視窗照舊經 IPC 通知；另外經 SSE 廣播一個不含內容的事件，Pi 等終端機頁面也會重讀狀態。
+        onPresence: () => {
+          memoryOpts.onPresence?.();
+          notifyPresence();
+        },
         log,
         onChange: () => notify(),
       })
     : null;
+  const terminals = new TerminalPresence({
+    onChange: (status) => {
+      log(status.connected ? `終端機已連線：${status.terminals.map((t) => t.id).join("、")}` : "終端機已斷線（心跳逾時）");
+      options.onTerminalChange?.(status);
+      // ALARM-3：終端機連上或斷線（心跳）會改變「到期時在哪裡響」，重推設定讓倒數只出現在會響的頁面。
+      notify();
+    },
+  });
   const server = createApp({
     cameraEnable: options.cameraEnable ?? "http",
+    terminals,
+    terminalDisplay: new TerminalDisplay(),
     store,
     runner,
     settings: providers,
@@ -393,13 +536,30 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     hideRevokeFromPage,
     webSearch,
     home,
+    ...(ail ? { integrations: ail } : {}),
+    alarms,
     camera,
     faceTuning,
     voice,
+    audio,
+    proactive: { view: () => proactive.view(), update: (patch) => proactiveSettings.update(patch), prefetch: () => proactive.prefetch() },
+    clock: {
+      view: (source) => clockSettings.view(source),
+      update: (patch) => clockSettings.update(patch),
+      weatherNow: (locale) => weatherNowView({ service: weather, place: proactive.place()?.id ?? null, locale, now: Date.now, systemTimeZone: systemTimeZone() }),
+    },
+    dayNight: { view: () => dayNight.view(), update: (patch) => dayNight.update(patch) },
+    homeCorner: {
+      view: (source) => homeCornerSettings.view(source),
+      update: (patch) => homeCornerSettings.update(patch),
+      overview: () => homeOverview.view(),
+    },
+    memories,
     ...(config.earlySpeechRms !== null ? { earlySpeechRms: config.earlySpeechRms } : {}),
     identity: identity ?? undefined,
     memory: memory ?? undefined,
     faceRuntimeDir,
+    speakerRuntimeDir,
     // WK-02（F6）：每通即時語音的費用紀錄（configDir/voice-cost.jsonl，最近 500 筆，0600）。George 2026-10-31：
     // 一律記錄，不綁喚醒開關（NOUS_WAKE 關閉時也記；這是旗標關閉「逐位元組相同」唯一刻意的例外）。
     voiceCostLog: new VoiceCostLog({ dir: config.configDir, log }),
@@ -409,6 +569,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     distDir: options.distDir,
   });
   notify = server.notifySettings;
+  pageConnected = (source) => server.connectedSources().has(source) && (source === MAIN_SOURCE || terminals.status().terminals.some((t) => t.id === source));
+  notifyPresence = server.notifyMemoryPresence;
 
   // 只綁本機位址，不對區域網路開放。
   await new Promise<void>((resolve, reject) => {
@@ -446,9 +608,12 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   return {
     port,
     url: `http://localhost:${port}`,
+    memoriesDir: config.memoriesDir,
     ...(identity ? { identity: { handle: (request: unknown, ctx: IdentityContext) => identity.handle(request, ctx), closeSessions: () => identity.closeSessions() } } : {}),
     ...(memory ? { memory: { handle: (request: unknown, ctx: { userInitiated?: boolean }) => memory.handle(request, ctx), closeSessions: () => memory.closeSessions(), suspendAll: () => memory.suspendAll() } } : {}),
-    ...(wakeStore ? { wake: { setListen: (value: boolean) => void wakeStore.update({ wake_listen: value }) } } : {}),
+    ...(wakeStore
+      ? { wake: { setListen: (value: boolean) => void wakeStore.update({ wake_listen: value }), setVoiceNameTest: (value: boolean) => void wakeStore.update({ voice_name_test: value }) } }
+      : {}),
     camera: {
       setActive: (value: boolean) => void camera.update({ active: value }),
       isActive: () => {
@@ -456,6 +621,11 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         return view.enabled && view.active;
       },
     },
+    terminals: { status: () => terminals.status() },
+    // ALARM-1：Mac 醒來時立刻檢查錯過的定時器；awakeNeeded 給 App 決定要不要阻止閒置睡眠。
+    alarms: { tick: () => alarms.tick(), awakeNeeded: () => alarms.awakeNeeded() },
+    // 費用防護：Mac 鎖定（只結束 App 主視窗的通話）或睡眠（全部）時，desktop/main.mjs 經這裡結束即時語音。
+    realtime: { endAll: (reason: "os_lock" | "suspend", scope?: "app" | "all") => server.realtimeSessions?.endAll(reason, scope) ?? Promise.resolve() },
     ...(options.tasks ? { tasks: (() => {
       const ipc = createTaskIpc({ store, runner, memory, confirmDeleteBackups: options.tasks.confirmDeleteBackups, log });
       // MEM-4c：dropPlaintext＝OS 鎖定與睡眠（desktop/main.mjs 的 powerMonitor）時丟棄解密內容。
@@ -466,6 +636,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         // 先讓家人辨識進入關閉狀態：結束 session，等待中的原生確認回來後也不寫檔。
         identity?.shutdown();
         void memory?.shutdown();
+        terminals.dispose();
+        alarms.dispose();
         // MEM-4c：結束 App 時丟棄解密內容與索引（只是放掉參照，不是安全抹除）。
         if (plaintextTimer) clearInterval(plaintextTimer);
         store.dropPlaintext("quit");
@@ -480,8 +652,23 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
  * live 路徑的問候文字來源（ID-02）：頁面 POST greeting 的文字只當互動 ID，連同這個 live 工作階段的 ID 交給
  * IdentityService.takeLiveGreeting；沒有家人辨識（瀏覽器版）或取不到時，由核心從固定清單挑一句不含名字的（例如「我在」「早安」）。
  */
-export function liveGreetingSource(identity: () => IdentityService | null, picker: GreetingPicker): (interaction: string, sessionId: string, locale?: Locale) => LiveGreeting {
-  return (interaction, sessionId, locale) => identity()?.takeLiveGreeting(interaction, sessionId) ?? picker.plainLive(locale);
+export function liveGreetingSource(identity: () => IdentityService | null, picker: GreetingPicker, proactive?: BriefingPort): (interaction: string, sessionId: string, locale?: Locale, use?: boolean) => LiveGreeting {
+  return (interaction, sessionId, locale, use = true) => {
+    const decided = identity()?.takeLiveGreeting(interaction, sessionId, use);
+    if (decided) return decided;
+    // PRO-1：沒有決策（瀏覽器版、決策逾時）：沒認出是誰，用這台裝置今天第一次的規則；真的要送出才組句與記下。
+    const composed = use ? (proactive?.compose(null, normalizeLocale(locale)) ?? null) : null;
+    // 放不進一段 sideband append：拿掉放不下的段落（不記成說過）。
+    const loc = normalizeLocale(locale);
+    const plain = picker.plainLive(locale);
+    const base = plain.sentence;
+    const briefing = composed ? fitBriefing(composed, (extra) => fitsLiveAppend(liveGreetingText(appendBriefing(base, extra, loc), loc))) : null;
+    if (!briefing) return plain;
+    const sentence = appendBriefing(base, briefing.sentence, loc);
+    const greeting = { id: plain.id, sentence, text: liveGreetingText(sentence, loc) };
+    proactive?.commit(briefing, { sessionId, spoken: greeting.sentence });
+    return greeting;
+  };
 }
 
 /** IdentityService 的 claimGreeting：把核心發出的互動 ID 換成真的連上的工作階段（RealtimeSessions.claimGreeting）。 */
@@ -496,9 +683,7 @@ export function memoryEnabledHint(file: string): { get(): boolean; set(enabled: 
       try { return (JSON.parse(readFileSync(file, "utf8")) as { enabled?: unknown }).enabled === true; } catch { return false; }
     },
     set: (enabled) => {
-      mkdirSync(dirname(file), { recursive: true });
-      writeFileSync(`${file}.tmp`, JSON.stringify({ enabled }), { mode: 0o600 });
-      renameSync(`${file}.tmp`, file);
+      writeAtomic(file, JSON.stringify({ enabled }), { mode: 0o600, mkdir: true });
     },
   };
 }

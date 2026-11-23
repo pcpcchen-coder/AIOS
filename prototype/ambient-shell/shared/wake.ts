@@ -3,6 +3,8 @@
 // 這個檔案只有型別、常數與純函式；音訊程式在 src/audio/（NOUS_WAKE=on 才以動態 import 載入）。
 // 介面文字以繁中為原文，英文在 shared/messages.en.json（共用翻譯表）。
 
+import { DEVICE_ID } from "./audio-devices.ts";
+
 export const WAKE_STATES = ["off", "armed", "listening_local", "paused", "in_call", "released", "error"] as const;
 export type WakeState = (typeof WAKE_STATES)[number];
 
@@ -15,6 +17,7 @@ export const WAKE_REASONS = [
   "lock",
   "rate_limited",
   "calibrating",
+  "service",
   "realtime",
   "web_speech",
   "permission_denied",
@@ -32,7 +35,7 @@ export const WAKE_STATE_REASONS: { readonly [S in WakeState]: readonly (WakeReas
   off: [null, "pref_off"],
   armed: ["starting", "auto_resume"],
   listening_local: [null],
-  paused: ["user_pause", "sleep", "lock", "rate_limited", "calibrating"],
+  paused: ["user_pause", "sleep", "lock", "rate_limited", "calibrating", "service"],
   in_call: ["realtime"],
   released: ["web_speech"],
   error: ["permission_denied", "device_missing", "device_ended", "runtime_missing", "runtime_load_failed", "audio_failed", "unsupported"],
@@ -58,13 +61,31 @@ export function isWakeReport(value: unknown): value is WakeReport {
 export interface WakePrefs {
   /** 「常駐喚醒聆聽」開關；預設關閉，讀不懂時也是關閉（fail closed）。 */
   wake_listen: boolean;
-  /** 上一次真的進入 listening_local 的麥克風 deviceId；自動恢復時以 exact 指定，找不到就 error device_missing。 */
+  /**
+   * 舊版（2026-11-01 之前）記下的上一次常駐聆聽麥克風。現在常駐聆聽跟著「聲音輸入」設定（configDir/audio.json），
+   * 這個值不再使用、也不再寫入（不搬到 audio.json：它只是當時的系統預設麥克風）。
+   */
   device_id: string | null;
   /** 喚醒後多久沒人出聲就結束這通（秒，src/audio/wake-call.ts）；只能是 WAKE_SILENCE_OPTIONS_S 其中一個。 */
   wake_silence_s: number;
   /**
+   * SP-02a 測試開關（George 2026-11-01）：喚醒開始的通話認不出臉時，只憑聲音也叫名字。門檻未校準、可能叫錯人；
+   * 預設關閉，打開只能從 App 選單列（原生說明之後），頁面只能關。
+   */
+  voice_name_test: boolean;
+  /**
+   * SP-02b「通話中辨認說話者」（17 §7.2、§14 ⑧；George 2026-11-01：選單直接勾、不跳說明）：通話中每段話在本機算聲音特徵，
+   * 給核心當記憶人物候選並記錄換人（只記 log，不打斷）。預設關閉；聲音不離開這台 Mac。
+   */
+  speaker_in_call: boolean;
+  /**
+   * 喚醒詞門檻調整值（George 2026-11-08；docs/validation/wake-threshold-2026-11-08.md）：加到 shared/wake-runtime.json 每一行
+   * 關鍵詞門檻（含全域門檻）上。負的比較容易喚醒、也比較容易誤觸；正的相反。只能是 WAKE_THRESHOLD_OFFSETS 其中一個，預設 0。
+   */
+  wake_threshold_offset: number;
+  /**
    * 「矯正喚醒詞…」套用的門檻（George 2026-11-01）：蓋過清單 shared/wake-runtime.json 每一行的提升分數與門檻；
-   * null＝用出貨的清單值（「回復預設」）。偵測器載入時讀這份（src/audio/detector.ts 的 kwsConfig）。
+   * null＝用出貨的清單值（「回復預設」）。src/audio/wake-worker.ts 先蓋上這份，再加上面的 wake_threshold_offset。
    */
   keyword_overrides: WakeKeywordOverrides | null;
 }
@@ -129,17 +150,23 @@ const round2 = (n: number): number => Math.round(n * 100) / 100;
 export const WAKE_SILENCE_OPTIONS_S = [3, 5, 8, 10, 15, 20] as const;
 export const DEFAULT_WAKE_SILENCE_S = 5;
 
-export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null, wake_silence_s: DEFAULT_WAKE_SILENCE_S, keyword_overrides: null };
-export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s", "keyword_overrides"] as const satisfies readonly (keyof WakePrefs)[];
+/**
+ * 門檻調整值的選項（設定頁一組選項）。±0.10 為上下限，依據 WK-00 Mac 實測（docs/validation/wk-00-mac-2026-10-31.md）：
+ * Hello Nous 在 0.25（+0.10）時離線只剩 6/10；Hey Nous 在 1.0／0.30（+0.05）時已降到 6/10；Hey Nous 在提升分數 1.5、門檻 0.15 時
+ * 「Hey nurse」會觸發（−0.10 是提升分數 1.0、門檻 0.15，沒量過）。Hello Nous 的 0.05（−0.10）也低於量過的最低 0.10。
+ */
+export const WAKE_THRESHOLD_OFFSETS = [-0.1, -0.05, 0, 0.05, 0.1] as const;
+export const DEFAULT_WAKE_THRESHOLD_OFFSET = 0;
+
+export const DEFAULT_WAKE_PREFS: WakePrefs = { wake_listen: false, device_id: null, wake_silence_s: DEFAULT_WAKE_SILENCE_S, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: DEFAULT_WAKE_THRESHOLD_OFFSET, keyword_overrides: null };
+export const WAKE_PREF_KEYS = ["wake_listen", "device_id", "wake_silence_s", "voice_name_test", "speaker_in_call", "wake_threshold_offset", "keyword_overrides"] as const satisfies readonly (keyof WakePrefs)[];
 
 export class WakePatchError extends Error {}
 
-/** deviceId 是瀏覽器給的不透明字串；只接受可見 ASCII、最多 256 字元。 */
-const DEVICE_ID = /^[\x21-\x7e]{1,256}$/;
 
 /**
- * 邊界驗證：只接受 wake_listen（布林）、device_id（字串或 null）、wake_silence_s（選項之一）與 keyword_overrides
- * （parseKeywordOverrides）；其他鍵、空 patch、型別不符一律丟錯。
+ * 邊界驗證：只接受 wake_listen、voice_name_test、speaker_in_call（布林）、device_id（字串或 null）、wake_silence_s 與
+ * wake_threshold_offset（選項之一）與 keyword_overrides（parseKeywordOverrides）；其他鍵、空 patch、型別不符一律丟錯。
  */
 export function parseWakePatch(input: unknown): WakePrefsPatch {
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new WakePatchError("喚醒設定必須是 JSON 物件");
@@ -158,6 +185,17 @@ export function parseWakePatch(input: unknown): WakePrefsPatch {
       patch.wake_silence_s = value as number;
     } else if (key === "keyword_overrides") {
       patch.keyword_overrides = parseKeywordOverrides(value);
+    } else if (key === "wake_threshold_offset") {
+      if (!(WAKE_THRESHOLD_OFFSETS as readonly unknown[]).includes(value)) {
+        throw new WakePatchError("wake_threshold_offset 必須是 -0.1、-0.05、0、0.05 或 0.1");
+      }
+      patch.wake_threshold_offset = value as number;
+    } else if (key === "voice_name_test") {
+      if (typeof value !== "boolean") throw new WakePatchError("voice_name_test 必須是 true 或 false");
+      patch.voice_name_test = value;
+    } else if (key === "speaker_in_call") {
+      if (typeof value !== "boolean") throw new WakePatchError("speaker_in_call 必須是 true 或 false");
+      patch.speaker_in_call = value;
     } else {
       throw new WakePatchError(`不認得的喚醒設定：${key}`);
     }
@@ -320,6 +358,34 @@ export function wakeRuntimeBlockers(m: WakeRuntimeManifest): string[] {
   return blockers;
 }
 
+const clampThreshold = (t: number) => Math.round(Math.min(0.99, Math.max(0.01, t)) * 100) / 100;
+
+/** 把每一行關鍵詞門檻（含全域門檻）加上 delta，夾在 0.01–0.99、取到小數兩位；提升分數不變。delta 為 0 時回傳原物件，其他時候是新物件（原物件不變）。 */
+export function offsetKeywords(k: WakeKeywordConfig, delta: number): WakeKeywordConfig {
+  if (!Number.isFinite(delta) || delta === 0) return k;
+  return {
+    ...k,
+    keywords_threshold: k.keywords_threshold === null ? null : clampThreshold(k.keywords_threshold + delta),
+    entries: k.entries.map((e) => ({ ...e, threshold: e.threshold === null ? null : clampThreshold(e.threshold + delta) })),
+  };
+}
+
+/**
+ * 設定頁顯示用：每個喚醒詞（關鍵詞 id 去掉最後的念法後綴，例如 HELLO_NOUS_OW → HELLO_NOUS）實際用的門檻。
+ * 沒有自己門檻的行用全域門檻（再沒有就是引擎預設 0.25，同 src/audio/detector.ts 的 kwsConfig）。
+ */
+export function effectiveWakeThresholds(k: WakeKeywordConfig, delta: number): { phrase: string; threshold: number }[] {
+  const shifted = offsetKeywords(k, delta);
+  const global = shifted.keywords_threshold ?? 0.25;
+  const out: { phrase: string; threshold: number }[] = [];
+  for (const e of shifted.entries) {
+    // 念法後綴（_OW、_AW、_UW 這類兩個字母）才去掉；沒有後綴的 id 原樣使用。
+    const phrase = e.id.replace(/_[A-Z]{2}$/, "");
+    if (!out.some((o) => o.phrase === phrase)) out.push({ phrase, threshold: e.threshold ?? global });
+  }
+  return out;
+}
+
 /** 關鍵詞設定 → sherpa-onnx 關鍵詞檔內容（keywordsBuf）；一行一個：發音單元 [:提升分數] [#門檻] @id。 */
 export function wakeKeywordsText(k: WakeKeywordConfig): string {
   return k.entries.map((e) => [e.tokens, e.boost === null ? null : `:${e.boost}`, e.threshold === null ? null : `#${e.threshold}`, `@${e.id}`].filter(Boolean).join(" ")).join("\n") + "\n";
@@ -365,6 +431,8 @@ export type WakeRuntimeState = "ok" | "missing" | "hash_mismatch" | "not_configu
 /** SettingsView.wake：只有 NOUS_WAKE=on 時才有這個欄位（關閉時 /api/settings 與之前逐位元組相同）。 */
 export interface WakeSettingsView extends WakePrefs {
   runtime: WakeRuntimeState;
+  /** 設定頁顯示用：套上門檻調整值之後，每個喚醒詞實際用的門檻（核心依 shared/wake-runtime.json 計算，effectiveWakeThresholds）。 */
+  thresholds?: { phrase: string; threshold: number }[];
 }
 
 // ───────────── 喚醒觸發（WK-01 的終點，WK-02 接上 startRealtime("wake_word")） ─────────────
@@ -485,6 +553,7 @@ export const WAKE_REASON_LABEL: { readonly [R in WakeReason]: string } = {
   lock: "螢幕已鎖定",
   rate_limited: "一分鐘內已由喚醒開始 3 次通話，暫停到一分鐘後自動恢復",
   calibrating: "正在矯正喚醒詞，結束後自動恢復",
+  service: "服務模式中（這台 Mac 給 Pi 使用），Mac 不收音",
   realtime: "即時語音使用中，喚醒偵測暫停",
   web_speech: "按下說話或語音模式使用中，喚醒偵測暫停",
   permission_denied: "麥克風權限被拒，常駐聆聽沒有開啟",
@@ -507,7 +576,9 @@ export const WAKE_TEXT = {
   pause: "暫停聆聽（到這次結束）",
   resume: "繼續聆聽",
   speaker: "通話中辨認說話者",
-  speakerNote: "SP-02 之後才能使用",
+  speakerNote: "通話中每段話在本機比對聲音；只用來問要不要用你的記憶，換人只記錄",
+  voiceNameTest: "只憑聲音也叫名字（測試）",
+  voiceNameTestNote: "喚醒時認不出臉，聲音認出就叫名字；門檻未校準，可能叫錯人",
   heard: "聽到了",
   resumed: "已恢復常駐喚醒聆聽（只在本機偵測「Hello Nous」或「Hey Nous」）",
   failed: "常駐喚醒聆聽沒有開啟：{0}",

@@ -19,9 +19,11 @@ export type VisibilityReason =
  * 使用者輸入或選單列點擊，visibility_reason 為 user_request（不冒用外部動作的確認 ID）。
  * history：成果紀錄（HIST-1），只由使用者的說法（「搜尋成果 香菜」）、進度卡的「搜尋全部成果」或選單列「成果紀錄…」打開；
  * visibility_reason 一律 user_request，request_id 是那一次輸入或點擊。模型工具不能打開。
+ * search：即時語音上網查詢的結果（編號候選、選定那一則的重點、失敗）；使用者說出的問題讓模型查詢，結果回來時登記一個
+ * user_request。內容在頁面的 SearchPanelController，不在 Surface。
  * wake_calibration：「矯正喚醒詞」（George 2026-11-01），只由選單列「矯正喚醒詞…」在原生說明之後打開，visibility_reason 為 user_request。
  */
-export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation" | "confirm" | "family" | "memory" | "history" | "wake_calibration";
+export type SurfaceKind = "progress" | "artifact" | "error" | "notice" | "settings" | "conversation" | "confirm" | "family" | "memory" | "history" | "search" | "wake_calibration";
 
 export interface Surface {
   surface_id: string;
@@ -59,6 +61,8 @@ export type ShellEvent =
   | { type: "show.history"; request_id: string }
   /** 矯正喚醒詞；request_id 是選單列點擊產生的使用者請求。 */
   | { type: "show.wake_calibration"; request_id: string }
+  /** 即時語音的查詢結果；request_id 是查詢結果回來時登記的使用者請求。 */
+  | { type: "show.search"; request_id: string }
   /** 外部動作的確認卡；request_id 為確認請求 id，由 Presentation Policy 對照待確認清單。 */
   | { type: "show.confirm"; request_id: string; message: string }
   | { type: "dismiss" };
@@ -190,6 +194,13 @@ export function reduceShell(state: ShellState, event: ShellEvent): ShellState {
         foreground_task_id: null,
         surface: surface("wake_calibration", event.request_id),
       };
+    case "show.search":
+      return {
+        mode: "presenting",
+        listening: false,
+        foreground_task_id: null,
+        surface: surface("search", event.request_id),
+      };
     case "show.confirm":
       return {
         mode: "confirming",
@@ -201,4 +212,14 @@ export function reduceShell(state: ShellState, event: ShellEvent): ShellState {
       // 「收起」只關閉視圖；任務照常在背景執行。
       return { ...initialShell };
   }
+}
+
+/**
+ * 釘住的設定畫面（George 2026-11-08）：設定畫面打開後一直留在最上層，只有使用者按「收起」（或右下角齒輪）才關。
+ * 其他事件（人離開、喚醒、開始語音、任務完成、別的畫面、Esc）照常更新任務與收音等狀態，但畫面換回同一張設定卡
+ * （同一個 surface_id，不重畫）。確認卡例外：外部動作要使用者確認，確認卡可以暫時蓋在上面，結束後回到設定。純函式。
+ */
+export function keepPinnedSettings(next: ShellState, pinned: Surface | null): ShellState {
+  if (!pinned || next.surface?.kind === "settings" || next.surface?.kind === "confirm") return next;
+  return { ...next, mode: next.mode === "ambient" ? "presenting" : next.mode, surface: pinned };
 }

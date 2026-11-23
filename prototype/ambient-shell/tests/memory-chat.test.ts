@@ -14,7 +14,7 @@ import { TaskStore } from "../server/store.ts";
 import type { ChatTarget } from "../server/memory/retrieve.ts";
 import type { SettingsView } from "../shared/types.ts";
 import { realLockAvailable } from "./fixtures/memory-lock.ts";
-import { CHATGPT, CLAUDE, enable, harness, req, type Harness } from "./fixtures/memory-service.ts";
+import { CHATGPT, CLAUDE, enable, harness, manage, req, selectProfile, type Harness } from "./fixtures/memory-service.ts";
 
 // /api/chat 的記憶接線（16 §7、§8）：兩個假 ChatCapable（Claude 與 ChatGPT 的替身，不呼叫任何模型）共用同一個 MemoryService，
 // 驗證注入只發生在 ProviderManager 前的同一處。這不是真帳號的 M02（Mac gate）。
@@ -110,6 +110,29 @@ describe.skipIf(!realLockAvailable)("/api/chat with memory_turn", () => {
       expect(e.systems[0]).toContain("不吃香菜");
       expect(events.at(-1)).toEqual({ type: "done", model: `fixture-${target.provider}`, memory_used: 1 });
     }
+  });
+
+  it("memory default (George 2026-11-02): a typed turn with a face candidate selects at once and that same question reaches the engine with the person's memory", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nous-memory-chat-store-")); dirs.push(dir);
+    let candidate: { person_id: string; name: string; at: number } | null = null;
+    const h = harness({ dir, key: randomBytes(32), identity: { candidate: () => candidate, people: () => [{ person_id: "fam_000000000000000000000001", name: "George", minor: false }] } });
+    harnesses.push(h);
+    await enable(h, "George");
+    await h.turn("記住，我不吃香菜");
+    const token = await manage(h);
+    const status = await h.call({ op: "status" }) as unknown as { profiles: { id: string }[] };
+    await h.call({ op: "link_face", profile: status.profiles[0]!.id, person: "fam_000000000000000000000001", token });
+    await selectProfile(h, null);
+    candidate = { person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now };
+    const e = engine(CLAUDE);
+    const app = await start(e, h);
+    const id = req();
+    const t = await h.turn("晚餐吃什麼", id) as unknown as { chat: { text: string; memory_turn: string }; auto_selected?: boolean; card: unknown };
+    expect(t.card).toBeNull();
+    expect(t.auto_selected).toBe(true);
+    const { events } = await app.chatCall(t.chat.text, id, t.chat.memory_turn);
+    expect(e.systems[0]).toContain("不吃香菜");
+    expect(events.at(-1)).toMatchObject({ type: "done", memory_used: 1 });
   });
 
   it("no memory_turn (browser) or a mismatched one: no memory in the prompt, chat still works", async () => {

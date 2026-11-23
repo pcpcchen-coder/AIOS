@@ -28,6 +28,12 @@ export interface RealtimeSession {
   addContext(text: string): void;
   notify(text: string): void;
   setIdleMs(ms: number): void;
+  /** 費用防護：每通上限（毫秒）改了。 */
+  setMaxCallMs(ms: number): void;
+  /** 費用防護：連上的時間（epoch ms）；沒在通話或還在連線時為 null。 */
+  readonly callStartedAt: number | null;
+  /** 費用防護：這通的上限（毫秒）。 */
+  readonly maxCallMs: number;
   resolveApproval(approve: boolean, outcome: ApprovalOutcome): void;
   /** live 建立失敗、auto 可以改路徑時，核心給的改路徑提議（start() 結束後讀）。 */
   readonly fallbackOffer?: FallbackOffer | null;
@@ -202,6 +208,9 @@ export function idleSession(): RealtimeSession {
     addContext: () => {},
     notify: () => {},
     setIdleMs: () => {},
+    setMaxCallMs: () => {},
+    callStartedAt: null,
+    maxCallMs: 0,
     resolveApproval: () => {},
   };
 }

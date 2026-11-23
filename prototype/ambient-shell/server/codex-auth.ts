@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import { join } from "node:path";
 import type { LiveAccountInfo, UnavailableReason } from "../shared/realtime-route.ts";
 import { unavailableText } from "../shared/realtime-route.ts";
-import type { Readiness } from "./realtime-routes.ts";
+import type { Readiness } from "./realtime-contracts.ts";
 
 // Nous 自己的 Codex 介面登入（即時語音的 ChatGPT 方案路徑）。和 Sign in with ChatGPT（chatgpt-auth.ts）分開，
 // 也和 Codex CLI 的 ~/.codex 分開：Nous 從不讀、不更新、不寫 ~/.codex。

@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR
+# shellcheck source=../lib/common.sh
+source "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../lib/common.sh"
+
+load_config || die "$CONFIG_ERROR" "$CONFIG_ERROR" 2
+[[ -f "$AIOS_KEY" ]] || die "找不到 SSH 金鑰 $AIOS_KEY，請重新執行 install.sh。" "SSH key $AIOS_KEY is missing; re-run install.sh." 2
+[[ -s "$AIOS_KNOWN_HOSTS" ]] || die "找不到已驗證的 Mac 主機金鑰 $AIOS_KNOWN_HOSTS，請重新執行 install.sh。" "Verified Mac host key $AIOS_KNOWN_HOSTS is missing; re-run install.sh." 2
+
+# The local port must equal the Mac core port: the core's Host-header guard only accepts its own port.
+forward="127.0.0.1:$AIOS_PORT:127.0.0.1:$AIOS_PORT"
+export AUTOSSH_GATETIME=0
+exec autossh -M 0 -N \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=15 \
+  -o ServerAliveCountMax=3 \
+  -o BatchMode=yes \
+  -o StrictHostKeyChecking=yes \
+  -o "UserKnownHostsFile=$AIOS_KNOWN_HOSTS" \
+  -o IdentitiesOnly=yes \
+  -i "$AIOS_KEY" \
+  -p "$AIOS_SSH_PORT" \
+  -L "$forward" \
+  "$AIOS_MAC_USER@$AIOS_MAC_HOST"

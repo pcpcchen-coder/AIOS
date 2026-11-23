@@ -1,9 +1,9 @@
 import { DEFAULT_WAKE_PREFS, parseWakePatch, WAKE_PREF_KEYS, type WakePrefs, type WakePrefsPatch } from "../shared/wake.ts";
-import { PrefsFile } from "./prefs-file.ts";
+import { PrefsStore } from "./prefs-store.ts";
 
 // 常駐喚醒聆聽的偏好（configDir/wake.json）。這個檔案只有這裡寫入，而且只有 NOUS_WAKE=on 時才建立這個 store。
 // fail closed：檔案讀不懂、或某個鍵不合法時，wake_listen 一律當成關閉、device_id 當成沒有（不猜成開，不用來源不明的裝置）。
-// wake_silence_s 不合法時用預設 5 秒（不影響隱私，只影響誤喚醒時多等幾秒）。
+// wake_silence_s 不合法時用預設 5 秒（不影響隱私，只影響誤喚醒時多等幾秒）；wake_threshold_offset 不合法時用預設 0（產品原本的門檻）。voice_name_test（SP-02a 測試開關）讀不懂時是關閉。
 // keyword_overrides（「矯正喚醒詞…」套用的門檻）不合法時當成沒有，偵測器用出貨清單的值；套用時間由這裡填上。
 // 「暫停聆聽」只到本次執行結束，不寫進這個檔案（docs/17 §5.5）。
 
@@ -14,27 +14,16 @@ export interface WakeSettingsStoreOptions {
   log?(message: string): void;
 }
 
-export class WakeSettingsStore {
-  private readonly file: PrefsFile<WakePrefs>;
-
+export class WakeSettingsStore extends PrefsStore<WakePrefs, WakeSettingsStoreOptions> {
   constructor(
-    private readonly options: WakeSettingsStoreOptions,
+    options: WakeSettingsStoreOptions,
     private readonly now: () => Date = () => new Date(),
   ) {
-    this.file = new PrefsFile<WakePrefs>({
-      dir: options.dir,
-      name: "wake.json",
-      version: 1,
-      parse: parseWakePatch,
-      failClosed: { wake_listen: false, device_id: null, keyword_overrides: null },
-      unreadable: "常駐喚醒聆聽保持關閉",
-      log: options.log,
-    });
+    super({ name: "wake.json", parse: parseWakePatch, failClosed: { wake_listen: false, device_id: null, voice_name_test: false, speaker_in_call: false, keyword_overrides: null }, unreadable: "常駐喚醒聆聽保持關閉" }, options);
   }
 
   view(): WakePrefs {
-    const saved = this.file.saved;
-    return Object.fromEntries(WAKE_PREF_KEYS.map((key) => [key, saved[key] ?? DEFAULT_WAKE_PREFS[key]])) as unknown as WakePrefs;
+    return this.resolve(WAKE_PREF_KEYS, DEFAULT_WAKE_PREFS);
   }
 
   /**
@@ -46,8 +35,7 @@ export class WakeSettingsStore {
     const listen = patch.wake_listen ?? this.view().wake_listen;
     const next: WakePrefsPatch = listen ? { ...patch } : { ...patch, device_id: null };
     if (next.keyword_overrides) next.keyword_overrides = { ...next.keyword_overrides, at: this.now().toISOString() };
-    this.file.update(next);
-    this.options.onChange();
+    this.commit(next);
     return this.view();
   }
 }

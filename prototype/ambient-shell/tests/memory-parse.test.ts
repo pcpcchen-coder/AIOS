@@ -134,3 +134,19 @@ describe("審查 M4: SENSITIVE uses real word boundaries (it held literal 0x08 c
     expect(source).not.toMatch(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);
   });
 });
+
+describe("記憶預設選人的復原：unselect（George 2026-11-02）", () => {
+  it("whole-sentence 「不是我」「不要用我的記憶」「改用全家共用的記憶」 and English equivalents", () => {
+    for (const text of ["不是我", "不是我啦", "那不是我。", "不是我，謝謝", "不要用我的記憶", "別用我的偏好", "不用我的記憶了", "換人", "改用全家共用的記憶", "只用全家共用的記憶就好", "用全家的記憶吧", "Not me", "That's not me.", "it’s not me", "Don't use my memory", "please use household memory", "switch to shared memory only", "不是我"]) {
+      expect(parseMemoryText(text), text).toEqual([{ op: "unselect", part: 0, text: text.replace(/[。！!；;\n.]+$/u, "").trim() }]);
+    }
+    expect(ops("不是我。幫我查天氣")).toEqual(["unselect", "chat"]);
+    expect(looksLikeMemoryRequest("不是我")).toBe(true);
+  });
+
+  it("near-misses stay ordinary chat: 「不是我做的」「不要開燈」「不是我說的」「換人來做」", () => {
+    for (const text of ["不是我做的", "不要開燈", "不是我說的", "我不是故意的", "換人來做", "不要用我的電腦", "用全家福當桌布", "not me too", "don't use my car", "not mine", "這不是我的"]) {
+      expect(ops(text), text).toEqual(["chat"]);
+    }
+  });
+});

@@ -3,7 +3,7 @@
 // setAttribute、append、addEventListener 與文字；DOMPurify 換成替身）。
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SettingsView } from "../shared/types.ts";
-import { describeMenuPrefs } from "../shared/seconds-menu.ts";
+import { describeMenuPrefs } from "../shared/menu-prefs.ts";
 import { DEFAULT_CAMERA_PREFS } from "../shared/sense.ts";
 import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
 import type { RealtimeInfo } from "../shared/types.ts";
@@ -283,5 +283,147 @@ describe("renderSettings in the macOS App (nousDesktop): accounts only", () => {
   it("without realtime info the page still renders the ChatGPT account", () => {
     const r = render(view({ realtime: undefined }), true);
     expect(r.headings).toEqual(["帳號與登入", "ChatGPT（AI 引擎）"]);
+  });
+});
+
+// 聲音輸入／輸出（George 2026-11-01）：瀏覽器版與 App 內的設定頁都有兩個下拉選單、使用中的裝置與兩句提示。
+describe("renderSettings: 聲音 (input / output devices)", () => {
+  const audio = { prefs: { input_device_id: null, input_label: null, output_device_id: "spk-bt", output_label: "JBL Flip", processing_cue: true }, write_path: "/api/settings/audio" as const };
+  const report = {
+    inputs: [{ id: "mic-mac", label: "MacBook Pro 麥克風" }, { id: "mic-usb", label: "" }],
+    outputs: [{ id: "spk-mac", label: "MacBook Pro 揚聲器" }],
+    default_input: "MacBook Pro 麥克風", default_output: "MacBook Pro 揚聲器",
+    input_in_use: { id: null, label: "MacBook Pro 麥克風" }, output_in_use: { id: null, label: "MacBook Pro 揚聲器" },
+    input_fallback: false, output_fallback: true, labels: true,
+  };
+  const renderAudio = (desktop: boolean, a: ReturnType<typeof actions> & { updateAudio?: (patch: unknown) => void } = actions()) => {
+    const el = views.renderSettings(view({ audio }), null, a, { desktop, audio: report }) as unknown as FakeElement;
+    const section = el.all().find((e) => e.tagName === "section" && e.all().some((h) => h.tagName === "h3" && h.textContent === "聲音"))!;
+    const selects = section.all().filter((e) => e.tagName === "select") as (FakeElement & { value?: string })[];
+    return { el, section, selects, text: section.textContent };
+  };
+
+  it.each([false, true])("desktop=%s: two selects with the system default first, in-use lines and both hints", (desktop) => {
+    const r = renderAudio(desktop);
+    expect(r.selects.map((s) => s.getAttribute("aria-label"))).toEqual(["聲音輸入", "聲音輸出"]);
+    const options = (s: FakeElement) => s.all().filter((e) => e.tagName === "option").map((o) => [o.getAttribute("value"), o.textContent, o.getAttribute("selected") !== null]);
+    expect(options(r.selects[0]!)).toEqual([
+      ["", "系統預設（目前：MacBook Pro 麥克風）", true],
+      ["mic-mac", "MacBook Pro 麥克風", false],
+      ["mic-usb", "未命名的麥克風 2", false],
+    ]);
+    // 選定的藍牙喇叭不在清單裡：仍列出來並選著，狀態照實說暫用系統預設
+    expect(options(r.selects[1]!)).toEqual([
+      ["", "系統預設（目前：MacBook Pro 揚聲器）", false],
+      ["spk-mac", "MacBook Pro 揚聲器", false],
+      ["spk-bt", "JBL Flip（目前找不到）", true],
+    ]);
+    expect(r.text).toContain("使用中：MacBook Pro 麥克風");
+    expect(r.text).toContain("找不到「JBL Flip」，暫用系統預設");
+    expect(r.text).toContain("藍牙耳機當麥克風會切到低音質通話模式；建議麥克風留在 Mac、聲音輸出選藍牙喇叭");
+    expect(r.text).toContain("按下說話與系統朗讀（語音模式、校準陌生聲音）一律用 Mac 的系統輸入／輸出");
+  });
+
+  it("choosing a device sends its id and name; choosing the system default sends null for both", () => {
+    const updateAudio = vi.fn();
+    const r = renderAudio(true, { ...actions(), updateAudio });
+    const change = (select: FakeElement & { value?: string }, value: string) => {
+      select.value = value;
+      for (const fn of select.listeners.get("change") ?? []) fn();
+    };
+    change(r.selects[0]!, "mic-mac");
+    change(r.selects[1]!, "");
+    change(r.selects[0]!, ""); // 已經是系統預設：不送
+    expect(updateAudio.mock.calls).toEqual([
+      [{ input_device_id: "mic-mac", input_label: "MacBook Pro 麥克風" }],
+      [{ output_device_id: null, output_label: null }],
+    ]);
+  });
+
+  it("「處理中音效」 row (George 2026-11-02): an on/off button with the note; clicking writes the opposite; English", async () => {
+    const updateAudio = vi.fn();
+    const r = renderAudio(true, { ...actions(), updateAudio });
+    expect(r.text).toContain("處理中音效");
+    expect(r.text).toContain("背景任務執行中輕聲提示；Nous 說話或你開口時暫停");
+    const toggle = r.section.all().find((e) => e.tagName === "button" && e.getAttribute("aria-label") === "處理中音效：開")!;
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    for (const fn of toggle.listeners.get("click") ?? []) fn();
+    expect(updateAudio.mock.calls).toEqual([[{ processing_cue: false }]]);
+    const off = views.renderSettings(view({ audio: { ...audio, prefs: { ...audio.prefs, processing_cue: false } } }), null, { ...actions(), updateAudio }, { desktop: false, audio: report }) as unknown as FakeElement;
+    const offButton = off.all().find((e) => e.tagName === "button" && e.getAttribute("aria-label") === "處理中音效：關")!;
+    expect(offButton.getAttribute("aria-pressed")).toBe("false");
+    for (const fn of offButton.listeners.get("click") ?? []) fn();
+    expect(updateAudio.mock.calls.at(-1)).toEqual([{ processing_cue: true }]);
+    const { setLocale } = await import("../src/i18n.ts");
+    setLocale("en");
+    try {
+      const en = views.renderSettings(view({ audio }), null, actions(), { desktop: true, audio: report }) as unknown as FakeElement;
+      expect(en.textContent).toContain("Processing sound");
+      expect(en.textContent).toContain("A soft cue while a background task is running; pauses while Nous speaks or you talk");
+      expect(en.all().some((e) => e.tagName === "button" && e.getAttribute("aria-label") === "Processing sound: On")).toBe(true);
+    } finally {
+      setLocale("zh-TW");
+    }
+  });
+
+  it("before microphone permission it says names appear after allowing the microphone; English keeps device names", async () => {
+    const { setLocale } = await import("../src/i18n.ts");
+    const el = views.renderSettings(view({ audio }), null, actions(), { desktop: true, audio: { ...report, labels: false } }) as unknown as FakeElement;
+    expect(el.textContent).toContain("授權麥克風後才會列出裝置名稱");
+    setLocale("en");
+    try {
+      const en = views.renderSettings(view({ audio }), null, actions(), { desktop: true, audio: report }) as unknown as FakeElement;
+      expect(en.textContent).toContain("In use: MacBook Pro 麥克風");
+      expect(en.textContent).toContain("Can't find “JBL Flip”; using the system default for now");
+      expect(en.textContent).toContain("System default (now: MacBook Pro 揚聲器)");
+      expect(en.textContent).not.toContain("藍牙");
+    } finally {
+      setLocale("zh-TW");
+    }
+  });
+});
+
+describe("renderSettings: 聲音 before the device list is read", () => {
+  it("shows the chosen device as 尚未回報 (not 找不到) and in English as not reported yet", async () => {
+    const audio = { prefs: { input_device_id: "mic-usb", input_label: "USB Mic", output_device_id: null, output_label: null, processing_cue: true }, write_path: "/api/settings/audio" as const };
+    const empty = { inputs: [], outputs: [], default_input: null, default_output: null, input_in_use: null, output_in_use: null, input_fallback: false, output_fallback: false, labels: false };
+    const options = (el: FakeElement) => el.all().filter((e) => e.tagName === "option").map((o) => o.textContent);
+    const el = views.renderSettings(view({ audio }), null, actions(), { desktop: true, audio: empty }) as unknown as FakeElement;
+    expect(options(el)).toContain("USB Mic（尚未回報）");
+    expect(options(el).some((o) => o.includes("找不到"))).toBe(false);
+    const { setLocale } = await import("../src/i18n.ts");
+    setLocale("en");
+    try {
+      const en = views.renderSettings(view({ audio }), null, actions(), { desktop: true, audio: empty }) as unknown as FakeElement;
+      expect(options(en)).toContain("USB Mic (not reported yet)");
+    } finally {
+      setLocale("zh-TW");
+    }
+  });
+});
+
+describe("renderSettings: 左上角家中狀態 (HOME-1)", () => {
+  const homeCorner = { enabled: false, prefs: { main: false, terminal: true }, write_path: "/api/settings/home-corner" as const };
+
+  it.each([false, true])("desktop=%s: one switch per page that saves the opposite value; absent when the core does not send it", async (desktop) => {
+    const a = { ...actions(), updateHomeCorner: vi.fn() };
+    const r = render(view({ home_corner: homeCorner }), desktop, a);
+    expect(r.headings).toContain("左上角家中狀態");
+    const section = r.el.all().find((e) => e.getAttribute("class")?.includes("home-corner-settings"))!;
+    const toggles = section.all().filter((e) => e.tagName === "button");
+    expect(toggles.map((b) => b.getAttribute("aria-label"))).toEqual(["Mac 視窗：關", "Pi 終端機：開"]);
+    toggles[0].click();
+    toggles[1].click();
+    expect(a.updateHomeCorner.mock.calls).toEqual([[{ main: true }], [{ terminal: false }]]);
+    expect(render(view(), desktop).headings).not.toContain("左上角家中狀態");
+    const { setLocale } = await import("../src/i18n.ts");
+    setLocale("en");
+    try {
+      const en = render(view({ home_corner: homeCorner }), desktop);
+      expect(en.headings).toContain("Home status corner");
+      expect(en.text).toContain("Shows only what the Wuling home controller reports");
+    } finally {
+      setLocale("zh-TW");
+    }
   });
 });

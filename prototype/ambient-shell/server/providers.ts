@@ -1,10 +1,11 @@
 import { type Locale } from "../shared/i18n.mjs";
 import { createHash, createHmac } from "node:crypto";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { SCHEMA_VERSION, type ExecutorMode, type ProviderInfo, type SettingsView } from "../shared/types.ts";
 import type { ChatGPTAuth } from "./chatgpt-auth.ts";
 import type { ChatCapable, ChatMessage } from "./chat.ts";
+import { writeAtomic } from "./fs-atomic.ts";
 import type { ChatTarget, ContextFact } from "./memory/retrieve.ts";
 
 /** 記憶同意的帳號鍵：Claude 用 API key 的 HMAC 指紋前 16 碼（不保存 key 本身）。 */
@@ -170,7 +171,5 @@ export class ProviderManager implements Executor, ChatCapable {
 }
 
 function writeJson(path: string, value: unknown): void {
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value, null, 2));
-  renameSync(tmp, path);
+  writeAtomic(path, JSON.stringify(value, null, 2));
 }

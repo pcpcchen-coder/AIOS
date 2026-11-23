@@ -135,7 +135,8 @@ describe("desktop main: the media permission gives camera video only while the c
   it("the request handler checks mediaTypes for video and asks core.camera.isActive() live; the check handler stays unchanged", () => {
     const start = main.indexOf("session.defaultSession.setPermissionRequestHandler(");
     const handler = main.slice(start, main.indexOf("});", start));
-    expect(handler).toMatch(/permission === "media" && allowMedia\(details\.requestingUrl\) && \(!wantsVideo\(details\) \|\| cameraAllowed\(\)\)/);
+    // 服務模式中一律拒絕（Mac 交給 Pi 使用）。
+    expect(handler).toMatch(/permission === "media" && !prefs\.serviceMode && allowMedia\(details\.requestingUrl\) && \(!wantsVideo\(details\) \|\| cameraAllowed\(\)\)/);
     const allowed = main.slice(main.indexOf("function cameraAllowed"), main.indexOf("async function setCameraActive"));
     expect(allowed).toMatch(/core\?\.camera\?\.isActive\(\) === true/);
     expect(allowed).not.toMatch(/settings\?\./);
@@ -158,7 +159,7 @@ describe("desktop main: the media permission gives camera video only while the c
     const callers = ["src/main.ts", "src/sense/pipeline.ts", "src/realtime.ts"].filter((file) => /getUserMedia\([^)]*video|getUserMedia\(constraints/.test(read(file)));
     expect(callers).toEqual(["src/sense/pipeline.ts"]);
     expect(read("src/sense/controller.ts")).toMatch(/return !!camera\?\.enabled && camera\.active && !offPending && !failed;/);
-    expect(read("src/main.ts")).toMatch(/if \(cameraShouldRun\(settings\?\.camera, cameraOffPending, cameraFailed\)\) void startCamera\(\);/);
+    expect(read("src/main.ts")).toMatch(/if \(!servicePaused && cameraShouldRun\(settings\?\.camera, cameraOffPending, cameraFailed\)\) void startCamera\(\);/);
   });
 });
 

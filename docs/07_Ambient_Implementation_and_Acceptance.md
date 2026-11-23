@@ -9,6 +9,8 @@
 > **2026-10-24 閱讀導覽**：先讀 [實作現況](Current_Implementation_Status.md) 與既有 `prototype/ambient-shell`，再依本文件找出 gate 缺口。新優先序見 [功能擴充評估](13_Feature_Expansion_Assessment_2026-10-24.md)。程式基準為 `1f44c6b`（2026-10-23）。原型已有電子腦、任務／成果、雙路語音及感測，不應從 PR-01 重新建立。
 >
 > 本地喚醒、正式 monorepo、Tauri、Python kernel、Agent SDK、校正眼動與完整 G0–G3 驗收仍不能據原型推定完成。[11 雙目鏡頭互動設計](11_Stereo_Camera_Interaction_2026-10.md) 的頭向、停止手勢及三區手臂指向不等於本文件的 gaze 校正；遠距先用語音編號選取。新評估中的 F0–F10、Q0–Q4 是候選功能與 Quest 分期，不取代 G0–G3。
+>
+> **2026-11-10 補記**：上面寫本地喚醒不能據原型推定完成，是 2026-10-24 的狀態。之後本機喚醒詞已在原型實作，放在旗標 `NOUS_WAKE` 之後、預設關閉；Mac 上只有部分實機證據（只有 George 一人，其他家人與長時間誤觸發未測），見 [實作現況](Current_Implementation_Status.md)「本機喚醒詞」一列。旗標後的實作與部分證據不等於喚醒的驗收通過；這不改變本文件的契約、gate 或驗收要求。
 
 需求來源：[06 電子腦、語音與視線互動規格](06_Ambient_Voice_Gaze_Experience.md)。本文件把產品方向拆成可交付工作；所有數值是待校準的工程目標，不是性能承諾。
 

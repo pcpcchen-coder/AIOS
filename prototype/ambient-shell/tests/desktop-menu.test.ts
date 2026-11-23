@@ -7,7 +7,7 @@ import { setNativeLocale, t as nativeT } from "../desktop/localization.mjs";
 import { WAKE_COMMANDS } from "../src/audio/controller.ts";
 import { DEFAULT_WAKE_SILENCE_S, parseWakePatch, WAKE_REASON_LABEL, WAKE_SILENCE_OPTIONS_S, WAKE_STATE_LABEL, WAKE_STATE_REASONS, WAKE_TEXT, type WakeReport } from "../shared/wake.ts";
 import { DESKTOP_COMMANDS, runDesktopCommand } from "../src/desktop-command.ts";
-import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, VOICE_UNSAVED_REASON } from "../shared/seconds-menu.ts";
+import { CAMERA_DISABLED_REASON, CAMERA_OFF_PREVIEW_REASON, cameraPreviewDisabledReason, describeMenuPrefs, VOICE_UNSAVED_REASON } from "../shared/menu-prefs.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
 import type { SettingsView } from "../shared/types.ts";
 import { BROWSER_IDENTITY_STATUS, type IdentityStatus } from "../shared/identity.ts";
@@ -63,6 +63,8 @@ describe("settingsMenu（鏡頭與語音設定）", () => {
       "語音",
       "語音模式閒置多久自動關閉：1 分 30 秒",
       "即時語音閒置多久自動結束：2 分鐘",
+      "每通即時語音最長多久：20 分鐘",
+      "查詢結果收起秒數：8 秒",
     ]);
     expect(m.labels.some((l) => l?.includes("更多設定"))).toBe(false);
     for (const label of ["鏡頭", "看著說話", "看著說話時先打招呼", "打招呼時稱呼認出的家人", "手掌停止播報"]) {
@@ -198,15 +200,16 @@ describe("runDesktopCommand", () => {
 
 // WK-01a 常駐喚醒聆聽（George 2026-10-31 D3：「通話中辨認說話者」先放停用的一列）。
 describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wake)", () => {
-  function wakeBuild(listen: boolean, report: WakeReport | null, silence = 5) {
+  function wakeBuild(listen: boolean, report: WakeReport | null, silence = 5, voiceTest = false, speaker = false, offset = 0) {
     const command = vi.fn();
     const wakeCommand = vi.fn();
     const setWakeListen = vi.fn();
+    const setVoiceNameTest = vi.fn();
     const setMenuPref = vi.fn();
-    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, keyword_overrides: null, runtime: "missing" as const } };
-    const items = settingsMenu(settings, { command, setMenuPref, setWakeListen, wakeReport: report, wakeCommand });
+    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, voice_name_test: voiceTest, speaker_in_call: speaker, wake_threshold_offset: offset, keyword_overrides: null, runtime: "missing" as const } };
+    const items = settingsMenu(settings, { command, setMenuPref, setWakeListen, setVoiceNameTest, wakeReport: report, wakeCommand });
     const find = (label: string) => items.find((i) => i.label === label) as MenuItemTemplate;
-    return { items, find, command, wakeCommand, setWakeListen, setMenuPref };
+    return { items, find, command, wakeCommand, setWakeListen, setVoiceNameTest, setMenuPref };
   }
 
   it("without settings.wake nothing is added (flag off)", () => {
@@ -215,17 +218,57 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     expect(JSON.stringify(plain.items)).not.toMatch(/喚醒|說話者/);
   });
 
-  it("draws header, device-event status, the switch, pause, and the disabled 「通話中辨認說話者」 row last", () => {
+  it("draws header, device-event status, the switch, pause, 「通話中辨認說話者」, then the voice-only naming test switch", () => {
     const { items, find } = wakeBuild(true, { state: "listening_local", reason: null });
     const start = items.findIndex((i) => i.label === "喚醒詞");
     expect(items[start - 1]).toEqual({ type: "separator" });
-    expect(items.slice(start).map((i) => i.label)).toEqual(["喚醒詞", "喚醒聆聽：本機聆聽中", "常駐喚醒聆聽", "喚醒後等你開口：5 秒", "暫停聆聽（到這次結束）", "矯正喚醒詞…", "通話中辨認說話者"]);
+    expect(items.slice(start).map((i) => i.label)).toEqual(["喚醒詞", "喚醒聆聽：本機聆聽中", "常駐喚醒聆聽", "喚醒後等你開口：5 秒", "喚醒詞門檻：預設（0）", "暫停聆聽（到這次結束）", "矯正喚醒詞…", "通話中辨認說話者", "只憑聲音也叫名字（測試）"]);
     expect(find("喚醒詞").enabled).toBe(false);
     expect(find("喚醒聆聽：本機聆聽中").enabled).toBe(false);
     expect(find("常駐喚醒聆聽")).toMatchObject({ type: "checkbox", checked: true, enabled: true });
     const speaker = find("通話中辨認說話者");
-    expect(speaker).toEqual({ label: "通話中辨認說話者", type: "checkbox", checked: false, enabled: false, sublabel: "SP-02 之後才能使用" });
-    expect(speaker.click).toBeUndefined();
+    expect(speaker).toMatchObject({ label: "通話中辨認說話者", type: "checkbox", checked: false, enabled: true, sublabel: "通話中每段話在本機比對聲音；只用來問要不要用你的記憶，換人只記錄" });
+  });
+
+  it("「喚醒詞門檻」 (George 2026-11-08) lists the five offsets like the settings page and writes wake_threshold_offset through setMenuPref", async () => {
+    const { WAKE_THRESHOLD_OFFSETS: shared } = await import("../shared/wake.ts");
+    const { WAKE_THRESHOLD_OFFSETS: menu, WAKE_THRESHOLD_LABEL } = await import("../desktop/settings-menu.mjs");
+    expect(menu).toEqual([...shared]);
+    // 和設定頁（src/views.ts 的 WAKE_THRESHOLD_TEXT.options）同一組文字；tests/wake-threshold.test.ts 另核對設定頁那一組
+    const viewsSrc = (await import("node:fs")).readFileSync(new URL("../src/views.ts", import.meta.url), "utf8");
+    for (const label of Object.values(WAKE_THRESHOLD_LABEL)) expect(viewsSrc).toContain(`"${label}"`);
+    expect(Object.keys(WAKE_THRESHOLD_LABEL).sort()).toEqual(menu.map(String).sort());
+    const off = wakeBuild(false, null, 5, false, false, -0.05);
+    const row = off.find("喚醒詞門檻：稍微容易（−0.05）");
+    expect(row.sublabel).toBe("數字越小越容易喚醒，也越容易被電視或聊天誤觸；設定頁也能改，所有裝置共用");
+    const radios = (row.submenu as MenuItemTemplate[]).filter((i) => i.type === "radio");
+    expect(radios.map((i) => [i.label, i.checked])).toEqual([["更容易喚醒（−0.10）", false], ["稍微容易（−0.05）", true], ["預設（0）", false], ["稍微嚴格（+0.05）", false], ["更不容易誤觸（+0.10）", false]]);
+    radios[4]!.click!();
+    expect(off.setMenuPref).toHaveBeenCalledWith({ key: "wake_threshold_offset", kind: "threshold", label: "喚醒詞門檻", write_path: "/api/settings/wake" }, 0.1);
+    // 不在選項裡的值（不該發生）顯示成預設
+    expect(wakeBuild(false, null, 5, false, false, 0.3).find("喚醒詞門檻：預設（0）")).toBeTruthy();
+  });
+
+  it("「通話中辨認說話者」 (SP-02b) is a plain checkbox written through setMenuPref to /api/settings/wake, without a dialog", () => {
+    const off = wakeBuild(true, null);
+    off.find("通話中辨認說話者").click!();
+    expect(off.setMenuPref).toHaveBeenCalledWith({ key: "speaker_in_call", kind: "bool", label: "通話中辨認說話者", write_path: "/api/settings/wake" }, true);
+    const on = wakeBuild(false, null, 5, false, true);
+    expect(on.find("通話中辨認說話者").checked).toBe(true);
+    on.find("通話中辨認說話者").click!();
+    expect(on.setMenuPref).toHaveBeenCalledWith(expect.objectContaining({ key: "speaker_in_call" }), false);
+  });
+
+  it("the voice-only naming test switch (SP-02a) shows the core's value and asks the main process for the opposite", () => {
+    const off = wakeBuild(true, null);
+    expect(off.find("只憑聲音也叫名字（測試）")).toMatchObject({ type: "checkbox", checked: false, enabled: true, sublabel: "喚醒時認不出臉，聲音認出就叫名字；門檻未校準，可能叫錯人" });
+    off.find("只憑聲音也叫名字（測試）").click!();
+    expect(off.setVoiceNameTest).toHaveBeenCalledWith(true);
+    const on = wakeBuild(false, null, 5, true);
+    expect(on.find("只憑聲音也叫名字（測試）").checked).toBe(true);
+    on.find("只憑聲音也叫名字（測試）").click!();
+    expect(on.setVoiceNameTest).toHaveBeenCalledWith(false);
+    expect(on.setMenuPref).not.toHaveBeenCalled();
   });
 
   it("the switch asks the main process to write the opposite of the core's value; pause/resume go to the page without opening the window", () => {
@@ -283,7 +326,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     expect(MENU_STATE_REASONS).toEqual(WAKE_STATE_REASONS);
     expect(MENU_STATE_LABEL).toEqual(WAKE_STATE_LABEL);
     expect(MENU_REASON_LABEL).toEqual(WAKE_REASON_LABEL);
-    for (const key of ["group", "statusPrefix", "listen", "listenNote", "silence", "silenceNote", "pause", "resume", "speaker", "speakerNote", "notReported", "calibrate", "calibrateNote", "calibratedNote", "calibrateUnavailable"] as const) expect(WAKE_MENU_TEXT[key]).toBe(WAKE_TEXT[key]);
+    for (const key of ["group", "statusPrefix", "listen", "listenNote", "silence", "silenceNote", "pause", "resume", "speaker", "speakerNote", "voiceNameTest", "voiceNameTestNote", "notReported", "calibrate", "calibrateNote", "calibratedNote", "calibrateUnavailable"] as const) expect(WAKE_MENU_TEXT[key]).toBe(WAKE_TEXT[key]);
     expect(MENU_SILENCE_OPTIONS).toEqual([...WAKE_SILENCE_OPTIONS_S]);
     expect(MENU_DEFAULT_SILENCE).toBe(DEFAULT_WAKE_SILENCE_S);
   });
@@ -291,7 +334,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
   it("is fully translated in English (the wake word Hello Nous is English already)", () => {
     setNativeLocale("en");
     try {
-      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, keyword_overrides: null, runtime: "missing" as const } };
+      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, keyword_overrides: null, runtime: "missing" as const } };
       for (const report of [null, ...Object.entries(WAKE_STATE_REASONS).flatMap(([state, reasons]) => reasons.map((reason) => ({ state, reason }) as WakeReport))]) {
         const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), wakeReport: report, translate: nativeT });
         const start = items.findIndex((i) => i.label === "Wake word");
@@ -300,7 +343,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
         expect(texts.filter((x) => /\p{Script=Han}/u.test(x))).toEqual([]);
       }
       const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), translate: nativeT });
-      expect(items.find((i) => i.label === "Recognise speaker during calls")).toMatchObject({ enabled: false, sublabel: "Available after SP-02" });
+      expect(items.find((i) => i.label === "Recognise speaker during calls")).toMatchObject({ enabled: true, sublabel: "Each utterance in a call is compared on this Mac; used only to ask whether to use your memory, and a change of speaker is only logged" });
       expect(items.find((i) => i.label === "Always-on wake listening")?.sublabel).toBe("Detects “Hello Nous” or “Hey Nous” only on this Mac");
       for (const text of Object.values(WAKE_TEXT)) expect(nativeT(text), text).not.toBe(text);
     } finally {
@@ -322,5 +365,103 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     expect(handler.indexOf('notifyPage("wake-off")')).toBeLessThan(handler.indexOf("core.wake.setListen(value)"));
     expect(handler).toMatch(/defaultId: 1, cancelId: 1/);
     expect(main).not.toMatch(/\/api\/settings\/wake/);
+  });
+});
+
+// 聲音輸入／輸出（George 2026-11-01）：「聲音」分段。清單與狀態句只來自頁面回報（preload 與 main.mjs 都整理過）。
+describe("settings menu: 聲音 (input / output devices)", async () => {
+  const menu = await import("../desktop/settings-menu.mjs");
+  const shared = await import("../shared/audio-devices.ts");
+  const audio = (patch: Partial<import("../shared/audio-devices.ts").AudioPrefs> = {}) => ({ prefs: { ...shared.DEFAULT_AUDIO_PREFS, ...patch }, write_path: "/api/settings/audio" as const });
+  const report = (patch: Partial<import("../shared/audio-devices.ts").AudioReport> = {}, prefs = shared.DEFAULT_AUDIO_PREFS) => {
+    const base = {
+      inputs: [{ id: "mic-mac", label: "MacBook Pro Microphone" }, { id: "mic-usb", label: "USB Mic" }],
+      outputs: [{ id: "spk-mac", label: "MacBook Pro Speakers" }, { id: "spk-bt", label: "JBL Flip" }],
+      default_input: "MacBook Pro Microphone", default_output: "MacBook Pro Speakers",
+      input_in_use: null, output_in_use: null, input_fallback: false, output_fallback: false, labels: true, ...patch,
+    };
+    return { ...base, input_status: shared.inputStatus(prefs, base), output_status: shared.outputStatus(prefs, base) };
+  };
+  const section = (items: MenuItemTemplate[]) => items.slice(items.findIndex((i) => i.label === "聲音" || i.label === "Sound") - 1);
+
+  it("uses the same text as shared/audio-devices.ts", () => {
+    for (const [key, value] of Object.entries(menu.AUDIO_TEXT)) expect(value, key).toBe((shared.AUDIO_TEXT as Record<string, string>)[key]);
+  });
+
+  it("is drawn only when the core provides settings.audio; radio submenus start with the system default (now: X), then devices, then status rows", () => {
+    const setAudio = vi.fn();
+    expect(settingsMenu(view(enabledCamera), { command: vi.fn(), setMenuPref: vi.fn() }).some((i) => i.label === "聲音")).toBe(false);
+    const prefs = shared.DEFAULT_AUDIO_PREFS;
+    const items = section(settingsMenu({ ...view(enabledCamera), audio: audio() }, { command: vi.fn(), setMenuPref: vi.fn(), setAudio, audioReport: report({ input_in_use: { id: null, label: "MacBook Pro Microphone" } }, prefs) }));
+    expect(items.map((i) => (i.type === "separator" ? "----" : i.label))).toEqual([
+      "----", "聲音", "聲音輸入：系統預設", "使用中：MacBook Pro Microphone", "聲音輸出：系統預設", "播放時使用：MacBook Pro Speakers", "處理中音效",
+    ]);
+    const input = items[2]!.submenu!;
+    expect(input.map((i) => [i.label, i.type, i.checked, i.enabled])).toEqual([
+      ["系統預設（目前：MacBook Pro Microphone）", "radio", true, true],
+      ["MacBook Pro Microphone", "radio", false, true],
+      ["USB Mic", "radio", false, true],
+      [undefined, "separator", undefined, undefined],
+      ["藍牙耳機當麥克風會切到低音質通話模式；建議麥克風留在 Mac、聲音輸出選藍牙喇叭", undefined, undefined, false],
+      ["按下說話與系統朗讀（語音模式、校準陌生聲音）一律用 Mac 的系統輸入／輸出", undefined, undefined, false],
+    ]);
+    input[2]!.click!();
+    items[4]!.submenu![2]!.click!();
+    items[4]!.submenu![0]!.click!();
+    expect(setAudio.mock.calls).toEqual([
+      [{ input_device_id: "mic-usb", input_label: "USB Mic" }],
+      [{ output_device_id: "spk-bt", output_label: "JBL Flip" }],
+      [{ output_device_id: null, output_label: null }],
+    ]);
+    expect(items.filter((i) => i.enabled === false && i.label !== "聲音").every((i) => !i.click)).toBe(true);
+  });
+
+  it("a missing chosen device stays listed (checked, disabled) and the status row says the default is used for now", () => {
+    const prefs = { ...shared.DEFAULT_AUDIO_PREFS, output_device_id: "spk-gone", output_label: "Bose SoundLink" };
+    const items = section(settingsMenu({ ...view(enabledCamera), audio: audio(prefs) }, { command: vi.fn(), setMenuPref: vi.fn(), setAudio: vi.fn(), audioReport: report({ output_fallback: true }, prefs) }));
+    expect(items[4]!.label).toBe("聲音輸出：Bose SoundLink");
+    expect(items[4]!.submenu!.find((i) => i.label === "Bose SoundLink（目前找不到）")).toMatchObject({ type: "radio", checked: true, enabled: false });
+    expect(items[5]!.label).toBe("找不到「Bose SoundLink」，暫用系統預設");
+  });
+
+  it("before a report: only the system default and the saved choice, status 尚未回報; without labels it says to allow the microphone", () => {
+    const items = section(settingsMenu({ ...view(enabledCamera), audio: audio({ input_device_id: "mic-usb", input_label: "USB Mic" }) }, { command: vi.fn(), setMenuPref: vi.fn() }));
+    expect(items[2]!.submenu!.slice(0, 2).map((i) => [i.label, i.checked])).toEqual([["系統預設", false], ["USB Mic（尚未回報）", true]]);
+    expect(items[3]!.label).toBe("尚未回報");
+    const noLabels = report({ inputs: [{ id: "mic-1", label: "" }], labels: false, default_input: null });
+    const unlabeled = section(settingsMenu({ ...view(enabledCamera), audio: audio() }, { command: vi.fn(), setMenuPref: vi.fn(), audioReport: noLabels }));
+    expect(unlabeled[2]!.submenu![1]!.label).toBe("未命名的麥克風 1");
+    expect(unlabeled.at(-1)!.label).toBe("授權麥克風後才會列出裝置名稱");
+  });
+
+  it("「處理中音效」 is a checkbox showing the core's value (default on) that writes the opposite through setAudio", () => {
+    const setAudio = vi.fn();
+    const row = (prefs: Partial<typeof shared.DEFAULT_AUDIO_PREFS>) =>
+      section(settingsMenu({ ...view(enabledCamera), audio: audio(prefs) }, { command: vi.fn(), setMenuPref: vi.fn(), setAudio, audioReport: report() })).find((i) => i.label === "處理中音效")!;
+    const on = row({});
+    expect(on).toMatchObject({ type: "checkbox", checked: true, sublabel: "背景任務執行中輕聲提示；Nous 說話或你開口時暫停" });
+    on.click!();
+    const off = row({ processing_cue: false });
+    expect(off.checked).toBe(false);
+    off.click!();
+    expect(setAudio.mock.calls).toEqual([[{ processing_cue: false }], [{ processing_cue: true }]]);
+    // 沒有回報、沒有裝置名稱時也在（「授權麥克風…」仍是最後一列）
+    const unlabeled = section(settingsMenu({ ...view(enabledCamera), audio: audio() }, { command: vi.fn(), setMenuPref: vi.fn(), audioReport: report({ labels: false }) }));
+    expect(unlabeled.at(-2)!.label).toBe("處理中音效");
+  });
+
+  it("English: interface text translated, device names unchanged", () => {
+    setNativeLocale("en");
+    try {
+      const prefs = { ...shared.DEFAULT_AUDIO_PREFS, output_device_id: "spk-bt", output_label: "JBL Flip" };
+      const items = section(settingsMenu({ ...view(enabledCamera), audio: audio(prefs) }, { command: vi.fn(), setMenuPref: vi.fn(), translate: nativeT, audioReport: report({ output_in_use: { id: "spk-bt", label: "JBL Flip" }, input_fallback: false }, prefs) }));
+      expect(items.map((i) => i.label).filter(Boolean)).toEqual(["Sound", "Sound input: System default", "No microphone is open right now", "Sound output: JBL Flip", "In use: JBL Flip", "Processing sound"]);
+      expect(items.at(-1)!.sublabel).toBe("A soft cue while a background task is running; pauses while Nous speaks or you talk");
+      expect(items[2]!.submenu![0]!.label).toBe("System default (now: MacBook Pro Microphone)");
+      const texts = (list: MenuItemTemplate[]): string[] => list.flatMap((i) => [i.label ?? "", ...(i.submenu ? texts(i.submenu) : [])]);
+      expect(texts(items).filter((x) => /\p{Script=Han}/u.test(x))).toEqual([]);
+    } finally {
+      setNativeLocale("zh-TW");
+    }
   });
 });

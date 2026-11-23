@@ -33,6 +33,11 @@ export const CALIBRATED = false;
  */
 export const MATCH_THRESHOLDS = { match: 0.5, margin: 0.08, consistency: 0.5, consistency_pair: 0.4 } as const;
 
+export interface EvidenceTiming {
+  gap_ms: number;
+  fresh_ms: number;
+}
+
 /** 證據規則（docs/14 §4 起點值）。 */
 export const EVIDENCE_RULES = {
   /** 至少幾個不同畫格一致指向同一人。 */
@@ -57,6 +62,139 @@ export interface FaceModelVersion {
 
 export function sameModelVersion(a: FaceModelVersion, b: FaceModelVersion): boolean {
   return a.detector === b.detector && a.recognizer === b.recognizer && a.align === b.align && a.preproc === b.preproc;
+}
+
+// ───────────── 聲音（SP-01，docs/17 §7、§11.3） ─────────────
+
+/** 講者模型與前處理版本（shared/speaker-runtime.json 的 model_version）：都相符的聲音特徵才參與比對，否則要重新登記。 */
+export interface SpeakerModelVersion {
+  speaker: string;
+  preproc: string;
+  dim: number;
+}
+
+export function sameSpeakerModel(a: SpeakerModelVersion, b: SpeakerModelVersion): boolean {
+  return a.speaker === b.speaker && a.preproc === b.preproc && a.dim === b.dim;
+}
+
+/** CAM++ 特徵維度。 */
+export const SPEAKER_FEATURE_DIM = 192;
+/** 登記時錄幾次喚醒詞（文字相關模板，比對喚醒片段用）與幾句朗讀（比對一般話語用）。George 2026-11-01 選「喚醒詞 5 次＋朗讀 3 句」。 */
+export const VOICE_KEYWORD_SAMPLES = 5;
+export const VOICE_UTTERANCE_SAMPLES = 3;
+/**
+ * 聲音登記的檢查門檻（cosine，起點值、未校準，SP-03 才校準）。SP-00 的合成語音：同一人兩句之間最低 0.79、不同人最高 0.67；
+ * 喚醒詞只有約 1 秒，彼此的分數較低，所以喚醒詞與朗讀分開檢查。
+ * - consistency／consistency_pair：同 MATCH_THRESHOLDS，每段與平均方向、任兩段之間的下限；低於表示混到別人或沒錄到人聲。
+ * - duplicate：新登記的朗讀平均與已登記家人的朗讀平均高於這個值，視為同一個人（不重複登記）。
+ * - match／margin（SP-02）：辨認時與每位家人同類模板平均方向的 cosine；最高分要 ≥ match、領先第二名 ≥ margin 才算 matched。
+ *   喚醒片段只和喚醒詞模板比（文字相關，docs/17 §4.4），話語只和朗讀模板比。
+ */
+export const VOICE_THRESHOLDS = {
+  keyword: { consistency: 0.45, consistency_pair: 0.3, match: 0.5, margin: 0.08 },
+  utterance: { consistency: 0.5, consistency_pair: 0.4, match: 0.55, margin: 0.08 },
+  duplicate: 0.8,
+} as const;
+
+/**
+ * 兩種聲音片段（docs/17 §4.2）：keyword 是喚醒詞那一段（約 1 秒），utterance 是喚醒後到問候前說的話。
+ * min_voiced_ms 是辨認時至少要有的人聲；不足就是 too_short（不比對）。
+ */
+export type VoiceSegment = "keyword" | "utterance";
+export const VOICE_SEGMENTS: readonly VoiceSegment[] = ["keyword", "utterance"];
+export const VOICE_MIN_VOICED_MS: Record<VoiceSegment, number> = { keyword: 300, utterance: 1500 };
+/** SP-02b 通話中的一段話至少要有這麼多人聲才比對（17 §4.2：可靠的話語通常要 2 秒以上）。 */
+export const CALL_VOICE_MIN_MS = 2000;
+
+/**
+ * 只憑聲音稱名要等 SP-03 以家人保留樣本校準兩種片段（docs/17 §4.4、§14 ④）。在那之前一律 false：
+ * 聲音只能讓臉的稱名「確認」或「取消」，不能自己帶出名字。
+ */
+export const VOICE_CALIBRATED: Readonly<Record<VoiceSegment, boolean>> = { keyword: false, utterance: false };
+
+// ───────────── SP-03a 聲音校準（George 2026-11-01：先只有 George、陌生聲音用 Mac 內建朗讀、只存分數、錯認 0/100 才放行） ─────────────
+
+/** 一次校準試驗：誰說的（家人或電腦朗讀的陌生聲音）、哪種片段，以及這段對每位家人同類模板的分數。不存錄音或特徵。 */
+export interface CalibrationTrial {
+  label: "member" | "stranger";
+  /** label member：說話的家人。 */
+  person_id?: string;
+  segment: VoiceSegment;
+  voiced_ms: number;
+  scores: { person_id: string; score: number }[];
+  /** collect：用來建議門檻；verify：套用門檻之後的驗證。 */
+  phase: "collect" | "verify";
+  at: string;
+}
+
+/** 收集階段每種片段至少要有幾筆家人樣本與陌生聲音，才能建議門檻。 */
+export const CALIBRATION_MIN = { member: 10, stranger: 30 } as const;
+/** 驗證階段每種片段要幾筆陌生聲音全部不被認成家人（兩種合計 100 次，17 §13.2 S7「錯認名字 0／100」）。 */
+export const CALIBRATION_VERIFY_STRANGERS = 50;
+/** 建議門檻＝陌生聲音最高分＋這個安全距離（不低於 floor）。 */
+export const CALIBRATION_SAFETY = 0.05;
+export const CALIBRATION_MATCH_FLOOR = 0.3;
+
+export interface CalibrationSegmentReport {
+  segment: VoiceSegment;
+  /** 收集階段：家人樣本數、陌生聲音數（含家人互相當冒名者的分數）。 */
+  member_trials: number;
+  stranger_trials: number;
+  /** 家人樣本對自己模板的分數（最低、中位數）；陌生聲音的最高分。沒有資料時 null。 */
+  member_min: number | null;
+  member_median: number | null;
+  stranger_max: number | null;
+  /** 建議門檻（資料不足時 null）與在收集資料上的拒認率（家人沒被認出的比例）。 */
+  proposed: { match: number; margin: number } | null;
+  proposed_reject_rate: number | null;
+  /** 目前使用的門檻（已套用的，或未校準的起點值）。 */
+  current: { match: number; margin: number };
+  applied: boolean;
+  /** 驗證階段（套用之後）：陌生聲音筆數、其中被認成家人的筆數、家人樣本筆數與沒被認出的筆數。 */
+  verify: { stranger_trials: number; false_accepts: number; member_trials: number; rejects: number };
+  /** 驗證通過（陌生聲音 ≥ CALIBRATION_VERIFY_STRANGERS 且 0 筆被認成家人）：這種片段可以只憑聲音稱名。 */
+  calibrated: boolean;
+}
+
+export interface CalibrationReport {
+  segments: CalibrationSegmentReport[];
+  /** 已登記聲音的家人人數（樣本只算目前模板還有效的）。 */
+  voices: number;
+  applied_at: string | null;
+}
+
+/** 一段聲音的辨認結果（docs/17 §7.2）。只在核心與管理畫面的試認使用；喚醒時的結果不回頁面。 */
+export type VoiceUnavailableReason = "no_enrollment" | "too_short" | "model_unavailable";
+export interface VoiceObservation {
+  state: IdentityState;
+  person_id?: string;
+  reason?: VoiceUnavailableReason | "margin";
+  segment: VoiceSegment;
+}
+
+/**
+ * 臉聲融合（docs/17 §7.3）的結果，只進 log 與測試：
+ * - confirmed：臉與聲音指向同一人。
+ * - conflict：臉與聲音指向不同人，或兩段聲音指向不同人。
+ * - face_only：臉認出、沒有可用的聲音（沒說話、太短、這個人沒登記聲音）；照 ID-02 規則。
+ * - voice_unsupported：臉認出，但這個人有登記聲音、聲音卻是 unknown／ambiguous（不支持）。
+ * - voice_only：沒有臉的結果、聲音認出（校準前不稱名）。
+ * - voice_only_test：同上，但 SP-02a 測試開關開著，所以以聲音叫了名字（門檻未校準）。
+ * - voice_only_calibrated：同上，認出這個人的片段已校準驗證通過（SP-03a），不需要測試開關。
+ * - none：都沒有。
+ */
+export type VoiceFusion = "confirmed" | "conflict" | "face_only" | "voice_unsupported" | "voice_only" | "voice_only_test" | "voice_only_calibrated" | "none";
+
+/** 聲音特徵的形狀檢查：192 個有限數值且已 L2 normalize。 */
+export function isValidSpeakerFeature(v: unknown): v is ArrayLike<number> {
+  if (!(Array.isArray(v) || v instanceof Float32Array) || v.length !== SPEAKER_FEATURE_DIM) return false;
+  let sum = 0;
+  for (let i = 0; i < v.length; i++) {
+    const x = v[i];
+    if (typeof x !== "number" || !Number.isFinite(x)) return false;
+    sum += x * x;
+  }
+  return Math.abs(Math.sqrt(sum) - 1) < FEATURE_NORM_TOLERANCE;
 }
 
 /** worker 回報的畫格品質（src/sense/face/quality.ts）。ok 以外都不送特徵。 */
@@ -147,9 +285,9 @@ function sameMatch(a: FrameMatch, b: FrameMatch): boolean {
  * 加入一格證據（純函式）。範圍改變、時間倒退或與上一格相隔超過 gap_ms 時清空重來；
  * 結果與上一格不同（換人、變成未知、品質不足…）時也從這一格重新累積，所以「都指向同一人」只看連續的同一人。
  */
-export function pushEvidence(state: EvidenceState, frame: EvidenceFrame, scope: EvidenceScope): EvidenceState {
+export function pushEvidence(state: EvidenceState, frame: EvidenceFrame, scope: EvidenceScope, timing: EvidenceTiming = EVIDENCE_RULES): EvidenceState {
   const last = state.frames.at(-1);
-  const fresh = !sameScope(state.scope, scope) || frame.gen !== scope.gen || !last || frame.t < last.t || frame.t - last.t > EVIDENCE_RULES.gap_ms;
+  const fresh = !sameScope(state.scope, scope) || frame.gen !== scope.gen || !last || frame.t < last.t || frame.t - last.t > timing.gap_ms;
   if (fresh || !sameMatch(last.match, frame.match)) return { scope, frames: [frame] };
   const frames = [...state.frames, frame];
   return { scope, frames: frames.slice(-EVIDENCE_RULES.max_frames) };
@@ -157,14 +295,14 @@ export function pushEvidence(state: EvidenceState, frame: EvidenceFrame, scope: 
 
 /**
  * 依目前證據決定辨識結果（純函式，時間由呼叫端給，測試用假時鐘）。
- * matched 的條件：同一範圍（世代、epoch、gallery_version）內至少 3 格、跨至少 500 ms、全部指向同一人，且最新一格不超過 1 秒。
+ * matched 的條件：同一範圍（世代、epoch、gallery_version）內至少 3 格、跨至少 500 ms、全部指向同一人，且最新一格不超過 timing.fresh_ms（預設 1 秒）。
  * 其他情況都不帶姓名：未知、多張臉、品質不足、關鏡頭與追蹤遺失都不沿用上一位。
  */
-export function decideIdentity(state: EvidenceState, now: number, scope: EvidenceScope): IdentityObservation {
+export function decideIdentity(state: EvidenceState, now: number, scope: EvidenceScope, timing: EvidenceTiming = EVIDENCE_RULES): IdentityObservation {
   const base = { gen: scope.gen, epoch: scope.epoch, gallery_version: scope.gallery_version, observed_at: now, calibrated: CALIBRATED };
   const last = state.frames.at(-1);
   if (!last) return { ...base, state: "unavailable", reason: "no_face" };
-  if (!sameScope(state.scope, scope) || last.gen !== scope.gen || now - last.t > EVIDENCE_RULES.fresh_ms || now < last.t) {
+  if (!sameScope(state.scope, scope) || last.gen !== scope.gen || now - last.t > timing.fresh_ms || now < last.t) {
     return { ...base, state: "unavailable", reason: "stale" };
   }
   const m = last.match;
@@ -254,6 +392,10 @@ export interface FamilyMember {
   needs_reenroll: boolean;
   /** 載入時發現特徵不合格（維度、非有限值或沒有正規化）：照實標為壞資料，不參與比對，只能刪除。 */
   damaged: boolean;
+  /** 有沒有登記臉（SP-01 起可以只登記聲音）。 */
+  face: boolean;
+  /** 聲音：none 沒登記、enrolled 已登記、needs_reenroll 講者模型或前處理版本不同，要重錄。 */
+  voice: "none" | "enrolled" | "needs_reenroll";
 }
 
 /**
@@ -283,6 +425,8 @@ export interface IdentityManageStatus {
   gallery_version: number;
   epoch: number;
   models: "ok" | "missing" | "hash_mismatch" | "not_configured";
+  /** 講者模型（shared/speaker-runtime.json）的核對結果；不是 ok 時不能錄聲音，查看與刪除仍可用。 */
+  voice_models: "ok" | "missing" | "hash_mismatch" | "not_configured";
   /** Time Machine 排除：excluded／failed（原因只在畫面說明，不阻擋）／pending／not_applicable。 */
   backup_exclusion: "excluded" | "failed" | "pending" | "not_applicable";
   calibrated: boolean;
@@ -331,6 +475,8 @@ export type GreetingRoute = "api_key" | "live";
  * - 其餘對應 decideIdentity 的結果（collecting、stale、unknown、ambiguous、quality、no_face、no_gallery）。
  * - person_gone：人物已刪除或不再參與比對。
  * - bad_name：名稱沒有通過 speakableName。
+ * - voice_conflict（SP-02）：臉認出一人，聲音認成另一人（或兩段聲音指向不同人）。
+ * - voice_unsupported（SP-02）：臉認出的人有登記聲音，但這次的聲音不支持他（unknown／ambiguous）。
  */
 export type GreetingNameReason =
   | "naming_off"
@@ -349,7 +495,9 @@ export type GreetingNameReason =
   | "no_face"
   | "no_gallery"
   | "person_gone"
-  | "bad_name";
+  | "bad_name"
+  | "voice_conflict"
+  | "voice_unsupported";
 
 /**
  * 結構化的問候決策（docs/14 §6）：只在核心建立與使用，不經 HTTP、不給頁面、不進 log。
@@ -369,7 +517,7 @@ export interface GreetingDecision {
 }
 
 /** IPC 的操作（desktop/identity-ipc.mjs 的白名單與這裡一致，測試對照）。 */
-export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming"] as const;
+export const IDENTITY_OPS = ["open_session", "close_session", "list", "probe", "enroll", "delete", "clear_all", "ambient_status", "ambient_probe", "greeting", "ack_naming", "enroll_voice", "delete_voice", "voice_probe", "voice_test", "call_voice", "calib_status", "calib_trial", "calib_apply", "calib_clear"] as const;
 export type IdentityOp = (typeof IDENTITY_OPS)[number];
 
 export type IdentityRequest =
@@ -387,7 +535,42 @@ export type IdentityRequest =
   /** 送出問候前：頁面給互動 ID、綁定的追蹤世代與頁面端條件，核心建立 GreetingDecision 並組句。 */
   | { op: "greeting"; interaction: string; track: number; eligible: boolean; route: GreetingRoute }
   /** 管理畫面：使用者按下「我知道了」，記錄已看過雲端稱名的說明（沒看過就不稱名）。 */
-  | { op: "ack_naming"; session: string };
+  | { op: "ack_naming"; session: string }
+  /**
+   * SP-01 登記聲音：只送特徵，不送錄音。有 person_id 時加到（或取代）那位家人的聲音；沒有時以 name／minor／guardian_confirmed
+   * 新增一位只有聲音的家人。keyword 是喚醒詞的特徵（VOICE_KEYWORD_SAMPLES 段），utterance 是朗讀的特徵（VOICE_UTTERANCE_SAMPLES 段）。
+   */
+  | {
+      op: "enroll_voice";
+      session: string;
+      person_id?: string;
+      name?: string;
+      minor?: boolean;
+      guardian_confirmed?: boolean;
+      consent: boolean;
+      model: SpeakerModelVersion;
+      keyword: number[][];
+      utterance: number[][];
+    }
+  /** 只刪聲音，保留臉（只有聲音的家人會整個刪除，和「刪除」相同）。 */
+  | { op: "delete_voice"; session: string; person_id: string }
+  /**
+   * SP-02 喚醒時的一段聲音（不需要管理 session）：wake_id 是這次喚醒（shared/wake.ts 的 WAKE_ID），feature 在人聲不足時省略
+   * （核心記成 too_short）。回應一律只有 ok，頁面拿不到結果；證據留在核心給這次喚醒的問候決策。
+   */
+  | { op: "voice_probe"; wake_id: string; segment: VoiceSegment; voiced_ms: number; model: SpeakerModelVersion; feature?: number[] }
+  /** SP-02 管理畫面的「試認聲音」：使用者自己按的，回傳這一段認成誰。 */
+  | { op: "voice_test"; session: string; segment: VoiceSegment; model: SpeakerModelVersion; feature: number[] }
+  /**
+   * SP-02b 通話中的一段話（「通話中辨認說話者」開著時；不需要管理 session）。feature 在人聲不足時省略。回應一律只有 ok；
+   * 核心只拿它當記憶人物候選與換人紀錄（只記 log，不打斷）。
+   */
+  | { op: "call_voice"; voiced_ms: number; model: SpeakerModelVersion; feature?: number[] }
+  /** SP-03a 校準：報告、記一筆試驗（只回報告，不回這筆的分數）、套用建議門檻（原生確認）、清除校準資料（原生確認）。 */
+  | { op: "calib_status"; session: string }
+  | { op: "calib_trial"; session: string; label: "member" | "stranger"; person_id?: string; segment: VoiceSegment; voiced_ms: number; model: SpeakerModelVersion; feature: number[] }
+  | { op: "calib_apply"; session: string }
+  | { op: "calib_clear"; session: string };
 
 /** 管理畫面需要的狀態（open_session、list 與變更後回傳）。 */
 export interface IdentityManageView {
@@ -426,13 +609,17 @@ export type IdentityErrorCode =
 export type MemoryUnlinkResult = "none" | "unlinked" | "deleted" | "failed";
 
 export type IdentityResponse =
-  | ({ ok: true; op: "open_session" | "list" | "enroll" | "ack_naming" } & IdentityManageView)
-  | ({ ok: true; op: "delete" | "clear_all"; memory?: MemoryUnlinkResult } & IdentityManageView)
+  | ({ ok: true; op: "open_session" | "list" | "enroll" | "ack_naming" | "enroll_voice" } & IdentityManageView)
+  | ({ ok: true; op: "delete" | "clear_all" | "delete_voice"; memory?: MemoryUnlinkResult } & IdentityManageView)
   | { ok: true; op: "close_session" }
   | { ok: true; op: "probe"; observation: IdentityObservation }
   /** 只回可不可以取樣；不回原因（原因可能透露有沒有登記家人）。 */
   | { ok: true; op: "ambient_status"; ready: boolean }
   | { ok: true; op: "ambient_probe" }
+  | { ok: true; op: "voice_probe" }
+  | { ok: true; op: "call_voice" }
+  | { ok: true; op: "calib_status" | "calib_trial" | "calib_apply" | "calib_clear"; report: CalibrationReport }
+  | { ok: true; op: "voice_test"; observation: VoiceObservation }
   /**
    * api_key：text 是 response.create 這一輪的 instructions（只含核心組好的短句；名字會短暫出現在頁面，ADR-0001 §2.4）。
    * live：text 為 null，短句留在核心，頁面接著 POST /api/realtime/input greeting（只帶互動 ID），核心自己送進 sideband。

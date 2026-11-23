@@ -35,10 +35,10 @@ function rng(seed: number): () => number {
   };
 }
 
-/** 合成的 128 維單位向量（不是任何人的臉）；不同 seed 之間的 cosine 約在 ±0.3 內。 */
-export function unitFeature(seed: number): Float32Array {
+/** 合成的單位向量（預設 128 維＝臉；SP-01 聲音用 192 維），不是任何人的臉或聲音；不同 seed 之間的 cosine 約在 ±0.3 內。 */
+export function unitFeature(seed: number, dim = 128): Float32Array {
   const r = rng(seed * 7919 + 1);
-  const v = Float32Array.from({ length: 128 }, () => r() * 2 - 1);
+  const v = Float32Array.from({ length: dim }, () => r() * 2 - 1);
   const n = Math.hypot(...v);
   return v.map((x) => x / n);
 }

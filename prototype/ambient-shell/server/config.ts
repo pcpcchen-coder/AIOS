@@ -4,6 +4,11 @@ import { join } from "node:path";
 import type { ExecutorMode } from "../shared/types.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_MAX_CONCURRENT } from "./runner.ts";
+import { DEFAULT_SOLOIST_PORT, parseSoloistPort } from "./integrations/adapters/spotify-soloist.ts";
+import { parseGogPath, parseMailSelf } from "./integrations/adapters/gmail-gog.ts";
+import { parseLgtvBroadcast, parseLgtvHost, parseLgtvMac, parseYoutubeKey } from "./lgtv/config.ts";
+import { pairingFile } from "./lgtv/store.ts";
+import { parseCalendarTimeZone, parseGogAccount } from "./integrations/adapters/google-calendar.ts";
 import { DEFAULT_LIVE_VOICE, isLiveVoice, LIVE_VOICES, ROUTE_PREFERENCES, type LiveVoiceId, type RoutePreference } from "../shared/realtime-route.ts";
 
 export interface Config {
@@ -19,6 +24,13 @@ export interface Config {
   chatgptModel: string | null;
   /** 憑證與設定目錄（預設 ~/.config/nous），不放在 repo 內。 */
   configDir: string;
+  /** MEMO-1 回憶模式的本機資料夾（NOUS_MEMORIES_DIR，預設 <configDir>/memories/library）；只從這裡來，不接受 HTTP 指定。 */
+  memoriesDir: string;
+  /**
+   * MEMO-2 Google 相簿：gog 的路徑（NOUS_GOG_PATH）與帳號（NOUS_GOG_ACCOUNT，沒有時 NOUS_MAIL_SELF）。不綁 NOUS_AIL。
+   * 設定值格式不對時不讓核心啟動失敗：invalid 帶原因（設定頁顯示為不可用的原因）。
+   */
+  memoriesGoogle: { gogPath: string | null; account: string | null; invalid: string | null };
   /** Sign in with ChatGPT 的 loopback 回呼埠。 */
   oauthPort: number;
   maxConcurrent: number;
@@ -79,6 +91,11 @@ export interface Config {
    * /wake-runtime/ 一律 404、頁面不載入 src/audio；開啟只代表「可以在選單列打開」，偏好預設仍是關閉（docs/17 §5.1）。
    */
   wake: boolean;
+  /**
+   * AIL-1（docs/18）：App Integration Layer 的功能旗標（NOUS_AIL=on，預設關閉）與啟用的 Adapter（NOUS_AIL_SERVICES，逗號分隔，例如 mock）。
+   * 關閉時不建立 Registry：工具表、說明、/api/settings 與 HTTP 路由都和加入整合層之前相同。
+   */
+  ail: { enabled: boolean; services: string[]; soloistPort: number; vcr?: { mode: "fake" | "mac"; dir: string }; mail?: { self: string | null; gogPath: string | null }; calendar?: { account: string | null; gogPath: string | null; timeZone: string }; tv?: { host: string | null; mac: string | null; broadcast: string | null; pairingFile: string; youtubeApiKey?: string | null } };
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -111,6 +128,8 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     fallbacks: (env.NOUS_FALLBACKS ?? "on").trim().toLowerCase() !== "off",
     chatgptModel: env.NOUS_CHATGPT_MODEL?.trim() || null,
     configDir: env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"),
+    memoriesDir: env.NOUS_MEMORIES_DIR?.trim() || join(env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"), "memories", "library"),
+    memoriesGoogle: parseMemoriesGoogle(env.NOUS_GOG_PATH, env.NOUS_GOG_ACCOUNT, env.NOUS_MAIL_SELF),
     oauthPort: intOr(env.NOUS_OAUTH_PORT, 1455),
     maxConcurrent: Math.max(1, intOr(env.NOUS_MAX_CONCURRENT, DEFAULT_MAX_CONCURRENT)),
     openaiApiKey: env.OPENAI_API_KEY?.trim() || null,
@@ -134,6 +153,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     smarthomeUrl: parseHttpUrl(env.SMARTHOME_URL, "SMARTHOME_URL"),
     smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
     wake: (env.NOUS_WAKE ?? "off").trim().toLowerCase() === "on",
+    ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES, env.NOUS_SPOTIFY_SOLOIST_PORT, env.NOUS_VCR, env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"), { self: env.NOUS_MAIL_SELF, gog: env.NOUS_GOG_PATH, account: env.NOUS_GOG_ACCOUNT, calendarTz: env.NOUS_CALENDAR_TZ }, { host: env.NOUS_LGTV_HOST, mac: env.NOUS_LGTV_MAC, broadcast: env.NOUS_LGTV_BROADCAST, youtubeKey: env.NOUS_YOUTUBE_API_KEY }),
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",
@@ -257,4 +277,45 @@ export function parseHttpUrl(raw: string | undefined, name: string): string | nu
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error(`${name} 必須是 http 或 https 網址`);
   if (url.username || url.password) throw new Error(`${name} 不可內含帳號密碼；權杖請放在 SMARTHOME_TOKEN`);
   return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+
+/**
+ * NOUS_AIL＋NOUS_AIL_SERVICES：只接受小寫英數 Adapter ID；旗標關閉時清單一律為空。
+ * VCR-0／VCR-2：NOUS_VCR＝off（預設）｜fake（假輸出，沒有實體喇叭發聲）｜mac（Mac 的 say 實際發聲；只限 macOS）；整合層開著時其他值一律報錯，關著時不看。
+ * CAL-1：列出 google_calendar 時才讀 NOUS_GOG_ACCOUNT（gog 的 Google 帳號，沒有時用 NOUS_MAIL_SELF）與 NOUS_CALENDAR_TZ（IANA 時區，預設 Asia/Taipei）。
+ * MAIL-1：只有 NOUS_AIL_SERVICES 列出 gmail_gog 時才讀 NOUS_MAIL_SELF（自己的 Gmail，寄件與收件相同）與 NOUS_GOG_PATH（gog 的絕對路徑，可省略）。
+ * LGTV-1：列出 lg_tv 時才讀 NOUS_LGTV_HOST（電視的區網 IP，限私有網段）、NOUS_LGTV_MAC（Wake-on-LAN，可省略）、NOUS_LGTV_BROADCAST（可省略）；
+ *   配對金鑰固定在 <configDir>/lgtv.json（npm run tv:pair 寫入），不從環境變數讀。
+ *   LGTV-2：NOUS_YOUTUBE_API_KEY（YouTube Data API v3 的 key，可省略；沒有時不能依名稱搜尋）。
+ * SP-1：NOUS_SPOTIFY_SOLOIST_PORT＝Mac loopback 上經 SSH -R 轉送的 Soloist WebSocket 埠（預設 19090；主機固定 127.0.0.1）。
+ */
+export function parseAil(flag: string | undefined, services: string | undefined, soloistPort?: string, vcr?: string, configDir?: string, mail?: { self?: string; gog?: string; account?: string; calendarTz?: string }, tv?: { host?: string; mac?: string; broadcast?: string; youtubeKey?: string }): Config["ail"] {
+  const enabled = (flag ?? "off").trim().toLowerCase() === "on";
+  // 整合層關閉時 NOUS_VCR 整個不看（和 NOUS_AIL_SERVICES 一樣）。
+  if (!enabled) return { enabled: false, services: [], soloistPort: DEFAULT_SOLOIST_PORT };
+  const vcrMode = (vcr ?? "off").trim().toLowerCase() || "off";
+  if (vcrMode !== "off" && vcrMode !== "fake" && vcrMode !== "mac") throw new Error("NOUS_VCR 只接受 off、fake 或 mac");
+  const list = (services ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  for (const id of list) if (!/^[a-z][a-z0-9_]{0,31}$/.test(id)) throw new Error(`NOUS_AIL_SERVICES 的 Adapter ID 不合法："${id}"`);
+  const unique = [...new Set(list)];
+  const base: Config["ail"] = {
+    enabled: true,
+    services: unique,
+    soloistPort: parseSoloistPort(soloistPort),
+    ...(unique.includes("gmail_gog") ? { mail: { self: parseMailSelf(mail?.self), gogPath: parseGogPath(mail?.gog) } } : {}),
+    // CAL-1：列出 google_calendar 時才讀帳號（NOUS_GOG_ACCOUNT，沒有時用 NOUS_MAIL_SELF）與時區（NOUS_CALENDAR_TZ，預設 Asia/Taipei）。
+    ...(unique.includes("google_calendar") ? { calendar: { account: parseGogAccount(mail?.account, mail?.self), gogPath: parseGogPath(mail?.gog), timeZone: parseCalendarTimeZone(mail?.calendarTz) } } : {}),
+    ...(unique.includes("lg_tv") ? { tv: { host: parseLgtvHost(tv?.host), mac: parseLgtvMac(tv?.mac), broadcast: parseLgtvBroadcast(tv?.broadcast), pairingFile: pairingFile(configDir ?? join(homedir(), ".config", "nous")), youtubeApiKey: parseYoutubeKey(tv?.youtubeKey) } } : {}),
+  };
+  // VCR-0／VCR-2（docs/19）：NOUS_VCR=fake（假輸出，mock）或 mac（say 發聲）才加上 vcr；目錄固定在 <configDir>/voice-relay，不來自模型。
+  return vcrMode === "fake" || vcrMode === "mac" ? { ...base, vcr: { mode: vcrMode, dir: join(configDir ?? join(homedir(), ".config", "nous"), "voice-relay") } } : base;
+}
+
+/** MEMO-2：Google 相簿用的 gog 路徑與帳號；格式不對時 invalid 帶原因（只是回憶模式的一個來源，不擋核心啟動）。 */
+export function parseMemoriesGoogle(gogPath: string | undefined, account: string | undefined, mailSelf: string | undefined): Config["memoriesGoogle"] {
+  try {
+    return { gogPath: parseGogPath(gogPath), account: parseGogAccount(account, mailSelf), invalid: null };
+  } catch (err) {
+    return { gogPath: null, account: null, invalid: (err as Error).message };
+  }
 }

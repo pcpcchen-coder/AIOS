@@ -6,7 +6,7 @@ import {
   type CameraPrefsPatch,
   type CameraSettings,
 } from "../shared/sense.ts";
-import { PrefsFile } from "./prefs-file.ts";
+import { PrefsStore } from "./prefs-store.ts";
 
 // 鏡頭的使用者設定（configDir/camera.json）。這個檔案只有這裡寫入；ProviderManager 的 settings.json 不受影響。
 // 優先順序：使用者保存的值 > .env（只有 NOUS_LOOK_TO_TALK）> CAMERA_PREFS 預設。
@@ -21,28 +21,17 @@ export interface CameraSettingsStoreOptions {
   log?(message: string): void;
 }
 
-export class CameraSettingsStore {
-  private readonly file: PrefsFile<CameraPrefs>;
-
-  constructor(private readonly options: CameraSettingsStoreOptions) {
-    this.file = new PrefsFile<CameraPrefs>({
-      dir: options.dir,
-      name: "camera.json",
-      version: 1,
-      parse: parseCameraPatch,
-      // 保存的「鏡頭」值不合法、或檔案讀不懂時，不猜成開；使用者說「打開鏡頭」或在設定打開時會覆寫這個檔案。
-      failClosed: { active: false },
-      unreadable: "鏡頭保持關閉；其他設定用 .env 與預設值",
-      log: options.log,
-    });
+export class CameraSettingsStore extends PrefsStore<CameraPrefs, CameraSettingsStoreOptions> {
+  constructor(options: CameraSettingsStoreOptions) {
+    // 保存的「鏡頭」值不合法、或檔案讀不懂時，不猜成開；使用者說「打開鏡頭」或在設定打開時會覆寫這個檔案。
+    super({ name: "camera.json", parse: parseCameraPatch, failClosed: { active: false }, unreadable: "鏡頭保持關閉；其他設定用 .env 與預設值" }, options);
   }
 
   /** install 永遠來自 .env；使用者設定 = base 疊上保存的值。 */
   view(): CameraSettings {
     const { enabled, label, left_first, screen_width_mm, screen_offset_mm } = this.options.base;
     const install: CameraInstall = { enabled, label, left_first, screen_width_mm, screen_offset_mm };
-    const saved = this.file.saved;
-    const prefs = Object.fromEntries(CAMERA_PREF_KEYS.map((key) => [key, saved[key] ?? this.options.base[key]])) as unknown as CameraPrefs;
+    const prefs = this.resolve<CameraPrefs>(CAMERA_PREF_KEYS, this.options.base);
     return { ...install, ...prefs };
   }
 
@@ -51,8 +40,7 @@ export class CameraSettingsStore {
    * 寫檔失敗時丟出錯誤、記憶體不變。同樣的 patch 再送一次，檔案內容不變。
    */
   update(patch: CameraPrefsPatch): CameraSettings {
-    this.file.update(patch);
-    this.options.onChange();
+    this.commit(patch);
     return this.view();
   }
 }

@@ -29,7 +29,7 @@ describe("RealtimeBridge", () => {
     expect((mint.init.headers as Record<string, string>).Authorization).toBe("Bearer sk-fixture");
     const session = JSON.parse(String(mint.init.body)).session;
     expect(session).toMatchObject({ type: "realtime", model: "gpt-realtime", audio: { output: { voice: "marin" }, input: { turn_detection: { type: "semantic_vad" } } } });
-    expect(session.tools.map((t: { name: string }) => t.name)).toEqual(["delegate_task", "get_tasks", "end_conversation"]);
+    expect(session.tools.map((t: { name: string }) => t.name)).toEqual(["delegate_task", "get_tasks", "set_voice_volume", "set_day_night", "end_conversation"]);
     expect(session.instructions).toContain("「寫週報」：進行中");
 
     expect(call.url).toBe("https://api.openai.com/v1/realtime/calls");
@@ -100,8 +100,11 @@ describe("RealtimeBridge", () => {
     const session = JSON.parse(String(api.calls[0].init.body)).session;
     expect(session.tools.map((t: { name?: string; type: string }) => t.name ?? t.type)).toEqual([
       "web_search",
+      "show_search_result",
       "delegate_task",
       "get_tasks",
+      "set_voice_volume",
+      "set_day_night",
       "end_conversation",
       "mcp",
     ]);

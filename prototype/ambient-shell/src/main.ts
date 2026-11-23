@@ -1,4 +1,7 @@
 import { t, msg, getLocale, setLocale, onLocaleChange, transcriptText, applyStaticTranslations, type Locale } from "./i18n.ts";
+import { AlarmRing } from "./alarm-ring.ts";
+import { browserRingSound, browserTickSound } from "./alarm-sound.ts";
+import { ALARM_WRITE_PATH, ringPeakVolume } from "../shared/alarm.ts";
 import "./style.css";
 import { computeProgress, isActive, queueText, sortForProgress } from "../shared/progress.ts";
 import { DEFAULT_FACE_TUNING } from "../shared/face-tuning.ts";
@@ -8,8 +11,11 @@ import { ConversationSession } from "./conversation.ts";
 import { cameraShouldRun, matchCameraCommand, SenseController, zoneOf, type SenseSnapshot } from "./sense/controller.ts";
 import type { PreviewTargets, SensePipeline } from "./sense/pipeline.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraPrefsPatch, type PointZone, type SensorState } from "../shared/sense.ts";
+import { TerminalCameraPrefs } from "./terminal-camera.ts";
 import { formatSeconds } from "../shared/prefs.ts";
-import { DEFAULT_VOICE_PREFS, idleTimeoutsMs, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
+import { DEFAULT_VOICE_PREFS, idleTimeoutsMs, maxCallMs, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
+import { CallLifecycle } from "./call-lifecycle.ts";
+import { CALL_METER_TEXT, callMeterText } from "../shared/call-meter.ts";
 import {
   browserRealtimeDeps,
   realtimeSupported,
@@ -22,48 +28,80 @@ import {
 } from "./realtime.ts";
 import { browserWatchLevel, LiveVoice, orphanStopReport } from "./live-voice.ts";
 import { greetingFor, idleSession, newInteractionId, openRealtime, wakeTriggerAction, type GreetingOnce, type RealtimeSession, type RealtimeStartSource, type SessionDecision } from "./realtime-session.ts";
-import type { CallAnswer, LiveCoreEvent, LiveMemoryReason, RealtimeServerEvent, RouteId } from "../shared/realtime-route.ts";
+import { CALL_END_TEXT, type CallAnswer, type LiveCoreEvent, type LiveMemoryReason, type RealtimeServerEvent, type RouteId } from "../shared/realtime-route.ts";
 import { Brain } from "./brain.ts";
+import { applyProfile, loadGpuDrawing, loadProfile, memoriesRenderBudget, saveGpuDrawing, saveProfile, type PerformanceProfile, type RenderBudget } from "./performance.ts";
+import { MEMORIES_OFF, memoryCaption, stepMemories, wakeMemories, type MemoriesItem, type MemoriesState } from "../shared/memories.ts";
+import { MEMORIES_TIMING, MemoriesPresenter } from "./memories.ts";
+import { ClockCorner } from "./clock-corner.ts";
+import { HomeCorner } from "./home-corner.ts";
+import { CUE_TIMING, ProcessingCue, processingSource } from "./processing-cue.ts";
+import { browserProcessingSound } from "./processing-sound.ts";
 import { classifyDomain, DOMAINS, isDomain } from "../shared/domain.ts";
 import { activityDescription, collectRegionActivity, type RegionActivity } from "./region-activity.ts";
 import { formatCount } from "./format.ts";
 import { homeControlLine, homeStatusLine } from "../shared/home.ts";
 import { classify, settingsReply } from "./intent.ts";
-import { RealtimeLocalCommands } from "./voice-command.ts";
+import { matchVoiceCommand, RealtimeLocalCommands } from "./voice-command.ts";
 import { runDesktopCommand } from "./desktop-command.ts";
+import { startTerminalHeartbeat } from "./terminal-heartbeat.ts";
+import { ScreenReporter } from "./screen-reporter.ts";
+import { selectBridges } from "./identity-bridge.ts";
+import { PAGE_PACE, pageTerminal, type TerminalPageReport } from "../shared/terminal.ts";
 import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
 import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
 import type { TasksRequest, TasksResponse, VaultView } from "../shared/protected-tasks.ts";
 import { WakeCalibrationView } from "./wake-calibration-view.ts";
-import { MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
+import { conversationPersonLabel, liveMemoryLabel, MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, PresenceNotice, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
 import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
 import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
 import { AmbientIdentity } from "./sense/identity-ambient.ts";
 import { LookTimeline } from "./look-timeline.ts";
 import type { IdentityRequest, IdentityResponse } from "../shared/identity.ts";
 import faceRuntime from "../shared/face-runtime.json" with { type: "json" };
+import speakerRuntime from "../shared/speaker-runtime.json" with { type: "json" };
+import { OWN_MICROPHONE, SPEAKER_RUNTIME_ASSETS, tapStream, type MicSource, type SpeakerWorkerLike } from "./speaker/recorder.ts";
+import { WakeVoice } from "./speaker/wake-voice.ts";
 import { evaluateSurface } from "./presentation-policy.ts";
-import { blocksAutoTalk, initialShell, reduceShell, type ShellEvent, type ShellState } from "./shell-state.ts";
+import { blocksAutoTalk, initialShell, keepPinnedSettings, reduceShell, type ShellEvent, type ShellState, type Surface } from "./shell-state.ts";
 import {
   progressStructureKey,
   refreshTimers,
   renderArtifact,
   renderError,
   renderNotice,
+  renderSearch,
+  applySearchHighlight,
   renderProgress,
   renderSettings,
   renderConfirm,
   refreshCountdowns,
+  refreshPerformanceReadout,
   updateLiveCounts,
   type ConfirmDetail,
   type ViewActions,
+  type IntegrationPanelState,
+  type VoiceRelayActions,
+  type VoiceRelayPanelState,
+  emptyVoiceRelayPanel,
   MAX_LISTED,
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
 import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts";
 import { DEFAULT_WAKE_SILENCE_S, WAKE_REASON_LABEL, WAKE_START_RATE, WAKE_TEXT, type WakeReason, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
+import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
+import { DAY_NIGHT_KEY, dayNightReasonText, loadLumaThresholds, saveLumaThresholds, VOICE_VOLUME_TEXT, voiceVolume } from "./voice-volume.ts";
+import { SettingsEntry, settingsEntryEnabled } from "./settings-entry.ts";
+import { voiceVolumeOutput } from "../shared/voice-volume.ts";
+import { activeOverride, currentLight, dayNightToolOutput, decideDayNight, INITIAL_LIGHT, nextLight, nightEffects, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type DayNightToolRequest, type LightState, type LumaThresholds, type NightEffects } from "../shared/day-night.ts";
+import { LightMeter, type LightWorkerLike } from "./light-meter.ts";
+import type { TerminalWindowPanelState, VoiceVolumePanelState } from "./views.ts";
+import { WINDOW_NO_RESPONSE_MS, windowModeFromSearch } from "../shared/terminal-window.ts";
+import { classifySearchError, dismissEmptySearch, planSearchSurface, READ_ALONG_CHARS_PER_S, SEARCH_ERROR_TEXT, SearchPanelController, shouldAutoClose, UtteranceRequests } from "./search-panel.ts";
+import { searchToolOutput } from "../shared/web-search.ts";
+import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
 import {
   PushToTalk,
   VoiceConversation,
@@ -84,7 +122,7 @@ interface DesktopBridge {
   onLocaleChange?(listener: (locale: Locale) => void): () => void;
   openExternal(url: string): void;
   /** settings：設定的版本字串；變了 App 就重新讀取設定，選單列不會留著舊的「（目前）」。 */
-  reportState(state: { voice: string; activeTasks: number; settings: string; locale: Locale; wake?: WakeReport }): void;
+  reportState(state: { voice: string; activeTasks: number; settings: string; locale: Locale; wake?: WakeReport; audio?: AudioMenuReport }): void;
   /** 家人辨識（只經 IPC 到 App 的核心；不走 HTTP）。舊版 App 沒有這一項。 */
   identity?(request: IdentityRequest): Promise<IdentityResponse>;
   /** 家庭記憶（docs/16 MEM-1；只經 IPC 到 App 的核心）。舊版 App 與瀏覽器版沒有這一項。 */
@@ -99,6 +137,10 @@ interface DesktopBridge {
   confirmDelete?(request: { title: string }): Promise<{ confirmed: boolean }>;
   /** WK-01a：系統睡眠、醒來、鎖定、解鎖（只有列舉值）。舊版 App 與瀏覽器版沒有這一項。 */
   onPower?(listener: (event: PowerEvent) => void): () => void;
+  /** 服務模式：載入時是否已在服務模式（之後的改變經 onService）。舊版 App 與瀏覽器版沒有這一項。 */
+  initialService?: boolean;
+  /** 服務模式（Mac 交給 Pi 使用）的進入與離開（只有列舉值）。舊版 App 與瀏覽器版沒有這一項。 */
+  onService?(listener: (event: "enter" | "exit") => void): () => void;
   /**
    * 打開鏡頭：主程序先顯示原生說明，使用者按「開啟」才由核心保存（HTTP 的 active: true 是 403）。不帶參數。
    * 舊版 App 與瀏覽器版沒有這一項。
@@ -111,6 +153,24 @@ declare global {
     nousDesktop?: DesktopBridge;
   }
 }
+
+/**
+ * RPI-ID：家人辨識與記憶的傳輸。Mac 主視窗是 IPC；Pi 等終端機頁面是 HTTP（只有認人與「正在用 X 的記憶」「不是我」）；
+ * 一般瀏覽器是 null。登記、校準、記憶管理、打字聊天的記憶與記憶建議仍只看 window.nousDesktop。
+ */
+const bridges = selectBridges({ desktop: window.nousDesktop, search: location.search, page: terminalPageReport, http: { identity: api.terminalIdentity, memory: api.terminalMemory } });
+/** 終端機頁面給核心的鏡頭回報：這個頁面實際套用的設定（Pi 本機的鏡頭設定）與鏡頭是否真的在跑。 */
+function terminalPageReport(): TerminalPageReport {
+  const cam = settings?.camera;
+  return { camera_active: pipeline?.running === true, look_to_talk: cam?.look_to_talk === true, look_to_talk_greet: cam?.look_to_talk_greet === true, look_to_talk_greet_name: cam?.look_to_talk_greet_name === true };
+}
+const identityBridge = bridges.identity;
+const presenceBridge = bridges.memory;
+/** Pi 的效能保護（對話流暢優先）：終端機頁面的感知迴圈與同步辨識取樣頻率減半。 */
+const pagePace = bridges.terminal !== null ? PAGE_PACE.terminal : PAGE_PACE.main;
+/** 終端機頁面上，Mac 才有的畫面（家人辨識、記憶管理）說明要到 Mac 的 App 操作。 */
+const TERMINAL_FAMILY_UNAVAILABLE = "家人辨識：登記與管理請在 Mac 的 Nous App 進行（這台終端機只用來認人）。";
+const TERMINAL_MEMORY_UNAVAILABLE = "記憶：管理請在 Mac 的 Nous App 進行（這台終端機只顯示正在用誰的記憶）。";
 
 const canvas = $<HTMLCanvasElement>("brain");
 const regionActivity = $<HTMLParagraphElement>("region-activity");
@@ -155,20 +215,189 @@ const suggestionPrompt = new SuggestionPrompt({
   },
   changed: () => render(),
 });
+/**
+ * 記憶預設選人（George 2026-11-02）：一行「即將用／正在用 X 的記憶」與「不是我」（不是卡片、不擋聊天；收起只藏起來）。
+ */
+const presenceNoticeEl = $<HTMLDivElement>("presence-notice");
+const presenceNotice = new PresenceNotice({
+  bridge: presenceBridge ? { memory: presenceBridge } : null,
+  presence: () => memoryPresence,
+  applied: (view) => {
+    if (view.history_reset) session.forgetMemoryHistory();
+    setMemoryPresence(view.presence, view.status?.profiles.map(p => ({ id: p.id, name: p.name })));
+    const receipts = receiptsText(view.receipts);
+    if (receipts) showSubtitle(receipts, true);
+  },
+  changed: () => render(),
+});
 let developmentProvider: ExecutorMode | null = null;
 let conversationEpoch = 0;
 let pendingProviderSelection: { epoch: number; account: string } | null = null;
 
-const brain = new Brain(canvas);
+const isPi4 = bridges.terminal === "rpi4";
+const brain = new Brain(canvas, isPi4 ? 1.5 : 1);
+// 這台裝置的畫面效能（George 2026-11-05）：只改電子腦的繪製與背景模糊，存在這個頁面；Pi 終端機預設「平衡」。
+// MEMO-1：播放回憶時電子腦降到「省電」的每秒格數與光暈，把 Pi 4 的 GPU／CPU 留給照片與影片解碼；收起後回到原本的設定。
+// 2026-11-07：解析度維持這台裝置原本的設定（memoriesRenderBudget）。退到角落的那 1.2 秒仍用原本的每秒格數，移動才順，到位後才降。
+let memoriesDimmed = false;
+const performanceTargets = { setRenderBudget: (budget: RenderBudget) => brain.setRenderBudget(memoriesDimmed ? memoriesRenderBudget(budget) : budget), root: document.documentElement };
+let memoriesDimTimer: ReturnType<typeof setTimeout> | null = null;
+let performanceProfile: PerformanceProfile = loadProfile({ search: location.search, desktop: !!window.nousDesktop });
+applyProfile(performanceProfile, performanceTargets);
+// 「使用 GPU 繪製（WebGL）」（方案 B，docs/validation/brain-webgl-2026-11-07.md）：每台裝置預設關閉；沒有硬體 WebGL 或中斷時自動改回 Canvas。
+let gpuDrawing = loadGpuDrawing();
+brain.setRendererPreference(gpuDrawing);
+brain.onRendererChange = (status) => {
+  if (shell.surface?.kind === "settings") refreshPerformanceReadout(surfaceRoot, brain.frameStats(), status);
+};
 brain.start();
+
+/**
+ * MEMO-1 回憶模式：電子腦閒置 idle_s 後照片與影片從電子腦浮現；任何喚醒立即收起（shared/memories.ts 的狀態機）。
+ * 斷線時視為關閉（核心不在就沒有照片可讀，也不留著過時的清單）。照片不點亮任何腦區。
+ */
+/** CLK-1：右上角的時間、日期與天氣（設定 settings.clock.enabled 打開時才有；被動讀數，不能點）。 */
+const clockCorner = new ClockCorner({
+  fetchWeather: (signal) => api.weatherNow(signal),
+  locale: () => getLocale(),
+  enlarged: isPi4,
+});
+/** HOME-1：左上角的家中狀態（設定 settings.home_corner.enabled 打開時才有；被動讀數，不能點、不能控制）。 */
+const homeCorner = new HomeCorner({
+  fetchOverview: (signal) => api.homeOverview(signal),
+  locale: () => getLocale(),
+  enlarged: isPi4,
+});
+
+const memoriesRoot = document.createElement("div");
+memoriesRoot.id = "memories";
+document.body.append(memoriesRoot);
+const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)") ?? null;
+const memoriesPresenter = new MemoriesPresenter({
+  root: memoriesRoot,
+  reducedMotion: () => reducedMotion?.matches ?? false,
+  origin: () => {
+    const corner = brain.memoriesCorner();
+    return { x: corner.x - window.innerWidth / 2, y: corner.y - window.innerHeight / 2 };
+  },
+  caption: (item) => memoryCaption(item, new Date(), getLocale()),
+  onWake: () => wakeMemoriesNow(),
+});
+let memoriesState: MemoriesState = MEMORIES_OFF;
+let memoriesItems: MemoriesItem[] = [];
+let memoriesFetchedAt: number | null = null;
+let memoriesFetching = false;
+let memoriesTicker: ReturnType<typeof setInterval> | null = null;
+
+/**
+ * 背景處理中的提示（George 2026-11-02；docs/validation/brain-processing-cue-2026-11-02.md）：電子腦的「處理中」樣子與輕聲的聲納提示音。
+ * 來源只有真的在執行的任務與還沒回來的即時語音查詢；聲音跟著「聲音輸出」設定，每一響期間喚醒防護不接受喚醒詞。
+ */
+/** 還沒回來的即時語音查詢（每次查詢一個遞增編號；最多算 CUE_TIMING.searchTimeoutMs）。 */
+const realtimeSearches = new Set<number>();
+let nextRealtimeSearch = 0;
+/**
+ * 即時語音的查詢結果畫面（George 2026-11-09）：編號候選 → 使用者選一則 → 重點跟讀 → 播放結束 N 秒後收起。
+ * searchSurfaceId：目前顯示查詢結果的那張畫面；倒數到了只收起同一張。searchEpoch：通話結束就加一，晚到的查詢結果不再顯示。
+ * searchRequests：使用者說完的每一句登記的 request id；打開查詢畫面要取用一個（模型自己決定的查詢不能自己打開畫面）。
+ */
+let searchSurfaceId: string | null = null;
+let searchEpoch = 0;
+const searchRequests = new UtteranceRequests(() => userRequest());
+const searchPanel = new SearchPanelController({
+  closeAfterMs: () => voicePrefs().search_close_s * 1000,
+  charsPerSecond: () => READ_ALONG_CHARS_PER_S[getLocale() === "en" ? "en" : "zh-TW"],
+  changed: () => {
+    const state = searchPanel.state;
+    if (shell.surface?.kind === "search" && state?.mode === "reading") applySearchHighlight(surfaceRoot, state.active);
+  },
+  autoClose: () => {
+    if (shouldAutoClose(shell.surface, searchSurfaceId)) dispatch({ type: "dismiss" });
+  },
+});
+/** 念話中的句數（speakText 可能重疊；同喚醒防護的計數）。 */
+let speechActive = 0;
+const processingCue = new ProcessingCue({
+  createSound: () => browserProcessingSound({ sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) }),
+  guard: {
+    // 每一響開始時的那一個喚醒控制器負責結束（中途換掉或關閉時，計數跟著舊的控制器一起丟掉）。
+    begin: () => {
+      cueGuardOwners.push(wake);
+      wake?.begin("cue");
+    },
+    end: () => cueGuardOwners.shift()?.end("cue"),
+  },
+  onPing: () => brain.cuePing(),
+});
+const cueGuardOwners: (WakeController | null)[] = [];
+voiceVolume.onChange(() => alarmRing.refreshVolume());
+
+/**
+ * ALARM-1：這個頁面的響鈴與倒數（真相在核心的 settings.alarms）。響鈴期間：喚醒偵測暫停（鈴聲不能觸發喚醒）、回憶模式收起、
+ * 處理中音效暫停、通話不掛斷但 Nous 的聲音靜音（George 2026-11-09「較溫和」）。
+ */
+let alarmGuardOwner: WakeController | null = null;
+/** 即時語音自己要的靜音（停播、記憶 hold、本機指令那一輪）；鈴響時另外疊上靜音，兩者合成，不互相蓋掉。 */
+let liveWantsMuted = false;
+function applyLiveMute(): void {
+  if (liveAudio) liveAudio.muted = liveWantsMuted || alarmRing.ringing;
+}
+/** 鈴響時喚醒控制器必須帶著 alarm 防護（中途才建立或重建的控制器也要補上）。 */
+function syncAlarmGuard(): void {
+  // ALARM-3：倒數的滴答與試聽鈴聲也一樣不能觸發喚醒（倒數的前 20 秒沒有聲音，喚醒照常，可以說「取消」「再加 5 分鐘」）。
+  const want = alarmRing.ringing || alarmRing.audible ? wake : null;
+  if (alarmGuardOwner === want) return;
+  alarmGuardOwner?.end("alarm");
+  alarmGuardOwner = want;
+  want?.begin("alarm");
+}
+const alarmRing = new AlarmRing({
+  createSound: () => browserRingSound({ sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) }),
+  post: (path, body) => api.alarmPost(path, body).then((value) => {
+    applySettings(value, true);
+    render();
+  }),
+  peak: (kind, alarmMin) => ringPeakVolume(voiceVolume.current, kind === "alarm" ? alarmMin : 0),
+  createTicks: () => browserTickSound({ sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) }),
+  onCountdownChange: () => {
+    syncAlarmGuard();
+    if (alarmRing.countingDown) wakeMemoriesNow();
+    syncMemories();
+    syncProcessingCue();
+    syncScreen();
+  },
+  onRingingChange: (ringing) => {
+    syncAlarmGuard();
+    applyLiveMute();
+    if (ringing) {
+      globalThis.speechSynthesis?.pause();
+      wakeMemoriesNow();
+    } else {
+      globalThis.speechSynthesis?.resume();
+    }
+    syncMemories();
+    syncProcessingCue();
+    // DN-3：Pi 夜間關著螢幕時，響鈴算「忙」，螢幕立刻亮起來。
+    syncScreen();
+  },
+});
 
 const tasks = new Map<string, Task>();
 const artifacts = new Map<string, Artifact>();
 const artifactErrors = new Map<string, string>();
 /** 只有真實的使用者輸入會登記在這裡；Presentation Policy 以此驗證 user_request。 */
 const userRequestIds = new Set<string>();
+/** WIN-1：設定頁「離開全螢幕」按下後的狀態（頁面重新載入就清掉）。 */
+let terminalWindowStatus: TerminalWindowPanelState["status"] = null;
+let terminalWindowTimer: ReturnType<typeof setTimeout> | null = null;
+/** 這個頁面的終端識別碼（Mac 視窗是 null，不畫全螢幕這一段）。 */
+const windowTerminal = pageTerminal(location.search, !!window.nousDesktop);
+/** 使用者打開的設定畫面；不是 null 時其他事件不會把它收起（見 keepPinnedSettings）。只在 Pi 等終端頁面釘住。 */
+let pinnedSettings: Surface | null = null;
+const pinSettingsOnThisPage = settingsEntryEnabled({ search: location.search, desktop: !!window.nousDesktop });
 let shell: ShellState = initialShell;
 let settings: SettingsView | null = null;
+const terminalCamera = new TerminalCameraPrefs({ search: location.search, desktop: !!window.nousDesktop, storage: () => localStorage });
 /** applySettings 收到不同的設定就加一；連同每次載入頁面不同的 pageLoadId 回報給 App（重新整理後版本重算也不會撞號）。 */
 let settingsRevision = 0;
 const pageLoadId = Math.random().toString(36).slice(2, 10);
@@ -254,36 +483,73 @@ const realtimeCallbacks: RealtimeCallbacks = {
   onPhase: (phase) => {
     // HIST-1 Mac F1（審查 M3）：播放與開口的時間給本機指令的回音判斷。
     realtimeCommands.notePhase(phase);
+    searchPanel.setPhase(phase);
     renderRealtimeState(phase);
   },
   onUserTranscript: (text) => {
     showTranscript("user", text);
+    searchRequests.noted();
+    // ALARM-1：通話中鈴響時，整句是「停」「關掉」「知道了」就在本機停鈴（不等模型）。
+    alarmRing.stopByText(text, "voice");
     handleCameraCommand(text);
+    // 說「收起」：記憶預設選人那一行也只藏起來（核心照常選定）。
+    if (matchVoiceCommand(text)?.kind === "dismiss") presenceNotice.hide();
   },
   // 鏡頭指令照舊（本機照做、這句話仍送到 AI）；其他只有整句是明確的畫面指令、而且不是剛才助理念的話（回音）才在本機執行。
   onLocalCommand: (text) => matchCameraCommand(text) === null && realtimeCommands.handle(text) !== null,
-  onAssistantPartial: (text) => realtimeCommands.noteAssistantPartial(text),
+  onAssistantPartial: (text) => {
+    realtimeCommands.noteAssistantPartial(text);
+    searchPanel.assistantPartial(text);
+  },
   onAssistantTranscript: (text) => {
     realtimeCommands.noteAssistant(text);
+    searchPanel.assistantFinal(text);
     showTranscript("assistant", text);
   },
   onDelegate: delegateFromRealtime,
+  // VOL-1：說「你講話大聲一點」「音量 60」：調這台裝置的對話音量（立即套用、保存在這個頁面）。
+  // DN-2：說「切到夜間模式」「現在是白天」「今晚維持日間」「恢復自動」：改核心共用的手動切換。
+  onDayNight: (request) => dayNightFromRealtime(request),
+  onVoiceVolume: (request) => {
+    const result = voiceVolume.change(request);
+    const output = voiceVolumeOutput(result.outcome, { period: result.period, active: result.active });
+    if (shell.surface?.kind === "settings") render();
+    return output;
+  },
   // MEM-4a：App 裡由核心依這條路徑的記憶同意給真實標題或外殼（George 2026-10-30）；瀏覽器版照舊。
   onGetTasks: async () => ({ ok: true, tasks: protectedTasks.available ? taskSummary(await protectedTasks.voiceTasks(realtimeTicket?.route === "live" ? "live" : "api_key")) : taskSummary() }),
   onWebSearch: webSearchFromRealtime,
+  onShowSearchResult: (index) => {
+    return searchPanel.pick(index, showSearchSurface);
+  },
   onHomeStatus: homeStatusFromRealtime,
   onHomeControl: homeControlFromRealtime,
   onHomeConfirm: homeConfirmFromRealtime,
   onApprovalPrompt: showApproval,
   onApprovalResolved: closeApproval,
   onToolActivity: (text) => showSubtitle(text),
-  onClosed: (reason) => {
+  // AIL-1：只有 NOUS_AIL=on（settings.integrations）時才有名稱；關閉時清單為空，行為和之前相同。
+  integrationTools: () => settings?.integrations?.tools ?? [],
+  onIntegrationTool: integrationFromRealtime,
+  // 費用防護：快到每通上限：字幕＋提示音（只提醒一次，到上限頁面與核心都會結束）。
+  onCallWarning: () => {
+    showSubtitle(t(CALL_END_TEXT.warn, Math.round(realtime.maxCallMs / 60_000)), true);
+    playCallWarning();
+  },
+  onClosed: (reason, code) => {
+    // 費用防護自己結束（idle、max_duration）：原因交給 API key 路徑的費用紀錄（live 由 LiveVoice 的 end 帶）。
+    if (code && realtimeTicket?.route === "api_key") noteEndReason(realtimeTicket.session_id, code);
     realtimeCommands.reset();
+    endSearchPanel();
     wakeGreetingInteraction = null;
     ambient.endInteraction();
     endRealtimeTicket();
     sense.conversationEnded();
     showSubtitle(reason);
+    if ((code === "idle" || code === "max_duration") && !input.value.trim() && shell.surface === null) {
+      dispatch({ type: "input.close" });
+      return;
+    }
     dispatch({ type: "input.open" });
     showCommandError(reason);
   },
@@ -295,6 +561,13 @@ let realtime: RealtimeSession = idleSession();
  * 頁面不載入任何音訊模組、不建立指示圖示、不回報喚醒狀態。
  */
 let wake: WakeController | null = null;
+/**
+ * 服務模式（App 主程序的 nous:service）：Mac 的麥克風、喚醒與鏡頭停止，開始語音或鏡頭的指令一律忽略；不改任何保存的設定。
+ * App 另外在權限處理器拒絕 media，這裡只是讓頁面照實停下來。
+ */
+let servicePaused = window.nousDesktop?.initialService === true;
+/** SP-02a：喚醒時認聲音（喚醒詞片段＋連線前的話）；只有桌面版、喚醒控制器存在時有。 */
+let wakeVoice: WakeVoice | null = null;
 let wakeLoading = false;
 /** 載入時已經有一通即時語音（它用的是原本的 getMicrophone）：等它結束才開始常駐聆聽，避免同時有兩個來源。 */
 let wakeDeferred = false;
@@ -310,6 +583,34 @@ let realtimeStarting = false;
 let realtimeLocale: Locale = getLocale();
 /** 進行中的開始流程；stopRealtime 中止它，之後的 await 回來時不會再開麥克風。 */
 let realtimeStart: AbortController | null = null;
+/** 費用防護：頁面正在關閉（pagehide）：結束通話的請求用 keepalive 送出。 */
+let pageClosing = false;
+/**
+ * 費用防護（src/call-lifecycle.ts）：App 鎖定／睡眠、瀏覽器與 Pi 背景超過 30 秒或關閉時結束通話；通話中每 15 秒向核心報到。
+ */
+const callLifecycle = new CallLifecycle({
+  desktop: !!window.nousDesktop,
+  active: () => realtime.on || realtimeStarting,
+  connected: () => realtimeTicket !== null && realtime.callStartedAt !== null,
+  callKey: () => realtimeTicket?.session_id ?? null,
+  stop: (reason, message, keepalive) => {
+    if (keepalive) pageClosing = true;
+    stopRealtime(reason ?? undefined);
+    showSubtitle(t(message), true);
+  },
+  alive: async (signal) => {
+    const ticket = realtimeTicket;
+    if (!ticket) return "ok";
+    try {
+      await api.realtimeAlive(ticketOf(ticket), ticket.route === "api_key" ? (realtime.usage ?? null) : null, signal);
+      return "ok";
+    } catch (err) {
+      // 報到期間換了一通：舊的結果不影響新的。
+      if (realtimeTicket !== ticket) return "ok";
+      return err instanceof ApiError && err.status === 404 ? "gone" : "error";
+    }
+  },
+});
 /** WK-02：喚醒開始的通話的「沒人出聲就結束」計時（通話結束時停止）與它的麥克風音量來源（租到的那一份）。 */
 let wakeCall: WakeCallWatch | null = null;
 let wakeLevel: { stream: MediaStream; stop(): void } | null = null;
@@ -373,7 +674,7 @@ const LIVE_MEMORY_REASON: Record<LiveMemoryReason, string> = {
 };
 
 /** MEM-2：live 通話的記憶事件。SSE 只帶卡片 ID、筆數與固定句；卡片內容經 IPC card_view 取得。 */
-function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void {
+function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "memory_card" | "memory_default" | "memory_notice" | "delegate_blocked" | "delegate_card" | "delegated" }>): void {
   switch (event.kind) {
     case "memory":
       liveMemory = { used: event.used, reason: event.reason };
@@ -386,6 +687,12 @@ function onLiveMemoryEvent(event: Extract<LiveCoreEvent, { kind: "memory" | "mem
         break;
       }
       void memoryView.showLiveCard(event.card).then((shown) => { if (shown) dispatch({ type: "show.memory", request_id: userRequest() }); });
+      break;
+    case "memory_default":
+      // 記憶預設選人：等選定時經 IPC 取人物名；選定後重讀本次人物，只有就是卡上那位家人才顯示「正在用」。
+      if (event.phase === "proposed") void presenceNotice.propose(event.card);
+      else if (event.phase === "selected") { const card = event.card; void refreshMemoryStatus().then(() => presenceNotice.confirm(card, memoryPresence)); }
+      else presenceNotice.clear();
       break;
     case "memory_notice":
       showSubtitle(t(event.message));
@@ -459,9 +766,11 @@ function ticketOf(decision: SessionDecision): RealtimeTicket {
 function endRealtimeTicket(): void {
   const ticket = realtimeTicket;
   realtimeTicket = null;
+  // 通話在記憶預設選人選定之前結束：核心不會選定，那一行收掉。
+  presenceNotice.callEnded();
   // WK-02（F6）：結束原因（no_voice）與這通加總的 usage 交給核心的費用紀錄。
   // F6 一律記錄（George 2026-10-31，不綁喚醒開關）：usage 不論旗標都送。
-  if (ticket?.route === "api_key") void api.realtimeEnd(ticketOf(ticket), { reason: takeEndReason(ticket.session_id), usage: realtime.usage ?? null }).catch(() => undefined);
+  if (ticket?.route === "api_key") void api.realtimeEnd(ticketOf(ticket), { reason: takeEndReason(ticket.session_id), usage: realtime.usage ?? null, keepalive: pageClosing }).catch(() => undefined);
   render();
 }
 
@@ -471,12 +780,16 @@ function takeEndReason(sessionId: string): PageEndReason | null {
   return reason;
 }
 
-/** reason：WK-02 喚醒開始的通話沒人出聲而自動結束（no_voice，記入費用紀錄）。 */
+function noteEndReason(sessionId: string, reason: PageEndReason): void {
+  realtimeEndReasons.set(sessionId, reason);
+  if (realtimeEndReasons.size > 8) realtimeEndReasons.delete(realtimeEndReasons.keys().next().value!);
+}
+
+/**
+ * reason：WK-02 喚醒開始的通話沒人出聲而自動結束（no_voice），或費用防護（hidden、os_lock、suspend），記入費用紀錄。
+ */
 function stopRealtime(reason?: PageEndReason): void {
-  if (reason && realtimeTicket) {
-    realtimeEndReasons.set(realtimeTicket.session_id, reason);
-    if (realtimeEndReasons.size > 8) realtimeEndReasons.delete(realtimeEndReasons.keys().next().value!);
-  }
+  if (reason && realtimeTicket) noteEndReason(realtimeTicket.session_id, reason);
   stopWakeCall();
   // 通話在問候決定前就結束：同步辨識不再放寬（ambientEnabled）。
   wakeGreetingInteraction = null;
@@ -493,6 +806,7 @@ function makeRealtimeSession(decision: SessionDecision, greeting: GreetingOnce |
   const next = createRealtimeSession(decision, greeting, rebuild);
   // 和其他計時器一樣：建構時用預設值，再套用目前的設定（applySettings 之後的改動也走 setIdleMs）。
   next.setIdleMs(idleTimeoutsMs(settings?.voice).realtime);
+  next.setMaxCallMs(maxCallMs(settings?.voice));
   return next;
 }
 
@@ -508,9 +822,16 @@ function trackedPlayRemote(stream: MediaStream): () => void {
     guardOwner?.end("playback");
   };
   const audio = new Audio();
+  // 「聲音輸出」選定的裝置（系統預設時不呼叫 setSinkId）；改設定或裝置中斷時 audioDevices 重新套用到這個元素。
+  void audioDevices.sink(audio);
+  // VOL-1：對話音量（說「你講話大聲一點」或設定頁），改了立即套用到這個元素。
+  const detachVolume = voiceVolume.attach(audio);
   audio.autoplay = true;
   audio.srcObject = stream;
   liveAudio = audio;
+  // 新的通話從沒有靜音開始；鈴正在響時照樣靜音。
+  liveWantsMuted = false;
+  applyLiveMute();
   liveAudioPaused = false;
   void audio.play().catch(() => {});
   return () => {
@@ -520,6 +841,8 @@ function trackedPlayRemote(stream: MediaStream): () => void {
     audio.srcObject = null;
     liveAudioPaused = audio.paused;
     if (liveAudio === audio) liveAudio = null;
+    audioDevices.release(audio);
+    detachVolume();
     endGuard();
   };
 }
@@ -563,13 +886,15 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
         stopped: async (evidence) => (await api.realtimeStopped(ticket, evidence)).accepted,
         playback: async () => void (await api.realtimePlayback(ticket)),
         setMuted: (muted) => {
-          if (liveAudio) liveAudio.muted = muted;
+          liveWantsMuted = muted;
+          applyLiveMute();
         },
         audioPaused: () => liveAudioPaused && (!liveAudio || liveAudio.paused),
         cancelSpeech: () => {
           try { globalThis.speechSynthesis?.cancel(); } catch { /* 沒有語音合成 */ }
         },
         speak: (text) => void speakText(text, { locale: realtimeLocale }).catch(() => undefined),
+        quietPowerEnd: !!window.nousDesktop,
         stopReply: async () => void (await api.realtimeStopReply(ticket)),
         memoryEvent: onLiveMemoryEvent,
         revoked: onLiveRevoked,
@@ -589,13 +914,15 @@ function createRealtimeSession(decision: SessionDecision, greeting: GreetingOnce
       input: async (kind, text) => void (await api.realtimeInput(ticket, kind, text)),
       hostResult: async (callId, output) => void (await api.realtimeHostResult(ticket, callId, output)),
       approval: async (report) => void (await api.realtimeApproval(ticket, report)),
-      end: async () => void (await api.realtimeEnd(ticket, { reason: takeEndReason(ticket.session_id) })),
+      end: async (code) => void (await api.realtimeEnd(ticket, { reason: takeEndReason(ticket.session_id) ?? code ?? null, keepalive: pageClosing })),
       subscribe: (handlers) => subscribeSession(ticket.session_id, handlers),
       watchLevel: browserWatchLevel,
       setMuted: (muted) => {
-        if (liveAudio) liveAudio.muted = muted;
+        liveWantsMuted = muted;
+        applyLiveMute();
       },
       speak: (text) => void speakText(text, { locale: realtimeLocale }).catch(() => undefined),
+      quietPowerEnd: !!window.nousDesktop,
       stopReply: async () => void (await api.realtimeStopReply(ticket)),
       stopped: async (evidence) => (await api.realtimeStopped(ticket, evidence)).accepted,
       audioPaused: () => liveAudioPaused && (!liveAudio || liveAudio.paused),
@@ -654,6 +981,14 @@ function stopWakeCall(): void {
  * 即時語音不能用時照實說原因。路徑、計費通知、改路徑與同意說明都沿用 startRealtime／openRealtime。
  */
 function onWakeTrigger(trigger: WakeTrigger): void {
+  // ALARM-1 備援：防護計數萬一不同步（控制器關掉又打開會歸零），鈴響時的喚醒一律不開始通話。
+  if (alarmRing.ringing || alarmRing.audible) {
+    alarmGuardOwner?.end("alarm");
+    alarmGuardOwner = null;
+    syncAlarmGuard();
+    return;
+  }
+  wakeMemoriesNow();
   const now = performance.now();
   const action = wakeTriggerAction({
     callActive: realtime.on || realtimeStarting,
@@ -717,6 +1052,10 @@ function accountKey(value: SettingsView): string {
 }
 
 function applySettings(value: SettingsView, preserveEntry = false): void {
+  applyEffectiveSettings(terminalCamera.receive(value), preserveEntry);
+}
+
+function applyEffectiveSettings(value: SettingsView, preserveEntry = false): void {
   if (settings && (settings.provider !== value.provider || accountKey(settings) !== accountKey(value))) {
     const expectedSelection = settings.provider !== "chatgpt" && value.provider === "chatgpt"
       && pendingProviderSelection?.epoch === conversationEpoch
@@ -733,13 +1072,115 @@ function applySettings(value: SettingsView, preserveEntry = false): void {
   const idle = idleTimeoutsMs(value.voice);
   conversation.setIdleMs(idle.voice_mode);
   realtime.setIdleMs(idle.realtime);
+  realtime.setMaxCallMs(maxCallMs(value.voice));
   if (value.camera && !value.camera.active) cameraOffPending = false; // 伺服器已保存「關掉」
   if (value.camera && wasActive !== undefined && value.camera.active !== wasActive) cameraFailed = false;
   syncCamera();
   applyFacingTuning();
+  bridges.syncPage?.();
   // 設定或家人辨識狀態改變：看著說話時的同步辨識重新向核心確認（不中斷正在進行的取樣）。
   ambient.refresh();
   syncWake(value.wake);
+  syncAudioPrefs(value);
+  clockCorner.setEnabled(value.clock?.enabled === true);
+  homeCorner.setEnabled(value.home_corner?.enabled === true);
+  alarmRing.sync(value.alarms);
+  // DN-2：核心的日夜間設定或手動切換可能變了（另一台裝置、選單列、語音）。
+  migrateDayNightPrefs();
+  syncLightMeter();
+  updateDayNight();
+}
+
+/**
+ * 聲音輸入／輸出（George 2026-11-01）：輸出改了立即套到正在播的聲音與提示音（audioDevices 內）；
+ * 麥克風改了，常駐聆聽在閒置時重開，通話中等這通結束——下一通起使用（字幕照實說）。
+ */
+function syncAudioPrefs(value: SettingsView): void {
+  const changed = audioDevices.setPrefs(value.audio?.prefs);
+  if (!changed.input) return;
+  wake?.inputChanged();
+  if (realtime.on || realtimeStarting) {
+    const prefs = audioDevices.current;
+    const label = prefs.input_device_id === null ? null : audioLabel(prefs.input_device_id, prefs.input_label, "inputs");
+    showSubtitle(label === null ? t(AUDIO_TEXT.nextCallDefault) : t(AUDIO_TEXT.nextCall, label));
+  }
+}
+
+/** 裝置名稱（資料，不翻譯）：清單裡的較新，否則用保存的；都沒有時用「名稱未知的裝置」。 */
+function audioLabel(id: string, saved: string | null, kind: "inputs" | "outputs"): string {
+  return audioDevices.report()[kind].find((d) => d.id === id)?.label || saved || t(AUDIO_TEXT.unknownDevice);
+}
+
+/** 裝置事件：找不到選定的麥克風、輸出中斷或回來時照實顯示字幕；之前找不到的麥克風回來時常駐聆聽在閒置時重開。 */
+function onAudioDeviceEvent(event: AudioDeviceEvent): void {
+  switch (event.type) {
+    case "input_fallback":
+      showSubtitle(t(AUDIO_TEXT.missing, event.label ?? t(AUDIO_TEXT.unknownDevice)));
+      break;
+    case "input_returned":
+      wake?.inputChanged();
+      if (isPi4) wake?.inputAvailable();
+      break;
+    case "input_available":
+      if (isPi4) wake?.inputAvailable();
+      break;
+    case "output_lost":
+      showSubtitle(t(AUDIO_TEXT.outputLost, event.label ?? t(AUDIO_TEXT.unknownDevice)));
+      break;
+    case "output_back":
+      showSubtitle(t(AUDIO_TEXT.outputBack, event.label ?? t(AUDIO_TEXT.unknownDevice)));
+      break;
+    case "changed":
+      backfillAudioLabels();
+      scheduleAudioRender();
+      break;
+  }
+}
+
+let audioRenderPending = false;
+/** 裝置清單或使用中的裝置變了：下一個 microtask 重畫一次（選單列回報與設定畫面）。 */
+function scheduleAudioRender(): void {
+  if (audioRenderPending) return;
+  audioRenderPending = true;
+  queueMicrotask(() => {
+    audioRenderPending = false;
+    render();
+  });
+}
+
+let audioBackfillInFlight = false;
+let audioBackfillFailedAt = 0;
+/**
+ * 選的時候還沒有名稱的裝置（授權麥克風之前選的）：清單有名稱之後補上（deviceId 換掉時才能用名稱找回）。
+ * patch 同時帶 deviceId 與名稱，名稱一定對到那一支；成功才算完成，失敗 30 秒後再試，裝置晚一點才出現時下次清單變化再補。
+ */
+function backfillAudioLabels(): void {
+  const prefs = settings?.audio?.prefs;
+  if (audioBackfillInFlight || !prefs || Date.now() - audioBackfillFailedAt < 30_000) return;
+  const patch = labelBackfill(prefs, audioDevices.report());
+  if (!patch) return;
+  audioBackfillInFlight = true;
+  void api.updateAudio(patch).then(
+    (next) => {
+      audioBackfillInFlight = false;
+      applySettings(next);
+    },
+    () => {
+      audioBackfillInFlight = false;
+      audioBackfillFailedAt = Date.now();
+    },
+  );
+}
+
+/** 設定畫面的「聲音輸入／輸出」：送出選定的裝置（id 與名稱；null＝系統預設）。 */
+async function updateAudioPrefs(patch: AudioPrefsPatch): Promise<string | null> {
+  try {
+    applySettings(await api.updateAudio(patch));
+    render();
+    return null;
+  } catch (err) {
+    return msg`聲音裝置設定沒有保存：${(err as Error).message}`;
+  }
 }
 
 /** WK-01a：settings.wake 第一次出現時才載入 src/audio/（動態 import）；之後每次設定都交給控制器。 */
@@ -765,6 +1206,23 @@ function syncWake(view: WakeSettingsView | undefined): void {
     wakeLoading = false;
     const latest = settings?.wake;
     if (!latest || wake) return;
+    // SP-02a：有家人辨識的頁面（Mac 的 App、RPI-ID 的終端機）才在喚醒時認聲音；speaker worker 跟著喚醒控制器存在，
+    // 喚醒詞片段由喚醒 worker 直接送過去。
+    const sendIdentity = identityBridge;
+    if (sendIdentity && !wakeVoice) {
+      wakeVoice = new WakeVoice({
+        createWorker: createSpeakerWorker,
+        assets: SPEAKER_RUNTIME_ASSETS,
+        model: speakerRuntime.model_version,
+        send: sendIdentity,
+        lease: () => familyMic.acquire(),
+        release: (stream) => familyMic.release(stream),
+        tap: tapStream,
+        now: () => performance.now(),
+      });
+      wakeVoice.start();
+    }
+    const voiceForWake = wakeVoice;
     wake = module.createWakeController({
       now: () => performance.now(),
       runtime: () => settings?.wake?.runtime ?? "missing",
@@ -780,13 +1238,20 @@ function syncWake(view: WakeSettingsView | undefined): void {
         renderWakeIndicator();
         render();
       },
-      saveDeviceId: async (deviceId) => void (await api.updateWake({ device_id: deviceId })),
       newId: () => newInteractionId(),
+    }, voiceForWake ? () => voiceForWake.keywordPort() : null, {
+      // 常駐聆聽的麥克風跟著「聲音輸入」設定（找不到就暫用系統預設），提示音跟著「聲音輸出」設定（src/audio-devices.ts）。
+      mic: typeof navigator.mediaDevices?.getUserMedia === "function" ? { open: () => audioDevices.openInput(), preferred: () => audioDevices.preferredInput } : null,
+      output: { sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) },
+      retryInterruptedInput: isPi4,
     });
     // WK-02：喚醒觸發開始 wake_word 即時語音（取代 WK-01a 預設的「聽到了」字幕）。
     wake.setTriggerHandler(onWakeTrigger);
+    // ALARM-1：載入時已經在響（重新整理、晚響）：新的控制器一建立就帶上防護。
+    syncAlarmGuard();
     // 載入前已經開始的 Web Speech 或即時語音照實告訴它（不會在通話或 Web Speech 中途搶麥克風）。
     if (voice.active || conversation.on) wake.webSpeech(true);
+    if (servicePaused) wake.service(true);
     wakeInitial = initial;
     if (realtime.on || realtimeStarting) wakeDeferred = true;
     else applyWakeFirst(latest);
@@ -811,7 +1276,10 @@ function disposeWake(): void {
   // 喚醒功能關掉了：矯正畫面一起收起（收起時丟掉錄音、還麥克風）。
   if (shell.surface?.kind === "wake_calibration") dispatch({ type: "dismiss" });
   stopWakeCall();
+  wakeVoice?.dispose();
+  wakeVoice = null;
   wake.dispose();
+  if (alarmGuardOwner === wake) alarmGuardOwner = null;
   wake = null;
   wakeDeferred = false;
   wakeDisposePending = false;
@@ -912,6 +1380,8 @@ function applyMemoryTurn(view: MemoryTurnView & { status?: MemoryStatusView }, u
   if (memoryTurnText.size > 32) memoryTurnText.delete(memoryTurnText.keys().next().value!);
   setMemoryPresence(view.presence, view.status?.profiles.map(p => ({ id: p.id, name: p.name })));
   if (view.history_reset) session.forgetMemoryHistory();
+  // 記憶預設選人：核心已依鏡頭認出的家人選定（這一句用他的記憶）；顯示一行「正在用 X 的記憶」與「不是我」。
+  if (view.auto_selected) presenceNotice.selected(view.presence);
   // MEM-5a：記憶建議只有卡片 ID；這一輪的回覆串流結束後才在回覆下方顯示一行（不擋聊天）。
   if (view.suggestion && view.chat && !view.card) suggestionPrompt.set(requestId, view.suggestion.card);
   else if (suggestionPrompt.requestId !== requestId) suggestionPrompt.clear();
@@ -952,6 +1422,7 @@ function setMemoryPresence(presence: MemoryPresenceView | null, profiles?: { id:
     pendingDelegate = null;
     // 核心換世代時已丟掉記憶建議；畫面上的那一行也一起收掉。
     suggestionPrompt.clear();
+    presenceNotice.presenceChanged(presence);
   }
   memoryPresence = presence;
   if (profiles) memoryProfiles = profiles;
@@ -960,7 +1431,7 @@ function setMemoryPresence(presence: MemoryPresenceView | null, profiles?: { id:
 
 /** 讀本次人物（status 不開記憶檔、不碰 Keychain）；記憶沒開時不顯示標示，但仍追蹤世代。 */
 async function refreshMemoryStatus(): Promise<void> {
-  const bridge = window.nousDesktop?.memory;
+  const bridge = presenceBridge;
   if (!bridge) return;
   const res = await bridge({ op: "status" });
   if (!res.ok || res.op !== "status") return;
@@ -971,6 +1442,7 @@ window.nousDesktop?.onMemoryChange?.(() => void refreshMemoryStatus());
 function closeConversation(): void {
   // WK-01a：說「收起」或按收起時，喚醒提示音一併取消（不觸發）。收起只關畫面，不關常駐聆聽。
   wake?.cancelEarcon();
+  presenceNotice.hide();
   conversationEpoch++;
   session.dismiss();
   conversation.stop();
@@ -1090,6 +1562,7 @@ function renderVoiceState(state: ConversationState): void {
 }
 
 function enableVoiceMode(): void {
+  if (servicePaused) return;
   const ready = settings && (settings.provider === "chatgpt" && chatGPTAvailable()
     || settings.provider === developmentProvider && settings.providers.some((provider) => provider.id === developmentProvider && provider.available));
   if (!ready) {
@@ -1119,7 +1592,131 @@ sensorIndicator.type = "button";
 sensorIndicator.className = "sensor-indicator";
 sensorIndicator.hidden = true;
 document.body.append(sensorIndicator);
+
+// SET-1：Pi 終端頁面右下角的設定按鈕（Mac 有選單列，不放）。點一下打開設定畫面，再點一下收起。
+const settingsEntry = pinSettingsOnThisPage
+  ? new SettingsEntry({
+      isOpen: () => shell.surface?.kind === "settings",
+      open: () => actions.openSettings(),
+      close: () => closeSettings(),
+      t: (source) => t(source),
+    })
+  : null;
+if (settingsEntry) document.body.classList.add("has-settings-entry");
 let pipeline: SensePipeline | null = null;
+
+// VOL-2：日間／夜間的對話音量。每分鐘依時段重算；鏡頭有開而且設定允許時，每 30 秒量一次環境亮度（只拿回一個數字）。
+let lightState: LightState = INITIAL_LIGHT;
+/** LUX-1：這台裝置的亮暗門檻（設定頁可調，存在這個頁面）。 */
+let lumaThresholds = loadLumaThresholds();
+const lightMeter = new LightMeter({
+  sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null),
+  createWorker: () => new Worker(new URL("./sense/light-worker.ts", import.meta.url), { type: "module" }) as unknown as LightWorkerLike,
+  onLuma: (luma) => {
+    lightState = nextLight(lightState, luma, Date.now(), lumaThresholds);
+    updateDayNight();
+  },
+});
+
+/** LUX-1：改門檻。保存後用最近一次讀值重新判斷（暗一樣要連續 1 分鐘才算，亮立即定案）。 */
+function setLumaThresholds(next: LumaThresholds): void {
+  lumaThresholds = saveLumaThresholds(next);
+  const { luma, at } = lightState;
+  lightState = luma !== null && at !== null ? nextLight(INITIAL_LIGHT, luma, at, lumaThresholds) : INITIAL_LIGHT;
+  updateDayNight();
+}
+
+/** DN-2：日夜間設定以核心（settings.day_night，Mac 與 Pi 共用）為準；核心沒有給（舊核心、測試）時用這個頁面保存的。 */
+function dayNightPrefs(): DayNightPrefs {
+  return settings?.day_night?.prefs ?? voiceVolume.prefs;
+}
+
+/** DN-2：還有效的手動切換（核心給的；過期就是 null）。 */
+function dayNightOverride(): DayNightOverride | null {
+  return activeOverride(settings?.day_night?.override, Date.now());
+}
+
+function updateDayNight(): void {
+  const prefs = dayNightPrefs();
+  const before = voiceVolume.mode;
+  const now = Date.now();
+  const decision = decideDayNight(new Date(now).getHours(), prefs.use_camera ? currentLight(lightState, now) : null, prefs, dayNightOverride(), now);
+  voiceVolume.setMode(decision);
+  applyNightEffects();
+  renderDayNightBadge();
+  if (shell.surface?.kind === "settings" && (before.mode !== decision.mode || before.reason !== decision.reason || before.camera !== decision.camera)) render();
+}
+
+/** DN-1：夜間模式一併套用的行為（日間或設定關閉時全部 false）。 */
+function currentNightEffects(): NightEffects {
+  return nightEffects(voiceVolume.mode.mode, dayNightPrefs());
+}
+
+/** DN-1：畫面變暗（CSS 漸變）、處理中音效與回憶模式依夜間模式重算。 */
+function applyNightEffects(): void {
+  const effects = currentNightEffects();
+  document.body.dataset.dayNight = voiceVolume.mode.mode;
+  document.body.dataset.nightDim = effects.dim ? "on" : "off";
+  syncProcessingCue();
+  syncMemories();
+}
+
+/** VOL-2：右上角時鐘下方的日間／夜間模式（文字依目前語言；原因放在 title）。 */
+function renderDayNightBadge(): void {
+  const decision = voiceVolume.mode;
+  const title = dayNightReasonText(decision, dayNightPrefs(), dayNightOverride(), t);
+  const effects = currentNightEffects();
+  const full = effects.dim ? `${title}\n${t(VOICE_VOLUME_TEXT.effectsLine)}` : title;
+  clockCorner.setDayNight({ mode: decision.mode, label: t(VOICE_VOLUME_TEXT.badge[decision.mode]), title: full });
+}
+
+/**
+ * DN-2：改日夜間設定或手動切換。核心有 settings.day_night 時送核心（Mac 與 Pi 一起變）；否則存在這個頁面（VOL-2 的行為）。
+ * 回傳核心的回應（失敗時丟錯，呼叫端照實說）。
+ */
+async function patchDayNight(patch: DayNightPatch): Promise<void> {
+  if (settings?.day_night) {
+    applySettings(await api.updateDayNight(patch));
+  } else {
+    const { override: _override, scope: _scope, ...prefs } = patch;
+    if (patch.override) throw new Error(t("這個核心不支援手動切換日夜間模式"));
+    voiceVolume.setPrefs(prefs);
+  }
+  syncLightMeter();
+  updateDayNight();
+}
+
+/** DN-2：核心還沒保存過日夜間設定、這個頁面有 VOL-2 時存的設定時，搬到核心一次（之後以核心為準）。 */
+let dayNightMigrated = false;
+function migrateDayNightPrefs(): void {
+  if (dayNightMigrated || !settings?.day_night || settings.day_night.saved) return;
+  dayNightMigrated = true;
+  let saved: string | null = null;
+  try { saved = localStorage.getItem(DAY_NIGHT_KEY); } catch {}
+  if (!saved) return;
+  void patchDayNight(voiceVolume.prefs).catch(() => undefined);
+}
+
+/** DN-2：即時語音說「切到夜間模式」「現在是白天」「今晚維持日間」「恢復自動」。 */
+async function dayNightFromRealtime(request: DayNightToolRequest): Promise<Record<string, unknown>> {
+  if (!settings?.day_night) return { ok: false, error: "這個核心不支援切換日夜間模式" };
+  try {
+    await patchDayNight(request.mode === "auto" ? { override: "auto" } : { override: request.mode, scope: request.scope ?? "now" });
+  } catch (err) {
+    return { ok: false, error: `沒有切換：${(err as Error).message}` };
+  }
+  if (shell.surface?.kind === "settings") render();
+  return dayNightToolOutput(voiceVolume.mode, dayNightOverride());
+}
+
+function syncLightMeter(): void {
+  if (dayNightPrefs().use_camera) lightMeter.start();
+  else {
+    lightMeter.stop();
+    lightState = INITIAL_LIGHT;
+  }
+}
+
 let pointedZone: PointZone | null = null;
 /** 最後一次的鏡頭裝置狀態（來自管線事件，不是設定）。 */
 let sensorDetail = "";
@@ -1224,7 +1821,7 @@ function createIdentityWorker(): WorkerLike {
 }
 
 /**
- * 看著說話時同步辨識（docs/14 ID-02）：只有 macOS App、三個設定（看著說話、打招呼、稱名）都開、settings.identity 可用而且
+ * 看著說話時同步辨識（docs/14 ID-02）：只有 macOS App 或終端機頁面（RPI-ID）、三個設定（看著說話、打招呼、稱名）都開、settings.identity 可用而且
  * 沒有限制、家人辨識畫面沒開時才啟用。只在面向停留期間與問候決策前取樣；不延長看著說話的秒數。
  */
 function ambientEnabled(): boolean {
@@ -1232,7 +1829,7 @@ function ambientEnabled(): boolean {
   const id = settings?.identity;
   // WK-02：喚醒開始、問候還沒決定的互動不需要「看著說話」「看著說話時先打招呼」（George 2026-10-31：喚醒後一律打招呼）。
   const greets = (cam?.look_to_talk && cam.look_to_talk_greet) || wakeGreetingInteraction !== null;
-  return !!window.nousDesktop?.identity && !!cam?.enabled && cam.active && greets && cam.look_to_talk_greet_name
+  return !!identityBridge && !!cam?.enabled && cam.active && greets && cam.look_to_talk_greet_name
     && !!id?.available && !id.limited_reason && !blocksAutoTalk(shell.surface);
 }
 
@@ -1255,11 +1852,12 @@ function applyDistanceScale(): void {
 const lookTimeline = new LookTimeline(() => performance.now(), (line) => console.info(line));
 
 const ambient = new AmbientIdentity({
-  bridge: window.nousDesktop?.identity ? { identity: (request) => window.nousDesktop!.identity!(request) } : null,
+  bridge: identityBridge ? { identity: identityBridge } : null,
   enabled: ambientEnabled,
   createSampler: (onFrame, onState) =>
     new IdentityClient({
       source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) }, createWorker: createIdentityWorker, onFrame, onState,
+      intervalMs: pagePace.identitySampleMs,
       // 看著說話的同步辨識用校正後的品質門檻（登記與試認仍用預設）。
       frameOptions: () => {
         const tuning = settings?.face_tuning;
@@ -1270,7 +1868,7 @@ const ambient = new AmbientIdentity({
   model: faceRuntime.model_version,
   now: () => performance.now(),
   // 記憶的互動結束：人離開鏡頭或多人入鏡時暫停本次人物（只能降權）。
-  onPresenceBreak: (reason) => void window.nousDesktop?.memory?.({ op: "suspend", reason }).then((res) => { if (res.ok && res.op === "suspend") setMemoryPresence(res.presence); }),
+  onPresenceBreak: (reason) => void presenceBridge?.({ op: "suspend", reason }).then((res) => { if (res.ok && res.op === "suspend") setMemoryPresence(res.presence); }),
 });
 
 const sense = new SenseController({
@@ -1287,6 +1885,8 @@ const sense = new SenseController({
     ambient.update(snapshot);
   },
   interruptSpeech: () => {
+    // ALARM-1：鈴響時舉手掌＝停止響鈴（不再往下打斷其他東西）。
+    if (alarmRing.stop("gesture")) return;
     // WK-01a：喚醒提示音播放中張掌＝取消這次喚醒（不觸發）。
     if (wake?.cancelEarcon()) return;
     // 即時語音還在連線（還沒打招呼）時舉手掌：直接結束這次語音，不再打招呼（ID-02 第 9 步）。
@@ -1317,6 +1917,7 @@ const sense = new SenseController({
   },
   setFacing: (facing) => {
     document.body.dataset.facing = facing ? "yes" : "no";
+    if (facing) wakeMemoriesNow();
     if (facing) lookTimeline.mark("facing");
   },
   pointTo: (zone) => {
@@ -1340,9 +1941,71 @@ const sense = new SenseController({
 });
 setInterval(() => sense.tick(), 200);
 
+// 聲音輸入／輸出：讀裝置清單、聽 devicechange（enumerateDevices 不開麥克風；名稱要授權麥克風後才有）。
+audioDevices.on(onAudioDeviceEvent);
+audioDevices.start();
+
 // 家人辨識（docs/14 ID-01）：只由選單列打開；畫面收起時停止取樣、丟掉記憶體中的樣本與 session。
+/**
+ * SP-01 聲音登記的麥克風：常駐喚醒有開時向它租用（KWS 暫停、歸還後自動恢復）；沒有時自己開（src/speaker/recorder.ts）。
+ * 記下每條串流是跟誰借的，歸還時才不會還錯地方（喚醒在錄音途中被打開或關掉也一樣）。
+ */
+const familyMicLeases = new WeakMap<MediaStream, WakeController>();
+/** SP-03a：系統朗讀聲音（speechSynthesis）。speak 念完（或出錯、最多 10 秒）就 resolve。 */
+function systemVoices(): { voices(): { name: string; lang: string }[]; speak(text: string, voice: string): Promise<void> } {
+  return {
+    voices: () => speechSynthesis.getVoices().map((v) => ({ name: v.name, lang: v.lang })),
+    speak: (text, name) =>
+      new Promise<void>((resolve) => {
+        const u = new SpeechSynthesisUtterance(text);
+        const v = speechSynthesis.getVoices().find((x) => x.name === name);
+        if (v) {
+          u.voice = v;
+          u.lang = v.lang;
+        }
+        const timer = setTimeout(resolve, 10_000);
+        u.onend = u.onerror = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        speechSynthesis.speak(u);
+      }),
+  };
+}
+
+function createSpeakerWorker(): SpeakerWorkerLike {
+  return new Worker(new URL("./speaker/worker.ts", import.meta.url), { type: "module" }) as unknown as SpeakerWorkerLike;
+}
+const familyMic: MicSource = {
+  acquire: async () => {
+    const owner = wake;
+    if (!owner) return OWN_MICROPHONE.acquire();
+    const stream = await owner.lease();
+    familyMicLeases.set(stream, owner);
+    return stream;
+  },
+  release: (stream) => {
+    const owner = familyMicLeases.get(stream);
+    familyMicLeases.delete(stream);
+    if (owner) owner.releaseLease(stream);
+    else OWN_MICROPHONE.release(stream);
+  },
+};
+
 const familyView = new FamilyView({
   bridge: window.nousDesktop?.identity ? { identity: (request) => window.nousDesktop!.identity!(request) } : null,
+  ...(bridges.terminal !== null ? { unavailableMessage: TERMINAL_FAMILY_UNAVAILABLE } : {}),
+  ...(window.nousDesktop?.identity
+    ? {
+        voice: {
+          mic: familyMic,
+          createWorker: createSpeakerWorker,
+          model: speakerRuntime.model_version,
+        },
+        // SP-03a 校準的陌生聲音：系統內建的朗讀聲音從喇叭念（不連網；macOS 的語音）。
+        ...(typeof speechSynthesis !== "undefined" ? { tts: systemVoices() } : {}),
+      }
+    : {}),
   source: { sampleFrame: () => pipeline?.sampleFrame() ?? Promise.resolve(null) },
   createWorker: createIdentityWorker,
   model: faceRuntime.model_version,
@@ -1366,6 +2029,7 @@ const familyView = new FamilyView({
 
 const memoryView = new MemoryView({
   bridge: window.nousDesktop?.memory ? { memory: (request) => window.nousDesktop!.memory!(request) } : null,
+  ...(bridges.terminal !== null ? { unavailableMessage: TERMINAL_MEMORY_UNAVAILABLE } : {}),
   dismiss: () => dispatch({ type: "dismiss" }),
   resolved: (view, requestId) => applyMemoryTurn(view, memoryTurnText.get(requestId) ?? "", requestId, getLocale()),
   // MEM-2：即時語音的卡：回條只顯示（模型已經聽到了，不經 /api/chat 續送），語音的固定回條由核心送。
@@ -1505,7 +2169,7 @@ async function delegateCard(card: string): Promise<void> {
 }
 
 memoryPerson.addEventListener("change", () => {
-  const bridge = window.nousDesktop?.memory;
+  const bridge = presenceBridge;
   if (!bridge) return;
   const profile = memoryPerson.value === "" ? null : memoryPerson.value;
   // 主視窗的「本次人物」選單：使用者直接選定（換人會撤銷舊世代，用過記憶的對話歷史清空）。
@@ -1538,17 +2202,21 @@ function applyFacingTuning(): void {
 }
 
 function syncCamera(): void {
-  if (cameraShouldRun(settings?.camera, cameraOffPending, cameraFailed)) void startCamera();
+  if (!servicePaused && cameraShouldRun(settings?.camera, cameraOffPending, cameraFailed)) void startCamera();
   else pipeline?.stop();
 }
 
 async function startCamera(): Promise<void> {
   const { SensePipeline } = await import("./sense/pipeline.ts");
   // 載入模組期間可能已收到「鏡頭關掉」。
-  if (!settings?.camera || !cameraShouldRun(settings.camera, cameraOffPending, cameraFailed)) return;
-  pipeline ??= new SensePipeline(settings.camera, (event) => sense.handle(event));
+  if (servicePaused || !settings?.camera || !cameraShouldRun(settings.camera, cameraOffPending, cameraFailed)) return;
+  pipeline ??= new SensePipeline(settings.camera, (event) => {
+    sense.handle(event);
+    if (event.type === "sensor") bridges.syncPage?.();
+  }, { frameIntervalMs: pagePace.senseFrameMs });
   applyFacingTuning();
   await pipeline.start();
+  if (servicePaused) pipeline.stop();
 }
 
 /**
@@ -1556,6 +2224,24 @@ async function startCamera(): Promise<void> {
  * 「關掉」先在本機釋放鏡頭再送出，不等網路。回傳失敗說明；成功時為 null。
  */
 async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null> {
+  if (terminalCamera.local) {
+    if (patch.active === false) {
+      cameraOffPending = true;
+      pipeline?.stop();
+    }
+    try {
+      const result = terminalCamera.update(patch);
+      if (patch.active === true && !result.error) {
+        cameraOffPending = false;
+        cameraFailed = false;
+      }
+      applyEffectiveSettings(result.settings);
+      render();
+      return result.error;
+    } catch (err) {
+      return (err as Error).message;
+    }
+  }
   if (patch.active === true && settings?.camera?.enable_via === "app") {
     // App：打開不經 HTTP（核心回 403）。其他鍵照常保存，鏡頭交給 App 主程序的原生說明。
     const { active: _active, ...rest } = patch;
@@ -1594,6 +2280,7 @@ async function updateCameraPrefs(patch: CameraPrefsPatch): Promise<string | null
  * 在核心保存之前不在本機啟動鏡頭：syncCamera 只看核心回報的設定，取消時什麼都不變。
  */
 async function enableCamera(): Promise<string | null> {
+  if (terminalCamera.local) return updateCameraPrefs({ active: true });
   if (settings?.camera?.active && !cameraOffPending) {
     // 已經是開：不必再問，只在上次啟動失敗時重試。
     cameraFailed = false;
@@ -1661,7 +2348,8 @@ function realtimeReady(): boolean {
  * wake：WK-02 這次喚醒（wake_id 交給核心的費用紀錄；限速時暫停喚醒聆聽）。
  */
 function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean; wake?: WakeTrigger } = {}): void {
-  if (realtime.on || realtimeStarting) return;
+  wakeMemoriesNow();
+  if (servicePaused || realtime.on || realtimeStarting) return;
   if (!hasVoiceConsent("realtime")) {
     // 不是喚醒開始的同意說明：同意後照舊以 user 開始。
     pendingWakeConsent = null;
@@ -1689,8 +2377,11 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
   const interaction = newInteractionId();
   let coreInteraction: string | null = null;
   const viaWake = source === "wake_word";
+  // SP-02a：這次喚醒的聲音（喚醒詞片段與連線前的話）交給核心，問候決策時和臉一起判斷。
+  const voiceWakeId = viaWake && !rebuild ? (options.wake?.wake_id ?? null) : null;
   const endWakeGreeting = () => {
     if (wakeGreetingInteraction === interaction) wakeGreetingInteraction = null;
+    if (voiceWakeId) wakeVoice?.cancel();
   };
   // WK-02：喚醒開始的通話一律打招呼（greetingFor 不讀「看著說話時先打招呼」）；同步辨識在問候決定前不需要「看著說話」設定。
   if (viaWake && !rebuild) wakeGreetingInteraction = interaction;
@@ -1698,6 +2389,7 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     interaction,
     locale: realtimeLocale,
     decide: async (route) => {
+      if (voiceWakeId) await wakeVoice?.finish(voiceWakeId);
       const content = await ambient.decide(interaction, route, coreInteraction);
       lookTimeline.mark("decided");
       return content;
@@ -1705,12 +2397,15 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     settled: () => {
       endWakeGreeting();
       ambient.endInteraction(interaction);
+      // SP-02b：問候決定（或略過）之後才開始通話中辨認說話者（連線前那一段已經停了，不會共用 worker 的收音）。
+      if (settings?.wake?.speaker_in_call === true) void wakeVoice?.startCall();
     },
   });
   if (greeting) {
     ambient.beginInteraction(interaction, realtimeLocale);
     lookTimeline.mark("start");
   }
+  if (voiceWakeId && greeting) void wakeVoice?.attach(voiceWakeId);
   // WK-02：喚醒開始的通話第一次就緒後開始「沒人出聲就結束」的倒數（選單列「喚醒後等你開口」，預設 5 秒；Nous 說話時暫停）。
   stopWakeCall();
   if (viaWake && wake) {
@@ -1750,6 +2445,8 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
     began: (next, decision) => {
       realtime = next;
       realtimeTicket = decision;
+      // SP-02b：沒有問候的通話（使用者自己開始的）在連上時開始通話中辨認說話者。
+      if (!greeting && settings?.wake?.speaker_in_call === true) void wakeVoice?.startCall();
       // MEM-3：兩條路徑都記下憑證（結束後收到記憶撤銷時仍要回報停播）。
       liveTickets.set(decision.session_id, ticketOf(decision));
       if (liveTickets.size > 8) liveTickets.delete(liveTickets.keys().next().value!);
@@ -1789,8 +2486,12 @@ function renderRealtimeState(phase: RealtimePhase): void {
   // 只在已經沒有任何進行中或開始中的通話時才歸還剩下的，不會停掉新通話的複製品）。
   // WK-02：喚醒開始的通話的「沒人出聲就結束」只看真的通話階段（改路徑時的 off 不算結束）。
   if (phase !== "off") wakeCall?.phase(phase);
+  // SP-02b：Nous 說話時的那一段不拿來辨認說話者。
+  wakeVoice?.setSpeaking(phase === "speaking");
   if (phase === "off" && !realtime.on && !realtimeStarting) {
     stopWakeCall();
+    wakeVoice?.cancel();
+    wakeVoice?.stopCall();
     wake?.releaseAllLeases();
     if (wakeDisposePending) {
       wakeDisposePending = false;
@@ -1805,11 +2506,52 @@ function renderRealtimeState(phase: RealtimePhase): void {
   // live 建立失敗、正在改用 API key 時（realtimeStarting）不結束：要記到 API key 路徑的就緒、問候決策與首音。
   else if (phase === "off" && !realtimeStarting) lookTimeline.end();
   voicePill.hidden = phase === "off";
-  if (phase !== "off") voicePill.textContent = msg`${t(REALTIME_STATE_LABEL[phase])}（點此結束）`;
+  if (phase !== "off") renderRealtimePill(phase);
+  syncCallMeter();
   voicePill.dataset.state = phase === "off" ? "off" : phase === "speaking" ? "speaking" : "listening";
   voiceModeButton.classList.toggle("recording", phase !== "off");
   voiceModeButton.setAttribute("aria-label", phase === "off" ? t("開始語音對話") : t("結束即時語音"));
   render();
+}
+
+/**
+ * 即時語音的指示：階段＋（連上之後）通話時間／上限與約略 tokens（API key 路徑頁面加總的 usage，不是帳單；
+ * ChatGPT 方案照實說用量不明）。瀏覽器與 Pi 都看得到。
+ */
+function renderRealtimePill(phase: Exclude<RealtimePhase, "off">): void {
+  const meter = realtimeTicket ? callMeterText({ route: realtimeTicket.route, startedAt: realtime.callStartedAt, maxMs: realtime.maxCallMs, usage: realtime.usage ?? null }, Date.now(), t) : "";
+  voicePill.textContent = t("{0}（點此結束）", t(REALTIME_STATE_LABEL[phase])) + (meter ? ` · ${meter}` : "");
+  if (meter && realtimeTicket?.route === "api_key") voicePill.title = t(CALL_METER_TEXT.tokensNote);
+  else voicePill.removeAttribute("title");
+}
+
+/** 通話中每秒更新一次指示上的時間（只改文字，不重畫整個畫面）。 */
+let callMeterTimer: ReturnType<typeof setInterval> | null = null;
+function syncCallMeter(): void {
+  if (realtime.on && !callMeterTimer) {
+    callMeterTimer = setInterval(() => {
+      if (realtime.current === "off") syncCallMeter();
+      else renderRealtimePill(realtime.current);
+    }, 1_000);
+  } else if (!realtime.on && callMeterTimer) {
+    clearInterval(callMeterTimer);
+    callMeterTimer = null;
+  }
+}
+
+/**
+ * 快到每通上限的提示音：用處理中提示的同一個合成音（經「聲音輸出」選定的裝置，src/processing-sound.ts），響一次就收掉。
+ * 瀏覽器暫停了 AudioContext（沒有使用者手勢）時不出聲，只有字幕。
+ */
+function playCallWarning(): void {
+  try {
+    const sound = browserProcessingSound({ sink: (ctx) => audioDevices.sink(ctx), release: (ctx) => audioDevices.release(ctx) });
+    sound.resume();
+    setTimeout(() => sound.ping(), 100);
+    setTimeout(() => sound.stop(), 2_000);
+  } catch {
+    // 沒有可用的音訊輸出：只有字幕
+  }
 }
 
 /** 模型在即時語音中決定交辦的工作：建立任務、顯示進度，並把真實狀態交還給模型。 */
@@ -1833,18 +2575,91 @@ async function delegateFromRealtime(title: string): Promise<Record<string, unkno
 /** 模型要上網查詢：本機核心代查，字幕顯示來源；失敗時照實交還給模型。 */
 async function webSearchFromRealtime(query: string): Promise<Record<string, unknown>> {
   brain.pulse("step", classifyDomain(query));
+  // 查詢還沒回來的期間算「處理中」（電子腦的樣子；通話中只有畫面、不出聲）。請求一直沒回來時 30 秒後不再算。
+  const searchId = nextRealtimeSearch++;
+  const epoch = searchEpoch;
+  const releaseSearch = () => {
+    clearTimeout(searchTimer);
+    if (realtimeSearches.delete(searchId)) render();
+  };
+  const searchTimer = setTimeout(releaseSearch, CUE_TIMING.searchTimeoutMs);
+  realtimeSearches.add(searchId);
+  render();
   try {
     // ChatGPT 方案路徑的查詢帶工作階段憑證：本機核心改用 Codex 額度查（不需要 OPENAI_API_KEY）。
     // MEM-3：帶記憶的 API key 通話也帶憑證：工作階段被撤銷後核心回 403，晚到的查詢不再執行。沒有記憶的 API key 通話照舊不帶
     // （事件串流重連時核心會結束它的紀錄，但通話本身還在，查詢不能因此失敗）。
     const ticketed = realtimeTicket && (realtimeTicket.route === "live" || realtimeCoreTools.length > 0);
     const result = await api.webSearch(query, ticketed ? ticketOf(realtimeTicket!) : undefined);
-    if (result.sources.length) showSubtitle(`來源：${result.sources.map((s) => s.title).slice(0, 3).join("、")}`);
-    return { ok: true, answer: result.answer, sources: result.sources.map((s) => s.title) };
+    const candidates = result.candidates ?? [];
+    const current = epoch === searchEpoch;
+    const panel = current ? searchPanel.results(query, candidates) : null;
+    // 有答案但沒有任何候選：收起上一次的查詢畫面（不留空白卡），由模型用說的回答。
+    if (current && dismissEmptySearch(panel, shell.surface)) dispatch({ type: "dismiss" });
+    const shown = !!panel && showSearchSurface();
+    if (!shown && result.sources.length) showSubtitle(`來源：${result.sources.map((s) => s.title).slice(0, 3).join("、")}`);
+    return searchToolOutput({ answer: result.answer, candidates }, shown);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    showSubtitle(message);
+    const kind = classifySearchError(err instanceof ApiError ? err.status : null, message);
+    const shown = epoch === searchEpoch && (searchPanel.failed(query, kind), showSearchSurface());
+    if (!shown) showSubtitle(SEARCH_ERROR_TEXT[kind]);
     return { ok: false, error: message };
+  } finally {
+    releaseSearch();
+  }
+}
+
+/** 通話結束：晚到的查詢結果不再顯示，結果與還沒用的使用者那一句話清掉，查詢畫面收起。 */
+function endSearchPanel(): void {
+  searchEpoch++;
+  searchPanel.clear();
+  searchRequests.clear();
+  if (shell.surface?.kind === "search") dispatch({ type: "dismiss" });
+}
+
+/**
+ * 顯示查詢結果畫面。確認卡開著時不換掉它（換掉＝拒絕）：結果留著，使用者之後選一則時再顯示。
+ * 要打開新的畫面必須有使用者剛說完、還沒用過的一句話（user_request 的 request id）；沒有就不打開，交回模型「畫面沒有顯示」。
+ * 已經顯示查詢結果時沿用同一張畫面（內容由 renderSurface 依狀態重畫）；釘住的設定畫面會蓋回來，那時也只留著結果。
+ */
+function showSearchSurface(): boolean {
+  const step = planSearchSurface(shell.surface, searchSurfaceId, searchRequests);
+  if (step.action === "reuse") {
+    render();
+    return true;
+  }
+  if (step.action !== "open") {
+    searchPanel.hidden();
+    return false;
+  }
+  dispatch({ type: "show.search", request_id: step.requestId });
+  if (shell.surface?.kind !== "search") {
+    searchPanel.hidden();
+    return false;
+  }
+  searchSurfaceId = shell.surface.surface_id;
+  return true;
+}
+
+/** AIL-1：API key 路徑的整合工具轉交核心執行；頁面只顯示核心回的固定句（不是模型的話）。 */
+async function integrationFromRealtime(name: string, rawArgs: string): Promise<Record<string, unknown>> {
+  const ticket = realtimeTicket;
+  if (!ticket || ticket.route !== "api_key") return { ok: false, status: "refused", message: t("沒有開始即時語音的工作階段，整合工具沒有執行。") };
+  showSubtitle(t("整合工具：{0}", name), true);
+  try {
+    const result = await api.integrationCall(ticketOf(ticket), name, rawArgs);
+    if (typeof result.message === "string") showSubtitle(t(result.message));
+    return result;
+  } catch (err) {
+    // 核心回 4xx：請求被拒，確定沒有執行。其他（連線中斷、核心沒有回覆、5xx）：核心可能已經執行，只能說結果不明。
+    const status = (err as { status?: unknown } | null)?.status;
+    if (typeof status === "number" && status >= 400 && status < 500) {
+      showSubtitle(t("整合工具沒有執行。"));
+      return { ok: false, status: "refused", message: "整合工具沒有執行。" };
+    }
+    showSubtitle(t("結果不明，請確認"));
+    return { ok: false, status: "unknown", message: "結果不明，請確認" };
   }
 }
 
@@ -1872,6 +2687,7 @@ async function homeControlFromRealtime(args: HomeControlArgs): Promise<HomeResul
   try {
     const result = await api.homeControl(args);
     showSubtitle(homeControlLine(result, getLocale()));
+    homeCorner.refreshSoon();
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1887,6 +2703,7 @@ async function homeConfirmFromRealtime(confirmId: string, approve: boolean): Pro
   try {
     const result = await api.homeConfirm(confirmId, approve);
     if (approve) showSubtitle(homeControlLine(result, getLocale()));
+    if (approve) homeCorner.refreshSoon();
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1978,18 +2795,29 @@ function userRequest(): string {
   return id;
 }
 
+/** 使用者按設定畫面的「收起」或右下角齒輪：解除釘住再收起。 */
+function closeSettings(): void {
+  pinnedSettings = null;
+  dispatch({ type: "dismiss" });
+}
+
 function dispatch(event: ShellEvent): void {
   if (event.type.startsWith("show.")) {
     conversationEpoch++;
     session.dismiss();
     hideSubtitle();
   }
-  const next = reduceShell(shell, event);
+  let next = reduceShell(shell, event);
+  // 釘住的設定畫面：使用者打開後，只有按「收起」或齒輪（closeSettings）才關（George 2026-11-08）。
+  // 只在 Pi 等終端頁面釘住：Mac 的 App 用選單列打開家人辨識、記憶、成果等畫面，釘住會讓那些指令沒有反應。
+  if (event.type === "show.settings" && next.surface?.kind === "settings" && pinSettingsOnThisPage) pinnedSettings = next.surface;
+  next = keepPinnedSettings(next, pinnedSettings);
   if (next === shell) return;
   const wasListening = shell.listening;
   const leftConfirm = shell.surface?.kind === "confirm" && next.surface?.surface_id !== shell.surface.surface_id ? shell.surface.request_id : null;
   const leftFamily = shell.surface?.kind === "family" && next.surface?.surface_id !== shell.surface.surface_id;
   const leftMemory = shell.surface?.kind === "memory" && next.surface?.surface_id !== shell.surface.surface_id;
+  const leftSearch = shell.surface?.kind === "search" && next.surface?.kind !== "search";
   const enteredFamily = next.surface?.kind === "family" && next.surface.surface_id !== shell.surface?.surface_id;
   const leftWakeCalibration = shell.surface?.kind === "wake_calibration" && next.surface?.surface_id !== shell.surface.surface_id;
   const enteredWakeCalibration = next.surface?.kind === "wake_calibration" && next.surface.surface_id !== shell.surface?.surface_id;
@@ -1997,9 +2825,11 @@ function dispatch(event: ShellEvent): void {
   // 收起矯正畫面：停止錄音、丟掉 worker 的錄音、恢復常駐聆聽。
   if (leftWakeCalibration) wakeCalibrationView.close();
   if (enteredWakeCalibration) wakeCalibrationView.open();
+  wakeMemoriesNow();
   // 收起只關畫面：停止取樣並丟掉記憶體中的樣本與 session，不刪已存的家人資料。
   if (leftFamily) familyView.close();
   if (leftMemory && next.surface?.kind !== "memory") memoryView.close();
+  if (leftSearch) searchPanel.hidden();
   if (enteredFamily) familyView.open(familyOpenMode);
   familyOpenMode = "list";
   // 家人辨識畫面開著時不做看著說話的同步辨識（核心也拒絕）；收起後重新確認（gallery 可能剛改過）。
@@ -2036,6 +2866,8 @@ function onServerEvent(event: ServerEvent): void {
         return;
       }
     }
+    // PRO-2：核心真的念今天的行程（真實事件）：點亮規劃區。
+    if (event.type === "realtime.live" && event.event.kind === "briefing") brain.pulse("step", "planning");
     if (event.type === "realtime.live" && event.event.kind === "memory_notice" && event.session_id !== realtimeTicket?.session_id) {
       showSubtitle(t(event.event.message), true);
       return;
@@ -2080,6 +2912,11 @@ function onServerEvent(event: ServerEvent): void {
     // MEM-4c 審查 M1／minor 5：不一次讀全部任務的真實內容；只為畫面上正在顯示的讀（renderProgress、前景任務）。
     void refreshVault();
     render();
+    return;
+  }
+  if (event.type === "memory.presence_changed") {
+    // RPI-ID：Mac 主視窗另有 IPC 通知（onMemoryChange）；終端機頁面靠這個不含內容的事件重讀本次人物。
+    if (!window.nousDesktop) void refreshMemoryStatus();
     return;
   }
   if (event.type === "task.deleted") {
@@ -2127,7 +2964,11 @@ function firePulses(prev: Task | undefined, next: Task): void {
     const before = prev.steps[i];
     const domain = isDomain(step.domain) ? step.domain : null;
     if (step.status !== before?.status) {
-      if (step.status === "running") brain.pulse("step", domain);
+      if (step.status === "running") {
+        brain.pulse("step", domain);
+        // 新的步驟真的開始執行：處理中提示音重新響 6 秒（每 15 秒最多一次，src/processing-cue.ts）。
+        processingCue.rearm();
+      }
       if (step.status === "done") brain.pulse("stepDone", domain);
     }
     if (step.output_chars !== null && step.output_chars !== (before?.output_chars ?? null)) brain.pulse("stream", domain);
@@ -2153,6 +2994,11 @@ function latestArtifactTask(): Task | undefined {
 async function handleCommand(text: string, source: "typed" | "speech" = "typed"): Promise<void> {
   // WK-02：喚醒開始的通話中使用者打字＝有人在，這通不再因為沒出聲而自動結束。
   if (source === "typed") wakeCall?.disarm();
+  // ALARM-1：鈴響時打「停」「好了」或按麥克風說，就在本機停鈴（不送給 AI）。
+  if (alarmRing.stopByText(text, source === "typed" ? "typed" : "voice")) {
+    dispatch({ type: "input.close" });
+    return;
+  }
   if (handleCameraCommand(text)) {
     dispatch({ type: "input.close" });
     return;
@@ -2258,7 +3104,105 @@ async function cancelTask(taskId: string, requestId: string): Promise<void> {
   }
 }
 
+/** SP-1：設定頁「App 整合」段的狀態。 */
+let integrationPanel: IntegrationPanelState = { view: null, loading: false, error: false };
+let integrationFetchedAt = 0;
+/** 30 秒內不重查（重新整理畫面不會一直打核心）；force＝「重新檢查」。 */
+function ensureIntegrationStatus(force = false): void {
+  if (!settings?.integrations || settings.integrations.builtin_only || integrationPanel.loading) return;
+  if (!force && integrationFetchedAt && Date.now() - integrationFetchedAt < 30_000) return;
+  integrationPanel = { ...integrationPanel, loading: true, error: false };
+  integrationFetchedAt = Date.now();
+  api.integrationStatus().then(
+    (view) => void (integrationPanel = { view, loading: false, error: false }),
+    () => void (integrationPanel = { view: null, loading: false, error: true }),
+  ).finally(() => {
+    integrationFetchedAt = Date.now();
+    render();
+  });
+}
+
+/** VCR-2：設定頁「語音中繼（實驗）」段的狀態（核心註冊了 voice_relay 才有；打開設定頁時才查，不在背景輪詢）。 */
+let voiceRelayPanel: VoiceRelayPanelState = emptyVoiceRelayPanel();
+let voiceRelayFetchedAt = 0;
+/** 30 秒內不重查；保存與播放的回覆本身就帶新的檢視。 */
+function ensureVoiceRelay(): void {
+  if (settings?.voice_relay !== true || voiceRelayPanel.loading || voiceRelayPanel.busy) return;
+  if (voiceRelayFetchedAt && Date.now() - voiceRelayFetchedAt < 30_000) return;
+  voiceRelayPanel = { ...voiceRelayPanel, loading: true, error: false };
+  voiceRelayFetchedAt = Date.now();
+  api.voiceRelay().then(
+    (view) => void (voiceRelayPanel = { ...voiceRelayPanel, view, loading: false, error: false }),
+    () => void (voiceRelayPanel = { ...voiceRelayPanel, view: null, loading: false, error: true }),
+  ).finally(() => {
+    voiceRelayFetchedAt = Date.now();
+    render();
+  });
+}
+
+/** 一次只送一個操作；核心拒絕（400）或沒有回覆時照實說沒有完成，不顯示舊結果當成新的。 */
+function voiceRelayRun<T>(work: () => Promise<T>, done: (value: T) => Partial<VoiceRelayPanelState>, noReply = "核心沒有回覆，這次操作沒有完成。"): void {
+  if (voiceRelayPanel.busy) return;
+  voiceRelayPanel = { ...voiceRelayPanel, busy: true, notice: null };
+  render();
+  work().then(
+    (value) => void (voiceRelayPanel = { ...voiceRelayPanel, ...done(value), busy: false }),
+    (err) => void (voiceRelayPanel = {
+      ...voiceRelayPanel,
+      busy: false,
+      notice: !(err instanceof ApiError) || err.status === 0 || err.status >= 500 ? noReply : err.status === 400 ? "核心拒絕了這次操作（內容沒有通過檢查），沒有完成。" : "核心拒絕了這次操作，沒有完成。",
+    }),
+  ).finally(() => {
+    voiceRelayFetchedAt = Date.now();
+    render();
+  });
+}
+
+const voiceRelayActions: VoiceRelayActions = {
+  refresh: () => voiceRelayRun(api.voiceRelayRefresh, (view) => ({ view })),
+  createTarget: (body) => voiceRelayRun(() => api.voiceRelayTarget(body), (view) => ({ view })),
+  setEnabled: (target_id, enabled) => voiceRelayRun(() => api.voiceRelayEnabled({ target_id, enabled }), (view) => ({ view })),
+  saveProfile: (body) => voiceRelayRun(() => api.voiceRelayProfile(body), (view) => ({ view })),
+  adopt: (body) => voiceRelayRun(() => api.voiceRelayAdopt(body), (view) => ({ view })),
+  unadopt: (body) => voiceRelayRun(() => api.voiceRelayUnadopt(body), (view) => ({ view })),
+  chooseProfile: (targetId, profileId) => {
+    voiceRelayPanel = { ...voiceRelayPanel, chosen: { ...voiceRelayPanel.chosen, [targetId]: profileId }, played: null };
+    render();
+  },
+  setCreateLocale: (locale) => {
+    voiceRelayPanel = { ...voiceRelayPanel, createLocale: locale };
+    render();
+  },
+  setTrial: (patch) => {
+    voiceRelayPanel = { ...voiceRelayPanel, trial: { ...voiceRelayPanel.trial, ...patch } };
+    render();
+  },
+  preview: (body) =>
+    voiceRelayRun(() => api.voiceRelayPreview(body), ({ result }) => ({
+      preview: { target_id: body.target_id, intent_id: body.intent_id, template_id: body.template_id ?? "", result },
+    })),
+  // 播放只由「測試喚醒／測試整句」按鈕觸發；結果最多是「已送出、未確認」。
+  play: (body) => {
+    const template = voiceRelayPanel.view?.targets.find((t) => t.id === body.target_id)?.intents.find((i) => i.intent_id === body.intent_id)?.templates.find((t) => t.template_id === body.template_id);
+    if (!template || !body.voice_profile_id) return;
+    const base = { target_id: body.target_id, intent_id: body.intent_id, template_id: template.template_id, template_version: template.version, voice_profile_id: body.voice_profile_id, part: body.part };
+    voiceRelayRun(() => api.voiceRelayPlay(body), (reply) => ({
+      played: "ok" in reply
+        ? { ...base, status: reply.status, reason: null }
+        : { ...base, status: "refused", reason: reply.reason },
+      trial: { wake: null, command: null, evidence: voiceRelayPanel.trial.evidence },
+    }), "核心沒有回覆：不知道有沒有播出聲音。");
+  },
+  recordTrial: (body) =>
+    voiceRelayRun(() => api.voiceRelayTrial(body), (view) => ({ view, played: null, trial: { wake: null, command: null, evidence: voiceRelayPanel.trial.evidence } })),
+};
+
 const actions: ViewActions = {
+  refreshIntegrations: () => {
+    ensureIntegrationStatus(true);
+    render();
+  },
+  voiceRelay: voiceRelayActions,
   cancel: (taskId) => void cancelTask(taskId, userRequest()),
   redo(taskId) {
     const requestId = userRequest();
@@ -2284,7 +3228,7 @@ const actions: ViewActions = {
     dispatch({ type: "show.artifact", request_id: userRequest(), task_id: taskId, artifact_id: artifactId }),
   showProgress: () => dispatch({ type: "show.progress", request_id: userRequest() }),
   openHistory: () => openHistory(userRequest()),
-  dismiss: () => dispatch({ type: "dismiss" }),
+  dismiss: () => (shell.surface?.kind === "settings" ? closeSettings() : dispatch({ type: "dismiss" })),
   openSettings: () => dispatch({ type: "show.settings", request_id: userRequest() }),
   selectProvider: (provider) => void selectProvider(provider, userRequest()),
   updateCamera(patch) {
@@ -2300,6 +3244,181 @@ const actions: ViewActions = {
     });
   },
   openCameraPreview: () => openPreview(userRequest()),
+  setPerformance(profile) {
+    performanceProfile = profile;
+    applyProfile(profile, performanceTargets);
+    saveProfile(profile);
+    render();
+  },
+  setTerminalWindow(mode) {
+    if (!windowTerminal) return;
+    if (terminalWindowTimer !== null) clearTimeout(terminalWindowTimer);
+    terminalWindowStatus = { kind: "sent" };
+    render();
+    api.terminalWindow(windowTerminal, mode).then(
+      () => {
+        // 成功時 Pi 會重開 Chromium（頁面重新載入）；這麼久頁面還在就是 Pi 沒有套用。
+        terminalWindowTimer = setTimeout(() => {
+          terminalWindowTimer = null;
+          terminalWindowStatus = { kind: "no_response" };
+          render();
+        }, WINDOW_NO_RESPONSE_MS);
+      },
+      (err: unknown) => {
+        terminalWindowStatus = { kind: "error", message: err instanceof Error ? err.message : String(err) };
+        render();
+      },
+    );
+  },
+  setVoiceVolume(request) {
+    voiceVolume.change(request);
+    render();
+  },
+  setLumaThresholds(next) {
+    const requestId = userRequest();
+    try {
+      setLumaThresholds(next);
+      render();
+    } catch (err) {
+      dispatch({ type: "show.settings", request_id: requestId, message: msg`門檻沒有保存：${(err as Error).message}` });
+    }
+  },
+  setDayNight(patch) {
+    const requestId = userRequest();
+    void patchDayNight(patch).then(
+      () => render(),
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`日夜間設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  setGpuDrawing(on) {
+    gpuDrawing = on;
+    saveGpuDrawing(on);
+    brain.setRendererPreference(on);
+    render();
+  },
+  updateAudio(patch) {
+    const requestId = userRequest();
+    void updateAudioPrefs(patch).then((error) => {
+      if (error) dispatch({ type: "show.settings", request_id: requestId, message: error });
+    });
+  },
+  updateWake(patch) {
+    const requestId = userRequest();
+    void api.updateWake(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`喚醒設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  updateProactive(patch) {
+    const requestId = userRequest();
+    void api.updateProactive(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`主動提醒設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  updateAlarms(patch) {
+    const requestId = userRequest();
+    void api.alarmPost(ALARM_WRITE_PATH, patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘與定時器設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  previewTone(tone) {
+    alarmRing.previewTone(tone);
+  },
+  addAlarm(input) {
+    const requestId = userRequest();
+    void api.alarmPost("/api/alarms/alarms/add", input).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘沒有新增：${(err as Error).message}` }),
+    );
+  },
+  setAlarmEnabled(id, enabled) {
+    const requestId = userRequest();
+    void api.alarmPost("/api/alarms/alarms/enable", { id, enabled }).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘沒有改：${(err as Error).message}` }),
+    );
+  },
+  deleteAlarm(id) {
+    const requestId = userRequest();
+    void api.alarmPost("/api/alarms/alarms/delete", { id }).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`鬧鐘沒有刪除：${(err as Error).message}` }),
+    );
+  },
+  clearAlarms() {
+    const requestId = userRequest();
+    void api.alarmPost("/api/alarms/clear", {}).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`沒有清除：${(err as Error).message}` }),
+    );
+  },
+  updateClock(patch) {
+    const requestId = userRequest();
+    void api.updateClock(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`時鐘設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  updateHomeCorner(patch) {
+    const requestId = userRequest();
+    void api.updateHomeCorner(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`家中狀態設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  updateMemories(patch) {
+    const requestId = userRequest();
+    void api.updateMemories(patch).then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`回憶模式設定沒有保存：${(err as Error).message}` }),
+    );
+  },
+  memoriesGoogle(action) {
+    const requestId = userRequest();
+    const call = action === "pick" ? api.googlePick : action === "cancel" ? api.googleCancel : api.googleClear;
+    void call().then(
+      (next) => {
+        applySettings(next);
+        render();
+      },
+      (err: unknown) => dispatch({ type: "show.settings", request_id: requestId, message: msg`Google 相簿：${(err as Error).message}` }),
+    );
+  },
+  openExternal(url) {
+    if (/^https:\/\//.test(url)) window.nousDesktop?.openExternal(url);
+  },
   updateRealtime(patch) {
     const requestId = userRequest();
     void api.updateRealtime(patch).then(
@@ -2447,6 +3566,7 @@ function showCommandError(message: string): void {
 // ───────────── 繪製 ─────────────
 
 function render(): void {
+  settingsEntry?.refresh();
   const fgRaw = shell.foreground_task_id ? tasks.get(shell.foreground_task_id) : undefined;
   if (fgRaw) protectedTasks.want([fgRaw]);
   const fg = fgRaw ? shown(fgRaw) : undefined;
@@ -2462,12 +3582,19 @@ function render(): void {
   canvas.dataset.conversationState = phase;
   conversationStatus.textContent = t({ idle: "", listening: "正在聆聽，你可以直接說話", thinking: "正在等待回覆，你可以插話", speaking: "正在回覆，你可以直接插話", error: "對話暫時中斷，可重試或開啟設定" }[phase]);
   conversationStatus.hidden = phase === "idle";
+  const processing = syncProcessingCue(phase);
+  // 對話閒置時，背景任務真的在執行就照實寫「背景處理中」（排隊或取消中不算）。
+  if (phase === "idle" && processing) {
+    conversationStatus.textContent = t("背景處理中");
+    conversationStatus.hidden = false;
+  }
   const activity = collectRegionActivity({
     tasks: [...tasks.values()], reply: session.view.reply,
     conversationVisible: session.view.visible && shell.surface === null,
     capture: { push: voice.capturing, continuous: conversation.capturing || realtime.capturing }, playback: conversation.playing || realtime.playing,
   });
   renderRegionActivity(activity);
+  renderPresenceNotice();
   brain.setState({
     activity,
     conversation: phase,
@@ -2477,7 +3604,9 @@ function render(): void {
     voice: live === "connecting" || (live === "off" && realtimeStarting) ? "connecting" : live === "off" ? "off" : "live",
     progress:
       shell.mode === "working" && fgProgress?.total ? fgProgress.done / fgProgress.total : null,
+    processing,
   });
+  canvas.dataset.processing = processing ? "on" : "off";
 
   document.body.dataset.mode = shell.mode;
   document.body.classList.toggle("listening", shell.listening);
@@ -2489,13 +3618,114 @@ function render(): void {
 
   renderStatusLine();
   renderEngineLine();
+  // 費用防護：背景計時跟著每一通（通話結束取消；在背景中開始的從開始時算）。
+  callLifecycle.sync(document.visibilityState === "hidden");
   voiceModeButton.setAttribute("aria-label", realtime.current !== "off" ? t("結束即時語音") : conversation.current !== "off" ? t("關閉語音對話模式") : t("開啟語音對話模式"));
-  if (realtime.current !== "off") voicePill.textContent = t("{0}（點此結束）", t(REALTIME_STATE_LABEL[realtime.current]));
+  if (realtime.current !== "off") renderRealtimePill(realtime.current);
   else if (conversation.current !== "off") voicePill.textContent = t("{0}（點此關閉）", t(VOICE_STATE_LABEL[conversation.current]));
   reportDesktopState();
   renderCaption(fg);
   renderSurface();
   applyDistanceScale();
+  syncMemories();
+}
+
+// ───────────── 回憶模式（MEMO-1） ─────────────
+
+/** 電子腦有沒有事：任務、通話、對話、收音、念話、處理中、畫面、輸入列、看著說話。 */
+function memoriesBusy(): boolean {
+  return [...tasks.values()].some(isActive)
+    || realtime.on || realtimeStarting
+    || conversation.current !== "off"
+    || voice.active || voice.capturing
+    || session.view.reply.kind === "pending"
+    || processingCue.active
+    || shell.surface !== null || shell.listening
+    || speechActive > 0
+    || alarmRing.ringing || alarmRing.countingDown
+    || document.body.dataset.facing === "yes";
+}
+
+function wakeMemoriesNow(): void {
+  memoriesState = wakeMemories(memoriesState, performance.now());
+  syncMemories();
+}
+
+function syncMemories(): void {
+  const prefs = settings?.memories?.prefs ?? null;
+  const enabled = !!prefs?.enabled && connected && !currentNightEffects().pauseMemories;
+  const now = performance.now();
+  const was = memoriesState.phase;
+  memoriesState = stepMemories(memoriesState, { now, enabled, busy: memoriesBusy(), hasItems: memoriesItems.length > 0, idleMs: (prefs?.idle_s ?? 60) * 1000 });
+  const phase = memoriesState.phase;
+  document.body.dataset.memories = phase;
+  if (phase === "showing" && prefs) memoriesPresenter.show(memoriesItems, prefs);
+  else memoriesPresenter.hide();
+  const showing = phase === "showing";
+  brain.setMemoriesCorner(showing);
+  if (!showing) {
+    if (memoriesDimTimer !== null) clearTimeout(memoriesDimTimer);
+    memoriesDimTimer = null;
+    if (memoriesDimmed) {
+      memoriesDimmed = false;
+      applyProfile(performanceProfile, performanceTargets);
+    }
+  } else if (!memoriesDimmed && memoriesDimTimer === null) {
+    memoriesDimTimer = setTimeout(() => {
+      memoriesDimTimer = null;
+      if (memoriesState.phase !== "showing") return;
+      memoriesDimmed = true;
+      applyProfile(performanceProfile, performanceTargets);
+    }, MEMORIES_TIMING.brainMs);
+  }
+  if (!enabled) {
+    if (memoriesTicker !== null) clearInterval(memoriesTicker);
+    memoriesTicker = null;
+    if (was !== "off") memoriesItems = [];
+    memoriesFetchedAt = null;
+    return;
+  }
+  memoriesTicker ??= setInterval(syncMemories, 1000);
+  // 清單：開啟時讀一次；之後不在播放時每 fetchRetryMs 重讀（資料夾放了新照片、或之前是空的）。
+  if (!memoriesFetching && phase !== "showing" && (memoriesFetchedAt === null || now - memoriesFetchedAt >= MEMORIES_TIMING.fetchRetryMs)) {
+    memoriesFetching = true;
+    memoriesFetchedAt = now;
+    void api.memoriesItems().then(
+      ({ items }) => { memoriesItems = items; },
+      () => { memoriesItems = []; },
+    ).finally(() => {
+      memoriesFetching = false;
+      syncMemories();
+    });
+  }
+}
+
+/**
+ * 把目前的真實狀態交給處理中提示（render、念話開始／結束、視窗顯示／隱藏時呼叫）。回傳電子腦要不要顯示「處理中」。
+ * 聲音暫停：Nous 說話（含之後 1.5 秒）、麥克風收音、即時語音通話（只有畫面）、主視窗看不到；開關關掉時不出聲。
+ */
+/** 處理中的來源：斷線時不算任務（狀態可能過時），通話結束後不算查詢。 */
+function currentProcessingSource(): string[] {
+  return processingSource({ tasks: tasks.values(), searches: realtimeSearches, connected, callOn: realtime.on });
+}
+
+function syncProcessingCue(phase = document.body.dataset.conversationState): boolean {
+  processingCue.update({
+    owners: currentProcessingSource(),
+    enabled: settings?.audio?.prefs.processing_cue !== false && !currentNightEffects().muteProcessingCue,
+    callOn: realtime.on || realtimeStarting,
+    speaking: speechActive > 0 || conversation.playing || realtime.playing || phase === "speaking" || alarmRing.ringing || alarmRing.countingDown,
+    capturing: voice.capturing || conversation.capturing || realtime.capturing,
+    hidden: document.visibilityState === "hidden",
+  });
+  return processingCue.active;
+}
+
+/** 選單列「聲音」：裝置清單、真的在用的裝置，與頁面算好的兩句狀態（選單列只翻譯、不重算）。 */
+function audioMenuReport(): AudioMenuReport {
+  const report = audioDevices.report();
+  const prefs = settings?.audio?.prefs ?? audioDevices.current;
+  return { ...report, input_status: inputStatus(prefs, report), output_status: outputStatus(prefs, report) };
 }
 
 let reportedDesktopState = "";
@@ -2513,6 +3743,8 @@ function reportDesktopState(): void {
     locale: getLocale(),
     // WK-01a：只有載入了常駐喚醒聆聽才帶（列舉值；preload 再過濾一次）。旗標關閉時與之前完全相同。
     ...(wake && wakeReport ? { wake: wakeReport } : {}),
+    // 聲音輸入／輸出的選單：裝置清單（名稱與 deviceId）與真的在用的裝置；preload 再整理一次（每種最多 24 個）。
+    audio: audioMenuReport(),
   };
   const key = JSON.stringify(state);
   if (key === reportedDesktopState) return;
@@ -2591,7 +3823,7 @@ function renderConversation(): void {
   conversationReply.dataset.status = reply.kind;
   conversationUser.textContent = msg`你：${reply.user}`;
   // 「本次人物」只在輸入列與這個對話 Surface 顯示（不建常駐側欄）。
-  const person = window.nousDesktop?.memory && settings?.memory?.enabled ? presenceLabel(memoryPresence) : "";
+  const person = conversationPersonLabel(memoryPresence, { bridge: !!presenceBridge, enabled: !!settings?.memory?.enabled, terminal: bridges.terminal !== null });
   conversationPerson.hidden = !person;
   conversationPerson.textContent = person;
   conversationNotice.hidden = !("notice" in reply && reply.notice);
@@ -2601,6 +3833,14 @@ function renderConversation(): void {
   conversationAnswer.textContent = `${t(PROVIDER_LABEL[provider])}：${answer}${reply.kind === "error" ? `\n${t(reply.message)}` : reply.kind === "interrupted" ? t("\n已打斷回覆。") : ""}`;
   renderDelegatePrompt(reply.requestId);
   renderSuggestionPrompt(reply.requestId, reply.kind === "complete");
+}
+
+/** 記憶預設選人那一行（不是 Surface；不擋聊天）。 */
+function renderPresenceNotice(): void {
+  const el = presenceNotice.render();
+  presenceNoticeEl.hidden = !el;
+  if (!el) { presenceNoticeEl.replaceChildren(); return; }
+  if (el.parentElement !== presenceNoticeEl) presenceNoticeEl.replaceChildren(el);
 }
 
 /** MEM-5a：「要記住『…』嗎？［記住］［不用］」：同一個 request_id 的回覆完成後才出現在回覆下方。 */
@@ -2641,10 +3881,9 @@ function renderDelegatePrompt(requestId: string): void {
   conversationReply.append(box);
 }
 
-/** 輸入列的記憶狀態：桌面版且記憶開啟時顯示「本次人物」選單；瀏覽器版明示不可用。 */
+/** 輸入列的記憶狀態：Mac 的 App 或終端機（RPI-ID）且記憶開啟時顯示「本次人物」選單；一般瀏覽器明示不可用。 */
 function renderMemoryLine(): void {
-  const desktop = !!window.nousDesktop?.memory;
-  if (!desktop) {
+  if (!presenceBridge) {
     memoryLine.hidden = false;
     memoryPersonLabel.textContent = t(MEMORY_BROWSER_UNAVAILABLE);
     memoryPerson.hidden = true;
@@ -2693,19 +3932,8 @@ function renderEngineLine(): void {
     const next = rt?.billing_line && rt.billing_line !== activeLine ? msg`（下次開始時改用：${t(rt.billing_line)}）` : "";
     engineLine.append(msg`即時語音：${t(activeLine ?? rt?.billing_line ?? "—")}${next}｜`);
     // MEM-2／MEM-3：這通即時語音通話的本次人物與記憶筆數（或沒有用到記憶的原因，依路徑）；不含內容。
-    const route = realtimeTicket?.route ?? null;
-    if (route && liveMemory && liveMemory.reason === "route_off") {
-      // 這條路徑的記憶還沒放行：記憶開著時照實標示（和 MEM-2 的 API key 路徑一樣）。
-      if (window.nousDesktop?.memory && settings.memory?.enabled) engineLine.append(t("此路徑未啟用記憶｜"));
-    } else if (route && liveMemory && window.nousDesktop?.memory) {
-      const name = memoryPresence?.state === "selected" ? memoryPresence.name : null;
-      const why = t(liveMemory.reason ? memoryReasonText(route, liveMemory.reason) : "未用記憶");
-      engineLine.append(name
-        ? liveMemory.used > 0 ? msg`本次人物：${name} · 記憶 ${liveMemory.used} 筆｜` : msg`本次人物：${name} · ${why}｜`
-        : liveMemory.used > 0 ? msg`本次人物：未選定 · 記憶 ${liveMemory.used} 筆｜` : msg`本次人物：未選定 · ${why}｜`);
-    }
-    // API key 路徑沒有記憶狀態（舊的核心或沒有事件串流）而記憶開著：照實標示沒有用到。
-    else if (route === "api_key" && !liveMemory && window.nousDesktop?.memory && settings.memory?.enabled) engineLine.append(t("此路徑未啟用記憶｜"));
+    const liveMemoryText = liveMemoryLabel({ route: realtimeTicket?.route ?? null, live: liveMemory, presence: memoryPresence, bridge: !!presenceBridge, enabled: !!settings.memory?.enabled, reasonText: memoryReasonText });
+    if (liveMemoryText) engineLine.append(liveMemoryText);
     engineLine.append(t("交辦工作："));
   }
   if (settings.provider === "chatgpt") {
@@ -2759,6 +3987,8 @@ function renderSurface(): void {
   if (!s || !decision.allowed) {
     if (s && !decision.allowed) {
       console.warn(t("[presentation-policy] 拒絕呈現："), decision.reason, s);
+      // 被拒絕的設定卡不能再被釘回來（否則會一直拒絕、收起、釘回）。
+      if (pinnedSettings?.surface_id === s.surface_id) pinnedSettings = null;
       queueMicrotask(() => dispatch({ type: "dismiss" }));
     }
     if (renderedKey !== null) surfaceRoot.replaceChildren();
@@ -2772,8 +4002,10 @@ function renderSurface(): void {
   const key = getLocale() + ":" + (
     s.kind === "family" || s.kind === "memory" || s.kind === "history" || s.kind === "wake_calibration"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
+      : s.kind === "search"
+      ? `${s.surface_id}:${searchPanelKey()}` // 跟讀亮起不重建（applySearchHighlight）；每次換內容（含重選同一則）revision 加一才重畫
       : s.kind === "settings"
-      ? `${s.surface_id}:${JSON.stringify(settings)}:${s.message ?? ""}`
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${gpuDrawing}:${voiceVolumeKey()}:${JSON.stringify(terminalWindowStatus)}:${s.message ?? ""}` // WIN-1 全螢幕按下後的狀態；聲音裝置清單、使用中的裝置、整合狀態（SP-1）或這台裝置的音量與亮暗門檻變了也重畫
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
@@ -2796,10 +4028,17 @@ function renderSurface(): void {
   else if (s.kind === "memory") el = memoryView.element;
   // 成果紀錄自己更新內容（搜尋、詳細頁、刪除確認時不重建）。
   else if (s.kind === "history") el = historyView.element;
+  else if (s.kind === "search" && searchPanel.state) el = renderSearch(searchPanel.state, actions);
   // 矯正喚醒詞自己更新內容（錄音、比較時不重建）。
   else if (s.kind === "wake_calibration") el = wakeCalibrationView.element;
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
-  else if (s.kind === "settings") el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop });
+  else if (s.kind === "settings") {
+    // SP-1：設定頁打開時才查整合服務狀態（NOUS_AIL=on 才有）；不在背景輪詢。
+    ensureIntegrationStatus();
+    // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
+    ensureVoiceRelay();
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats(), gpu: gpuDrawing, renderer: brain.rendererStatus() }, voiceVolume: voiceVolumePanel(), terminalWindow: windowTerminal ? { current: windowModeFromSearch(location.search), status: terminalWindowStatus } : null });
+  }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));
     el = renderProgress([...tasks.values()].map(shown), s.message, actions);
@@ -2816,6 +4055,12 @@ function renderSurface(): void {
   el.scrollTop = scrollTop;
   renderedKey = key;
   if (pointedZone) applyPointing();
+}
+
+function searchPanelKey(): string {
+  const state = searchPanel.state;
+  if (!state) return "none";
+  return `${searchPanel.revision}:${state.mode}`;
 }
 
 async function loadArtifact(artifactId: string, task?: Task): Promise<void> {
@@ -2881,12 +4126,14 @@ function renderVaultPrompt(): void {
 setInterval(() => {
   refreshTimers(surfaceRoot);
   refreshCountdowns(surfaceRoot);
+  if (shell.surface?.kind === "settings") refreshPerformanceReadout(surfaceRoot, brain.frameStats(), brain.rendererStatus());
 }, 1000);
 
 // ───────────── 輸入 ─────────────
 
 form.addEventListener("submit", (e) => {
   e.preventDefault();
+  wakeMemoriesNow();
   commandError.hidden = true;
   void handleCommand(input.value);
 });
@@ -2904,13 +4151,19 @@ canvas.addEventListener("click", (e) => {
 window.addEventListener("keydown", (e) => {
   if (e.isComposing) return;
   dismissFirstHint();
+  // ALARM-1：鈴響時 Esc 或空白鍵＝停止響鈴（只做這件事）。
+  if (alarmRing.ringing && (e.key === "Escape" || e.key === " ")) {
+    e.preventDefault();
+    alarmRing.stop("key");
+    return;
+  }
   if (e.key === "Escape") {
     e.preventDefault();
     // WK-01a：喚醒提示音播放中按 Esc＝取消這次喚醒（不觸發），其他不動。
     if (wake?.cancelEarcon()) return;
     if (realtime.current === "speaking") realtime.interrupt();
-    // 即時語音中有畫面（進度、成果）開著時，Esc 只關畫面，對話繼續。
-    else if (realtime.on && shell.surface !== null) dispatch({ type: "dismiss" });
+    // 即時語音中有畫面（進度、成果）開著時，Esc 只關畫面，對話繼續。釘住的設定畫面不會被 Esc 關，Esc 就照常結束對話。
+    else if (realtime.on && shell.surface !== null && !pinnedSettings) dispatch({ type: "dismiss" });
     else if (conversation.current === "speaking") conversation.interrupt();
     else closeConversation();
     return;
@@ -2948,6 +4201,7 @@ if (speechSupported()) {
       voice.stop();
       return;
     }
+    if (servicePaused) return;
     if (!hasVoiceConsent("push")) {
       askConsent("push");
       return;
@@ -2972,7 +4226,7 @@ $<HTMLButtonElement>("consent-yes").addEventListener("click", () => {
   // WK-02：喚醒打開的同意說明：同意後以 wake_word 開始（問候、沉默 5 秒結束、限速照常）。
   if (pendingConsent === "realtime") startRealtime(wakeTrigger ? "wake_word" : "user", wakeTrigger ? { wake: wakeTrigger } : {});
   else if (pendingConsent === "continuous") enableVoiceMode();
-  else voice.start();
+  else if (!servicePaused) voice.start();
 });
 $<HTMLButtonElement>("consent-no").addEventListener("click", () => {
   pendingWakeConsent = null;
@@ -2985,9 +4239,90 @@ render();
 applyStaticTranslations();
 window.nousDesktop?.onLocaleChange?.(setLocale);
 // WK-01a：系統電源事件（只有列舉值）交給常駐喚醒聆聽；念話期間告訴防護（避免 Nous 自己說出喚醒詞時觸發）。
-window.nousDesktop?.onPower?.((event) => wake?.power(event));
-onSpeechActivity((speaking) => (speaking ? wake?.begin("speech") : wake?.end("speech")));
+window.nousDesktop?.onPower?.((event) => {
+  wake?.power(event);
+  // 費用防護：螢幕鎖定、睡眠就結束即時語音（視窗隱藏或收起不結束）。
+  callLifecycle.power(event);
+});
+// 費用防護（瀏覽器與 Pi）：頁面在背景超過 30 秒、或頁面關閉，就結束即時語音。
+document.addEventListener("visibilitychange", () => callLifecycle.visibility(document.visibilityState === "hidden"));
+window.addEventListener("pagehide", () => {
+  pageClosing = true;
+  callLifecycle.pageHide();
+});
+window.addEventListener("pageshow", () => {
+  pageClosing = false;
+});
+callLifecycle.startAlive();
+// 服務模式：Mac 交給 Pi 使用。進入時停止即時語音、按下說話與語音模式、常駐喚醒聆聽與鏡頭（不改保存的設定）；
+// 離開時喚醒和解鎖一樣依偏好恢復，鏡頭依保存的設定重新開。
+window.nousDesktop?.onService?.((event) => {
+  if (event === "enter") {
+    if (servicePaused) return;
+    servicePaused = true;
+    pendingWakeConsent = null;
+    consentBox.hidden = true;
+    // 先暫停喚醒：stopRealtime 歸還麥克風時，喚醒不會先重開收音再被關掉。
+    wake?.service(true);
+    stopRealtime();
+    conversation.stop();
+    voice.abort();
+    closePreview();
+    pipeline?.stop();
+  } else {
+    if (!servicePaused) return;
+    servicePaused = false;
+    wake?.service(false);
+    cameraFailed = false;
+    syncCamera();
+  }
+  render();
+});
+// 終端機（Pi kiosk，網址帶 ?terminal=）的心跳：Mac 選單列的「Pi 已連線」只以這個為準。
+// 心跳時也重送鏡頭回報：核心重新啟動後會忘記回報，頁面的設定卻沒變。
+// DN-3：終端機頁面（Pi）依夜間模式與閒置回報螢幕要開或關；Pi 套件的 aios-display 照著開關螢幕。Mac 主視窗不回報。
+const screenTerminal = pageTerminal(location.search, !!window.nousDesktop);
+const screenReporter = screenTerminal ? new ScreenReporter({ send: (screen) => api.terminalDisplay(screenTerminal, screen) }) : null;
+function syncScreen(): void {
+  if (!screenReporter || !settings?.day_night) return;
+  screenReporter.update({ mode: voiceVolume.mode.mode, prefs: dayNightPrefs(), busy: memoriesBusy() });
+}
+/** 螢幕關著時叫醒它的那一下不算點擊（不會因此開始對話或打開畫面）。 */
+let swallowClicksUntil = 0;
+if (screenReporter) {
+  for (const type of ["pointerdown", "touchstart", "keydown", "wheel"] as const) {
+    window.addEventListener(type, (event) => {
+      if (screenReporter.current === "off") {
+        swallowClicksUntil = Date.now() + 800;
+        if (event.cancelable) event.preventDefault();
+        event.stopPropagation();
+      }
+      screenReporter.activity();
+      syncScreen();
+    }, { passive: false, capture: true });
+  }
+  window.addEventListener("click", (event) => {
+    if (Date.now() < swallowClicksUntil) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, { capture: true });
+  setInterval(syncScreen, 2_000);
+}
+startTerminalHeartbeat({ desktop: !!window.nousDesktop, search: location.search, send: (terminal) => {
+  bridges.syncPage?.(true);
+  return api.terminalHeartbeat(terminal);
+} });
+onSpeechActivity((speaking) => {
+  if (speaking) wake?.begin("speech");
+  else wake?.end("speech");
+  // 處理中提示音：Nous 念話時暫停，念完 1.5 秒後才恢復。
+  speechActive = Math.max(0, speechActive + (speaking ? 1 : -1));
+  syncProcessingCue();
+});
+document.addEventListener("visibilitychange", () => syncProcessingCue());
 onLocaleChange(() => {
+  alarmRing.refreshLocale();
   const selected = getLocale();
   const revision = settingsRevision;
   void api.getSettings(selected).then(value => {
@@ -3004,5 +4339,36 @@ onLocaleChange(() => {
   sensorIndicator.title = t("{0}（按一下顯示／收起鏡頭畫面）", t(sensorDetail));
   sensorIndicator.textContent = sensorState === "ok" ? t("鏡頭") : sensorState === "starting" ? t("鏡頭啟動中") : t("鏡頭：{0}", t(sensorDetail));
   renderWakeIndicator();
+  renderDayNightBadge();
+  clockCorner.refreshLocale();
+  homeCorner.refreshLocale();
+  settingsEntry?.refresh();
   render();
 });
+
+/** 設定頁重畫用：這台裝置的音量、模式與亮暗門檻（不含每 30 秒變動的亮度數字，免得選單打開時被重畫關掉）。 */
+function voiceVolumeKey(): string {
+  const panel = voiceVolumePanel();
+  return JSON.stringify({ ...panel, light: panel.light ? panel.light.level : null });
+}
+
+/** VOL-2：設定頁「這台裝置的對話音量」的狀態。 */
+function voiceVolumePanel(): VoiceVolumePanelState {
+  const prefs = dayNightPrefs();
+  const fresh = currentLight(lightState, Date.now()) !== null;
+  return {
+    day: voiceVolume.volumeFor("day"),
+    night: voiceVolume.volumeFor("night"),
+    decision: voiceVolume.mode,
+    prefs,
+    override: dayNightOverride(),
+    shared: !!settings?.day_night,
+    light: prefs.use_camera && fresh && lightState.luma !== null ? { luma: lightState.luma, level: lightState.level } : null,
+    thresholds: lumaThresholds,
+  };
+}
+
+// VOL-2：開頁時依時段（之後鏡頭讀值）決定日間／夜間音量，之後每分鐘重算。
+syncLightMeter();
+updateDayNight();
+setInterval(updateDayNight, 60_000);

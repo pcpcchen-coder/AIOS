@@ -179,9 +179,20 @@ After a wake: an earcon plays, Nous greets you and starts a realtime voice call 
 2. Enter a **code** (1–4 letters or digits, e.g. A1; no names) and press "Start recording test".
 3. Say 20 prompts, about 3 minutes: "Hey Nous" 10 times, "Hello Nous" 5 times, then the should-not-wake phrases "Hey", "Hello", "Hey, no", "They know us" and "Hey nurse" once each. Each prompt starts with a ding and the whole window turning green; you have 5 seconds. Right after each one the screen shows whether the current settings detected it. You can "Pause" or "Cancel".
 4. Afterwards the App rescans the same recordings with the product's own detector at several thresholds: the Hey lines (default boost 1.0, threshold 0.25) at 0.15–0.35, the Hello lines (default 1.5/0.15) at 0.05–0.25, in steps of 0.05. The table lists how often each setting recognized the wake word and how often a should-not-wake phrase woke it; the suggestion is the setting with the most recognitions among those with zero false wakes (ties go to the higher threshold).
-5. Nothing is saved until you press "Apply"; "Restore defaults" goes back to the shipped values. The values are saved as `keyword_overrides` in the user setting `~/.config/nous/wake.json` (`NOUS_CONFIG_DIR` moves it), not in the shipped `shared/wake-runtime.json`; if listening is on, the detector reloads with the new thresholds right away.
+5. Nothing is saved until you press "Apply"; "Restore defaults" goes back to the shipped values. The values are saved as `keyword_overrides` in the user setting `~/.config/nous/wake.json` (`NOUS_CONFIG_DIR` moves it), not in the shipped `shared/wake-runtime.json`; if listening is on, the detector reloads with the new thresholds right away. The “Wake word threshold” adjustment (−0.10 to +0.10) from the settings page or the menu bar is then added on top of the calibrated thresholds; calibration measures with the adjustment in effect at that time, and the table shows the numbers before the adjustment.
 
 The recording stays only in the wake worker's memory: it is not written to disk, uploaded or logged, and it is zero-filled and discarded as soon as the comparison finishes, or you cancel, close the screen, or the Mac sleeps or locks; only the numbers remain on screen. Always-on wake listening pauses during calibration (status "Paused: Calibrating the wake word") and resumes automatically afterwards. A household has one set of thresholds: the last "Apply" wins, so ideally the family member who finds it hardest to wake Nous does the calibration. The feature appears only with `NOUS_WAKE=on`; a suggestion reflects this recording in this room, so repeat it after changing the microphone or furniture.
+
+### Choosing the microphone and speaker (for example a Bluetooth speaker)
+
+In the macOS App, the menu bar's “Camera and voice settings → Sound” (or the “Accounts and sign-in” page in the window, or the settings screen of the browser version) chooses which microphone Nous uses (“Sound input”) and which speaker it plays through (“Sound output”), saved in `audio.json`. To use a Bluetooth speaker, pair it first in macOS System Settings → Bluetooth, then choose it under “Sound output”.
+
+- A speaker change applies immediately; a microphone change during a call applies from the next call.
+- When the chosen microphone is missing, the system default is used for now; when the chosen speaker disconnects, playback moves to the system default; a caption says so, and it switches back automatically when the device returns.
+- Push-to-talk, voice-mode recognition and system read-aloud (voice mode, stranger voices in calibration) cannot choose a device in the browser and always use the Mac's system input/output.
+- A Bluetooth headset used as the microphone switches to a low-quality call mode; keep the microphone on the Mac and choose the Bluetooth speaker as the sound output.
+
+Not verified on a Mac yet; see the [validation record](../../docs/validation/audio-devices-2026-11-01.en.md).
 
 ### Wuling home controller (optional)
 

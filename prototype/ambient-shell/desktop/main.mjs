@@ -3,13 +3,13 @@ import { execFile } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, watch, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, safeStorage, session, shell, Tray } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, powerSaveBlocker, safeStorage, session, shell, Tray } from "electron";
 import { checkIdentitySender, MenuClickWindow, validateIdentityRequest } from "./identity-ipc.mjs";
 import { validateMemoryRequest } from "./memory-ipc.mjs";
 import { deleteConfirmed, deleteTaskDialog, validateConfirmDeleteRequest, validateTasksRequest } from "./tasks-ipc.mjs";
 import { createMemorySecretBox } from "./memory-safe-storage.mjs";
 import { checkTrustedSender, sameOrigin } from "./trusted-sender.mjs";
-import { isWakeReport, radio, settingsMenu } from "./settings-menu.mjs";
+import { isWakeReport, radio, realtimeMeter, sanitizeAudioMenuReport, SERVICE_TEXT, serviceStatusLine, serviceTray, settingsMenu, MEMORIES_TEXT } from "./settings-menu.mjs";
 import { isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "./localization.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,6 +28,8 @@ const logFile = join(userData, "nous.log");
 const identityDir = join(userData, "identity");
 /** 家人辨識的模型與 onnxruntime wasm：只由 npm run face:setup -- --product 安裝到這裡，不在 App 包裡。 */
 const faceRuntimeDir = join(userData, "face-runtime");
+// SP-01 家人聲音辨認的講者模型（npm run speaker:setup 安裝；核心核對雜湊後從 /speaker-runtime/ 提供）。
+const speakerRuntimeDir = join(userData, "speaker-runtime");
 /**
  * 家庭記憶的加密快照（docs/16；0700；Time Machine 排除）。資料夾與 Keychain 只在使用者說「記住…」、打開「記憶…」，
  * 或上次執行時記憶是開著的（核心在 configDir 留一個不含內容的開關提示）而第一次打字時才碰；查狀態不碰。
@@ -63,6 +65,8 @@ const DEFAULT_PREFS = {
   showDock: true,
   openAtLogin: false,
   startHidden: false,
+  // 服務模式（George 2026-11-03）：Mac 只當 Pi 的核心；App 重開後維持。
+  serviceMode: false,
   bounds: { width: 1100, height: 760 },
 };
 
@@ -131,6 +135,8 @@ function log(line) {
 
 let core = null; // { port, url, close }
 let quitting = false;
+/** 核心的終端機心跳狀態（不是服務模式開關）；核心重啟後從「已斷線」重新開始。 */
+let terminalStatus = { connected: false, terminals: [] };
 
 async function startCore() {
   const { startNous } = await import(pathToFileURL(join(here, "server.mjs")).href);
@@ -147,12 +153,23 @@ async function startCore() {
       NOUS_MAX_CONCURRENT: String(prefs.maxConcurrent),
     },
     log,
+    onTerminalChange: (status) => {
+      terminalStatus = status;
+      rebuildMenu();
+    },
+    // ALARM-1：定時器開始響時發系統通知（主視窗隱藏或頁面沒出聲時的備援；通知本身有系統提示音）；
+    // 有定時器在跑或正在響時阻止系統閒置睡眠（螢幕仍可關），手動睡眠或蓋上仍會停住核心，醒來後補響或記錄錯過。
+    alarms: {
+      onRingStart: (ring) => showAlarmNotification(ring),
+      onAwakeChange: (needed) => syncAlarmBlocker(needed),
+    },
     identity: {
       dir: identityDir,
       secretBox: identitySecretBox,
       excludeFromBackup: excludeFromTimeMachine,
       confirm: confirmIdentity,
       modelDir: faceRuntimeDir,
+      speakerModelDir: speakerRuntimeDir,
     },
     wakeRuntimeDir,
     // 鏡頭只能由主程序在原生說明之後打開（setCameraActive）；頁面經 HTTP 送 active: true 會被核心拒絕（403）。
@@ -171,6 +188,7 @@ async function startCore() {
     // MEM-2：記憶撤銷後頁面沒有在 1.5 秒內回報停播時，核心把主視窗的聲音強制靜音（下一次回報停播或新通話開始才解除）。
     audio: { setMuted: (muted) => { if (win && !win.isDestroyed()) win.webContents.setAudioMuted(muted); } },
   });
+  terminalStatus = core.terminals.status();
 }
 
 /** MEM-4c 審查 M1：只送原因（固定白名單），不含任何內容；preload 也只接受白名單裡的原因。 */
@@ -224,6 +242,61 @@ async function confirmIdentity(request) {
       ...(minor ? { checkboxLabel: "我是家長，本人在場，我確認同意登記這位未成年家人", checkboxChecked: false } : {}),
     });
     return response === 0 && (!minor || checkboxChecked === true);
+  }
+  if (request?.kind === "enroll_voice") {
+    // SP-01：只存聲音特徵（數字），錄音在頁面算完就丟，不寫檔、不上傳。
+    const minor = request.minor === true;
+    const { response, checkboxChecked } = await ask({
+      type: "question",
+      buttons: ["保存", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: request.existing ? `要保存「${request.name}」的聲音嗎？` : `要登記「${request.name}」為家人（只有聲音）嗎？`,
+      detail:
+        "本人必須在場、聽過說明並同意。Nous 只在這台 Mac 上保存加密的聲音特徵（一串數字，不存錄音、不上傳），只用來稱呼，" +
+        "不作為解鎖或授權的依據；錄音本身在算完特徵後就丟掉。隨時可以在「家人辨識」刪除。目前辨識門檻尚未校準。" +
+        (request.existing ? "\n\n原本登記的聲音（如有）會被取代。" : ""),
+      ...(minor ? { checkboxLabel: "我是家長，本人在場，我確認同意登記這位未成年家人", checkboxChecked: false } : {}),
+    });
+    return response === 0 && (!minor || checkboxChecked === true);
+  }
+  if (request?.kind === "calib_apply") {
+    // SP-03a：套用建議的聲音門檻；之後還要用新的陌生聲音驗證通過，才會只憑聲音稱名。
+    const line = (label, seg) =>
+      seg && Number.isFinite(seg.match) && Number.isFinite(seg.reject_rate)
+        ? t("{0}：門檻 {1}，在你的樣本上約 {2}% 認不出來", t(label), seg.match.toFixed(2), String(Math.round(seg.reject_rate * 100)))
+        : t("{0}：資料不足，維持起點值", t(label));
+    const { response } = await ask({
+      type: "question",
+      buttons: ["套用", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "要套用建議的聲音門檻嗎？",
+      detail: [line("喚醒詞", request.keyword), line("話語", request.utterance), t("套用後要再錄一輪：至少 50 次喚醒詞與 50 句陌生聲音都沒有被認成家人，才會開始只憑聲音叫名字。之後可以隨時清除校準資料，回到未校準的起點值。")].join("\n"),
+    });
+    return response === 0;
+  }
+  if (request?.kind === "calib_clear") {
+    const { response } = await ask({
+      type: "warning",
+      buttons: ["清除", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: "要清除聲音校準資料嗎？",
+      detail: "會刪除校準的分數與已套用的門檻，回到未校準的起點值；只憑聲音不再叫名字（測試開關除外）。家人的聲音登記不受影響。",
+    });
+    return response === 0;
+  }
+  if (request?.kind === "delete_voice") {
+    const { response } = await ask({
+      type: "warning",
+      buttons: ["刪除聲音", "取消"],
+      defaultId: 1,
+      cancelId: 1,
+      message: `要刪除「${request.name}」的聲音嗎？`,
+      detail: `只移除這位家人的聲音特徵，臉與名稱保留；會換用新的加密金鑰，刪除後無法還原。\n\n${backupNote}`,
+    });
+    return response === 0;
   }
   if (request?.kind === "delete") {
     // 連結的記憶（docs/17 §9.4、George 決定 ⑨）：顯示筆數；成人預設不勾，未成年預設勾選。不勾只解除連結。
@@ -405,7 +478,11 @@ function createWindow() {
   });
   win.loadURL(core.url);
   win.once("ready-to-show", () => {
-    if (!prefs.startHidden) win.show();
+    if (!prefs.startHidden && !prefs.serviceMode) win.show();
+  });
+  // 每次載入（啟動、核心重啟、重新載入）都把目前狀態再告訴頁面一次：載入中按「返回 Mac 使用」時，頁面可能還沒註冊監聽、收不到 "exit"。
+  win.webContents.on("did-finish-load", () => {
+    notifyService(prefs.serviceMode ? "enter" : "exit");
   });
   // 關閉視窗只是隱藏：Nous 留在選單列，背景任務繼續。
   win.on("close", (e) => {
@@ -438,6 +515,8 @@ function createWindow() {
 }
 
 function showWindow() {
+  // 服務模式中不顯示電子腦（Dock、再次開啟、快速鍵與選單都經這裡）；只有「返回 Mac 使用」先離開服務模式再顯示。
+  if (prefs.serviceMode) return;
   if (!win || win.isDestroyed()) createWindow();
   if (win.isMinimized()) win.restore();
   win.show();
@@ -445,6 +524,7 @@ function showWindow() {
 }
 
 function toggleWindow() {
+  if (prefs.serviceMode) return;
   if (win?.isVisible() && win.isFocused()) win.hide();
   else showWindow();
 }
@@ -510,6 +590,7 @@ function loadCommands() {
 
 /** 把選單動作交給網頁（開始語音、看進度…）。 */
 function command(name) {
+  if (prefs.serviceMode) return;
   showWindow();
   notifyPage(name);
 }
@@ -527,10 +608,91 @@ function notifyPower(event) {
   if (win && !win.isDestroyed()) win.webContents.send("nous:power", event);
 }
 
+/** 服務模式的進入與離開交給頁面（只送 "enter"／"exit"）。 */
+function notifyService(event) {
+  if (win && !win.isDestroyed()) win.webContents.send("nous:service", event);
+}
+
+// 服務模式下視窗都隱藏、沒有人操作 Mac：防止 App Nap 與系統閒置睡眠讓核心停住（螢幕仍可關）。
+let serviceBlocker = null;
+function syncServiceBlocker() {
+  if (prefs.serviceMode && serviceBlocker === null) serviceBlocker = powerSaveBlocker.start("prevent-app-suspension");
+  else if (!prefs.serviceMode && serviceBlocker !== null) {
+    powerSaveBlocker.stop(serviceBlocker);
+    serviceBlocker = null;
+  }
+}
+
+// ALARM-1：和服務模式分開的 blocker（兩者各自開關，任一個需要就不閒置睡眠）。
+let alarmBlocker = null;
+function syncAlarmBlocker(needed) {
+  if (needed && alarmBlocker === null) alarmBlocker = powerSaveBlocker.start("prevent-app-suspension");
+  else if (!needed && alarmBlocker !== null) {
+    powerSaveBlocker.stop(alarmBlocker);
+    alarmBlocker = null;
+  }
+}
+
+/** ALARM-1：響鈴的系統通知（只有名稱與是否晚響；按通知打開主視窗）。 */
+function showAlarmNotification(ring) {
+  // 只在 Mac 也要響時通知（Pi 上建立、Pi 在線的定時器只在 Pi 響）。
+  if (!Notification.isSupported() || (ring.targets !== "all" && !ring.targets.includes("main"))) return;
+  const title = ring.kind === "alarm" ? (ring.label ? t("鬧鐘：「{0}」", ring.label) : t("鬧鐘")) : ring.label ? t("「{0}」時間到", ring.label) : t("定時器時間到");
+  const body = ring.late_ms >= 60_000 ? t("晚了 {0} 分鐘才響（Mac 睡眠或 Nous 沒在執行）。", Math.round(ring.late_ms / 60_000)) : t("在 Nous 畫面按「停止」或舉起手掌停止。");
+  const note = new Notification({ title, body, silent: false });
+  note.on("click", () => {
+    if (win && !win.isDestroyed()) {
+      win.show();
+      win.focus();
+    }
+  });
+  note.show();
+}
+
+/** 選單列用的終端狀態：每次直接問核心（逾時計時器晚到時也不會沿用舊的「已連線」）。 */
+function currentTerminalStatus() {
+  try {
+    return core?.terminals?.status() ?? terminalStatus;
+  } catch {
+    return terminalStatus;
+  }
+}
+
+/** 進入服務模式：頁面停止收音、喚醒與鏡頭，隱藏電子腦；核心、登入與背景任務照常（Pi 繼續使用）。保存的開關都不改。 */
+function enterServiceMode() {
+  if (prefs.serviceMode) return;
+  try {
+    savePrefs({ serviceMode: true });
+  } catch (err) {
+    prefs.serviceMode = false;
+    showError("服務模式沒有保存", String(err.message ?? err));
+    return;
+  }
+  notifyService("enter");
+  if (win && !win.isDestroyed()) win.hide();
+  syncServiceBlocker();
+  rebuildMenu();
+}
+
+/** 「返回 Mac 使用」：頁面依保存的設定恢復喚醒與鏡頭，再顯示電子腦。 */
+function exitServiceMode() {
+  if (!prefs.serviceMode) return;
+  try {
+    savePrefs({ serviceMode: false });
+  } catch (err) {
+    // 這次執行已離開服務模式；只有 App 重開後會回到服務模式。
+    log(`服務模式關閉沒有保存：${err.message ?? err}`);
+  }
+  notifyService("exit");
+  syncServiceBlocker();
+  showWindow();
+  rebuildMenu();
+}
+
 // ───────────── 選單列圖示 ─────────────
 
 let tray = null;
-let pageState = { voice: "off", activeTasks: 0, wake: null };
+let pageState = { voice: "off", activeTasks: 0, wake: null, audio: null };
 let settings = null;
 let settingsReadGeneration = 0;
 
@@ -568,7 +730,132 @@ async function refreshSettings() {
 
 /** 「鏡頭與語音設定」子選單：範本在 settings-menu.mjs（純函式，有測試）。 */
 function secondsMenu() {
-  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, wakeReport: pageState.wake, wakeCommand: notifyPage, calibrateWake, translate: t });
+  return settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setClock, setDayNight, setHomeCorner, setMemories, memoriesGoogle, openMemoriesFolder, audioReport: pageState.audio, wakeReport: pageState.wake, wakeCommand: notifyPage, calibrateWake, servicePaused: prefs.serviceMode, translate: t });
+}
+
+/**
+ * 「聲音」分段的選擇（聲音輸入／輸出）：POST 到核心給的 settings.audio.write_path，直接套用回應；失敗時照實說明並重新讀取，
+ * radio 不會停在沒保存的選擇。輸出改了頁面立即套用到正在播的聲音；麥克風通話中改時下一通起使用（頁面顯示字幕）。
+ */
+async function setAudio(patch) {
+  const path = settings?.audio?.write_path;
+  if (!path) return;
+  try {
+    settings = await api(path, patch);
+  } catch (err) {
+    showError("聲音裝置設定沒有保存", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  rebuildMenu();
+}
+
+/** PRO-1「主動提醒」：POST 到核心給的 settings.proactive.write_path，直接套用回應；失敗時照實說明並重新讀取。 */
+async function setProactive(patch) {
+  const path = settings?.proactive?.write_path;
+  if (!path) return;
+  try {
+    settings = await api(path, patch);
+  } catch (err) {
+    showError("主動提醒設定沒有保存", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  rebuildMenu();
+}
+
+/** CLK-1「右上角時鐘與天氣」：POST 到核心給的 settings.clock.write_path，直接套用回應；失敗時照實說明並重新讀取。 */
+async function setClock(patch) {
+  const path = settings?.clock?.write_path;
+  if (!path) return;
+  try {
+    settings = await api(path, patch);
+  } catch (err) {
+    showError("時鐘設定沒有保存", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  rebuildMenu();
+}
+
+/** DN-2「日夜間模式」：POST 到核心給的 settings.day_night.write_path，直接套用回應；失敗時照實說明並重新讀取。 */
+async function setDayNight(patch) {
+  const path = settings?.day_night?.write_path;
+  if (!path) return;
+  try {
+    settings = await api(path, patch);
+  } catch (err) {
+    showError("日夜間設定沒有保存", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  rebuildMenu();
+}
+
+/** HOME-1「左上角家中狀態」：POST 到核心給的 settings.home_corner.write_path，直接套用回應；失敗時照實說明並重新讀取。 */
+async function setHomeCorner(patch) {
+  const path = settings?.home_corner?.write_path;
+  if (!path) return;
+  try {
+    settings = await api(path, patch);
+  } catch (err) {
+    showError("家中狀態設定沒有保存", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  rebuildMenu();
+}
+
+/** MEMO-1「回憶模式」：POST 到核心給的 settings.memories.write_path，直接套用回應；失敗時照實說明並重新讀取。 */
+async function setMemories(patch) {
+  const path = settings?.memories?.write_path;
+  if (!path) return;
+  try {
+    settings = await api(path, patch);
+  } catch (err) {
+    showError("回憶模式設定沒有保存", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  rebuildMenu();
+}
+
+/**
+ * MEMO-2「Google 相簿」：pick 等核心建立好挑選連結再用系統瀏覽器開（Google 的挑選頁不能放進視窗）；
+ * clear 先問原生確認對話框。失敗時照實說明並重新讀取。
+ */
+/** MEMO-1「打開回憶資料夾」：Finder 打開核心的回憶資料夾（不存在時先建立）；打不開時照實說明。 */
+async function openMemoriesFolder() {
+  const dir = core?.memoriesDir;
+  if (!dir) return;
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  } catch (err) {
+    showError("無法打開回憶資料夾", String(err.message ?? err));
+    return;
+  }
+  const failure = await shell.openPath(dir);
+  if (failure) showError("無法打開回憶資料夾", failure);
+}
+
+async function memoriesGoogle(action) {
+  const google = settings?.memories?.google;
+  if (!google) return;
+  if (action === "clear") {
+    const { response } = await showMessage({ type: "warning", buttons: [MEMORIES_TEXT.googleClearButton, "取消"], defaultId: 1, cancelId: 1, message: MEMORIES_TEXT.googleClearAsk, detail: MEMORIES_TEXT.googleClearDetail }, dialogParent());
+    if (response !== 0) return;
+  }
+  try {
+    settings = await api(google.paths[action], {});
+  } catch (err) {
+    showError("Google 相簿", String(err.message ?? err));
+    await refreshSettings();
+    return;
+  }
+  const after = settings?.memories?.google;
+  if (action === "pick" && after?.phase === "failed" && after.error) showError("Google 相簿", after.error);
+  else if (action === "pick" && typeof after?.picker_uri === "string" && /^https:\/\//.test(after.picker_uri)) void shell.openExternal(after.picker_uri);
+  rebuildMenu();
 }
 
 /** 即時語音用的 Codex 登入：核心開好回呼（1455，被占用時 1457，再不行改裝置代碼），系統瀏覽器開登入頁。 */
@@ -596,7 +883,7 @@ async function setMenuPref(row, value) {
   try {
     settings = await api(row.write_path, { [row.key]: value });
   } catch (err) {
-    const title = row.kind === "bool" ? `「${t(row.label)}」沒有保存` : row.kind === "factor" ? "倍率沒有保存" : "秒數沒有保存";
+    const title = row.kind === "bool" ? `「${t(row.label)}」沒有保存` : row.kind === "factor" ? "倍率沒有保存" : row.kind === "threshold" ? "喚醒詞門檻沒有保存" : "秒數沒有保存";
     showError(title, String(err.message ?? err));
     await refreshSettings();
     return;
@@ -752,12 +1039,52 @@ async function calibrateWake() {
   if (response === 0) command("calibrate-wake");
 }
 
+/**
+ * SP-02a 選單列「只憑聲音也叫名字（測試）」（George 2026-11-01）。打開前先顯示原生說明（門檻未校準、可能叫錯人、名字會送到雲端語音），
+ * 按「打開」才保存；關掉直接保存。開關只經主程序與核心之間的同一行程呼叫（core.wake），頁面腳本無法自己打開。
+ */
+async function setVoiceNameTest(value) {
+  if (value) {
+    let response = 1;
+    try {
+      ({ response } = await showMessage(
+        {
+          type: "warning",
+          buttons: ["打開", "取消"],
+          defaultId: 1,
+          cancelId: 1,
+          message: "要讓 Nous 只憑聲音也叫名字嗎？",
+          detail: t("這是測試功能。喚醒開始的通話認不出臉（沒看螢幕、鏡頭關著）時，只要聲音認出是哪位家人就會叫名字。聲音的門檻還沒有校準，可能叫錯人；錄音或聲音相近的人也可能被認成家人。看到陌生臉、多張臉或臉和聲音不一致時仍不叫。名字會像認臉時一樣以短句送到雲端語音供應商。隨時可以在這裡關掉。"),
+        },
+        dialogParent(),
+      ));
+    } catch {
+      response = 1;
+    }
+    if (response !== 0) {
+      rebuildMenu();
+      return;
+    }
+  }
+  try {
+    if (!core?.wake) throw new Error(t("常駐喚醒聆聽不可用"));
+    core.wake.setVoiceNameTest(value);
+  } catch (err) {
+    showError("只憑聲音叫名字的設定沒有保存", String(err.message ?? err));
+  }
+  await refreshSettings();
+}
+
 function rebuildMenu() {
   if (!tray) return;
   const voiceOn = pageState.voice !== "off";
   tray.setImage(trayImage(voiceOn));
   tray.setTitle(pageState.activeTasks > 0 ? ` ${pageState.activeTasks}` : "", { fontType: "monospacedDigit" });
-  tray.setToolTip(t(voiceOn ? `Nous · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}` : "Nous 電子腦"));
+  tray.setToolTip(prefs.serviceMode ? `Nous · ${t(serviceStatusLine(currentTerminalStatus()))}` : t(voiceOn ? `Nous · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}` : "Nous 電子腦"));
+  const service = serviceTray({ serviceMode: prefs.serviceMode, terminal: currentTerminalStatus(), voiceOn, showWindow, command, enterService: enterServiceMode, exitService: exitServiceMode });
+  // 服務模式中需要主視窗的項目停用（點了也不會顯示電子腦）。
+  const local = !prefs.serviceMode;
+  const needsWindow = local ? undefined : SERVICE_TEXT.needsWindow;
 
   const realtime = settings?.realtime;
   const provider = settings?.provider;
@@ -767,13 +1094,20 @@ function rebuildMenu() {
   const liveRoute = realtime?.routes?.find((r) => r.id === "live");
   const liveAccount = realtime?.live_account;
   // 路徑與計費一律照實顯示：進行中的工作階段用它自己的路徑；偏好改了只影響下一次開始。
+  // 費用防護：進行中的通話另顯示通話時間／上限與約略 tokens（核心的設定每 15 秒重讀一次，這一行跟著更新）。
+  const meter = realtime?.active ? realtimeMeter(realtime.active, Date.now(), t) : "";
   const realtimeLine = !realtime
     ? "讀取中…"
     : realtime.active
-      ? `${t(realtime.active.billing_line)}（進行中）${realtime.billing_line && realtime.billing_line !== realtime.active.billing_line ? `；下次：${t(realtime.billing_line)}` : ""}`
+      ? meter
+        ? realtime.billing_line && realtime.billing_line !== realtime.active.billing_line
+          ? t("{0}（進行中） · {1}；下次：{2}", t(realtime.active.billing_line), meter, t(realtime.billing_line))
+          : t("{0}（進行中） · {1}", t(realtime.active.billing_line), meter)
+        : `${t(realtime.active.billing_line)}（進行中）${realtime.billing_line && realtime.billing_line !== realtime.active.billing_line ? `；下次：${t(realtime.billing_line)}` : ""}`
       : t(realtime.billing_line ?? `不可用（${t(realtime.detail)}）`);
 
   const template = [
+    ...service.head,
     { label: `Nous · 引擎：${t(PROVIDER_LABEL[provider] ?? "讀取中…")}`, enabled: false },
     {
       label: `即時語音：${t(realtimeLine)} · 語音${t(VOICE_LABEL[pageState.voice] ?? "")}`,
@@ -781,11 +1115,7 @@ function rebuildMenu() {
     },
     { label: pageState.activeTasks > 0 ? `進行中的任務：${pageState.activeTasks} 個` : "目前沒有進行中的任務", enabled: false },
     { type: "separator" },
-    { label: "顯示電子腦", accelerator: "Alt+Command+N", click: showWindow },
-    { label: voiceOn ? "結束語音對話" : "開始語音對話", accelerator: "Alt+Command+V", click: () => command("voice") },
-    { label: "打字對話", click: () => command("type") },
-    { label: "看進度", click: () => command("progress") },
-    { type: "separator" },
+    ...(service.actions.length ? [...service.actions, { type: "separator" }] : []),
     {
       label: "AI 引擎（執行交辦的工作）",
       submenu: [
@@ -800,7 +1130,7 @@ function rebuildMenu() {
           }, p.available),
         ),
         { type: "separator" },
-        { label: "登入／帳號設定…", click: () => command("settings") },
+        { label: "登入／帳號設定…", sublabel: needsWindow, enabled: local, click: () => command("settings") },
       ],
     },
     {
@@ -866,7 +1196,7 @@ function rebuildMenu() {
           ),
         },
         { type: "separator" },
-        { label: "帳號與登入…", click: () => command("settings") },
+        { label: "帳號與登入…", sublabel: needsWindow, enabled: local, click: () => command("settings") },
         { label: "填入 OpenAI API key…", click: openEnvFile },
         { label: "OpenAI 用量與上限", click: () => shell.openExternal("https://platform.openai.com/usage") },
       ],
@@ -885,13 +1215,14 @@ function rebuildMenu() {
     { label: "鏡頭與語音設定", submenu: secondsMenu() },
     { label: "語音指令表", click: openCommandsWindow },
     // 成果紀錄（HIST-1）：使用者點了才打開（App 內的按需畫面，或用系統瀏覽器開核心的 /history）。
-    { label: "成果紀錄…", click: openHistoryMenu },
+    { label: "成果紀錄…", sublabel: needsWindow, enabled: local, click: openHistoryMenu },
     // MEM-4a：任務加密搬遷後的明文備份（顯示提示；刪除前另跳原生確認）。
-    { label: "刪除明文備份…", click: () => command("vault"), enabled: !!core },
+    { label: "刪除明文備份…", sublabel: needsWindow, click: () => command("vault"), enabled: !!core && local },
     { label: "在瀏覽器打開成果紀錄", click: openHistoryInBrowser, enabled: !!core },
     {
       label: "記憶…",
-      sublabel: settings?.memory && !settings.memory.available ? t("此 Mac 無法安全保存，記憶停用") : settings?.memory?.enabled ? undefined : t("尚未開啟"),
+      sublabel: needsWindow ?? (settings?.memory && !settings.memory.available ? t("此 Mac 無法安全保存，記憶停用") : settings?.memory?.enabled ? undefined : t("尚未開啟")),
+      enabled: local,
       click: openMemory,
     },
     languageMenu(prefs.locale, setLocale),
@@ -1001,6 +1332,7 @@ app.setAboutPanelOptions({
   credits: t("漂浮電子腦 × 即時語音 × 背景任務"),
 });
 
+// 服務模式中 showWindow 不做事（不顯示電子腦）。
 app.on("second-instance", showWindow);
 app.on("activate", showWindow);
 app.on("before-quit", () => {
@@ -1017,13 +1349,23 @@ app.on("window-all-closed", () => {
 // 設定在頁面（帳號頁、語音或打字指令）改了：頁面收到核心的 settings.updated 後回報新的版本字串，這裡馬上重新讀取。
 // 不在點選單列圖示時才讀：macOS 上 setContextMenu 的選單在 mouse-down 當下就打開，非同步的讀取趕不上這一次。
 let reportedSettings = null;
+// 頁面載入時同步讀目前是否在服務模式（只有布林值），載入期間就不會先開麥克風或鏡頭。
+ipcMain.on("nous:get-service", (event) => {
+  event.returnValue = prefs.serviceMode === true;
+});
 ipcMain.on("nous:get-locale", (event) => {
   event.returnValue = trustedLocaleSender(event, win, core?.url) ? prefs.locale : "zh-TW";
 });
 ipcMain.on("nous:state", (event, state) => {
   if (!trustedLocaleSender(event, win, core?.url) || !state || typeof state !== "object") return;
   if (isLocale(state.locale)) setLocale(state.locale, { notify: false });
-  pageState = { voice: String(state.voice ?? "off"), activeTasks: Number(state.activeTasks) || 0, wake: isWakeReport(state.wake) ? { state: state.wake.state, reason: state.wake.reason ?? null } : null };
+  pageState = {
+    voice: String(state.voice ?? "off"),
+    activeTasks: Number(state.activeTasks) || 0,
+    wake: isWakeReport(state.wake) ? { state: state.wake.state, reason: state.wake.reason ?? null } : null,
+    // 「聲音」的裝置清單與狀態（只有名稱、deviceId 與白名單裡的狀態句；preload 已整理過，這裡再整理一次）。
+    audio: sanitizeAudioMenuReport(state.audio),
+  };
   const revision = String(state.settings ?? "");
   if (revision && revision !== reportedSettings) {
     reportedSettings = revision;
@@ -1047,7 +1389,7 @@ ipcMain.handle("nous:identity", async (event, request) => {
 // 頁面要打開鏡頭（設定畫面的開關、說或打「打開鏡頭」）：只接受主視窗主框架、來自本機核心頁面的請求；不收任何參數。
 // 一律先顯示主程序的原生說明，使用者按「開啟」才保存（頁面腳本無法略過；HTTP 的 active: true 是 403）。
 ipcMain.handle("nous:camera-enable", async (event) => {
-  if (!core?.camera || !checkTrustedSender(event, win, core.url)) return { ok: false, reason: "unavailable" };
+  if (!core?.camera || prefs.serviceMode || !checkTrustedSender(event, win, core.url)) return { ok: false, reason: "unavailable" };
   try {
     return await setCameraActive(true, { fromPage: true });
   } catch (err) {
@@ -1160,8 +1502,9 @@ app.whenReady().then(async () => {
   // 麥克風與鏡頭（media）只開放給本機核心的頁面；鏡頭需 NOUS_CAMERA=on，影像只在本機處理。
   // 只給本機核心同一個 origin 的頁面（完全相同的協定、主機、埠；不用字首比對）。
   const allowMedia = (url) => Boolean(core && sameOrigin(url, core.url));
+  // 服務模式中一律拒絕（麥克風與鏡頭）：即使頁面沒有照 nous:service 停下來，Mac 的麥克風與鏡頭也打不開。
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-    callback(permission === "media" && allowMedia(details.requestingUrl) && (!wantsVideo(details) || cameraAllowed()));
+    callback(permission === "media" && !prefs.serviceMode && allowMedia(details.requestingUrl) && (!wantsVideo(details) || cameraAllowed()));
   });
   // 權限檢查（navigator.permissions.query、enumerateDevices 的裝置名稱）不會自己打開鏡頭；真正取得影像的 getUserMedia
   // 一律經上面的權限請求處理器，所以這裡維持原樣。
@@ -1171,6 +1514,10 @@ app.whenReady().then(async () => {
   // 作業系統鎖定：暫停本次人物（記憶撤銷舊世代；解鎖後要重新選擇）。
   // MEM-4c：鎖定與睡眠時，核心也丟棄已結束受保護任務的解密內容與搜尋索引（解鎖後要用時才重新解密）。
   // 核心的 dropPlaintext 會經 onPlaintextDropped 通知主視窗；核心不在時主程序自己通知（頁面的快取一樣要清）。
+  // 費用防護（2026-11-06）：鎖定只結束 App 主視窗開始的即時語音（Pi 與一般瀏覽器的通話不受影響）；睡眠結束全部（核心也要睡了）。
+  // 頁面自己也會依 nous:power 結束；核心這邊是頁面沒照做時的保險（掛斷、記費用原因）。
+  powerMonitor.on("lock-screen", () => void core?.realtime?.endAll("os_lock", "app"));
+  powerMonitor.on("suspend", () => void core?.realtime?.endAll("suspend"));
   powerMonitor.on("lock-screen", () => {
     core?.memory?.suspendAll();
     if (core?.tasks) core.tasks.dropPlaintext("os_lock");
@@ -1182,8 +1529,12 @@ app.whenReady().then(async () => {
   powerMonitor.on("lock-screen", () => notifyPower("lock"));
   powerMonitor.on("suspend", () => notifyPower("suspend"));
   powerMonitor.on("resume", () => notifyPower("resume"));
+  // ALARM-1：醒來立刻檢查睡眠中到期的定時器（補響或記錄錯過），不等下一次排程。
+  powerMonitor.on("resume", () => core?.alarms?.tick());
+  powerMonitor.on("unlock-screen", () => core?.alarms?.tick());
   powerMonitor.on("unlock-screen", () => notifyPower("unlock"));
 
+  syncServiceBlocker();
   tray = new Tray(trayImage(false));
   setTimeout(() => log(`選單列圖示位置：${JSON.stringify(tray.getBounds())}`), 3000);
   applyDock();

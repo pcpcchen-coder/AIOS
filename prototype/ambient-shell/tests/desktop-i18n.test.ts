@@ -8,7 +8,7 @@ import { spawnSync } from "node:child_process";
 import { build } from "esbuild";
 import { getNativeLocale, isLocale, languageMenu, localizeDialog, localizeMenu, setNativeLocale, t, trustedLocaleSender } from "../desktop/localization.mjs";
 import { settingsMenu } from "../desktop/settings-menu.mjs";
-import { describeMenuPrefs } from "../shared/seconds-menu.ts";
+import { describeMenuPrefs } from "../shared/menu-prefs.ts";
 import { DEFAULT_CAMERA_PREFS, type CameraSettings } from "../shared/sense.ts";
 import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
 import type { SettingsView } from "../shared/types.ts";

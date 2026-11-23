@@ -1,0 +1,228 @@
+<!doctype html>
+<!--
+  Nous TV capability check (LG webOS assessment, docs/22).
+  Read-only: it never calls getUserMedia, never records audio or video, and sends nothing over the network.
+  The CSP below blocks every network request except loading this file itself.
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; worker-src blob:; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Nous TV 能力檢測</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b0f14; --fg:#e8eef5; --muted:#8fa1b3; --ok:#4fd1a5; --part:#f2c14e; --no:#ff6b6b; --unk:#9aa7b4; --card:#141b24; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:22px/1.45 system-ui, sans-serif; }
+  main { max-width:1500px; margin:0 auto; padding:28px 32px 60px; }
+  h1 { font-size:34px; margin:0 0 6px; }
+  p.note { color:var(--muted); margin:4px 0 18px; }
+  .bar { display:flex; gap:14px; flex-wrap:wrap; margin:14px 0 20px; }
+  button { font:inherit; padding:10px 22px; border-radius:10px; border:2px solid #3a4b5e; background:var(--card); color:var(--fg); }
+  button:focus { outline:4px solid #6cb4ff; }
+  table { width:100%; border-collapse:collapse; background:var(--card); }
+  th, td { text-align:left; padding:10px 14px; border-bottom:1px solid #243140; vertical-align:top; }
+  th { color:var(--muted); font-weight:600; }
+  td.s { white-space:nowrap; font-weight:700; }
+  .ok { color:var(--ok); } .part { color:var(--part); } .no { color:var(--no); } .unk, .info { color:var(--unk); }
+  td.d { color:var(--muted); word-break:break-all; font-size:19px; }
+  textarea { width:100%; height:220px; margin-top:18px; background:#05080b; color:var(--fg); font:16px/1.4 monospace; border:1px solid #243140; }
+  @media (max-width:700px) { body { font-size:16px; } main { padding:16px; } td.d { font-size:14px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1 data-i18n="title"></h1>
+  <p class="note" data-i18n="intro"></p>
+  <div class="bar">
+    <button id="lang" type="button"></button>
+    <button id="rerun" type="button" data-i18n="rerun"></button>
+    <button id="copy" type="button" data-i18n="copy"></button>
+  </div>
+  <table>
+    <thead><tr><th data-i18n="colItem"></th><th data-i18n="colStatus"></th><th data-i18n="colDetail"></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <p class="note" data-i18n="jsonNote"></p>
+  <textarea id="json" readonly aria-label="JSON"></textarea>
+</main>
+<script>
+'use strict';
+var STR = {
+  'zh-Hant': {
+    title: 'Nous 電視能力檢測（唯讀）',
+    intro: '只讀取瀏覽器回報的能力，不開麥克風、不開鏡頭、不錄音錄影，也不送出任何資料（頁面的 CSP 擋下所有網路連線）。把下方 JSON 拍照或複製給開發者即可。',
+    rerun: '重新檢測', copy: '複製 JSON', copied: '已複製', copyFail: '無法複製，請拍照',
+    lang: 'English', colItem: '項目', colStatus: '結果', colDetail: '細節',
+    jsonNote: '完整結果（JSON）：', ok: '支援', part: '部分', no: '不支援', unk: '未知', info: '資訊',
+    userAgent: 'User-Agent 與 Chromium 版本', secure: '安全情境（isSecureContext）', origin: '頁面來源',
+    gum: 'getUserMedia 介面存在（未呼叫）', perms: '麥克風／鏡頭權限狀態（permissions.query）',
+    devices: '聲音／影像裝置數量（enumerateDevices，不開裝置）', webrtc: 'WebRTC（RTCPeerConnection）',
+    worklet: 'AudioWorklet', wasm: 'WebAssembly 基本', simd: 'WebAssembly SIMD', threads: 'WebAssembly 執行緒／SharedArrayBuffer',
+    coi: '跨來源隔離（crossOriginIsolated）', sinkEl: 'HTMLMediaElement.setSinkId（選喇叭）', sinkCtx: 'AudioContext.setSinkId',
+    sw: 'Service Worker', webgl: 'WebGL 1', webgl2: 'WebGL 2', fs: '全螢幕 API', tts: '語音合成（speechSynthesis）',
+    asr: '語音辨識（SpeechRecognition）', worker: 'Module Worker', offscreen: 'OffscreenCanvas', webcodecs: 'WebCodecs',
+    video: '影片格式（回憶模式）', hw: '硬體回報', screen: '螢幕', tz: '時區', storage: '儲存空間估計', wakelock: 'Screen Wake Lock',
+    noSecure: '不是安全情境：麥克風與鏡頭在此來源一定無法使用', insecureHint: '在 http 區網網址下這是預期結果',
+    notCalled: '只檢查介面，沒有開啟裝置', labelsHidden: '未授權時裝置名稱會隱藏，這是正常的'
+  },
+  'en': {
+    title: 'Nous TV capability check (read-only)',
+    intro: 'Reads what the browser reports only. It does not open the microphone or camera, records nothing, and sends nothing (the page CSP blocks all network connections). Photograph or copy the JSON below for the developer.',
+    rerun: 'Run again', copy: 'Copy JSON', copied: 'Copied', copyFail: 'Copy failed; please take a photo',
+    lang: '繁體中文', colItem: 'Item', colStatus: 'Result', colDetail: 'Detail',
+    jsonNote: 'Full result (JSON):', ok: 'Yes', part: 'Partial', no: 'No', unk: 'Unknown', info: 'Info',
+    userAgent: 'User-Agent and Chromium version', secure: 'Secure context (isSecureContext)', origin: 'Page origin',
+    gum: 'getUserMedia interface present (not called)', perms: 'Microphone / camera permission state (permissions.query)',
+    devices: 'Audio / video device count (enumerateDevices, devices not opened)', webrtc: 'WebRTC (RTCPeerConnection)',
+    worklet: 'AudioWorklet', wasm: 'WebAssembly basic', simd: 'WebAssembly SIMD', threads: 'WebAssembly threads / SharedArrayBuffer',
+    coi: 'Cross-origin isolation (crossOriginIsolated)', sinkEl: 'HTMLMediaElement.setSinkId (speaker choice)', sinkCtx: 'AudioContext.setSinkId',
+    sw: 'Service Worker', webgl: 'WebGL 1', webgl2: 'WebGL 2', fs: 'Fullscreen API', tts: 'Speech synthesis (speechSynthesis)',
+    asr: 'Speech recognition (SpeechRecognition)', worker: 'Module Worker', offscreen: 'OffscreenCanvas', webcodecs: 'WebCodecs',
+    video: 'Video formats (memories mode)', hw: 'Hardware report', screen: 'Screen', tz: 'Time zone', storage: 'Storage estimate', wakelock: 'Screen Wake Lock',
+    noSecure: 'Not a secure context: microphone and camera can never work from this origin', insecureHint: 'Expected on a plain http LAN address',
+    notCalled: 'Interface checked only; no device opened', labelsHidden: 'Device names stay hidden without permission; this is normal'
+  }
+};
+var lang = 'zh-Hant';
+try { if (localStorage.getItem('nous.tvcheck.lang') === 'en') lang = 'en'; } catch (e) {}
+function t(k) { return STR[lang][k] || k; }
+var results = [];
+function add(key, status, detail) { results.push({ key: key, status: status, detail: detail == null ? '' : String(detail) }); }
+function has(obj, name) { try { return !!obj && name in obj; } catch (e) { return false; } }
+function wasmValid(bytes) { try { return typeof WebAssembly === 'object' && WebAssembly.validate(new Uint8Array(bytes)); } catch (e) { return false; } }
+
+function chromiumVersion(ua) { var m = /Chrome\/(\d+)\.[\d.]+/.exec(ua); return m ? m[1] : null; }
+
+async function run() {
+  results = [];
+  var ua = navigator.userAgent || '';
+  var cv = chromiumVersion(ua);
+  add('userAgent', cv ? 'info' : 'unk', (cv ? 'Chromium ' + cv + ' · ' : '') + ua);
+  add('origin', 'info', location.protocol + '//' + location.host);
+  add('secure', window.isSecureContext ? 'ok' : 'no', window.isSecureContext ? '' : t('noSecure') + ' · ' + t('insecureHint'));
+
+  var md = navigator.mediaDevices;
+  add('gum', md && typeof md.getUserMedia === 'function' ? 'ok' : 'no', t('notCalled'));
+
+  var permDetail = [];
+  var permStatus = 'unk';
+  if (navigator.permissions && navigator.permissions.query) {
+    for (var name of ['microphone', 'camera']) {
+      try { var p = await navigator.permissions.query({ name: name }); permDetail.push(name + '=' + p.state); permStatus = 'ok'; }
+      catch (e) { permDetail.push(name + '=error:' + (e && e.name)); if (permStatus !== 'ok') permStatus = 'part'; }
+    }
+  } else { permDetail.push('navigator.permissions missing'); }
+  add('perms', permStatus, permDetail.join(' · '));
+
+  if (md && typeof md.enumerateDevices === 'function') {
+    try {
+      var list = await md.enumerateDevices();
+      var count = { audioinput: 0, audiooutput: 0, videoinput: 0 };
+      list.forEach(function (d) { if (d.kind in count) count[d.kind]++; });
+      add('devices', 'ok', 'audioinput=' + count.audioinput + ' · audiooutput=' + count.audiooutput + ' · videoinput=' + count.videoinput + ' · ' + t('labelsHidden'));
+    } catch (e) { add('devices', 'no', e && e.name); }
+  } else { add('devices', 'no', 'enumerateDevices missing'); }
+
+  add('webrtc', typeof window.RTCPeerConnection === 'function' ? 'ok' : 'no', '');
+  var AC = window.AudioContext || window.webkitAudioContext;
+  add('worklet', typeof window.AudioWorkletNode === 'function' && AC && has(AC.prototype, 'audioWorklet') ? 'ok' : 'no', '');
+
+  var basic = wasmValid([0, 97, 115, 109, 1, 0, 0, 0]);
+  add('wasm', basic ? 'ok' : 'no', '');
+  add('simd', wasmValid([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]) ? 'ok' : 'no', '');
+  var sab = typeof window.SharedArrayBuffer === 'function';
+  var sharedMem = false;
+  try { sharedMem = new WebAssembly.Memory({ initial: 1, maximum: 1, shared: true }).buffer instanceof SharedArrayBuffer; } catch (e) {}
+  add('threads', sab && sharedMem ? 'ok' : (sab || sharedMem ? 'part' : 'no'), 'SharedArrayBuffer=' + sab + ' · sharedMemory=' + sharedMem);
+  add('coi', window.crossOriginIsolated ? 'ok' : 'no', '');
+
+  add('sinkEl', has(HTMLMediaElement.prototype, 'setSinkId') ? 'ok' : 'no', '');
+  add('sinkCtx', AC && has(AC.prototype, 'setSinkId') ? 'ok' : 'no', '');
+  add('sw', has(navigator, 'serviceWorker') ? 'ok' : 'no', '');
+
+  ['webgl', 'webgl2'].forEach(function (kind) {
+    try {
+      var c = document.createElement('canvas');
+      var gl = c.getContext(kind);
+      if (!gl) { add(kind, 'no', ''); return; }
+      var info = gl.getExtension('WEBGL_debug_renderer_info');
+      var r = info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+      add(kind, 'ok', r);
+    } catch (e) { add(kind, 'no', e && e.name); }
+  });
+
+  add('fs', document.fullscreenEnabled ? 'ok' : (has(document.documentElement, 'requestFullscreen') ? 'part' : 'no'), 'fullscreenEnabled=' + !!document.fullscreenEnabled);
+  var voices = 0;
+  try { voices = window.speechSynthesis ? window.speechSynthesis.getVoices().length : 0; } catch (e) {}
+  add('tts', has(window, 'speechSynthesis') ? 'ok' : 'no', 'voices=' + voices);
+  add('asr', has(window, 'SpeechRecognition') || has(window, 'webkitSpeechRecognition') ? 'ok' : 'no', '');
+
+  var moduleWorker = false;
+  try {
+    var url = URL.createObjectURL(new Blob([''], { type: 'text/javascript' }));
+    var w = new Worker(url, { get type() { moduleWorker = true; return 'module'; } });
+    w.terminate(); URL.revokeObjectURL(url);
+  } catch (e) {}
+  add('worker', moduleWorker ? 'ok' : 'unk', '');
+  add('offscreen', typeof window.OffscreenCanvas === 'function' ? 'ok' : 'no', '');
+  add('webcodecs', typeof window.VideoDecoder === 'function' ? 'ok' : 'no', '');
+
+  var v = document.createElement('video');
+  var types = {
+    'H.264': 'video/mp4; codecs="avc1.640028"', 'HEVC': 'video/mp4; codecs="hvc1.1.6.L120.90"',
+    'VP9': 'video/webm; codecs="vp9"', 'AV1': 'video/mp4; codecs="av01.0.08M.08"', 'MOV/H.264': 'video/quicktime; codecs="avc1.640028"'
+  };
+  var vd = Object.keys(types).map(function (k) { return k + '=' + (v.canPlayType(types[k]) || 'no'); });
+  add('video', 'info', vd.join(' · '));
+
+  add('hw', 'info', 'hardwareConcurrency=' + (navigator.hardwareConcurrency || '?') + ' · deviceMemory=' + (navigator.deviceMemory || '?') + 'GB');
+  add('screen', 'info', screen.width + '×' + screen.height + ' · inner=' + innerWidth + '×' + innerHeight + ' · dpr=' + devicePixelRatio);
+  var tz = '';
+  try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) {}
+  add('tz', tz ? 'info' : 'unk', tz + ' · ' + new Date().toString());
+  if (navigator.storage && navigator.storage.estimate) {
+    try { var est = await navigator.storage.estimate(); add('storage', 'info', 'quota=' + Math.round((est.quota || 0) / 1048576) + 'MB'); }
+    catch (e) { add('storage', 'unk', e && e.name); }
+  } else { add('storage', 'no', ''); }
+  add('wakelock', has(navigator, 'wakeLock') ? 'ok' : 'no', '');
+
+  render();
+}
+
+function render() {
+  document.documentElement.lang = lang;
+  document.title = t('title');
+  document.querySelectorAll('[data-i18n]').forEach(function (el) { el.textContent = t(el.getAttribute('data-i18n')); });
+  document.getElementById('lang').textContent = t('lang');
+  var body = document.getElementById('rows');
+  body.textContent = '';
+  results.forEach(function (r) {
+    var tr = document.createElement('tr');
+    var a = document.createElement('td'); a.textContent = t(r.key);
+    var b = document.createElement('td'); b.className = 's ' + r.status; b.textContent = t(r.status);
+    var c = document.createElement('td'); c.className = 'd'; c.textContent = r.detail;
+    tr.appendChild(a); tr.appendChild(b); tr.appendChild(c); body.appendChild(tr);
+  });
+  var out = { tool: 'nous-tv-capability-check', version: 1, checkedAt: new Date().toISOString(), results: results };
+  document.getElementById('json').value = JSON.stringify(out, null, 1);
+}
+
+document.getElementById('lang').addEventListener('click', function () {
+  lang = lang === 'en' ? 'zh-Hant' : 'en';
+  try { localStorage.setItem('nous.tvcheck.lang', lang === 'en' ? 'en' : 'zh'); } catch (e) {}
+  run();
+});
+document.getElementById('rerun').addEventListener('click', run);
+document.getElementById('copy').addEventListener('click', function () {
+  var ta = document.getElementById('json');
+  var btn = this;
+  ta.select();
+  var done = function (ok) { btn.textContent = t(ok ? 'copied' : 'copyFail'); setTimeout(function () { btn.textContent = t('copy'); }, 2500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(ta.value).then(function () { done(true); }, function () { done(false); });
+  else { try { done(document.execCommand('copy')); } catch (e) { done(false); } }
+});
+run();
+</script>
+</body>
+</html>

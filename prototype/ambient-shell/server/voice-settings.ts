@@ -1,5 +1,5 @@
 import { DEFAULT_VOICE_PREFS, parseVoicePatch, VOICE_PREF_KEYS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
-import { PrefsFile } from "./prefs-file.ts";
+import { PrefsStore } from "./prefs-store.ts";
 
 // 語音閒置秒數（configDir/voice.json）。這個檔案只有這裡寫入。優先順序：使用者保存的值 > VOICE_PREFS 預設。
 
@@ -10,30 +10,18 @@ export interface VoiceSettingsStoreOptions {
   log?(message: string): void;
 }
 
-export class VoiceSettingsStore {
-  private readonly file: PrefsFile<VoicePrefs>;
-
-  constructor(private readonly options: VoiceSettingsStoreOptions) {
-    this.file = new PrefsFile<VoicePrefs>({
-      dir: options.dir,
-      name: "voice.json",
-      version: 1,
-      parse: parseVoicePatch,
-      failClosed: {},
-      unreadable: "語音閒置秒數用預設值",
-      log: options.log,
-    });
+export class VoiceSettingsStore extends PrefsStore<VoicePrefs, VoiceSettingsStoreOptions> {
+  constructor(options: VoiceSettingsStoreOptions) {
+    super({ name: "voice.json", parse: parseVoicePatch, failClosed: {}, unreadable: "語音閒置秒數用預設值" }, options);
   }
 
   view(): VoicePrefs {
-    const saved = this.file.saved;
-    return Object.fromEntries(VOICE_PREF_KEYS.map((key) => [key, saved[key] ?? DEFAULT_VOICE_PREFS[key]])) as unknown as VoicePrefs;
+    return this.resolve(VOICE_PREF_KEYS, DEFAULT_VOICE_PREFS);
   }
 
   /** 與 CameraSettingsStore.update 同一個約定：先寫檔，成功後才改記憶體並呼叫 onChange；失敗時丟錯、記憶體不變。 */
   update(patch: VoicePrefsPatch): VoicePrefs {
-    this.file.update(patch);
-    this.options.onChange();
+    this.commit(patch);
     return this.view();
   }
 }

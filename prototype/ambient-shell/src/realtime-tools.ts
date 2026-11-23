@@ -3,6 +3,9 @@ import { matchApproval } from "../shared/approval.ts";
 import type { ApprovalReport } from "../shared/realtime-route.ts";
 import type { ApprovalOutcome, ApprovalRequest, HomeResult, RealtimeCallbacks } from "./realtime.ts";
 import { taiwanText } from "./zh-tw.ts";
+import { parseVoiceVolumeArgs } from "../shared/voice-volume.ts";
+import { parseDayNightToolArgs } from "../shared/day-night.ts";
+import { SEARCH_ERRORS } from "../shared/web-search.ts";
 
 // 兩條即時語音路徑共用的工具執行器與確認卡佇列，從 RealtimeVoice（src/realtime.ts）原樣搬出：
 //   API key：RealtimeVoice 收到 response.function_call_arguments.done → executeRealtimeTool → function_call_output
@@ -145,14 +148,14 @@ export interface ToolContext {
 }
 
 /**
- * 驗證參數、呼叫既有的 callbacks（onDelegate、onWebSearch、onHomeStatus、onHomeControl、onGetTasks），
+ * 驗證參數、呼叫既有的 callbacks（onDelegate、onWebSearch、onHomeStatus、onHomeControl、onGetTasks、onVoiceVolume、onDayNight），
  * 並透過 approvals 套用 needs_confirmation → 確認卡／busy 的規則。分支與搬出前的 runTool 完全相同。
  */
 export async function executeRealtimeTool(name: string, rawArgs: string, ctx: ToolContext): Promise<void> {
   const { callbacks, approvals, generation } = ctx;
   let output: Record<string, unknown>;
   try {
-    const args = JSON.parse(rawArgs || "{}") as { title?: unknown; query?: unknown; target?: unknown; metric?: unknown; command?: unknown; value?: unknown };
+    const args = JSON.parse(rawArgs || "{}") as { title?: unknown; query?: unknown; target?: unknown; metric?: unknown; command?: unknown; value?: unknown; index?: unknown };
     if (name === "end_conversation") {
       ctx.end();
       return;
@@ -169,6 +172,12 @@ export async function executeRealtimeTool(name: string, rawArgs: string, ctx: To
         callbacks.onToolActivity(`上網查詢：${query}`);
         output = await callbacks.onWebSearch(query);
       }
+    } else if (name === "show_search_result") {
+      const index = typeof args.index === "number" ? args.index : typeof args.index === "string" ? Number(args.index) : NaN;
+      // 已經結束的通話（generation 換了）不能打開新通話的結果。
+      if (ctx.stale(generation) || !callbacks.onShowSearchResult) output = { ok: false, error: SEARCH_ERRORS.none };
+      else if (!Number.isInteger(index) || index < 1 || index > 3) output = { ok: false, error: SEARCH_ERRORS.outOfRange };
+      else output = callbacks.onShowSearchResult(index);
     } else if (name === "home_status") {
       const target = typeof args.target === "string" ? args.target.trim() : "";
       const metric = typeof args.metric === "string" && args.metric.trim() ? args.metric.trim() : null;
@@ -200,8 +209,28 @@ export async function executeRealtimeTool(name: string, rawArgs: string, ctx: To
           }
         }
       }
+    } else if (name === "set_day_night") {
+      const request = parseDayNightToolArgs(args as Record<string, unknown>);
+      if (!callbacks.onDayNight) {
+        output = { ok: false, error: "這個畫面不能切換日夜間模式" };
+      } else if (!request) {
+        output = { ok: false, error: "mode 只能是 day、night 或 auto" };
+      } else {
+        output = await callbacks.onDayNight(request);
+        if (output.ok === true) callbacks.onToolActivity(`日夜間模式：${output.mode === "night" ? "夜間" : "日間"}${output.reason === "manual" ? "（手動）" : "（自動）"}`);
+      }
+    } else if (name === "set_voice_volume") {
+      if (!callbacks.onVoiceVolume) {
+        output = { ok: false, error: "這個畫面不能調對話音量" };
+      } else {
+        output = callbacks.onVoiceVolume(parseVoiceVolumeArgs(args as Record<string, unknown>));
+        if (output.ok === true && typeof output.volume === "number") callbacks.onToolActivity(`對話音量：${output.volume}`);
+      }
     } else if (name === "get_tasks") {
       output = await callbacks.onGetTasks();
+    } else if (callbacks.onIntegrationTool && callbacks.integrationTools?.().includes(name)) {
+      // AIL-1：整合工具由核心執行（POST /api/integrations/call）；頁面只轉交與顯示結果。
+      output = await callbacks.onIntegrationTool(name, rawArgs);
     } else {
       output = { ok: false, error: `未知的工具：${name}` };
     }

@@ -1,6 +1,7 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { VoiceCostRecord } from "../shared/voice-cost.ts";
+import { writeAtomic } from "./fs-atomic.ts";
 
 // F6 費用紀錄（docs/13 F6、docs/17 §5.7 第 3 點；WK-02）：configDir/voice-cost.jsonl，一行一筆，只留最近 VOICE_COST_KEEP 筆。
 // 內容只有路徑、模型、開始方式、wake_id、時間、連線毫秒、結束原因與 usage（費用一律 unknown）；沒有逐字稿、音訊或姓名。
@@ -47,11 +48,7 @@ export class VoiceCostLog {
   private write(all: string[]): void {
     try {
       const lines = all.slice(-VOICE_COST_KEEP);
-      mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
-      const tmp = `${this.file}.tmp`;
-      writeFileSync(tmp, `${lines.join("\n")}\n`, { mode: 0o600 });
-      chmodSync(tmp, 0o600);
-      renameSync(tmp, this.file);
+      writeAtomic(this.file, `${lines.join("\n")}\n`, { mode: 0o600, mkdir: 0o700, chmodTemp: true });
     } catch {
       this.options.log?.("費用紀錄：寫入失敗（不影響通話）");
     }

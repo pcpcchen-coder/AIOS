@@ -1,5 +1,9 @@
 import { DOMAINS, REGION_COLOR, regionMap, regionOf, type Domain } from "../shared/domain.ts";
-import { activityDescription, type RegionActivity } from "./region-activity.ts";
+import type { RegionActivity } from "./region-activity.ts";
+import { RENDER_BUDGETS, type FrameStats, type RenderBudget } from "./performance.ts";
+import { AMBER, CYAN, DEPTH_BUCKETS, MINT, PULSE_STRIDE, VIOLET, depthAlpha, emptyRegionCenters, mix, rgbKey, type BrainFrame, type Pulse, type RGB } from "./brain-frame.ts";
+import { CanvasBrainRenderer, rgbString, type BrainRenderer, type RendererKind } from "./brain-canvas.ts";
+import { createWebGLRenderer } from "./brain-webgl.ts";
 export { REGION_COLOR } from "../shared/domain.ts";
 
 // 電子腦待機視覺：粒子與神經連線組成的雙半球腦，緩慢呼吸與旋轉。
@@ -23,6 +27,25 @@ export interface BrainVisualState {
    * （George 2026-10-31：只有右上角的字不夠明顯，不知道何時該說話）。沒有即時語音時為 off 或省略。
    */
   voice?: "off" | "connecting" | "live";
+  /**
+   * 背景處理中（George 2026-11-02）：有任務真的在執行（running）或即時語音的查詢還沒回來時為 true（src/processing-cue.ts）。
+   * 整顆腦保持「思考中」的青色並緩慢呼吸；排隊或取消中不算。Nous 說話或錯誤時以那兩種樣子為準。
+   */
+  processing?: boolean;
+}
+
+/** 處理中的青色保持量：0.45 ± 0.1、週期 2 秒（減少動態時固定 0.45）；不在處理中、或正在說話／錯誤時為 0。 */
+export const PROCESSING_TINT = { base: 0.45, swing: 0.1, periodS: 2, energy: 0.65 } as const;
+
+export function processingHold(state: Pick<BrainVisualState, "processing" | "conversation">, time: number, reduced: boolean): number {
+  if (!state.processing || state.conversation === "speaking" || state.conversation === "error") return 0;
+  if (reduced) return PROCESSING_TINT.base;
+  return PROCESSING_TINT.base + PROCESSING_TINT.swing * Math.sin((2 * Math.PI * time) / PROCESSING_TINT.periodS);
+}
+
+/** 處理中時的最低亮度：對話閒置或聆聽時至少和「思考中」一樣（0.65）。 */
+export function processingEnergy(state: Pick<BrainVisualState, "processing" | "conversation">): number {
+  return state.processing && (state.conversation === "idle" || state.conversation === "listening") ? PROCESSING_TINT.energy : 0;
 }
 
 interface Node3 {
@@ -58,20 +81,15 @@ function insideEllipsoid(x: number, y: number, z: number, p: Part): boolean {
   return ((x - p.c[0]) / p.r[0]) ** 2 + ((y - p.c[1]) / p.r[1]) ** 2 + ((z - p.c[2]) / p.r[2]) ** 2 < 0.97;
 }
 
-interface Pulse {
-  path: number[];
-  t: number;
-  speed: number;
-  color: RGB;
-  domain: Domain | null;
+/** 繪製方式的實際狀態：requested 是設定、active 是真的在用的；fallback 說明為什麼沒用 WebGL。 */
+export type RendererFallback = "unavailable" | "setup-failed" | "context-lost";
+export interface RendererStatus {
+  requested: RendererKind;
+  active: RendererKind;
+  fallback: RendererFallback | null;
+  /** 給開發者看的原因（console 與驗證文件）；不顯示在畫面上。 */
+  detail: string | null;
 }
-
-type RGB = readonly [number, number, number];
-
-const CYAN: RGB = [92, 225, 255];
-const VIOLET: RGB = [166, 139, 255];
-const MINT: RGB = [92, 242, 176];
-const AMBER: RGB = [255, 179, 92];
 
 const INNER_PER_HEMISPHERE = 30;
 /** 小腦偏紫、腦幹偏青；半球依左右漸層（未列者）。 */
@@ -83,8 +101,8 @@ const PITCH = -0.5;
 /** 腦形本身比外圈光環略小；放大以填滿原本的半徑。 */
 const SHAPE_SCALE = 1.18;
 const NEIGHBORS = 3;
-const FRAME_MS = 1000 / 30;
-const MAX_PULSES = 70;
+/** 實測每秒格數與繪製時間的視窗。 */
+const STATS_WINDOW_MS = 2000;
 /** 外圈軌道（1.62 R）加呼吸（1.018）與餘裕：不放大時整個圖形，包含淡淡的軌道，都留在視窗內。 */
 export const ORBIT_FIT_EXTENT = 1.7;
 /**
@@ -163,6 +181,22 @@ export function brainGeometry(
   return { cx, cy: zoomCenter(height, cy, home, max, r, fit), r };
 }
 
+/**
+ * 回憶模式的左下角（George 2026-11-07：原本整張 Canvas 用 CSS 縮成 0.32 倍、0.45 不透明度，線條變得又細又糊、幾乎看不見）。
+ * 改成直接以角落的大小繪製：線條維持原本的 0.7–1.4 px，不經縮放取樣。
+ * - 半徑 = 不放大時的待機半徑 × scale（1920×1080：216 × 0.5 = 108 px；1280×720：72 px；800×480：48 px）。
+ * - 中心讓腦形左緣（HIT_EXTENT.x = 1.25 R）與下緣（HIT_EXTENT.down = 0.85 R）離視窗邊緣 margin（max(16 px, 1.6vw)）。
+ *   腦形右緣約在 margin + 2.5 R（1920×1080 約 301 px；1280×720 約 200 px），在 3:2 橫式照片左緣（約 324／216 px）之外；
+ *   照片最大 86vw × 78vh，更寬的照片（16:9）或 800×480 小螢幕上，照片左下角可能蓋到腦形右緣一小塊（照片在上層）。
+ */
+export const MEMORIES_CORNER = { scale: 0.5, marginPx: 16, marginVw: 0.016 } as const;
+
+export function memoriesCornerGeometry(width: number, height: number): { cx: number; cy: number; r: number } {
+  const r = brainGeometry(width, height, "center", 1, 1).r * MEMORIES_CORNER.scale;
+  const margin = Math.max(MEMORIES_CORNER.marginPx, width * MEMORIES_CORNER.marginVw);
+  return { cx: margin + r * HIT_EXTENT.x, cy: height - margin - r * HIT_EXTENT.down, r };
+}
+
 export class Brain {
   private ctx: CanvasRenderingContext2D;
   private nodes: Node3[] = [];
@@ -175,7 +209,21 @@ export class Brain {
   private activation: Record<Domain, number> = regionMap(() => 0);
   private pulses: Pulse[] = [];
   private projected = new Float32Array(0);
-  private sprite: HTMLCanvasElement;
+  /** 每個粒子不隨時間變的底色（RGB）。 */
+  private nodeBase = new Float64Array(0);
+  /** 連線每格分組用的暫存陣列（counting sort），每格不配置新陣列。 */
+  private edgeBucket = new Uint8Array(0);
+  private edgeNext = new Int32Array(DEPTH_BUCKETS);
+  /** 每一格交給繪製的資料（src/brain-frame.ts）；預先配置、每格覆寫。 */
+  private frame!: BrainFrame;
+  private renderer: BrainRenderer;
+  private readonly canvasRenderer: CanvasBrainRenderer;
+  private requestedRenderer: RendererKind = "canvas";
+  /** WebGL 建立失敗或中斷後，這次開啟的其餘時間都用 Canvas。 */
+  private webglBlocked: { reason: RendererFallback; detail: string } | null = null;
+  private allowSoftwareGL = false;
+  /** 繪製方式真的變了（含 WebGL 中斷後自動改回 Canvas）時通知，設定頁的狀態列跟著更新。 */
+  onRendererChange: ((status: RendererStatus) => void) | null = null;
 
   private state: BrainVisualState = { conversation: "idle", listening: false, working: false, layout: "center", progress: null };
   private energy = 0.35;
@@ -199,19 +247,28 @@ export class Brain {
   /** 已發布到 CSS 的 --brain-cy（待機中心的高度；放大往中間移時跟著緩動）。 */
   private ambientCy = 0;
   private shownProgress = 0;
+  /** 回憶模式播放中：電子腦退到左下角（memoriesCornerGeometry）。 */
+  private corner = false;
+  /** 處理中提示音的波紋（0–1 的進度；每次真的排了提示音才有，減少動態時不畫）。 */
+  private cueRings: number[] = [];
 
   private width = 0;
   private height = 0;
   private lastFrame = 0;
   private raf = 0;
   private readonly reducedMotion: MediaQueryList;
+  /** 這台裝置的畫面效能（src/performance.ts）；預設 full＝調整前的畫面。 */
+  private budget: RenderBudget = RENDER_BUDGETS.full;
+  /** 最近約 2 秒每一格的時間（rAF 時間戳）與 step＋draw 花的毫秒。 */
+  private frameSamples: { at: number; ms: number }[] = [];
 
-  constructor(private readonly canvas: HTMLCanvasElement) {
+  constructor(private readonly canvas: HTMLCanvasElement, private readonly baseScale = 1) {
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("canvas 2D 不可用");
     this.ctx = ctx;
     this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
-    this.sprite = makeGlowSprite();
+    this.canvasRenderer = new CanvasBrainRenderer(canvas, ctx);
+    this.renderer = this.canvasRenderer;
     this.buildBrain();
     this.resize();
     const target = this.target();
@@ -225,18 +282,88 @@ export class Brain {
     const loop = (now: number) => {
       this.raf = requestAnimationFrame(loop);
       const elapsed = now - this.lastFrame;
-      // 減少動態時降到約 10 FPS 且不旋轉。
-      const minFrame = this.reducedMotion.matches ? 100 : FRAME_MS;
-      if (elapsed < minFrame) return;
+      // 減少動態時降到約 10 FPS 且不旋轉；效能設定的上限更低時取較低者。
+      const minFrame = Math.max(this.reducedMotion.matches ? 100 : 0, 1000 / this.budget.maxFps);
+      // 留 2 ms 餘裕：上限剛好是螢幕更新間隔的倍數時，時間戳的微小抖動不會讓這一格多等一次更新（60 Hz 下省電才能真的到 12 格）。
+      if (elapsed < minFrame - 2) return;
       this.lastFrame = now;
+      const started = performance.now();
       this.step(Math.min(elapsed, 100) / 1000);
       this.draw();
+      this.recordFrame(now, performance.now() - started);
     };
     this.raf = requestAnimationFrame(loop);
   }
 
   stop(): void {
     cancelAnimationFrame(this.raf);
+  }
+
+  /** 換效能設定：立即生效，不重新載入。 */
+  setRenderBudget(budget: RenderBudget): void {
+    const pixelRatioChanged = budget.pixelRatioCap !== this.budget.pixelRatioCap;
+    this.budget = budget;
+    if (this.pulses.length > budget.maxPulses) this.pulses.splice(0, this.pulses.length - budget.maxPulses);
+    if (pixelRatioChanged) this.resize();
+    this.frameSamples = [];
+  }
+
+  /**
+   * 「使用 GPU 繪製（WebGL）」：立即切換，不重新載入。WebGL 畫在另一張插在原畫布下方的畫布上，原畫布改當區名的透明疊層
+   * （一張畫布不能同時有 2D 與 WebGL）。建立失敗（沒有硬體 WebGL、只有軟體、著色器或緩衝區建立失敗）或中斷後，這次開啟的其餘時間都用 Canvas。
+   * allowSoftware 只給量測腳本用（無頭 Chromium 只有 SwiftShader 軟體 WebGL）。
+   */
+  setRendererPreference(gpu: boolean, options: { allowSoftware?: boolean } = {}): RendererStatus {
+    this.requestedRenderer = gpu ? "webgl" : "canvas";
+    this.allowSoftwareGL = options.allowSoftware ?? false;
+    this.applyRenderer();
+    return this.rendererStatus();
+  }
+
+  rendererStatus(): RendererStatus {
+    return {
+      requested: this.requestedRenderer,
+      active: this.renderer.kind,
+      fallback: this.requestedRenderer === "webgl" && this.webglBlocked ? this.webglBlocked.reason : null,
+      detail: this.webglBlocked?.detail ?? null,
+    };
+  }
+
+  private applyRenderer(): void {
+    const want: RendererKind = this.requestedRenderer === "webgl" && !this.webglBlocked ? "webgl" : "canvas";
+    if (want === this.renderer.kind) return;
+    this.renderer.dispose();
+    this.renderer = this.canvasRenderer;
+    if (want === "webgl") {
+      const result = createWebGLRenderer(this.canvas, this.ctx, { allowSoftware: this.allowSoftwareGL, onContextLost: () => this.blockWebGL("context-lost", "webglcontextlost") });
+      if (result.ok) this.renderer = result.renderer;
+      else this.webglBlocked = { reason: result.fallback, detail: result.reason };
+    }
+    this.resize();
+    this.frameSamples = [];
+    if (this.webglBlocked) console.info(`[brain] WebGL 不可用，改用 Canvas：${this.webglBlocked.detail}`);
+    this.onRendererChange?.(this.rendererStatus());
+  }
+
+  private blockWebGL(reason: RendererFallback, detail: string): void {
+    if (this.webglBlocked) return;
+    this.webglBlocked = { reason, detail };
+    this.applyRenderer();
+  }
+
+  /** 實測的每秒格數與平均每格繪製時間（最近約 2 秒）；少於兩格時為 null。 */
+  frameStats(): FrameStats | null {
+    const samples = this.frameSamples;
+    if (samples.length < 2) return null;
+    const span = samples[samples.length - 1].at - samples[0].at;
+    if (span <= 0) return null;
+    const drawMs = samples.reduce((sum, s) => sum + s.ms, 0) / samples.length;
+    return { fps: ((samples.length - 1) * 1000) / span, drawMs };
+  }
+
+  private recordFrame(at: number, ms: number): void {
+    this.frameSamples.push({ at, ms });
+    while (this.frameSamples.length > 1 && at - this.frameSamples[0].at > STATS_WINDOW_MS) this.frameSamples.shift();
   }
 
   /** 字級的距離比例（SenseHooks.setScale）：只影響頂端縮略圖。 */
@@ -287,6 +414,17 @@ export class Brain {
     if (kind === "error") this.tint = { color: AMBER, strength: 1 };
   }
 
+  /**
+   * 處理中提示音真的排了一次（src/processing-cue.ts 的 onPing）：畫一圈淡淡的波紋。減少動態時不畫。
+   * 不看 state.processing：第一響發生在 main.ts 的 render() 把 processing 交給 setState 之前；
+   * 不在處理中時 step() 會把波紋清掉。
+   */
+  cuePing(): void {
+    if (this.reducedMotion.matches) return;
+    if (this.cueRings.length >= 3) this.cueRings.shift();
+    this.cueRings.push(0);
+  }
+
   /** 點擊座標（CSS 像素）是否落在電子腦上：貼著腦形的橢圓（HIT_EXTENT），上下分開。 */
   hitTest(x: number, y: number): boolean {
     const dy = y - this.cy;
@@ -296,8 +434,23 @@ export class Brain {
     return ((x - this.cx) / rx) ** 2 + (dy / ry) ** 2 < 1;
   }
 
-  private target(layout = this.state.layout): { cx: number; cy: number; r: number } {
-    return brainGeometry(this.width, this.height, layout, this.zoom, this.distanceScale, this.state.progress !== null);
+  /**
+   * 回憶模式播放中退到左下角（true）或回到原位（false）。和其他大小變化一樣在 step() 裡緩動（約 0.55 秒到 95%），
+   * 減少動態效果時直接跳到。CSS 的 --brain-r／--brain-cy 仍是待機的值（字幕與按鈕的位置不跟著跑）。
+   */
+  setMemoriesCorner(on: boolean): void {
+    this.corner = on;
+  }
+
+  /** 角落的中心（CSS 像素）：照片從這裡浮現、退回這裡。 */
+  memoriesCorner(): { x: number; y: number } {
+    const c = memoriesCornerGeometry(this.width, this.height);
+    return { x: c.cx, y: c.cy };
+  }
+
+  private target(layout?: BrainVisualState["layout"]): { cx: number; cy: number; r: number } {
+    if (layout === undefined && this.corner) return memoriesCornerGeometry(this.width, this.height);
+    return brainGeometry(this.width, this.height, layout ?? this.state.layout, this.zoom * this.baseScale, this.distanceScale * this.baseScale, this.state.progress !== null);
   }
 
   /**
@@ -312,16 +465,18 @@ export class Brain {
   }
 
   private resize(): void {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, this.budget.pixelRatioCap);
     this.width = window.innerWidth;
     this.height = window.innerHeight;
-    this.canvas.width = Math.round(this.width * dpr);
-    this.canvas.height = Math.round(this.height * dpr);
-    this.canvas.style.width = `${this.width}px`;
-    this.canvas.style.height = `${this.height}px`;
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.renderer.resize(this.width, this.height, dpr);
     const ambient = this.target("center");
     this.publishAmbient(ambient.r, ambient.cy);
+    // 回憶模式角落的位置給 CSS 的光暈（body::before）用；只隨視窗大小改變。
+    const corner = memoriesCornerGeometry(this.width, this.height);
+    const css = document.documentElement.style;
+    css.setProperty("--brain-corner-x", `${corner.cx}px`);
+    css.setProperty("--brain-corner-y", `${corner.cy}px`);
+    css.setProperty("--brain-corner-r", `${corner.r}px`);
   }
 
   private buildBrain(): void {
@@ -407,108 +562,48 @@ export class Brain {
       }
     }
     this.projected = new Float32Array(n * 3);
+    this.edgeBucket = new Uint8Array(this.edges.length);
+    this.nodeBase = new Float64Array(n * 3);
+    this.nodes.forEach((node, i) => {
+      const c = node.inner ? VIOLET : (GROUP_COLOR[node.group] ?? mix(CYAN, VIOLET, (node.x + 1) / 2));
+      this.nodeBase.set(c, i * 3);
+    });
     for (const d of DOMAINS) this.regionEdges[d] = [];
     for (const [i, j] of this.edges) {
       const r = this.nodes[i].region;
       if (r && r === this.nodes[j].region) this.regionEdges[r].push([i, j]);
     }
-  }
-
-  /** 腦區的螢幕中心（投影後的平均位置）與前後深度。 */
-  private regionCenter(d: Domain): { x: number; y: number; z: number } | null {
-    const idx = this.regionNodes[d];
-    if (!idx.length) return null;
-    const p = this.projected;
-    let x = 0;
-    let y = 0;
-    let z = 0;
-    for (const i of idx) {
-      x += p[i * 3];
-      y += p[i * 3 + 1];
-      z += p[i * 3 + 2];
-    }
-    return { x: x / idx.length, y: y / idx.length, z: z / idx.length };
-  }
-
-  private drawRegionGlow(R: number): void {
-    const { ctx } = this;
-    for (const d of DOMAINS) {
-      const a = this.activation[d];
-      if (a < 0.02) continue;
-      const c = this.regionCenter(d);
-      if (!c) continue;
-      const r = R * 0.62;
-      const g = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, r);
-      g.addColorStop(0, rgba(REGION_COLOR[d], 0.32 * a));
-      g.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = g;
-      ctx.fillRect(c.x - r, c.y - r, r * 2, r * 2);
-    }
-  }
-
-  private drawRegionEdges(): void {
-    const { ctx, projected: p } = this;
-    ctx.lineWidth = 0.9;
-    for (const d of DOMAINS) {
-      const a = this.activation[d];
-      if (a < 0.02) continue;
-      ctx.strokeStyle = rgba(REGION_COLOR[d], 0.55 * a);
-      ctx.beginPath();
-      for (const [i, j] of this.regionEdges[d]) {
-        if (p[i * 3 + 2] > 0.35 && p[j * 3 + 2] > 0.35) continue; // 背面的連線不加亮
-        ctx.moveTo(p[i * 3], p[i * 3 + 1]);
-        ctx.lineTo(p[j * 3], p[j * 3 + 1]);
-      }
-      ctx.stroke();
-    }
-  }
-
-  /** 亮起的腦區旁標示名稱，讓人看得出現在處理的是哪一類內容。 */
-  private drawRegionLabels(R: number): void {
-    if (R < 60) return; // 縮小到頂端時不放字
-    const { ctx } = this;
-    const fontSize = Math.round(Math.max(12, R / 11));
-    ctx.font = `500 ${fontSize}px "Noto Sans TC", "PingFang TC", system-ui, sans-serif`;
-    ctx.textBaseline = "middle";
-    for (const d of DOMAINS) {
-      const a = this.activation[d];
-      if (a < 0.25) continue;
-      const c = this.regionCenter(d);
-      if (!c) continue;
-      // 標籤放在腦外側，以細線連回腦區中心
-      const dx = c.x - this.cx;
-      const dy = c.y - this.cy;
-      const len = Math.hypot(dx, dy) || 1;
-      const ux = dx / len;
-      const uy = dy / len;
-      const ex = this.cx + ux * R * 1.3;
-      const ey = this.cy + uy * R * 1.2;
-      const alpha = Math.min(1, (a - 0.2) * 1.6);
-      ctx.strokeStyle = rgba(REGION_COLOR[d], 0.45 * alpha);
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(c.x, c.y);
-      ctx.lineTo(ex, ey);
-      ctx.stroke();
-      ctx.textAlign = "left";
-      ctx.shadowColor = "rgba(2,6,16,0.9)";
-      ctx.shadowBlur = 6;
-      ctx.fillStyle = rgba(REGION_COLOR[d], alpha);
-      const descriptions = [...new Set(this.state.activity?.filter((a) => a.domain === d).map(activityDescription))];
-      if (descriptions.length) {
-        let text = descriptions.join(" / ");
-        while (text.length > 1 && ctx.measureText(text).width > this.width - 24) text = `${text.slice(0, -2)}…`;
-        const textWidth = ctx.measureText(text).width;
-        const x = Math.max(12, Math.min(this.width - textWidth - 12, ux >= 0 ? ex + 6 : ex - textWidth - 6));
-        const y = Math.max(fontSize, Math.min(this.height - fontSize, ey));
-        ctx.fillText(text, x, y);
-      }
-      ctx.shadowBlur = 0;
-    }
+    const maxPulses = Math.max(...Object.values(RENDER_BUDGETS).map((b) => b.maxPulses));
+    this.frame = {
+      width: 0, height: 0, cx: 0, cy: 0, R: 0, bright: 0, time: 0, reduced: false, liveLevel: 0,
+      glowInner: CYAN, glowInnerAlpha: 0, glowMid: CYAN, glowMidAlpha: 0, orbitAngle: [0, 0], orbitAlpha: 0,
+      nodeCount: n,
+      projected: this.projected,
+      nodeInner: Uint8Array.from(this.nodes, (node) => (node.inner ? 1 : 0)),
+      nodeKey: new Int32Array(n),
+      nodeAlpha: new Float64Array(n),
+      nodeSize: new Float64Array(n),
+      glowEvery: 4,
+      nodeGlowSize: 0,
+      edgeEnds: Int32Array.from(this.edges.flat()),
+      edgeOrder: new Int32Array(this.edges.length),
+      edgeStarts: new Int32Array(DEPTH_BUCKETS + 1),
+      edgeColor: CYAN,
+      edgeAlpha: new Float64Array(DEPTH_BUCKETS),
+      activation: this.activation,
+      regionCenter: emptyRegionCenters(),
+      regionEdges: this.regionEdges,
+      pulses: this.pulses,
+      pulseGeom: new Float64Array(maxPulses * PULSE_STRIDE),
+      pulseGlowSize: 0,
+      connectAlpha: 0, connectDash: [0, 0], connectDashOffset: 0,
+      listenColor: CYAN, listenAlpha: 0, listenWidth: 0, listenShadowAlpha: 0, listenBlur: 0,
+      cueRings: this.cueRings, progress: null, shownProgress: 0, labelShadow: true, activity: undefined,
+    };
   }
 
   private spawnPulse(color: RGB, domain: Domain | null = null): void {
-    if (this.pulses.length >= MAX_PULSES) this.pulses.shift();
+    while (this.pulses.length >= this.budget.maxPulses) this.pulses.shift();
     const pool = domain && this.regionNodes[domain].length ? this.regionNodes[domain] : this.outerNodes;
     let node = pool[Math.floor(Math.random() * pool.length)];
     const path = [node];
@@ -519,14 +614,14 @@ export class Brain {
       node = next[Math.floor(Math.random() * next.length)];
       path.push(node);
     }
-    this.pulses.push({ path, t: 0, speed: 5 + Math.random() * 4, color, domain });
+    this.pulses.push({ path, t: 0, speed: 5 + Math.random() * 4, color, domain, stroke: rgbString(rgbKey(color)), sprite: null });
   }
 
   private step(dt: number): void {
     const reduced = this.reducedMotion.matches;
     this.time += dt;
     const phaseEnergy = { idle: 0.35, listening: 0.55, thinking: 0.65, speaking: 0.85, error: 0.3 }[this.state.conversation];
-    const targetEnergy = Math.max(this.state.working ? 0.8 : 0, phaseEnergy);
+    const targetEnergy = Math.max(this.state.working ? 0.8 : 0, phaseEnergy, processingEnergy(this.state));
     this.energy += (targetEnergy - this.energy) * Math.min(1, dt * 2.5);
     this.listenLevel += ((this.state.listening ? 1 : 0) - this.listenLevel) * Math.min(1, dt * 6);
     this.liveLevel += ((this.state.voice === "live" ? 1 : 0) - this.liveLevel) * (reduced ? 1 : Math.min(1, dt * 3));
@@ -535,6 +630,12 @@ export class Brain {
     if (!reduced) this.swing += dt * (0.12 + 0.35 * this.energy);
     this.yaw = YAW_BASE + YAW_SWING * Math.sin(this.swing);
     this.tint.strength = Math.max(0, this.tint.strength - dt * 0.45);
+    // 背景處理中：青色保持在 0.35–0.55 之間緩慢呼吸；成功（薄荷綠）或失敗（琥珀）的閃色比它亮時先讓它們褪到這個水準。
+    const hold = processingHold(this.state, this.time, reduced);
+    if (hold > 0 && (this.tint.color === CYAN || this.tint.strength <= hold)) {
+      this.tint = { color: CYAN, strength: this.tint.color === CYAN ? Math.max(hold, this.tint.strength) : hold };
+    }
+    this.cueRings = reduced || !this.state.processing ? [] : this.cueRings.map((t) => t + dt / 1.2).filter((t) => t < 1);
     // 腦區亮度：有持續焦點時維持在焦點水準，否則逐漸暗下。
     for (const d of DOMAINS) {
       const target = this.state.activity?.some((a) => a.domain === d) ? 0.75 : 0;
@@ -567,33 +668,170 @@ export class Brain {
     this.pulses = this.pulses.filter((p) => p.t < p.path.length - 1);
   }
 
+  /** 算好這一格的繪製資料（BrainFrame），交給目前的繪製方式（Canvas 或 WebGL）。 */
   private draw(): void {
-    const { ctx, width, height } = this;
-    ctx.clearRect(0, 0, width, height);
+    const f = this.frame;
     const reduced = this.reducedMotion.matches;
     const breath = reduced ? 1 : 1 + 0.018 * Math.sin(this.time * 0.9);
     const R = this.radius * breath;
     const bright = 0.55 + 0.6 * this.energy;
-
-    // 中心光暈
-    const glow = ctx.createRadialGradient(this.cx, this.cy, 0, this.cx, this.cy, R * 1.9);
-    glow.addColorStop(0, rgba(this.tinted(mix(VIOLET, MINT, 0.6 * this.liveLevel)), (0.16 + 0.14 * this.liveLevel) * bright));
-    glow.addColorStop(0.45, rgba(this.tinted(mix(CYAN, MINT, 0.5 * this.liveLevel)), (0.06 + 0.08 * this.liveLevel) * bright));
-    glow.addColorStop(1, "rgba(0,0,0,0)");
-    ctx.fillStyle = glow;
-    ctx.fillRect(this.cx - R * 2, this.cy - R * 2, R * 4, R * 4);
-
-    this.drawOrbits(R, bright);
+    const live = this.liveLevel;
+    f.width = this.width;
+    f.height = this.height;
+    f.cx = this.cx;
+    f.cy = this.cy;
+    f.R = R;
+    f.bright = bright;
+    f.time = this.time;
+    f.reduced = reduced;
+    f.liveLevel = live;
+    f.glowInner = this.tinted(mix(VIOLET, MINT, 0.6 * live));
+    f.glowInnerAlpha = (0.16 + 0.14 * live) * bright;
+    f.glowMid = this.tinted(mix(CYAN, MINT, 0.5 * live));
+    f.glowMidAlpha = (0.06 + 0.08 * live) * bright;
+    f.orbitAngle[0] = 0.35 + (reduced ? 0 : this.time * 0.03);
+    f.orbitAngle[1] = -0.5 + (reduced ? 0 : this.time * -0.02);
+    f.orbitAlpha = 0.09 * bright;
     this.project(R);
-    ctx.globalCompositeOperation = "lighter";
-    this.drawRegionGlow(R);
-    this.drawEdges(bright);
-    this.drawRegionEdges();
-    this.drawNodes(R, bright);
-    this.drawPulses(R);
-    ctx.globalCompositeOperation = "source-over";
-    this.drawRegionLabels(R);
-    this.drawRings(R);
+    this.prepareRegions();
+    this.prepareEdges(bright);
+    this.prepareNodes(R, bright);
+    this.preparePulses(R);
+    this.prepareRings(R);
+    f.activity = this.state.activity;
+    this.renderer.draw(f);
+  }
+
+  /** 腦區的螢幕中心（投影後的平均位置）與前後深度；只算亮度 ≥ 0.02 的腦區。 */
+  private prepareRegions(): void {
+    const p = this.projected;
+    for (const d of DOMAINS) {
+      const center = this.frame.regionCenter[d];
+      const idx = this.regionNodes[d];
+      center.valid = this.activation[d] >= 0.02 && idx.length > 0;
+      if (!center.valid) continue;
+      let x = 0;
+      let y = 0;
+      let z = 0;
+      for (const i of idx) {
+        x += p[i * 3];
+        y += p[i * 3 + 1];
+        z += p[i * 3 + 2];
+      }
+      center.x = x / idx.length;
+      center.y = y / idx.length;
+      center.z = z / idx.length;
+    }
+  }
+
+  /** 連線依前後深度分四組（counting sort，重複使用的陣列）。 */
+  private prepareEdges(bright: number): void {
+    const f = this.frame;
+    const { projected: p, edgeEnds: ends, edgeOrder, edgeStarts: starts, edgeAlpha } = f;
+    const { edgeBucket, edgeNext: next } = this;
+    const count = ends.length / 2;
+    starts.fill(0);
+    for (let e = 0; e < count; e++) {
+      const z = (p[ends[e * 2] * 3 + 2] + p[ends[e * 2 + 1] * 3 + 2]) / 2;
+      const b = Math.min(3, Math.max(0, Math.floor((z + 1.2) / 0.6)));
+      edgeBucket[e] = b;
+      starts[b + 1]++;
+    }
+    for (let b = 1; b <= DEPTH_BUCKETS; b++) starts[b] += starts[b - 1];
+    next.set(starts.subarray(0, DEPTH_BUCKETS));
+    for (let e = 0; e < count; e++) edgeOrder[next[edgeBucket[e]]++] = e;
+    f.edgeColor = this.tinted(mix(CYAN, MINT, 0.45 * this.liveLevel));
+    for (let b = 0; b < DEPTH_BUCKETS; b++) edgeAlpha[b] = depthAlpha(-0.9 + b * 0.6) * (0.4 + 0.15 * this.liveLevel) * bright;
+  }
+
+  /** 每個粒子這一格的顏色（RGB 取整數）、透明度與大小。 */
+  private prepareNodes(R: number, bright: number): void {
+    const f = this.frame;
+    const { projected: p, nodes } = this;
+    const { nodeKey, nodeAlpha, nodeSize } = f;
+    const size = Math.max(0.6, R / 140);
+    const live = this.liveLevel > 0.01 ? 0.9 * this.liveLevel : 0;
+    const tint = this.tint.strength > 0 ? this.tint.strength * 0.7 : 0;
+    const [tr, tg, tb] = this.tint.color;
+    const base = this.nodeBase;
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      let r = base[i * 3];
+      let g = base[i * 3 + 1];
+      let b = base[i * 3 + 2];
+      // 即時語音接通：各腦區亮出自己的顏色，一眼看得出「腦子活起來了」。
+      const region = node.region;
+      if (region) {
+        const rc = REGION_COLOR[region];
+        if (live > 0) {
+          r += (rc[0] - r) * live;
+          g += (rc[1] - g) * live;
+          b += (rc[2] - b) * live;
+        }
+        const act = this.activation[region];
+        if (act > 0.01) {
+          const t = Math.min(1, act * 1.1);
+          r += (rc[0] - r) * t;
+          g += (rc[1] - g) * t;
+          b += (rc[2] - b) * t;
+        }
+      }
+      if (tint > 0) {
+        r += (tr - r) * tint;
+        g += (tg - g) * tint;
+        b += (tb - b) * tint;
+      }
+      nodeKey[i] = ((r | 0) << 16) | ((g | 0) << 8) | (b | 0);
+      const z = p[i * 3 + 2];
+      nodeAlpha[i] = depthAlpha(z) * bright;
+      nodeSize[i] = size * (node.inner ? 0.9 : 1.2) * (1.3 - z * 0.4);
+    }
+    f.glowEvery = this.budget.glow === "full" ? 4 : 8;
+    f.nodeGlowSize = size * 7;
+  }
+
+  private preparePulses(R: number): void {
+    const f = this.frame;
+    const p = this.projected;
+    const geom = f.pulseGeom;
+    f.pulses = this.pulses;
+    f.pulseGlowSize = Math.max(6, R / 9) * (this.budget.glow === "full" ? 1 : 0.6);
+    for (let k = 0; k < this.pulses.length; k++) {
+      const pulse = this.pulses[k];
+      const seg = Math.floor(pulse.t);
+      const frac = pulse.t - seg;
+      const a = pulse.path[seg];
+      const b = pulse.path[seg + 1];
+      const o = k * PULSE_STRIDE;
+      geom[o] = p[a * 3];
+      geom[o + 1] = p[a * 3 + 1];
+      geom[o + 2] = p[a * 3] + (p[b * 3] - p[a * 3]) * frac;
+      geom[o + 3] = p[a * 3 + 1] + (p[b * 3 + 1] - p[a * 3 + 1]) * frac;
+      geom[o + 4] = 1 - pulse.t / (pulse.path.length - 1);
+    }
+  }
+
+  private prepareRings(R: number): void {
+    const f = this.frame;
+    const reduced = f.reduced;
+    f.connectAlpha = this.connectLevel > 0.01 ? 0.6 * this.connectLevel : 0;
+    f.connectDash[0] = R * 0.12;
+    f.connectDash[1] = R * 0.08;
+    f.connectDashOffset = reduced ? 0 : -this.time * R * 0.4;
+    f.listenAlpha = 0;
+    if (this.listenLevel > 0.01 || this.liveLevel > 0.01) {
+      const level = Math.max(this.listenLevel, this.liveLevel);
+      const beat = reduced ? 1 : 0.8 + 0.2 * Math.sin(this.time * 3);
+      f.listenColor = mix(CYAN, MINT, this.liveLevel);
+      f.listenAlpha = (0.45 + 0.35 * this.liveLevel) * level * beat;
+      f.listenWidth = 2 + 2 * this.liveLevel;
+      f.listenShadowAlpha = 0.8 * level;
+      f.listenBlur = this.budget.ringBlur ? 18 + 14 * this.liveLevel : 0;
+    }
+    f.cueRings = this.cueRings;
+    f.progress = this.state.progress;
+    f.shownProgress = this.shownProgress;
+    f.labelShadow = this.budget.glow === "full";
   }
 
   private project(R: number): void {
@@ -617,189 +855,9 @@ export class Brain {
     }
   }
 
-  private depthAlpha(z: number): number {
-    return Math.max(0.08, Math.min(1, 0.62 - z * 0.5));
-  }
-
-  private drawEdges(bright: number): void {
-    const { ctx, projected: p } = this;
-    const buckets: [number, number][][] = [[], [], [], []];
-    for (const edge of this.edges) {
-      const z = (p[edge[0] * 3 + 2] + p[edge[1] * 3 + 2]) / 2;
-      const b = Math.min(3, Math.max(0, Math.floor((z + 1.2) / 0.6)));
-      buckets[b].push(edge);
-    }
-    ctx.lineWidth = 0.7;
-    buckets.forEach((edges, b) => {
-      const z = -0.9 + b * 0.6;
-      ctx.strokeStyle = rgba(this.tinted(mix(CYAN, MINT, 0.45 * this.liveLevel)), this.depthAlpha(z) * (0.4 + 0.15 * this.liveLevel) * bright);
-      ctx.beginPath();
-      for (const [i, j] of edges) {
-        ctx.moveTo(p[i * 3], p[i * 3 + 1]);
-        ctx.lineTo(p[j * 3], p[j * 3 + 1]);
-      }
-      ctx.stroke();
-    });
-  }
-
-  private drawNodes(R: number, bright: number): void {
-    const { ctx, projected: p } = this;
-    const size = Math.max(0.6, R / 140);
-    for (let i = 0; i < this.nodes.length; i++) {
-      const z = p[i * 3 + 2];
-      const a = this.depthAlpha(z) * bright;
-      const node = this.nodes[i];
-      let color: RGB = node.inner ? VIOLET : (GROUP_COLOR[node.group] ?? mix(CYAN, VIOLET, (node.x + 1) / 2));
-      // 即時語音接通：各腦區亮出自己的顏色，一眼看得出「腦子活起來了」。
-      if (node.region && this.liveLevel > 0.01) color = mix(color, REGION_COLOR[node.region], 0.9 * this.liveLevel);
-      const act = node.region ? this.activation[node.region] : 0;
-      if (act > 0.01) color = mix(color, REGION_COLOR[node.region!], Math.min(1, act * 1.1));
-      ctx.fillStyle = rgba(this.tinted(color), Math.min(1, a));
-      const r = size * (node.inner ? 0.9 : 1.2) * (1.3 - z * 0.4);
-      ctx.fillRect(p[i * 3] - r / 2, p[i * 3 + 1] - r / 2, r, r);
-      if (z < -0.55 && !node.inner && i % 4 === 0) {
-        const g = size * 7;
-        ctx.globalAlpha = 0.25 * a;
-        ctx.drawImage(this.sprite, p[i * 3] - g / 2, p[i * 3 + 1] - g / 2, g, g);
-        ctx.globalAlpha = 1;
-      }
-    }
-  }
-
-  private drawPulses(R: number): void {
-    const { ctx, projected: p } = this;
-    const g = Math.max(6, R / 9);
-    for (const pulse of this.pulses) {
-      const seg = Math.floor(pulse.t);
-      const frac = pulse.t - seg;
-      const a = pulse.path[seg];
-      const b = pulse.path[seg + 1];
-      const x = p[a * 3] + (p[b * 3] - p[a * 3]) * frac;
-      const y = p[a * 3 + 1] + (p[b * 3 + 1] - p[a * 3 + 1]) * frac;
-      const fade = 1 - pulse.t / (pulse.path.length - 1);
-      ctx.strokeStyle = rgba(pulse.color, 0.55 * fade);
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      ctx.moveTo(p[a * 3], p[a * 3 + 1]);
-      ctx.lineTo(x, y);
-      ctx.stroke();
-      ctx.globalAlpha = 0.9 * fade;
-      ctx.drawImage(tintSprite(this.sprite, pulse.color), x - g / 2, y - g / 2, g, g);
-      ctx.globalAlpha = 1;
-    }
-  }
-
-  private drawOrbits(R: number, bright: number): void {
-    const { ctx } = this;
-    ctx.save();
-    ctx.translate(this.cx, this.cy);
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 2; i++) {
-      ctx.save();
-      ctx.rotate((i === 0 ? 0.35 : -0.5) + (this.reducedMotion.matches ? 0 : this.time * (i === 0 ? 0.03 : -0.02)));
-      ctx.strokeStyle = rgba(i === 0 ? CYAN : VIOLET, 0.09 * bright);
-      ctx.beginPath();
-      ctx.ellipse(0, 0, R * 1.62, R * 0.42, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-    ctx.restore();
-  }
-
-  private drawRings(R: number): void {
-    const { ctx } = this;
-    const reduced = this.reducedMotion.matches;
-    // 即時語音連線中：琥珀色虛線慢轉，表示還在接通、先別說話。
-    if (this.connectLevel > 0.01) {
-      ctx.save();
-      ctx.strokeStyle = rgba(AMBER, 0.6 * this.connectLevel);
-      ctx.lineWidth = 2;
-      ctx.setLineDash([R * 0.12, R * 0.08]);
-      ctx.lineDashOffset = reduced ? 0 : -this.time * R * 0.4;
-      ctx.beginPath();
-      ctx.arc(this.cx, this.cy, R * 1.32, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-    // 聆聽光環；即時語音接通後換成較粗、會呼吸的薄荷綠，表示可以說話了。
-    if (this.listenLevel > 0.01 || this.liveLevel > 0.01) {
-      const level = Math.max(this.listenLevel, this.liveLevel);
-      const color = mix(CYAN, MINT, this.liveLevel);
-      const beat = reduced ? 1 : 0.8 + 0.2 * Math.sin(this.time * 3);
-      ctx.strokeStyle = rgba(color, (0.45 + 0.35 * this.liveLevel) * level * beat);
-      ctx.lineWidth = 2 + 2 * this.liveLevel;
-      ctx.shadowColor = rgba(color, 0.8 * level);
-      ctx.shadowBlur = 18 + 14 * this.liveLevel;
-      ctx.beginPath();
-      ctx.arc(this.cx, this.cy, R * 1.32, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
-    // 前景任務的真實進度環（done / total）
-    if (this.state.progress !== null) {
-      const rr = R * 1.45;
-      ctx.lineWidth = 3;
-      ctx.lineCap = "round";
-      ctx.strokeStyle = "rgba(255,255,255,0.08)";
-      ctx.beginPath();
-      ctx.arc(this.cx, this.cy, rr, 0, Math.PI * 2);
-      ctx.stroke();
-      if (this.shownProgress > 0.001) {
-        const grad = ctx.createLinearGradient(this.cx - rr, this.cy - rr, this.cx + rr, this.cy + rr);
-        grad.addColorStop(0, rgba(CYAN, 0.95));
-        grad.addColorStop(1, rgba(VIOLET, 0.95));
-        ctx.strokeStyle = grad;
-        ctx.beginPath();
-        ctx.arc(this.cx, this.cy, rr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * this.shownProgress);
-        ctx.stroke();
-      }
-      ctx.lineCap = "butt";
-    }
-  }
-
   private tinted(color: RGB): RGB {
     return this.tint.strength > 0 ? mix(color, this.tint.color, this.tint.strength * 0.7) : color;
   }
-}
-
-function mix(a: RGB, b: RGB, t: number): RGB {
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-}
-
-function rgba(c: RGB, a: number): string {
-  return `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a.toFixed(3)})`;
-}
-
-function makeGlowSprite(): HTMLCanvasElement {
-  const c = document.createElement("canvas");
-  c.width = c.height = 64;
-  const g = c.getContext("2d")!;
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, "rgba(255,255,255,1)");
-  grad.addColorStop(0.25, "rgba(200,240,255,0.6)");
-  grad.addColorStop(1, "rgba(0,0,0,0)");
-  g.fillStyle = grad;
-  g.fillRect(0, 0, 64, 64);
-  return c;
-}
-
-const tintCache = new Map<string, HTMLCanvasElement>();
-function tintSprite(base: HTMLCanvasElement, color: RGB): HTMLCanvasElement {
-  const key = color.join(",");
-  let c = tintCache.get(key);
-  if (!c) {
-    c = document.createElement("canvas");
-    c.width = c.height = base.width;
-    const g = c.getContext("2d")!;
-    g.drawImage(base, 0, 0);
-    g.globalCompositeOperation = "source-in";
-    g.fillStyle = rgba(color, 1);
-    g.fillRect(0, 0, c.width, c.height);
-    g.globalCompositeOperation = "destination-over";
-    g.drawImage(base, 0, 0);
-    tintCache.set(key, c);
-  }
-  return c;
 }
 
 function mulberry32(seed: number): () => number {

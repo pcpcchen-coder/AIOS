@@ -152,12 +152,14 @@ export function greetingSentence(name: string | null, locale: Locale = "zh-TW"):
  */
 export function greetingInstructions(sentence: string, locale: Locale = "zh-TW"): string {
   if (locale === "en") return (
-    `You are Nous. The user has just faced the screen to start a voice conversation. Say exactly this one English sentence, with no additions or questions: 「${sentence}」. ` +
-    "You cannot see the scene. Do not claim to see the user or describe their appearance, expression, clothes, or surroundings. Do not say or guess any name beyond the one already in that sentence."
+    "You are the assistant Nous. Hello Nous and Hey Nous address you, not a self-introduction. " +
+    `Say only this exact English sentence from the core: 「${sentence}」. Add no names, acknowledgement, or questions. ` +
+    "If it contains no name, say no name. Never infer a name from wake words. You cannot see the scene. Do not claim to see or describe the user or surroundings."
   );
   return (
-    `你是 Nous。使用者剛面向螢幕開始語音對話：請用繁體中文只說這一句，一字不改，不要加字、不要提問：「${sentence}」。` +
-    "你看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境；除了這一句裡已有的名字，不要說出或猜測任何名字。"
+    "你是助手 Nous。Hello Nous／Hey Nous 是在呼叫你，不是自我介紹。" +
+    `只說核心指定這一句，一字不改，不加稱呼、確認或提問：「${sentence}」。` +
+    "句中沒有名字就不稱名，不從喚醒詞猜名字。你看不到畫面：不要說看到使用者或描述外觀與環境。"
   );
 }
 
@@ -169,13 +171,13 @@ export function greetingInstructions(sentence: string, locale: Locale = "zh-TW")
  */
 export function strictGreetingInstructions(sentence: string, locale: Locale = "zh-TW"): string {
   if (locale === "en") return (
-    "You are Nous. This turn is not a user request and needs no reply or acknowledgement: your entire spoken output is exactly the one English sentence inside 「」, word for word. " +
+    "You are the assistant Nous. Hello Nous and Hey Nous address you, not a self-introduction. This turn is not a user request and needs no reply or acknowledgement: your entire spoken output is exactly the one English sentence inside 「」, word for word. " +
     `Say only this sentence: 「${sentence}」. ` +
     "Add nothing before or after it: no \"Okay\", \"Sure\", \"Understood\", \"I'll do as you say\", no preface, explanation, or question. Do not replace it with a different sentence. Stop right after it. " +
     "You cannot see the scene. Do not claim to see the user or describe their appearance, expression, clothes, or surroundings. Do not say or guess any name beyond the one already in that sentence."
   );
   return (
-    "你是 Nous。這一輪不是使用者的請求，不需要回應、也不需要確認收到：你說出的全部內容，就是下面「」裡的那一句本身。" +
+    "你是助手 Nous。Hello Nous／Hey Nous 是在呼叫你，不是自我介紹。這一輪不是使用者的請求，不需要回應、也不需要確認收到：你說出的全部內容，就是下面「」裡的那一句本身。" +
     `請用繁體中文只說這一句，一字不改：「${sentence}」。` +
     "前後都不要加任何字：不要說「好的」「我明白了」「我會照您說的來」，也不要加開場白、說明或提問；不要換成別的句子；說完這一句就停。" +
     "你看不到畫面：不要說看到使用者，也不要提到長相、表情、穿著或周遭環境；除了這一句裡已有的名字，不要說出或猜測任何名字。"

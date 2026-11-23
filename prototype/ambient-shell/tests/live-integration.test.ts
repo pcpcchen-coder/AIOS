@@ -423,6 +423,40 @@ describe.skipIf(!realLockAvailable)("MEM-2 live memory end to end (fixture)", ()
     expect(scanDir(dirs[0]!)).toEqual([]);
   });
 
+  it("memory default (George 2026-11-02): the question goes to the sideband, SSE carries only a card ID (no name, no card), and a spoken no keeps household only", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "nous-memv-int-"));
+    dirs.push(dir);
+    let candidate: { person_id: string; name: string; at: number } | null = null;
+    const h = harness({ dir, key: randomBytes(32), live: CODEX, identity: { candidate: () => candidate, people: () => [{ person_id: "fam_000000000000000000000001", name: "George", minor: false }] } });
+    harnesses.push(h);
+    await enable(h, "George", [CODEX]);
+    await h.turn("記住，我不吃香菜");
+    const token = await manage(h);
+    const status = (await h.call({ op: "status" })) as unknown as { profiles: { id: string }[] };
+    await h.call({ op: "link_face", profile: status.profiles[0]!.id, person: "fam_000000000000000000000001", token });
+    await h.call({ op: "select", profile: null, token });
+    const t = await start({ memory: h });
+    const p = await page(t.base);
+    const { conn } = await startLive(t, p.clientId);
+    conn.send({ type: "session.started", session: {} });
+    await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "memory");
+    candidate = { person_id: "fam_000000000000000000000001", name: "George", at: h.clock.now };
+    h.service.offerVoiceCandidate(true);
+    const question = await conn.waitFor((e) => e.type === "session.context.append" && JSON.stringify(e).includes("記憶，好嗎"));
+    expect(question).toMatchObject({ channel: "speakable", content: [{ text: "（記憶確認）「我要用 George 的記憶，好嗎？」" }] });
+    const proposed = await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string }).kind === "memory_default");
+    expect(Object.keys(proposed.event as object).sort()).toEqual(["card", "kind", "phase"]);
+    expect(proposed.event).toMatchObject({ phase: "proposed" });
+    conn.send({ type: "turn.done", turn: { role: "user", transcript: "不要", id: "u1" } });
+    const declined = await p.waitFor((e) => e.type === "realtime.live" && (e.event as { kind: string; phase?: string }).kind === "memory_default" && (e.event as { phase?: string }).phase === "declined");
+    expect(declined.event).toMatchObject({ card: (proposed.event as { card: string }).card });
+    await conn.waitFor((e) => e.type === "session.context.append" && JSON.stringify(e).includes("好，這次只用全家共用的記憶。"));
+    expect((await h.call({ op: "status" })).presence).toMatchObject({ state: "unselected" });
+    expect(p.frames.filter((f) => f.includes("memory_default")).join("\n")).not.toContain("George");
+    expect(p.frames.some((f) => f.includes('"kind":"memory_card"'))).toBe(false);
+    p.close();
+  });
+
   it("no stop report (test flag NOUS_TEST_DROP_STOP_REPORT): forced silence after 1.5 s, a separate notice, and no memory on the next call", async () => {
     const h = await georgeWithCanary();
     const muted: boolean[] = [];

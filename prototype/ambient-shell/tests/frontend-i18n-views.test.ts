@@ -50,7 +50,7 @@ describe("English and Chinese App/web views", () => {
     setLocale("zh-TW");
     const { FamilyView } = await import("../src/family-view.ts");
     const family = new FamilyView({
-      bridge: { identity: async () => ({ ok: true, op: "open_session", session: "ids_fixture", people: [], status: { state: "ready", limited_reason: null, count: 0, max: 8, needs_reenroll: 0, damaged: 0, gallery_version: 1, epoch: 1, models: "ok", backup_exclusion: "excluded", calibrated: false, naming_notice_seen: true } }) },
+      bridge: { identity: async () => ({ ok: true, op: "open_session", session: "ids_fixture", people: [], status: { state: "ready", limited_reason: null, count: 0, max: 8, needs_reenroll: 0, damaged: 0, gallery_version: 1, epoch: 1, models: "ok", voice_models: "ok", backup_exclusion: "excluded", calibrated: false, naming_notice_seen: true } }) },
       source: { sampleFrame: async () => null },
       createWorker: () => { throw new Error("No camera is used in this UI fixture"); },
       model: { detector: "d", recognizer: "r", align: "a", preproc: "p" }, dismiss: () => {},
@@ -108,5 +108,35 @@ describe("English and Chinese App/web views", () => {
     expect(matchCameraCommand("show camera preview")).toEqual({ preview: true });
     expect(matchCameraCommand("don't turn off camera")).toBeNull();
     expect(matchCameraCommand("how do I turn off camera?")).toBeNull();
+  });
+});
+
+describe("PRO-1 proactive settings section", () => {
+  const view = {
+    prefs: { enabled: true, weather: true, calendar: true, start_hour: 5, end_hour: 11, place: null },
+    place: { id: "taipei", label: "台北", auto: true },
+    places: [{ id: "taipei", label: "台北" }, { id: "kaohsiung", label: "高雄" }],
+    start_hours: [4, 5, 6, 7, 8, 9],
+    end_hours: [9, 10, 11, 12, 13, 14],
+    weather: { state: "ok", at: 1 },
+    calendar: { state: "not_connected" },
+    attribution: "Open-Meteo.com（CC BY 4.0）",
+    write_path: "/api/settings/proactive",
+  } as const;
+
+  it("renders fully in English (labels, options, status, aria labels) and patches on change", () => {
+    setLocale("en");
+    const patches: unknown[] = [];
+    const el = views.renderProactiveSettings(structuredClone(view) as never, { ...actions, updateProactive: (p: unknown) => patches.push(p) } as never) as unknown as ElementFixture;
+    const text = [el.textContent, ...el.all().map((n) => n.getAttribute("aria-label") ?? "")].join(" ");
+    expect(text).not.toMatch(/[一-鿿]/);
+    expect(text).toContain("Weather data: Open-Meteo.com (CC BY 4.0)");
+    expect(text).toContain("From system time zone (Taipei)");
+    expect(text).toContain("Tell George today's schedule when recognised");
+    expect(text).toContain("Calendar: not connected to Google Calendar (CAL-1)");
+    const select = el.all().find((n) => n.tagName === "select" && n.getAttribute("aria-label") === "Weather location")!;
+    select.value = "kaohsiung";
+    select.listeners.get("change")![0]!();
+    expect(patches).toEqual([{ place: "kaohsiung" }]);
   });
 });

@@ -3,7 +3,8 @@
 // tests/voice-commands.test.ts 把每一句丟進真正的比對函式：結果不同、某條規則／意圖／確認語句／插話詞／模型工具
 // 沒有列、或「在哪裡有效」與 LOCAL_ROUTING 推算的不同，測試就失敗。
 import { formatSeconds, type SecondsPrefSpec } from "./prefs.ts";
-import type { CameraSecondsKey, SecondsKey } from "./seconds-menu.ts";
+import type { HostToolName } from "./realtime-route.ts";
+import type { CameraSecondsKey, SecondsKey } from "./menu-prefs.ts";
 import { CAMERA_PREFS } from "./sense.ts";
 import type { SettingsView } from "./types.ts";
 import { VOICE_PREFS } from "./voice-prefs.ts";
@@ -71,8 +72,8 @@ export type LocalIntentKind = "voice_on" | "voice_off" | "settings" | "use_provi
 export type Provider = "claude" | "chatgpt" | "mock";
 /** 測試在編譯期比對 src/approval.ts 的 ApprovalDecision。 */
 export type ApprovalDecision = "approve" | "reject";
-/** 即時語音的模型工具；測試在編譯期比對 server/realtime.ts。 */
-export type RealtimeToolName = "web_search" | "delegate_task" | "get_tasks" | "end_conversation" | "home_status" | "home_control";
+/** 即時語音的模型工具：和頁面執行的工具是同一組（shared/realtime-route.ts HOST_TOOL_NAMES）；測試在編譯期比對 server/realtime.ts。 */
+export type RealtimeToolName = HostToolName;
 
 /** 鏡頭規則的效果（CameraCommand 去掉字幕 say）。 */
 export type CameraEffect = { preview: boolean } | { set: { active?: boolean; look_to_talk?: boolean; look_to_talk_greet?: boolean; stop_gesture?: boolean } };
@@ -319,8 +320,14 @@ export const CAVEATS: readonly Caveat[] = [
 export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
   end_conversation: { try: ["再見", "結束對話", "先這樣", "不用了"], does: "AI 判斷你要結束時道別並結束即時語音（不保證每次都結束）；ChatGPT 方案路徑上整句只說「再見」「掰掰」「拜拜」「結束對話」時，Nous 也會在道別念完後結束（備援）",
     needs: { text: "即時語音", live: "realtime_available" } },
+  set_voice_volume: { try: ["你講話大聲一點", "小聲一點", "音量調到 60", "晚上的音量調到 30"], does: "調這台裝置上 Nous 說話的音量（每次 20，最小 10、最大 100），立即生效，每台裝置各自記住。分日間與夜間兩個音量：夜間時段（預設 22:00–07:00）或鏡頭量到很暗時用夜間音量；沒說白天或晚上就調現在用的那一個。最大就是系統音量，不能比系統更大聲；提示音與系統音量不變。說了家電名稱（「電視大聲一點」）才是控制家電",
+    needs: { text: "即時語音", live: "realtime_available" } },
+  set_day_night: { try: ["切到夜間模式", "現在是白天", "今晚維持日間", "恢復自動"], does: "切換日間或夜間模式，家裡所有 Nous 畫面一起變（夜間：夜間音量、畫面變暗、處理中提示音靜音、回憶暫停）。手動切換到下一次時段交界自動恢復；說「今晚」維持到今晚夜間時段結束；說「恢復自動」立即回到依時段與鏡頭判斷",
+    needs: { text: "即時語音", live: "realtime_available" } },
   get_tasks: { try: ["任務做好了沒", "報告寫到哪了"], does: "AI 查詢真實任務狀態後用說的回答", needs: { text: "即時語音", live: "realtime_available" } },
   web_search: { try: ["新竹今天會下雨嗎"], does: "AI 上網查詢後回答，字幕顯示來源", needs: { text: "即時語音與上網查詢（ChatGPT 方案路徑用 Codex 額度；API key 路徑需要 OPENAI_API_KEY）", live: "realtime_web_search" } },
+  show_search_result: { try: ["第二個", "看第一則"], does: "查詢有兩則以上的結果時畫面列出編號，選一則後畫面顯示那一則的重點，AI 依序念、念到的那一點亮起；念完後依設定的秒數自動收起",
+    needs: { text: "即時語音與上網查詢（同上）", live: "realtime_web_search" } },
   delegate_task: { try: ["幫我寫一份下週出差規劃"], does: "AI 判斷是較長的工作時交辦成背景任務，進度顯示在電子腦下方",
     needs: { text: "即時語音", live: "realtime_available" } },
   home_status: { try: ["客廳現在幾度"], does: "查武陵居的感測值與設備狀態",
@@ -330,7 +337,22 @@ export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
     needs: { text: "即時語音與武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）", live: "realtime_home" } },
 };
 
+/**
+ * ALARM-1（George 2026-11-09）：定時器是核心內建的整合工具（app__timer__*），兩條即時語音路徑都有，由模型判斷何時用。
+ * 不是本機固定語句；本機只有「鈴響時停止」的固定語句（shared/alarm.ts matchRingStop，見 CONTROLS 的 ring-stop）。
+ */
+export const TIMER_ASK: readonly AskTheAi[] = [
+  { try: ["計時 10 分鐘", "泡麵 3 分鐘", "5 分鐘後叫我"], does: "設定定時器（可以取名字，可以同時好幾個）；時間到時在建立的那台裝置響（那台不在線時每個畫面都響），右下角按需顯示倒數",
+    needs: { text: "即時語音，設定頁「鬧鐘與定時器」開著（預設開）", live: "realtime_available" } },
+  { try: ["泡麵還剩多久", "有哪些定時器"], does: "說各個定時器剩下的時間", needs: { text: "即時語音", live: "realtime_available" } },
+  { try: ["暫停泡麵", "繼續", "再加 5 分鐘", "取消雞蛋的定時器", "全部取消"], does: "暫停、繼續、延長或取消；有好幾個而沒說是哪一個時，AI 會問", needs: { text: "即時語音", live: "realtime_available" } },
+  { try: ["明天早上 7 點叫我", "每個工作天 6:30 叫我", "週一三五晚上 9 點提醒我倒垃圾"], does: "設定鬧鐘（ALARM-2）：單次或重複（每天、工作日、週末、指定星期），可以取名字；用這台 Mac 的時區，跨夏令時間照當地時間響；在設定的那台裝置響，一小時內的鬧鐘右下角按需顯示倒數",
+    needs: { text: "即時語音，設定頁「鬧鐘與定時器」開著（預設開）", live: "realtime_available" } },
+  { try: ["有哪些鬧鐘", "關掉明天的鬧鐘", "刪掉 6:30 的鬧鐘"], does: "列出、打開或關掉、刪除鬧鐘（設定頁也可以管理）", needs: { text: "即時語音", live: "realtime_available" } },
+];
+
 export const CONTROLS: readonly Control[] = [
+  { id: "ring-stop", how: "定時器或鬧鐘響鈴時", does: "按「停止」、Esc 或空白鍵、舉起張開的手掌（需要鏡頭與「手掌停止播報」），或打字／通話中整句說「停」「好了」「知道了」「關掉」「我起來了」就停止響鈴（每個畫面一起停）；鬧鐘另有「貪睡」按鈕，打字或通話中說「貪睡」「再睡一下」9 分鐘後再響。鈴聲期間喚醒詞暫停（避免鈴聲誤觸），沒有通話時不能用說的停止。響 5 分鐘沒人停會自動停止並記錄" },
   { id: "esc", how: "Esc", does: "即時語音 Nous 說話時：打斷（ChatGPT 方案路徑沒有取消回覆的指令，只會把這段回覆靜音）；即時語音中有畫面開著：只收起畫面；語音模式念回覆時：打斷；其他時候：收起畫面並結束語音" },
   { id: "voice-pill", how: "點右上角的語音指示", does: "結束語音模式或即時語音" },
   { id: "palm", how: "舉起張開的手掌", does: "停止 Nous 說話，不取消任務（需要鏡頭與「手掌停止播報」）" },
@@ -339,6 +361,7 @@ export const CONTROLS: readonly Control[] = [
   { id: "look-cooldown", how: "對話結束後", does: "這段時間內看著說話不再自動開始", seconds: "look_to_talk_cooldown_s" },
   { id: "voice-idle", how: "語音模式沒說話", does: "自動關閉語音模式（Nous 等回覆、念回覆時不計時）", seconds: "voice_idle_s" },
   { id: "realtime-idle", how: "即時語音沒說話", does: "自動結束即時語音，避免持續計費或用掉方案額度（Nous 回覆、查資料、等確認時不計時）", seconds: "realtime_idle_s" },
+  { id: "realtime-max", how: "每通即時語音到上限", does: "從連上算起，到上限前一分鐘字幕加提示音，到了就結束（一直說話也不延長；頁面與本機核心都會結束）", seconds: "realtime_max_call_s" },
   { id: "app-window", how: "⌥⌘N（App）", does: "叫出／收起視窗" },
   { id: "app-voice", how: "⌥⌘V（App）", does: "開始／結束語音對話" },
   { id: "app-commands", how: "⌘/（App）", does: "打開這張語音指令表" },
@@ -437,6 +460,8 @@ export function commandSections(ctx: CommandContext | null): TableSection[] {
         const row = ASK_THE_AI[tool];
         return { id: `ai-${tool}`, cells: [quote(row.try), row.does, `需要${row.needs.text}`], unmet: unmet(row.needs.live, ctx) };
       }) },
+    { id: "timers", title: "定時器與鬧鐘（即時語音，由模型判斷，不保證）", intro: "定時器與鬧鐘由 Nous 核心保存與排程，重新啟動後還在；Mac 睡眠時核心會停住，醒來後 30 分鐘內補響並說晚了多久，超過只記錄錯過。", columns: ["可以這樣問", "AI 可能會做什麼", "條件"],
+      rows: TIMER_ASK.map((row, i) => ({ id: `timer-${i}`, cells: [quote(row.try), row.does, `需要${row.needs.text}`], unmet: unmet(row.needs.live, ctx) })) },
     { id: "controls", title: "不用說話", intro: null, columns: ["操作", "作用"],
       rows: CONTROLS.map((c) => ({ id: c.id, cells: [c.how, c.seconds ? `${c.does}；${secondsText(c.seconds, ctx)}` : c.does], unmet: null })) },
   ];

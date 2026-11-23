@@ -27,8 +27,8 @@
       "source": "README.md",
       "sourceLanguage": "zh-TW",
       "translation": "README.en.md",
-      "sourceSha256": "681d4ffe9d438c8a94e413c74d38672510fd7af0a6c86e6c9f83756f9f99d378",
-      "translationSha256": "66db9082a08d77a1c92d621f0adca3d5c2fe98c988ea8730b5d60eb398d86b09"
+      "sourceSha256": "99e0d93a2bb058e7a6b6f8ba3e2a8ebdf6f4bb36c9d74c33ef488ca7b5a1bafc",
+      "translationSha256": "4d3537ffd953289b0e0f46e66efffbcc34b0baf3b619398c1441bdd99c25ed07"
     },
     {
       "source": "SETUP.md",
@@ -76,15 +76,15 @@
       "source": "docs/06_Ambient_Voice_Gaze_Experience.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/06_Ambient_Voice_Gaze_Experience.en.md",
-      "sourceSha256": "72533e4b13513b5353e6df1786340f5cbfcd3efb2f8598df6cb0360777dd35fd",
-      "translationSha256": "f0a6c5485deefeb28cc1650f222c12e3e722c506524615f339104c1b53dc8d08"
+      "sourceSha256": "edb9012caf628384f80708176736ce85e3d76ef671f6753f37190f775a87ac90",
+      "translationSha256": "fdcbd66235296bce5d213d3804151e75c1b21266175fe75ccb6ffc0ffd19b528"
     },
     {
       "source": "docs/07_Ambient_Implementation_and_Acceptance.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/07_Ambient_Implementation_and_Acceptance.en.md",
-      "sourceSha256": "16d9d559cef8394b6a672933c3b2525c2567025dd8f3b9ba4a5ebef16ff14461",
-      "translationSha256": "9c7c4b60f9c03a1f993d22b5ea8afeb8967357294aaea90844a81fc2fca40db6"
+      "sourceSha256": "f6b2b40fd299c7db0f38b0f49d1952bccef1a37e29743d1fdcfb9fa4c652b8be",
+      "translationSha256": "841549680e19c117286dad5e23e4b22d8cbb059fe2c4b1f9c8ac18edc98ac8db"
     },
     {
       "source": "docs/08_Consolidation_and_Update_2026-10.md",
@@ -97,22 +97,22 @@
       "source": "docs/10_Distance_UI_18inch_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/10_Distance_UI_18inch_2026-10.en.md",
-      "sourceSha256": "84a0a57ad45bd77f90c79de833e6fa23a22c0acd2bd3c8ac857dfd3728e01d49",
-      "translationSha256": "138232a4b79b1e31451414835ee5b9f958e5fa973510019a16f704da48fc9afa"
+      "sourceSha256": "d1883914473e50d85e8e6846765f4e2211489a474526e9e09d9c703ca929d2ab",
+      "translationSha256": "12022a1d77aa45cf73b42bea9f9d69090d53a109feedbf0ef8ebcee71b4424f2"
     },
     {
       "source": "docs/11_Stereo_Camera_Interaction_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/11_Stereo_Camera_Interaction_2026-10.en.md",
-      "sourceSha256": "2e3ffe17a97f153932526d295d4c8c1f24131d704006673f2966468464f6669b",
-      "translationSha256": "47152e23c63ca0b897f918bfb8934144a89fc6847a2226a37b4bbfc052ef0d17"
+      "sourceSha256": "a3a27ac1cfbbc676b6a6e839c5daae7c02f2d6ca44ffa4d6ada330f996caa403",
+      "translationSha256": "0f571c721c9e658bb38cd2976fba730b585977f7f62aa72717d2717fc91e1201"
     },
     {
       "source": "docs/12_SmartHome_Integration_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/12_SmartHome_Integration_Plan_2026-10.en.md",
-      "sourceSha256": "bec9e87a354499e5c81dbb1656d4052517f1cef7c0151e63d9de611bfc9f33b9",
-      "translationSha256": "04f3e649a6cd3c27d544d956c31dcfd134f678ecdb6c7cde4ed2598c056915d2"
+      "sourceSha256": "dc79fae0a5b8a934d46b66faa12279987f606664fd0735972e2332cae9853900",
+      "translationSha256": "e4ca7946ba8d58b9c371c13d49a9abc19e00908d3e54edfb554ad59ddebf701c"
     },
     {
       "source": "docs/13_Feature_Expansion_Assessment_2026-10-24.md",
@@ -139,15 +139,50 @@
       "source": "docs/16_Nous_Memory_Layer_Design_2026-10-26.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/16_Nous_Memory_Layer_Design_2026-10-26.en.md",
-      "sourceSha256": "0a98ac458d19ef1d63156ff20be57deb9f3ada47425ac575a0ba99466521143e",
-      "translationSha256": "b1c1d43d04d40a3317bf028bd3159e5f9f8f54f4b879db83aac0e15f62f318cf"
+      "sourceSha256": "a2d77f6693ff0ffad28de53cc353a37b7d63a4af5f505f9cb886143aab5d67e5",
+      "translationSha256": "83a7c693249631720af87ad2e2a505a054a68587e033f74933245d1c5fd92216"
     },
     {
       "source": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.en.md",
-      "sourceSha256": "a6977f6c845be2c57c4a404cd67adaed7e52b171415dc9e86b7241b84f2ebe67",
-      "translationSha256": "7453578cb55e74e0c9ef4d42813358de81ecd5fdc59fb9ac71d56e0d8828298b"
+      "sourceSha256": "2b7888000137c31dd3c8be6d4fa96d2876fb09c476286120402ea2f6e82aeff4",
+      "translationSha256": "32bb53006aadd484c74954199e0c81d16b02892fc3ece06345fcc81408b16831"
+    },
+    {
+      "source": "docs/18_App_Integration_Layer_and_Spotify_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/18_App_Integration_Layer_and_Spotify_2026-11.en.md",
+      "sourceSha256": "dd50150eac773c687ba1e1fc278d3f1e235cd6880a12c0f4e8b6fdf73c0535c2",
+      "translationSha256": "fe9623cc2643530c74d5ce244ee19cb4b1e3289b16b3e29d30e0db250b56cf0b"
+    },
+    {
+      "source": "docs/19_Voice_Command_Relay_Design_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/19_Voice_Command_Relay_Design_2026-11.en.md",
+      "sourceSha256": "b664a4e698285959626ba6a21d50f8e1ee7a41322265a2a7e4c398f499cac13c",
+      "translationSha256": "e6ba04ff49ac7a827be00ee8479e6af976eb467ffa3099399f908b967e04eb38"
+    },
+    {
+      "source": "docs/20_TV_Netflix_Playback_Plan_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/20_TV_Netflix_Playback_Plan_2026-11.en.md",
+      "sourceSha256": "092c12ab7313875431102c84ca72d98f00007d836dc1af755d32bd06e386fb05",
+      "translationSha256": "731871b9680ec3d9996c58f40e94893f9cdafb7cdd6b631bccb09fff445591a2"
+    },
+    {
+      "source": "docs/22_LG_G3_webOS_Port_Assessment_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/22_LG_G3_webOS_Port_Assessment_2026-11.en.md",
+      "sourceSha256": "16dd029e7c594582f70a8d500857d4ef819a84ebb1dccb5a684798fb5c89bd50",
+      "translationSha256": "e75c4a2356ce3e818d6f2a24d0bf4039c03c314d7a87ce8e52c8b9c086163edf"
+    },
+    {
+      "source": "docs/23_Architecture_Review_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/23_Architecture_Review_2026-11.en.md",
+      "sourceSha256": "b7d68e629c1d1f832a52e76bb7ff66f9f7493ff755df1a9790ce5ea6adec7b2f",
+      "translationSha256": "c8455ed5a745d0a4c10f16fa6db74a252f5b6f925fd841335ea708b51df24a55"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -158,15 +193,15 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "e67f20f011259b452aa810f58f06588748ddafded7585487a0ac17f4b7ae742c",
-      "translationSha256": "077679a2167171404807d703900c8803ff23e6ed6b6f0040fd270c9ba9a25f45"
+      "sourceSha256": "66fc4477cd3798029a0ee280127375ac7e420a67faaad17bc431ac9ef38fed83",
+      "translationSha256": "40795dba3b4749fc314637b88c47990a156fcf88f331e2f3ee419ee5d3915eb2"
     },
     {
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "566b2092f54d3b7e48ef3f70e40a794dad832bd75ce91ec75cb7f83433579be2",
-      "translationSha256": "fd131361c143010cb1fe887094a16eecb2b6531aa39f8f3fd23b17ee4b803c46"
+      "sourceSha256": "9848e73678cab5addfe3b07e652bd14dfdff0633d77b0376d3a06f9b03bb4412",
+      "translationSha256": "47dab0873ec64594f0e1bbd58b09ac4feea4fae24ce25ecce7db26fad4748e41"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
@@ -186,8 +221,8 @@
       "source": "docs/adr/ADR-0003-local-wake-and-voice-recognition.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/adr/ADR-0003-local-wake-and-voice-recognition.en.md",
-      "sourceSha256": "8309bb1ac7ec36d673db870e331dbd0985517a40015de1660526fe3368b20e89",
-      "translationSha256": "1a28cd3bd812a63b4798c05e86b4eafded6bf9463a64072ced4510d610f471b4"
+      "sourceSha256": "e88990710c3c4e2103f2aa73f2188c042aa3de8e5de52615840167a9bbf80498",
+      "translationSha256": "643d835c8b8471790a2a1a66aa1a75c38e5f3e7f3b656143b40ff328d2dd28a4"
     },
     {
       "source": "docs/development/brain-regions.md",
@@ -225,11 +260,158 @@
       "translationSha256": "fe5870de22710ce0c894e1a11315d51141185a70be14290ee695258e550996be"
     },
     {
+      "source": "docs/development/voice-command-relay-implementation-plan.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/development/voice-command-relay-implementation-plan.en.md",
+      "sourceSha256": "03fa329ecb2070fe377e134ff45595bc163b2a0707b2e62353111f939cbd7ba7",
+      "translationSha256": "65499f301e5e843028b086bb32ae67118394213953a5fd0ce98534a76093c190"
+    },
+    {
+      "source": "docs/experiments/RPI4_BLUETOOTH_EMEET_PLAN.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/experiments/RPI4_BLUETOOTH_EMEET_PLAN.en.md",
+      "sourceSha256": "498185d537cb4297a90ea4154245039a930a31c7d92da9f46612da623aaf57c9",
+      "translationSha256": "0c047dc58bb9b2fec61d65c7742314342eee6df1f9c51d3b8364c32da21365a4"
+    },
+    {
+      "source": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.md",
+      "sourceLanguage": "en",
+      "translation": "docs/experiments/RPI4_REMOTE_TERMINAL_REPORT.zh-TW.md",
+      "sourceSha256": "d3ab75fbc22f2ab71fa7d9e5825cf2eb51e33e67eca18661e907d3002a04d534",
+      "translationSha256": "39eabcb49506f1bd1e703be377fcf0b67b03632300dd984571322a73f4ab304d"
+    },
+    {
+      "source": "docs/experiments/RPI4_REMOTE_TERMINAL_TEST_PLAN.md",
+      "sourceLanguage": "en",
+      "translation": "docs/experiments/RPI4_REMOTE_TERMINAL_TEST_PLAN.zh-TW.md",
+      "sourceSha256": "9b4595e7d3603f00fe2182d403b9b6bbf8289f8e62b0d214c1f9e3ff6daecc15",
+      "translationSha256": "59b9ec7e8cf6e5201b442652527f593b884e30db4471ea8a562a5670de73b1ee"
+    },
+    {
+      "source": "docs/experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/experiments/SPOTIFY_SOLOIST_WEEKEND_TEST_PLAN.en.md",
+      "sourceSha256": "bfca85734a568fcf799f651b1a38c72ee0783cd289fb8a7b323cc96bdeee766e",
+      "translationSha256": "1734fc0c842885174b0b6b1325c2016eb2b3b54ed7b9bd1e6b321aeab451876b"
+    },
+    {
+      "source": "docs/experiments/VOICE_COMMAND_RELAY_TEST_PLAN.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/experiments/VOICE_COMMAND_RELAY_TEST_PLAN.en.md",
+      "sourceSha256": "1688bd16d01d61121e56d6d2c2e2940c4e8f928bbad435d526cd3ae56133583c",
+      "translationSha256": "2e3d2adacea1ba3c892f8ba1f6f75283e1313afb34031907c5fda4a5052a8da4"
+    },
+    {
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "65c8fe65986fe6a363678af27892b13771e6836920d4bc436c409753e7ba2485",
-      "translationSha256": "fe2eceb96aacc5786c581c36d3d84886e1f9aea4e29647226ea1ff1fc4adc4de"
+      "sourceSha256": "3f069f0ac3ce7c8e139d1f3ff76a5bbce37d55e6aa621bc2555149709f587b07",
+      "translationSha256": "3ba41e4467885997255fbbc6c9e6235a51edca51424cdc2929d41f0f358cf90c"
+    },
+    {
+      "source": "docs/validation/ail-1-2026-11-03.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/ail-1-2026-11-03.en.md",
+      "sourceSha256": "a50d26fd6bf07887c9a398e208146828a7c32be7443ff0fc6d773778ab4f0e49",
+      "translationSha256": "dc1652b0e638ad029e8e37d5112b5308f70294680367fcadc4061c0f29fd470d"
+    },
+    {
+      "source": "docs/validation/ail-2-home-facade-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/ail-2-home-facade-2026-11-05.en.md",
+      "sourceSha256": "8c02bed91d3364bb168d7ed874c8dd8a2349ad857ad095381b91ad784faca687",
+      "translationSha256": "eb0501b937e0bbd19c10fc6c083f5bf2a678819855870203e2e21375e2f984eb"
+    },
+    {
+      "source": "docs/validation/alarm-timer-1-2026-11-09.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/alarm-timer-1-2026-11-09.en.md",
+      "sourceSha256": "5d2c39a33443f4a375f654032ee3b68ff1b466766c61059c98d7494d9c809eb2",
+      "translationSha256": "df782567cbcbb27366b5dd2e4a5a85de1b6c8dd91336e37e4dfe17cd76be6b8d"
+    },
+    {
+      "source": "docs/validation/alarm-timer-2-2026-11-09.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/alarm-timer-2-2026-11-09.en.md",
+      "sourceSha256": "1f4de8cd27e38635a18dbf24b327f247930e6ac2fa0a77a30a46c35aac566c47",
+      "translationSha256": "787ad65a6ace479cc69d0ad31dd1ca8912a625a8d3239df6c3955821a29991e1"
+    },
+    {
+      "source": "docs/validation/alarm-timer-3-2026-11-09.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/alarm-timer-3-2026-11-09.en.md",
+      "sourceSha256": "116a11c2b42b5c3fea90ce6fb588ac7d7e5b7c5b6f9fe637d8b002d4ced1bcfd",
+      "translationSha256": "1517be66cdde14e0aca78b028e35c50915de9e5be4ed5e34b8fad1f069dad233"
+    },
+    {
+      "source": "docs/validation/architecture-guard-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-guard-2026-11-10.en.md",
+      "sourceSha256": "061aae7679ab54c0fd3809558da3e45d60ba902998e8ae3e8afd06f152c7522a",
+      "translationSha256": "f774c815da11e072065a84ef8de4dcd371f26a06b0e5a7c0e732b667ebc3e1c5"
+    },
+    {
+      "source": "docs/validation/architecture-review-2026-11-09.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-review-2026-11-09.en.md",
+      "sourceSha256": "ae03f0a6cf53d3a2ea3ec701fee7f4b415d0b1ab0e989d8d3f8f5cc7a23298a3",
+      "translationSha256": "0e382ffaee0bc27fecf41ab8b0d99eb896767b6aed32420df6dfd763c34b76b5"
+    },
+    {
+      "source": "docs/validation/architecture-s3-menu-prefs-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s3-menu-prefs-2026-11-10.en.md",
+      "sourceSha256": "13ca32d294eb3485ba227803add2e1dd7523504a08055871e979e265aa6ef9b2",
+      "translationSha256": "801cc6e9eec1ef250cfe0122cd6551210ba696b1c920b0cbb3ce1709acb7a995"
+    },
+    {
+      "source": "docs/validation/architecture-s4-fs-atomic-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s4-fs-atomic-2026-11-10.en.md",
+      "sourceSha256": "7d3d6bf46f0164edfb0a7526319d8d85e0b2f6c9aa97482e2fbd40926cc8ddec",
+      "translationSha256": "180df5485a400df6418d432d7a164ef34c2600be6f6790e6f508cb20f3c5e912"
+    },
+    {
+      "source": "docs/validation/architecture-s5-prefs-store-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s5-prefs-store-2026-11-10.en.md",
+      "sourceSha256": "ee66863814d4636257c4b77be7bacc705c9a748acf8d5ee40dff92a5d6aeac21",
+      "translationSha256": "9305590d826310cab177b581f95806a7cb16f3bfe5bc7de4f69a647dc8ef2ae1"
+    },
+    {
+      "source": "docs/validation/architecture-s6-settings-routes-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s6-settings-routes-2026-11-10.en.md",
+      "sourceSha256": "b4f3e7d46d06b8285f8867be8b321a2eddd74879d3de146cd727b7269fa458f1",
+      "translationSha256": "0c2c7f6b1d22407a54f1e19617cae8d5b10d08bf984060040806fb2502b81ed7"
+    },
+    {
+      "source": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s7-realtime-contracts-2026-11-10.en.md",
+      "sourceSha256": "4d75f464e8ee44de196b99296cfffa512918891c3ba2b8c64e9605d42ec283be",
+      "translationSha256": "e31b79a1605393287ca68f1b252b1d9a889209e9b19b3f5341f84f510f5d9924"
+    },
+    {
+      "source": "docs/validation/architecture-s8-tool-names-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s8-tool-names-2026-11-10.en.md",
+      "sourceSha256": "a11dcfe29b7b9ca19bcf99b14efb94ae9f79952fb87530266a1719654b1588a9",
+      "translationSha256": "3e2a84d22ddfb1dd98326fe9a04ba1f9fae71cb807a0202e0fa60a884cb90ccf"
+    },
+    {
+      "source": "docs/validation/architecture-s9-home-split-2026-11-10.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/architecture-s9-home-split-2026-11-10.en.md",
+      "sourceSha256": "3ada5922e8ebfdc677fff687c3a60c31c15cc7ec88d6d9de743f6ae10bb161fc",
+      "translationSha256": "91c8a8813bbc9ba34e1882cbd70248fb91737840db168bde9355ef8cb2bfa23a"
+    },
+    {
+      "source": "docs/validation/audio-devices-2026-11-01.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/audio-devices-2026-11-01.en.md",
+      "sourceSha256": "e4d34093c4e9ddd1824a03762e070ae0e60fc7df7d30ae006c13d0a851314088",
+      "translationSha256": "2f5667eb1f5e62160382a8c086aa76f2c87a92fc779f62523aaf2c6abce3014f"
     },
     {
       "source": "docs/validation/bilingual-2026-10-26.md",
@@ -239,11 +421,25 @@
       "translationSha256": "ee8645acdc0d2ff7d9094b31878ba8c600c35d421caf1433f98d27dc1d1dc984"
     },
     {
+      "source": "docs/validation/brain-canvas-perf-2026-11-06.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/brain-canvas-perf-2026-11-06.en.md",
+      "sourceSha256": "61e302b3c280c6fcb4eebdae50941150259aa6b9a7abd142a768d4ad3d09da24",
+      "translationSha256": "28f50705312d6564e1457e5e8b1d98fdf63d1c7d74b7ab5722b37ffa370c6ebd"
+    },
+    {
       "source": "docs/validation/brain-distance-2026-10-22.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/brain-distance-2026-10-22.en.md",
       "sourceSha256": "040481979a82deac237078c73cb0aaa752155a047808f3a74c3bcb227d6256da",
       "translationSha256": "88aef388aa3ce4488242638c254a634f2ace961f06746b5870fd4e3da3d43782"
+    },
+    {
+      "source": "docs/validation/brain-processing-cue-2026-11-02.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/brain-processing-cue-2026-11-02.en.md",
+      "sourceSha256": "4df919a55989be8df9735be9f60689a00f2a52d7012fff9d545207207d6950e6",
+      "translationSha256": "808ee751aecff93d7aa57b4ef81b07c6be82143d08ead7fe1287835fef38b254"
     },
     {
       "source": "docs/validation/brain-proximity-zoom-2026-10-23.md",
@@ -258,6 +454,20 @@
       "translation": "docs/validation/brain-regions-2026-10-20.en.md",
       "sourceSha256": "95eef9f81c59320b87f49ff48752de96c9b373dc8368166cb0c49631840e69f2",
       "translationSha256": "cb0c81a39f7a2f05961f02b4b5194766e0e8bceb35cef9f668ce926ec3855bba"
+    },
+    {
+      "source": "docs/validation/brain-webgl-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/brain-webgl-2026-11-07.en.md",
+      "sourceSha256": "d9021e8346dcca9ed7d9686c55bff861e98ba13e63f23821370ceaf93c1dc143",
+      "translationSha256": "be458e47effded047224fab247df4163c8f022e576cf758bfa74891dbbd30cf6"
+    },
+    {
+      "source": "docs/validation/cal-1-google-calendar-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/cal-1-google-calendar-2026-11-05.en.md",
+      "sourceSha256": "c7ee84e592b5b36b47f1cc2d065b89871190ce9fb157004d435b3d86735adbc8",
+      "translationSha256": "5f783647bc56383bf96e6661fe9d3a2388ca86b9b0a98bf9b721f434d65f5e65"
     },
     {
       "source": "docs/validation/camera-enable-main-only-2026-10-31.md",
@@ -279,6 +489,27 @@
       "translation": "docs/validation/chatgpt-conversation-2026-10-20.en.md",
       "sourceSha256": "c2560ed8bf74828c0ef83f3a3fe0b8a6826c60546544af799ad6cf866730b835",
       "translationSha256": "2c37b6227be4774fc576a010ad11a55f928460b9cab4624c4cbea2610506374b"
+    },
+    {
+      "source": "docs/validation/day-night-badge-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/day-night-badge-2026-11-07.en.md",
+      "sourceSha256": "22eac2d1de159eba67c3b9ba8adf5c560632c8acfa278af0bad80aa64bde7380",
+      "translationSha256": "745ac5538973aaad82565f77f4055c0e4afa62f81a1c73b18e9b78f511211a6a"
+    },
+    {
+      "source": "docs/validation/day-night-mode-2026-11-08.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/day-night-mode-2026-11-08.en.md",
+      "sourceSha256": "9d888d57303333806623b5a584d039fb8cc5dfb43b3613948f5dc2c77f727feb",
+      "translationSha256": "bcb73154aee0e846a42be7ab261d270eb744aaa2898072513b3e3706598b6419"
+    },
+    {
+      "source": "docs/validation/day-night-volume-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/day-night-volume-2026-11-07.en.md",
+      "sourceSha256": "4d6a895524da787b049245ac9d3f3e744c9dfc16a8bd1050f94cc09e1e03aa34",
+      "translationSha256": "8e7ac983a3fa97ed7f06aff1e70cf2bdf6701857ad351b00f0f5242ae8720c0b"
     },
     {
       "source": "docs/validation/evidence/brain-distance-2026-10-22/brief.md",
@@ -379,6 +610,13 @@
       "translationSha256": "4426f59223c84b22a6db4161cd65fa43fcce6e3d4a625d01f9e20c16745d96c5"
     },
     {
+      "source": "docs/validation/home-corner-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/home-corner-2026-11-07.en.md",
+      "sourceSha256": "0cf758e40bb09ef1b7ba01d16eabbf846719a09ce96fd972e827d388414c6dd3",
+      "translationSha256": "c6b156d8d592de99bbe2b8e9555c412b5414a2122c7b49054b5ac06f36f0073f"
+    },
+    {
       "source": "docs/validation/implementation-review-2026-10-24.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/implementation-review-2026-10-24.en.md",
@@ -386,11 +624,39 @@
       "translationSha256": "b332c8718ad567559c65638a030805fbe3a1aa52b4467c497a6481a37db22e70"
     },
     {
+      "source": "docs/validation/lgtv-1-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/lgtv-1-2026-11-07.en.md",
+      "sourceSha256": "5db120eb4b13f076d218aba49df3c499109769b44f06e14b5c19a1a84bb6852d",
+      "translationSha256": "7e41358fd4ca06bf43f5510ba05f2e02fc90ccb7ae7fdadb1c0139c667dfa589"
+    },
+    {
+      "source": "docs/validation/lgtv-2-2026-11-08.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/lgtv-2-2026-11-08.en.md",
+      "sourceSha256": "7bc5102f040d099934e58d7f1fbb5bdafdf9882e21241bbe17ea4f6c5d2b7d87",
+      "translationSha256": "a5978e3e9ed0a1bf61614c5b8399c15d0a0af341f61a26630c11efb2487a060a"
+    },
+    {
+      "source": "docs/validation/light-thresholds-2026-11-09.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/light-thresholds-2026-11-09.en.md",
+      "sourceSha256": "bb0342f992038e33558491da655d0bf867ae952a8de45b5817b81a7589865597",
+      "translationSha256": "1f357732657df2d68e5372a56ed0d053dd9bca09d73bc52e00a242ecc66eb3cf"
+    },
+    {
       "source": "docs/validation/live-voice-2026-10-23.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/live-voice-2026-10-23.en.md",
       "sourceSha256": "426c0e701d6c98201df658a813e0473849e81545f8b155ae067c6424797d9513",
       "translationSha256": "9385b8a115a4e6db9f6d3a00bd414ff90972e86534d3941f2570e0c2a597c49e"
+    },
+    {
+      "source": "docs/validation/local-date-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/local-date-2026-11-05.en.md",
+      "sourceSha256": "0573793227cee22602e0e44db81c44b2147b8fdeba2514d5d75d7fee8790754d",
+      "translationSha256": "40d6600fff7c8b3f441bbcf3e900ae3576df359d24bd2b3307dcceb932a59717"
     },
     {
       "source": "docs/validation/look-to-talk-greet-2026-10-23.md",
@@ -405,6 +671,34 @@
       "translation": "docs/validation/mac-acceptance-runbook-2026-10-30.en.md",
       "sourceSha256": "0b8a8519e08a18d60e9006ef23570ca0ad2ecb802a960695aa30231f1524d889",
       "translationSha256": "f02f6e7f9e6798309791a98676a0ea0dd33531888dd41989c28c4f525303bcaf"
+    },
+    {
+      "source": "docs/validation/mail-1-gog-self-2026-11-04.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/mail-1-gog-self-2026-11-04.en.md",
+      "sourceSha256": "8a008ab721ee167c28d7d4cbfa85065a3c2f016d04c7c2aa68ccf33bf933130c",
+      "translationSha256": "24095f7bd33eebbce91a00ba5236c03132a292e746b0a49ff3867c399b7e43b5"
+    },
+    {
+      "source": "docs/validation/memories-google-2026-11-06.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/memories-google-2026-11-06.en.md",
+      "sourceSha256": "7608acc6f0ed6c3bc451979fa37127f2e45ceec6c28699cbb77ff98684e25c22",
+      "translationSha256": "d00f0568949e0d135acd1cd72f7bf5ad4845d90b8664f487a4517dac2585f029"
+    },
+    {
+      "source": "docs/validation/memories-idle-after-call-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/memories-idle-after-call-2026-11-07.en.md",
+      "sourceSha256": "4c35cf045f8fa0eb03b48b123e361ea9c9af7587ef066948a991fb72d775f425",
+      "translationSha256": "91a98d7492d51f90e1955390dfdf67dbb7acabb0fb4b2179045e642b51f5426f"
+    },
+    {
+      "source": "docs/validation/memories-mode-2026-11-06.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/memories-mode-2026-11-06.en.md",
+      "sourceSha256": "ce8dc17fd13e5ba610a8f36662f76799c5cdaa0ead2c4d67cf278e2895fa7edd",
+      "translationSha256": "8f011de5c8bfe1abd17e67f779f87d6ee536a08a91b1a57a240c9a5d11eaba6a"
     },
     {
       "source": "docs/validation/memory-mem0-2026-10-26.md",
@@ -470,6 +764,13 @@
       "translationSha256": "35d9e5ef0248048e552cfe7a9e4654429e37705b966f4af70f0b4e9ecdbabcd0"
     },
     {
+      "source": "docs/validation/memory-voice-default-2026-11-02.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/memory-voice-default-2026-11-02.en.md",
+      "sourceSha256": "bab5afa591878868018b64bee2fb328539ae4a2c1ceb8f9987c578d388afcc73",
+      "translationSha256": "2c5263afa4363012d9f2d35b741f7e54a44b0d79ff9d8414dbf5921784e7d63e"
+    },
+    {
       "source": "docs/validation/menu-seconds-commands-2026-10-22.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/menu-seconds-commands-2026-10-22.en.md",
@@ -482,6 +783,83 @@
       "translation": "docs/validation/menu-settings-consolidate-2026-10-23.en.md",
       "sourceSha256": "6dd40b1b8dde63c86e263e76a0e8c02f0d5594d4d9d1daea0e8d1ac2a99536a7",
       "translationSha256": "37ccb89949f1abd40abbdd96045109398d64b2835012b1f380694033f9767d82"
+    },
+    {
+      "source": "docs/validation/pi-clock-weather-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pi-clock-weather-2026-11-07.en.md",
+      "sourceSha256": "6b5f0d7487dee8e091fc05d394f055f7071d9e455ba2d6fd3b9e49486b20ec9a",
+      "translationSha256": "dbd50d71ad5a8e4f78c9cb8982215f8ad8955026897ecb4bf8be1ec39b825093"
+    },
+    {
+      "source": "docs/validation/pi-exit-fullscreen-2026-11-23.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pi-exit-fullscreen-2026-11-23.en.md",
+      "sourceSha256": "0e2158d6adc9b0a87a87c6ba0bd337ac1e8571698949fb60a44f17e9f4d4a681",
+      "translationSha256": "dcb98a9df3ae95f41989a7fe005d16d961d002e48d78db248ee125f6737e39e2"
+    },
+    {
+      "source": "docs/validation/pi-family-recognition-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pi-family-recognition-2026-11-05.en.md",
+      "sourceSha256": "fb06ffc218d7af00430026e809fd565c374a51bfe54cfd34964c5865d682550d",
+      "translationSha256": "95b00be393cc289c49b94ff281b1742a6215d051418be90885367a1de895c8c3"
+    },
+    {
+      "source": "docs/validation/pi-performance-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pi-performance-2026-11-05.en.md",
+      "sourceSha256": "00d48e06614dfbaf401ae974ce13908de650c0372ce3acb882f37db5d0a70e66",
+      "translationSha256": "15be886d3bc85c92816c9e79645aea8b8addc3cd605c581b7dfb289f581dd4e7"
+    },
+    {
+      "source": "docs/validation/pi-settings-entry-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pi-settings-entry-2026-11-07.en.md",
+      "sourceSha256": "baff72b0cf2103b0d56a2daf1e0c0a0d275adbcdea4947bed2d4d02ba6d44220",
+      "translationSha256": "4d6b632d3e437e0b08bdd63fd784a8907f6e4e7d89360c30f9100860fac066c7"
+    },
+    {
+      "source": "docs/validation/pinned-settings-2026-11-08.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pinned-settings-2026-11-08.en.md",
+      "sourceSha256": "00940d9d5781b750ab4e6357c19fab5d926adf6185788cb49ab7397b79258943",
+      "translationSha256": "534b547e58ca0cf4c3a4123d47e9fc6e1bc9d9ada5c0360d8f95f10ab5d966bd"
+    },
+    {
+      "source": "docs/validation/pro-1-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pro-1-2026-11-05.en.md",
+      "sourceSha256": "2f03cb26e3ed6fcf764617ed058aa7c8e25f1ca9bc82fe68a9191feac9b55074",
+      "translationSha256": "682dd152817d3a6bede5dfca339ed6b633df6c2b9ec3a3e2d8f7139f065c9e69"
+    },
+    {
+      "source": "docs/validation/pro-2-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pro-2-2026-11-05.en.md",
+      "sourceSha256": "ccd5df2b7bdeb23bb607ef13a74987b96eb91dd381ee38122223bd968e3b0490",
+      "translationSha256": "93d89c63a0bf10e294d075261af4d1872b0237b761776eec38a8bf44d8d8b950"
+    },
+    {
+      "source": "docs/validation/realtime-cost-guard-2026-11-06.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/realtime-cost-guard-2026-11-06.en.md",
+      "sourceSha256": "bf9cff4f65b539aa139f446e8c83f38fb138c3c807b654f70a16be924e4705a0",
+      "translationSha256": "534beb57983aee9200bb969901e308dcb7baeaec02a49e04ca0939f0efa2b7ad"
+    },
+    {
+      "source": "docs/validation/rpi-deployment-fixes-2026-11-05.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/rpi-deployment-fixes-2026-11-05.en.md",
+      "sourceSha256": "462635c1a410bcaaf4e2b2dfc1f5299b5ed77a6db5ff6ff479e31dd14b12355e",
+      "translationSha256": "faac55dfcd8bc765cfe4c46999504aecf6d2f6a1f54636c1ee685f40600b0380"
+    },
+    {
+      "source": "docs/validation/service-mode-2026-11-03.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/service-mode-2026-11-03.en.md",
+      "sourceSha256": "fb0779bdfe9a249af808a0b35aefa6d146c8d7cc65929d30d5ac95020ce4bd8d",
+      "translationSha256": "e142a55eb7f90abbb2a7873b8612e45307a156467560a06798db2ce1a2ce451c"
     },
     {
       "source": "docs/validation/small-decisions-2026-10-25.md",
@@ -512,6 +890,83 @@
       "translationSha256": "cc173a59d6616db315aff18f448ec9d4a990d1199a42d8f3177fc1a89609b6a2"
     },
     {
+      "source": "docs/validation/sp-00-2026-11-01.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/sp-00-2026-11-01.en.md",
+      "sourceSha256": "d8750302b432ce1c616cf785655dca2bfa1fc71992c4aba081f787dd0ed6ea22",
+      "translationSha256": "27d7e1d007110c6b1b9cdb8f423f1d9e77b58bd603ba8c10c09e403b52a4470b"
+    },
+    {
+      "source": "docs/validation/sp-02a-2026-11-01.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/sp-02a-2026-11-01.en.md",
+      "sourceSha256": "528533375c7708468d0b69262a8b8bfa139ad898a9823f1088675b20e5dbf994",
+      "translationSha256": "93d70ee8bdc77dd8776b60e4c08e94e8aaeb684f35e828d5071a74a652a4386d"
+    },
+    {
+      "source": "docs/validation/sp-02b-2026-11-01.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/sp-02b-2026-11-01.en.md",
+      "sourceSha256": "6d3fe1bf195450eb42d698055f1aca3b6ad38af56c484a362034cf199e35b3f0",
+      "translationSha256": "140adb0370745b48046ca2956f3f7a07e39915f8567f997389d14f803cff0d7e"
+    },
+    {
+      "source": "docs/validation/sp-03a-2026-11-01.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/sp-03a-2026-11-01.en.md",
+      "sourceSha256": "b65d7e8002d3e5fe4f43721bd98100cc7d2659eb10dc2189ac7ce9a9639ef1c6",
+      "translationSha256": "ce2bdc0b02ad28d4265d5fa1ba98c261f1b5e723107bb312dc5d0ad36e0ea19e"
+    },
+    {
+      "source": "docs/validation/sp-1-soloist-health-2026-11-03.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/sp-1-soloist-health-2026-11-03.en.md",
+      "sourceSha256": "a3a2413813733f34599c4c79ff7ccb675d48dde5737713141e070b6d66a1530c",
+      "translationSha256": "a29a862a1c0c558715b2d8526f33261657b3fc358073427ab2259931dfed919d"
+    },
+    {
+      "source": "docs/validation/vcr-0-2026-11-03.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/vcr-0-2026-11-03.en.md",
+      "sourceSha256": "6abeb51ed0d19886619dff9ae5ebfe310a192700f31c760e952ff71e30e7810c",
+      "translationSha256": "2663ed0e13210a37bcfa7577b1c068517e7c020c16716598d58262bc85f4e46a"
+    },
+    {
+      "source": "docs/validation/vcr-2-2026-11-03.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/vcr-2-2026-11-03.en.md",
+      "sourceSha256": "97d01f022bb0ba1457c2c6a124ceeec86969a82f0f8a651de3dd5a6a10108aa3",
+      "translationSha256": "6c090e2d734555809e1b59cebd800bf0b1f31bb2e36b29d910a1df5cf92bc667"
+    },
+    {
+      "source": "docs/validation/voice-volume-2026-11-07.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/voice-volume-2026-11-07.en.md",
+      "sourceSha256": "1a4c2440f5190ee902a6c3cd0963f2ef4b3f663985a4032a2f9cf0850dbd16f5",
+      "translationSha256": "a69c8472aa9f3957f9bcb10108ccb73074380b18bcc6eef78c00962740effb1c"
+    },
+    {
+      "source": "docs/validation/wake-direction-2026-11-08.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/wake-direction-2026-11-08.en.md",
+      "sourceSha256": "ebc27d769446d5b0e31bfa15d5ff2ed821a35f4de06fb7f873be78c5a4a929a5",
+      "translationSha256": "80126d24499a5857239a6312747dbb460bc0eeee1680627335441d1dd7f9ac8d"
+    },
+    {
+      "source": "docs/validation/wake-threshold-2026-11-08.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/wake-threshold-2026-11-08.en.md",
+      "sourceSha256": "d7a3ef5c32674331ca238b91582dddcf201c8fcad0587422687c1931db5af379",
+      "translationSha256": "b506e58428b3a67637a47fa2fcd6be8d136f88bd06b903efc10bb9c4aa4d15a0"
+    },
+    {
+      "source": "docs/validation/web-search-picker-2026-11-09.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/web-search-picker-2026-11-09.en.md",
+      "sourceSha256": "0304e7b6d3a143deccb145c0f30a5ab92629342c6ec2f302606e4238f49b22fc",
+      "translationSha256": "bdcecd203f7938a2add5b50c35e630dab9410c0e4d5035c4b27a1e5a3401bc59"
+    },
+    {
       "source": "docs/validation/wk-00-mac-2026-10-31.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/wk-00-mac-2026-10-31.en.md",
@@ -529,8 +984,8 @@
       "source": "docs/validation/wk-01a-2026-10-31.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/wk-01a-2026-10-31.en.md",
-      "sourceSha256": "498e21265a2d3f4a1495a507ba50bca5120f3a9f2d2620dba410f340573b6690",
-      "translationSha256": "7f48690ead7261f0ca0c16890f09ab628fb078481fbb341b698cfa887c4b03c9"
+      "sourceSha256": "6075f866e3fad382ce69768729448a091e5b76630c072af7bffdaa0ea4460791",
+      "translationSha256": "7de49e020170e4755ff497ee908c37c602234264c492f7f65def3b680b92de62"
     },
     {
       "source": "docs/validation/wk-01b-prep-2026-10-31.md",
@@ -550,22 +1005,29 @@
       "source": "prototype/ambient-shell/INSTALL.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/INSTALL.en.md",
-      "sourceSha256": "3cfdca71667a46bdf34f8df044937dedab52ec86a38c5a3d28baff5a8bb0c665",
-      "translationSha256": "b8368f55c9da5a6287641dc765250ed92f4d7caad3482ad7cbc939c6366c9a11"
+      "sourceSha256": "4f0450356c3dd28572f60fb3f16bb776d467a9e1ed9b5c6393e26d52072bfefa",
+      "translationSha256": "3268014f8180176305b3f29a50fbd19b521cda5f6b16d399436daa6f8c5cd856"
     },
     {
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "03b1e8a05030825a5b697cac37a264a0722dec0f33dc77e4ef4ef35037bcdf36",
-      "translationSha256": "a340d8e57b1d911974ece1c415a8dc1e065453abc3867407a5354e90df1e2b95"
+      "sourceSha256": "95de67abbed80f2089992a11ec5729a763f33f4484b6b5918ae713a37e496687",
+      "translationSha256": "890ff3ff7b543c67de21c0b06eddbce3d636b1672e4861f729a4fa549d6d0375"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/desktop/README.en.md",
-      "sourceSha256": "84e482affed94c48e99afae31021a13b641fddbcd80a0d865658d4a9021947a0",
-      "translationSha256": "a3aec7ef0188a05ad9d6b5c4543aeec90518602c28422566153ee897cf392aa0"
+      "sourceSha256": "3e4332ac7e79023fd8515c2436c0ea722dbd9c97a825e5e81c6e3441f9888bb2",
+      "translationSha256": "762a9153d7c9a51f92840f5ca98e905590700028179212b1421af60c09c13149"
+    },
+    {
+      "source": "terminals/rpi4/README.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "terminals/rpi4/README.en.md",
+      "sourceSha256": "e803f0b091a0760298d81e2d666967cde1a92b7dcd41e9844f048dd5c7f16ad5",
+      "translationSha256": "6b1729eb179a29931ec410626318521a108901907fca7d368c192956b3238c37"
     }
   ]
 }

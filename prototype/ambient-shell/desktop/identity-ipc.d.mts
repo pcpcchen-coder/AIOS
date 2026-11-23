@@ -1,6 +1,6 @@
 // desktop/identity-ipc.mjs 的型別（給 tests/identity-ipc.test.ts；App 本身直接跑 .mjs）。
 
-export const IDENTITY_OPS: readonly string[];
+export { IDENTITY_OPS, validateIdentityRequest } from "../shared/identity-validate.mjs";
 export const MENU_CLICK_WINDOW_MS: number;
 
 export function checkIdentitySender(
@@ -8,8 +8,6 @@ export function checkIdentitySender(
   win: { webContents: unknown; isDestroyed?(): boolean } | null | undefined,
   coreUrl: string | null | undefined,
 ): boolean;
-
-export function validateIdentityRequest(req: unknown): { ok: true; request: Record<string, unknown> & { op: string } } | { ok: false; error: string };
 
 export class MenuClickWindow {
   constructor(windowMs?: number);

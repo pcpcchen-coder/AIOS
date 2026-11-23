@@ -12,6 +12,7 @@ import type { SettingsView } from "../shared/types.ts";
 // WK-01a（docs/17 §13.4）：NOUS_WAKE 預設關閉。關閉時頁面標頭、/api/settings 與選單列「鏡頭與語音設定」必須和加入喚醒程式
 // 之前逐位元組相同。快照檔（__snapshots__/wake-flag-off.test.ts.snap）是在 base 9778b41、還沒有任何喚醒程式時先產生的，
 // 之後的變更不得更新它；需要更新代表旗標關閉時的行為變了，要另行說明。
+// 例外（都不是喚醒程式）：F6 費用紀錄（下面另有測試）與 settings.audio（聲音輸入／輸出，2026-11-01；比對前拿掉這個欄位）。
 
 async function freePort(): Promise<number> {
   const s = createServer();
@@ -77,9 +78,35 @@ describe("NOUS_WAKE off is byte-identical to the pre-wake build", () => {
     const handle = await boot();
     const page = await fetch(`${handle.url}/`);
     expect(JSON.stringify(Object.fromEntries(["content-security-policy", "permissions-policy", "x-content-type-options", "referrer-policy"].map((h) => [h, page.headers.get(h)])))).toMatchSnapshot();
-    const body = await (await fetch(`${handle.url}/api/settings`)).text();
+    const raw = await (await fetch(`${handle.url}/api/settings`)).text();
+    // 第二個刻意的例外（George 2026-11-01「聲音輸入／輸出」）：settings.audio 不綁任何旗標，一定存在。拿掉這一個欄位之後
+    // 其餘逐位元組相同（快照不更新）；選單列的「聲音」分段也只來自這個欄位。
+    const parsed = JSON.parse(raw) as SettingsView;
+    // 「處理中音效」processing_cue（George 2026-11-02）也在這個欄位裡（預設開），一樣不綁旗標。
+    expect(parsed.audio).toEqual({ prefs: { input_device_id: null, input_label: null, output_device_id: null, output_label: null, processing_cue: true }, write_path: "/api/settings/audio" });
+    // 第三個刻意的例外（George 2026-11-05 PRO-1「主動提醒」）：settings.proactive 不綁旗標（預設開），一定存在；拿掉後其餘逐位元組相同。
+    expect(parsed.proactive?.prefs).toEqual({ enabled: true, weather: true, calendar: true, start_hour: 5, end_hour: 11, place: null });
+    // 第四個刻意的例外（George 2026-11-06 MEMO-1「回憶模式」）：settings.memories 不綁旗標（預設關），一定存在；拿掉後其餘逐位元組相同。
+    expect(parsed.memories?.prefs).toEqual({ enabled: false, dwell_s: 8, idle_s: 60, video_sound: false });
+    // 第五個刻意的例外（George 2026-11-07 CLK-1「右上角時鐘與天氣」）：settings.clock 不綁旗標（Mac 視窗預設關），一定存在；拿掉後其餘逐位元組相同。
+    expect(parsed.clock).toEqual({ enabled: false, prefs: { main: false, terminal: true }, write_path: "/api/settings/clock" });
+    // 第六個刻意的例外（George 2026-11-07 HOME-1「左上角家中狀態」）：settings.home_corner 不綁旗標（同時鐘的預設），一定存在；拿掉後其餘逐位元組相同。
+    expect(parsed.home_corner).toEqual({ enabled: false, prefs: { main: false, terminal: true }, write_path: "/api/settings/home-corner" });
+    // 第七個刻意的例外（George 2026-11-08 DN-2「日夜間模式」）：settings.day_night 不綁旗標（預設 22–07、沒有手動切換），一定存在；拿掉後其餘逐位元組相同。
+    expect(parsed.day_night).toMatchObject({ prefs: { night_start_h: 22, night_end_h: 7, use_camera: true, night_effects: true }, override: null, saved: false, write_path: "/api/settings/day-night" });
+    // 第八個刻意的例外（George 2026-11-09 ALARM-1「定時器」、ALARM-2「鬧鐘」）：settings.alarms 不綁旗標（預設開），一定存在；定時器與鬧鐘工具是核心內建的
+    // 整合工具（不需要 NOUS_AIL），所以 settings.integrations 只列 app__timer__* 與 app__alarm__*。拿掉這兩個欄位後其餘逐位元組相同。
+    expect(parsed.alarms).toMatchObject({ prefs: { enabled: true, ring_s: 300, ramp_s: 30, late_ring_max_s: 1800, snooze_s: 540, alarm_min_volume: 30 }, timers: [], alarms: [], snoozes: [], rings: [], notice: null, write_path: "/api/settings/alarms" });
+    expect(parsed.integrations?.tools.every((name) => name.startsWith("app__timer__") || name.startsWith("app__alarm__"))).toBe(true);
+    const { audio: _audio, proactive: _proactive, memories: _memories, clock: _clock, home_corner: _homeCorner, day_night: _dayNight, alarms: _alarms, integrations: _integrations, ...rest } = parsed;
+    // 第九個刻意的例外（George 2026-11-09「查詢結果收起秒數」）：voice.search_close_s 與 seconds 的同名一列不綁旗標，一定存在；
+    // 拿掉這兩處後其餘逐位元組相同。
+    expect(rest.voice?.search_close_s).toBe(8);
+    if (rest.voice) delete (rest.voice as Partial<typeof rest.voice>).search_close_s;
+    if (rest.seconds) rest.seconds = rest.seconds.filter((row) => row.key !== "search_close_s");
+    const body = JSON.stringify(rest);
     expect(body).toMatchSnapshot();
-    expect(menuJson(JSON.parse(body) as SettingsView)).toMatchSnapshot();
+    expect(menuJson(rest as SettingsView)).toMatchSnapshot();
   });
 
   it("has no wake route, no wake settings and /wake-runtime/ is 404 (not the SPA fallback)", async () => {

@@ -130,11 +130,11 @@ describe("Electron wiring (static)", () => {
     };
     new Function("require", preload)(require);
     expect(Object.keys(exposed)).toEqual(["nousDesktop"]);
-    expect(Object.keys(exposed.nousDesktop!).sort()).toEqual(["cameraEnable", "confirmDelete", "identity", "initialLocale", "memory", "onLocaleChange", "onMemoryChange", "onPower", "onTasksPlaintextDropped", "openExternal", "reportState", "tasks"]);
+    expect(Object.keys(exposed.nousDesktop!).sort()).toEqual(["cameraEnable", "confirmDelete", "identity", "initialLocale", "initialService", "memory", "onLocaleChange", "onMemoryChange", "onPower", "onService", "onTasksPlaintextDropped", "openExternal", "reportState", "tasks"]);
     (exposed.nousDesktop!.identity as (r: unknown) => unknown)({ op: "open_session" });
     expect(invoke).toHaveBeenCalledWith("nous:identity", { op: "open_session" });
     expect(send).not.toHaveBeenCalled();
-    expect(sendSync).toHaveBeenCalledExactlyOnceWith("nous:get-locale");
+    expect(sendSync.mock.calls).toEqual([["nous:get-locale"], ["nous:get-service"]]);
   });
 
   it("main.mjs checks the sender and the request shape before handing it to the core, and only open_session consumes the click", () => {

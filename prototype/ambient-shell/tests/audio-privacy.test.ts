@@ -66,6 +66,8 @@ const RUNTIME_NET_LINES = [
 /** runtime-net.ts 裡允許出現 importScripts（動態程式規則）的行：型別宣告與要覆蓋的清單。 */
 const RUNTIME_NET_DYNAMIC_LINES = ["importScripts?: unknown;", RUNTIME_NET_LINES[6]!];
 
+const bridge = (exposed: Record<string, Record<string, (...args: unknown[]) => unknown>>) => exposed.nousDesktop!;
+
 describe("audio privacy (static)", () => {
   const audioFiles = files(audio);
 
@@ -76,24 +78,82 @@ describe("audio privacy (static)", () => {
     expect(audioFiles.filter((f) => /kws|sherpa/i.test(relative(audio, f)))).toEqual([]);
   });
 
-  it("only src/audio/front-end.ts calls getUserMedia({ audio }); the only other audio caller is the unchanged flag-off realtime path", () => {
+  it("only src/audio-devices.ts calls getUserMedia({ audio }) (openMic: exact → name → system default); src/audio and every other caller go through it", () => {
     const callers = files(src).flatMap((file) =>
       codeLines(file)
         .filter(({ line }) => /\bgetUserMedia\s*\(/.test(line))
         .map(({ line, n }) => ({ file: relative(src, file), n, line: line.trim() })),
     );
     const byFile = (name: string) => callers.filter((c) => c.file === name);
-    // 常駐喚醒聆聽：唯一的擁有者
-    expect(byFile(join("audio", "front-end.ts")).length).toBeGreaterThan(0);
-    expect(callers.filter((c) => c.file.startsWith(`audio${"/"}`) && c.file !== join("audio", "front-end.ts"))).toEqual([]);
-    // 旗標關閉時即時語音照舊（同 9778b41 的那一行）；旗標開啟時 main.ts 以 AudioFrontEnd 的租用取代它
-    expect(byFile("realtime.ts").map((c) => c.line)).toEqual([
-      "getMicrophone: () => navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }),",
+    // 聲音輸入（George 2026-11-01）：唯一的麥克風開啟點。系統預設時約束和以前相同（不帶 deviceId）；選定時 exact deviceId。
+    expect(byFile("audio-devices.ts").map((c) => c.line)).toEqual([
+      "getUserMedia(constraints: MediaStreamConstraints): Promise<MediaStream>;",
+      "stream = await media.getUserMedia({ audio: { ...MIC_CONSTRAINTS, deviceId: { exact: id } }, ...extra });",
+      "if (pref.id === null) return { stream: await media.getUserMedia({ audio: { ...MIC_CONSTRAINTS }, ...extra }), fallback: false };",
+      "return { stream: await media.getUserMedia({ audio: { ...MIC_CONSTRAINTS }, ...extra }), fallback: true };",
     ]);
+    expect(readFileSync(join(src, "audio-devices.ts"), "utf8")).toMatch(/export const MIC_CONSTRAINTS = \{ echoCancellation: true, noiseSuppression: true, autoGainControl: true \} as const;/);
+    // 常駐聆聽（src/audio/）不直接開麥克風：經 main.ts 注入的 MicOpener（audioDevices.openInput）
+    expect(callers.filter((c) => c.file.startsWith(`audio${"/"}`))).toEqual([]);
     // 鏡頭管線：不收音（audio: false）
     expect(byFile(join("sense", "pipeline.ts")).length).toBe(2);
     expect(readFileSync(join(src, "sense", "pipeline.ts"), "utf8")).toMatch(/audio: false/);
-    expect(callers.filter((c) => ![join("audio", "front-end.ts"), "realtime.ts", join("sense", "pipeline.ts")].includes(c.file))).toEqual([]);
+    expect(callers.filter((c) => !["audio-devices.ts", join("sense", "pipeline.ts")].includes(c.file))).toEqual([]);
+    // 其他開麥克風的地方都經 audioDevices.openInput：即時語音（旗標關閉時）、聲音登記（喚醒沒開時）、常駐聆聽的注入
+    expect(readFileSync(join(src, "realtime.ts"), "utf8")).toMatch(/getMicrophone: \(\) => audioDevices\.openInput\(\),/);
+    expect(readFileSync(join(src, "speaker", "recorder.ts"), "utf8")).toMatch(/acquire: \(\) => audioDevices\.openInput\(\{ video: false \}\),/);
+    expect(readFileSync(join(src, "main.ts"), "utf8")).toMatch(/mic: typeof navigator\.mediaDevices\?\.getUserMedia === "function" \? \{ open: \(\) => audioDevices\.openInput\(\), preferred: \(\) => audioDevices\.preferredInput \} : null,/);
+  });
+
+  it("every playback that reaches the speakers goes through the output setting (applySink via audioDevices.sink or the injected earcon output)", () => {
+    // 會出聲的地方：new Audio()（遠端聲音）與接到 destination 的 AudioContext（提示音）。擷取圖接的是音量 0 的節點（不出聲）。
+    const sounding = files(src).flatMap((file) =>
+      codeLines(file)
+        .filter(({ line }) => /\bnew Audio\s*\(|\.destination\b/.test(line))
+        .map(({ line }) => `${relative(src, file)}: ${line.trim()}`),
+    );
+    expect(sounding.sort()).toEqual([
+      `${join("audio", "capture.ts")}: node.connect(mute).connect(ctx.destination);`,
+      `${join("audio", "earcon.ts")}: osc.connect(gain).connect(ctx.destination);`,
+      "processing-sound.ts: master.connect(ctx.destination);",
+      "alarm-sound.ts: s.connect(g).connect(c.destination);",
+      "alarm-sound.ts: osc.connect(g).connect(c.destination);",
+      "main.ts: const audio = new Audio();",
+      "realtime.ts: const audio = new Audio();",
+      `${join("speaker", "recorder.ts")}: node.connect(mute).connect(ctx.destination);`,
+      `${join("speaker", "recorder.ts")}: osc.connect(gain).connect(ctx.destination);`,
+    ].sort());
+    const text = (rel: string) => readFileSync(join(src, rel), "utf8");
+    // 遠端聲音：建立元素後立刻 sink，停止時 release
+    for (const rel of ["main.ts", "realtime.ts"]) {
+      expect(text(rel), rel).toMatch(/const audio = new Audio\(\);\s*(\/\/[^\n]*\s*)*void audioDevices\.sink\(audio\);/);
+      expect(text(rel), rel).toMatch(/audioDevices\.release\(audio\);/);
+    }
+    // 提示音：先 output.sink(ctx) 再排音；main.ts 注入 audioDevices
+    expect(text(join("audio", "earcon.ts"))).toMatch(/void output\.sink\(ctx\)\.catch\(\(\) => undefined\)\.then\(\(\) => schedule\(ctx\)\);/);
+    expect(text(join("audio", "index.ts"))).toMatch(/earcon: browserEarcon\(devices\.output\),/);
+    expect(text("main.ts")).toMatch(/output: \{ sink: \(ctx\) => audioDevices\.sink\(ctx\), release: \(ctx\) => audioDevices\.release\(ctx\) \},/);
+    // ALARM-1 鈴聲：開始出聲前先 output.sink(c)（最多等 1 秒，導不好照系統預設），停止時 release；main.ts 注入 audioDevices
+    const ring = text("alarm-sound.ts");
+    expect(ring).toMatch(/await Promise\.race\(\[output\.sink\(c\)\.catch\(\(\) => undefined\)/);
+    expect(ring).toMatch(/output\?\.release\(c\);/);
+    expect(text("main.ts")).toMatch(/createSound: \(\) => browserRingSound\(\{ sink: \(ctx\) => audioDevices\.sink\(ctx\), release: \(ctx\) => audioDevices\.release\(ctx\) \}\),/);
+    // ALARM-3 倒數滴答：同樣先導到選定的輸出
+    expect(text("main.ts")).toMatch(/createTicks: \(\) => browserTickSound\(\{ sink: \(ctx\) => audioDevices\.sink\(ctx\), release: \(ctx\) => audioDevices\.release\(ctx\) \}\),/);
+    // 處理中提示音（George 2026-11-02）：開始出聲前先 output.sink(ctx)（等太久照系統預設），淡出後 release；main.ts 注入 audioDevices
+    const cueSound = text("processing-sound.ts");
+    expect(cueSound).toMatch(/ready = Promise\.race\(\[output\.sink\(ctx\)\.catch\(\(\) => undefined\)/);
+    expect(cueSound).toMatch(/output\.release\(ctx\);/);
+    expect(cueSound).toMatch(/void ready\.then\(\(\) => \{/);
+    expect(text("main.ts")).toMatch(/createSound: \(\) => browserProcessingSound\(\{ sink: \(ctx\) => audioDevices\.sink\(ctx\), release: \(ctx\) => audioDevices\.release\(ctx\) \}\),/);
+    // 聲音登記的「現在開始」提示音：另開一個短暫的 AudioContext 導到輸出；擷取用的 AudioContext 不登記成輸出
+    const recorder = text(join("speaker", "recorder.ts"));
+    expect(recorder).toMatch(/await playChime\(audioDevices\);/);
+    expect(recorder).toMatch(/await Promise\.race\(\[output\.sink\(ctx\)/);
+    expect(recorder).not.toMatch(/audioDevices\.sink\(tap\.ctx\)|audioDevices\.sink\(this\.ctx\)/);
+    // setSinkId 只在 applySink 裡呼叫
+    const sinkCalls = files(src).flatMap((file) => codeLines(file).filter(({ line }) => /setSinkId\(/.test(line)).map(() => relative(src, file)));
+    expect([...new Set(sinkCalls)]).toEqual(["audio-devices.ts"]);
   });
 
   it("src/audio never records, exports, uploads, stores, logs or talks to IPC; the only network lines are the pinned ones in runtime-net.ts", () => {
@@ -191,14 +251,20 @@ describe("audio privacy (static)", () => {
         'node?.port.postMessage({ type: "stop" });',
         'w.postMessage({ type: "clear" });',
         'w.postMessage({ type: "close" });',
-        'worker.postMessage({ type: "init", sampleRate: ctx.sampleRate, mode: options.calibrate ? "calibrate" : "listen", overrides: options.overrides }, [channel.port2]);',
+        'worker.postMessage({ type: "init", sampleRate: ctx.sampleRate, mode: options.calibrate ? "calibrate" : "listen", overrides: options.overrides, thresholdOffset: thresholdOffset() }, toSpeaker ? [channel.port2, toSpeaker] : [channel.port2]);',
         'node.port.postMessage({ type: "port" }, [channel.port1]);',
         'beginClip: () => send(() => w.postMessage({ type: "clip_begin" })),',
         'endClip: () => send(() => w.postMessage({ type: "clip_end" })),',
         'sweep: (candidates, clips) => send(() => w.postMessage({ type: "sweep", candidates, clips })),',
         'discard: () => send(() => w.postMessage({ type: "discard" })),',
       ],
-      "wake-worker.ts": ["postMessage(message: WakeWorkerOut): void;", "const post = (out: WakeWorkerOut) => scope.postMessage(out);", "scope.postMessage(closed);"],
+      "wake-worker.ts": [
+        "postMessage(message: WakeWorkerOut): void;",
+        "const post = (out: WakeWorkerOut) => scope.postMessage(out);",
+        // SP-02a：喚醒詞片段只經 init 給的第二條 port 轉移給 speaker worker（不經主執行緒）；矯正模式不接這條 port
+        "const toSpeaker = keywordPort ? (span: Float32Array) => keywordPort?.postMessage(span, [span.buffer]) : null;",
+        "scope.postMessage(closed);",
+      ],
     };
     const found: Record<string, string[]> = {};
     for (const file of audioFiles) {
@@ -212,11 +278,16 @@ describe("audio privacy (static)", () => {
       expect([...core.matchAll(/this\.post\(([^;]+)\);/g)].map((m) => m[1]), name).toEqual(["message"]);
       expect(core, name).toMatch(/private emit\(message: WakeWorkerOut\): void \{\s*if \(isWakeWorkerOut\(message\)\) this\.post\(message\);\s*\}/);
     }
-    // 兩個核心都只拿到 post（不是 scope），矯正核心的錄音陣列不經任何 postMessage
+    // 兩個核心都只拿到 post（不是 scope），矯正核心的錄音陣列不經任何 postMessage，也拿不到 speaker worker 的 port
     const worker = readFileSync(join(audio, "wake-worker.ts"), "utf8");
-    expect(worker).toMatch(/new WakeCalibrationCore\(detector, runtime\.keywords, overrides, post\)/);
-    expect(worker).toMatch(/new WakeWorkerCore\(detector, post\)/);
-    expect(readFileSync(join(audio, "calibration-core.ts"), "utf8")).not.toMatch(/postMessage/);
+    expect(worker).toMatch(/new WakeCalibrationCore\(shifted, base\.keywords, overrides, post\)/);
+    expect(worker).toMatch(/new WakeWorkerCore\(detector, post, toSpeaker\)/);
+    expect(readFileSync(join(audio, "calibration-core.ts"), "utf8")).not.toMatch(/postMessage|keywordPort/);
+    const core = readFileSync(join(audio, "worker-core.ts"), "utf8");
+    // SP-02a：喚醒詞片段只在偵測到的那一刻複製一次（緩衝最後 KEYWORD_SPAN_S 秒），交給 keyword 接收端
+    expect([...core.matchAll(/this\.keyword\(([^;]+)\);/g)].map((m) => m[1])).toEqual(["this.ring.latest(Math.round(KEYWORD_SPAN_S * SAMPLE_RATE))"]);
+    expect([...core.matchAll(/this\.ring\.latest\(/g)]).toHaveLength(1);
+    expect(core).toMatch(/if \(keyword !== null\) \{\s*this\.detector\.reset\(\);\s*if \(this\.keyword\) this\.keyword\(/);
     expect(readFileSync(join(audio, "wake-worker.ts"), "utf8")).toMatch(/const closed: WakeWorkerOut = \{ type: "closed" \};/);
     // 主執行緒只接受檢查過的事件
     expect(readFileSync(join(audio, "capture.ts"), "utf8")).toMatch(/if \(stopped \|\| !isWakeWorkerOut\(event\.data\)\) return;/);
@@ -249,7 +320,11 @@ describe("audio privacy (static)", () => {
     const product = ["src", "server", "shared", "desktop"].flatMap((d) => files(join(app, d))).filter((f) => !f.startsWith(audio));
     const IMPORTS_AUDIO = /(\bfrom\s+|\bimport\s*\(?\s*|\brequire\s*\(\s*)["'`][^"'`]*\baudio\/[\w-]+\.ts/;
     const importers = product.filter((f) => IMPORTS_AUDIO.test(readFileSync(f, "utf8"))).map((f) => relative(app, f));
-    expect(importers).toEqual([join("src", "main.ts")]);
+    expect(importers.sort()).toEqual([join("src", "main.ts"), join("src", "speaker", "recorder.ts"), join("src", "speaker", "worker.ts")].sort());
+    // SP-01 聲音登記只借用兩個無狀態的零件：擷取 AudioWorklet 的網址與取樣率轉換；碰不到 AudioFrontEnd／WakeController／KWS。
+    const audioImports = (rel: string) => [...readFileSync(join(app, rel), "utf8").matchAll(/from\s+["']([^"']*\baudio\/[^"']+)["']/g)].map((m) => m[1]);
+    expect(audioImports(join("src", "speaker", "recorder.ts"))).toEqual(["../audio/capture-worklet.ts?worker&url"]);
+    expect(audioImports(join("src", "speaker", "worker.ts"))).toEqual(["../audio/resample.ts"]);
     const main = readFileSync(join(src, "main.ts"), "utf8");
     const statics = [...main.matchAll(/^import\s+(type\s+)?[^;]*from\s+["']\.\/audio\/[^"']+["'];$/gm)];
     expect(statics.map((m) => Boolean(m[1]))).toEqual([true]); // 只有 import type（編譯後消失）
@@ -257,11 +332,11 @@ describe("audio privacy (static)", () => {
     const loader = main.slice(main.indexOf("function syncWake("), main.indexOf("function renderWakeIndicator("));
     expect(loader).toMatch(/if \(!view\) \{/);
     expect(loader.indexOf("if (!view)")).toBeLessThan(loader.indexOf('import("./audio/index.ts")'));
-    // 旗標關閉時 getMicrophone 是 browserRealtimeDeps 原本的函式：wakeMicrophone() 在沒有控制器時回空物件
+    // 旗標關閉時 getMicrophone 是 browserRealtimeDeps 的函式（audioDevices.openInput）：wakeMicrophone() 在沒有控制器時回空物件
     expect(main).toMatch(/const owner = wake;\s*if \(!owner\) return \{\};/);
     // 審查 M1／m9：保險的歸還只在沒有任何進行中或開始中的通話時；旗標在通話中關掉時等通話結束才結束常駐聆聽
     // WK-02：先停掉「沒人出聲就結束」的計時再歸還。
-    expect(main).toMatch(/if \(phase === "off" && !realtime\.on && !realtimeStarting\) \{\s*stopWakeCall\(\);\s*wake\?\.releaseAllLeases\(\);/);
+    expect(main).toMatch(/if \(phase === "off" && !realtime\.on && !realtimeStarting\) \{\s*stopWakeCall\(\);\s*wakeVoice\?\.cancel\(\);\s*wakeVoice\?\.stopCall\(\);\s*wake\?\.releaseAllLeases\(\);/);
     expect(main).toMatch(/releaseMicrophone: \(stream\) => \{\s*if \(wakeLevel\?\.stream === stream\) stopWakeLevel\(\);\s*owner\.releaseLease\(stream\);\s*\}/);
     // WK-02：喚醒開始的通話只把租到那一份的 RMS 數字交給計時（browserWatchLevel，不保存樣本）。
     expect(main).toMatch(/const stream = await owner\.lease\(\);\s*watchWakeLevel\(stream\);\s*return stream;/);
@@ -299,8 +374,46 @@ describe("audio privacy (static)", () => {
     const listener = on.mock.calls.find((c) => c[0] === "nous:power")![1] as (e: unknown, k: unknown) => void;
     for (const kind of ["suspend", "resume", "lock", "unlock", "shutdown", { kind: "resume" }, "resume; rm"]) listener({}, kind);
     expect(received).toEqual(["suspend", "resume", "lock", "unlock"]);
-    // preload 不碰 deviceId 或樣本
+    // preload 不碰樣本；喚醒回報不帶裝置（「聲音」選單的裝置清單另外整理，見下一個測試）
     expect(codeLines(join(app, "desktop", "preload.cjs")).filter(({ line }) => /deviceId|device_id|samples|Float32Array/.test(line))).toEqual([]);
+  });
+
+  it("preload passes the 聲音 menu report only in the sanitized shape (same rules as shared/audio-devices.ts and desktop/settings-menu.mjs)", async () => {
+    const preload = readFileSync(join(app, "desktop", "preload.cjs"), "utf8");
+    const exposed: Record<string, Record<string, (...args: unknown[]) => unknown>> = {};
+    const send = vi.fn();
+    const require = () => ({
+      contextBridge: { exposeInMainWorld: (key: string, api: Record<string, (...args: unknown[]) => unknown>) => (exposed[key] = api) },
+      ipcRenderer: { invoke: vi.fn(), send, sendSync: vi.fn(() => "zh-TW"), on: vi.fn(), removeListener: vi.fn() },
+    });
+    new Function("require", "process", preload)(require, { argv: [] });
+    const { sanitizeAudioMenuReport } = await import("../shared/audio-devices.ts");
+    const menu = await import("../desktop/settings-menu.mjs");
+    const samples: unknown[] = [
+      {
+        inputs: [{ id: "mic-a", label: "Mic\u0007 A", pcm: [1, 2] }, { id: "x".repeat(257), label: "long id" }, { id: "has space", label: "x" }, null],
+        outputs: Array.from({ length: 30 }, (_, i) => ({ id: `o${i}`, label: "y".repeat(200) })),
+        default_input: "Mic A", default_output: "", input_in_use: { id: null, label: "Mic A" }, output_in_use: { id: 3 },
+        input_fallback: true, output_fallback: "yes", labels: true, samples: new Float32Array(4),
+        input_status: { text: "使用中：{0}", values: ["Mic A", "extra"] }, output_status: { text: "播放時使用：{0}", values: ["Spk"] },
+      },
+      { inputs: [], outputs: [], input_status: { text: "rm -rf {0}", values: [] }, output_status: { text: "尚未回報", values: [] } },
+      "audio",
+      null,
+    ];
+    for (const audio of samples) {
+      bridge(exposed).reportState!({ voice: "off", activeTasks: 0, settings: "x", audio });
+      const sent = send.mock.lastCall![1] as { audio?: unknown };
+      const expected = sanitizeAudioMenuReport(audio);
+      expect(sent.audio ?? null).toEqual(expected);
+      expect(menu.sanitizeAudioMenuReport(audio)).toEqual(expected);
+    }
+    const first = sanitizeAudioMenuReport(samples[0])!;
+    expect(first.inputs).toEqual([{ id: "mic-a", label: "Mic A" }]);
+    expect(first.outputs).toHaveLength(24);
+    expect(first.outputs[0]!.label).toHaveLength(128);
+    expect(first).not.toHaveProperty("samples");
+    expect(first.input_status).toEqual({ text: "使用中：{0}", values: ["Mic A"] });
   });
 
   it("main.mjs forwards only the allowlisted wake report and power enums", () => {

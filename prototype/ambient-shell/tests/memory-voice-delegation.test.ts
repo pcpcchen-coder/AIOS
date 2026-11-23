@@ -90,7 +90,7 @@ function temp(prefix: string): string {
   return d;
 }
 
-function setup(options: { task?: boolean; apiKey?: boolean; unsealed?: boolean; logs?: string[] } = {}) {
+function setup(options: { task?: boolean; apiKey?: boolean; unsealed?: boolean; logs?: string[]; identity?: Parameters<typeof harness>[0]["identity"] } = {}) {
   const dataDir = temp("nous-mem4b-data-");
   const vault = SealedVault.open({ dir: join(dataDir, "sealed"), secretBox: fakeBox(randomBytes(32)), lockProvider: testLockProvider });
   vaults.push(vault);
@@ -102,6 +102,7 @@ function setup(options: { task?: boolean; apiKey?: boolean; unsealed?: boolean; 
     release: { task: options.task !== false, api_key: options.apiKey !== false },
     tasks: { sealed: () => !options.unsealed && store.sealed && store.vaultStatus().failure === null, mode: () => runner.mode, target: () => CLAUDE, submit: (input) => runner.submitProtected(input), publicGet: (id) => store.publicGet(id) },
     onResultsWithdrawn: (ids) => runner.revokeMemory(ids),
+    ...(options.identity ? { identity: options.identity } : {}),
   });
   if (options.logs) (h.service as unknown as { log: (l: string) => void }).log = (l) => void options.logs!.push(l);
   harnesses.push(h);
@@ -164,6 +165,46 @@ describe("MEM-4b pure policy", () => {
   it("the model gets a fixed sentence: no title, no counts", () => {
     expect(delegatedOutput("claude")).toEqual({ ok: true, status: "delegated", engine: "Claude", note: DELEGATED_NOTE });
     expect(DELEGATED_NOTE).toBe("已開始處理，完成會通知");
+  });
+});
+
+describe.skipIf(!realLockAvailable)("memory default (George 2026-11-02) × MEM-4b", () => {
+  async function withDefault() {
+    const candidate = { value: null as { person_id: string; name: string; at: number } | null };
+    const env = setup({ identity: { candidate: () => candidate.value, people: () => [{ person_id: "fam_000000000000000000000001", name: "George", minor: false }] } });
+    await george(env, { allow: [CLAUDE, CODEX] });
+    const token = await manage(env.h);
+    const status = await env.h.call({ op: "status" }) as unknown as { profiles: { id: string }[] };
+    await env.h.call({ op: "link_face", profile: status.profiles[0]!.id, person: "fam_000000000000000000000001", token });
+    await selectProfile(env.h, null);
+    candidate.value = { person_id: "fam_000000000000000000000001", name: "George", at: env.h.clock.now };
+    const binding = env.h.service.openVoice("live", { lookToTalk: true, rebuild: false, now: () => env.h.clock.now, asrGraceMs: 60, timer: () => () => {} });
+    const call = new FakeCall();
+    await binding.connect(async () => { binding.bind(call); return call; });
+    binding.started();
+    binding.afterGreeting(true);
+    binding.onAssistantFinal("我要用 George 的記憶，好嗎？", env.h.clock.now);
+    env.h.clock.now += 2000;
+    return { env, binding, call, port: binding.delegatePort() };
+  }
+
+  it("the request said right after the question selects George first, so the protected delegation carries George's memory (not household-only)", async () => {
+    const { env, binding, port } = await withDefault();
+    await say(binding, "幫我規劃一週晚餐", env.h);
+    expect((await env.h.call({ op: "status" })).presence).toMatchObject({ state: "selected", name: "George" });
+    const out = await ask(port, "規劃一週晚餐", env.h);
+    expect(out.kind).toBe("protected");
+    await env.runner.idle();
+    expect(env.exec.inputs).toEqual([{ title: "幫我規劃一週晚餐", facts: [expect.objectContaining({ text: "不吃香菜" })] }]);
+  });
+
+  it("a bare 「好」 answering the question only selects; it never becomes a delegation source sentence", async () => {
+    const { env, binding, call, port } = await withDefault();
+    await say(binding, "好", env.h);
+    expect((await env.h.call({ op: "status" })).presence).toMatchObject({ state: "selected", name: "George" });
+    const out = await ask(port, "好", env.h);
+    expect(out.kind).not.toBe("protected");
+    expect(delegated(call)).toEqual([]);
   });
 });
 

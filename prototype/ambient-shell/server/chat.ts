@@ -2,6 +2,7 @@ import { type Locale } from "../shared/i18n.mjs";
 import { computeProgress, sortForProgress } from "../shared/progress.ts";
 import type { Task } from "../shared/types.ts";
 import type { ContextFact } from "./memory/retrieve.ts";
+import { todayLine } from "./local-date.ts";
 
 // 語音對話模式：使用者和 AI 直接對談；需要較長的工作時，由 AI 以標記交辦成任務。
 
@@ -64,7 +65,7 @@ export function buildChatSystem(tasks: Iterable<Task>, now = new Date(), locale:
     "使用者隨時可能打斷你；被打斷後以使用者的新內容為準，不用重複剛才的話。",
     "需要即時或最新資訊（天氣、新聞、價格等）時，有上網搜尋工具就先查再答，回答講結論和數字；沒有工具或查不到時照實說。不確定的事要說是推測。",
     `如果使用者要你完成需要較長時間產出的工作（例如寫報告、整理資料、做規劃），先用一句話回應，然後在回覆最後另起一行輸出 ${DELEGATE_OPEN}任務描述${DELEGATE_CLOSE}，系統會把它交辦成背景任務並追蹤進度。只有使用者明確要你做事時才交辦；一般聊天和簡短問答直接回答。`,
-    `今天日期：${now.toISOString().slice(0, 10)}。`,
+    todayLine(now),
     list.length ? `目前的任務（真實狀態）：\n${list.join("\n")}` : "目前沒有交辦的任務。",
     // 記憶只由核心保存：模型不能自己宣稱記住（核心另在串流結束時檢查，沒有成功回條就補一句）。
     "你沒有保存記憶的能力。使用者要你記住或忘記某件事時，不要說「記住了」「已保存」「我會記得」或「已忘記」；保存與忘記由 Nous 核心處理並另外回報結果。",
