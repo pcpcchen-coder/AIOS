@@ -146,14 +146,20 @@ describe("HTTP (startNous, mock provider)", () => {
     expect((await post({ scope: "tonight" })).status).toBe(400);
     expect(((await (await post({ override: "auto" })).json()) as SettingsView).day_night?.override).toBeNull();
     // DN-3：頁面回報螢幕狀態，Pi 的 aios-display 讀；不合法 400，沒回報時是 on。
-    expect(await (await fetch(`${url}/api/terminal/display?terminal=rpi4`)).json()).toEqual({ screen: "on", fresh: false });
+    expect(await (await fetch(`${url}/api/terminal/display?terminal=rpi4`)).json()).toEqual({ screen: "on", fresh: false, window: null });
     const report = (body: unknown) => fetch(`${url}/api/terminal/display`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     expect((await report({ terminal: "rpi4", screen: "off" })).status).toBe(200);
-    expect(await (await fetch(`${url}/api/terminal/display?terminal=rpi4`)).json()).toEqual({ screen: "off", fresh: true });
+    expect(await (await fetch(`${url}/api/terminal/display?terminal=rpi4`)).json()).toEqual({ screen: "off", fresh: true, window: null });
     expect((await report({ terminal: "rpi4", screen: "dim" })).status).toBe(400);
     expect((await report({ terminal: "RPI 4", screen: "off" })).status).toBe(400);
     expect((await fetch(`${url}/api/terminal/display`)).status).toBe(400);
     expect(((await (await post({ screen_off: false })).json()) as SettingsView).day_night?.prefs.screen_off).toBe(false);
+    // WIN-1：Pi 設定的「離開全螢幕」；aios-display 從同一個 GET 拿到請求。
+    const win = (body: unknown) => fetch(`${url}/api/terminal/window`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    expect((await win({ terminal: "rpi4", mode: "window" })).status).toBe(200);
+    expect(await (await fetch(`${url}/api/terminal/display?terminal=rpi4`)).json()).toMatchObject({ window: "window" });
+    expect((await win({ terminal: "rpi4", mode: "maximized" })).status).toBe(400);
+    expect((await win({ terminal: "RPI 4", mode: "kiosk" })).status).toBe(400);
   });
 });
 
@@ -317,11 +323,11 @@ describe("DN-3 screen off late at night", () => {
   it("the core keeps the last report per terminal and falls back to on when it is stale or missing", () => {
     let now = 0;
     const d = new TerminalDisplay({ now: () => now });
-    expect(d.view("rpi4")).toEqual({ screen: "on", fresh: false });
+    expect(d.view("rpi4")).toEqual({ screen: "on", fresh: false, window: null });
     d.report("rpi4", "off");
-    expect(d.view("rpi4")).toEqual({ screen: "off", fresh: true });
-    expect(d.view("other")).toEqual({ screen: "on", fresh: false });
+    expect(d.view("rpi4")).toEqual({ screen: "off", fresh: true, window: null });
+    expect(d.view("other")).toEqual({ screen: "on", fresh: false, window: null });
     now = SCREEN_STALE_MS;
-    expect(d.view("rpi4")).toEqual({ screen: "on", fresh: false });
+    expect(d.view("rpi4")).toEqual({ screen: "on", fresh: false, window: null });
   });
 });

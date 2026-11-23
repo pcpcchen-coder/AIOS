@@ -114,6 +114,15 @@ find_chromium() {
 
 core_url() { printf 'http://localhost:%s%s' "$AIOS_PORT" "${1:-}"; }
 
+# WIN-1: full screen (kiosk) or a normal window. The Nous settings on this Pi ask through the core; aios-display
+# saves the answer here and restarts the kiosk unit. Anything but "window" means full screen.
+AIOS_WINDOW_MODE_FILE="$AIOS_CONFIG_DIR/window-mode"
+read_window_mode() {
+  local mode=""
+  [[ -f "$AIOS_WINDOW_MODE_FILE" ]] && mode="$(head -c 16 "$AIOS_WINDOW_MODE_FILE" 2>/dev/null || true)"
+  if [[ "${mode//[[:space:]]/}" == window ]]; then echo window; else echo kiosk; fi
+}
+
 # DN-3: how to turn the screen off and on. AIOS_DISPLAY_METHOD forces one of backlight, wlr-randr, xset or none;
 # otherwise the first that works wins: a writable DSI backlight, then wlr-randr (Wayland), then xset (X11).
 backlight_device() {

@@ -193,8 +193,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "8a4da842618f3225fff7d6b0d603d62881950c45c1e359beb3272ed7ba24ad1b",
-      "translationSha256": "49e0128fd815a964658cbc9a07fe17fb3bd1c552a6558cfecf487dfb57818b44"
+      "sourceSha256": "66fc4477cd3798029a0ee280127375ac7e420a67faaad17bc431ac9ef38fed83",
+      "translationSha256": "40795dba3b4749fc314637b88c47990a156fcf88f331e2f3ee419ee5d3915eb2"
     },
     {
       "source": "docs/README.md",
@@ -792,6 +792,13 @@
       "translationSha256": "dbd50d71ad5a8e4f78c9cb8982215f8ad8955026897ecb4bf8be1ec39b825093"
     },
     {
+      "source": "docs/validation/pi-exit-fullscreen-2026-11-23.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/pi-exit-fullscreen-2026-11-23.en.md",
+      "sourceSha256": "0e2158d6adc9b0a87a87c6ba0bd337ac1e8571698949fb60a44f17e9f4d4a681",
+      "translationSha256": "dcb98a9df3ae95f41989a7fe005d16d961d002e48d78db248ee125f6737e39e2"
+    },
+    {
       "source": "docs/validation/pi-family-recognition-2026-11-05.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/pi-family-recognition-2026-11-05.en.md",
@@ -1019,8 +1026,8 @@
       "source": "terminals/rpi4/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "terminals/rpi4/README.en.md",
-      "sourceSha256": "766754f355bde08d82c659e274c2dfa48d11f549eeae0cc2197a564175eacd7a",
-      "translationSha256": "51233f7de01a20e35fca243390ee7a67c66eddc3e6902e82dd706b609cd9b746"
+      "sourceSha256": "e803f0b091a0760298d81e2d666967cde1a92b7dcd41e9844f048dd5c7f16ad5",
+      "translationSha256": "6b1729eb179a29931ec410626318521a108901907fca7d368c192956b3238c37"
     }
   ]
 }

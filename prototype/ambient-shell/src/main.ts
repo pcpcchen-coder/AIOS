@@ -96,7 +96,8 @@ import { SettingsEntry, settingsEntryEnabled } from "./settings-entry.ts";
 import { voiceVolumeOutput } from "../shared/voice-volume.ts";
 import { activeOverride, currentLight, dayNightToolOutput, decideDayNight, INITIAL_LIGHT, nextLight, nightEffects, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type DayNightToolRequest, type LightState, type LumaThresholds, type NightEffects } from "../shared/day-night.ts";
 import { LightMeter, type LightWorkerLike } from "./light-meter.ts";
-import type { VoiceVolumePanelState } from "./views.ts";
+import type { TerminalWindowPanelState, VoiceVolumePanelState } from "./views.ts";
+import { WINDOW_NO_RESPONSE_MS, windowModeFromSearch } from "../shared/terminal-window.ts";
 import { classifySearchError, dismissEmptySearch, planSearchSurface, READ_ALONG_CHARS_PER_S, SEARCH_ERROR_TEXT, SearchPanelController, shouldAutoClose, UtteranceRequests } from "./search-panel.ts";
 import { searchToolOutput } from "../shared/web-search.ts";
 import { AUDIO_TEXT, inputStatus, labelBackfill, outputStatus, type AudioMenuReport, type AudioPrefsPatch } from "../shared/audio-devices.ts";
@@ -385,6 +386,11 @@ const artifacts = new Map<string, Artifact>();
 const artifactErrors = new Map<string, string>();
 /** 只有真實的使用者輸入會登記在這裡；Presentation Policy 以此驗證 user_request。 */
 const userRequestIds = new Set<string>();
+/** WIN-1：設定頁「離開全螢幕」按下後的狀態（頁面重新載入就清掉）。 */
+let terminalWindowStatus: TerminalWindowPanelState["status"] = null;
+let terminalWindowTimer: ReturnType<typeof setTimeout> | null = null;
+/** 這個頁面的終端識別碼（Mac 視窗是 null，不畫全螢幕這一段）。 */
+const windowTerminal = pageTerminal(location.search, !!window.nousDesktop);
 /** 使用者打開的設定畫面；不是 null 時其他事件不會把它收起（見 keepPinnedSettings）。只在 Pi 等終端頁面釘住。 */
 let pinnedSettings: Surface | null = null;
 const pinSettingsOnThisPage = settingsEntryEnabled({ search: location.search, desktop: !!window.nousDesktop });
@@ -3197,6 +3203,26 @@ const actions: ViewActions = {
     saveProfile(profile);
     render();
   },
+  setTerminalWindow(mode) {
+    if (!windowTerminal) return;
+    if (terminalWindowTimer !== null) clearTimeout(terminalWindowTimer);
+    terminalWindowStatus = { kind: "sent" };
+    render();
+    api.terminalWindow(windowTerminal, mode).then(
+      () => {
+        // 成功時 Pi 會重開 Chromium（頁面重新載入）；這麼久頁面還在就是 Pi 沒有套用。
+        terminalWindowTimer = setTimeout(() => {
+          terminalWindowTimer = null;
+          terminalWindowStatus = { kind: "no_response" };
+          render();
+        }, WINDOW_NO_RESPONSE_MS);
+      },
+      (err: unknown) => {
+        terminalWindowStatus = { kind: "error", message: err instanceof Error ? err.message : String(err) };
+        render();
+      },
+    );
+  },
   setVoiceVolume(request) {
     voiceVolume.change(request);
     render();
@@ -3928,7 +3954,7 @@ function renderSurface(): void {
       : s.kind === "search"
       ? `${s.surface_id}:${searchPanelKey()}` // 跟讀亮起不重建（applySearchHighlight）；每次換內容（含重選同一則）revision 加一才重畫
       : s.kind === "settings"
-      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${gpuDrawing}:${voiceVolumeKey()}:${s.message ?? ""}` // 聲音裝置清單、使用中的裝置、整合狀態（SP-1）或這台裝置的音量與亮暗門檻變了也重畫
+      ? `${s.surface_id}:${JSON.stringify(settings)}:${JSON.stringify(audioDevices.report())}:${JSON.stringify(integrationPanel)}:${JSON.stringify(voiceRelayPanel)}:${performanceProfile}:${gpuDrawing}:${voiceVolumeKey()}:${JSON.stringify(terminalWindowStatus)}:${s.message ?? ""}` // WIN-1 全螢幕按下後的狀態；聲音裝置清單、使用中的裝置、整合狀態（SP-1）或這台裝置的音量與亮暗門檻變了也重畫
       : s.kind === "progress"
       ? `${s.surface_id}:${progressStructureKey([...tasks.values()].map(shown))}:${s.message ?? ""}`
       : s.kind === "artifact"
@@ -3958,7 +3984,7 @@ function renderSurface(): void {
     ensureIntegrationStatus();
     // VCR-2：語音中繼診斷區也只在設定頁打開時查（核心註冊了 voice_relay 才有）。
     ensureVoiceRelay();
-    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats(), gpu: gpuDrawing, renderer: brain.rendererStatus() }, voiceVolume: voiceVolumePanel() });
+    el = renderSettings(settings, s.message, actions, { desktop: !!window.nousDesktop, terminalCamera: terminalCamera.local, audio: audioDevices.report(), integrations: settings?.integrations ? integrationPanel : null, voiceRelay: settings?.voice_relay === true ? voiceRelayPanel : null, performance: { profile: performanceProfile, stats: brain.frameStats(), gpu: gpuDrawing, renderer: brain.rendererStatus() }, voiceVolume: voiceVolumePanel(), terminalWindow: windowTerminal ? { current: windowModeFromSearch(location.search), status: terminalWindowStatus } : null });
   }
   else if (s.kind === "progress") {
     protectedTasks.want(sortForProgress([...tasks.values()]).slice(0, MAX_LISTED));

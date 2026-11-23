@@ -36,6 +36,7 @@ fake apt-cache
 fake id 'case "${1:-}" in -u) echo 1000 ;; -un) echo pi ;; *) echo "uid=1000(pi) gid=1000(pi)" ;; esac'
 fake hostname 'echo raspberrypi'
 fake systemctl '
+if [[ -n "${FAKE_SYSTEMCTL_FAIL:-}" && "$*" == *"restart aios-kiosk.service"* ]]; then exit 1; fi
 if [[ "${1:-} ${2:-}" == "--user is-active" ]]; then
   case "${3:-}" in
     aios-tunnel.service) if [[ -n "${FAKE_TUNNEL_INACTIVE:-}" ]]; then echo inactive; exit 3; fi ;;
@@ -79,7 +80,7 @@ if [[ -n "${FAKE_CURL_FAIL:-}" ]]; then
 fi
 case "$url" in
   */api/settings) body="{\"provider\":\"mock\"}" ;;
-  */api/terminal/display*) body="{\"screen\":\"${FAKE_SCREEN:-on}\",\"fresh\":true}" ;;
+  */api/terminal/display*) body="{\"screen\":\"${FAKE_SCREEN:-on}\",\"fresh\":true,\"window\":${FAKE_WINDOW:-null}}" ;;
   *) body="<!doctype html><script></script>" ;;
 esac
 if [[ -z "$out" || "$out" == - ]]; then printf "%s" "$body"; else printf "%s" "$body" >"$out"; fi
@@ -268,6 +269,37 @@ AIOS_DISPLAY_METHOD=bogus AIOS_DISPLAY_ONCE=1 "$LBIN/aios-display" >"$WORK/out" 
 status=$?
 set -e
 check "invalid AIOS_DISPLAY_METHOD exits 2" test "$status" = 2
+
+# WIN-1: the settings on this Pi ask for a window or full screen; aios-display saves it and restarts the kiosk once.
+rm -f "$CONF/window-mode"
+reset_calls
+check "aios-display with no window request leaves the mode alone" bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "no window request, no kiosk restart" lacks "restart aios-kiosk.service" "$CALLS"
+check "no window request, no mode file" test ! -e "$CONF/window-mode"
+reset_calls
+check "aios-display applies a window request" env FAKE_WINDOW='"window"' bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "window request saved" test "$(cat "$CONF/window-mode")" = window
+check "window request restarts the kiosk unit" called "systemctl --user --no-block restart aios-kiosk.service"
+reset_calls
+check "the same request again does not restart the kiosk" env FAKE_WINDOW='"window"' bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "no second restart" lacks "restart aios-kiosk.service" "$CALLS"
+reset_calls
+check "aios-kiosk in window mode" "$LBIN/aios-kiosk"
+window_call="$(grep '^chromium ' "$CALLS" || true)"
+check "window mode has no --kiosk" bash -c '! grep -qF -- " --kiosk" <<<"$1"' _ "$window_call"
+check "window mode opens the page with display=window" grep -qF -- " --app=http://localhost:8787/?terminal=rpi4&display=window" <<<"$window_call"
+check "window mode starts maximized" grep -qF -- " --start-maximized" <<<"$window_call"
+reset_calls
+check "aios-display applies a full-screen request" env FAKE_WINDOW='"kiosk"' bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "full-screen request saved" test "$(cat "$CONF/window-mode")" = kiosk
+check "full-screen request restarts the kiosk unit" called "systemctl --user --no-block restart aios-kiosk.service"
+reset_calls
+check "aios-kiosk back in full screen" "$LBIN/aios-kiosk"
+check "full screen has --kiosk again" grep -qF -- " --kiosk" <<<"$(grep '^chromium ' "$CALLS" || true)"
+reset_calls
+check "a restart that cannot be queued still lets aios-display finish" env FAKE_WINDOW='"window"' FAKE_SYSTEMCTL_FAIL=1 bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "a failed restart puts the saved mode back" test "$(cat "$CONF/window-mode")" = kiosk
+rm -f "$CONF/window-mode"
 
 doctor() {
   set +e

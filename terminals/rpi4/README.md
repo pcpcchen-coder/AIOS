@@ -29,7 +29,7 @@ Pi Chromium ──http://localhost:<AIOS_PORT>──> Pi 127.0.0.1:<AIOS_PORT>
 | `bin/aios-tunnel` | autossh 通道（`aios-tunnel.service` 執行） |
 | `bin/aios-kiosk` | 等核心可用後開 Chromium 全螢幕（`aios-kiosk.service` 執行） |
 | `bin/aios-session-start` | 桌面登入時把顯示環境交給 systemd，再啟動 `aios-kiosk.service` 與 `aios-display.service` |
-| `bin/aios-display` | 夜間關螢幕：每 2 秒經通道讀核心，照 Pi 頁面的決定開關螢幕（`aios-display.service` 執行） |
+| `bin/aios-display` | 夜間關螢幕：每 2 秒經通道讀核心，照 Pi 頁面的決定開關螢幕；也套用設定裡的「離開全螢幕／回到全螢幕」（存在 `~/.config/aios-terminal/window-mode`，再重開 `aios-kiosk.service`）（`aios-display.service` 執行） |
 | `bin/aios-doctor` | 診斷，逐項輸出 PASS／WARN／FAIL／SKIP |
 | `systemd/`、`autostart/` | 使用者服務與桌面自動啟動檔 |
 | `tests/dry-run.sh` | 容器內可跑的 dry-run 測試（假指令），CI 與 `scripts/verify-aios.mjs` 都會跑 |
@@ -120,7 +120,7 @@ aios-doctor
 <a id="settings-entry"></a>
 ## 設定按鈕
 
-Pi 頁面右下角有一個齒輪按鈕，用滑鼠點一下就打開這台 Pi 的設定畫面，再點一下收起。設定畫面打開後會一直留在最上層（人離開、喚醒、開始語音、Esc 都不會關），只有點「收起」或齒輪才關，文字放大 1.5 倍（[2026-11-08 紀錄](../../docs/validation/pinned-settings-2026-11-08.md)）；鏡頭狀態點在它左邊。設定畫面裡有這台 Pi 能用的全部設定：AI 引擎、即時語音、語音、鏡頭與手勢（含「顯示鏡頭畫面」）、聲音、對話音量、畫面效能、主動提醒、時鐘與天氣、家中狀態、回憶模式。家人登記與記憶管理仍只在 Mac 的 App。Mac 有選單列，所以 Mac 的視窗沒有這個按鈕。見[驗證紀錄](../../docs/validation/pi-settings-entry-2026-11-07.md)。
+Pi 頁面右下角有一個齒輪按鈕，用滑鼠點一下就打開這台 Pi 的設定畫面，再點一下收起。設定畫面打開後會一直留在最上層（人離開、喚醒、開始語音、Esc 都不會關），只有點「收起」或齒輪才關，文字放大 1.5 倍（[2026-11-08 紀錄](../../docs/validation/pinned-settings-2026-11-08.md)）；鏡頭狀態點在它左邊。設定畫面裡有這台 Pi 能用的全部設定：AI 引擎、即時語音、語音、鏡頭與手勢（含「顯示鏡頭畫面」）、聲音、對話音量、畫面效能、主動提醒、時鐘與天氣、家中狀態、回憶模式。家人登記與記憶管理仍只在 Mac 的 App。設定裡的「這台 Pi 的全螢幕」可以離開全螢幕改成一般視窗，或回到全螢幕；需要更新 Pi 套件（重新執行 `install.sh`），見[紀錄](../../docs/validation/pi-exit-fullscreen-2026-11-23.md)。Mac 有選單列，所以 Mac 的視窗沒有這個按鈕。見[驗證紀錄](../../docs/validation/pi-settings-entry-2026-11-07.md)。
 
 ## 畫面效能
 
