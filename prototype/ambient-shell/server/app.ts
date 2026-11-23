@@ -51,6 +51,7 @@ import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHist
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
 import { HOME_OVERVIEW_PATH, type HomeCornerPrefs, type HomeCornerPrefsPatch, type HomeCornerSettingsView, type HomeOverviewView } from "../shared/home-corner.ts";
+import { isWindowMode, TERMINAL_WINDOW_PATH, type WindowMode } from "../shared/terminal-window.ts";
 import { isScreenState, TERMINAL_DISPLAY_PATH, type DayNightPatch, type DayNightSettingsView, type ScreenState } from "../shared/day-night.ts";
 import { WEATHER_NOW_PATH, type ClockPrefs, type ClockPrefsPatch, type ClockSettingsView, type WeatherNowView } from "../shared/clock.ts";
 import type { ProactivePrefs, ProactivePrefsPatch, ProactiveSettingsView } from "../shared/proactive.ts";
@@ -204,7 +205,7 @@ export interface AppOptions {
    */
   terminals?: { heartbeat(id: string): void };
   /** DN-3：終端機的螢幕狀態（頁面回報、Pi 的 aios-display 讀）。未提供時兩條路由 404。 */
-  terminalDisplay?: { report(id: string, screen: ScreenState): void; view(id: string): { screen: ScreenState; fresh: boolean } };
+  terminalDisplay?: { report(id: string, screen: ScreenState): void; requestWindow(id: string, mode: WindowMode): void; view(id: string): { screen: ScreenState; fresh: boolean; window: WindowMode | null } };
   /**
    * PRO-1：主動提醒（招呼後接今天的天氣）。view 給 settings.proactive；prefetch 在看著說話或喚醒開始時先取天氣。
    * 未提供時（舊的組裝、測試）settings 沒有 proactive、POST /api/settings/proactive 回 404。
@@ -638,6 +639,14 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const terminal = params.get("terminal");
       if (!isTerminalId(terminal)) throw new HttpError(400, "terminal must be a lowercase id (a-z, 0-9, -; up to 32 characters)");
       return sendJson(res, 200, options.terminalDisplay.view(terminal));
+    }
+    if (options.terminalDisplay && method === "POST" && path === TERMINAL_WINDOW_PATH) {
+      // WIN-1：Pi 設定的「離開全螢幕／回到全螢幕」；aios-display 讀 GET /api/terminal/display 時一起拿到。只有識別碼與模式，不記 log。
+      const body = await readJson(req);
+      if (!isTerminalId(body.terminal)) throw new HttpError(400, "terminal must be a lowercase id (a-z, 0-9, -; up to 32 characters)");
+      if (!isWindowMode(body.mode)) throw new HttpError(400, "mode must be kiosk or window");
+      options.terminalDisplay.requestWindow(body.terminal, body.mode);
+      return sendJson(res, 200, { ok: true });
     }
     if (method === "POST" && path === "/api/terminal/identity" && options.identity?.handle) {
       // RPI-ID：Pi 的認人（特徵向量，不是影像或錄音）；不記 log（取樣約 2 Hz），核心自己記狀態轉換與問候決策。

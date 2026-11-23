@@ -25,9 +25,15 @@ until curl -fsS -o /dev/null --max-time 3 "$(core_url /api/settings)" 2>/dev/nul
   sleep 2
 done
 
+# WIN-1: full screen unless the Nous settings on this Pi asked for a window (saved by aios-display).
+if [[ "$(read_window_mode)" == window ]]; then
+  mode_args=(--start-maximized "--app=$(core_url '/?terminal=rpi4&display=window')")
+else
+  mode_args=(--kiosk "--app=$(core_url '/?terminal=rpi4')")
+fi
+
 exec "$chromium" \
-  --kiosk \
-  "--app=$(core_url '/?terminal=rpi4')" \
+  "${mode_args[@]}" \
   "--user-data-dir=$AIOS_PROFILE_DIR" \
   --autoplay-policy=no-user-gesture-required \
   --disable-features=WebRtcPipeWireCamera \

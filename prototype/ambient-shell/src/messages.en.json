@@ -1156,5 +1156,14 @@
   "第 {0} 則": "Result {0}",
   "這則沒有摘要，只有來源": "No summary for this result, only the source",
   "重點": "Key points",
-  "也可以說「收起」": "You can also say “dismiss”"
+  "也可以說「收起」": "You can also say “dismiss”",
+  "這台 Pi 的全螢幕": "Full screen on this Pi",
+  "離開全螢幕": "Exit full screen",
+  "回到全螢幕": "Back to full screen",
+  "目前：全螢幕": "Now: full screen",
+  "目前：視窗": "Now: window",
+  "按下後 Pi 會在幾秒內重新開啟 Nous 畫面（進行中的語音對話會中斷）。視窗模式下可以用 Pi 的桌面；關掉視窗後會自動再開。重開機後沿用最後的選擇。": "After you press it, the Pi reopens the Nous screen within a few seconds (a voice conversation in progress is cut off). In window mode you can use the Pi desktop; closing the window opens it again automatically. The last choice is kept after a reboot.",
+  "已送出，Pi 會在幾秒內重新開啟畫面…": "Sent; the Pi will reopen the screen in a few seconds…",
+  "Pi 沒有反應：請確認 Pi 套件已更新（在 Pi 上重新執行 install.sh），而且 aios-display 服務在執行。": "The Pi did not respond: make sure the Pi kit is updated (re-run install.sh on the Pi) and the aios-display service is running.",
+  "沒有送出：{0}": "Not sent: {0}"
 }

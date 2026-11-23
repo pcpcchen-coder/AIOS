@@ -29,7 +29,7 @@ Kit contents:
 | `bin/aios-tunnel` | autossh tunnel (run by `aios-tunnel.service`) |
 | `bin/aios-kiosk` | Waits for the core, then opens Chromium full screen (run by `aios-kiosk.service`) |
 | `bin/aios-session-start` | On desktop login, hands the display environment to systemd and starts `aios-kiosk.service` and `aios-display.service` |
-| `bin/aios-display` | Night screen off: reads the core over the tunnel every 2 s and turns the screen off or on as the Pi page decides (run by `aios-display.service`) |
+| `bin/aios-display` | Night screen off: reads the core over the tunnel every 2 s and turns the screen off or on as the Pi page decides; also applies "Exit full screen/Back to full screen" from the settings (saved in `~/.config/aios-terminal/window-mode`, then restarts `aios-kiosk.service`) (run by `aios-display.service`) |
 | `bin/aios-doctor` | Diagnostics with one PASS / WARN / FAIL / SKIP line per check |
 | `systemd/`, `autostart/` | User services and the desktop autostart entry |
 | `tests/dry-run.sh` | Dry-run test with fake commands that runs in a container; CI and `scripts/verify-aios.mjs` run it |
@@ -122,7 +122,7 @@ While using the Pi, choose "Enter service mode (for the Pi)" in the Mac menu bar
 <a id="settings-entry"></a>
 ## Settings button
 
-The Pi page has a gear button in the bottom-right corner. Click it once with the mouse to open this Pi's settings and again to close them. Once open, settings stay on top (the person leaving, a wake word, starting voice or Esc do not close them) until you click "收起" (Close) or the gear, and their text is 1.5× larger ([2026-11-08 record](../../docs/validation/pinned-settings-2026-11-08.en.md)); the camera status dot sits to its left. The settings page holds every setting available on this Pi: AI engine, realtime voice, voice, camera and gestures (including "Show camera view"), sound, voice volume, display performance, proactive reminders, clock and weather, home status, and memories mode. Family enrolment and memory management remain in the Mac App only. The Mac has a menu bar, so the Mac window has no such button. See the [validation record](../../docs/validation/pi-settings-entry-2026-11-07.en.md).
+The Pi page has a gear button in the bottom-right corner. Click it once with the mouse to open this Pi's settings and again to close them. Once open, settings stay on top (the person leaving, a wake word, starting voice or Esc do not close them) until you click "收起" (Close) or the gear, and their text is 1.5× larger ([2026-11-08 record](../../docs/validation/pinned-settings-2026-11-08.en.md)); the camera status dot sits to its left. The settings page holds every setting available on this Pi: AI engine, realtime voice, voice, camera and gestures (including "Show camera view"), sound, voice volume, display performance, proactive reminders, clock and weather, home status, and memories mode. Family enrolment and memory management remain in the Mac App only. "Full screen on this Pi" in the settings switches between full screen and a normal window; it needs the updated Pi kit (re-run `install.sh`), see the [record](../../docs/validation/pi-exit-fullscreen-2026-11-23.en.md). The Mac has a menu bar, so the Mac window has no such button. See the [validation record](../../docs/validation/pi-settings-entry-2026-11-07.en.md).
 
 ## Display performance
 

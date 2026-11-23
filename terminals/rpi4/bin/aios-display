@@ -38,9 +38,25 @@ if [[ -z "$once" ]]; then
   trap 'set_screen "$method" on >/dev/null 2>&1 || true' EXIT
 fi
 
+# WIN-1: the Nous settings on this Pi asked for full screen or a window. Save it and reopen the kiosk unit
+# (only when it differs from what is saved, so a request the core keeps for a minute restarts Chromium once).
+apply_window() {
+  local want="$1"
+  [[ "$want" == "$(read_window_mode)" ]] && return 0
+  mkdir -p "$AIOS_CONFIG_DIR"
+  if printf '%s\n' "$want" >"$AIOS_WINDOW_MODE_FILE"; then
+    t "畫面模式：$want；重新開啟 aios-kiosk.service" "Window mode: $want; restarting aios-kiosk.service"
+    systemctl --user restart aios-kiosk.service || t "無法重新開啟 aios-kiosk.service" "Could not restart aios-kiosk.service" >&2
+  else
+    t "無法寫入 $AIOS_WINDOW_MODE_FILE" "Could not write $AIOS_WINDOW_MODE_FILE" >&2
+  fi
+}
+
 while :; do
   body="$(curl -fsS --max-time 3 "$(core_url '/api/terminal/display?terminal=rpi4')" 2>/dev/null || true)"
   if [[ "$body" == *'"screen":"off"'* ]]; then apply off; else apply on; fi
+  if [[ "$body" == *'"window":"window"'* ]]; then apply_window window
+  elif [[ "$body" == *'"window":"kiosk"'* ]]; then apply_window kiosk; fi
   [[ -z "$once" ]] || break
   sleep "$interval"
 done

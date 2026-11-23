@@ -23,6 +23,7 @@ import type { IntegrationServiceStatus, IntegrationStatusView, ToolResultStatus 
 import { GENRES, MUSIC_SERVICES, type IntentId, type MusicService, type Rate, type RelayRefusal, type RelayTrial, type TrialSummary, type VoiceRelayIntentView, type VoiceRelayPart, type VoiceRelayPreview, type VoiceRelayTargetView, type VoiceRelayTemplateView, type VoiceRelayView } from "../shared/voice-relay.ts";
 import type { VoiceRelayAdoptBody, VoiceRelayPlayBody, VoiceRelayPreviewBody, VoiceRelayProfileBody, VoiceRelaySlots, VoiceRelayTargetBody, VoiceRelayTrialBody, VoiceRelayUnadoptBody } from "./api.ts";
 import { dayNightReasonText, VOICE_VOLUME_TEXT } from "./voice-volume.ts";
+import { TERMINAL_WINDOW_TEXT, type WindowMode } from "../shared/terminal-window.ts";
 import { WAKE_THRESHOLD_OFFSETS, type WakePrefsPatch, type WakeSettingsView } from "../shared/wake.ts";
 import { VOICE_VOLUME_DEFAULT, VOICE_VOLUME_MAX, VOICE_VOLUME_MIN, type VoiceVolumeRequest } from "../shared/voice-volume.ts";
 import { brightOptions, darkOptions, DEFAULT_LUMA_THRESHOLDS, NIGHT_VOLUME_DEFAULT, type LumaThresholds, type DayNightDecision, type DayNightMode, type DayNightOverride, type DayNightPatch, type DayNightPrefs, type LightLevel } from "../shared/day-night.ts";
@@ -90,6 +91,8 @@ export interface ViewActions {
   setGpuDrawing?(on: boolean): void;
   /** VOL-1：這台裝置的對話音量（立即套用並保存在這個頁面）。 */
   setVoiceVolume?(request: VoiceVolumeRequest): void;
+  /** WIN-1：Pi 的「離開全螢幕／回到全螢幕」。 */
+  setTerminalWindow?(mode: WindowMode): void;
   /** VOL-2：夜間時段與「用鏡頭亮度判斷」（立即套用並保存在這個頁面）。 */
   setDayNight?(patch: DayNightPatch): void;
   /** LUX-1：這台裝置的鏡頭亮暗門檻。 */
@@ -421,6 +424,15 @@ export interface SettingsRenderOptions {
   performance?: PerformancePanelState | null;
   /** VOL-1／VOL-2：這台裝置的對話音量（日間、夜間與判斷）；沒有時不畫。 */
   voiceVolume?: VoiceVolumePanelState | null;
+  /** WIN-1：只有 Pi 等終端頁面才有。 */
+  terminalWindow?: TerminalWindowPanelState | null;
+}
+
+export interface TerminalWindowPanelState {
+  /** 這個頁面現在是全螢幕還是視窗（看網址的 display=window）。 */
+  current: WindowMode;
+  /** 按下後的狀態：sent 已送出、no_response Pi 沒反應、error 送出失敗（附訊息）。 */
+  status: { kind: "sent" } | { kind: "no_response" } | { kind: "error"; message: string } | null;
 }
 
 export interface VoiceVolumePanelState {
@@ -521,6 +533,7 @@ export function renderSettings(
     settings.audio && renderAudioSettings(settings.audio.prefs, options.audio ?? null, actions),
     options.voiceVolume && renderVoiceVolumeSettings(options.voiceVolume, actions),
     settings.wake && renderWakeThresholdSettings(settings.wake, actions),
+    options.terminalWindow && renderTerminalWindowSettings(options.terminalWindow, actions),
     options.performance && renderPerformanceSettings(options.performance, actions),
     settings.proactive && renderProactiveSettings(settings.proactive, actions),
     settings.clock && renderClockSettings(settings.clock, actions),
@@ -789,6 +802,27 @@ function lightLine(state: VoiceVolumePanelState): string {
   if (!state.light) return t(VOICE_VOLUME_TEXT.light.unknown);
   const level = state.light.level === "dark" ? VOICE_VOLUME_TEXT.light.dark : state.light.level === "bright" ? VOICE_VOLUME_TEXT.light.bright : VOICE_VOLUME_TEXT.light.middle;
   return t(VOICE_VOLUME_TEXT.light.reading, String(Math.round(state.light.luma)), t(level));
+}
+
+/** WIN-1：Pi 的全螢幕（George 2026-11-23）：一個按鈕在「離開全螢幕」與「回到全螢幕」之間切換，下面照實寫按下後的狀態。 */
+export function renderTerminalWindowSettings(state: TerminalWindowPanelState, actions: ViewActions): HTMLElement {
+  const target: WindowMode = state.current === "kiosk" ? "window" : "kiosk";
+  const b = button(target === "window" ? TERMINAL_WINDOW_TEXT.exit : TERMINAL_WINDOW_TEXT.enter, () => actions.setTerminalWindow?.(target), "btn--primary");
+  b.disabled = !actions.setTerminalWindow || state.status?.kind === "sent";
+  const status =
+    state.status?.kind === "sent" ? t(TERMINAL_WINDOW_TEXT.pending)
+    : state.status?.kind === "no_response" ? t(TERMINAL_WINDOW_TEXT.noResponse)
+    : state.status?.kind === "error" ? t(TERMINAL_WINDOW_TEXT.failed, t(state.status.message))
+    : null;
+  return h(
+    "section",
+    { class: "camera-settings terminal-window-settings" },
+    h("h3", {}, t(TERMINAL_WINDOW_TEXT.title)),
+    h("p", {}, t(state.current === "kiosk" ? TERMINAL_WINDOW_TEXT.nowKiosk : TERMINAL_WINDOW_TEXT.nowWindow)),
+    h("div", { class: "actions" }, b),
+    status && h("p", { class: state.status?.kind === "sent" ? "muted small" : "error-text", role: "status" }, status),
+    h("p", { class: "muted small" }, t(TERMINAL_WINDOW_TEXT.note)),
+  );
 }
 
 /**
