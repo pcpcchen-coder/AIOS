@@ -36,6 +36,7 @@ fake apt-cache
 fake id 'case "${1:-}" in -u) echo 1000 ;; -un) echo pi ;; *) echo "uid=1000(pi) gid=1000(pi)" ;; esac'
 fake hostname 'echo raspberrypi'
 fake systemctl '
+if [[ -n "${FAKE_SYSTEMCTL_FAIL:-}" && "$*" == *"restart aios-kiosk.service"* ]]; then exit 1; fi
 if [[ "${1:-} ${2:-}" == "--user is-active" ]]; then
   case "${3:-}" in
     aios-tunnel.service) if [[ -n "${FAKE_TUNNEL_INACTIVE:-}" ]]; then echo inactive; exit 3; fi ;;
@@ -278,7 +279,7 @@ check "no window request, no mode file" test ! -e "$CONF/window-mode"
 reset_calls
 check "aios-display applies a window request" env FAKE_WINDOW='"window"' bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
 check "window request saved" test "$(cat "$CONF/window-mode")" = window
-check "window request restarts the kiosk unit" called "systemctl --user restart aios-kiosk.service"
+check "window request restarts the kiosk unit" called "systemctl --user --no-block restart aios-kiosk.service"
 reset_calls
 check "the same request again does not restart the kiosk" env FAKE_WINDOW='"window"' bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
 check "no second restart" lacks "restart aios-kiosk.service" "$CALLS"
@@ -291,10 +292,13 @@ check "window mode starts maximized" grep -qF -- " --start-maximized" <<<"$windo
 reset_calls
 check "aios-display applies a full-screen request" env FAKE_WINDOW='"kiosk"' bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
 check "full-screen request saved" test "$(cat "$CONF/window-mode")" = kiosk
-check "full-screen request restarts the kiosk unit" called "systemctl --user restart aios-kiosk.service"
+check "full-screen request restarts the kiosk unit" called "systemctl --user --no-block restart aios-kiosk.service"
 reset_calls
 check "aios-kiosk back in full screen" "$LBIN/aios-kiosk"
 check "full screen has --kiosk again" grep -qF -- " --kiosk" <<<"$(grep '^chromium ' "$CALLS" || true)"
+reset_calls
+check "a restart that cannot be queued still lets aios-display finish" env FAKE_WINDOW='"window"' FAKE_SYSTEMCTL_FAIL=1 bash -c "$(declare -f display_once); LBIN='$LBIN' WORK='$WORK' display_once"
+check "a failed restart puts the saved mode back" test "$(cat "$CONF/window-mode")" = kiosk
 rm -f "$CONF/window-mode"
 
 doctor() {

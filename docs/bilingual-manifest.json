@@ -193,8 +193,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "dd1e3b471fba47a90c89f912d58151d3a476c8d42c29bc989a1b14d5b54435d1",
-      "translationSha256": "72a333ca917c59634a92ba6099760301e23c10260da521d405db8d40de90f8ef"
+      "sourceSha256": "66fc4477cd3798029a0ee280127375ac7e420a67faaad17bc431ac9ef38fed83",
+      "translationSha256": "40795dba3b4749fc314637b88c47990a156fcf88f331e2f3ee419ee5d3915eb2"
     },
     {
       "source": "docs/README.md",
@@ -795,8 +795,8 @@
       "source": "docs/validation/pi-exit-fullscreen-2026-11-23.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/pi-exit-fullscreen-2026-11-23.en.md",
-      "sourceSha256": "37f6a6742ccd16994de13351562a95e1dd4a4eefffdcc2a7b7819659005e5940",
-      "translationSha256": "188541491b03e750565f39e34ca6ef9fe9020175a47b8fd2678fc3a135643e1f"
+      "sourceSha256": "0e2158d6adc9b0a87a87c6ba0bd337ac1e8571698949fb60a44f17e9f4d4a681",
+      "translationSha256": "dcb98a9df3ae95f41989a7fe005d16d961d002e48d78db248ee125f6737e39e2"
     },
     {
       "source": "docs/validation/pi-family-recognition-2026-11-05.md",

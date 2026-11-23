@@ -20,7 +20,7 @@ Pi 的 Chromium 是用 `--kiosk` 開的。頁面裡的 JavaScript 沒辦法離�
    - 核心只在記憶體記住最近一次請求，60 秒內有效。
    - Pi 原本就在讀的 `GET /api/terminal/display?terminal=rpi4` 多回一個 `window` 欄位，過期或沒有請求時是 `null`。
 3. **Pi 套件**：
-   - `aios-display` 原本就每 2 秒讀核心。讀到的 `window` 和 Pi 上存的不同時，寫進 `~/.config/aios-terminal/window-mode`，再執行 `systemctl --user restart aios-kiosk.service`。同一個請求不會重開第二次。
+   - `aios-display` 原本就每 2 秒讀核心。讀到的 `window` 和 Pi 上存的不同時，寫進 `~/.config/aios-terminal/window-mode`，再排一個 `systemctl --user --no-block restart aios-kiosk.service`（不等舊的 Chromium 關掉，夜間關螢幕的迴圈不會卡住）。同一個請求不會重開第二次；連排程都失敗時，把存的模式改回原本的，和畫面保持一致。
    - `aios-kiosk` 讀這個檔：
      - 全螢幕用 `--kiosk`；
      - 視窗模式改用 `--start-maximized`，網址加 `&display=window`，頁面就知道自己是視窗。
@@ -38,6 +38,7 @@ Pi 的 Chromium 是用 `--kiosk` 開的。頁面裡的 JavaScript 沒辦法離�
 
 - 切換時 Chromium 會重開，進行中的語音對話會中斷；鏡頭與麥克風權限存在同一個 profile，不用重新允許。
 - 視窗模式下，關掉視窗後 `aios-kiosk.service`（`Restart=always`）約 3 秒後會再開。要完全關掉，執行 `systemctl --user stop aios-kiosk.service`。
+- 在別台電腦用 `?terminal=rpi4` 開的瀏覽器頁面也有這一段，按下也會切換 Pi；那個頁面不會重新載入，所以 20 秒後會誤顯示「Pi 沒有反應」。
 - Mac 的核心重新啟動後，記憶體裡的請求會消失；Pi 維持檔案裡的模式，不會被改回。
 
 ## 測試
@@ -50,11 +51,12 @@ Pi 的 Chromium 是用 `--kiosk` 開的。頁面裡的 JavaScript 沒辦法離�
 - `tests/day-night-mode.test.ts`：
   - HTTP 的 `window` 欄位；
   - `POST /api/terminal/window` 合法時是 200；mode 或 terminal 不合法時是 400。
-- `terminals/rpi4/tests/dry-run.sh`（147 項，新增 16 項）：
+- `terminals/rpi4/tests/dry-run.sh`（149 項，新增 18 項）：
   - 沒有請求時不動；
   - 收到視窗請求時存檔、重開一次，同一個請求不重開第二次；
   - 視窗模式的 Chromium 沒有 `--kiosk`，帶 `--start-maximized` 與 `display=window`；
   - 收到全螢幕請求時改回 `--kiosk`；
+  - 重開排不進去時，存的模式改回原本的；
   - shellcheck 乾淨。
 - **無頭 Chromium（mock 核心）：**
   - Pi 頁面設定裡有這一段，全螢幕頁面寫「目前：全螢幕」，帶 `display=window` 的寫「目前：視窗」。

@@ -20,7 +20,7 @@ Chromium on the Pi runs with `--kiosk`. JavaScript in the page cannot leave kios
    - The core keeps only the latest request, in memory, valid for 60 seconds.
    - The `GET /api/terminal/display?terminal=rpi4` that the Pi already reads gains a `window` field, which is `null` when there is no request or it has expired.
 3. **Pi kit**:
-   - `aios-display` already reads the core every 2 seconds. When the `window` it reads differs from what the Pi has saved, it writes `~/.config/aios-terminal/window-mode` and runs `systemctl --user restart aios-kiosk.service`. The same request never restarts it twice.
+   - `aios-display` already reads the core every 2 seconds. When the `window` it reads differs from what the Pi has saved, it writes `~/.config/aios-terminal/window-mode` and queues `systemctl --user --no-block restart aios-kiosk.service` (without waiting for the old Chromium to stop, so the night screen loop never stalls). The same request never restarts it twice; if even queuing fails, the saved mode is put back so it keeps matching the screen.
    - `aios-kiosk` reads this file:
      - full screen uses `--kiosk`;
      - window mode uses `--start-maximized` instead and adds `&display=window` to the URL, so the page knows it is in a window.
@@ -38,6 +38,7 @@ This change touches the Pi kit's `aios-kiosk`, `aios-display` and `lib/common.sh
 
 - Switching restarts Chromium, so a voice conversation in progress is cut off. Camera and microphone permissions live in the same profile and do not need to be granted again.
 - In window mode, closing the window makes `aios-kiosk.service` (`Restart=always`) reopen it after about 3 seconds. To close it for good, run `systemctl --user stop aios-kiosk.service`.
+- A browser page opened elsewhere with `?terminal=rpi4` also shows this section and really switches the Pi; that page does not reload, so after 20 seconds it wrongly shows "The Pi did not respond".
 - When the core on the Mac restarts, the in-memory request is lost; the Pi keeps the mode in its file and is not switched back.
 
 ## Tests
@@ -50,11 +51,12 @@ This change touches the Pi kit's `aios-kiosk`, `aios-display` and `lib/common.sh
 - `tests/day-night-mode.test.ts`:
   - the `window` field over HTTP;
   - `POST /api/terminal/window` returns 200 when valid and 400 for a bad mode or terminal.
-- `terminals/rpi4/tests/dry-run.sh` (147 checks, 16 new):
+- `terminals/rpi4/tests/dry-run.sh` (149 checks, 18 new):
   - nothing happens without a request;
   - a window request is saved and restarts the kiosk once, and the same request does not restart it again;
   - window mode Chromium has no `--kiosk`, with `--start-maximized` and `display=window`;
   - a full-screen request switches back to `--kiosk`;
+  - when the restart cannot be queued, the saved mode is put back;
   - shellcheck is clean.
 - **Headless Chromium (mock core):**
   - The Pi page's settings show the section: "Now: full screen" on the full-screen page and "Now: window" with `display=window`.

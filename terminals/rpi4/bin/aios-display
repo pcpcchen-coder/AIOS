@@ -40,15 +40,21 @@ fi
 
 # WIN-1: the Nous settings on this Pi asked for full screen or a window. Save it and reopen the kiosk unit
 # (only when it differs from what is saved, so a request the core keeps for a minute restarts Chromium once).
+# --no-block: queue the restart without waiting for the old Chromium to stop, so the screen loop never stalls.
+# If the restart cannot even be queued, put the saved mode back so it keeps matching what is on screen.
 apply_window() {
-  local want="$1"
-  [[ "$want" == "$(read_window_mode)" ]] && return 0
+  local want="$1" was
+  was="$(read_window_mode)"
+  [[ "$want" == "$was" ]] && return 0
   mkdir -p "$AIOS_CONFIG_DIR"
-  if printf '%s\n' "$want" >"$AIOS_WINDOW_MODE_FILE"; then
-    t "畫面模式：$want；重新開啟 aios-kiosk.service" "Window mode: $want; restarting aios-kiosk.service"
-    systemctl --user restart aios-kiosk.service || t "無法重新開啟 aios-kiosk.service" "Could not restart aios-kiosk.service" >&2
-  else
+  if ! printf '%s\n' "$want" >"$AIOS_WINDOW_MODE_FILE"; then
     t "無法寫入 $AIOS_WINDOW_MODE_FILE" "Could not write $AIOS_WINDOW_MODE_FILE" >&2
+    return 0
+  fi
+  t "畫面模式：$want；重新開啟 aios-kiosk.service" "Window mode: $want; restarting aios-kiosk.service"
+  if ! systemctl --user --no-block restart aios-kiosk.service; then
+    t "無法重新開啟 aios-kiosk.service；畫面模式維持 $was" "Could not restart aios-kiosk.service; window mode stays $was" >&2
+    printf '%s\n' "$was" >"$AIOS_WINDOW_MODE_FILE" || true
   fi
 }
 
