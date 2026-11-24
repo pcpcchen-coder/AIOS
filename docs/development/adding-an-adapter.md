@@ -81,7 +81,8 @@ npm run catalog -- --check
 npm run catalog -- --markdown
 npm run catalog -- --json
 npm run typecheck
-npx vitest run tests/capability-catalog.test.ts
+npx vitest run tests/capability-catalog.test.ts tests/commands-from-catalog.test.ts
+npm run docs:commands
 ```
 
 `--check` 在漏寫 summary 或例句、缺英文、`domain` 不合法、ID 撞名，或模擬／Facade 工具沒標 hidden 時失敗；`--markdown` 是給人看的表、`--json` 是靜態總表，兩者都可以加 `--lang en` 看英文。
@@ -96,7 +97,7 @@ repo 根目錄：`node scripts/verify-aios.mjs`、`node scripts/check-bilingual-
 
 5. 在 `server/integrations/catalog.ts` 的 `HOST_TOOL_CATALOG` 加一筆（型別要求 `HOST_TOOL_NAMES` 的每個名稱都要有一筆，漏了 `tsc` 會失敗），例句取自你寫進 `ASK_THE_AI` 的句子，英文加在 `server/messages.en.json`。
 
-CAP-1 的 `/help/commands` 仍然由 `ASK_THE_AI` 與 `TIMER_ASK` 產生；改由總表產生是 CAP-2 與 CAP-4 的工作。
+CAP-2 起，整合工具（含定時器與鬧鐘）在 `/help/commands` 與原型 README 的列由總表產生：加好總表資料後，非 hidden 的工具自動出現在「App 整合」（核心內建的出現在「定時器與鬧鐘」），不用再手寫指令表；只要在 `prototype/ambient-shell` 跑 `npm run docs:commands` 更新 README 並重新產生 `tests/fixtures/commands-page.baseline.json`（`npx tsx scripts/write-model-tools-baseline.ts --commands`），並在 PR 說明多了哪些列。頁面工具仍由 `ASK_THE_AI` 產生（CAP-4）。
 
 ## 7. 不能做的事
 

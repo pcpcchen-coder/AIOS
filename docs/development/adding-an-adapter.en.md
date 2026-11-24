@@ -81,7 +81,8 @@ npm run catalog -- --check
 npm run catalog -- --markdown
 npm run catalog -- --json
 npm run typecheck
-npx vitest run tests/capability-catalog.test.ts
+npx vitest run tests/capability-catalog.test.ts tests/commands-from-catalog.test.ts
+npm run docs:commands
 ```
 
 `--check` fails on a missing summary or example, missing English, an invalid `domain`, an ID collision, or a mock/Facade tool not marked hidden; `--markdown` prints the human-facing table and `--json` the static catalog, and both accept `--lang en` for English.
@@ -96,7 +97,7 @@ Follow the 4 steps in "what to change when adding a page tool" in the [S8 valida
 
 5. Add an entry to `HOST_TOOL_CATALOG` in `server/integrations/catalog.ts` (the type requires an entry for every name in `HOST_TOOL_NAMES`, so `tsc` fails if one is missing). Take the examples from the sentences you put in `ASK_THE_AI`, and add the English to `server/messages.en.json`.
 
-In CAP-1, `/help/commands` is still generated from `ASK_THE_AI` and `TIMER_ASK`; generating it from the catalog is CAP-2 and CAP-4 work.
+Since CAP-2, the rows for integration tools (timers and alarms included) in `/help/commands` and the prototype README are generated from the catalog: once the catalog data is in, a non-hidden tool appears in "App integrations" automatically (built-in ones in "Timers and alarms"), with no hand-written command table. In `prototype/ambient-shell`, just run `npm run docs:commands` to update the README, regenerate `tests/fixtures/commands-page.baseline.json` (`npx tsx scripts/write-model-tools-baseline.ts --commands`), and list the new rows in the PR description. Page tools are still generated from `ASK_THE_AI` (CAP-4).
 
 ## 7. What not to do
 
