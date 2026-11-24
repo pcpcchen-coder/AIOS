@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 import { toolResult, type IntegrationToolId, type ToolResult } from "../../../shared/integrations.ts";
-import type { ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import type { AdapterCatalog, ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 import { defaultGogRunner, isEmail, type GogRunner } from "../gog/runner.ts";
 
 // AIL-2：gog 的執行方式移到 ../gog/runner.ts（Gmail 與 Calendar 共用）；這裡照舊匯出，既有的呼叫端不用改。
@@ -90,8 +90,16 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: MAIL_LIMITS.timeoutMs,
     supportedRoutes: ["api_key", "live"],
+    catalog: {
+      summary: "寄一封 email 到你自己的 Gmail；收件人固定是你本人，不能寄給別人。",
+      examples: ["把剛才的重點寄到我的信箱", "email 給我今天要買的東西"],
+      needs: "NOUS_MAIL_SELF（你自己的 Gmail），而且 gog 已登入",
+      domain: "language",
+    },
   },
 ];
+
+export const GMAIL_GOG_CATALOG: AdapterCatalog = { id: "gmail_gog", service: "mail", label: "Gmail（寄給自己）", mock: false, tools: TOOLS };
 
 export class GmailGogAdapter implements IntegrationAdapter {
   readonly id = "gmail_gog";

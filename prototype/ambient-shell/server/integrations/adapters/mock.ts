@@ -1,5 +1,5 @@
 import { toolResult, type IntegrationToolId, type ToolResult } from "../../../shared/integrations.ts";
-import type { ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import type { AdapterCatalog, ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 
 // AIL-1：模擬 Adapter（mock）。只用來測試與示範整合層本身；結果與狀態一律標示 mock，
 // 不連任何外部服務，也不能拿來宣稱任何真實 App 的能力。
@@ -34,6 +34,7 @@ export const MOCK_TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
+    catalog: { summary: "（模擬）把一段文字原樣回傳，只用來測試整合層。", examples: ["測試整合層，回傳「你好」"], domain: null, hidden: true },
   },
   {
     id: "app.mock.toggle",
@@ -49,8 +50,11 @@ export const MOCK_TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
+    catalog: { summary: "（模擬）切換一個只存在記憶體的開關，只用來測試整合層。", examples: ["測試整合層，把模擬開關打開"], domain: null, hidden: true },
   },
 ];
+
+export const MOCK_CATALOG: AdapterCatalog = { id: "mock", service: "mock", label: "模擬測試", mock: true, tools: MOCK_TOOLS };
 
 export class MockAdapter implements IntegrationAdapter {
   readonly id = "mock";

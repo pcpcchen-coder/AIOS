@@ -51,7 +51,7 @@ Number 09, “Spoken Brief,” references an external Project document that is n
 <a id="中英文版本與介面"></a>
 ## Bilingual documents and interface
 
-Use the language links at the top of every document. Follow the [bilingual policy](BILINGUAL.md) when adding or updating either version. [App/web language support](development/localization.en.md) covers switching, persistence, English commands, and maintenance. The [validation record](validation/bilingual-2026-10-26.en.md) distinguishes code/UI evidence from pending hardware checks.
+Use the language links at the top of every document. Follow the [bilingual policy](BILINGUAL.md) when adding or updating either version. [App/web language support](development/localization.en.md) covers switching, persistence, English commands, and maintenance. [How to add an Adapter or a tool](development/adding-an-adapter.en.md) covers the capability catalog fields and their English. The [validation record](validation/bilingual-2026-10-26.en.md) distinguishes code/UI evidence from pending hardware checks.
 
 <a id="執行開發與證據"></a>
 ## Run, develop, and review evidence

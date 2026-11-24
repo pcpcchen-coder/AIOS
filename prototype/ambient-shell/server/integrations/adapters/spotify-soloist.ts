@@ -1,5 +1,5 @@
 import { toolResult, type ToolResult } from "../../../shared/integrations.ts";
-import type { HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import type { AdapterCatalog, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 
 // SP-1（docs/18 §5–§6）：Spotify Soloist 的本機健康狀態。**沒有任何模型工具**：Spotify Developer Policy III.3
 // 禁止未經授權的語音控制，SP-2 維持 BLOCKED（server/integrations/policy.ts 也會拒絕任何 app.spotify.* 註冊）。
@@ -42,6 +42,9 @@ export interface SpotifySoloistOptions {
   WebSocket?: SoloistSocketCtor;
   timeoutMs?: number;
 }
+
+/** CAP-1：只有健康狀態，總表上沒有工具（SP-2 BLOCKED）。 */
+export const SPOTIFY_SOLOIST_CATALOG: AdapterCatalog = { id: "spotify_soloist", service: "spotify", label: "Spotify（只有連線狀態）", mock: false, tools: [] };
 
 export function parseSoloistPort(value: string | undefined): number {
   if (value === undefined || !value.trim()) return DEFAULT_SOLOIST_PORT;
