@@ -89,6 +89,8 @@ npm run docs:commands
 
 At the repo root: `node scripts/verify-aios.mjs`, `node scripts/check-bilingual-docs.mjs`.
 
+Since SKL-1 (2026-11-24), `--check` also checks the shipped skills: renaming or removing a tool, or making it hidden, makes the check fail for every skill that uses it, and the skill has to be fixed in the same PR (see [Writing a skill](writing-a-skill.en.md)).
+
 `--check` and `tests/capability-catalog.test.ts` share `checkCatalog()`. These are fixtures and type checks; they cannot be used to claim real voice or a real service has been validated.
 
 ## 6. Add a page tool

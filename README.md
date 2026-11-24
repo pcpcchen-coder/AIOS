@@ -76,7 +76,7 @@
 | 模型與語音 | Claude／ChatGPT／模擬；瀏覽器語音與 WebRTC 即時語音雙路徑 | Mac 的 Codex live 登入、通話及溫度查詢有部分實機紀錄；完整流程與計費尚未驗收 |
 | 鏡頭與手勢 | 在場、名目距離、頭向、張掌停止播報、手臂三區指向、靠近放大 | 頭向不是眼動；雙目未實測校正，準確率與硬體驗收待做 |
 | 家電 | H0 查詢、H1 一般控制、H1b AIFA／紅外線 | 開關燈有口頭實機紀錄；H1b 待實機；H2 設備政策、H3 房間群控、H4 背景 MCP 尚未實作 |
-| 保存與安全 | JSON 任務／成果（macOS App 內加密保存，MEM-4a；瀏覽器版仍是明文）、呈現政策、部分工具確認機制；家庭記憶 MEM-0～MEM-5b 已合併（預設關閉、首次同意後才開；記憶核心與管理只在 macOS App；Pi 終端機頁面只能經 `POST /api/terminal/memory` 做 `status`／`suspend`／`select`／`card_view`／`card_answer`（`prototype/ambient-shell/shared/terminal.ts`、`prototype/ambient-shell/server/app.ts`）） | 未完任務重啟後失敗；缺 checkpoint、完整成果版本、通用 Action Gate。MEM-1～MEM-5b 的 Mac gate 都未執行，自動測試只在 Linux 雲端；Mac 上只有 SP-02b 試用順帶做過開啟記憶、建立記憶檔、連結家人辨識與選定本次人物（[SP-02b 驗證 §5](docs/validation/sp-02b-2026-11-01.md)，只有 George 一人），不是記憶的驗收；知識圖譜與技能晉升沒有（2026-11-10 補記，原文寫「缺長期記憶」） |
+| 保存與安全 | JSON 任務／成果（macOS App 內加密保存，MEM-4a；瀏覽器版仍是明文）、呈現政策、部分工具確認機制；家庭記憶 MEM-0～MEM-5b 已合併（預設關閉、首次同意後才開；記憶核心與管理只在 macOS App；Pi 終端機頁面只能經 `POST /api/terminal/memory` 做 `status`／`suspend`／`select`／`card_view`／`card_answer`（`prototype/ambient-shell/shared/terminal.ts`、`prototype/ambient-shell/server/app.ts`）） | 未完任務重啟後失敗；缺 checkpoint、完整成果版本、通用 Action Gate。MEM-1～MEM-5b 的 Mac gate 都未執行，自動測試只在 Linux 雲端；Mac 上只有 SP-02b 試用順帶做過開啟記憶、建立記憶檔、連結家人辨識與選定本次人物（[SP-02b 驗證 §5](docs/validation/sp-02b-2026-11-01.md)，只有 George 一人），不是記憶的驗收；知識圖譜與技能晉升沒有（2026-11-10 補記，原文寫「缺長期記憶」）；技能只有格式、檢查與一份出貨技能「早晨簡報」，模型還用不到（SKL-1，2026-11-24，[驗證](docs/validation/skl-1-skill-format-2026-11-24.md)） |
 | Quest／OpenClaw | 已完成本次功能評估 | 沒有 Quest 客戶端或 OpenClaw agent adapter；語音參考 OpenClaw 不等於已整合 agent |
 
 2026-10-24 基準 `1f44c6b` 的 48 個測試檔、790 項測試、型別檢查、建置與隔離 mock HTTP 流程通過。這些結果不替代真模型、麥克風、Quest、相機與家電驗收。詳見 [現況與證據](docs/Current_Implementation_Status.md)。

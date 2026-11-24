@@ -89,6 +89,8 @@ npm run docs:commands
 
 repo 根目錄：`node scripts/verify-aios.mjs`、`node scripts/check-bilingual-docs.mjs`。
 
+SKL-1（2026-11-24）起，`--check` 也檢查出貨技能：改名或移除工具、或把工具改成 hidden 時，用到它的技能會讓檢查失敗，要同一個 PR 改技能（見[怎麼寫一份技能](writing-a-skill.md)）。
+
 `--check` 與 `tests/capability-catalog.test.ts` 共用 `checkCatalog()`。這些都是 fixture 與型別檢查，不能拿來宣稱真實語音或真實服務已驗證。
 
 ## 6. 加一個頁面工具
