@@ -2,7 +2,8 @@ import { formatClock, repeatDays, repeatText, REPEATS } from "../../../shared/al
 import { toolResult, type IntegrationToolId, type ToolResult } from "../../../shared/integrations.ts";
 import type { AlarmView } from "../../../shared/alarm.ts";
 import type { AlarmCenter, AlarmOp } from "../../alarms.ts";
-import type { ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import { ALARM_TIMER_NEEDS } from "./timer.ts";
+import type { AdapterCatalog, ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 
 // ALARM-2（George 2026-11-09）：鬧鐘是核心內建的本機工具（同定時器，不需要 NOUS_AIL），兩條即時語音路徑共用。
 // 時間一律是 24 小時制的本機時間（核心的系統時區）；「明天」「下週三」由模型依指示裡的今天日期換成 date。
@@ -31,6 +32,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ROUTES,
+    catalog: { summary: "設定單次或重複（每天、工作日、週末、指定星期）的鬧鐘，在設定的那台裝置響。", examples: ["明天早上 7 點叫我", "每個工作天 6:30 叫我", "週一三五晚上 9 點提醒我倒垃圾"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.alarm.list",
@@ -41,6 +43,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ROUTES,
+    catalog: { summary: "列出鬧鐘、下一次什麼時候響，以及貪睡中的鬧鐘。", examples: ["有哪些鬧鐘"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.alarm.enable",
@@ -51,6 +54,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ROUTES,
+    catalog: { summary: "打開或關掉一個鬧鐘（不刪除）。", examples: ["關掉明天的鬧鐘", "把 7 點的鬧鐘打開"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.alarm.delete",
@@ -61,6 +65,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ROUTES,
+    catalog: { summary: "刪除一個或全部鬧鐘。", examples: ["刪掉 6:30 的鬧鐘"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.alarm.snooze",
@@ -71,6 +76,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ROUTES,
+    catalog: { summary: "鬧鐘響時貪睡，過幾分鐘再響。", examples: ["貪睡", "再睡一下"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.alarm.stop_ringing",
@@ -81,8 +87,11 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ROUTES,
+    catalog: { summary: "停止正在響的鬧鐘，也可以一併取消貪睡中的。", examples: ["我起來了", "不用再叫我了"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
 ];
+
+export const ALARM_CATALOG: AdapterCatalog = { id: "alarm", service: "alarm", label: "鬧鐘", mock: false, builtin: true, tools: TOOLS };
 
 export class AlarmAdapter implements IntegrationAdapter {
   readonly id = "alarm";

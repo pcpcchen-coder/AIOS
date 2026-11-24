@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { toolResult, type IntegrationToolId, type ToolResult, type ToolResultReason } from "../../../shared/integrations.ts";
 import { GENRES, INTENT_IDS, summarizeTrials, type RelayCatalog, type RelayRefusal, type RelayTrial, type Target, type TtsEngine, type VoiceRelayIntentView, type VoiceRelayMode, type VoiceRelayPart, type VoiceRelayPlayResult, type VoiceRelayPreview, type VoiceRelayProfileView, type VoiceRelayTargetView, type VoiceRelayView } from "../../../shared/voice-relay.ts";
 import type { Config } from "../../config.ts";
-import type { ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import type { AdapterCatalog, CatalogTool, ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 import { BUILTIN_PROFILES, composeRelayDocument } from "../voice-relay/builtin.ts";
 import { parseRelayCatalog, readRelayUserConfig } from "../voice-relay/catalog.ts";
 import { MacSayOutput, type SayRunner } from "../voice-relay/mac-say.ts";
@@ -17,6 +17,24 @@ import { selectedProfileId, templatePolicyOk, VoiceRelayStore } from "../voice-r
 // 但這個批次只在 Linux 用假的 runner 測過，沒有在真的 Mac 上跑過。沒有回音抑制（已知風險）。Pi 喇叭（VCR-3）尚未實作。
 
 export const VOICE_RELAY_TOOL: IntegrationToolId = "app.voice_relay.send_intent";
+
+/**
+ * CAP-1：不看設定就知道的部分（靜態總表用）。工具的 schema（音箱與燈的 enum）要看目錄，所以 schema 在 tools() 裡組。
+ */
+const RELAY_TOOL_STATIC = {
+  id: VOICE_RELAY_TOOL,
+  effect: "reversible_write",
+  enabled: true,
+  supportedRoutes: ["api_key", "live"],
+  catalog: {
+    summary: "用合成語音對附近的智慧音箱說一句審閱過的命令（下一首、暫停、音量、開關燈）；結果最多是「已發出、未確認」。",
+    examples: ["叫音箱下一首", "叫音箱把音量調到 30"],
+    needs: "NOUS_VCR=fake（模擬，沒有實體發聲）或 mac（Mac 的 say 發聲），而且有啟用的音箱目標",
+    domain: "auditory",
+  },
+} as const satisfies CatalogTool;
+
+export const VOICE_RELAY_CATALOG: AdapterCatalog = { id: "voice_relay", service: "voice_relay", label: "附近的智慧音箱（語音中繼）", mock: "config", tools: [RELAY_TOOL_STATIC] };
 
 const UNCONFIRMED = "已發出語音命令，但執行結果尚未確認。";
 const MOCK_UNCONFIRMED = "（模擬）已發出語音命令，但執行結果尚未確認；這次是假輸出，沒有實體喇叭發聲。";
@@ -110,7 +128,7 @@ export class VoiceRelayAdapter implements IntegrationAdapter {
     const enPrefix = this.mock ? "(Mock) " : "";
     return [
       {
-        id: VOICE_RELAY_TOOL,
+        id: RELAY_TOOL_STATIC.id,
         description: `${zhPrefix}用語音合成對附近的智慧音箱說一句事先審閱過的命令（例如下一首、暫停、音量、開關燈）。結果最多是「已發出、未確認」，不知道音箱有沒有照做。只在使用者明確要求控制那個音箱時呼叫。`,
         descriptionEn: `${enPrefix}Sends a pre-approved voice command to a nearby smart speaker by playing synthesized speech (e.g. next song, pause, volume, lights). The result is at most "sent, unconfirmed"; it cannot tell whether the speaker obeyed. Call only when the user explicitly asks to control that speaker.`,
         inputSchema: {
@@ -127,10 +145,11 @@ export class VoiceRelayAdapter implements IntegrationAdapter {
           required: ["target_id", "intent_id"],
           additionalProperties: false,
         },
-        effect: "reversible_write",
-        enabled: true,
+        effect: RELAY_TOOL_STATIC.effect,
+        enabled: RELAY_TOOL_STATIC.enabled,
         timeoutMs: 20_000,
-        supportedRoutes: ["api_key", "live"],
+        supportedRoutes: RELAY_TOOL_STATIC.supportedRoutes,
+        catalog: RELAY_TOOL_STATIC.catalog,
       },
     ];
   }

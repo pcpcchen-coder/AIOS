@@ -1,11 +1,14 @@
 import { spokenDuration, timerRemainingMs, TIMER_MAX_S, type TimerView } from "../../../shared/alarm.ts";
 import { toolResult, type IntegrationToolId, type ToolResult } from "../../../shared/integrations.ts";
 import type { AlarmCenter, TimerOp } from "../../alarms.ts";
-import type { ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import type { AdapterCatalog, ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 
 // ALARM-1（George 2026-11-09）：定時器是核心內建的本機工具（不需要 NOUS_AIL）；兩條即時語音路徑共用。
 // 排程與保存都在 AlarmCenter；這裡只把模型的參數轉成核心操作，結果一律來自核心的狀態（confirmed 表示核心已保存）。
 // 設定頁關掉「鬧鐘與定時器」時，工具不出現在工具清單（registry 的 enabled），已在通話中的呼叫回 refused。
+
+/** CAP-1：定時器與鬧鐘的前提（和 /help/commands 的 TIMER_ASK 相同）。 */
+export const ALARM_TIMER_NEEDS = "設定頁「鬧鐘與定時器」開著（預設開）";
 
 const TIMER_REF = { type: "string", description: "哪一個定時器：名字（例如「泡麵」）或 ID；只有一個時可以不給", maxLength: 40 } as const;
 
@@ -27,6 +30,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
+    catalog: { summary: "開始一個倒數定時器；可以取名字，可以同時好幾個，時間到時在設定的那台裝置響。", examples: ["計時 10 分鐘", "泡麵 3 分鐘"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.timer.list",
@@ -37,6 +41,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
+    catalog: { summary: "說各個定時器還剩多久。", examples: ["泡麵還剩多久", "有哪些定時器"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.timer.pause",
@@ -47,6 +52,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
+    catalog: { summary: "暫停一個定時器。", examples: ["暫停泡麵"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.timer.resume",
@@ -57,6 +63,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
+    catalog: { summary: "繼續一個暫停的定時器。", examples: ["泡麵繼續計時"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.timer.extend",
@@ -72,6 +79,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
+    catalog: { summary: "延長一個定時器。", examples: ["再加 5 分鐘"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.timer.cancel",
@@ -82,6 +90,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
+    catalog: { summary: "取消一個或全部定時器。", examples: ["取消雞蛋的定時器", "定時器全部取消"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.timer.stop_ringing",
@@ -92,8 +101,11 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
+    catalog: { summary: "停止正在響的定時器鈴聲。", examples: ["定時器響了，關掉"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
 ];
+
+export const TIMER_CATALOG: AdapterCatalog = { id: "timer", service: "timer", label: "定時器", mock: false, builtin: true, tools: TOOLS };
 
 export class TimerAdapter implements IntegrationAdapter {
   readonly id = "timer";

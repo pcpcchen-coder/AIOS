@@ -1,6 +1,6 @@
 import { isAbsolute } from "node:path";
 import { toolResult, type IntegrationToolId, type ToolResult } from "../../../shared/integrations.ts";
-import type { ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import type { AdapterCatalog, ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 import { defaultGogRunner, isEmail, type GogRunner } from "../gog/runner.ts";
 
 // CAL-1（George 2026-11-05）：用 gog（github.com/steipete/gogcli，MIT）讀寫 George 自己的 Google 日曆（primary）。
@@ -191,6 +191,9 @@ export function findEventId(stdout: string): string | null {
 
 const RANGES = ["today", "tomorrow", "week", "date"] as const;
 
+/** CAP-1：日曆工具共同的前提。 */
+const CALENDAR_NEEDS = "NOUS_GOG_ACCOUNT（或 NOUS_MAIL_SELF）的 Google 帳號，而且 gog 已授權 Calendar";
+
 const TOOLS: readonly ToolDefinition[] = [
   {
     id: CALENDAR_TOOL.list,
@@ -211,6 +214,12 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: CALENDAR_LIMITS.timeoutMs,
     supportedRoutes: ["api_key", "live"],
+    catalog: {
+      summary: "查你自己的 Google 日曆行程：今天、明天、這週或指定的一天。",
+      examples: ["我今天有什麼行程", "明天下午有空嗎", "這週有哪些行程"],
+      needs: CALENDAR_NEEDS,
+      domain: "planning",
+    },
   },
   {
     id: CALENDAR_TOOL.create,
@@ -236,8 +245,16 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: CALENDAR_LIMITS.timeoutMs,
     supportedRoutes: ["api_key", "live"],
+    catalog: {
+      summary: "在你自己的 Google 日曆新增一個行程，不邀請任何人。",
+      examples: ["明天下午三點記一個看牙醫", "把下週三晚上七點的聚餐記到行事曆"],
+      needs: CALENDAR_NEEDS,
+      domain: "planning",
+    },
   },
 ];
+
+export const GOOGLE_CALENDAR_CATALOG: AdapterCatalog = { id: "google_calendar", service: "calendar", label: "Google 日曆", mock: false, tools: TOOLS };
 
 export class GoogleCalendarAdapter implements IntegrationAdapter {
   readonly id = "google_calendar";

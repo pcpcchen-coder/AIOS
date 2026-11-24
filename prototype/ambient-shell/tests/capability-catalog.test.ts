@@ -1,0 +1,157 @@
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { isDomain } from "../shared/domain.ts";
+import { toWireName } from "../shared/integrations.ts";
+import { HOST_TOOL_NAMES } from "../shared/realtime-route.ts";
+import { ASK_THE_AI } from "../shared/voice-commands.ts";
+import { TimerAdapter } from "../server/integrations/adapters/timer.ts";
+import { MockAdapter } from "../server/integrations/adapters/mock.ts";
+import { ADAPTER_CATALOGS, catalogMarkdown, checkCatalog, HOST_TOOL_CATALOG, liveCatalog, localizeCatalog, staticCatalog, type CatalogEntry } from "../server/integrations/catalog.ts";
+import type { AdapterCatalog } from "../server/integrations/contracts.ts";
+import { KNOWN_ADAPTERS } from "../server/integrations/index.ts";
+import { IntegrationRegistry } from "../server/integrations/registry.ts";
+import type { AlarmCenter } from "../server/alarms.ts";
+import { commandsPageOutputs } from "./fixtures/commands-page.ts";
+import { modelToolAdapters, modelToolOutputs } from "./fixtures/model-tools.ts";
+
+// CAP-1（docs/24 §3）：能力總表。全部是 fixture 與型別檢查，不是產品 gate，也不是 Mac 實機驗收。
+
+const baseline = (name: string) => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8")) as Record<string, string>;
+const HAN = /\p{Script=Han}/u;
+
+describe("gate: what the model sees is byte-for-byte unchanged", () => {
+  it("functionSpecs() and buildRealtimeTools() equal the output recorded before CAP-1 (both routes, both locales, both voice_relay modes)", () => {
+    const before = baseline("model-tools.baseline.json");
+    const now = modelToolOutputs();
+    expect(Object.keys(now)).toEqual(Object.keys(before));
+    expect(Object.keys(now)).toHaveLength(26);
+    for (const key of Object.keys(before)) expect(now[key], key).toBe(before[key]);
+  });
+
+  it("no catalog field reaches a function spec: each spec is exactly name, description and inputSchema", () => {
+    const registry = new IntegrationRegistry({ enabled: { has: () => true } });
+    for (const adapter of modelToolAdapters("fake")) registry.register(adapter);
+    for (const locale of ["zh-TW", "en"] as const) {
+      const specs = registry.functionSpecs("api_key", locale);
+      expect(specs.length).toBeGreaterThan(0);
+      for (const spec of specs) {
+        const def = registry.listTools("api_key").find((d) => toWireName(d.id) === spec.name)!;
+        expect(spec).toStrictEqual({ type: "function", name: toWireName(def.id), description: locale === "en" && def.descriptionEn ? def.descriptionEn : def.description, parameters: def.inputSchema });
+        expect(def.catalog.summary.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("/help/commands (both languages) and the README command table equal the output recorded before the catalog translations", () => {
+    const before = baseline("commands-page.baseline.json");
+    const now = commandsPageOutputs();
+    expect(Object.keys(now)).toEqual(Object.keys(before));
+    for (const key of Object.keys(before)) expect(now[key], key).toBe(before[key]);
+  });
+});
+
+describe("static catalog (no configuration needed)", () => {
+  it("covers every reviewed Adapter (KNOWN_ADAPTERS plus the built-in timer and alarm)", () => {
+    expect(ADAPTER_CATALOGS.map((a) => a.id).sort()).toEqual([...Object.keys(KNOWN_ADAPTERS), "timer", "alarm"].sort());
+    expect(ADAPTER_CATALOGS.filter((a) => a.builtin).map((a) => a.id)).toEqual(["timer", "alarm"]);
+  });
+
+  it("matches what each real Adapter registers (id, service, effect, routes, catalog)", () => {
+    for (const adapter of modelToolAdapters("fake")) {
+      const info = ADAPTER_CATALOGS.find((a) => a.id === adapter.id);
+      expect(info, adapter.id).toBeDefined();
+      expect(info!.service).toBe(adapter.service);
+      if (info!.mock !== "config") expect(info!.mock).toBe(adapter.mock);
+      const live = adapter.tools().map(({ id, effect, enabled, supportedRoutes, legacyName, catalog }) => ({ id, effect, enabled, supportedRoutes: [...supportedRoutes], legacyName, catalog }));
+      const declared = info!.tools.map(({ id, effect, enabled, supportedRoutes, legacyName, catalog }) => ({ id, effect, enabled, supportedRoutes: [...supportedRoutes], legacyName, catalog }));
+      expect(live, adapter.id).toEqual(declared);
+    }
+  });
+
+  it("lists voice_relay even when its schema needs configuration (mac mode without targets registers no tool)", () => {
+    const mac = modelToolAdapters("mac").find((a) => a.id === "voice_relay")!;
+    expect(mac.tools()).toEqual([]);
+    expect(staticCatalog().map((e) => e.id)).toContain("app.voice_relay.send_intent");
+  });
+
+  it("has 32 integration tools, 9 page tools, 5 hidden; counts are derived, not typed in", () => {
+    const entries = staticCatalog();
+    const integration = entries.filter((e) => e.kind === "integration");
+    expect(integration).toHaveLength(ADAPTER_CATALOGS.reduce((n, a) => n + a.tools.length, 0));
+    expect(integration).toHaveLength(32);
+    expect(entries.filter((e) => e.kind === "host").map((e) => e.id)).toEqual([...HOST_TOOL_NAMES]);
+    expect(entries.filter((e) => e.hidden).map((e) => e.id)).toEqual(["app.mock.echo", "app.mock.toggle", "app.home.status", "app.home.control", "app.home.confirm"]);
+  });
+
+  it("page-tool examples are sentences /help/commands already lists for that tool (ASK_THE_AI)", () => {
+    expect(Object.keys(HOST_TOOL_CATALOG)).toEqual([...HOST_TOOL_NAMES]);
+    for (const name of HOST_TOOL_NAMES) for (const x of HOST_TOOL_CATALOG[name].examples) expect(ASK_THE_AI[name].try, name).toContain(x);
+  });
+
+  it("passes its own check, and every domain is a brain region or an explicit null", () => {
+    expect(checkCatalog()).toEqual([]);
+    for (const e of staticCatalog()) expect(e.domain === null || isDomain(e.domain), e.id).toBe(true);
+  });
+
+  it("has English for every human-facing string", () => {
+    for (const e of localizeCatalog(staticCatalog(), "en")) {
+      for (const text of [e.group_label, e.summary, ...e.examples, ...(e.needs ? [e.needs] : [])]) expect(HAN.test(text), `${e.id}: ${text}`).toBe(false);
+    }
+    expect(HAN.test(catalogMarkdown(localizeCatalog(staticCatalog(), "en"), "en"))).toBe(false);
+  });
+});
+
+describe("catalog check fails on", () => {
+  const entries = () => staticCatalog();
+  const tv = (patch: Partial<CatalogEntry>) => entries().map((e) => (e.id === "app.tv.power" ? { ...e, ...patch } : e));
+  const cases: [string, () => string[], RegExp][] = [
+    ["a missing summary", () => checkCatalog(tv({ summary: " " })), /app\.tv\.power：沒有 summary/],
+    ["no examples", () => checkCatalog(tv({ examples: [] })), /app\.tv\.power：至少要一句例句/],
+    ["a blank example", () => checkCatalog(tv({ examples: ["開電視", ""] })), /至少要一句例句/],
+    ["a summary without English", () => checkCatalog(tv({ summary: "這一句沒有翻譯。" })), /缺英文翻譯.*這一句沒有翻譯/],
+    ["an example without English", () => checkCatalog(tv({ examples: ["這一句也沒有翻譯"] })), /例句：缺英文翻譯/],
+    ["needs without English", () => checkCatalog(tv({ needs: "沒有翻譯的前提" })), /needs：缺英文翻譯/],
+    ["a bad domain", () => checkCatalog(tv({ domain: "kitchen" as never })), /domain 不合法：kitchen/],
+    ["two tools with one ID", () => checkCatalog([...entries(), { ...entries().find((e) => e.id === "app.tv.power")!, group: "copy" }]), /ID 撞名：app\.tv\.power/],
+    ["a page tool named like an integration wire name", () => checkCatalog([...entries(), { ...entries().find((e) => e.id === "web_search")!, id: "app__tv__power", wire: "app__tv__power" }]), /ID 撞名：app__tv__power/],
+    ["a service label without English", () => checkCatalog(entries(), [...ADAPTER_CATALOGS, { id: "x", service: "x", label: "沒有翻譯的服務", mock: false, tools: [] }]), /x 的服務名稱：缺英文翻譯/],
+  ];
+  for (const [name, run, pattern] of cases) {
+    it(name, () => {
+      const problems = run();
+      expect(problems.some((p) => pattern.test(p)), problems.join("\n")).toBe(true);
+    });
+  }
+
+  it("a mock or legacy tool that is not hidden", () => {
+    const unhide = (a: AdapterCatalog): AdapterCatalog => ({ ...a, tools: a.tools.map((t) => ({ ...t, catalog: { ...t.catalog, hidden: undefined } })) });
+    const problems = checkCatalog(entries(), ADAPTER_CATALOGS.map((a) => (a.id === "mock" || a.id === "home" ? unhide(a) : a)));
+    expect(problems).toContain("app.mock.echo：模擬工具要標 hidden");
+    expect(problems).toContain("app.home.control：legacy Facade 工具要標 hidden");
+  });
+});
+
+describe("live catalog", () => {
+  it("adds this configuration's registration and per-route status; unregistered tools are disabled, page tools carry no status", () => {
+    const registry = new IntegrationRegistry({ enabled: { has: (id) => id === "timer" } });
+    registry.register(new MockAdapter());
+    registry.register(new TimerAdapter({} as AlarmCenter));
+    const live = liveCatalog(registry);
+    const byId = new Map(live.map((e) => [e.id, e]));
+    expect(byId.get("app.timer.start")).toMatchObject({ configured: true, mock: false, status: { api_key: "available", live: "available" } });
+    // 有註冊但核心設定沒有啟用。
+    expect(byId.get("app.mock.echo")).toMatchObject({ configured: true, mock: true, status: { api_key: "disabled", live: "disabled" } });
+    // 缺設定、factory 回 null，沒有註冊。
+    expect(byId.get("app.tv.power")).toMatchObject({ configured: false, status: { api_key: "disabled", live: "disabled" } });
+    expect(byId.get("web_search")).not.toHaveProperty("status");
+    expect(live.map((e) => e.id)).toEqual(staticCatalog().map((e) => e.id));
+  });
+
+  it("reports the registered voice_relay as mock in fake mode", () => {
+    const registry = new IntegrationRegistry({ enabled: { has: () => true } });
+    for (const adapter of modelToolAdapters("fake")) registry.register(adapter);
+    const relay = liveCatalog(registry).find((e) => e.id === "app.voice_relay.send_intent")!;
+    expect(relay).toMatchObject({ configured: true, mock: true, status: { api_key: "available", live: "available" } });
+    expect(staticCatalog().find((e) => e.id === relay.id)!.mock).toBe("config");
+  });
+});

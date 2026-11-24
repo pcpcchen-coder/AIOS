@@ -1,13 +1,34 @@
 import { toolResult, type IntegrationToolId, type ToolResult } from "../../../shared/integrations.ts";
 import { weatherCondition, weatherPlace, WEATHER_ATTRIBUTION, type WeatherPlaceId } from "../../../shared/proactive.ts";
 import type { WeatherService } from "../../weather.ts";
-import type { ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import type { AdapterCatalog, ExecutionContext, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 
 // PRO-1（George 2026-11-05）：今天的天氣（Open-Meteo，CC BY 4.0）當成唯讀 Adapter。
 // 沒有任何參數：地點只來自主動提醒設定（WEATHER_PLACES 的固定座標），模型不能指定地點或網址。
 // 結果和招呼後念的那一句來自同一份快取（server/weather.ts）。
 
 export const WEATHER_TOOL = "app.weather.today" as const satisfies IntegrationToolId;
+
+const TOOLS: readonly ToolDefinition[] = [
+  {
+    id: WEATHER_TOOL,
+    description: "查今天的天氣（設定裡的地點；資料來源 Open-Meteo）：天氣狀況、最低與最高溫、降雨機率最高的時段。使用者問今天天氣時呼叫。",
+    descriptionEn: "Get today's weather for the place in settings (data from Open-Meteo): condition, low and high temperature, and the part of the day with the highest chance of rain. Call when the user asks about today's weather.",
+    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+    effect: "read",
+    enabled: true,
+    timeoutMs: 10_000,
+    supportedRoutes: ["api_key", "live"],
+    catalog: {
+      summary: "說今天的天氣：狀況、最低與最高溫、最可能下雨的時段（Open-Meteo）。",
+      examples: ["今天天氣怎麼樣", "今天會下雨嗎"],
+      needs: "選單列「主動提醒」有地點（選的或依系統時區推的）",
+      domain: "math",
+    },
+  },
+];
+
+export const WEATHER_CATALOG: AdapterCatalog = { id: "weather", service: "weather", label: "天氣", mock: false, tools: TOOLS };
 
 export interface WeatherAdapterOptions {
   service: WeatherService;
@@ -24,18 +45,7 @@ export class WeatherAdapter implements IntegrationAdapter {
   constructor(private readonly options: WeatherAdapterOptions) {}
 
   tools(): readonly ToolDefinition[] {
-    return [
-      {
-        id: WEATHER_TOOL,
-        description: "查今天的天氣（設定裡的地點；資料來源 Open-Meteo）：天氣狀況、最低與最高溫、降雨機率最高的時段。使用者問今天天氣時呼叫。",
-        descriptionEn: "Get today's weather for the place in settings (data from Open-Meteo): condition, low and high temperature, and the part of the day with the highest chance of rain. Call when the user asks about today's weather.",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false },
-        effect: "read",
-        enabled: true,
-        timeoutMs: 10_000,
-        supportedRoutes: ["api_key", "live"],
-      },
-    ];
+    return TOOLS;
   }
 
   async health(): Promise<HealthReport> {

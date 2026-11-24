@@ -1,7 +1,7 @@
 import { toolResult, type IntegrationToolId, type ToolResult, type ToolResultStatus } from "../../../shared/integrations.ts";
 import { HOME_ARG_MAX, type HomeControlResult, type HomeStatusResult } from "../../../shared/home.ts";
 import { HomeBridgeError, type ControlRequest } from "../../home-bridge.ts";
-import type { HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
+import type { AdapterCatalog, HealthReport, IntegrationAdapter, ToolDefinition } from "../contracts.ts";
 
 // AIL-2（docs/18 §6）：HomeBridge Facade。武陵居家電的三支本機 API（/api/home/status、control、confirm）改經整合層的
 // Registry／Dispatcher 呼叫 HomeBridge，但**行為不變**（H0／H1／H1b 回歸無差異）：
@@ -32,6 +32,9 @@ export const HOME_TOOL = {
  */
 export const HOME_TIMEOUTS_MS = { status: 45_000, control: 80_000, confirm: 80_000 } as const;
 
+/** CAP-1：家電工具的前提（和 /help/commands 的 home_status、home_control 列相同）。 */
+export const HOME_NEEDS = "武陵居中控（SMARTHOME_URL、SMARTHOME_TOKEN）";
+
 const TOOLS: readonly ToolDefinition[] = [
   {
     id: HOME_TOOL.status,
@@ -47,6 +50,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: HOME_TIMEOUTS_MS.status,
     supportedRoutes: ["page"],
+    catalog: { summary: "（Facade）頁面查家電狀態時經整合層轉給中控；模型用的是 home_status。", examples: ["客廳現在幾度"], needs: HOME_NEEDS, domain: "math", hidden: true },
   },
   {
     id: HOME_TOOL.control,
@@ -63,6 +67,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: HOME_TIMEOUTS_MS.control,
     supportedRoutes: ["page"],
+    catalog: { summary: "（Facade）頁面控制家電時經整合層轉給中控；模型用的是 home_control。", examples: ["客廳主燈關掉"], needs: HOME_NEEDS, domain: null, hidden: true },
   },
   {
     id: HOME_TOOL.confirm,
@@ -78,8 +83,11 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: HOME_TIMEOUTS_MS.confirm,
     supportedRoutes: ["page"],
+    catalog: { summary: "（Facade）家電確認卡的答案經整合層交給中控；只由確認卡呼叫。", examples: ["（在家電確認卡上按「確認」）"], needs: HOME_NEEDS, domain: null, hidden: true },
   },
 ];
+
+export const HOME_CATALOG: AdapterCatalog = { id: "home", service: "home", label: "武陵居家電", mock: false, tools: TOOLS };
 
 /** HomeBridge 的 status → 統一結果的 status（只用來稽核與診斷；頁面拿到的是 data.legacy 原文）。 */
 export function homeStatusOf(result: HomeStatusResult | HomeControlResult): ToolResultStatus {
