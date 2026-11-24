@@ -45,7 +45,7 @@ The system is used only at home for now: **convenience and features come first**
 ## Required owner-specified design
 
 - The electronic brain must include at least Language, Mathematics, Art, Hearing, Vision, and Planning regions. Current content and real application events must drive animations in the corresponding regions, including illumination, light pulses, and region names.
-- Only real events may drive this mapping: task-step `domain` tags or conversation-topic classification. Do not describe it as internal neural activity of the model.
+- Only real events may drive this mapping: task-step `domain` tags, conversation-topic classification, or a real tool call (using that tool's `domain` in the capability catalog; owner decision of 2026-11-24, see `docs/24` §6.1, not yet implemented). Do not describe it as internal neural activity of the model.
 - Capture and playback states must follow device events. A mode toggle does not mean audio capture is active. Visual topic classification must name its source. Without image input or analysis, do not claim that the application is watching.
 - The prototype implementation is in `prototype/ambient-shell/shared/domain.ts` and `src/brain.ts`. The production Presence animation must retain this requirement.
 

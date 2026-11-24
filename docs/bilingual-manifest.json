@@ -20,8 +20,8 @@
       "source": "CLAUDE.md",
       "sourceLanguage": "zh-TW",
       "translation": "CLAUDE.en.md",
-      "sourceSha256": "00265dc7945acf70dd67727eda8d2291fdfc0b747a6a11841973633bf96d2efd",
-      "translationSha256": "cffb0c7c3f0f6a443babcd8617442fd626563727e93b56b2448b64f6dc715dba"
+      "sourceSha256": "c12d51454c24a4f90d7ff12861bb59988099c13307061ffe8eaff72a177ed9b3",
+      "translationSha256": "2c24ec34a5a7de6557c600302ee2358569d06409c75e462d2a67f5c747177146"
     },
     {
       "source": "README.md",
@@ -188,8 +188,8 @@
       "source": "docs/24_Capability_Catalog_and_Skills_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/24_Capability_Catalog_and_Skills_2026-11.en.md",
-      "sourceSha256": "2a8aaa2223fb1361f5e0cabc5091673f17c024a9e18966a490f3b4690aba0513",
-      "translationSha256": "7a93b3b897aa5d344c4c9a421306e5418a68ed4162af4e09efc06a751ea475d2"
+      "sourceSha256": "3d9e00b8020792cc50008e1a40e82773ebfa3cd2f9d06cd5187308c0406041b2",
+      "translationSha256": "cdf4aa5fd83dda25af1953a773e4a7e9e065f4ee6d8d7eeb92b4f8dd8ccc858a"
     },
     {
       "source": "docs/BILINGUAL.md",

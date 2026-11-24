@@ -4,7 +4,7 @@
 
 # Nous 24 — Capability catalog and skills directory (2026-11)
 
-Version: v0.1 · Date: 2026-11-24 (Asia/Taipei) · Status: **proposal; no product code changed; work starts only after George agrees**. Baseline: main `fd2198b` (after PR #150). This document borrows two mechanisms from [Omarchy](https://omarchy.org/), compares them with the existing Nous code, and proposes two groups of batches: CAP (capability catalog) and SKL (skills directory). CAP and SKL are new batch labels introduced here. They do not change the gates in `docs/07`, F0–F10 in `docs/13`, or any ADR. Development follows [CLAUDE.md](../CLAUDE.en.md), the [current implementation status](Current_Implementation_Status.en.md), [18 App Integration Layer](18_App_Integration_Layer_and_Spotify_2026-11.en.md), and the [bilingual policy](BILINGUAL.md).
+Version: v0.1 · Date: 2026-11-24 (Asia/Taipei) · Status: **George answered the 6 decisions on 2026-11-24 ([§6.1](#61-george-的決定2026-11-24)) and agreed to start with CAP-1; this document itself changes no product code**. Baseline: main `fd2198b` (after PR #150). This document borrows two mechanisms from [Omarchy](https://omarchy.org/), compares them with the existing Nous code, and proposes two groups of batches: CAP (capability catalog) and SKL (skills directory). CAP and SKL are new batch labels introduced here. They do not change the gates in `docs/07`, F0–F10 in `docs/13`, or any ADR. Development follows [CLAUDE.md](../CLAUDE.en.md), the [current implementation status](Current_Implementation_Status.en.md), [18 App Integration Layer](18_App_Integration_Layer_and_Spotify_2026-11.en.md), and the [bilingual policy](BILINGUAL.md).
 
 ## 0. One-page summary
 
@@ -16,7 +16,7 @@ Version: v0.1 · Date: 2026-11-24 (Asia/Taipei) · Status: **proposal; no produc
   - **CAP**: add the human summary and examples to each tool definition, and have the registry produce one catalog. Generate the voice command table from it. Add a check that fails when something is missing.
   - **SKL**: a skill is a Markdown procedure that only describes "how to use catalog tools to do something this household does often". It adds no tools, carries no code, and changes no permissions. The check confirms that every tool a skill mentions is in the catalog.
 - **Recommended order**: CAP-1 → CAP-2 → SKL-1 → SKL-2 → CAP-3 → SKL-3. The skill check needs the catalog, so CAP-1 comes first.
-- George needs to decide 6 items. See [§6](#6-待-george-決定).
+- George answered the 6 open items on 2026-11-24. See [§6.1](#61-george-的決定2026-11-24).
 
 ## 1. The two Omarchy mechanisms
 
@@ -140,7 +140,8 @@ The shape of one entry (illustration; CAP-1 settles the field names):
 | CAP-1 | The `ToolCatalogInfo` fields; summaries and examples for every existing tool; `registry.catalog()`; `npm run catalog -- --json／--check／--markdown`; the bilingual how-to "How to add an Adapter" | The check fails on a missing summary, missing examples, missing English, or an ID collision. **The tool JSON sent to the model is byte-identical to before the change** (compared by a test). Everything is fixture-based; this is not a product gate |
 | CAP-2 | In `/help/commands` and the prototype README, the integration-tool part of the "you can ask the AI" section is generated from the catalog; `TIMER_ASK` is generated from the catalog; unavailable rows show the reason from the live status | Rows for the TV, calendar, mail, and weather appear in the table; mock tools and Facades do not; the rows of the 9 existing page tools do not change |
 | CAP-3 | A built-in read-only tool (working name `app.nous.capabilities`): when asked "what can you do" or "why can't you turn on the TV", the model answers from the live catalog, including the reason something is unavailable | Fixture tests. On the Mac, ask by real voice once about an available service and once about an unavailable one; the answers match the settings view |
-| CAP-4 (needs a decision first) | The 9 page tools also have catalog data, and `ASK_THE_AI` is generated from the catalog | The tool definitions the model sees do not change; the rows and order of the command table do not change |
+| CAP-4 (George agreed 2026-11-24) | The 9 page tools also have catalog data, and `ASK_THE_AI` is generated from the catalog | The tool definitions the model sees do not change; the rows and order of the command table do not change |
+| CAP-6 (George agreed 2026-11-24) | Tool calls drive brain regions: when the page receives a real tool-call event, it lights the region given by that tool's `domain` in the catalog and labels the source as a tool call | Fixtures; nothing lights without a tool call; mock tools are labelled mock; one real voice trial on the Mac. The CLAUDE.md rule is relaxed to match |
 | CAP-5 (separate proposal) | Text chat and background tasks connect to the registry | Outside this proposal. `docs/18` §2 already says it needs its own batch |
 
 CAP-1 and CAP-2 change no voice behavior. They change only the help page and development tools. The first things a user notices are CAP-2 (the command table becomes complete) and CAP-3 (you can ask Nous directly what it can do).
@@ -197,8 +198,8 @@ SKL-3 settles the real path of the household data directory, based on `server/co
 
 | Batch | Deliverable | Gate |
 |---|---|---|
-| SKL-1 | Format, parser, and check (part of `npm run catalog -- --check`); 2 shipped skills; the flag `NOUS_SKILLS` is off by default, and **the model cannot see them yet** | Fixtures: the check fails on bad frontmatter, a name that differs from the directory, a tool ID that does not exist, and a body that is too long |
-| SKL-2 | Both realtime voice routes: the skill index enters the session instructions; `app.skill.read`; filtering by available tools | Fixtures. With the flag off, the tool list and instructions are byte-identical. On the Mac, run each of the two shipped skills once by real voice and record the real result of every step |
+| SKL-1 | Format, parser, and check (part of `npm run catalog -- --check`); 1 shipped skill (morning briefing, one file per language); the flag `NOUS_SKILLS` is off by default, and **the model cannot see them yet** | Fixtures: the check fails on bad frontmatter, a name that differs from the directory, a tool ID that does not exist, and a body that is too long |
+| SKL-2 | Both realtime voice routes: the skill index enters the session instructions; `app.skill.read`; filtering by available tools | Fixtures. With the flag off, the tool list and instructions are byte-identical. On the Mac, run the shipped skill once by real voice and record the real result of every step |
 | SKL-3 | "Remember this way of doing it": the model drafts → the screen shows the name and steps → the file is written after the user confirms; list and forget by voice; the household's skill wins on a name clash | Fixtures. On the Mac, save one, use it once, and forget it once. Nothing is written without confirmation |
 
 Realtime voice comes first because those two routes already have a tool loop that goes through the registry. Text chat and background tasks wait for CAP-5.
@@ -214,7 +215,7 @@ Combinations that existing tools can already do:
 | Before going out | Home devices, calendar | Check the lights and air conditioner, and remind about the next event |
 | Cooking timers | Timers | Set several timers for one dish at once |
 
-George chooses which two SKL-1 builds ([§6](#6-待-george-決定), item 2). These are candidates only. How far each one really works is known only after SKL-2 runs on the Mac.
+On 2026-11-24 George decided that SKL-1 starts with one skill, the morning briefing. These are candidates only. How far each one really works is known only after SKL-2 runs on the Mac.
 
 ## 5. Check against the product red lines and honesty rules
 
@@ -242,6 +243,20 @@ SKL-3 has one property to be aware of: a saved skill is "text that future model 
 4. **Skills saved by the household**: one shared set for the whole family, or one set per person (connected to family recognition)? The recommendation is to start with one shared set.
 5. **Bilingual shipped skills**: `SKILL.md` is a procedure for the model. The recommendation is to provide files in both languages, as `.agents/skills/verify-aios` does, and have the model read the one that matches the interface language.
 6. **The 9 page tools** (CAP-4): should they also enter the catalog? Then the command table has a single source, but `shared/voice-commands.ts` and its tests must change.
+
+<a id="61-george-的決定2026-11-24"></a>
+### 6.1 George's decisions (2026-11-24)
+
+| Item | Decision | Effect on the batches |
+|---|---|---|
+| 1 Batches and order | Agreed | Follow CAP-1 → CAP-2 → SKL-1 → SKL-2 → CAP-3 → SKL-3. CAP-4 and CAP-6 come after these; their order is set later |
+| 2 First skills | Start with the morning briefing | SKL-1 ships 1 skill, not the 2 written earlier |
+| 3 Brain-region link | Yes | `ToolCatalogInfo` gains a `domain` field (CAP-1 only stores and checks the data). Wiring the animation is CAP-6. In CLAUDE.md, the sources listed under the owner-specified design requirements now include tool calls |
+| 4 Skills saved by the household | One shared set first | SKL-3 does not connect to family recognition |
+| 5 Bilingual shipped skills | Yes | Each skill has one file per language |
+| 6 The 9 page tools | Include them | CAP-1 first makes the catalog able to list these 9 tools (data). Generating `ASK_THE_AI` from the catalog is CAP-4 |
+
+The boundary for item 3: the source of a lit region must be a real tool-call event, not internal model activity. Nothing lights without a call.
 
 <a id="7-數字的計算方式"></a>
 ## 7. How the numbers were calculated
