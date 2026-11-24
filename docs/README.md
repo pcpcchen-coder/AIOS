@@ -46,7 +46,7 @@
 
 ## 中英文版本與介面
 
-每份文件頂端提供語言切換，新增或修改文件須依[雙語規範](BILINGUAL.md)同步兩版。[App／網頁語言支援](development/localization.md)說明切換、保存、英文指令與維護；[驗證紀錄](validation/bilingual-2026-10-26.md)區分程式／畫面證據與待實機事項。
+每份文件頂端提供語言切換，新增或修改文件須依[雙語規範](BILINGUAL.md)同步兩版。[App／網頁語言支援](development/localization.md)說明切換、保存、英文指令與維護；[怎麼加一個 Adapter 或工具](development/adding-an-adapter.md)說明能力總表欄位與英文翻譯；[驗證紀錄](validation/bilingual-2026-10-26.md)區分程式／畫面證據與待實機事項。
 
 ## 執行、開發與證據
 

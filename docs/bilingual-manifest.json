@@ -200,15 +200,15 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "66fc4477cd3798029a0ee280127375ac7e420a67faaad17bc431ac9ef38fed83",
-      "translationSha256": "40795dba3b4749fc314637b88c47990a156fcf88f331e2f3ee419ee5d3915eb2"
+      "sourceSha256": "2e1e264f3dcf39daf4626193796129834b1b61cdd942f4082e3fdbefe53f495d",
+      "translationSha256": "29d67569c3bfc3cc01eceb48a1b61a763cda6fb1738062407b48dc07486b2c1a"
     },
     {
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "d66fcb6b880c9bf8a83d6fefb82ca31a12240a40f7d4ad2f8cf7db4c45790bf2",
-      "translationSha256": "272e35f667f471f17b1736d81deba7c07d1f3d0e3a096f1b661254392b051c18"
+      "sourceSha256": "4a5d9a336a10349c0380eaa76e0242ffd2243b331a4953f096f868628690f84f",
+      "translationSha256": "3825d98ba053abccf5de9c35b503c82e882cac304109a608482f948386ab3b01"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
@@ -230,6 +230,13 @@
       "translation": "docs/adr/ADR-0003-local-wake-and-voice-recognition.en.md",
       "sourceSha256": "e88990710c3c4e2103f2aa73f2188c042aa3de8e5de52615840167a9bbf80498",
       "translationSha256": "643d835c8b8471790a2a1a66aa1a75c38e5f3e7f3b656143b40ff328d2dd28a4"
+    },
+    {
+      "source": "docs/development/adding-an-adapter.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/development/adding-an-adapter.en.md",
+      "sourceSha256": "a8333389426d27e814bb3c9c5cbdf670ac006a486fc9f153c9661c1852079ee8",
+      "translationSha256": "bb801a7466cba18e8f5a109f836035fcc34c7668088cdcc70c9b3f30ab222c98"
     },
     {
       "source": "docs/development/brain-regions.md",
@@ -312,8 +319,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "3f069f0ac3ce7c8e139d1f3ff76a5bbce37d55e6aa621bc2555149709f587b07",
-      "translationSha256": "3ba41e4467885997255fbbc6c9e6235a51edca51424cdc2929d41f0f358cf90c"
+      "sourceSha256": "a35a04103fdc48f91388e55d0c0a6f3f7454d014b4c7173e1a7d83f0d0e198bb",
+      "translationSha256": "57b6e474a887d82ba47668fc74d27bf613bb0e4a123d7aff2d3728f7d784de6e"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -489,6 +496,13 @@
       "translation": "docs/validation/camera-preview-2026-10-21.en.md",
       "sourceSha256": "60d8f4808b38892d6df46829a14e4649a85fdc8482aa5a518fc0043a26ece07b",
       "translationSha256": "fbef56294f1b8e2a361074a5042c692a75005ebea65d7aa82f8dac7384968823"
+    },
+    {
+      "source": "docs/validation/cap-1-capability-catalog-2026-11-24.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/cap-1-capability-catalog-2026-11-24.en.md",
+      "sourceSha256": "c37b97ebf7ea7e0d7641cc0ba32582539c581b52280a649d6195ea4466e9f65f",
+      "translationSha256": "290cf670cdebd587671e38a33f4d014d012c877f195730aa1d3d2d98b0bc3957"
     },
     {
       "source": "docs/validation/chatgpt-conversation-2026-10-20.md",
