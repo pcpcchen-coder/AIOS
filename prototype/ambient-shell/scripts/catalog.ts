@@ -1,9 +1,11 @@
 import { catalogMarkdown, checkCatalog, localizeCatalog, staticCatalog } from "../server/integrations/catalog.ts";
+import { loadSkills } from "../server/skills/load.ts";
 
 // CAP-1（docs/24 §3）：開發用的能力總表。只讀程式碼裡的定義，不需要任何設定，也不連任何服務。
 //   npm run catalog -- --json [--lang en]      靜態總表（JSON）
 //   npm run catalog -- --markdown [--lang en]  給人看的表（不列 hidden 工具）
-//   npm run catalog -- --check                 漏寫 summary／例句、缺英文、domain 不合法、ID 撞名時失敗
+//   npm run catalog -- --check                 漏寫 summary／例句、缺英文、domain 不合法、ID 撞名時失敗；
+//                                              SKL-1 起也檢查出貨技能（skills/<name>/SKILL.md 與 SKILL.en.md，見 docs/development/writing-a-skill.md）
 // 即時總表（加上這次設定的註冊狀態）要有執行中的登記表，見 server/integrations/catalog.ts 的 liveCatalog()。
 
 const args = process.argv.slice(2);
@@ -15,7 +17,10 @@ if (args.includes("--check")) {
   for (const p of problems) console.error(`✗ ${p}`);
   const visible = entries.filter((e) => !e.hidden).length;
   console.log(problems.length ? `能力總表檢查失敗：${problems.length} 個問題` : `能力總表檢查通過：${entries.length} 個工具（${visible} 個列在給人看的表、${entries.length - visible} 個 hidden）`);
-  process.exit(problems.length ? 1 : 0);
+  const skills = loadSkills(undefined, entries);
+  for (const p of skills.problems) console.error(`✗ 技能 ${p.where}：${p.message}（${p.code}）`);
+  console.log(skills.problems.length ? `技能檢查失敗：${skills.problems.length} 個問題` : `技能檢查通過：${skills.skills.length} 份出貨技能（${skills.skills.map((s) => s.name).join("、") || "無"}），中英文各一份`);
+  process.exit(problems.length || skills.problems.length ? 1 : 0);
 } else if (args.includes("--json")) {
   console.log(JSON.stringify(localizeCatalog(entries, locale), null, 2));
 } else if (args.includes("--markdown")) {
