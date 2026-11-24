@@ -202,6 +202,8 @@ tools:
 
 **SKL-1 狀態補記（2026-11-24）**：已實作於分支 `claude/skl-1-skill-format`。格式是 `skills/<name>/SKILL.md`（中文）與 `SKILL.en.md`（英文），frontmatter 只有 `name`、`description`、`tools`；解析與檢查在 `server/skills/`，併入 `npm run catalog -- --check`，24 種失敗各有 fixture；出貨「早晨簡報」一份（只用天氣與日曆的唯讀工具）。**模型還看不到技能**；`NOUS_SKILLS` 這一批沒有程式讀它，SKL-2 才會用到。雲端 fixture 與型別檢查，不是產品 gate，也不是 Mac 實機驗收，見 [SKL-1 驗證](validation/skl-1-skill-format-2026-11-24.md)與[怎麼寫一份技能](development/writing-a-skill.md)。
 
+**SKL-2 狀態補記（2026-11-24）**：已實作於分支 `claude/skl-2-skills-realtime`。`NOUS_SKILLS=on`（預設關閉）時，兩條即時語音路徑共用 `server/skills/runtime.ts` 的 `SkillBook`：工作階段說明加上技能索引（每份技能的 `name` 與介面語言的 `description`，加一段「先用讀取工具讀內文、照做、只說工具回傳的內容」的指示）；讀取工具名稱定案為 `app.skill.read`（核心內建、`read`、hidden、`domain: null`），只讀這條路徑、這個語言列得出來的技能，名稱只對照已載入清單。一份技能的 `tools` 在這條路徑上全部 `available` 才列出（登記表即時狀態）：API key 路徑以工作階段開始時為準，ChatGPT 方案的工具執行層每次交辦重算。§4.3 待量測的數字：只有早晨簡報時 API key 說明中文 +202、英文 +571 字；上限一次 8 份、整段 2,000 字，超過時依名稱截斷並記 log。旗標關閉時工具 JSON、說明與 `/help/commands` 逐字不變。雲端 fixture 與型別檢查，不是產品 gate；**gate 的「Mac 上用真實語音跑一次」未完成，待 George 執行**，見 [SKL-2 驗證](validation/skl-2-skills-realtime-2026-11-24.md)。
+
 先接即時語音，是因為這兩條路徑已經有經過登記表的工具迴圈。文字聊天與背景任務要等 CAP-5。
 
 ### 4.5 第一批出貨技能的候選

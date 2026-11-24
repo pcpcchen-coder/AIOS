@@ -188,8 +188,8 @@
       "source": "docs/24_Capability_Catalog_and_Skills_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/24_Capability_Catalog_and_Skills_2026-11.en.md",
-      "sourceSha256": "2fcc3096bbe8c468e363e1df936678326ecb67a761c15453df3b7a42416b1d5f",
-      "translationSha256": "0e9f85d13edc60b11d6dd035c58f89038bd6e8626cdbf75358b38640f7864372"
+      "sourceSha256": "25a56746ee3545354e55676dba36b0cc18d6ed62007282470443eb393ff5787a",
+      "translationSha256": "6bc99fc3199a01adf16a855f7d40955b683709db1f69eb3011118c05b57ea859"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -200,8 +200,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "5a2399a119da94d548ed6f7b05e3b245646ce23a47cca7072f0be4cd7912482a",
-      "translationSha256": "b9d919f271f81247ce1e8ad5707852a0d13cf3c9a850436f81da0b5a5b7c49d4"
+      "sourceSha256": "5299425cbe2f70327a0a189a03036149160a290d814e9615f44f008f0f9a10ec",
+      "translationSha256": "99c3e16a7796aca4d333966ebe14cbbc3b9eb03245779968d4e857bbfeeeae87"
     },
     {
       "source": "docs/README.md",
@@ -284,8 +284,8 @@
       "source": "docs/development/writing-a-skill.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/development/writing-a-skill.en.md",
-      "sourceSha256": "f5c7463dd31a850c2e803a48677ada8d213d04e163292690b2d4b8060ba3eda9",
-      "translationSha256": "6d39539535f16736f80bfb33c969507ff864dd484ae9e632d130868e0fa05f9a"
+      "sourceSha256": "0aa1ef11982930b7e92ddaed37c6a75c3c70f67deb01ab1331c33babbcabc1c2",
+      "translationSha256": "58a85e4ecbcc826c4dd79fa56179e736240a85473b2044da098364301d608f96"
     },
     {
       "source": "docs/experiments/RPI4_BLUETOOTH_EMEET_PLAN.md",
@@ -326,8 +326,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "ebe1426e4506114f702ca5f40edbc4f04d6629d38a8962c50aaf479cda3f73f6",
-      "translationSha256": "f013e21c82a0b731a6e794f3be16a19a64af706a2bfc5617bf01b7c86bc7e6dd"
+      "sourceSha256": "30f7a147423390bd4d148febbe8a29f5352b23694398fe8579b7c3c0b664521e",
+      "translationSha256": "7a3dfe63f481e03260b6c189d52453debd103637ab2a8566d5c817fa57af1e87"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -904,6 +904,13 @@
       "translationSha256": "c801cc6f41ad0b375d04f88dd99b1d609b0a88c6df93e9b33d5485a5bc89f7a9"
     },
     {
+      "source": "docs/validation/skl-2-skills-realtime-2026-11-24.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/skl-2-skills-realtime-2026-11-24.en.md",
+      "sourceSha256": "00935a6f6433d6167110e7a11b2370f3d3155540aa989bf25582ebd69bce7ca1",
+      "translationSha256": "6e023385ce94eba5c584677da6891ac6e1b13306f08f0e389c0cc684a838a73c"
+    },
+    {
       "source": "docs/validation/small-decisions-2026-10-25.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/small-decisions-2026-10-25.en.md",
@@ -1054,8 +1061,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "74de844e75fe9ae82a976107b6cc7a9b982e8107d4da13c3576d01422da629a3",
-      "translationSha256": "a76ae79bb6a80e982f59b42ecbf3b56f19ff4afeeeb721753418b537de48d92c"
+      "sourceSha256": "83d26d6d5992052166160c922b37d0101f7d2923b7c72627ed31b817316ab0dc",
+      "translationSha256": "e0aa2a86587238413ef1ba87b052fb110d80fe933bde8af6a63f77f704e5ab5d"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

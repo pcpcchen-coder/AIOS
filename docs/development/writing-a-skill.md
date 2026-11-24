@@ -4,9 +4,9 @@
 
 # 怎麼寫一份技能
 
-版本：2026-11-24（SKL-1）。適用 `prototype/ambient-shell`。給在本 repo 開發的人與開發 Agent。設計背景見 [24 能力總表與技能目錄 §4](../24_Capability_Catalog_and_Skills_2026-11.md#4-skl技能目錄)；這一批的驗證見 [SKL-1 驗證紀錄](../validation/skl-1-skill-format-2026-11-24.md)。
+版本：2026-11-24（SKL-1；SKL-2 補上 §8–§9）。適用 `prototype/ambient-shell`。給在本 repo 開發的人與開發 Agent。設計背景見 [24 能力總表與技能目錄 §4](../24_Capability_Catalog_and_Skills_2026-11.md#4-skl技能目錄)；驗證見 [SKL-1 驗證紀錄](../validation/skl-1-skill-format-2026-11-24.md)與 [SKL-2 驗證紀錄](../validation/skl-2-skills-realtime-2026-11-24.md)。
 
-**現況：模型還看不到技能。** SKL-1 只有格式、解析與檢查，加上一份出貨技能「早晨簡報」。技能索引進工作階段說明、唯讀工具 `app.skill.read` 都是 SKL-2；家裡自己存的技能是 SKL-3。旗標 `NOUS_SKILLS`（預設關閉）在 SKL-1 沒有任何程式讀它，SKL-2 才會用到。
+**現況（SKL-2）：`NOUS_SKILLS=on` 時，兩條即時語音路徑的模型看得到技能索引，可以用唯讀工具 `app.skill.read` 讀內文**（§8）；旗標預設關閉，關閉時模型看不到技能。真實語音下的表現還沒在 Mac 上驗過。家裡自己存的技能是 SKL-3，文字聊天與背景任務要等 CAP-5。
 
 ## 1. 技能是什麼
 
@@ -60,7 +60,7 @@ frontmatter 只接受下面三個欄位，順序不拘，不能重複，也不�
 
 內文是 frontmatter 之後的全部文字。repo 文件慣例的 `<!-- bilingual: ... -->` 標記與語言切換那一行會被拿掉，不算進內文，也不會給模型。內文最多 6,000 字（Unicode code point）；不能是空的。
 
-長度上限的根據：2026-11-24 出貨的 `morning-briefing` 中文內文 1,730 字、英文內文 4,437 字、英文 `description` 177 字，上限留約三成餘裕。技能索引一次列幾份、佔多少字，要等 SKL-2 量測後再定。
+長度上限的根據：2026-11-24 出貨的 `morning-briefing` 中文內文 1,730 字、英文內文 4,437 字、英文 `description` 177 字，上限留約三成餘裕。技能索引的上限是 SKL-2 量測後定的（§8.3）。
 
 ## 4. 工具 ID 的規則
 
@@ -68,7 +68,7 @@ frontmatter 只接受下面三個欄位，順序不拘，不能重複，也不�
 - 不能列 hidden 工具（模擬工具與 legacy Facade，例如 `app.home.control`）。
 - 內文提到的每個 `app.<service>.<action>`（反引號內外都算）都必須在總表上，而且列在 `tools`。所以工具改名或移除時，檢查會指出哪份技能壞了。
 
-技能「能列出」不代表「這次能用」。這台裝置沒有設定那個服務時，工具不會註冊；SKL-2 才會依即時總表只列出工具全部可用的技能（[24 §4.3](../24_Capability_Catalog_and_Skills_2026-11.md#43-總表與技能怎麼接起來)）。
+技能「能列出」不代表「這次能用」。這台裝置沒有設定那個服務時，工具不會註冊；SKL-2 起依即時狀態只列出工具全部可用的技能（§8.2，[24 §4.3](../24_Capability_Catalog_and_Skills_2026-11.md#43-總表與技能怎麼接起來)）。
 
 ## 5. 內文怎麼寫
 
@@ -112,7 +112,7 @@ npm run typecheck
 
 repo 根目錄：`node scripts/check-bilingual-docs.mjs`（中英文兩份都改好、審閱過，才用 `--record`）。
 
-這些都是 fixture 與型別檢查。技能在真實語音下的表現，要等 SKL-2 在 Mac 上實際跑過才知道，不能用這些檢查宣稱。
+這些都是 fixture 與型別檢查。技能在真實語音下的表現，要在 Mac 上實際跑過才知道（SKL-2 驗證第 7 節），不能用這些檢查宣稱。
 
 ## 7. 程式在哪裡
 
@@ -121,6 +121,67 @@ repo 根目錄：`node scripts/check-bilingual-docs.mjs`（中英文兩份都改
 | `server/skills/format.ts` | 純函式：`parseSkillFile()`（一個檔）、`buildSkills()`（中英文配對、對照總表、撞名）、`mentionedTools()`、`SKILL_LIMITS` |
 | `server/skills/load.ts` | 讀 `skills/` 目錄（只讀文字檔）：`readSkillSources()`、`loadSkills()` |
 | `scripts/catalog.ts` | `--check` 呼叫 `loadSkills()` |
-| `tests/skills.test.ts` | 出貨技能通過、每種失敗一個 fixture、旗標與「模型看不到」的 gate |
+| `server/skills/runtime.ts` | SKL-2：`SkillBook`（列出、索引、讀取）、`SKILL_INDEX_LIMITS`、`skillLoadLog()` |
+| `server/skills/tool-id.ts` | SKL-2：`app.skill.read` 的 ID 與模型看到的名稱 |
+| `server/integrations/adapters/skill.ts` | SKL-2：讀取工具的 `SkillAdapter` 與總表資料 |
+| `server/nous.ts` | SKL-2：`NOUS_SKILLS=on` 時載入技能、記 log、註冊讀取工具、把索引交給兩條路徑 |
+| `server/realtime.ts` | SKL-2：`realtimeToolRules()` 與 `buildLiveInstructions()` 插入索引 |
+| `tests/skills.test.ts` | 出貨技能通過、每種失敗一個 fixture、旗標的 gate |
+| `tests/skills-realtime.test.ts` | SKL-2：旗標關閉逐字不變、開啟時差異只有索引與讀取工具、過濾、讀取與拒絕、上限、壞檔略過、量測 |
 
-SKL-1 除了 `scripts/catalog.ts` 與測試，沒有任何程式 import `server/skills/`（測試會檢查），所以模型、工作階段說明與 `/help/commands` 都不會看到技能。
+除了 `scripts/catalog.ts`、`server/nous.ts`（只在 `NOUS_SKILLS=on` 時）與測試，沒有程式載入技能（測試會檢查）。
+
+## 8. 模型怎麼看到技能（SKL-2）
+
+### 8.1 索引與讀取
+
+`NOUS_SKILLS=on` 時，Nous 啟動時讀一次 `skills/`，檢查失敗的那一份略過並記 log，其他照常。每次組工作階段說明時：
+
+1. 依名稱排序，只留這條路徑上工具全部可用的技能（§8.2），套上限（§8.3）。
+2. 說明裡插入一段索引：一句指示，加上每份技能一行 `- name：description`。中文介面用 `SKILL.md` 的 `description`，英文介面用 `SKILL.en.md` 的。**只有名稱與說明，沒有內文**，所以 `description` 要寫清楚「什麼時候用」。
+3. 模型判斷使用者的請求符合某一份時，呼叫 `app.skill.read`（參數 `name`），拿到那個語言的內文，照內文呼叫各個工具。
+
+位置：API key 語音模型與 ChatGPT 方案的工具執行層，索引插在鬧鐘規則之後（同一份 `realtimeToolRules()`）；ChatGPT 方案沒有工具的語音層，插一段「符合時一律交辦」版的索引。實際文字見 [SKL-2 驗證 §5.1](../validation/skl-2-skills-realtime-2026-11-24.md#51-旗標開啟時實際加進說明的中文段落)。
+
+`app.skill.read` 只回傳文字：只讀這條路徑、這個語言現在列得出來的技能，名稱只和已載入的清單比對（不組路徑、不讀檔）；不在清單上回 `refused`（`invalid_arguments`），工具不可用或被上限截掉回 `refused`（`unavailable`），旗標關閉時根本沒有註冊（`not_registered`）。它是 hidden，不列在 `/help/commands`。
+
+### 8.2 什麼時候列出
+
+一份技能的 `tools` **每一個**在這條路徑上都是 `available`（登記表的即時狀態）才列出。例如沒有設定日曆（`NOUS_AIL_SERVICES` 沒有 `google_calendar`）時，早晨簡報不列出；沒有任何技能列得出來時，連 `app.skill.read` 都不在工具清單上，說明和旗標關閉時相同。
+
+- API key 路徑：以工作階段開始時為準；通話中狀態改變不會更新索引。
+- ChatGPT 方案：工具執行層每次交辦都重組說明，會反映通話中的變化；語音層以工作階段開始時為準。
+- 讀取工具每次呼叫都重新看狀態。
+
+### 8.3 上限
+
+一次最多 **8 份**，整段索引（指示加每份一行）最多 **2,000 字**（Unicode code point，兩種語言共用）。超過時依名稱排序，從第一份放不下的開始後面全部不列，並在 log 記錄被截掉的名稱。量測：只有早晨簡報時，API key 說明中文多 202 字、英文多 571 字。寫新技能時 `description` 盡量短；英文一行約 200 字時，8 份剛好放得下。
+
+### 8.4 診斷
+
+啟動 log（macOS App 在 `~/Library/Application Support/Nous/nous.log`）：
+
+```text
+技能：載入 1 份（morning-briefing）
+技能：api_key／zh-TW 列出 1 份（morning-briefing）
+```
+
+不列出時會寫原因，例如 `技能：api_key／zh-TW 列出 0 份；工具不可用沒列：morning-briefing（app.calendar.list_events 未註冊）`；檢查失敗時寫 `技能：1 份檢查失敗被略過：…` 與每個問題。log 不記內文。
+
+## 9. 在本機打開旗標試用
+
+1. 在 `prototype/ambient-shell` 的 `.env`（macOS App：選單列「編輯 API key 與進階設定（.env）…」）加上：
+
+   ```bash
+   NOUS_SKILLS=on
+   NOUS_AIL=on
+   NOUS_AIL_SERVICES=weather,google_calendar
+   NOUS_GOG_ACCOUNT=you@gmail.com
+   ```
+
+   早晨簡報需要天氣與日曆兩個工具；日曆要先照 [CAL-1](../validation/cal-1-google-calendar-2026-11-05.md) 授權 gog，天氣要在選單列「主動提醒」選好地點。
+2. 重新啟動（`npm start`；macOS App 存檔後自動重新啟動），在 log 確認 `技能：… 列出 1 份（morning-briefing）`。
+3. 開即時語音說「給我今天的簡報」。log 應該依序有 `app.skill.read`、`app.weather.today`、`app.calendar.list_events` 的呼叫與各自的 status。
+4. 改自己的技能後先跑 `npm run catalog -- --check`；技能是啟動時讀的，改完要重新啟動。
+
+Mac 上的完整驗收步驟與結果表見 [SKL-2 驗證第 7 節](../validation/skl-2-skills-realtime-2026-11-24.md#7-mac-實機驗收給-george未執行)。
