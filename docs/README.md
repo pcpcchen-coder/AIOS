@@ -29,6 +29,7 @@
 | [20 電視 Netflix 播指定節目](20_TV_Netflix_Playback_Plan_2026-11.md) | **規劃／未實作**：Netflix 送片的社群參數（待在 G3 實測）、找片沒有官方 API；建議做「給網址」加「本機片單」（LGTV-3），開到搜尋頁再評估 |
 | [22 Nous 搬到 LG G3 電視（webOS）可行性評估](22_LG_G3_webOS_Port_Assessment_2026-11.md) | **評估中／未實作**（2026-11-09）：webOS 23 的 Web App 是 Chromium 94；官方沒有收音 API、鏡頭 API 已 deprecated，LG 論壇回覆 WebRTC 只給合作夥伴，所以電視當收音／鏡頭終端不可行（待實測）；建議先用 Pi 接電視 HDMI，並用[唯讀檢測頁](../terminals/webos/capability-check.html)做 G-0 實測 |
 | [23 架構盤點與重整計畫](23_Architecture_Review_2026-11.md) | **提案、未動程式**（2026-11-09）：原型 241 個檔、66,887 行的模組地圖、六條資料流、85 條 HTTP 路由與 SSE 事件、設定檔與測試覆蓋；11 項架構問題附 file:line 與不改的代價；S0 加 14 步行為不變的小 PR 重整計畫，等 George 同意才開始搬移；數字見[量測紀錄](validation/architecture-review-2026-11-09.md)。2026-11-10 補記：PR #139 已於 2026-11-10 合併；George 同日同意 S1–S5（各自一個 PR）。S6–S14 仍等同意，S6 起沒有同意前不搬移程式。 |
+| [24 能力總表與技能目錄](24_Capability_Catalog_and_Skills_2026-11.md) | **提案、未動程式**（2026-11-24）：借鏡 Omarchy 的指令總表與技能目錄，對照既有 AIL 登記表後提出 CAP（工具加上給人看的說明與例句、由登記表產生總表與語音指令表）與 SKL（只有文字、只能用總表上工具的技能）兩組批次；6 項待 George 決定 |
 
 ## 歷史藍圖與決策
 

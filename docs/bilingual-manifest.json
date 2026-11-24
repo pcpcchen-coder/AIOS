@@ -20,8 +20,8 @@
       "source": "CLAUDE.md",
       "sourceLanguage": "zh-TW",
       "translation": "CLAUDE.en.md",
-      "sourceSha256": "00265dc7945acf70dd67727eda8d2291fdfc0b747a6a11841973633bf96d2efd",
-      "translationSha256": "cffb0c7c3f0f6a443babcd8617442fd626563727e93b56b2448b64f6dc715dba"
+      "sourceSha256": "c12d51454c24a4f90d7ff12861bb59988099c13307061ffe8eaff72a177ed9b3",
+      "translationSha256": "2c24ec34a5a7de6557c600302ee2358569d06409c75e462d2a67f5c747177146"
     },
     {
       "source": "README.md",
@@ -185,6 +185,13 @@
       "translationSha256": "c8455ed5a745d0a4c10f16fa6db74a252f5b6f925fd841335ea708b51df24a55"
     },
     {
+      "source": "docs/24_Capability_Catalog_and_Skills_2026-11.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/24_Capability_Catalog_and_Skills_2026-11.en.md",
+      "sourceSha256": "3d9e00b8020792cc50008e1a40e82773ebfa3cd2f9d06cd5187308c0406041b2",
+      "translationSha256": "cdf4aa5fd83dda25af1953a773e4a7e9e065f4ee6d8d7eeb92b4f8dd8ccc858a"
+    },
+    {
       "source": "docs/BILINGUAL.md",
       "mode": "inline",
       "sha256": "d2ba4d1c494863262594e6d315bcc32759e377756ad7b7de0680e757955cc0cc"
@@ -200,8 +207,8 @@
       "source": "docs/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/README.en.md",
-      "sourceSha256": "9848e73678cab5addfe3b07e652bd14dfdff0633d77b0376d3a06f9b03bb4412",
-      "translationSha256": "47dab0873ec64594f0e1bbd58b09ac4feea4fae24ce25ecce7db26fad4748e41"
+      "sourceSha256": "d66fcb6b880c9bf8a83d6fefb82ca31a12240a40f7d4ad2f8cf7db4c45790bf2",
+      "translationSha256": "272e35f667f471f17b1736d81deba7c07d1f3d0e3a096f1b661254392b051c18"
     },
     {
       "source": "docs/adr/ADR-0001-local-family-recognition.md",
