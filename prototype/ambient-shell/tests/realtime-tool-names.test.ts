@@ -1,4 +1,5 @@
 import { mkdtempSync, readFileSync } from "node:fs";
+import { staticCatalog } from "../server/integrations/catalog.ts";
 import type { Server } from "node:http";
 import { createServer as createNetServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -91,7 +92,7 @@ describe("特徵：核心的名單（順序看得到的地方）", () => {
 
   it("ASK_THE_AI 的鍵順序＝指令表「可以問 AI」的列順序", () => {
     expect(Object.keys(ASK_THE_AI)).toEqual(ASK_ORDER);
-    const ask = commandSections(null).find((s) => s.id === "ask")!;
+    const ask = commandSections(null, staticCatalog()).find((s) => s.id === "ask")!;
     expect(ask.rows.map((r) => r.id)).toEqual(ASK_ORDER.map((name) => `ai-${name}`));
     expect(ask.rows).toMatchSnapshot("commands doc ask rows");
   });

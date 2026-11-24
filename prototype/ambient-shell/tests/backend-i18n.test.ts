@@ -1,4 +1,5 @@
 import { describeMenuPrefs } from "../shared/menu-prefs.ts";
+import { staticCatalog } from "../server/integrations/catalog.ts";
 import { DEFAULT_CAMERA_PREFS } from "../shared/sense.ts";
 import { DEFAULT_VOICE_PREFS } from "../shared/voice-prefs.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -139,7 +140,7 @@ describe("backend locale isolation", () => {
     expect(html).not.toContain("<script");
     expect(response.headers.get("content-security-policy")).toBe(commandsPageHeaders()["Content-Security-Policy"]);
     const now = new Date("2026-10-26T12:00:00Z");
-    expect(renderCommandsPage(view(), now)).toBe(renderCommandsPage(view(), now, "zh-TW"));
+    expect(renderCommandsPage(view(), staticCatalog(), now)).toBe(renderCommandsPage(view(), staticCatalog(), now, "zh-TW"));
   });
 });
 

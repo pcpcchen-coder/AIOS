@@ -32,7 +32,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ROUTES,
-    catalog: { summary: "設定單次或重複（每天、工作日、週末、指定星期）的鬧鐘，在設定的那台裝置響。", examples: ["明天早上 7 點叫我", "每個工作天 6:30 叫我", "週一三五晚上 9 點提醒我倒垃圾"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
+    catalog: { summary: "設定單次或重複（每天、工作日、週末、指定星期）的鬧鐘，可以取名字；用這台 Mac 的時區，跨夏令時間照當地時間響。在設定的那台裝置響，一小時內的鬧鐘右下角按需顯示倒數。", examples: ["明天早上 7 點叫我", "每個工作天 6:30 叫我", "週一三五晚上 9 點提醒我倒垃圾"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.alarm.list",
@@ -43,7 +43,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ROUTES,
-    catalog: { summary: "列出鬧鐘、下一次什麼時候響，以及貪睡中的鬧鐘。", examples: ["有哪些鬧鐘"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
+    catalog: { summary: "列出鬧鐘、下一次什麼時候響，以及貪睡中的鬧鐘（設定頁也可以管理鬧鐘）。", examples: ["有哪些鬧鐘"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.alarm.enable",

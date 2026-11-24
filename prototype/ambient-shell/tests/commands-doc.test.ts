@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { staticCatalog } from "../server/integrations/catalog.ts";
 import { COMMANDS_BEGIN, COMMANDS_END, renderCommandsMarkdown } from "../shared/voice-commands.ts";
 
 describe("README command table", () => {
@@ -9,6 +10,6 @@ describe("README command table", () => {
     const end = readme.indexOf(COMMANDS_END);
     expect(begin).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(begin);
-    expect(readme.slice(begin + COMMANDS_BEGIN.length, end).trim()).toBe(renderCommandsMarkdown());
+    expect(readme.slice(begin + COMMANDS_BEGIN.length, end).trim()).toBe(renderCommandsMarkdown(staticCatalog()));
   });
 });

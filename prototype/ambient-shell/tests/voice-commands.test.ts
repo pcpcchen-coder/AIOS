@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { staticCatalog } from "../server/integrations/catalog.ts";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { APPROVE_VERBS, matchApproval, REJECT_WORDS, type ApprovalDecision } from "../src/approval.ts";
 import { isStopWord, STOP_WORDS } from "../src/echo.ts";
@@ -268,9 +269,9 @@ describe("LOCAL_ROUTING mirrors src/main.ts", () => {
 describe("commandSections", () => {
   it("marks unmet preconditions and shows the live seconds when given the settings", () => {
     const sections = commandSections({
-      cameraEnabled: false, realtimeAvailable: false, webSearch: false, home: false,
+      cameraEnabled: false, realtimeAvailable: false, webSearch: false, home: false, route: null,
       seconds: { look_to_talk_s: 1.6, look_to_talk_cooldown_s: 10, voice_idle_s: 60, realtime_idle_s: 300 },
-    });
+    }, staticCatalog());
     const rows = sections.flatMap((s) => s.rows);
     expect(rows.find((r) => r.id === "camera-off")?.unmet).toBe("目前：鏡頭未啟用");
     expect(rows.find((r) => r.id === "preview-off")?.unmet).toBeNull();
@@ -281,7 +282,7 @@ describe("commandSections", () => {
   });
 
   it("without settings (README) nothing is marked and seconds show only the defaults", () => {
-    const rows = commandSections(null).flatMap((s) => s.rows);
+    const rows = commandSections(null, staticCatalog()).flatMap((s) => s.rows);
     expect(rows.every((r) => r.unmet === null)).toBe(true);
     expect(rows.find((r) => r.id === "voice-idle")?.cells[1]).toContain("預設 1 分 30 秒");
     expect(rows.map((r) => r.cells.join(" ")).join("\n")).not.toContain("目前 ");

@@ -188,15 +188,45 @@ These are not fixed phrases. AI decides whether to use tools from meaning.
 <a id="定時器與鬧鐘即時語音由模型判斷不保證"></a>
 #### Timers and alarms (realtime, model decides, no guarantee)
 
-Timers and alarms are saved and scheduled by the Nous core and survive a restart. While the Mac sleeps the core stops; after waking it still rings anything up to 30 minutes late and says how late, and only logs older ones as missed.
+Timers and alarms are saved and scheduled by the Nous core and survive a restart. While the Mac sleeps the core stops; after waking it still rings anything up to 30 minutes late and says how late, and only logs older ones as missed. With several timers or alarms and none named, the AI asks which one. This section is generated from the capability catalog (one row per tool).
 
-| Ask | Possible AI action | Conditions |
-|---|---|---|
-| 「計時 10 分鐘」「泡麵 3 分鐘」「5 分鐘後叫我」 | Sets a timer (it can have a name, and several can run at once). When it ends it rings on the device where it was set (every screen if that device is offline); a countdown shows in the bottom-right corner while timers exist | Requires realtime and “Alarms and timers” on in settings (on by default) |
-| 「泡麵還剩多久」「有哪些定時器」 | Says how much time each timer has left | Requires realtime |
-| 「暫停泡麵」「繼續」「再加 5 分鐘」「取消雞蛋的定時器」「全部取消」 | Pauses, resumes, extends or cancels; with several timers and none named, the AI asks which one | Requires realtime |
-| 「明天早上 7 點叫我」「每個工作天 6:30 叫我」「週一三五晚上 9 點提醒我倒垃圾」 | Sets an alarm (ALARM-2): one-off or repeating (every day, weekdays, weekends, chosen days), optionally named; uses this Mac's time zone and rings at local time across daylight-saving changes; rings on the device where it was set, and an alarm within the hour shows a countdown in the bottom-right corner | Requires realtime and “Alarms and timers” on in settings (on by default) |
-| 「有哪些鬧鐘」「關掉明天的鬧鐘」「刪掉 6:30 的鬧鐘」 | Lists, turns on or off, or deletes alarms (also manageable in settings) | Requires realtime |
+| Service | Ask | Possible AI action | Conditions |
+|---|---|---|---|
+| Timer | 「計時 10 分鐘」「泡麵 3 分鐘」「5 分鐘後叫我」 | Starts a countdown timer; it can have a name, and several can run at once. When it ends it rings on the device where it was set (on every screen if that device is offline), and a countdown shows in the bottom-right corner while timers exist. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Timer | 「泡麵還剩多久」「有哪些定時器」 | Says how much time each timer has left. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Timer | 「暫停泡麵」 | Pauses a timer. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Timer | 「泡麵繼續計時」「繼續」 | Resumes a paused timer. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Timer | 「再加 5 分鐘」 | Adds time to a timer. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Timer | 「取消雞蛋的定時器」「定時器全部取消」 | Cancels one timer or all of them. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Timer | 「定時器響了，關掉」 | Stops a ringing timer. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Alarm | 「明天早上 7 點叫我」「每個工作天 6:30 叫我」「週一三五晚上 9 點提醒我倒垃圾」 | Sets a one-off or repeating alarm (daily, weekdays, weekends, or chosen days), optionally named; it uses this Mac's time zone and rings at local time across daylight-saving changes. It rings on the device where it was set, and an alarm within the hour shows a countdown in the bottom-right corner. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Alarm | 「有哪些鬧鐘」 | Lists alarms, when each rings next, and any snoozed alarms (alarms can also be managed in settings). | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Alarm | 「關掉明天的鬧鐘」「把 7 點的鬧鐘打開」 | Turns an alarm on or off (without deleting it). | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Alarm | 「刪掉 6:30 的鬧鐘」 | Deletes one alarm or all of them. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Alarm | 「貪睡」「再睡一下」 | Snoozes a ringing alarm so it rings again in a few minutes. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+| Alarm | 「我起來了」「不用再叫我了」 | Stops a ringing alarm, and can cancel snoozed ones too. | Requires realtime and Alarms and timers turned on in settings (on by default) |
+
+<a id="app-整合即時語音由模型判斷不保證"></a>
+#### App integrations (realtime, model decides, no guarantee)
+
+This section is generated from the capability catalog (server/integrations/catalog.ts, one row per tool); the AI decides from what you mean whether to use a tool. The page marks which tools cannot be used right now, based on the settings when it was opened.
+
+| Service | Ask | Possible AI action | Conditions |
+|---|---|---|---|
+| Nearby smart speakers (voice relay) | 「叫音箱下一首」「叫音箱把音量調到 30」 | Speaks a reviewed command to a nearby smart speaker with synthesized speech (next song, pause, volume, lights on or off); the result is at most "sent, unconfirmed". | Requires realtime and NOUS_VCR=fake (mock, no real sound) or mac (spoken by the Mac's say), and at least one enabled speaker target |
+| Google Calendar | 「我今天有什麼行程」「明天下午有空嗎」「這週有哪些行程」 | Reads your own Google Calendar: today, tomorrow, this week, or a given day. | Requires realtime and a Google account in NOUS_GOG_ACCOUNT (or NOUS_MAIL_SELF), with gog authorized for Calendar |
+| Google Calendar | 「明天下午三點記一個看牙醫」「把下週三晚上七點的聚餐記到行事曆」 | Adds an event to your own Google Calendar without inviting anyone. | Requires realtime and a Google account in NOUS_GOG_ACCOUNT (or NOUS_MAIL_SELF), with gog authorized for Calendar |
+| Weather | 「今天天氣怎麼樣」「今天會下雨嗎」 | Tells today's weather: condition, low and high temperature, and when rain is most likely (Open-Meteo). | Requires realtime and a place in the menu bar's Proactive notices (chosen, or inferred from the system time zone) |
+| Living-room TV | 「電視開著嗎」「電視現在在看什麼」 | Checks whether the living-room LG TV is on, which app or input it shows, and its volume and mute. | Requires realtime and NOUS_LGTV_HOST (the TV's LAN IP), paired once on the Mac with npm run tv:pair |
+| Living-room TV | 「開電視」「把電視關掉」 | Turns the living-room LG TV on or off (Wake-on-LAN from standby, which can take more than ten seconds). | Requires realtime and NOUS_LGTV_HOST (the TV's LAN IP), paired once on the Mac with npm run tv:pair |
+| Living-room TV | 「電視大聲一點」「電視音量調到 20」 | Changes the living-room TV volume: set a level, or step it up or down. | Requires realtime and NOUS_LGTV_HOST (the TV's LAN IP), paired once on the Mac with npm run tv:pair |
+| Living-room TV | 「電視靜音」「電視取消靜音」 | Mutes or unmutes the living-room TV. | Requires realtime and NOUS_LGTV_HOST (the TV's LAN IP), paired once on the Mac with npm run tv:pair |
+| Living-room TV | 「電視切到 HDMI 2」 | Switches the TV input (such as HDMI 1); turns the TV on first if needed. | Requires realtime and NOUS_LGTV_HOST (the TV's LAN IP), paired once on the Mac with npm run tv:pair |
+| Living-room TV | 「電視開 Netflix」「在電視上打開 YouTube」 | Opens an app on the TV (such as YouTube or Netflix); turns the TV on first if needed. | Requires realtime and NOUS_LGTV_HOST (the TV's LAN IP), paired once on the Mac with npm run tv:pair |
+| Living-room TV | 「在電視上用 YouTube 播周杰倫的晴天」 | Plays a video in the TV's YouTube app from a link or from what you ask for; turns the TV on first if needed. | Requires realtime and NOUS_LGTV_HOST, paired with npm run tv:pair; searching by name also needs NOUS_YOUTUBE_API_KEY (a link does not) |
+| Living-room TV | 「選第一個帳號」 | When the TV's YouTube is stuck on the "Who's watching?" screen, picks an account and replays the last video. | Requires realtime and NOUS_LGTV_HOST (the TV's LAN IP), paired once on the Mac with npm run tv:pair |
+| Living-room TV | 「電視暫停」「電視繼續播放」 | TV playback control: play, pause, stop, rewind, fast forward (the TV does not report playback state). | Requires realtime and NOUS_LGTV_HOST (the TV's LAN IP), paired once on the Mac with npm run tv:pair |
+| Gmail (to yourself) | 「把剛才的重點寄到我的信箱」「email 給我今天要買的東西」 | Sends an email to your own Gmail; the recipient is always you and cannot be anyone else. | Requires realtime and NOUS_MAIL_SELF (your own Gmail), with gog signed in |
 
 <a id="不用說話"></a>
 #### Without speaking

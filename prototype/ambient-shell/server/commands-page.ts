@@ -2,9 +2,11 @@ import { localize } from "./localization.ts";
 import type { Locale } from "../shared/i18n.mjs";
 import { createHash } from "node:crypto";
 import type { SettingsView } from "../shared/types.ts";
-import { commandContext, commandSections, COMMANDS_INTRO, type TableSection } from "../shared/voice-commands.ts";
+import { translate } from "../shared/i18n.mjs";
+import { commandContext, commandSections, COMMANDS_INTRO, type CatalogToolRow, type TableSection } from "../shared/voice-commands.ts";
 
 // 唯讀的語音指令表頁（GET /help/commands）：每次請求依目前設定產生，所以「目前：鏡頭未啟用」這類標註在打開當下是真的。
+// CAP-2：catalog 是即時總表（server/integrations/catalog.ts liveCatalog），整合工具的列與「目前：未設定」等標註由它產生。
 // 沒有任何 script；App 的視窗也關掉 JavaScript，CSP 是第二道鎖。路由在 SPA fallback 之前（server/app.ts）。
 
 export const COMMANDS_PATH = "/help/commands";
@@ -43,9 +45,9 @@ export function commandsPageHeaders(): Record<string, string> {
   };
 }
 
-export function renderCommandsPage(view: SettingsView, now: Date, locale: Locale = "zh-TW"): string {
+export function renderCommandsPage(view: SettingsView, catalog: readonly CatalogToolRow[], now: Date, locale: Locale = "zh-TW"): string {
   const t = (text: string) => localize(text, locale);
-  const sections = commandSections(commandContext(view)).map(section => locale === "en" ? {
+  const sections = commandSections(commandContext(view), catalog).map(section => locale === "en" ? {
     ...section, title: t(section.title), intro: section.intro ? t(section.intro) : null,
     columns: section.columns.map(t), rows: section.rows.map(row => ({
       ...row, cells: row.cells.map(cell => localizeHelpCell(cell)), unmet: row.unmet ? t(row.unmet) : null,
@@ -77,6 +79,9 @@ ${sections}
 }
 
 function localizeHelpCell(cell: string): string {
+  // CAP-2：總表工具的條件欄是「需要即時語音，」＋總表的 needs；needs 各自有翻譯。
+  const needs = cell.match(/^需要即時語音，(.+)$/);
+  if (needs) return translate("需要即時語音，{0}", "en", localize(needs[1]!, "en").replace(/^A /, "a "));
   const dynamic = cell.match(/^(.*)；目前 (.*?)（預設 (.*?)），macOS App：選單列「鏡頭與語音設定」；瀏覽器：設定畫面可調$/);
   if (dynamic) {
     const prefix = localize(`${dynamic[1]}；預設 ${dynamic[3]}，macOS App：選單列「鏡頭與語音設定」；瀏覽器：設定畫面可調`, "en");
