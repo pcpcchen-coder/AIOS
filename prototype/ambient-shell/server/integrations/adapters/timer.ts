@@ -7,7 +7,7 @@ import type { AdapterCatalog, ExecutionContext, HealthReport, IntegrationAdapter
 // 排程與保存都在 AlarmCenter；這裡只把模型的參數轉成核心操作，結果一律來自核心的狀態（confirmed 表示核心已保存）。
 // 設定頁關掉「鬧鐘與定時器」時，工具不出現在工具清單（registry 的 enabled），已在通話中的呼叫回 refused。
 
-/** CAP-1：定時器與鬧鐘的前提（和 /help/commands 的 TIMER_ASK 相同）。 */
+/** CAP-1：定時器與鬧鐘的前提。CAP-2 起 /help/commands 的「定時器與鬧鐘」一段由這些總表資料產生。 */
 export const ALARM_TIMER_NEEDS = "設定頁「鬧鐘與定時器」開著（預設開）";
 
 const TIMER_REF = { type: "string", description: "哪一個定時器：名字（例如「泡麵」）或 ID；只有一個時可以不給", maxLength: 40 } as const;
@@ -30,7 +30,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
-    catalog: { summary: "開始一個倒數定時器；可以取名字，可以同時好幾個，時間到時在設定的那台裝置響。", examples: ["計時 10 分鐘", "泡麵 3 分鐘"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
+    catalog: { summary: "開始一個倒數定時器；可以取名字，可以同時好幾個。時間到時在建立的那台裝置響（那台不在線時每個畫面都響），右下角按需顯示倒數。", examples: ["計時 10 分鐘", "泡麵 3 分鐘", "5 分鐘後叫我"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.timer.list",
@@ -63,7 +63,7 @@ const TOOLS: readonly ToolDefinition[] = [
     enabled: true,
     timeoutMs: 2_000,
     supportedRoutes: ["api_key", "live"],
-    catalog: { summary: "繼續一個暫停的定時器。", examples: ["泡麵繼續計時"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
+    catalog: { summary: "繼續一個暫停的定時器。", examples: ["泡麵繼續計時", "繼續"], needs: ALARM_TIMER_NEEDS, domain: "planning" },
   },
   {
     id: "app.timer.extend",

@@ -188,8 +188,8 @@
       "source": "docs/24_Capability_Catalog_and_Skills_2026-11.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/24_Capability_Catalog_and_Skills_2026-11.en.md",
-      "sourceSha256": "3d9e00b8020792cc50008e1a40e82773ebfa3cd2f9d06cd5187308c0406041b2",
-      "translationSha256": "cdf4aa5fd83dda25af1953a773e4a7e9e065f4ee6d8d7eeb92b4f8dd8ccc858a"
+      "sourceSha256": "13bf9a97298d7b0980fedc6b3f956d62c5764b92e29d96d598727a0716c48ba7",
+      "translationSha256": "bef2a8b2347893f59238b1f5af3c2c6d0c01c1febad882f0c7cbe3132a411378"
     },
     {
       "source": "docs/BILINGUAL.md",
@@ -200,8 +200,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "2e1e264f3dcf39daf4626193796129834b1b61cdd942f4082e3fdbefe53f495d",
-      "translationSha256": "29d67569c3bfc3cc01eceb48a1b61a763cda6fb1738062407b48dc07486b2c1a"
+      "sourceSha256": "12bb42331b266e5668bebcc545cdfdc5e627f739d76aed1c37139fc5679c4eed",
+      "translationSha256": "3c629b2d5ca29f7e71bbd55f1493fa86c8140157ff71f3c9b1f80def0d581e5f"
     },
     {
       "source": "docs/README.md",
@@ -235,8 +235,8 @@
       "source": "docs/development/adding-an-adapter.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/development/adding-an-adapter.en.md",
-      "sourceSha256": "a8333389426d27e814bb3c9c5cbdf670ac006a486fc9f153c9661c1852079ee8",
-      "translationSha256": "bb801a7466cba18e8f5a109f836035fcc34c7668088cdcc70c9b3f30ab222c98"
+      "sourceSha256": "b0a8e7f63c38be37b7b728baebdb2d7ffcbc84774af6cdc0c07d67eb7fa79112",
+      "translationSha256": "288f97c4da5d5d671c7ce21f9b025395cb1089b25596267af842f2ddaa96b214"
     },
     {
       "source": "docs/development/brain-regions.md",
@@ -319,8 +319,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "a35a04103fdc48f91388e55d0c0a6f3f7454d014b4c7173e1a7d83f0d0e198bb",
-      "translationSha256": "57b6e474a887d82ba47668fc74d27bf613bb0e4a123d7aff2d3728f7d784de6e"
+      "sourceSha256": "fe628a4d46f760a8db63a164a27c8e207cb0ed95aff42e95273e1d0cd0344f88",
+      "translationSha256": "5eca4090d88549c0ae4a36b4433d9f0525ff4d6cd841410cf8aa28629485d6a0"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -503,6 +503,13 @@
       "translation": "docs/validation/cap-1-capability-catalog-2026-11-24.en.md",
       "sourceSha256": "c37b97ebf7ea7e0d7641cc0ba32582539c581b52280a649d6195ea4466e9f65f",
       "translationSha256": "290cf670cdebd587671e38a33f4d014d012c877f195730aa1d3d2d98b0bc3957"
+    },
+    {
+      "source": "docs/validation/cap-2-commands-from-catalog-2026-11-24.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/cap-2-commands-from-catalog-2026-11-24.en.md",
+      "sourceSha256": "1008a819beb042532066f48f175a1d45b0f3c8528d2d29d00744f10f08f9ab43",
+      "translationSha256": "b4aca738fa0994d89c1f18a3fd68f216bc74046ee279574482938cd9f7d1aaf7"
     },
     {
       "source": "docs/validation/chatgpt-conversation-2026-10-20.md",
@@ -1033,8 +1040,8 @@
       "source": "prototype/ambient-shell/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/README.en.md",
-      "sourceSha256": "95de67abbed80f2089992a11ec5729a763f33f4484b6b5918ae713a37e496687",
-      "translationSha256": "890ff3ff7b543c67de21c0b06eddbce3d636b1672e4861f729a4fa549d6d0375"
+      "sourceSha256": "74de844e75fe9ae82a976107b6cc7a9b982e8107d4da13c3576d01422da629a3",
+      "translationSha256": "a76ae79bb6a80e982f59b42ecbf3b56f19ff4afeeeb721753418b537de48d92c"
     },
     {
       "source": "prototype/ambient-shell/desktop/README.md",

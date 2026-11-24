@@ -50,6 +50,8 @@ import type { VoiceRoute } from "./memory/live.ts";
 import { forgetHistoryArtifact, HistoryQueryError, parseHistoryQuery, searchHistory, type HistorySource } from "./history.ts";
 import type { HistoryDetail } from "../shared/history.ts";
 import type { Integrations } from "./integrations/index.ts";
+import { liveCatalog } from "./integrations/catalog.ts";
+import { IntegrationRegistry } from "./integrations/registry.ts";
 import { HOME_OVERVIEW_PATH, type HomeCornerPrefs, type HomeCornerPrefsPatch, type HomeCornerSettingsView, type HomeOverviewView } from "../shared/home-corner.ts";
 import { isWindowMode, TERMINAL_WINDOW_PATH, type WindowMode } from "../shared/terminal-window.ts";
 import { isScreenState, TERMINAL_DISPLAY_PATH, type DayNightPatch, type DayNightSettingsView, type ScreenState } from "../shared/day-night.ts";
@@ -361,6 +363,9 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     ...(options.historySources ?? []),
   ];
 
+  // CAP-2：/help/commands 的整合工具列依即時總表。沒有整合層（只有測試會這樣）時沒有任何工具註冊，每列標「目前：未設定」。
+  const commandsCatalog = () => liveCatalog(options.integrations?.registry ?? new IntegrationRegistry({ enabled: { has: () => false } }));
+
   const heartbeat = setInterval(() => {
     for (const { response } of clients.values()) response.write(": keep-alive\n\n");
   }, 25_000);
@@ -376,7 +381,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         const method = req.method ?? "GET";
         if (method !== "GET" && method !== "HEAD") throw new HttpError(405, "method not allowed");
         res.writeHead(200, commandsPageHeaders());
-        res.end(method === "HEAD" ? undefined : renderCommandsPage(settings.view(), new Date(), normalizeLocale(url.searchParams.get("lang"))));
+        res.end(method === "HEAD" ? undefined : renderCommandsPage(settings.view(), commandsCatalog(), new Date(), normalizeLocale(url.searchParams.get("lang"))));
       } else if (url.pathname.startsWith("/api/")) {
         await handleApi(req, res, url.pathname, url.searchParams);
       } else if (url.pathname.startsWith("/face-runtime/")) {

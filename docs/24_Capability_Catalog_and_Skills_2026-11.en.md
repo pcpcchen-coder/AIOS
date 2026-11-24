@@ -144,6 +144,8 @@ The shape of one entry (illustration; CAP-1 settles the field names):
 | CAP-6 (George agreed 2026-11-24) | Tool calls drive brain regions: when the page receives a real tool-call event, it lights the region given by that tool's `domain` in the catalog and labels the source as a tool call | Fixtures; nothing lights without a tool call; mock tools are labelled mock; one real voice trial on the Mac. The CLAUDE.md rule is relaxed to match |
 | CAP-5 (separate proposal) | Text chat and background tasks connect to the registry | Outside this proposal. `docs/18` §2 already says it needs its own batch |
 
+**CAP-2 status note (2026-11-24)**: implemented on branch `claude/cap-2-commands-from-catalog`. "Timers and alarms" is generated from the catalog (one row per tool, 13 rows), the integration tools are in a new "App integrations" section (14 rows), and the 9 page tools in "ask the AI" are untouched (CAP-4); unavailable rows show the reason from the live catalog. Cloud fixtures and type checks, not a product gate; see the [CAP-2 validation](validation/cap-2-commands-from-catalog-2026-11-24.en.md).
+
 CAP-1 and CAP-2 change no voice behavior. They change only the help page and development tools. The first things a user notices are CAP-2 (the command table becomes complete) and CAP-3 (you can ask Nous directly what it can do).
 
 ### 3.4 How CAP-3 is presented

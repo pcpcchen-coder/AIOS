@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { staticCatalog } from "../server/integrations/catalog.ts";
 import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
@@ -627,7 +628,7 @@ describe("HTTP API", () => {
     expect(html).not.toMatch(/<script|javascript:|\son\w+=/i);
     const style = html.slice(html.indexOf("<style>") + 7, html.indexOf("</style>"));
     expect(csp).toContain(`'sha256-${createHash("sha256").update(style).digest("base64")}'`);
-    for (const row of commandSections(null).flatMap((s) => s.rows)) expect(html).toContain(`data-row="${row.id}"`);
+    for (const row of commandSections(null, staticCatalog()).flatMap((s) => s.rows)) expect(html).toContain(`data-row="${row.id}"`);
     expect(html).toContain("目前：鏡頭未啟用");
     expect(html).toContain("目前 1 分 30 秒（預設 1 分 30 秒）");
     expect(html).toMatch(/依 \d\d:\d\d:\d\d 打開時的設定產生/);

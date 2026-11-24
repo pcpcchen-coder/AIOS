@@ -16,7 +16,7 @@ import { WEATHER_CATALOG } from "./adapters/weather.ts";
 import type { AdapterCatalog, ToolCatalogInfo } from "./contracts.ts";
 import type { IntegrationRegistry } from "./registry.ts";
 
-// CAP-1（docs/24 §3）：能力總表。給人與開發工具看，**不給模型**：送給模型的工具 JSON 仍然只由 registry.functionSpecs()
+// CAP-1（docs/24 §3）：能力總表。給人與開發工具看（CAP-2 起 /help/commands 與 README 的整合工具列由它產生），**不給模型**：送給模型的工具 JSON 仍然只由 registry.functionSpecs()
 // 與 server/realtime.ts 產生（tests/capability-catalog.test.ts 比對與加入總表之前逐字相同）。
 // 靜態總表＝所有已審核 Adapter 模組層級的資料＋9 個頁面工具，不需要任何設定；即時總表＝靜態總表＋執行中登記表的狀態。
 
@@ -40,8 +40,9 @@ export const HOST_GROUP = { id: "host", label: "即時語音內建" } as const;
 const WEB_SEARCH_NEEDS = "上網查詢（ChatGPT 方案路徑用 Codex 額度；API key 路徑需要 OPENAI_API_KEY）";
 
 /**
- * George 決定 6：9 個頁面工具（shared/realtime-route.ts 的 HOST_TOOL_NAMES）也列在總表上。這一批只有資料：
- * /help/commands 仍由 shared/voice-commands.ts 的 ASK_THE_AI 產生（改由總表產生是 CAP-4）。例句取自 ASK_THE_AI（測試比對）。
+ * George 決定 6：9 個頁面工具（shared/realtime-route.ts 的 HOST_TOOL_NAMES）也列在總表上。目前只有資料：
+ * /help/commands 的「可以問 AI」仍由 shared/voice-commands.ts 的 ASK_THE_AI 產生（改由總表產生是 CAP-4）；
+ * CAP-2 起整合工具（定時器、鬧鐘與其他 Adapter）的列由總表產生。例句取自 ASK_THE_AI（測試比對）。
  */
 export const HOST_TOOL_CATALOG: { readonly [T in HostToolName]: ToolCatalogInfo } = {
   web_search: { summary: "上網查詢後回答，字幕顯示來源。", examples: ["新竹今天會下雨嗎"], needs: WEB_SEARCH_NEEDS, domain: "language" },
@@ -65,6 +66,8 @@ export interface CatalogEntry {
   /** Adapter ID；頁面工具是 "host"。 */
   group: string;
   group_label: string;
+  /** 核心內建的 Adapter（定時器、鬧鐘；AdapterCatalog.builtin）。頁面工具是 false。 */
+  builtin: boolean;
   /** 整合工具的副作用類別；頁面工具沒有分類（null）。 */
   effect: EffectClass | null;
   routes: readonly IntegrationRoute[];
@@ -93,11 +96,11 @@ export function staticCatalog(): CatalogEntry[] {
   const out: CatalogEntry[] = [];
   for (const adapter of ADAPTER_CATALOGS) {
     for (const tool of adapter.tools) {
-      out.push({ id: tool.id, wire: toWireName(tool.id), kind: "integration", group: adapter.id, group_label: adapter.label, effect: tool.effect, routes: [...tool.supportedRoutes], ...info(tool.catalog), mock: adapter.mock });
+      out.push({ id: tool.id, wire: toWireName(tool.id), kind: "integration", group: adapter.id, group_label: adapter.label, builtin: adapter.builtin === true, effect: tool.effect, routes: [...tool.supportedRoutes], ...info(tool.catalog), mock: adapter.mock });
     }
   }
   for (const name of HOST_TOOL_NAMES) {
-    out.push({ id: name, wire: name, kind: "host", group: HOST_GROUP.id, group_label: HOST_GROUP.label, effect: null, routes: [...VOICE_ROUTES], ...info(HOST_TOOL_CATALOG[name]), mock: false });
+    out.push({ id: name, wire: name, kind: "host", group: HOST_GROUP.id, group_label: HOST_GROUP.label, builtin: false, effect: null, routes: [...VOICE_ROUTES], ...info(HOST_TOOL_CATALOG[name]), mock: false });
   }
   return out;
 }

@@ -3,7 +3,8 @@
 // tests/voice-commands.test.ts 把每一句丟進真正的比對函式：結果不同、某條規則／意圖／確認語句／插話詞／模型工具
 // 沒有列、或「在哪裡有效」與 LOCAL_ROUTING 推算的不同，測試就失敗。
 import { formatSeconds, type SecondsPrefSpec } from "./prefs.ts";
-import type { HostToolName } from "./realtime-route.ts";
+import type { CapabilityStatus } from "./integrations.ts";
+import type { HostToolName, RouteId } from "./realtime-route.ts";
 import type { CameraSecondsKey, SecondsKey } from "./menu-prefs.ts";
 import { CAMERA_PREFS } from "./sense.ts";
 import type { SettingsView } from "./types.ts";
@@ -338,18 +339,26 @@ export const ASK_THE_AI: { readonly [T in RealtimeToolName]: AskTheAi } = {
 };
 
 /**
- * ALARM-1（George 2026-11-09）：定時器是核心內建的整合工具（app__timer__*），兩條即時語音路徑都有，由模型判斷何時用。
- * 不是本機固定語句；本機只有「鈴響時停止」的固定語句（shared/alarm.ts matchRingStop，見 CONTROLS 的 ring-stop）。
+ * CAP-2（docs/24 §3.3）：「定時器與鬧鐘」與「App 整合」兩段由能力總表（server/integrations/catalog.ts）產生，一個工具一列。
+ * shared/ 不 import server/（docs/23 的分層），所以總表由 server 端（/help/commands 用即時總表、README 用靜態總表）傳進
+ * commandSections；這裡只定義需要的欄位（CatalogEntry 在結構上符合）。ALARM-1：定時器與鬧鐘是核心內建的整合工具（app__timer__*、
+ * app__alarm__*），兩條即時語音路徑都有，由模型判斷何時用；本機只有「鈴響時停止」的固定語句（CONTROLS 的 ring-stop）。
  */
-export const TIMER_ASK: readonly AskTheAi[] = [
-  { try: ["計時 10 分鐘", "泡麵 3 分鐘", "5 分鐘後叫我"], does: "設定定時器（可以取名字，可以同時好幾個）；時間到時在建立的那台裝置響（那台不在線時每個畫面都響），右下角按需顯示倒數",
-    needs: { text: "即時語音，設定頁「鬧鐘與定時器」開著（預設開）", live: "realtime_available" } },
-  { try: ["泡麵還剩多久", "有哪些定時器"], does: "說各個定時器剩下的時間", needs: { text: "即時語音", live: "realtime_available" } },
-  { try: ["暫停泡麵", "繼續", "再加 5 分鐘", "取消雞蛋的定時器", "全部取消"], does: "暫停、繼續、延長或取消；有好幾個而沒說是哪一個時，AI 會問", needs: { text: "即時語音", live: "realtime_available" } },
-  { try: ["明天早上 7 點叫我", "每個工作天 6:30 叫我", "週一三五晚上 9 點提醒我倒垃圾"], does: "設定鬧鐘（ALARM-2）：單次或重複（每天、工作日、週末、指定星期），可以取名字；用這台 Mac 的時區，跨夏令時間照當地時間響；在設定的那台裝置響，一小時內的鬧鐘右下角按需顯示倒數",
-    needs: { text: "即時語音，設定頁「鬧鐘與定時器」開著（預設開）", live: "realtime_available" } },
-  { try: ["有哪些鬧鐘", "關掉明天的鬧鐘", "刪掉 6:30 的鬧鐘"], does: "列出、打開或關掉、刪除鬧鐘（設定頁也可以管理）", needs: { text: "即時語音", live: "realtime_available" } },
-];
+export interface CatalogToolRow {
+  id: string;
+  kind: "integration" | "host";
+  /** 核心內建（定時器、鬧鐘）：放在「定時器與鬧鐘」一段；其他整合工具放在「App 整合」。 */
+  builtin: boolean;
+  group_label: string;
+  summary: string;
+  examples: readonly string[];
+  needs: string | null;
+  hidden: boolean;
+  /** 只在即時總表：這次設定下有沒有註冊。 */
+  configured?: boolean;
+  /** 只在即時總表：兩條即時語音路徑上的能力狀態。 */
+  status?: Partial<Record<RouteId, CapabilityStatus>>;
+}
 
 export const CONTROLS: readonly Control[] = [
   { id: "ring-stop", how: "定時器或鬧鐘響鈴時", does: "按「停止」、Esc 或空白鍵、舉起張開的手掌（需要鏡頭與「手掌停止播報」），或打字／通話中整句說「停」「好了」「知道了」「關掉」「我起來了」就停止響鈴（每個畫面一起停）；鬧鐘另有「貪睡」按鈕，打字或通話中說「貪睡」「再睡一下」9 分鐘後再響。鈴聲期間喚醒詞暫停（避免鈴聲誤觸），沒有通話時不能用說的停止。響 5 分鐘沒人停會自動停止並記錄" },
@@ -373,6 +382,8 @@ export interface CommandContext {
   realtimeAvailable: boolean;
   webSearch: boolean;
   home: boolean;
+  /** 下一次即時語音會用的路徑（RealtimeRouteFields.route）；總表的能力狀態依這條路徑判斷。 */
+  route: RouteId | null;
   seconds: Partial<Record<SecondsKey, number>>;
 }
 
@@ -382,6 +393,7 @@ export function commandContext(view: SettingsView): CommandContext {
     realtimeAvailable: !!view.realtime?.available,
     webSearch: !!view.realtime?.available && !!view.realtime.web_search,
     home: !!view.realtime?.available && !!view.realtime.home,
+    route: view.realtime?.available ? view.realtime.route ?? null : null,
     seconds: Object.fromEntries((view.seconds ?? []).filter((row) => row.kind === "seconds").map((row) => [row.key, row.value])),
   };
 }
@@ -420,6 +432,32 @@ function unmet(live: Live | undefined, ctx: CommandContext | null): string | nul
   return ctx.home ? null : "目前：未設定武陵居中控";
 }
 
+const CATALOG_COLUMNS = ["服務", "可以這樣問", "AI 可能會做什麼", "條件"];
+const STATUS_UNMET: Record<Exclude<CapabilityStatus, "available">, string> = {
+  disabled: "目前：已停用",
+  unsupported: "目前：這條語音路徑不支援",
+  authorization_required: "目前：需要授權",
+};
+
+/** 總表工具依即時狀態的標註：即時語音不可用 → 沒有註冊（缺設定）→ 這條路徑上的能力狀態。README（ctx 為 null）不標。 */
+function catalogUnmet(row: CatalogToolRow, ctx: CommandContext | null): string | null {
+  if (!ctx) return null;
+  if (!ctx.realtimeAvailable) return "目前：即時語音不可用";
+  if (row.configured === false) return "目前：未設定";
+  const status = ctx.route ? row.status?.[ctx.route] : undefined;
+  return status && status !== "available" ? STATUS_UNMET[status] : null;
+}
+
+function catalogRows(catalog: readonly CatalogToolRow[], builtin: boolean, ctx: CommandContext | null): TableRow[] {
+  return catalog
+    .filter((row) => row.kind === "integration" && row.builtin === builtin && !row.hidden)
+    .map((row) => ({
+      id: `cap-${row.id}`,
+      cells: [row.group_label, quote(row.examples), row.summary, row.needs ? `需要即時語音，${row.needs}` : "需要即時語音"],
+      unmet: catalogUnmet(row, ctx),
+    }));
+}
+
 function localRow(row: LocalCommand, ctx: CommandContext | null): TableRow {
   const notes = [row.needs?.text, row.note].filter(Boolean).join("；");
   return {
@@ -438,8 +476,11 @@ function secondsText(key: SecondsKey, ctx: CommandContext | null): string {
     : `目前 ${formatSeconds(current)}（預設 ${formatSeconds(spec.default)}），${where}`;
 }
 
-/** 表的段落，依固定順序；頁面與 README 共用。ctx 為 null 時不加註目前狀態。 */
-export function commandSections(ctx: CommandContext | null): TableSection[] {
+/**
+ * 表的段落，依固定順序；頁面與 README 共用。ctx 為 null 時不加註目前狀態。catalog 是能力總表（頁面傳即時總表、README 傳靜態總表），
+ * 「定時器與鬧鐘」「App 整合」兩段由它產生；hidden 的工具（模擬、legacy Facade）不列。
+ */
+export function commandSections(ctx: CommandContext | null, catalog: readonly CatalogToolRow[]): TableSection[] {
   const intents = INTENT_COMMANDS;
   return [
     { id: "camera", title: "鏡頭", intro: "可以加客氣話（請、幫我…吧）；否定與問句（「不要打開鏡頭」「鏡頭怎麼關」）不算指令。", columns: LOCAL_COLUMNS,
@@ -460,8 +501,10 @@ export function commandSections(ctx: CommandContext | null): TableSection[] {
         const row = ASK_THE_AI[tool];
         return { id: `ai-${tool}`, cells: [quote(row.try), row.does, `需要${row.needs.text}`], unmet: unmet(row.needs.live, ctx) };
       }) },
-    { id: "timers", title: "定時器與鬧鐘（即時語音，由模型判斷，不保證）", intro: "定時器與鬧鐘由 Nous 核心保存與排程，重新啟動後還在；Mac 睡眠時核心會停住，醒來後 30 分鐘內補響並說晚了多久，超過只記錄錯過。", columns: ["可以這樣問", "AI 可能會做什麼", "條件"],
-      rows: TIMER_ASK.map((row, i) => ({ id: `timer-${i}`, cells: [quote(row.try), row.does, `需要${row.needs.text}`], unmet: unmet(row.needs.live, ctx) })) },
+    { id: "timers", title: "定時器與鬧鐘（即時語音，由模型判斷，不保證）", intro: "定時器與鬧鐘由 Nous 核心保存與排程，重新啟動後還在；Mac 睡眠時核心會停住，醒來後 30 分鐘內補響並說晚了多久，超過只記錄錯過。有好幾個定時器或鬧鐘而沒說是哪一個時，AI 會問。這一段由能力總表產生（一個工具一列）。", columns: CATALOG_COLUMNS,
+      rows: catalogRows(catalog, true, ctx) },
+    { id: "apps", title: "App 整合（即時語音，由模型判斷，不保證）", intro: "這一段由能力總表產生（server/integrations/catalog.ts，一個工具一列）；AI 依你的意思決定要不要用。頁面依打開時的設定標註哪些現在不能用。", columns: CATALOG_COLUMNS,
+      rows: catalogRows(catalog, false, ctx) },
     { id: "controls", title: "不用說話", intro: null, columns: ["操作", "作用"],
       rows: CONTROLS.map((c) => ({ id: c.id, cells: [c.how, c.seconds ? `${c.does}；${secondsText(c.seconds, ctx)}` : c.does], unmet: null })) },
   ];
@@ -470,11 +513,11 @@ export function commandSections(ctx: CommandContext | null): TableSection[] {
 export const COMMANDS_BEGIN = "<!-- voice-commands:begin（由 shared/voice-commands.ts 產生：npm run docs:commands；請勿手改） -->";
 export const COMMANDS_END = "<!-- voice-commands:end -->";
 
-/** README 的指令段落（不含目前狀態）。 */
-export function renderCommandsMarkdown(): string {
+/** README 的指令段落（不含目前狀態）；catalog 是靜態總表（scripts/write-commands-doc.ts 傳入）。 */
+export function renderCommandsMarkdown(catalog: readonly CatalogToolRow[]): string {
   const cell = (text: string) => text.replace(/\|/g, "\\|");
   const lines: string[] = [COMMANDS_INTRO, ""];
-  for (const section of commandSections(null)) {
+  for (const section of commandSections(null, catalog)) {
     lines.push(`#### ${section.title}`, "");
     if (section.intro) lines.push(section.intro, "");
     lines.push(`| ${section.columns.map(cell).join(" | ")} |`, `|${section.columns.map(() => "---").join("|")}|`);
