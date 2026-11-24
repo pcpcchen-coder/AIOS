@@ -200,6 +200,8 @@ tools:
 | SKL-2 | 兩條即時語音路徑：技能索引進工作階段說明；`app.skill.read`；依可用工具過濾 | fixture；旗標關閉時工具表與說明逐位元組不變；Mac 上真實語音跑一次出貨技能，記錄每一步的真實結果 |
 | SKL-3 | 「記住這種做法」：模型起草 → 畫面顯示名稱與步驟 → 使用者確認後寫檔；用說的列出與忘掉；同名時家裡的優先 | fixture；Mac 上存一份、用一次、忘掉一次；沒確認就不寫檔 |
 
+**SKL-1 狀態補記（2026-11-24）**：已實作於分支 `claude/skl-1-skill-format`。格式是 `skills/<name>/SKILL.md`（中文）與 `SKILL.en.md`（英文），frontmatter 只有 `name`、`description`、`tools`；解析與檢查在 `server/skills/`，併入 `npm run catalog -- --check`，24 種失敗各有 fixture；出貨「早晨簡報」一份（只用天氣與日曆的唯讀工具）。**模型還看不到技能**；`NOUS_SKILLS` 這一批沒有程式讀它，SKL-2 才會用到。雲端 fixture 與型別檢查，不是產品 gate，也不是 Mac 實機驗收，見 [SKL-1 驗證](validation/skl-1-skill-format-2026-11-24.md)與[怎麼寫一份技能](development/writing-a-skill.md)。
+
 先接即時語音，是因為這兩條路徑已經有經過登記表的工具迴圈。文字聊天與背景任務要等 CAP-5。
 
 ### 4.5 第一批出貨技能的候選

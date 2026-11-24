@@ -204,6 +204,8 @@ SKL-3 settles the real path of the household data directory, based on `server/co
 | SKL-2 | Both realtime voice routes: the skill index enters the session instructions; `app.skill.read`; filtering by available tools | Fixtures. With the flag off, the tool list and instructions are byte-identical. On the Mac, run the shipped skill once by real voice and record the real result of every step |
 | SKL-3 | "Remember this way of doing it": the model drafts → the screen shows the name and steps → the file is written after the user confirms; list and forget by voice; the household's skill wins on a name clash | Fixtures. On the Mac, save one, use it once, and forget it once. Nothing is written without confirmation |
 
+**SKL-1 status note (2026-11-24)**: implemented on branch `claude/skl-1-skill-format`. The format is `skills/<name>/SKILL.md` (Chinese) and `SKILL.en.md` (English), with only `name`, `description` and `tools` in the frontmatter; the parser and check are in `server/skills/` and part of `npm run catalog -- --check`, with a fixture for each of the 24 failure codes; one shipped skill, "morning briefing" (only the weather and calendar read tools). **The model cannot see skills yet**; no code reads `NOUS_SKILLS` in this batch, and SKL-2 will use it. Cloud fixtures and type checks, not a product gate and not a Mac acceptance test; see the [SKL-1 validation](validation/skl-1-skill-format-2026-11-24.en.md) and [Writing a skill](development/writing-a-skill.en.md).
+
 Realtime voice comes first because those two routes already have a tool loop that goes through the registry. Text chat and background tasks wait for CAP-5.
 
 ### 4.5 Candidates for the first shipped skills
