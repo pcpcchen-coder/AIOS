@@ -230,9 +230,12 @@ describe("parser", () => {
 });
 
 describe("gate: skills change nothing the model sees (NOUS_SKILLS on or off)", () => {
-  it("NOUS_SKILLS is not read by the configuration in SKL-1: on and off give the same config (SKL-2 will read it)", () => {
-    expect(loadConfig({ NOUS_SKILLS: "on" })).toEqual(loadConfig({}));
-    expect(loadConfig({ NOUS_SKILLS: "on", NOUS_AIL: "on", NOUS_AIL_SERVICES: "weather" })).toEqual(loadConfig({ NOUS_AIL: "on", NOUS_AIL_SERVICES: "weather" }));
+  it("SKL-2: NOUS_SKILLS only sets config.skills (default off); everything else in the configuration is the same", () => {
+    expect(loadConfig({}).skills).toBe(false);
+    expect(loadConfig({ NOUS_SKILLS: "off" }).skills).toBe(false);
+    expect(loadConfig({ NOUS_SKILLS: " ON " }).skills).toBe(true);
+    expect({ ...loadConfig({ NOUS_SKILLS: "on" }), skills: false }).toEqual(loadConfig({}));
+    expect({ ...loadConfig({ NOUS_SKILLS: "on", NOUS_AIL: "on", NOUS_AIL_SERVICES: "weather" }), skills: false }).toEqual(loadConfig({ NOUS_AIL: "on", NOUS_AIL_SERVICES: "weather" }));
   });
 
   it("with NOUS_SKILLS=on in the environment, the tool JSON and /help/commands still equal the CAP-1/CAP-2 baselines", () => {
@@ -251,7 +254,7 @@ describe("gate: skills change nothing the model sees (NOUS_SKILLS on or off)", (
     }
   });
 
-  it("no runtime code imports server/skills/ (only scripts/catalog.ts and tests): no skill index, no app.skill.read, nothing in session instructions", () => {
+  it("SKL-2: only scripts/catalog.ts and server/nous.ts load skills (nous.ts only when NOUS_SKILLS=on; tests/skills-realtime.test.ts covers the wiring); app.skill.read is a hidden catalog entry", () => {
     const importers: string[] = [];
     const walk = (dir: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -263,7 +266,7 @@ describe("gate: skills change nothing the model sees (NOUS_SKILLS on or off)", (
       }
     };
     for (const dir of ["server", "shared", "src", "desktop", "scripts"]) walk(join(shellDir, dir));
-    expect(importers.sort()).toEqual(["scripts/catalog.ts"]);
-    expect(staticCatalog().map((e) => e.id)).not.toContain("app.skill.read");
+    expect(importers.sort()).toEqual(["scripts/catalog.ts", "server/nous.ts"]);
+    expect(staticCatalog().find((e) => e.id === "app.skill.read")).toMatchObject({ hidden: true, builtin: true, effect: "read" });
   });
 });

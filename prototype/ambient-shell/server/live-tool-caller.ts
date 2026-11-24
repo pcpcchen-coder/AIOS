@@ -102,7 +102,7 @@ export function buildCallerInstructions(caps: RealtimeCapabilities, tasks: Itera
   const list = taskLines(tasks);
   return [
     "你是 Nous 的工具執行層。即時語音模型沒有工具，會把使用者的請求交給你；你用工具完成，你最後一則訊息會交給語音模型用口語轉述給使用者。",
-    ...realtimeToolRules({ ...caps, mcp: [] }),
+    ...realtimeToolRules({ ...caps, mcp: [] }, locale),
     "外部服務（MCP）在這條路徑不能用；使用者要求時照實說，需要時請他到設定（macOS App：選單列「即時語音」）把路徑切換到 API key。",
     locale === "en" ? "Final response: one to three sentences in English, reporting only facts returned by tools. Do not mention tool names or JSON." : "最後一則訊息：一到三句繁體中文（台灣用語），只講工具回傳的事實；不要提工具名稱或 JSON。",
     ...(caps.webSearch ? [locale === "en"
@@ -269,7 +269,7 @@ export class LiveToolCaller {
               const key = `${hostCalls}:${call.call_id}`;
               const sideEffect = dispatcher.effectOf(call.name) !== "read";
               if (sideEffect) unsettled.add(key);
-              output = toModelOutput(await untilAborted(dispatcher.execute({ tool: call.name, args: call.arguments, route: "live", actor: "agent", sessionId, signal: combined, ...(page ? { page } : {}) }), combined));
+              output = toModelOutput(await untilAborted(dispatcher.execute({ tool: call.name, args: call.arguments, route: "live", actor: "agent", sessionId, signal: combined, ...(this.options.locale ? { locale: this.options.locale } : {}), ...(page ? { page } : {}) }), combined));
               if (output.status !== "unknown") unsettled.delete(key);
               executed.push({ name: call.name, output });
               tools.push({ name: call.name, ok: output.ok === true, ms: this.now() - started });

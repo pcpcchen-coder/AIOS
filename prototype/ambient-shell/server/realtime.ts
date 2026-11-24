@@ -5,6 +5,8 @@ import { HOME_COMMANDS } from "../shared/home.ts";
 import type { RealtimeBaseInfo, Task } from "../shared/types.ts";
 import type { McpServerConfig } from "./config.ts";
 import type { IntegrationFunctionSpec } from "./integrations/contracts.ts";
+import type { SkillIndexMode } from "./skills/runtime.ts";
+import { SKILL_READ_WIRE } from "./skills/tool-id.ts";
 import { callIdFrom, openSidebandSocket, type SidebandSocket, type SidebandSocketCtor } from "./sideband.ts";
 import { todayLine } from "./local-date.ts";
 
@@ -37,6 +39,8 @@ export interface RealtimeOptions {
   home?: boolean;
   /** AIL-1：整合層在 api_key 路徑上可用的函式工具（NOUS_AIL 關閉時不提供，工具表與之前相同）。 */
   integrations?: (locale: Locale) => readonly IntegrationFunctionSpec[];
+  /** SKL-2：api_key 路徑的技能索引（NOUS_SKILLS 關閉時不提供，說明與之前相同）。 */
+  skills?: RealtimeCapabilities["skills"];
   /**
    * PRO-2：主動提醒可能在開場問「要不要我念今天的行程？」（核心接上 CAL-1 時）。只有核心旁路（caps.memory）的通話會問，
    * 所以 API key 路徑只在那時加規則；沒有時說明和之前一個位元組都不差。
@@ -79,6 +83,11 @@ export interface RealtimeCapabilities {
   integrations?: (locale: Locale) => readonly IntegrationFunctionSpec[];
   /** DN-2：核心判斷現在是夜間模式（時段或手動切換）時 true，說明裡多一句輕聲語氣。沒有時和之前一樣。 */
   night?: boolean;
+  /**
+   * SKL-2（docs/24 §4.3）：這條路徑現在列得出來的技能索引（server/skills/runtime.ts SkillBook.indexLines，已綁定路徑）。
+   * NOUS_SKILLS 關閉時沒有；沒有列出任何技能時回空陣列。兩種情況的說明都和 SKL-2 之前逐字相同。
+   */
+  skills?: (locale: Locale, mode: SkillIndexMode) => readonly string[];
 }
 
 const WEB_SEARCH_TOOL = {
@@ -306,7 +315,7 @@ export const INTEGRATION_RULE =
  * 工具的使用規則（上網查詢、家電、MCP、背景任務）。API key 路徑的語音模型與 ChatGPT 方案路徑的
  * LiveToolCaller 拿到的是同一份文字。
  */
-export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
+export function realtimeToolRules(caps: RealtimeCapabilities, locale: Locale = "zh-TW"): string[] {
   const abilities: string[] = [];
   if (caps.webSearch) {
     abilities.push(
@@ -327,7 +336,8 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
       `你也接上了這些外部服務，可以直接使用它們的工具：${names.join("、")}。需要確認的動作（寄出、發布、刪除等），系統會在畫面顯示確認卡；你用一句話說明要做什麼、對象和影響，請使用者說「確認執行」或「取消」。使用者要說出「確認執行」才會執行，只說「好」不算，你也不能替使用者確認。沒有執行時照實說。`,
     );
   }
-  const integrationNames = (caps.integrations?.("zh-TW") ?? []).map((spec) => spec.name);
+  // SKL-2：技能讀取工具不算「App 功能」（不觸發整合層的規則）；它的用法寫在技能索引裡。
+  const integrationNames = (caps.integrations?.("zh-TW") ?? []).map((spec) => spec.name).filter((name) => name !== SKILL_READ_WIRE);
   const tv = integrationNames.some((name) => name.startsWith("app__tv__"));
   if (integrationNames.length) {
     abilities.push(INTEGRATION_RULE);
@@ -335,6 +345,7 @@ export function realtimeToolRules(caps: RealtimeCapabilities): string[] {
     if (integrationNames.some((name) => name.startsWith("app__timer__"))) abilities.push(TIMER_RULE);
     if (integrationNames.some((name) => name.startsWith("app__alarm__"))) abilities.push(ALARM_RULE);
   }
+  abilities.push(...(caps.skills?.(locale, "tool") ?? []));
   abilities.push(voiceVolumeRule(!!caps.home, tv));
   abilities.push(DAY_NIGHT_RULE);
   abilities.push(`需要較長時間產出的工作（報告、整理、規劃、研究）交給背景任務${caps.taskWebSearch ? "，背景任務也能上網查資料" : ""}。`);
@@ -368,7 +379,7 @@ export function buildRealtimeInstructions(
   locale: Locale = "zh-TW",
 ): string {
   const list = taskLines(tasks);
-  const abilities = realtimeToolRules(caps);
+  const abilities = realtimeToolRules(caps, locale);
   return [
     "你是 Nous，使用者桌面上的語音助理，正在和使用者即時語音對話。",
     locale === "en" ? "Speak English unless the user explicitly asks for another language. Be natural and brief, usually one to three sentences. Preserve all tool and confirmation rules." : "一律用繁體中文（台灣口音與用語）說話，口語、自然、簡短，通常一到三句。",
@@ -405,7 +416,7 @@ export const CALENDAR_BRIEFING_RULE_APIKEY = "如果開場問了「要不要我�
 export function buildLiveInstructions(
   tasks: Iterable<Task>,
   now: Date,
-  caps: { mcp: readonly unknown[]; memory?: boolean; calendarBriefing?: boolean; night?: boolean; integrations?: RealtimeCapabilities["integrations"] },
+  caps: { mcp: readonly unknown[]; memory?: boolean; calendarBriefing?: boolean; night?: boolean; integrations?: RealtimeCapabilities["integrations"]; skills?: RealtimeCapabilities["skills"] },
   locale: Locale = "zh-TW",
 ): string {
   const list = taskLines(tasks);
@@ -423,6 +434,7 @@ export function buildLiveInstructions(
     ...(integrations.some(({ name }) => name === "app__alarm__set") ? [
       "使用者要設定、查詢、更改或取消鬧鐘，以及要求停止鬧鐘響鈴或貪睡時，一律交辦。等核心回報成功才說已設定。",
     ] : []),
+    ...(caps.skills?.(locale, "delegate") ?? []),
     "只轉述交辦結果；結果回來之前不能說已經做好、查到或開了（例如不能說「燈開了」）。結果說失敗或不確定時照實說。",
     "交辦結果在 speakable 頻道時，用自己的話自然說出；commentary 頻道是安靜的背景，不要念出來。不要提到交辦、頻道或系統。",
     "交辦結果是查詢結果的編號標題或某一則的重點時，照順序念，每點一句、用那一點開頭的字開始，數字照念、不要改寫或省略。",
@@ -486,6 +498,7 @@ export class RealtimeBridge {
       taskWebSearch: !!this.options.taskWebSearch,
       home: !!this.options.home,
       ...(this.options.integrations ? { integrations: this.options.integrations } : {}),
+      ...(this.options.skills ? { skills: this.options.skills } : {}),
       ...(this.options.calendarBriefing ? { calendarBriefing: true } : {}),
       ...(this.options.night?.() ? { night: true } : {}),
     };

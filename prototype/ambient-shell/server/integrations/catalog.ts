@@ -9,6 +9,7 @@ import { GOOGLE_CALENDAR_CATALOG } from "./adapters/google-calendar.ts";
 import { HOME_CATALOG, HOME_NEEDS } from "./adapters/home.ts";
 import { LG_TV_CATALOG } from "./adapters/lg-tv.ts";
 import { MOCK_CATALOG } from "./adapters/mock.ts";
+import { SKILL_CATALOG } from "./adapters/skill.ts";
 import { SPOTIFY_SOLOIST_CATALOG } from "./adapters/spotify-soloist.ts";
 import { TIMER_CATALOG } from "./adapters/timer.ts";
 import { VOICE_RELAY_CATALOG } from "./adapters/voice-relay.ts";
@@ -20,7 +21,7 @@ import type { IntegrationRegistry } from "./registry.ts";
 // 與 server/realtime.ts 產生（tests/capability-catalog.test.ts 比對與加入總表之前逐字相同）。
 // 靜態總表＝所有已審核 Adapter 模組層級的資料＋9 個頁面工具，不需要任何設定；即時總表＝靜態總表＋執行中登記表的狀態。
 
-/** 已審核的 Adapter（index.ts 的 KNOWN_ADAPTERS，加上核心內建的定時器與鬧鐘）。測試確認與 KNOWN_ADAPTERS 一致。 */
+/** 已審核的 Adapter（index.ts 的 KNOWN_ADAPTERS，加上核心內建的定時器、鬧鐘與 SKL-2 的技能讀取）。測試確認與 KNOWN_ADAPTERS 一致。 */
 export const ADAPTER_CATALOGS: readonly AdapterCatalog[] = [
   MOCK_CATALOG,
   HOME_CATALOG,
@@ -32,6 +33,7 @@ export const ADAPTER_CATALOGS: readonly AdapterCatalog[] = [
   GMAIL_GOG_CATALOG,
   TIMER_CATALOG,
   ALARM_CATALOG,
+  SKILL_CATALOG,
 ];
 
 /** 頁面工具不屬於任何 Adapter；總表上用這個名稱分組。 */

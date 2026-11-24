@@ -48,10 +48,10 @@ describe("rows come from the catalog", () => {
   it("every non-hidden integration tool has exactly one row; hidden ones (mock, legacy Facade) have none", () => {
     const ids = rowsOf(staticCatalog(), null).map((r) => r.id).filter((id) => id.startsWith("cap-"));
     expect(ids).toEqual([...visible.filter((e) => e.builtin), ...visible.filter((e) => !e.builtin)].map((e) => `cap-${e.id}`));
-    expect(ids).toHaveLength(staticCatalog().filter((e) => e.kind === "integration").length - 5);
+    expect(ids).toHaveLength(staticCatalog().filter((e) => e.kind === "integration").length - 6);
     for (const e of staticCatalog().filter((x) => x.hidden)) expect(ids, e.id).not.toContain(`cap-${e.id}`);
     const html = commandsPageOutputs()["page/zh-TW"]!;
-    for (const id of ["app.mock.echo", "app.mock.toggle", "app.home.status", "app.home.control", "app.home.confirm"]) expect(html).not.toContain(`data-row="cap-${id}"`);
+    for (const id of ["app.mock.echo", "app.mock.toggle", "app.home.status", "app.home.control", "app.home.confirm", "app.skill.read"]) expect(html).not.toContain(`data-row="cap-${id}"`);
   });
 
   it("TV, calendar, mail, weather and the voice relay appear in App integrations; timers and alarms stay in their own section", () => {

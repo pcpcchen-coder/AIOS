@@ -512,9 +512,10 @@ prototype/ambient-shell/
 │   ├── home-overview.ts    # 左上角家中狀態的唯讀內容（HOME-1；快取 30 秒）
 │   ├── integrations/       # App Integration Layer（AIL-1，docs/18；NOUS_AIL 預設關閉）：Registry、Dispatcher、政策、Schema、按需狀態
 │   │   ├── adapters/       # mock、home（AIL-2 Facade）、gmail-gog、google-calendar、weather、lg-tv、spotify-soloist（只有健康檢查）、
-│   │   │                   # voice-relay，以及內建的 timer、alarm（不需要 NOUS_AIL）
+│   │   │                   # voice-relay，以及內建的 timer、alarm（不需要 NOUS_AIL）與 skill（SKL-2 的 app.skill.read，只在 NOUS_SKILLS=on 時註冊）
 │   │   ├── gog/            # gog 命令列的共用執行方式
 │   │   └── voice-relay/    # Voice Command Relay（docs/19；NOUS_VCR 預設 off）：命令目錄、解析、政策、輸出與 HTTP 路由
+│   ├── skills/             # 技能（docs/24 §4；出貨技能在 skills/<name>/）：format.ts、load.ts（SKL-1 格式與檢查）、runtime.ts（SKL-2 索引與讀取，NOUS_SKILLS 預設關閉）、tool-id.ts
 │   ├── lgtv/               # 客廳 LG 電視（LGTV-1、LGTV-2）：SSAP 用戶端、Wake-on-LAN、App 與輸入對照、配對金鑰、YouTube 目標
 │   ├── memory/             # 家庭記憶（docs/16 MEM-0～MEM-5b；核心與管理只在 macOS App，Pi 終端機頁面只有 POST /api/terminal/memory 的五個操作）：service.ts（規則入口）、store.ts（加密快照）、
 │   │                       # parse.ts、retrieve.ts、live.ts（ChatGPT 方案即時語音）、suggest.ts、boundary.ts

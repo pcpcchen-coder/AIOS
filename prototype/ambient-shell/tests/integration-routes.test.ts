@@ -77,6 +77,27 @@ describe("live route: LiveToolCaller runs app__ tools in the core", () => {
     expect(r2.text).not.toMatch(/處理好了/);
   });
 
+  it("SKL-2: passes the caller's interface language to the Adapter", async () => {
+    const seen: (string | undefined)[] = [];
+    const ail = createIntegrations({ enabled: true, services: ["mock"], soloistPort: 19090 }, () => undefined, { mock: () => {
+      const m = new MockAdapter();
+      const execute = m.execute.bind(m);
+      m.execute = async (id, args, ctx) => { seen.push(ctx.locale); return execute(id, args, ctx); };
+      return m;
+    } })!;
+    const c = new LiveToolCaller({
+      locale: "en",
+      responses: { turn: async () => (seen.length ? turn({ text: "done" }) : turn({ calls: [{ call_id: "c1", name: "app__mock__echo", arguments: '{"text":"x"}' }] })) },
+      caps: () => ({ webSearch: false, mcp: [], home: false, integrations: (l) => ail.registry.functionSpecs("live", l) }),
+      host: { outstanding: 0, call: async () => ({ ok: true }) },
+      tasks: () => [],
+      approval: () => ({ open: false, resolvedAt: null }),
+      integrations: { dispatcher: ail.dispatcher, sessionId: "s1" },
+    });
+    await c.run({ id: "d1", text: "x", source: "voice", transcript: [] }, new AbortController().signal);
+    expect(seen).toEqual(["en"]);
+  });
+
   it("without integrations (flag off) an app__ call is not a tool on this route", async () => {
     const { c, requests, hostCalls } = caller([turn({ calls: [{ call_id: "c1", name: "app__mock__echo", arguments: '{"text":"x"}' }] }), turn({ text: "不能用" })], null);
     await c.run({ id: "d1", text: "x", source: "voice", transcript: [] }, new AbortController().signal);
@@ -167,5 +188,23 @@ describe("HTTP /api/integrations/*", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, status: "confirmed", message: "（模擬）已回傳。", data: { mock: true, text: "hi" } });
     expect(await (await a.post("/api/integrations/call", { ...body, name: "app__mock__nope" })).json()).toMatchObject({ status: "refused", reason: "not_registered" });
+  });
+
+  it("SKL-2: the core passes the session's interface language to the Adapter (page cannot choose it)", async () => {
+    const seen: (string | undefined)[] = [];
+    const ail = createIntegrations({ enabled: true, services: ["mock"], soloistPort: 19090 }, () => undefined, { mock: () => {
+      const m = new MockAdapter();
+      const execute = m.execute.bind(m);
+      m.execute = async (id, args, ctx) => { seen.push(ctx.locale); return execute(id, args, ctx); };
+      return m;
+    } })!;
+    const a = await app(ail);
+    for (const locale of ["en", "zh-TW"]) {
+      const start = (await (await fetch(`${a.base}/api/realtime/start`, { method: "POST", headers: { "Content-Type": "application/json", "x-nous-locale": locale }, body: "{}" })).json()) as { session_id: string; owner: string };
+      expect((await a.post("/api/realtime/call", { sdp: "v=0 offer", session_id: start.session_id, owner: start.owner })).status).toBe(200);
+      await a.post("/api/integrations/call", { session_id: start.session_id, owner: start.owner, name: "app__mock__echo", arguments: '{"text":"hi"}', locale: "zh-TW" });
+      await a.post("/api/realtime/end", { session_id: start.session_id, owner: start.owner });
+    }
+    expect(seen).toEqual(["en", "zh-TW"]);
   });
 });
