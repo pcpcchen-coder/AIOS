@@ -95,6 +95,11 @@ export interface Config {
    * AIL-1（docs/18）：App Integration Layer 的功能旗標（NOUS_AIL=on，預設關閉）與啟用的 Adapter（NOUS_AIL_SERVICES，逗號分隔，例如 mock）。
    * 關閉時不建立 Registry：工具表、說明、/api/settings 與 HTTP 路由都和加入整合層之前相同。
    */
+  /**
+   * SKL-2（docs/24 §4）：技能旗標（NOUS_SKILLS=on，預設關閉）。開啟時兩條即時語音路徑的說明加上技能索引、多一個唯讀工具 app.skill.read；
+   * 關閉時不註冊讀取工具，工具表、說明與 /help/commands 和 SKL-2 之前逐字相同。
+   */
+  skills: boolean;
   ail: { enabled: boolean; services: string[]; soloistPort: number; vcr?: { mode: "fake" | "mac"; dir: string }; mail?: { self: string | null; gogPath: string | null }; calendar?: { account: string | null; gogPath: string | null; timeZone: string }; tv?: { host: string | null; mac: string | null; broadcast: string | null; pairingFile: string; youtubeApiKey?: string | null } };
 }
 
@@ -153,6 +158,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     smarthomeUrl: parseHttpUrl(env.SMARTHOME_URL, "SMARTHOME_URL"),
     smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
     wake: (env.NOUS_WAKE ?? "off").trim().toLowerCase() === "on",
+    skills: (env.NOUS_SKILLS ?? "off").trim().toLowerCase() === "on",
     ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES, env.NOUS_SPOTIFY_SOLOIST_PORT, env.NOUS_VCR, env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"), { self: env.NOUS_MAIL_SELF, gog: env.NOUS_GOG_PATH, account: env.NOUS_GOG_ACCOUNT, calendarTz: env.NOUS_CALENDAR_TZ }, { host: env.NOUS_LGTV_HOST, mac: env.NOUS_LGTV_MAC, broadcast: env.NOUS_LGTV_BROADCAST, youtubeKey: env.NOUS_YOUTUBE_API_KEY }),
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",

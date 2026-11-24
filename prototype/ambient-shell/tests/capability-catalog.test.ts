@@ -51,9 +51,9 @@ describe("gate: what the model sees is byte-for-byte unchanged", () => {
 });
 
 describe("static catalog (no configuration needed)", () => {
-  it("covers every reviewed Adapter (KNOWN_ADAPTERS plus the built-in timer and alarm)", () => {
-    expect(ADAPTER_CATALOGS.map((a) => a.id).sort()).toEqual([...Object.keys(KNOWN_ADAPTERS), "timer", "alarm"].sort());
-    expect(ADAPTER_CATALOGS.filter((a) => a.builtin).map((a) => a.id)).toEqual(["timer", "alarm"]);
+  it("covers every reviewed Adapter (KNOWN_ADAPTERS plus the built-in timer, alarm and SKL-2 skill reader)", () => {
+    expect(ADAPTER_CATALOGS.map((a) => a.id).sort()).toEqual([...Object.keys(KNOWN_ADAPTERS), "timer", "alarm", "skill"].sort());
+    expect(ADAPTER_CATALOGS.filter((a) => a.builtin).map((a) => a.id)).toEqual(["timer", "alarm", "skill"]);
   });
 
   it("matches what each real Adapter registers (id, service, effect, routes, catalog)", () => {
@@ -74,13 +74,13 @@ describe("static catalog (no configuration needed)", () => {
     expect(staticCatalog().map((e) => e.id)).toContain("app.voice_relay.send_intent");
   });
 
-  it("has 32 integration tools, 9 page tools, 5 hidden; counts are derived, not typed in", () => {
+  it("has 33 integration tools, 9 page tools, 6 hidden (SKL-2 adds the hidden app.skill.read); counts are derived, not typed in", () => {
     const entries = staticCatalog();
     const integration = entries.filter((e) => e.kind === "integration");
     expect(integration).toHaveLength(ADAPTER_CATALOGS.reduce((n, a) => n + a.tools.length, 0));
-    expect(integration).toHaveLength(32);
+    expect(integration).toHaveLength(33);
     expect(entries.filter((e) => e.kind === "host").map((e) => e.id)).toEqual([...HOST_TOOL_NAMES]);
-    expect(entries.filter((e) => e.hidden).map((e) => e.id)).toEqual(["app.mock.echo", "app.mock.toggle", "app.home.status", "app.home.control", "app.home.confirm"]);
+    expect(entries.filter((e) => e.hidden).map((e) => e.id)).toEqual(["app.mock.echo", "app.mock.toggle", "app.home.status", "app.home.control", "app.home.confirm", "app.skill.read"]);
   });
 
   it("page-tool examples are sentences /help/commands already lists for that tool (ASK_THE_AI)", () => {

@@ -894,6 +894,14 @@ export class RealtimeSessions {
     return null;
   }
 
+  /** SKL-2：這個工作階段的介面語言（app.skill.read 回傳對應語言的內文）；已結束時 null。 */
+  localeOf(sessionId: string | null): Locale | null {
+    if (!sessionId) return null;
+    if (this.live?.id === sessionId) return this.live.locale;
+    if (this.ga?.id === sessionId) return this.ga.locale;
+    return null;
+  }
+
   /** 驗證工作階段的擁有者（給 web-search 等附帶 session_id 的請求用）；已結束或撤銷的工作階段一律 false。 */
   isOwner(sessionId: string, owner: string): boolean {
     return (this.live?.id === sessionId && this.live.owner === owner) || (this.ga?.id === sessionId && this.ga.owner === owner);

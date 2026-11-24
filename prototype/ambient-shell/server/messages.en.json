@@ -790,5 +790,9 @@
   "目前：需要授權": "Currently: authorization required",
   "App 整合（即時語音，由模型判斷，不保證）": "App integrations (realtime, model decides, no guarantee)",
   "這一段由能力總表產生（server/integrations/catalog.ts，一個工具一列）；AI 依你的意思決定要不要用。頁面依打開時的設定標註哪些現在不能用。": "This section is generated from the capability catalog (server/integrations/catalog.ts, one row per tool); the AI decides from what you mean whether to use a tool. The page marks which tools cannot be used right now, based on the settings when it was opened.",
-  "定時器與鬧鐘由 Nous 核心保存與排程，重新啟動後還在；Mac 睡眠時核心會停住，醒來後 30 分鐘內補響並說晚了多久，超過只記錄錯過。有好幾個定時器或鬧鐘而沒說是哪一個時，AI 會問。這一段由能力總表產生（一個工具一列）。": "Timers and alarms are saved and scheduled by the Nous core and survive a restart. While the Mac sleeps the core stops; after waking it still rings anything up to 30 minutes late and says how late, and only logs older ones as missed. With several timers or alarms and none named, the AI asks which one. This section is generated from the capability catalog (one row per tool)."
+  "定時器與鬧鐘由 Nous 核心保存與排程，重新啟動後還在；Mac 睡眠時核心會停住，醒來後 30 分鐘內補響並說晚了多久，超過只記錄錯過。有好幾個定時器或鬧鐘而沒說是哪一個時，AI 會問。這一段由能力總表產生（一個工具一列）。": "Timers and alarms are saved and scheduled by the Nous core and survive a restart. While the Mac sleeps the core stops; after waking it still rings anything up to 30 minutes late and says how late, and only logs older ones as missed. With several timers or alarms and none named, the AI asks which one. This section is generated from the capability catalog (one row per tool).",
+  "技能": "Skills",
+  "讀一份技能的做法給模型照著做；只讀得到技能索引列出的技能。": "Reads a skill's procedure for the model to follow; only skills listed in the skill index can be read.",
+  "給我今天的簡報": "Give me today's briefing",
+  "NOUS_SKILLS=on，而且技能用到的工具在這條路徑上都可用": "NOUS_SKILLS=on, and every tool the skill uses is available on this route"
 }

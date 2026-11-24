@@ -1,5 +1,6 @@
 import type { CapabilityStatus, EffectClass, HealthReason, IntegrationHealth, IntegrationRoute, IntegrationToolId, ToolResult } from "../../shared/integrations.ts";
 import type { Domain } from "../../shared/domain.ts";
+import type { Locale } from "../../shared/i18n.mjs";
 import type { InputSchema } from "./schema.ts";
 
 // AIL-1（docs/18 §4）：Adapter 契約。只有程式碼裡明確註冊的 Adapter（server/integrations/adapters/）；
@@ -45,6 +46,11 @@ export interface ToolDefinition {
    * 由原本的模組自己控管），可以用 scalar 參數，時限可到 90 秒。
    */
   legacyName?: string;
+  /**
+   * SKL-2：結果 data 的上限（位元組，預設 MAX_RESULT_DATA_BYTES）。只有 effect 是 read 的工具可以設，範圍到 MAX_READ_DATA_BYTES
+   * （app.skill.read 交回技能內文）。不給模型。
+   */
+  resultDataMaxBytes?: number;
   /** CAP-1：給人看的總表資料（不給模型）。 */
   catalog: ToolCatalogInfo;
 }
@@ -80,6 +86,8 @@ export interface ExecutionContext {
   signal: AbortSignal;
   /** ALARM-1：開始這通即時語音的頁面（"main" 或終端機識別碼）；不知道時沒有。 */
   page?: string;
+  /** SKL-2：這通即時語音的介面語言（app.skill.read 回傳對應語言的內文）；不知道時沒有。 */
+  locale?: Locale;
 }
 
 export interface HealthReport {

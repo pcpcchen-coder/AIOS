@@ -1,7 +1,7 @@
 import type { Locale } from "../../shared/i18n.mjs";
 import { EFFECT_CLASSES, INTEGRATION_ROUTES, isIntegrationToolId, serviceOf, toWireName, type CapabilityStatus, type IntegrationRoute, type IntegrationToolId } from "../../shared/integrations.ts";
 import type { IntegrationAdapter, IntegrationFunctionSpec, ToolCapability, ToolDefinition } from "./contracts.ts";
-import { LEGACY_TIMEOUT_MAX_MS, registrationRefusal, TIMEOUT_RANGE_MS } from "./policy.ts";
+import { LEGACY_TIMEOUT_MAX_MS, MAX_READ_DATA_BYTES, MAX_RESULT_DATA_BYTES, registrationRefusal, TIMEOUT_RANGE_MS } from "./policy.ts";
 import { assertSupportedSchema } from "./schema.ts";
 
 // AIL-1（docs/18 §4 執行流程 1）：Registry。註冊時檢查唯一 ID、Schema、版本、來源與時限；
@@ -44,6 +44,7 @@ export class IntegrationRegistry {
       if (!(EFFECT_CLASSES as readonly string[]).includes(def.effect)) throw new RegistryError(`工具 ${def.id} 的 effect 不合法`);
       const maxTimeout = def.legacyName ? LEGACY_TIMEOUT_MAX_MS : TIMEOUT_RANGE_MS.max;
       if (!Number.isInteger(def.timeoutMs) || def.timeoutMs < TIMEOUT_RANGE_MS.min || def.timeoutMs > maxTimeout) throw new RegistryError(`工具 ${def.id} 的 timeoutMs 必須在 ${TIMEOUT_RANGE_MS.min}–${maxTimeout}`);
+      if (def.resultDataMaxBytes !== undefined && (def.effect !== "read" || def.legacyName !== undefined || !Number.isInteger(def.resultDataMaxBytes) || def.resultDataMaxBytes < MAX_RESULT_DATA_BYTES || def.resultDataMaxBytes > MAX_READ_DATA_BYTES)) throw new RegistryError(`工具 ${def.id} 的 resultDataMaxBytes 只限 read 工具，範圍 ${MAX_RESULT_DATA_BYTES}–${MAX_READ_DATA_BYTES}`);
       if (def.legacyName !== undefined && !/^[a-z][a-z0-9_]{0,63}$/.test(def.legacyName)) throw new RegistryError(`工具 ${def.id} 的 legacyName 不合法`);
       // legacy Facade 只走 page 路徑；page 路徑也只給 legacy Facade（模型工具不能借這條路避開限速與大小上限）。
       const pageOnly = def.supportedRoutes.length === 1 && def.supportedRoutes[0] === "page";

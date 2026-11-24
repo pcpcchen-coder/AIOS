@@ -708,7 +708,8 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         if (!res.writableEnded) controller.abort();
       });
       const page = sessions.pageOf(sessionId);
-      return sendJson(res, 200, await options.integrations.dispatcher.execute({ tool: name, args, route, actor: "agent", sessionId, signal: controller.signal, ...(page ? { page } : {}) }));
+      const locale = sessions.localeOf(sessionId);
+      return sendJson(res, 200, await options.integrations.dispatcher.execute({ tool: name, args, route, actor: "agent", sessionId, signal: controller.signal, ...(page ? { page } : {}), ...(locale ? { locale } : {}) }));
     }
 
     if (method === "POST" && path === "/api/realtime/web-search") {

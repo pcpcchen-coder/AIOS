@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { fromWireName, isIntegrationToolId, isToolResult, toolResult, type IntegrationRoute, type IntegrationToolId, type ToolResult } from "../../shared/integrations.ts";
 import { decide, MAX_LEGACY_DATA_BYTES, MAX_RESULT_DATA_BYTES, RateLimiter } from "./policy.ts";
+import type { Locale } from "../../shared/i18n.mjs";
 import type { IntegrationRegistry } from "./registry.ts";
 import { validateArgs } from "./schema.ts";
 
@@ -24,6 +25,8 @@ export interface DispatchRequest {
   signal?: AbortSignal;
   /** ALARM-1：開始這通的頁面（定時器在建立的那台響）。 */
   page?: string;
+  /** SKL-2：這通的介面語言（只交給 Adapter；不影響政策）。 */
+  locale?: Locale;
 }
 
 export interface AuditEntry {
@@ -124,14 +127,14 @@ export class IntegrationDispatcher {
       request.signal?.addEventListener("abort", onAbort, { once: true });
     });
     try {
-      const work = found.adapter.execute(id, checked.value, { actor: request.actor, route: request.route, sessionId: request.sessionId, requestId, signal, ...(request.page ? { page: request.page } : {}) });
+      const work = found.adapter.execute(id, checked.value, { actor: request.actor, route: request.route, sessionId: request.sessionId, requestId, signal, ...(request.page ? { page: request.page } : {}), ...(request.locale ? { locale: request.locale } : {}) });
       // 中止或逾時後 Adapter 可能還在跑：不再等它，但它之後丟的錯不能變成未處理的 rejection。
       work.catch(() => undefined);
       const outcome = await Promise.race([work.then((value) => ({ value })), stop.then((why) => ({ why }))]);
       if ("why" in outcome) {
         return finish(toolResult("unknown", outcome.why === "timeout" ? "整合服務沒有在時限內回覆，結果不明，請確認。" : "這次呼叫已中止，結果不明，請確認。", { reason: outcome.why }));
       }
-      return finish(normalize(outcome.value, found.def.legacyName ? MAX_LEGACY_DATA_BYTES : MAX_RESULT_DATA_BYTES));
+      return finish(normalize(outcome.value, found.def.legacyName ? MAX_LEGACY_DATA_BYTES : (found.def.resultDataMaxBytes ?? MAX_RESULT_DATA_BYTES)));
     } catch {
       return finish(sideEffect
         ? toolResult("unknown", "整合服務出錯，結果不明，請確認。", { reason: "adapter_error" })

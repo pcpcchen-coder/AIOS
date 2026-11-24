@@ -65,6 +65,9 @@ import { MEMORIES_GOOGLE_REASON } from "../shared/memories.ts";
 import { AlarmCenter } from "./alarms.ts";
 import { TimerAdapter } from "./integrations/adapters/timer.ts";
 import { AlarmAdapter } from "./integrations/adapters/alarm.ts";
+import { SkillAdapter } from "./integrations/adapters/skill.ts";
+import { loadSkills } from "./skills/load.ts";
+import { SkillBook, skillLoadLog, type SkillIndexMode } from "./skills/runtime.ts";
 import type { RingRecord } from "../shared/alarm.ts";
 import { MAIN_SOURCE } from "../shared/terminal.ts";
 import { fitBriefing, fitsLiveAppend, ProactiveBriefing, ProactiveDailyLog, ProactiveSettingsStore, type BriefingPort } from "./proactive.ts";
@@ -318,7 +321,23 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     onAwakeChange: (needed) => options.alarms?.onAwakeChange?.(needed),
     onChange: () => notify(),
   });
-  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } }, [{ adapter: new TimerAdapter(alarms), enabled: () => alarms.enabled }, { adapter: new AlarmAdapter(alarms), enabled: () => alarms.enabled }]);
+  // SKL-2（docs/24 §4.3）：NOUS_SKILLS=on 才讀出貨技能並註冊唯讀的 app.skill.read；關閉時什麼都不讀、不註冊，工具表與說明和之前相同。
+  // 技能檔有錯只略過那一份（log 照實記），不讓 Nous 啟動失敗。列出與否每次都看登記表的即時狀態（book 在 ail 建立後才查得到）。
+  let skillBook: SkillBook | null = null;
+  if (config.skills) {
+    let loaded: ReturnType<typeof loadSkills> = { skills: [], problems: [] };
+    try {
+      loaded = loadSkills();
+    } catch (err) {
+      log(`技能：讀取出貨技能目錄失敗，這次沒有技能（${err instanceof Error ? err.message.slice(0, 200) : "unknown error"}）`);
+    }
+    for (const line of skillLoadLog(loaded.skills, loaded.problems)) log(line);
+    skillBook = new SkillBook({ skills: loaded.skills, status: (id, route) => ail?.registry.status(id, route) ?? null, log });
+  }
+  const skillBuiltins = skillBook ? [{ adapter: new SkillAdapter(skillBook), enabled: () => skillBook!.anyListed() }] : [];
+  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } }, [{ adapter: new TimerAdapter(alarms), enabled: () => alarms.enabled }, { adapter: new AlarmAdapter(alarms), enabled: () => alarms.enabled }, ...skillBuiltins]);
+  for (const route of ["api_key", "live"] as const) for (const locale of ["zh-TW", "en"] as const) skillBook?.indexLines(route, locale, "tool");
+  const skillIndex = (route: "api_key" | "live") => (skillBook ? { skills: (locale: Locale, mode: SkillIndexMode) => skillBook!.indexLines(route, locale, mode) } : {});
   // PRO-2：CAL-1 有註冊時，認出行程擁有者（George）才說今天的行程（核心自己讀，不經模型）。
   const calendarReader = calendarReaderFrom(ail?.registry);
   const proactive = new ProactiveBriefing({ settings: proactiveSettings, log: new ProactiveDailyLog({ dir: config.configDir, log }), weather, calendar: calendarReader, logLine: log });
@@ -331,10 +350,11 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     taskWebSearch: config.taskWebSearch,
     home: home.available,
     ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("api_key", locale) } : {}),
+    ...skillIndex("api_key"),
     ...(calendarReader ? { calendarBriefing: true } : {}),
     night: () => dayNight.coreMode() === "night",
   });
-  const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available, ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("live", locale) } : {}) });
+  const liveCaps = () => ({ webSearch: true, mcp: [], taskWebSearch: config.taskWebSearch, home: home.available, ...(ail ? { integrations: (locale: Locale) => ail.registry.functionSpecs("live", locale) } : {}), ...skillIndex("live") });
   // MEM-2：ChatGPT 方案即時語音的記憶同意鍵（provider codex，獨立於 chatgpt）；沒有 Codex 登入時為 null。
   const liveTarget = () => codexTarget(codexAuth.accountSubject());
   // 開場句挑選（固定清單、依本機時段、避開上一次）：家人辨識的決策與 live 保底共用一個。
@@ -348,6 +368,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     // memoryOn：這通記憶開著而且有 codex 同意（LiveMemoryBinding.memoryActive）才加記憶規則；否則和 MEM-2 之前一樣。
     instructions: (ctx, memoryOn) => buildLiveInstructions(ctx.tasks(), new Date(), {
       integrations: liveCaps().integrations,
+      ...skillIndex("live"),
       mcp: config.realtimeMcp,
       memory: !!memoryOn,
       calendarBriefing: !!calendarReader,

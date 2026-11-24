@@ -46,6 +46,12 @@ export const RATE_LIMIT_PER_MINUTE = 30;
 /** 結果 data 序列化後的上限（位元組）；超過就不交回模型。 */
 export const MAX_RESULT_DATA_BYTES = 4_096;
 
+/**
+ * SKL-2：唯讀工具可以宣告較大的 data 上限（ToolDefinition.resultDataMaxBytes），最多到這裡。
+ * 給 app.skill.read 交回技能內文：內文上限 6,000 字（SKILL_LIMITS.body），中文每字 3 位元組，加上 JSON 跳脫仍在 32 KiB 內。
+ */
+export const MAX_READ_DATA_BYTES = 32_768;
+
 /** 工具時限的範圍（模型工具）。 */
 export const TIMEOUT_RANGE_MS = { min: 100, max: 60_000 } as const;
 /** AIL-2：legacy Facade 工具的時限上限（家電控制一句話最多 60 秒，加上讀中控清單）。 */
