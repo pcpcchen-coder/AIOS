@@ -63,7 +63,9 @@ describe("thresholds with the offset", () => {
   it("the worker accepts only a listed offset and otherwise uses the product thresholds; capture passes the setting at init", () => {
     const worker = readFileSync(join(app, "src/audio/wake-worker.ts"), "utf8");
     expect(worker).toMatch(/\(WAKE_THRESHOLD_OFFSETS as readonly unknown\[\]\)\.includes\(message\.thresholdOffset\) \? \(message\.thresholdOffset as number\) : 0/);
-    expect(worker).toMatch(/keywords: offsetKeywords\(base\.keywords, offset\)/);
+    // 矯正值（keyword_overrides）先蓋上，門檻調整值再加在上面；矯正時掃描用的偵測器也加同一個調整值。
+    expect(worker).toMatch(/keywords: offsetKeywords\(applyKeywordOverrides\(base\.keywords, overrides\), offset\)/);
+    expect(worker).toMatch(/scanner: \(keywords\) => detector\.scanner\(offsetKeywords\(keywords, offset\)\)/);
     expect(readFileSync(join(app, "src/audio/capture.ts"), "utf8")).toMatch(/thresholdOffset: thresholdOffset\(\)/);
     expect(readFileSync(join(app, "src/audio/index.ts"), "utf8")).toMatch(/browserCapture\(keywordPort, \(\) => controller\.thresholdOffset\)/);
   });

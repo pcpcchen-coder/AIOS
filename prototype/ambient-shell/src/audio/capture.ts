@@ -2,10 +2,12 @@
 // 主執行緒只收到 worker 的事件（isWakeWorkerOut 檢查過的 started／detected／load_error），收不到樣本。
 // stop()：先斷開 worklet（不再有新樣本），叫 worker 清空環形緩衝並釋放偵測器，等 worker 回 closed（最多 100 ms）才 terminate，
 // 這樣以 0 覆寫真的會在 worker 結束前執行；再關掉 AudioContext。來源 track 由 front-end.ts 管。
+// 「矯正喚醒詞…」用同一個擷取圖與 worker（mode: "calibrate"）：主執行緒只送指令（開始／結束一段、比較、丟掉），收到的只有結果事件。
+// 比較進行中 worker 可能 100 ms 內回不了 closed：那時直接 terminate，worker 的記憶體（含錄音）隨之釋放。
 
 import { isWakeWorkerOut } from "../../shared/wake.ts";
 import workletUrl from "./capture-worklet.ts?worker&url";
-import type { CaptureDeps, CaptureEvents, CaptureGraph } from "./front-end.ts";
+import type { CaptureDeps, CaptureEvents, CaptureGraph, CaptureOptions } from "./front-end.ts";
 
 /** stop() 等 worker 回報清空完成的上限。 */
 export const WORKER_CLOSE_TIMEOUT_MS = 100;
@@ -17,7 +19,7 @@ export const WORKER_CLOSE_TIMEOUT_MS = 100;
  */
 export function browserCapture(keywordPort: (() => MessagePort | null) | null = null, thresholdOffset: () => number = () => 0): CaptureDeps {
   return {
-    async connect(stream: MediaStream, events: CaptureEvents): Promise<CaptureGraph> {
+    async connect(stream: MediaStream, events: CaptureEvents, options: CaptureOptions = { overrides: null }): Promise<CaptureGraph> {
       const AudioCtx = (globalThis as { AudioContext?: typeof AudioContext }).AudioContext;
       if (!AudioCtx) throw new Error("AudioContext unavailable");
       const ctx = new AudioCtx();
@@ -66,15 +68,20 @@ export function browserCapture(keywordPort: (() => MessagePort | null) | null = 
         worker.onmessage = (event: MessageEvent<unknown>) => {
           if (stopped || !isWakeWorkerOut(event.data)) return;
           const message = event.data;
+          const cal = options.calibrate;
           if (message.type === "started") events.started();
           else if (message.type === "detected") events.detected(message.keyword_index);
           else if (message.type === "load_error") events.failed(message.reason);
+          else if (message.type === "clip") cal?.clip(message.clip, message.keyword_index);
+          else if (message.type === "scan") cal?.scan(message.candidate, message.clip, message.keyword_index);
+          else if (message.type === "sweep_done") cal?.sweepDone();
         };
         worker.onerror = () => {
           if (!stopped) events.failed("runtime_load_failed");
         };
-        const toSpeaker = keywordPort?.() ?? null;
-        worker.postMessage({ type: "init", sampleRate: ctx.sampleRate, thresholdOffset: thresholdOffset() }, toSpeaker ? [channel.port2, toSpeaker] : [channel.port2]);
+        // 矯正不做常駐偵測，也不把任何片段交給 speaker worker。
+        const toSpeaker = options.calibrate ? null : keywordPort?.() ?? null;
+        worker.postMessage({ type: "init", sampleRate: ctx.sampleRate, mode: options.calibrate ? "calibrate" : "listen", overrides: options.overrides, thresholdOffset: thresholdOffset() }, toSpeaker ? [channel.port2, toSpeaker] : [channel.port2]);
         node.port.postMessage({ type: "port" }, [channel.port1]);
         source = ctx.createMediaStreamSource(stream);
         source.connect(node);
@@ -82,7 +89,18 @@ export function browserCapture(keywordPort: (() => MessagePort | null) | null = 
         stop();
         throw err;
       }
-      return { stop };
+      if (!options.calibrate) return { stop };
+      const w = worker;
+      const send = (run: () => void) => { if (!stopped) run(); };
+      return {
+        stop,
+        calibration: {
+          beginClip: () => send(() => w.postMessage({ type: "clip_begin" })),
+          endClip: () => send(() => w.postMessage({ type: "clip_end" })),
+          sweep: (candidates, clips) => send(() => w.postMessage({ type: "sweep", candidates, clips })),
+          discard: () => send(() => w.postMessage({ type: "discard" })),
+        },
+      };
     },
   };
 }

@@ -15,9 +15,12 @@
 // - track ended：選了特定麥克風時重新開一次（找不到就用系統預設）。Pi 可在瀏覽器回報麥克風可用時恢復中斷的聆聽。
 // - 「聲音輸入」改了：閒置時立即重開；通話中等這通結束（最後一份租用歸還）才換，下一通起使用。
 // - 引擎檔案不在（runtime 不是 ok）時直接 error runtime_missing，**不開麥克風**。
+// - 「矯正喚醒詞…」（calibrate）：另開一份麥克風（有來源時用它的複製品）接到 mode calibrate 的擷取圖；期間常駐偵測暫停
+//   （paused／calibrating），結束（endCalibration，或 dispose）時停掉那一份、丟掉 worker 的錄音，再依偏好恢復。
+// - 矯正值（overrides）改變時 reload()：正在聽就重接擷取圖，偵測器以新的門檻重新載入。
 // 這個檔案只看得到 MediaStream 與事件，拿不到樣本；樣本只在 worklet 與 worker（tests/audio-privacy.test.ts 靜態檢查）。
 
-import type { WakeErrorReason, WakeReason, WakeReport, WakeRuntimeState, WakeState } from "../../shared/wake.ts";
+import type { WakeErrorReason, WakeKeywordOverrides, WakeReason, WakeReport, WakeRuntimeState, WakeState, WakeSweepCandidate } from "../../shared/wake.ts";
 
 export type CaptureFailure = "runtime_missing" | "runtime_load_failed";
 
@@ -29,12 +32,37 @@ export interface CaptureEvents {
 }
 
 export interface CaptureGraph {
-  /** 清空 worker 的環形緩衝、斷開 worklet、結束 worker。可重複呼叫。 */
+  /** 清空 worker 的環形緩衝（矯正：全部錄音）、斷開 worklet、結束 worker。可重複呼叫。 */
   stop(): void;
+  /** 只有 mode calibrate 的擷取圖有：送指令給 worker（不含樣本）。 */
+  calibration?: CalibrationControls;
+}
+
+/** 矯正時給 worker 的指令。 */
+export interface CalibrationControls {
+  beginClip(): void;
+  endClip(): void;
+  /** clips[i] 是第 i 個候選要掃的段落編號。 */
+  sweep(candidates: WakeSweepCandidate[], clips: number[][]): void;
+  discard(): void;
+}
+
+/** 矯正時 worker 回來的結果（只有編號）。keywordIndex -1＝沒有偵測到。 */
+export interface CalibrationEvents {
+  clip(clip: number, keywordIndex: number): void;
+  scan(candidate: number, clip: number, keywordIndex: number): void;
+  sweepDone(): void;
+}
+
+export interface CaptureOptions {
+  /** 已套用的矯正值（wake.json 的 keyword_overrides）；null＝清單的值。 */
+  overrides: WakeKeywordOverrides | null;
+  /** 有的話是矯正：worker 只在錄音視窗留樣本、不做常駐偵測。 */
+  calibrate?: CalibrationEvents;
 }
 
 export interface CaptureDeps {
-  connect(stream: MediaStream, events: CaptureEvents): Promise<CaptureGraph>;
+  connect(stream: MediaStream, events: CaptureEvents, options?: CaptureOptions): Promise<CaptureGraph>;
 }
 
 /** 開麥克風（src/audio-devices.ts 的 audioDevices，由 main.ts 注入）：跟著「聲音輸入」設定，找不到就用系統預設。 */
@@ -54,6 +82,15 @@ export interface FrontEndDeps {
   runtime(): WakeRuntimeState;
   /** Pi Chromium can delay devicechange until the device list is queried. */
   retryInterruptedInput?: boolean;
+  /** 已套用的矯正值（核心的 settings.wake.keyword_overrides）。 */
+  overrides?(): WakeKeywordOverrides | null;
+}
+
+/** 開始矯正失敗的原因（開麥克風的錯誤對到原因碼，或引擎不能用、已經在矯正）。 */
+export class CalibrationStartError extends Error {
+  constructor(readonly reason: WakeErrorReason | "busy" | "cancelled") {
+    super(reason);
+  }
 }
 
 /** 是什麼讓擷取開始（決定 armed 的原因與「已恢復」字幕）；麥克風一律用「聲音輸入」設定。 */
@@ -98,6 +135,9 @@ export class AudioFrontEnd {
   private starting: number | null = null;
   private gen = 0;
   private report: WakeReport = { state: "off", reason: null };
+  /** 矯正進行中（從 calibrate() 開始到 endCalibration()）；常駐偵測因此暫停。 */
+  private calibrating = false;
+  private calibration: { stream: MediaStream; graph: CaptureGraph } | null = null;
 
   constructor(
     private readonly deps: FrontEndDeps,
@@ -297,8 +337,77 @@ export class AudioFrontEnd {
     this.sync("after_call");
   }
 
+  /**
+   * 「矯正喚醒詞…」：暫停常駐偵測，另開一份麥克風（有來源時用它的複製品，否則經 MicOpener 依「聲音輸入」設定開一條），
+   * 接到 mode calibrate 的擷取圖。回傳的擷取圖帶 calibration 指令；結束一律呼叫 endCalibration()。
+   */
+  async calibrate(events: CaptureEvents, calibrate: CalibrationEvents): Promise<CaptureGraph> {
+    if (this.calibrating) throw new CalibrationStartError("busy");
+    if (this.deps.runtime() !== "ok") throw new CalibrationStartError("runtime_missing");
+    const mic = this.deps.mic;
+    if (!mic) throw new CalibrationStartError("unsupported");
+    this.calibrating = true;
+    const live = this.source && this.track?.readyState === "live" ? this.source.clone() : null;
+    // 先暫停常駐偵測（停掉擷取圖與來源；複製品不受影響）。
+    this.sync("user_resume");
+    let stream: MediaStream | null = live;
+    try {
+      if (!stream) {
+        try {
+          stream = await mic.open();
+        } catch (err) {
+          throw new CalibrationStartError(micError(err, mic.preferred()));
+        }
+      }
+      if (!this.calibrating) throw new CalibrationStartError("cancelled");
+      let graph: CaptureGraph;
+      try {
+        graph = await this.deps.capture.connect(stream, events, { overrides: this.deps.overrides?.() ?? null, calibrate });
+      } catch {
+        throw new CalibrationStartError("audio_failed");
+      }
+      if (!this.calibrating) {
+        graph.stop();
+        throw new CalibrationStartError("cancelled");
+      }
+      this.calibration = { stream, graph };
+      return graph;
+    } catch (err) {
+      if (stream && this.calibration?.stream !== stream) stopTracks(stream);
+      this.endCalibration();
+      throw err;
+    }
+  }
+
+  /** 矯正結束（完成、取消、收起畫面、睡眠、鎖定）：丟掉 worker 的錄音、停掉那一份麥克風，依偏好恢復常駐偵測。可重複呼叫。 */
+  endCalibration(): void {
+    const cal = this.calibration;
+    this.calibration = null;
+    const was = this.calibrating;
+    this.calibrating = false;
+    if (cal) {
+      cal.graph.calibration?.discard();
+      cal.graph.stop();
+      stopTracks(cal.stream);
+    }
+    if (was) this.sync("user_resume");
+  }
+
+  get isCalibrating(): boolean {
+    return this.calibrating;
+  }
+
+  /** 矯正值改變：正在聽（或正要開始）就重接擷取圖，worker 以新的門檻重新載入偵測器。 */
+  reload(): void {
+    if (!this.graph && this.starting === null) return;
+    this.invalidate();
+    this.stopGraph();
+    this.sync("user_resume");
+  }
+
   /** 結束（頁面卸載）：停止一切。 */
   dispose(): void {
+    this.endCalibration();
     this.cancelReclaim();
     this.wanted = false;
     this.resetInputRecovery();
@@ -318,6 +427,7 @@ export class AudioFrontEnd {
     if (this.systemPause.has("service")) return { state: "paused", reason: "service" };
     if (this.leases.length > 0) return { state: "in_call", reason: "realtime" };
     if (this.webSpeechActive) return { state: "released", reason: "web_speech" };
+    if (this.calibrating) return { state: "paused", reason: "calibrating" };
     if (this.userPaused) return { state: "paused", reason: "user_pause" };
     if (this.systemPause.has("lock")) return { state: "paused", reason: "lock" };
     if (this.systemPause.has("sleep")) return { state: "paused", reason: "sleep" };
@@ -379,7 +489,7 @@ export class AudioFrontEnd {
           failed: (reason) => {
             if (gen === this.gen) this.fail(reason);
           },
-        });
+        }, { overrides: this.deps.overrides?.() ?? null });
       } catch {
         if (gen !== this.gen) return;
         return this.fail("audio_failed");

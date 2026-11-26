@@ -161,8 +161,9 @@ const ROUTES = new Map<string, SettingsWrite>([
     parse: parseWakePatch,
     PatchError: WakePatchError,
     refuse: (patch) => {
-      // 頁面（以及任何本機頁面腳本）只能記下麥克風或關掉；打開只能由 App 主程序在原生說明之後經 NousHandle.wake 做
-      // （ADR-0003 §2.3）。關掉一定安全，所以這裡照收。
+      // 頁面（以及任何本機頁面腳本）只能記下麥克風、改「喚醒後等你開口」與門檻調整值、套用或回復「矯正喚醒詞」的門檻（範圍在
+      // parseKeywordOverrides 限制），或關掉；打開只能由 App 主程序在原生說明之後經 NousHandle.wake 做（ADR-0003 §2.3）。
+      // 關掉一定安全，所以這裡照收。
       if (patch.wake_listen === true) throw new HttpError(403, "常駐喚醒聆聽只能從 App 選單列打開");
       // SP-02a：只憑聲音叫名字的測試開關同樣只能由主程序在原生說明之後打開。
       if (patch.voice_name_test === true) throw new HttpError(403, "只憑聲音叫名字只能從 App 選單列打開");

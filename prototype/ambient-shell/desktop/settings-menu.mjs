@@ -20,7 +20,7 @@ export const WAKE_STATE_REASONS = {
   off: [null, "pref_off"],
   armed: ["starting", "auto_resume"],
   listening_local: [null],
-  paused: ["user_pause", "sleep", "lock", "rate_limited", "service"],
+  paused: ["user_pause", "sleep", "lock", "rate_limited", "calibrating", "service"],
   in_call: ["realtime"],
   released: ["web_speech"],
   error: ["permission_denied", "device_missing", "device_ended", "runtime_missing", "runtime_load_failed", "audio_failed", "unsupported"],
@@ -51,6 +51,7 @@ export const WAKE_REASON_LABEL = {
   sleep: "系統睡眠中",
   lock: "螢幕已鎖定",
   rate_limited: "一分鐘內已由喚醒開始 3 次通話，暫停到一分鐘後自動恢復",
+  calibrating: "正在矯正喚醒詞，結束後自動恢復",
   service: "服務模式中（這台 Mac 給 Pi 使用），Mac 不收音",
   realtime: "即時語音使用中，喚醒偵測暫停",
   web_speech: "按下說話或語音模式使用中，喚醒偵測暫停",
@@ -79,6 +80,10 @@ export const WAKE_MENU_TEXT = {
   notReported: "尚未回報",
   threshold: "喚醒詞門檻",
   thresholdNote: "數字越小越容易喚醒，也越容易被電視或聊天誤觸；設定頁也能改，所有裝置共用",
+  calibrate: "矯正喚醒詞…",
+  calibrateNote: "依提示念幾次，替這個家重新選門檻",
+  calibratedNote: "目前用代號 {0} 的矯正值",
+  calibrateUnavailable: "喚醒引擎可以使用後才能矯正",
 };
 
 /**
@@ -103,8 +108,9 @@ export const DEFAULT_WAKE_SILENCE_S = 5;
  * 開著顯示「尚未回報」（不是裝置事件，所以不說「準備中」）。
  * 「通話中辨認說話者」（George 2026-10-31 D3 先放停用的一列；2026-11-01 SP-02b 啟用，選單直接勾、不跳說明）：
  * 和「喚醒後等你開口」同一條寫入路徑（setMenuPref POST { speaker_in_call } 到 /api/settings/wake）。
+ * 「矯正喚醒詞…」（George 2026-11-01）：引擎可以用、而且不在服務模式時才能按；按下後主程序先顯示原生說明（calibrateWake），同意才打開矯正畫面。
  */
-export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused = false, translate = (source) => source }) {
+export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTest, setMenuPref, calibrateWake, servicePaused = false, translate = (source) => source }) {
   const text = (source) => translate(source);
   const reported = isWakeReport(report);
   const current = reported ? report : { state: "off", reason: null };
@@ -119,6 +125,8 @@ export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTes
   const thresholdRow = { key: "wake_threshold_offset", kind: "threshold", label: WAKE_MENU_TEXT.threshold, write_path: "/api/settings/wake" };
   const offset = WAKE_THRESHOLD_OFFSETS.includes(wake.wake_threshold_offset) ? wake.wake_threshold_offset : 0;
   const seconds = (n) => `${n} 秒${n === DEFAULT_WAKE_SILENCE_S ? "（預設）" : ""}`;
+  const calibrateReady = wake.runtime === "ok";
+  const calibratedCode = typeof wake.keyword_overrides?.code === "string" ? wake.keyword_overrides.code : null;
   return [
     { type: "separator" },
     { label: text(WAKE_MENU_TEXT.group), enabled: false },
@@ -159,6 +167,19 @@ export function wakeMenu(wake, report, { command, setWakeListen, setVoiceNameTes
       label: text(paused ? WAKE_MENU_TEXT.resume : WAKE_MENU_TEXT.pause),
       enabled: !servicePaused && wake.wake_listen && (paused || canPause),
       click: () => command(paused ? "wake-resume" : "wake-pause"),
+    },
+    {
+      label: text(WAKE_MENU_TEXT.calibrate),
+      // 服務模式中 Mac 不收音，矯正也停用。
+      enabled: calibrateReady && !servicePaused,
+      sublabel: servicePaused
+        ? text(SERVICE_TEXT.paused)
+        : !calibrateReady
+          ? text(WAKE_MENU_TEXT.calibrateUnavailable)
+          : calibratedCode
+            ? text(WAKE_MENU_TEXT.calibratedNote).replace("{0}", calibratedCode)
+            : text(WAKE_MENU_TEXT.calibrateNote),
+      click: () => void calibrateWake?.(),
     },
     {
       label: text(WAKE_MENU_TEXT.speaker),
@@ -620,7 +641,7 @@ export function memoriesMenu(memories, { setMemories, memoriesGoogle, openMemori
  *   setMemories(patch)：「回憶模式」分段（settings.memories 存在時畫；patch 送到 settings.memories.write_path）
  *   memoriesGoogle(action)：MEMO-2「Google 相簿」的 pick／cancel／clear（settings.memories.google 存在時畫）
  */
-export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setClock, setDayNight, setHomeCorner, setMemories, memoriesGoogle, openMemoriesFolder, audioReport = null, wakeReport = null, wakeCommand, servicePaused = false, translate = (source) => source }) {
+export function settingsMenu(settings, { command, setMenuPref, openFamily, setWakeListen, setVoiceNameTest, setAudio, setProactive, setClock, setDayNight, setHomeCorner, setMemories, memoriesGoogle, openMemoriesFolder, audioReport = null, wakeReport = null, wakeCommand, calibrateWake, servicePaused = false, translate = (source) => source }) {
   const text = (source) => typeof source === "string" ? translate(source) : source;
   const rows = settings?.seconds;
   if (!rows) return [{ label: text("讀取中…"), enabled: false }];
@@ -691,7 +712,7 @@ export function settingsMenu(settings, { command, setMenuPref, openFamily, setWa
   }
   closeGroup();
   if (settings.audio) items.push(...audioMenu(settings.audio, audioReport, { setAudio, translate }));
-  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, servicePaused, translate }));
+  if (settings.wake) items.push(...wakeMenu(settings.wake, wakeReport, { command: wakeCommand ?? command, setWakeListen, setVoiceNameTest, setMenuPref, calibrateWake, servicePaused, translate }));
   if (settings.proactive) items.push(...proactiveMenu(settings.proactive, { setProactive, translate }));
   if (settings.clock) items.push(...clockMenu(settings.clock, { setClock, translate }));
   if (settings.day_night) items.push(...dayNightMenu(settings.day_night, { setDayNight, translate }));

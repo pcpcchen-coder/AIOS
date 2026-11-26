@@ -18,9 +18,11 @@ export interface DesktopCommandHandlers {
   history(): void;
   /** 選單列「刪除明文備份…」（MEM-4a）：顯示任務加密搬遷的明文備份提示（刪除前主程序另跳原生確認）。 */
   vault(): void;
+  /** 選單列「矯正喚醒詞…」（主程序已先顯示原生說明、使用者按了「開始」）：打開矯正畫面（不自動錄音）。 */
+  calibrateWake(): void;
 }
 
-export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family", "family-calibrate", "memory", "history", "vault"] as const;
+export const DESKTOP_COMMANDS = ["voice", "progress", "settings", "type", "camera-preview", "family", "family-calibrate", "memory", "history", "vault", "calibrate-wake"] as const;
 
 /** 認得的指令執行對應動作並回 true；不認得的不做任何事，回 false。 */
 export function runDesktopCommand(command: string, handlers: DesktopCommandHandlers): boolean {
@@ -54,6 +56,9 @@ export function runDesktopCommand(command: string, handlers: DesktopCommandHandl
       return true;
     case "vault":
       handlers.vault();
+      return true;
+    case "calibrate-wake":
+      handlers.calibrateWake();
       return true;
     default:
       return false;

@@ -7,10 +7,12 @@
 //      所以 module 的頂層程式執行時已不能 fetch／XHR／WebSocket 等；再以 import() 載入兩個（已核對的）ES module，
 //      然後 lockImports。失敗時兩者都關閉。之後才以 wasmBinary 初始化 Emscripten 模組（glue 不自行下載任何東西）。
 //   4. 模型寫進 Emscripten 的記憶體檔案系統；關鍵詞來自清單的 keywords，經 keywordsBuf 傳入（不讀檔）。
+//      使用者以「矯正喚醒詞…」套用的門檻（wake.json 的 keyword_overrides，主執行緒在 init 帶進 worker）蓋過每一行的提升分數與門檻。
+// 矯正（scan）：同一個已載入的引擎，每個候選另建一個偵測器掃 worker 記憶體裡的錄音段，用完就釋放並以 0 覆寫 wasm 裡的樣本。
 // 第一次 CI 建置與 George 的數字之前，第 1 步就停下：產品照實回報 runtime_missing，不假裝偵測。
 // 測試用的假偵測器只在 tests/fixtures/（產品程式不得引用）。
 
-import { WAKE_RELEASE_FILES, wakeKeywordsText, wakeRuntimeBlockers, type WakeRuntimeManifest } from "../../shared/wake.ts";
+import { applyKeywordOverrides, WAKE_RELEASE_FILES, wakeKeywordsText, wakeRuntimeBlockers, type WakeKeywordConfig, type WakeKeywordOverrides, type WakeRuntimeManifest } from "../../shared/wake.ts";
 import type { WakeRuntimeNet } from "./runtime-net.ts";
 
 export type DetectorFailure = "runtime_missing" | "runtime_load_failed";
@@ -29,6 +31,17 @@ export interface WakeDetector {
   /** 清掉解碼狀態（每次偵測後、清空緩衝時）。 */
   reset(): void;
   dispose(): void;
+  /**
+   * 矯正：用 keywords 另建一個偵測器（同一個已載入的引擎），之後每段錄音各開一個串流掃。不改常駐偵測的設定；
+   * 引擎沒載入或關鍵詞不被接受時 null。用完要 free()。
+   */
+  scanner?(keywords: WakeKeywordConfig): WakeScanner | null;
+}
+
+export interface WakeScanner {
+  /** 掃一段 16 kHz 錄音，回傳第一個偵測到的清單編號，沒有時 null。不保存、不轉送樣本。 */
+  scan(clip: Float32Array): number | null;
+  free(): void;
 }
 
 // ───────────── 上游 sherpa-onnx v2.0.1 wasm/kws 的介面（只列用到的部分） ─────────────
@@ -93,13 +106,16 @@ interface ApiModule {
 }
 
 const SAMPLE_RATE = 16_000;
+/** scan：每次送進引擎的樣本數（0.1 秒）與段落後面補的靜音（讓結尾的喚醒詞也解碼完）。 */
+const SCAN_CHUNK = 1600;
+const SCAN_TAIL = new Float32Array(SAMPLE_RATE / 2);
 /** Emscripten 記憶體檔案系統裡的模型路徑（不是磁碟）。 */
 export const KWS_FS_PATHS = { encoder: "/wake-encoder.onnx", decoder: "/wake-decoder.onnx", joiner: "/wake-joiner.onnx", tokens: "/wake-tokens.txt" } as const;
 const silent = (): void => {};
 
-/** 依清單產生上游 createKws 的設定（純函式，測試直接檢查）。 */
-export function kwsConfig(manifest: WakeRuntimeManifest): KwsConfig {
-  const k = manifest.keywords;
+/** 依清單產生上游 createKws 的設定（純函式，測試直接檢查）。keywords 預設是清單的關鍵詞（矯正值由呼叫端先蓋上）。 */
+export function kwsConfig(manifest: WakeRuntimeManifest, keywords: WakeKeywordConfig = manifest.keywords): KwsConfig {
+  const k = keywords;
   const text = wakeKeywordsText(k);
   return {
     featConfig: { samplingRate: SAMPLE_RATE, featureDim: 80 },
@@ -129,12 +145,15 @@ export function kwsConfig(manifest: WakeRuntimeManifest): KwsConfig {
  */
 export class SherpaWasmDetector implements WakeDetector {
   private module: KwsWasmModule | null = null;
+  private api: ApiModule | null = null;
   private spotter: KwsSpotter | null = null;
   private stream: KwsStream | null = null;
 
   constructor(
     private readonly manifest: WakeRuntimeManifest,
     private readonly net: WakeRuntimeNet | null,
+    /** 「矯正喚醒詞…」套用的門檻（null＝清單的值）。 */
+    private readonly overrides: WakeKeywordOverrides | null = null,
   ) {}
 
   async load(): Promise<void> {
@@ -173,8 +192,9 @@ export class SherpaWasmDetector implements WakeDetector {
       const mod = await glue.default({ wasmBinary, locateFile: (path) => path, print: silent, printErr: silent });
       this.module = mod;
       for (const key of Object.keys(KWS_FS_PATHS) as (keyof typeof KWS_FS_PATHS)[]) mod.FS.writeFile(KWS_FS_PATHS[key], models[key]);
-      const spotter = api.createKws(mod, kwsConfig(this.manifest));
+      const spotter = api.createKws(mod, kwsConfig(this.manifest, applyKeywordOverrides(this.manifest.keywords, this.overrides)));
       if (!spotter || !spotter.handle) throw new Error("keyword spotter was not created");
+      this.api = api as ApiModule;
       this.spotter = spotter;
       this.stream = spotter.createStream();
     } catch {
@@ -204,6 +224,57 @@ export class SherpaWasmDetector implements WakeDetector {
     return hit;
   }
 
+  scanner(keywords: WakeKeywordConfig): WakeScanner | null {
+    const { module, api } = this;
+    if (!module || !api || keywords.entries.length === 0) return null;
+    let spotter: KwsSpotter | null = null;
+    try {
+      spotter = api.createKws(module, kwsConfig(this.manifest, keywords));
+    } catch {
+      spotter = null;
+    }
+    if (!spotter || !spotter.handle) return null;
+    const own = spotter;
+    const entries = this.manifest.keywords.entries;
+    let freed = false;
+    return {
+      scan: (clip) => {
+        if (freed || this.module !== module) return null;
+        let stream: KwsStream | null = null;
+        let hit: number | null = null;
+        try {
+          const s = own.createStream();
+          stream = s;
+          const feed = (samples: Float32Array) => {
+            s.acceptWaveform(SAMPLE_RATE, samples);
+            zeroStream(module, s);
+            while (own.isReady(s)) {
+              own.decode(s);
+              const keyword = own.getResult(s).keyword;
+              if (!keyword) continue;
+              own.reset(s);
+              const index = entries.findIndex((e) => e.id === keyword);
+              if (index >= 0 && hit === null) hit = index;
+            }
+          };
+          for (let i = 0; i < clip.length && hit === null; i += SCAN_CHUNK) feed(clip.subarray(i, i + SCAN_CHUNK));
+          if (hit === null) feed(SCAN_TAIL);
+          return hit;
+        } catch {
+          return null;
+        } finally {
+          zeroStream(module, stream);
+          stream?.free();
+        }
+      },
+      free: () => {
+        if (freed) return;
+        freed = true;
+        if (this.module === module) own.free();
+      },
+    };
+  }
+
   reset(): void {
     if (this.spotter && this.stream) this.spotter.reset(this.stream);
   }
@@ -224,11 +295,16 @@ export class SherpaWasmDetector implements WakeDetector {
     }
     this.stream = null;
     this.spotter = null;
+    this.api = null;
     this.module = null;
   }
 
   private zeroSamples(): void {
-    const { module, stream } = this;
-    if (module && stream?.pointer) module.HEAPF32.fill(0, stream.pointer / 4, stream.pointer / 4 + stream.n);
+    zeroStream(this.module, this.stream);
   }
+}
+
+/** 上游把樣本複製到 wasm heap；送進引擎後以 0 覆寫那一塊。 */
+function zeroStream(module: KwsWasmModule | null, stream: KwsStream | null): void {
+  if (module && stream?.pointer) module.HEAPF32.fill(0, stream.pointer / 4, stream.pointer / 4 + stream.n);
 }

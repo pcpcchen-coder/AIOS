@@ -52,6 +52,7 @@ import { FamilyView } from "./family-view.ts";
 import { HistoryView } from "./history-view.ts";
 import { applyPlaintextDrop, ProtectedTasks, vaultNotice, type PlaintextDropReason } from "./protected-tasks.ts";
 import type { TasksRequest, TasksResponse, VaultView } from "../shared/protected-tasks.ts";
+import { WakeCalibrationView } from "./wake-calibration-view.ts";
 import { conversationPersonLabel, liveMemoryLabel, MemoryView, MEMORY_BROWSER_UNAVAILABLE, memoryText, PresenceNotice, presenceLabel, receiptsText, SuggestionPrompt } from "./memory-view.ts";
 import type { MemoryPresenceView, MemoryRequest, MemoryResponse, MemoryStatusView, MemoryTurnView } from "../shared/memory.ts";
 import { IdentityClient, type WorkerLike } from "./sense/identity-client.ts";
@@ -88,7 +89,7 @@ import {
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
 import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts";
-import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
+import { DEFAULT_WAKE_SILENCE_S, WAKE_REASON_LABEL, WAKE_START_RATE, WAKE_TEXT, type WakeReason, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
 import { audioDevices, type AudioDeviceEvent } from "./audio-devices.ts";
 import { DAY_NIGHT_KEY, dayNightReasonText, loadLumaThresholds, saveLumaThresholds, VOICE_VOLUME_TEXT, voiceVolume } from "./voice-volume.ts";
@@ -1272,6 +1273,8 @@ function applyWakeFirst(latest: WakeSettingsView): void {
 
 function disposeWake(): void {
   if (!wake) return;
+  // 喚醒功能關掉了：矯正畫面一起收起（收起時丟掉錄音、還麥克風）。
+  if (shell.surface?.kind === "wake_calibration") dispatch({ type: "dismiss" });
   stopWakeCall();
   wakeVoice?.dispose();
   wakeVoice = null;
@@ -2042,6 +2045,45 @@ const memoryView = new MemoryView({
   },
 });
 
+// 矯正喚醒詞（George 2026-11-01）：只由選單列「矯正喚醒詞…」在原生說明之後打開。錄音與比較都在喚醒 worker（src/audio/），
+// 這裡只拿到結果編號；整個視窗的提示顏色（wakeCue）是 ShellState 之外的覆蓋層，只在「現在念」的 5 秒出現。
+const wakeCue = document.createElement("div");
+wakeCue.className = "wake-cue";
+wakeCue.hidden = true;
+wakeCue.setAttribute("aria-hidden", "true");
+document.body.append(wakeCue);
+const CALIBRATION_START_TEXT: Record<string, string> = {
+  busy: "已經在矯正中。",
+  cancelled: "已取消。",
+};
+const wakeCalibrationView = new WakeCalibrationView({
+  settings: () => settings?.wake,
+  start: async (events) => {
+    const owner = wake;
+    if (!owner) return "常駐喚醒聆聽沒有載入，無法矯正。";
+    try {
+      return await owner.startCalibration(events);
+    } catch (err) {
+      const reason = (err as { reason?: string } | null)?.reason ?? "audio_failed";
+      return CALIBRATION_START_TEXT[reason] ?? WAKE_REASON_LABEL[reason as WakeReason] ?? WAKE_REASON_LABEL.audio_failed;
+    }
+  },
+  apply: async (overrides) => {
+    try {
+      applySettings(await api.updateWake({ keyword_overrides: overrides }));
+      return null;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  },
+  cue: (state) => {
+    wakeCue.hidden = state === null;
+    if (state) wakeCue.dataset.state = state;
+    else delete wakeCue.dataset.state;
+  },
+  dismiss: () => dispatch({ type: "dismiss" }),
+});
+
 // 成果紀錄（HIST-1）：只由使用者的說法、進度卡的「搜尋全部成果」或選單列「成果紀錄…」打開；模型工具不能打開。
 /**
  * MEM-4a：macOS App 加密保存任務時，SSE 只給外殼；畫面經 IPC 讀回真實標題與成果（只用來畫畫面）。
@@ -2777,7 +2819,12 @@ function dispatch(event: ShellEvent): void {
   const leftMemory = shell.surface?.kind === "memory" && next.surface?.surface_id !== shell.surface.surface_id;
   const leftSearch = shell.surface?.kind === "search" && next.surface?.kind !== "search";
   const enteredFamily = next.surface?.kind === "family" && next.surface.surface_id !== shell.surface?.surface_id;
+  const leftWakeCalibration = shell.surface?.kind === "wake_calibration" && next.surface?.surface_id !== shell.surface.surface_id;
+  const enteredWakeCalibration = next.surface?.kind === "wake_calibration" && next.surface.surface_id !== shell.surface?.surface_id;
   shell = next;
+  // 收起矯正畫面：停止錄音、丟掉 worker 的錄音、恢復常駐聆聽。
+  if (leftWakeCalibration) wakeCalibrationView.close();
+  if (enteredWakeCalibration) wakeCalibrationView.open();
   wakeMemoriesNow();
   // 收起只關畫面：停止取樣並丟掉記憶體中的樣本與 session，不刪已存的家人資料。
   if (leftFamily) familyView.close();
@@ -3740,6 +3787,10 @@ window.addEventListener("nous:command", (event) => {
     },
     history: () => openHistory(userRequest(), "", true),
     vault: () => void refreshVault(true),
+    // 「矯正喚醒詞…」：只有喚醒功能開著（settings.wake）時才有這個選單項目；畫面打開後由使用者按「開始錄音測試」。
+    calibrateWake: () => {
+      if (settings?.wake) dispatch({ type: "show.wake_calibration", request_id: userRequest() });
+    },
   });
 });
 
@@ -3949,7 +4000,7 @@ function renderSurface(): void {
   if (rawTask) protectedTasks.want([rawTask]);
   const task = rawTask ? shown(rawTask) : undefined;
   const key = getLocale() + ":" + (
-    s.kind === "family" || s.kind === "memory" || s.kind === "history"
+    s.kind === "family" || s.kind === "memory" || s.kind === "history" || s.kind === "wake_calibration"
       ? s.surface_id // 家人辨識畫面自己更新內容，不隨設定重建（重建會打斷取樣）
       : s.kind === "search"
       ? `${s.surface_id}:${searchPanelKey()}` // 跟讀亮起不重建（applySearchHighlight）；每次換內容（含重選同一則）revision 加一才重畫
@@ -3978,6 +4029,8 @@ function renderSurface(): void {
   // 成果紀錄自己更新內容（搜尋、詳細頁、刪除確認時不重建）。
   else if (s.kind === "history") el = historyView.element;
   else if (s.kind === "search" && searchPanel.state) el = renderSearch(searchPanel.state, actions);
+  // 矯正喚醒詞自己更新內容（錄音、比較時不重建）。
+  else if (s.kind === "wake_calibration") el = wakeCalibrationView.element;
   // macOS App 的設定以選單列為主體：頁面只畫帳號與登入（瀏覽器版畫完整設定畫面）。
   else if (s.kind === "settings") {
     // SP-1：設定頁打開時才查整合服務狀態（NOUS_AIL=on 才有）；不在背景輪詢。

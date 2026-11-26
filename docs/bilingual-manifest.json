@@ -146,8 +146,8 @@
       "source": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/17_Wake_Word_and_Speaker_Recognition_Plan_2026-10.en.md",
-      "sourceSha256": "aa8f15797978308cfbc8e6d557bb28d754222bd8d297ddcb10c38d3e569507ab",
-      "translationSha256": "d96212fded2fdcc5d4f950d4b4e9dfa7ac37959a55688d927e2aa3d04bac7072"
+      "sourceSha256": "2b7888000137c31dd3c8be6d4fa96d2876fb09c476286120402ea2f6e82aeff4",
+      "translationSha256": "32bb53006aadd484c74954199e0c81d16b02892fc3ece06345fcc81408b16831"
     },
     {
       "source": "docs/18_App_Integration_Layer_and_Spotify_2026-11.md",
@@ -1054,8 +1054,8 @@
       "source": "prototype/ambient-shell/INSTALL.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/INSTALL.en.md",
-      "sourceSha256": "af79ab6340b26614858a8ce4627fc8ed55f90a893a0188fb8fbc14b2f4044d7d",
-      "translationSha256": "ff20582f03b7abf42bf60b970efd69bb1b0d432fa6af0b75f886d13c2c7437b4"
+      "sourceSha256": "4f0450356c3dd28572f60fb3f16bb776d467a9e1ed9b5c6393e26d52072bfefa",
+      "translationSha256": "3268014f8180176305b3f29a50fbd19b521cda5f6b16d399436daa6f8c5cd856"
     },
     {
       "source": "prototype/ambient-shell/README.md",
@@ -1068,8 +1068,8 @@
       "source": "prototype/ambient-shell/desktop/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "prototype/ambient-shell/desktop/README.en.md",
-      "sourceSha256": "3e74537fd2016c1a1fa1349936a14b65930a0d7df71d24a99b8b13db52b01c5d",
-      "translationSha256": "24d6e4c7bbaaa3459153d1fefa7d3c1c8e07a541f58f6ee447f53ccb6138feb2"
+      "sourceSha256": "3e4332ac7e79023fd8515c2436c0ea722dbd9c97a825e5e81c6e3441f9888bb2",
+      "translationSha256": "762a9153d7c9a51f92840f5ca98e905590700028179212b1421af60c09c13149"
     },
     {
       "source": "prototype/ambient-shell/skills/morning-briefing/SKILL.md",

@@ -91,7 +91,7 @@ describe("settingsMenu（鏡頭與語音設定）", () => {
     expect(m.command).toHaveBeenCalledWith("camera-preview");
     const cameraPreview = vi.fn();
     const noop = () => {};
-    expect(runDesktopCommand("camera-preview", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview, family: noop, familyCalibrate: noop, memory: noop, history: noop, vault: noop })).toBe(true);
+    expect(runDesktopCommand("camera-preview", { voice: noop, progress: noop, settings: noop, type: noop, cameraPreview, family: noop, familyCalibrate: noop, memory: noop, history: noop, vault: noop, calibrateWake: noop })).toBe(true);
     expect(cameraPreview).toHaveBeenCalledOnce();
   });
 
@@ -184,10 +184,11 @@ describe("runDesktopCommand", () => {
       memory: () => calls.push("memory"),
       history: () => calls.push("history"),
       vault: () => calls.push("vault"),
+      calibrateWake: () => calls.push("calibrateWake"),
     };
     for (const c of DESKTOP_COMMANDS) expect(runDesktopCommand(c, handlers)).toBe(true);
     expect(runDesktopCommand("more-settings", handlers)).toBe(false);
-    expect(calls).toEqual(["voice", "progress", "settings", "type", "cameraPreview", "family", "familyCalibrate", "memory", "history", "vault"]);
+    expect(calls).toEqual(["voice", "progress", "settings", "type", "cameraPreview", "family", "familyCalibrate", "memory", "history", "vault", "calibrateWake"]);
   });
 
   it("every command(...) the Electron main program and the menu template send is one the page knows", () => {
@@ -205,7 +206,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     const setWakeListen = vi.fn();
     const setVoiceNameTest = vi.fn();
     const setMenuPref = vi.fn();
-    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, voice_name_test: voiceTest, speaker_in_call: speaker, wake_threshold_offset: offset, runtime: "missing" as const } };
+    const settings = { ...view(enabledCamera), wake: { wake_listen: listen, device_id: null, wake_silence_s: silence, voice_name_test: voiceTest, speaker_in_call: speaker, wake_threshold_offset: offset, keyword_overrides: null, runtime: "missing" as const } };
     const items = settingsMenu(settings, { command, setMenuPref, setWakeListen, setVoiceNameTest, wakeReport: report, wakeCommand });
     const find = (label: string) => items.find((i) => i.label === label) as MenuItemTemplate;
     return { items, find, command, wakeCommand, setWakeListen, setVoiceNameTest, setMenuPref };
@@ -221,7 +222,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     const { items, find } = wakeBuild(true, { state: "listening_local", reason: null });
     const start = items.findIndex((i) => i.label === "喚醒詞");
     expect(items[start - 1]).toEqual({ type: "separator" });
-    expect(items.slice(start).map((i) => i.label)).toEqual(["喚醒詞", "喚醒聆聽：本機聆聽中", "常駐喚醒聆聽", "喚醒後等你開口：5 秒", "喚醒詞門檻：預設（0）", "暫停聆聽（到這次結束）", "通話中辨認說話者", "只憑聲音也叫名字（測試）"]);
+    expect(items.slice(start).map((i) => i.label)).toEqual(["喚醒詞", "喚醒聆聽：本機聆聽中", "常駐喚醒聆聽", "喚醒後等你開口：5 秒", "喚醒詞門檻：預設（0）", "暫停聆聽（到這次結束）", "矯正喚醒詞…", "通話中辨認說話者", "只憑聲音也叫名字（測試）"]);
     expect(find("喚醒詞").enabled).toBe(false);
     expect(find("喚醒聆聽：本機聆聽中").enabled).toBe(false);
     expect(find("常駐喚醒聆聽")).toMatchObject({ type: "checkbox", checked: true, enabled: true });
@@ -325,7 +326,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
     expect(MENU_STATE_REASONS).toEqual(WAKE_STATE_REASONS);
     expect(MENU_STATE_LABEL).toEqual(WAKE_STATE_LABEL);
     expect(MENU_REASON_LABEL).toEqual(WAKE_REASON_LABEL);
-    for (const key of ["group", "statusPrefix", "listen", "listenNote", "silence", "silenceNote", "pause", "resume", "speaker", "speakerNote", "voiceNameTest", "voiceNameTestNote", "notReported"] as const) expect(WAKE_MENU_TEXT[key]).toBe(WAKE_TEXT[key]);
+    for (const key of ["group", "statusPrefix", "listen", "listenNote", "silence", "silenceNote", "pause", "resume", "speaker", "speakerNote", "voiceNameTest", "voiceNameTestNote", "notReported", "calibrate", "calibrateNote", "calibratedNote", "calibrateUnavailable"] as const) expect(WAKE_MENU_TEXT[key]).toBe(WAKE_TEXT[key]);
     expect(MENU_SILENCE_OPTIONS).toEqual([...WAKE_SILENCE_OPTIONS_S]);
     expect(MENU_DEFAULT_SILENCE).toBe(DEFAULT_WAKE_SILENCE_S);
   });
@@ -333,7 +334,7 @@ describe("settingsMenu: 喚醒詞 section (only when the core sends settings.wak
   it("is fully translated in English (the wake word Hello Nous is English already)", () => {
     setNativeLocale("en");
     try {
-      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, runtime: "missing" as const } };
+      const settings = { ...view(enabledCamera), wake: { wake_listen: true, device_id: null, wake_silence_s: 5, voice_name_test: false, speaker_in_call: false, wake_threshold_offset: 0, keyword_overrides: null, runtime: "missing" as const } };
       for (const report of [null, ...Object.entries(WAKE_STATE_REASONS).flatMap(([state, reasons]) => reasons.map((reason) => ({ state, reason }) as WakeReport))]) {
         const items = settingsMenu(settings, { command: vi.fn(), setMenuPref: vi.fn(), wakeReport: report, translate: nativeT });
         const start = items.findIndex((i) => i.label === "Wake word");

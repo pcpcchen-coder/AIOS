@@ -1,7 +1,7 @@
 // desktop/settings-menu.mjs 的型別（給 tests/desktop-menu.test.ts；App 本身直接跑 .mjs）。
 import type { MenuPrefSetting } from "../shared/menu-prefs.ts";
 import type { SettingsView } from "../shared/types.ts";
-import type { WakePrefs, WakeReason, WakeReport, WakeState } from "../shared/wake.ts";
+import type { WakeReason, WakeReport, WakeSettingsView, WakeState } from "../shared/wake.ts";
 import type { AudioMenuReport, AudioPrefsPatch, AudioSettingsView } from "../shared/audio-devices.ts";
 import type { ProactivePrefsPatch, ProactiveSettingsView } from "../shared/proactive.ts";
 import type { ClockPrefsPatch, ClockSettingsView } from "../shared/clock.ts";
@@ -25,7 +25,7 @@ export function radio(label: string, checked: boolean, click: () => void, enable
 export const WAKE_STATE_REASONS: Record<WakeState, readonly (WakeReason | null)[]>;
 export const WAKE_STATE_LABEL: Record<WakeState, string>;
 export const WAKE_REASON_LABEL: Record<WakeReason, string>;
-export const WAKE_MENU_TEXT: Record<"group" | "statusPrefix" | "listen" | "listenNote" | "silence" | "silenceNote" | "pause" | "resume" | "speaker" | "speakerNote" | "voiceNameTest" | "voiceNameTestNote" | "notReported" | "threshold" | "thresholdNote", string>;
+export const WAKE_MENU_TEXT: Record<"group" | "statusPrefix" | "listen" | "listenNote" | "silence" | "silenceNote" | "pause" | "resume" | "speaker" | "speakerNote" | "voiceNameTest" | "voiceNameTestNote" | "notReported" | "threshold" | "thresholdNote" | "calibrate" | "calibrateNote" | "calibratedNote" | "calibrateUnavailable", string>;
 export const WAKE_THRESHOLD_OFFSETS: number[];
 export const WAKE_THRESHOLD_LABEL: Record<string, string>;
 export const WAKE_SILENCE_OPTIONS_S: number[];
@@ -36,13 +36,14 @@ export interface WakeSpeakerRow { key: "speaker_in_call"; kind: "bool"; label: s
 export interface WakeThresholdRow { key: "wake_threshold_offset"; kind: "threshold"; label: string; write_path: "/api/settings/wake" }
 export function isWakeReport(value: unknown): value is WakeReport;
 export function wakeMenu(
-  wake: WakePrefs,
+  wake: WakeSettingsView,
   report: WakeReport | null,
   handlers: {
     command(name: string): void;
     setWakeListen?(value: boolean): unknown;
     setVoiceNameTest?(value: boolean): unknown;
     setMenuPref?(row: WakeSilenceRow | WakeSpeakerRow | WakeThresholdRow, value: number | boolean): unknown;
+    calibrateWake?(): unknown;
     servicePaused?: boolean;
     translate?(source: string): string;
   },
@@ -96,6 +97,7 @@ export function settingsMenu(
     setVoiceNameTest?(value: boolean): unknown;
     wakeReport?: WakeReport | null;
     wakeCommand?(name: string): void;
+    calibrateWake?(): unknown;
     setAudio?(patch: AudioPrefsPatch): unknown;
     audioReport?: AudioMenuReport | null;
     setProactive?(patch: ProactivePrefsPatch): unknown;

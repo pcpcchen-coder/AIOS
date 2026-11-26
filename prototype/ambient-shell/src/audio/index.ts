@@ -7,7 +7,7 @@ import { WakeController, type WakeHost } from "./controller.ts";
 import { browserEarcon, type EarconOutput } from "./earcon.ts";
 import type { MicOpener } from "./front-end.ts";
 
-export { WAKE_COMMANDS, WakeController, type PowerEvent, type WakeHost, type WakeTriggerHandler } from "./controller.ts";
+export { CalibrationStartError, WAKE_COMMANDS, WakeController, type PowerEvent, type WakeCalibrationEvents, type WakeCalibrationSession, type WakeHost, type WakeTriggerHandler } from "./controller.ts";
 export { NoVoiceWatchdog, NO_VOICE_TIMEOUT_MS } from "./no-voice.ts";
 export type { WakeCallWatch } from "./wake-call.ts";
 
