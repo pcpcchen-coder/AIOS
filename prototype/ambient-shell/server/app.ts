@@ -21,7 +21,7 @@ import type { CameraPrefsPatch, CameraSettings } from "../shared/sense.ts";
 import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/menu-prefs.ts";
 import { DEFAULT_VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
-import { ApiKeyRoute, FallbackRequired, RealtimeSessions, RouteStartError, SessionError, type RealtimeRoute } from "./realtime-routes.ts";
+import { ApiKeyRoute, FallbackRequired, RealtimeSessions, RouteStartError, SessionError, type RealtimeRoute, type SessionLifecycleEvent } from "./realtime-routes.ts";
 import type { CodexAuth } from "./codex-auth.ts";
 import {
   APPROVAL_CARD_OUTCOMES,
@@ -206,6 +206,8 @@ export interface AppOptions {
    * 服務模式：終端機（Pi kiosk）頁面的心跳（server/terminal-presence.ts）。未提供時 POST /api/terminal/heartbeat 落到 404。
    */
   terminals?: { heartbeat(id: string): void };
+  /** DUCK-1：即時語音工作階段的觀察者（鴨子的 presence）。未提供時 RealtimeSessions 不通知任何人。 */
+  voiceSessionObserver?: (event: SessionLifecycleEvent) => void;
   /** DN-3：終端機的螢幕狀態（頁面回報、Pi 的 aios-display 讀）。未提供時兩條路由 404。 */
   terminalDisplay?: { report(id: string, screen: ScreenState): void; requestWindow(id: string, mode: WindowMode): void; view(id: string): { screen: ScreenState; fresh: boolean; window: WindowMode | null } };
   /**
@@ -303,6 +305,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
         maxCallMs: () => (options.voice?.view() ?? DEFAULT_VOICE_PREFS).realtime_max_call_s * 1000,
         // PRO-1：看著說話或喚醒開始（會打招呼的通話）時先取天氣，招呼決策時已在快取裡。
         ...(options.proactive ? { onGreetingStart: () => options.proactive?.prefetch() } : {}),
+        ...(options.voiceSessionObserver ? { onSessionEvent: options.voiceSessionObserver } : {}),
       })
     : null;
   const tasksFor = (target: ChatTarget | null) => tasksForTarget(store, options.memory ?? null, target);

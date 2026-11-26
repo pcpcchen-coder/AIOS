@@ -9,6 +9,7 @@ import { GOOGLE_CALENDAR_CATALOG } from "./adapters/google-calendar.ts";
 import { HOME_CATALOG, HOME_NEEDS } from "./adapters/home.ts";
 import { LG_TV_CATALOG } from "./adapters/lg-tv.ts";
 import { MOCK_CATALOG } from "./adapters/mock.ts";
+import { DUCK_CATALOG } from "./adapters/duck.ts";
 import { SPOTIFY_SOLOIST_CATALOG } from "./adapters/spotify-soloist.ts";
 import { TIMER_CATALOG } from "./adapters/timer.ts";
 import { VOICE_RELAY_CATALOG } from "./adapters/voice-relay.ts";
@@ -23,6 +24,7 @@ import type { IntegrationRegistry } from "./registry.ts";
 /** 已審核的 Adapter（index.ts 的 KNOWN_ADAPTERS，加上核心內建的定時器與鬧鐘）。測試確認與 KNOWN_ADAPTERS 一致。 */
 export const ADAPTER_CATALOGS: readonly AdapterCatalog[] = [
   MOCK_CATALOG,
+  DUCK_CATALOG,
   HOME_CATALOG,
   SPOTIFY_SOLOIST_CATALOG,
   VOICE_RELAY_CATALOG,

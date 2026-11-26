@@ -6,6 +6,10 @@ import { join } from "node:path";
 import { createServer } from "node:net";
 import { parseEnv } from "node:util";
 import { createApp } from "./app.ts";
+import { sendDuckPresence } from "./duck/exec.ts";
+import { DuckLinkHub } from "./duck/link.ts";
+import { PresenceDriver } from "./duck/presence.ts";
+import { createPresenceBridge } from "./duck/session-bridge.ts";
 import { CameraSettingsStore } from "./camera-settings.ts";
 import { FaceTuningStore } from "./face-tuning-settings.ts";
 import { VoiceSettingsStore } from "./voice-settings.ts";
@@ -318,7 +322,16 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     onAwakeChange: (needed) => options.alarms?.onAwakeChange?.(needed),
     onChange: () => notify(),
   });
-  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null } }, [{ adapter: new TimerAdapter(alarms), enabled: () => alarms.enabled }, { adapter: new AlarmAdapter(alarms), enabled: () => alarms.enabled }]);
+  // DUCK-1：duck-link hub（NOUS_DUCK=on 才建立）。鴨子是 WebSocket client，經 SSH 通道連到核心的 /duck-link；
+  // hub 先建立（duck adapter 要拿它），等核心的 http server 建好再掛上去。presence 只由下面的工作階段觀察點驅動。
+  const duckLink = config.duck.enabled ? new DuckLinkHub({ log: (line) => log(`鴨子：${line}`) }) : null;
+  const duckPresence = duckLink ? new PresenceDriver({ send: (state, level) => sendDuckPresence(duckLink, state, level), log: (line) => log(`鴨子：${line}`) }) : null;
+  const duckBridge = duckPresence ? createPresenceBridge({ handle: (event) => duckPresence.handle(event) }) : null;
+  // 鴨子（重新）連上時把目前的 presence 再送一次：它不知道 Nous 這時候在做什麼。
+  duckLink?.onLink((change) => {
+    if (change.up) duckPresence?.resend();
+  });
+  const ail = createIntegrations(config.ail, log, undefined, { home, weather: { service: weather, place: () => proactive.place()?.id ?? null }, ...(duckLink ? { duck: duckLink } : {}) }, [{ adapter: new TimerAdapter(alarms), enabled: () => alarms.enabled }, { adapter: new AlarmAdapter(alarms), enabled: () => alarms.enabled }]);
   // PRO-2：CAL-1 有註冊時，認出行程擁有者（George）才說今天的行程（核心自己讀，不經模型）。
   const calendarReader = calendarReaderFrom(ail?.registry);
   const proactive = new ProactiveBriefing({ settings: proactiveSettings, log: new ProactiveDailyLog({ dir: config.configDir, log }), weather, calendar: calendarReader, logLine: log });
@@ -519,6 +532,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const server = createApp({
     cameraEnable: options.cameraEnable ?? "http",
     terminals,
+    ...(duckBridge ? { voiceSessionObserver: (event) => duckBridge.observe(event) } : {}),
     terminalDisplay: new TerminalDisplay(),
     store,
     runner,
@@ -568,6 +582,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     devPort: config.devPort,
     distDir: options.distDir,
   });
+  // DUCK-1：只接 /duck-link 的 WebSocket 升級；Host 必須是核心自己的埠（開發用的 Vite 埠不算），帶 Origin 的一律拒絕。
+  duckLink?.attach(server, { hosts: new Set([`127.0.0.1:${port}`, `localhost:${port}`]) });
   notify = server.notifySettings;
   pageConnected = (source) => server.connectedSources().has(source) && (source === MAIN_SOURCE || terminals.status().terminals.some((t) => t.id === source));
   notifyPresence = server.notifyMemoryPresence;
@@ -590,6 +606,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const pref = realtimePrefs.view().route;
   log(`即時語音：${rt?.route ? `${rt.billing_line}（路徑偏好：${pref}）` : `不可用，${rt?.detail ?? "未設定"}（路徑偏好：${pref}）`}`);
   for (const option of rt?.routes ?? []) log(`  - ${option.id === "live" ? "ChatGPT 方案（Codex）" : "OpenAI API key"}：${option.available ? "可用" : "不可用"}，${option.detail}`);
+  if (duckLink) log(`鴨子：duck-link 已開在 ws://127.0.0.1:${port}/duck-link（只聽本機；等鴨子經 SSH 通道連進來）`);
   log(`武陵居中控：${home.available ? "已設定" : "未設定"}，${home.detail}`);
   const cam = camera.view();
   log(`雙目鏡頭：${cam.enabled ? `啟用（${cam.label}，影像只在本機處理${cam.active ? "" : "；使用者已在設定關閉"}）` : "未啟用（NOUS_CAMERA=on 開啟）"}`);
@@ -637,6 +654,9 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
         identity?.shutdown();
         void memory?.shutdown();
         terminals.dispose();
+        duckBridge?.dispose();
+        duckPresence?.stop();
+        void duckLink?.stop();
         alarms.dispose();
         // MEM-4c：結束 App 時丟棄解密內容與索引（只是放掉參照，不是安全抹除）。
         if (plaintextTimer) clearInterval(plaintextTimer);

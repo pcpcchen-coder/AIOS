@@ -1,0 +1,19 @@
+{"protocol_version":"0.1","type":"hello","sent_at_ms":1795600000000,"role":"duck","software":"duckd 0.1.0","duck_id":"duck1","mock":true,"capabilities":{"head":{"status":"mock"},"walk":{"status":"unsupported","reason":"feet switches not wired"},"eyes":{"status":"unsupported","reason":"GC9A01 panels not installed"}},"gestures":["nod","shake","tilt"],"expressions":["neutral","happy"],"sounds":[]}
+{"protocol_version":"0.1","type":"hello","sent_at_ms":1795600000001,"role":"nous","software":"duck-link-hub 0.1.0","mock":true}
+{"protocol_version":"0.1","type":"heartbeat","sent_at_ms":1795600000500,"seq":1}
+{"protocol_version":"0.1","type":"heartbeat","sent_at_ms":1795600000503,"seq":1,"echo_of":1}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1795600001000,"request_id":"req_00000001","action":"status","ttl_ms":2000}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1795600001000,"request_id":"req_00000002","action":"walk","ttl_ms":3000,"params":{"vx":0.1,"duration_s":2}}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1795600001000,"request_id":"req_00000003","action":"look","ttl_ms":3000,"params":{"head_yaw":0.3,"head_pitch":-0.1,"duration_s":1.0}}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1795600001000,"request_id":"req_00000004","action":"track","ttl_ms":3000,"params":{"target":"face","body":false,"timeout_s":60}}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1795600001000,"request_id":"req_00000005","action":"gesture","ttl_ms":3000,"params":{"name":"nod"}}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1795600001000,"request_id":"req_00000006","action":"express","ttl_ms":3000,"params":{"expression":"happy","duration_s":3}}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1795600001000,"request_id":"req_00000007","action":"presence","ttl_ms":3000,"params":{"state":"speaking","speech_level":0.4}}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1795600001000,"request_id":"req_00000008","action":"go_to","ttl_ms":5000,"params":{"place":"brother_room"}}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1795600001000,"request_id":"req_00000009","action":"stop","ttl_ms":1000}
+{"protocol_version":"0.1","type":"ack","sent_at_ms":1795600001010,"request_id":"req_00000002","status":"rejected","reason":"unsupported","detail":"walk: feet switches not wired"}
+{"protocol_version":"0.1","type":"ack","sent_at_ms":1795600001010,"request_id":"req_00000003","status":"accepted","clamped":true,"applied":{"head_yaw":0.3,"head_pitch":-0.1,"duration_s":1.0}}
+{"protocol_version":"0.1","type":"ack","sent_at_ms":1795600001010,"request_id":"req_00000008","status":"accepted","mission_id":"m_0001"}
+{"protocol_version":"0.1","type":"state","sent_at_ms":1795600002000,"mock":true,"mode":"holding","control_source":"duck_link","capabilities":{"head":{"status":"mock"}},"faults":[],"presence":"idle","expression":"neutral","tracking":"none","head":{"neck_pitch":0,"head_pitch":-0.1,"head_yaw":0.3,"head_roll":0,"age_ms":20},"battery":{"voltage_v":8.0,"source":"servo_bus","charging":null},"temperature_c":{"servo_max":31,"cpu":45.2},"tilt_deg":null,"mission":null,"location":null,"link":{"lease_ok":true,"rtt_ms":4.1},"loop":{"hz":50,"overruns":0}}
+{"protocol_version":"0.1","type":"event","sent_at_ms":1795600003000,"event":"mission_failed","event_id":"e_0001","mission_id":"m_0001","reason":"door_closed","data":{"place":"brother_room"}}
+{"protocol_version":"0.1","type":"event","sent_at_ms":1795600003000,"event":"link_lost","event_id":"e_0002"}

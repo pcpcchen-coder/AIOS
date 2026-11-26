@@ -1,0 +1,11 @@
+{"protocol_version":"0.2","type":"heartbeat","sent_at_ms":1,"seq":1}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1,"request_id":"req_00000001","action":"walk","ttl_ms":3000}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1,"request_id":"req_00000001","action":"walk","ttl_ms":3000,"params":{"vx":0.1,"duration_s":60}}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1,"request_id":"req_00000001","action":"torque_off","ttl_ms":3000}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1,"request_id":"req_00000001","action":"look","ttl_ms":3000,"params":{"joint_angles":[0,0]}}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1,"request_id":"short","action":"stop","ttl_ms":3000}
+{"protocol_version":"0.1","type":"command","sent_at_ms":1,"request_id":"req_00000001","action":"stop","ttl_ms":3000,"params":{"force":true}}
+{"protocol_version":"0.1","type":"ack","sent_at_ms":1,"request_id":"req_00000001","status":"rejected"}
+{"protocol_version":"0.1","type":"state","sent_at_ms":1,"mode":"flying","control_source":"none","capabilities":{},"faults":[]}
+{"protocol_version":"0.1","type":"state","sent_at_ms":1,"mode":"holding","control_source":"none","capabilities":{"laser":{"status":"available"}},"faults":[]}
+{"protocol_version":"0.1","type":"event","sent_at_ms":1,"event":"exploded","event_id":"e1"}

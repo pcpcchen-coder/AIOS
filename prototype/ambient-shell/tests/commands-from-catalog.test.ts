@@ -48,7 +48,8 @@ describe("rows come from the catalog", () => {
   it("every non-hidden integration tool has exactly one row; hidden ones (mock, legacy Facade) have none", () => {
     const ids = rowsOf(staticCatalog(), null).map((r) => r.id).filter((id) => id.startsWith("cap-"));
     expect(ids).toEqual([...visible.filter((e) => e.builtin), ...visible.filter((e) => !e.builtin)].map((e) => `cap-${e.id}`));
-    expect(ids).toHaveLength(staticCatalog().filter((e) => e.kind === "integration").length - 5);
+    // 5 個 mock／legacy Facade，加上 DUCK-1 第一階段還沒啟用的 11 個鴨子工具。
+    expect(ids).toHaveLength(staticCatalog().filter((e) => e.kind === "integration").length - 16);
     for (const e of staticCatalog().filter((x) => x.hidden)) expect(ids, e.id).not.toContain(`cap-${e.id}`);
     const html = commandsPageOutputs()["page/zh-TW"]!;
     for (const id of ["app.mock.echo", "app.mock.toggle", "app.home.status", "app.home.control", "app.home.confirm"]) expect(html).not.toContain(`data-row="cap-${id}"`);

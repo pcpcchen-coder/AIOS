@@ -213,6 +213,12 @@ This section is generated from the capability catalog (server/integrations/catal
 
 | Service | Ask | Possible AI action | Conditions |
 |---|---|---|---|
+| Duck | 「鴨子現在怎麼樣？」「鴨子有連線嗎？」 | Checks the duck's status and which capabilities it can use right now. | Requires realtime; the duck must be powered on and connected to Nous. |
+| Duck | 「鴨子停」「鴨子不要動」 | Stops the duck right away. | Requires realtime; the duck must be powered on and connected to Nous. |
+| Duck | 「鴨子看左邊」「鴨子抬頭」 | Turns the duck's head toward a direction. | Requires realtime; the duck must be powered on and connected to Nous. |
+| Duck | 「鴨子點點頭」「鴨子搖頭」 | Makes the duck nod, shake its head or play another pre-recorded gesture. | Requires realtime; the duck must be powered on and connected to Nous. |
+| Duck | 「鴨子笑一個」「鴨子做個好奇的表情」 | Changes the expression on the duck's eyes. | Requires realtime; the eye displays must be installed. |
+| Duck | 「鴨子看著我」「鴨子不要一直看我」 | Makes the duck's head follow a face or a voice, or stops following. | Requires realtime; needs a camera (faces) or a microphone array (voices). |
 | Nearby smart speakers (voice relay) | 「叫音箱下一首」「叫音箱把音量調到 30」 | Speaks a reviewed command to a nearby smart speaker with synthesized speech (next song, pause, volume, lights on or off); the result is at most "sent, unconfirmed". | Requires realtime and NOUS_VCR=fake (mock, no real sound) or mac (spoken by the Mac's say), and at least one enabled speaker target |
 | Google Calendar | 「我今天有什麼行程」「明天下午有空嗎」「這週有哪些行程」 | Reads your own Google Calendar: today, tomorrow, this week, or a given day. | Requires realtime and a Google account in NOUS_GOG_ACCOUNT (or NOUS_MAIL_SELF), with gog authorized for Calendar |
 | Google Calendar | 「明天下午三點記一個看牙醫」「把下週三晚上七點的聚餐記到行事曆」 | Adds an event to your own Google Calendar without inviting anyone. | Requires realtime and a Google account in NOUS_GOG_ACCOUNT (or NOUS_MAIL_SELF), with gog authorized for Calendar |
