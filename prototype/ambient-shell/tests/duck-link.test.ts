@@ -232,6 +232,34 @@ describe("指令、ack、state、event", () => {
     expect(events).toEqual(["battery_low", "picked_up"]);
   });
 
+  it("鴨子端程式重啟、事件編號從頭編：重啟後的事件照常轉發，不當成重複（2026-11-26 實機的 bug）", async () => {
+    // 照 duckd 的編法：e_000001 起跳。第一個行程送 3 則後結束。
+    r = await rig({ duck: { eventIds: "counter" } });
+    const events: string[] = [];
+    r.hub.onEvent((e) => events.push(`${e.event}:${e.event_id}`));
+    for (const name of ["tracking_acquired", "tracking_lost", "gesture_done"] as const) r.duck.emitEvent(name);
+    await until(() => events.length === 3);
+    r.duck.disconnect();
+    await until(() => !r!.hub.snapshot().connected);
+    // 新的行程（同一個 duck_id、同一個 software）連上來，編號又從 e_000001 開始。
+    const { MockDuck } = await import("./fixtures/mock-duck.ts");
+    const restarted = new MockDuck({ url: r.url, stateIntervalMs: 50, eventIds: "counter" });
+    await restarted.connect();
+    await until(() => r!.hub.snapshot().connected);
+    try {
+      for (const name of ["tracking_acquired", "tracking_lost", "walk_done"] as const) restarted.emitEvent(name);
+      await until(() => events.length === 6);
+      expect(events).toEqual(["tracking_acquired:e_000001", "tracking_lost:e_000002", "gesture_done:e_000003", "tracking_acquired:e_000001", "tracking_lost:e_000002", "walk_done:e_000003"]);
+      expect(r.hub.snapshot().counters.duplicateEvents).toBe(0);
+      // 同一條連線內真的重送同一則，還是只轉一次。
+      restarted.sendRaw(JSON.stringify({ protocol_version: "0.1", type: "event", sent_at_ms: 1, event: "walk_done", event_id: "e_000003" }));
+      await until(() => r!.hub.snapshot().counters.duplicateEvents === 1);
+      expect(events).toHaveLength(6);
+    } finally {
+      restarted.disconnect();
+    }
+  });
+
   it("waitFor：先看已經收到的，再等新的；逾時回 timeout", async () => {
     r = await rig();
     const since = r.hub.seq;

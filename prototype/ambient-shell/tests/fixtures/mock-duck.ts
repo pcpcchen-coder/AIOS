@@ -49,6 +49,8 @@ export interface MockDuckOptions {
   missionOutcome?: "done" | "failed" | "hold";
   /** 接受指令後不送 state（測「已接受但沒有回讀」）。 */
   muteState?: boolean;
+  /** 事件編號怎麼編：unique（預設，不會撞號）或 counter（照 duckd：e_000001 起跳，行程重啟就從頭編）。 */
+  eventIds?: "unique" | "counter";
   /** 不回 heartbeat 的回聲（測往返時間量不到）。 */
   muteHeartbeatEcho?: boolean;
   log?: (line: string) => void;
@@ -171,7 +173,9 @@ export class MockDuck {
 
   /** 送一個事件（例如 fell、battery_low）。 */
   emitEvent(event: DuckEventName, extra: { request_id?: string; mission_id?: string; reason?: string; data?: Record<string, unknown> } = {}): void {
-    this.send({ type: "event", event, event_id: `mock_e_${++this.eventSeq}_${Date.now().toString(36)}`, ...extra });
+    const n = ++this.eventSeq;
+    const event_id = this.options.eventIds === "counter" ? `e_${String(n).padStart(6, "0")}` : `mock_e_${n}_${Date.now().toString(36)}`;
+    this.send({ type: "event", event, event_id, ...extra });
   }
 
   /** 模擬跌倒：模式變 fallen，之後的動作指令都被拒絕。 */
