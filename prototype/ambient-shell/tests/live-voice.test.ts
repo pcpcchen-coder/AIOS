@@ -642,7 +642,8 @@ describe("MEM-2: openRealtime rebuild", () => {
     expect(began).toEqual(["live"]);
     const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
     expect(main).toContain("const greeting = rebuild ? null : greetingFor(");
-    expect(main).toContain("api.realtimeStart(sseClientId, source, realtimeLocale, rebuild, options.wake?.wake_id)");
+    // DUCK-2：多一個參數（鴨子喚醒的一次性權杖）；rebuild 仍然只送一次。
+    expect(main).toContain("api.realtimeStart(sseClientId, source, realtimeLocale, rebuild, options.wake?.wake_id, options.duckWake)");
   });
 });
 

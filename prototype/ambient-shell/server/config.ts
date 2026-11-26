@@ -1,3 +1,5 @@
+import { DEFAULT_DUCK_TERMINAL } from "../shared/duck-terminal.ts";
+import { isTerminalId } from "../shared/terminal.ts";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -100,7 +102,7 @@ export interface Config {
    * DUCK-1：鴨子（Nous Duck，會動的終端）的 duck-link 端點（NOUS_DUCK=on，預設關閉）。關閉時不建立 hub、不掛 WebSocket 升級，
    * duck adapter 不註冊（就算列在 NOUS_AIL_SERVICES），工作階段的觀察點不接：行為和加入之前相同。
    */
-  duck: { enabled: boolean };
+  duck: { enabled: boolean; /** DUCK-2：鴨子終端頁面的終端 ID（NOUS_DUCK_TERMINAL，預設 duck）。 */ terminal: string };
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -159,7 +161,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
     wake: (env.NOUS_WAKE ?? "off").trim().toLowerCase() === "on",
     ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES, env.NOUS_SPOTIFY_SOLOIST_PORT, env.NOUS_VCR, env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"), { self: env.NOUS_MAIL_SELF, gog: env.NOUS_GOG_PATH, account: env.NOUS_GOG_ACCOUNT, calendarTz: env.NOUS_CALENDAR_TZ }, { host: env.NOUS_LGTV_HOST, mac: env.NOUS_LGTV_MAC, broadcast: env.NOUS_LGTV_BROADCAST, youtubeKey: env.NOUS_YOUTUBE_API_KEY }),
-    duck: { enabled: (env.NOUS_DUCK ?? "off").trim().toLowerCase() === "on" },
+    duck: { enabled: (env.NOUS_DUCK ?? "off").trim().toLowerCase() === "on", terminal: parseDuckTerminal(env.NOUS_DUCK_TERMINAL) },
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",
@@ -315,6 +317,13 @@ export function parseAil(flag: string | undefined, services: string | undefined,
   };
   // VCR-0／VCR-2（docs/19）：NOUS_VCR=fake（假輸出，mock）或 mac（say 發聲）才加上 vcr；目錄固定在 <configDir>/voice-relay，不來自模型。
   return vcrMode === "fake" || vcrMode === "mac" ? { ...base, vcr: { mode: vcrMode, dir: join(configDir ?? join(homedir(), ".config", "nous"), "voice-relay") } } : base;
+}
+
+/** DUCK-2：NOUS_DUCK_TERMINAL 必須是合法的終端 ID（小寫英數與連字號，不能是 main）；沒設定時用 duck。 */
+export function parseDuckTerminal(value: string | undefined): string {
+  const id = value?.trim() || DEFAULT_DUCK_TERMINAL;
+  if (!isTerminalId(id)) throw new Error(`NOUS_DUCK_TERMINAL 不是合法的終端 ID："${String(id).slice(0, 40)}"`);
+  return id;
 }
 
 /** MEMO-2：Google 相簿用的 gog 路徑與帳號；格式不對時 invalid 帶原因（只是回憶模式的一個來源，不擋核心啟動）。 */

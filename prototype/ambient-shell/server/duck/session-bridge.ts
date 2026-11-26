@@ -1,4 +1,5 @@
 import type { SessionLifecycleEvent } from "../realtime-routes.ts";
+import type { DuckReportPhase } from "../../shared/duck-terminal.ts";
 import type { VoiceSessionEvent } from "./presence.ts";
 
 // DUCK-1（D4a）：核心看得到的工作階段事件 → 鴨子 presence 的輸入事件。
@@ -16,10 +17,19 @@ export interface PresenceBridgeOptions {
   pendingMs?: number;
 }
 
-export function createPresenceBridge(options: PresenceBridgeOptions): { observe(event: SessionLifecycleEvent): void; dispose(): void } {
+/** DUCK-2：鴨子終端的頁面回報的語音狀態（比核心自己看得到的準：有真的「說話中」）。 */
+export interface PagePhaseEvent {
+  kind: "phase";
+  sessionId: string;
+  phase: DuckReportPhase;
+}
+
+export function createPresenceBridge(options: PresenceBridgeOptions): { observe(event: SessionLifecycleEvent | PagePhaseEvent): void; dispose(): void } {
   const pendingMs = options.pendingMs ?? 60_000;
   const pending = new Map<string, ReturnType<typeof setTimeout>>();
   const active = new Set<string>();
+  /** 有頁面回報 phase 的工作階段：聽／想／說以頁面為準，核心自己的粗略對應（連上＝在聽、委派時切換）不再插手。 */
+  const pageReported = new Set<string>();
   const clearPending = (id?: string) => {
     for (const [key, timer] of [...pending]) {
       if (id !== undefined && key !== id) continue;
@@ -46,12 +56,20 @@ export function createPresenceBridge(options: PresenceBridgeOptions): { observe(
           // 改路徑時連上的工作階段 ID 可能和決定開始時不同：連上就把等待中的都清掉。
           clearPending();
           active.add(event.sessionId);
-          options.handle({ kind: "phase", phase: "listening" });
+          if (!pageReported.has(event.sessionId)) options.handle({ kind: "phase", phase: "listening" });
+          break;
+        case "phase":
+          // 頁面可能在核心記到「連上」之前就先回報（connecting）；已經結束的工作階段的回報不理。
+          if (!active.has(event.sessionId) && !pending.has(event.sessionId)) break;
+          pageReported.add(event.sessionId);
+          options.handle({ kind: "phase", phase: event.phase });
           break;
         case "delegation":
           if (!active.has(event.sessionId)) break;
           // 委派＝模型交給核心去做事（工具、交辦）。核心不知道頁面的 phase，所以這裡自己切：做事中 → working，做完 → 回到 listening。
-          if (event.state === "started") {
+          if (pageReported.has(event.sessionId)) {
+            options.handle({ kind: "working", active: event.state === "started" });
+          } else if (event.state === "started") {
             options.handle({ kind: "phase", phase: "thinking" });
             options.handle({ kind: "working", active: true });
           } else {
@@ -61,6 +79,7 @@ export function createPresenceBridge(options: PresenceBridgeOptions): { observe(
           break;
         case "ended":
           clearPending(event.sessionId);
+          pageReported.delete(event.sessionId);
           if (!active.delete(event.sessionId) && (active.size || pending.size)) break;
           if (!active.size && !pending.size) options.handle({ kind: "session_ended", reason: event.reason });
           break;
@@ -69,6 +88,7 @@ export function createPresenceBridge(options: PresenceBridgeOptions): { observe(
     dispose() {
       clearPending();
       active.clear();
+      pageReported.clear();
     },
   };
 }

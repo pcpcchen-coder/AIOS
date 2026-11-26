@@ -10,6 +10,7 @@ import { sendDuckPresence } from "./duck/exec.ts";
 import { DuckLinkHub } from "./duck/link.ts";
 import { PresenceDriver } from "./duck/presence.ts";
 import { createPresenceBridge } from "./duck/session-bridge.ts";
+import { DuckWakeGate } from "./duck/wake-gate.ts";
 import { CameraSettingsStore } from "./camera-settings.ts";
 import { FaceTuningStore } from "./face-tuning-settings.ts";
 import { VoiceSettingsStore } from "./voice-settings.ts";
@@ -327,6 +328,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const duckLink = config.duck.enabled ? new DuckLinkHub({ log: (line) => log(`鴨子：${line}`) }) : null;
   const duckPresence = duckLink ? new PresenceDriver({ send: (state, level) => sendDuckPresence(duckLink, state, level), log: (line) => log(`鴨子：${line}`) }) : null;
   const duckBridge = duckPresence ? createPresenceBridge({ handle: (event) => duckPresence.handle(event) }) : null;
+  const duckWakes = duckLink ? new DuckWakeGate() : null;
   // 鴨子（重新）連上時把目前的 presence 再送一次：它不知道 Nous 這時候在做什麼。
   duckLink?.onLink((change) => {
     if (change.up) duckPresence?.resend();
@@ -533,6 +535,8 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
     cameraEnable: options.cameraEnable ?? "http",
     terminals,
     ...(duckBridge ? { voiceSessionObserver: (event) => duckBridge.observe(event) } : {}),
+    // DUCK-2：鴨子當語音終端。喚醒權杖的核對與鴨子終端頁面回報的語音狀態（→ presence，有真的 speaking）。
+    ...(duckBridge && duckWakes ? { duck: { terminal: config.duck.terminal, redeemWake: (token, page) => duckWakes.redeem(token, page), onPhase: (sessionId, phase) => duckBridge.observe({ kind: "phase", sessionId, phase }) } } : {}),
     terminalDisplay: new TerminalDisplay(),
     store,
     runner,
@@ -584,6 +588,15 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   });
   // DUCK-1：只接 /duck-link 的 WebSocket 升級；Host 必須是核心自己的埠（開發用的 Vite 埠不算），帶 Origin 的一律拒絕。
   duckLink?.attach(server, { hosts: new Set([`127.0.0.1:${port}`, `localhost:${port}`]) });
+  // DUCK-2：鴨子本機偵測到喚醒詞（duck-link 的 wake_word 事件）→ 請鴨子終端的頁面開始一通即時語音。
+  // 核心不碰音訊：收音與播放都在那個頁面（鴨子 Pi 上的瀏覽器）。頁面沒連著就只記 log，不假裝開始了。
+  duckLink?.onEvent((event) => {
+    if (event.event !== "wake_word" || !duckWakes) return;
+    const terminal = config.duck.terminal;
+    if (!server.connectedSources().has(terminal)) return void log(`鴨子：聽到喚醒詞，但終端頁面（?terminal=${terminal}）沒有連著，沒有開始對話`);
+    const sent = server.requestVoice(terminal, duckWakes.issue(terminal));
+    log(`鴨子：聽到喚醒詞，已請終端頁面（${terminal}）開始對話（${sent} 個頁面）`);
+  });
   notify = server.notifySettings;
   pageConnected = (source) => server.connectedSources().has(source) && (source === MAIN_SOURCE || terminals.status().terminals.some((t) => t.id === source));
   notifyPresence = server.notifyMemoryPresence;
@@ -606,7 +619,7 @@ export async function startNous(options: NousOptions): Promise<NousHandle> {
   const pref = realtimePrefs.view().route;
   log(`即時語音：${rt?.route ? `${rt.billing_line}（路徑偏好：${pref}）` : `不可用，${rt?.detail ?? "未設定"}（路徑偏好：${pref}）`}`);
   for (const option of rt?.routes ?? []) log(`  - ${option.id === "live" ? "ChatGPT 方案（Codex）" : "OpenAI API key"}：${option.available ? "可用" : "不可用"}，${option.detail}`);
-  if (duckLink) log(`鴨子：duck-link 已開在 ws://127.0.0.1:${port}/duck-link（只聽本機；等鴨子經 SSH 通道連進來）`);
+  if (duckLink) log(`鴨子：duck-link 已開在 ws://127.0.0.1:${port}/duck-link（只聽本機；等鴨子經 SSH 通道連進來）；語音終端頁面：http://localhost:${port}/?terminal=${config.duck.terminal}`);
   log(`武陵居中控：${home.available ? "已設定" : "未設定"}，${home.detail}`);
   const cam = camera.view();
   log(`雙目鏡頭：${cam.enabled ? `啟用（${cam.label}，影像只在本機處理${cam.active ? "" : "；使用者已在設定關閉"}）` : "未啟用（NOUS_CAMERA=on 開啟）"}`);

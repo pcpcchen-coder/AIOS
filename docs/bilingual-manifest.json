@@ -200,8 +200,8 @@
       "source": "docs/Current_Implementation_Status.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/Current_Implementation_Status.en.md",
-      "sourceSha256": "cc492d353aea3216efe90a60f452583fc2830f017a28df177ac9ed474115b49b",
-      "translationSha256": "b771855b87ff05b9bd5162bfb4934f65ac48a1ea9d1b10ae15e404a6d4adec5b"
+      "sourceSha256": "eaafa659482c7a7b30691220264ef0db7522633d58f27f6a3f39eee6bbd5cf9f",
+      "translationSha256": "067102ada3e6ced16fd57c04604f82e6293af8ec1e6a5d4c42d5cb887b41cc3c"
     },
     {
       "source": "docs/README.md",
@@ -326,8 +326,8 @@
       "source": "docs/validation/README.md",
       "sourceLanguage": "zh-TW",
       "translation": "docs/validation/README.en.md",
-      "sourceSha256": "43cac201ed0423cff30cde0e33039b63da8e03684a19b039122ff3705665fdac",
-      "translationSha256": "b0674bd9db14804e461527f4bbd762e155d81e8eaa41241fbcb091aa96b581f1"
+      "sourceSha256": "b153f28f8429427819b8810543d83048ea8e15e317f83aa587871c0bec628782",
+      "translationSha256": "1a43c3409190b3343773a85d25bae627b3c2ccbb4d1494aead93d1eac2428e53"
     },
     {
       "source": "docs/validation/ail-1-2026-11-03.md",
@@ -552,6 +552,13 @@
       "translation": "docs/validation/duck-link-2026-11-26.en.md",
       "sourceSha256": "5524fc81334808e8825d76486ce9b5b84e3f7df49953f7c4a3e1d8c2f569fb7b",
       "translationSha256": "10461642bdd41c09caafef3cad273bcee7aee368bb7262cb67844e8a0031ddb0"
+    },
+    {
+      "source": "docs/validation/duck-voice-terminal-2026-11-26.md",
+      "sourceLanguage": "zh-TW",
+      "translation": "docs/validation/duck-voice-terminal-2026-11-26.en.md",
+      "sourceSha256": "686629329c30c715b987b34d34b010f5bde9191ad78b82380d25fc09a698180c",
+      "translationSha256": "bbbede5f3dcee7f61baf89b57108d9d8e84f19b8ce96d92ed174d2688d38ebd2"
     },
     {
       "source": "docs/validation/evidence/brain-distance-2026-10-22/brief.md",

@@ -87,6 +87,7 @@ import {
   MAX_LISTED,
 } from "./views.ts";
 import { speakFinished, speakProgress } from "./speech-text.ts";
+import { DuckWakeWatch } from "./duck-wake-watch.ts";
 import type { PowerEvent, WakeCallWatch, WakeController } from "./audio/index.ts";
 import { DEFAULT_WAKE_SILENCE_S, WAKE_START_RATE, WAKE_TEXT, type WakeReport, type WakeSettingsView, type WakeTrigger } from "../shared/wake.ts";
 import type { PageEndReason } from "../shared/voice-cost.ts";
@@ -480,6 +481,8 @@ const realtimeCommands = new RealtimeLocalCommands({
 /** 兩條路徑共用的 callbacks（工具、字幕、確認卡、腦區光脈衝都在這裡）：只建一次。 */
 const realtimeCallbacks: RealtimeCallbacks = {
   onPhase: (phase) => {
+    // DUCK-2：鴨子終端的頁面把真實的語音狀態回報給核心（→ 鴨子的互動狀態，含真的「說話中」）。失敗不影響通話。
+    if (settings?.duck?.terminal && phase !== "off" && realtimeTicket) void api.realtimePhase(ticketOf(realtimeTicket), phase).catch(() => undefined);
     // HIST-1 Mac F1（審查 M3）：播放與開口的時間給本機指令的回音判斷。
     realtimeCommands.notePhase(phase);
     searchPanel.setPhase(phase);
@@ -612,6 +615,8 @@ const callLifecycle = new CallLifecycle({
 });
 /** WK-02：喚醒開始的通話的「沒人出聲就結束」計時（通話結束時停止）與它的麥克風音量來源（租到的那一份）。 */
 let wakeCall: WakeCallWatch | null = null;
+/** DUCK-2：鴨子喚醒開始的通話的「沒人出聲就結束」計時（只看通話階段，不碰音訊）。 */
+let duckWakeWatch: DuckWakeWatch | null = null;
 let wakeLevel: { stream: MediaStream; stop(): void } | null = null;
 /** WK-02：喚醒開始、問候還沒決定的互動（這段時間同步辨識不需要「看著說話」設定，稱名設定仍要開）。 */
 let wakeGreetingInteraction: string | null = null;
@@ -973,6 +978,8 @@ function stopWakeCall(): void {
   stopWakeLevel();
   wakeCall?.stop();
   wakeCall = null;
+  duckWakeWatch?.stop();
+  duckWakeWatch = null;
 }
 
 /**
@@ -1079,7 +1086,8 @@ function applyEffectiveSettings(value: SettingsView, preserveEntry = false): voi
   bridges.syncPage?.();
   // 設定或家人辨識狀態改變：看著說話時的同步辨識重新向核心確認（不中斷正在進行的取樣）。
   ambient.refresh();
-  syncWake(value.wake);
+  // DUCK-2：鴨子終端的喚醒由鴨子本機偵測（duck-link），這個頁面不啟動自己的喚醒聆聽（避免兩個偵測器搶同一支麥克風）。
+  syncWake(value.duck?.terminal ? undefined : value.wake);
   syncAudioPrefs(value);
   clockCorner.setEnabled(value.clock?.enabled === true);
   homeCorner.setEnabled(value.home_corner?.enabled === true);
@@ -2305,7 +2313,7 @@ function realtimeReady(): boolean {
  * rebuild：MEM-2 記憶撤銷後的自動重建（只走 live、不問候、保留「記憶已更新」字幕）。
  * wake：WK-02 這次喚醒（wake_id 交給核心的費用紀錄；限速時暫停喚醒聆聽）。
  */
-function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean; wake?: WakeTrigger } = {}): void {
+function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean; wake?: WakeTrigger; duckWake?: string } = {}): void {
   wakeMemoriesNow();
   if (servicePaused || realtime.on || realtimeStarting) return;
   if (!hasVoiceConsent("realtime")) {
@@ -2377,10 +2385,22 @@ function startRealtime(source: RealtimeStartSource, options: { rebuild?: boolean
       },
     });
   }
+  // DUCK-2：鴨子喚醒開始的通話也要「沒人出聲就結束」。這個頁面沒有喚醒控制器、也不載入 src/audio（鴨子自己偵測喚醒），
+  // 所以用只看通話階段的計時（src/duck-wake-watch.ts）：上游判斷使用者開口（hearing）就不再倒數。
+  if (viaWake && !wake && options.duckWake && !rebuild) {
+    duckWakeWatch = new DuckWakeWatch({
+      timeoutMs: DEFAULT_WAKE_SILENCE_S * 1000,
+      onTimeout: () => {
+        if (!realtime.on && !realtimeStarting) return;
+        stopRealtime("no_voice");
+        showSubtitle(t(WAKE_TEXT.noVoice));
+      },
+    });
+  }
   // 路徑在開麥克風前決定；auto 改用 API key 時先說出計費通知。
   void openRealtime({
     start: async () => {
-      const decision = await api.realtimeStart(sseClientId, source, realtimeLocale, rebuild, options.wake?.wake_id);
+      const decision = await api.realtimeStart(sseClientId, source, realtimeLocale, rebuild, options.wake?.wake_id, options.duckWake);
       coreInteraction = decision.ok ? (decision.interaction ?? null) : null;
       // WK-02：核心已發出喚醒的互動 ID，重新問一次同步辨識能不能做（之前問的時候核心還不知道這次喚醒）。
       if (viaWake && decision.ok) ambient.refresh();
@@ -2444,6 +2464,7 @@ function renderRealtimeState(phase: RealtimePhase): void {
   // 只在已經沒有任何進行中或開始中的通話時才歸還剩下的，不會停掉新通話的複製品）。
   // WK-02：喚醒開始的通話的「沒人出聲就結束」只看真的通話階段（改路徑時的 off 不算結束）。
   if (phase !== "off") wakeCall?.phase(phase);
+  if (phase !== "off") duckWakeWatch?.phase(phase);
   // SP-02b：Nous 說話時的那一段不拿來辨認說話者。
   wakeVoice?.setSpeaking(phase === "speaking");
   if (phase === "off" && !realtime.on && !realtimeStarting) {
@@ -2807,7 +2828,37 @@ function dispatch(event: ShellEvent): void {
 
 // ───────────── 伺服器事件 ─────────────
 
+/**
+ * DUCK-2：核心請這個頁面開始一通即時語音（只會送給鴨子終端的頁面；起因是鴨子本機偵測到喚醒詞）。
+ * 規則和頁面自己的喚醒觸發相同（onWakeTrigger）：通話中、開始中、家人辨識畫面開著時忽略；鈴響時不開始；
+ * 即時語音不能用時照實顯示原因。鴨子沒有螢幕可以按同意，所以還沒同意過即時語音時不開始，只顯示同意說明。
+ */
+function onDuckWake(duckWake: string): void {
+  if (alarmRing.ringing || alarmRing.audible) return;
+  const action = wakeTriggerAction({
+    callActive: realtime.on || realtimeStarting,
+    familyOpen: shell.surface?.kind === "family",
+    realtimeReady: realtimeReady(),
+    consent: hasVoiceConsent("realtime"),
+    consentAskedRecently: false,
+  });
+  if (action === "ignore") return;
+  if (action === "ask_consent") {
+    askConsent("realtime");
+    return;
+  }
+  if (action === "unavailable") {
+    showSubtitle(t(WAKE_TEXT.unavailable, t(realtimeSupported() ? (settings?.realtime?.detail ?? "未設定") : "這個環境不支援即時語音")));
+    return;
+  }
+  startRealtime("wake_word", { duckWake });
+}
+
 function onServerEvent(event: ServerEvent): void {
+  if (event.type === "voice.request") {
+    if (event.action === "start" && event.source === "wake_word") onDuckWake(event.duck_wake);
+    return;
+  }
   if (event.type === "realtime.host" || event.type === "realtime.live") {
     // 只有擁有工作階段的頁面會收到（核心只送到開始它的 SSE 串流）。
     // MEM-2：已結束的工作階段（停播未確認）的固定句回條沒有人訂閱，直接顯示。
@@ -2947,6 +2998,7 @@ function latestArtifactTask(): Task | undefined {
 async function handleCommand(text: string, source: "typed" | "speech" = "typed"): Promise<void> {
   // WK-02：喚醒開始的通話中使用者打字＝有人在，這通不再因為沒出聲而自動結束。
   if (source === "typed") wakeCall?.disarm();
+  if (source === "typed") duckWakeWatch?.disarm();
   // ALARM-1：鈴響時打「停」「好了」或按麥克風說，就在本機停鈴（不送給 AI）。
   if (alarmRing.stopByText(text, source === "typed" ? "typed" : "voice")) {
     dispatch({ type: "input.close" });
