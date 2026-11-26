@@ -96,6 +96,11 @@ export interface Config {
    * 關閉時不建立 Registry：工具表、說明、/api/settings 與 HTTP 路由都和加入整合層之前相同。
    */
   ail: { enabled: boolean; services: string[]; soloistPort: number; vcr?: { mode: "fake" | "mac"; dir: string }; mail?: { self: string | null; gogPath: string | null }; calendar?: { account: string | null; gogPath: string | null; timeZone: string }; tv?: { host: string | null; mac: string | null; broadcast: string | null; pairingFile: string; youtubeApiKey?: string | null } };
+  /**
+   * DUCK-1：鴨子（Nous Duck，會動的終端）的 duck-link 端點（NOUS_DUCK=on，預設關閉）。關閉時不建立 hub、不掛 WebSocket 升級，
+   * duck adapter 不註冊（就算列在 NOUS_AIL_SERVICES），工作階段的觀察點不接：行為和加入之前相同。
+   */
+  duck: { enabled: boolean };
 }
 
 /** OpenAI Realtime 的 mcp 工具設定；require_approval 預設 always，外部動作要在畫面上確認。 */
@@ -154,6 +159,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): Config {
     smarthomeToken: env.SMARTHOME_TOKEN?.trim() || null,
     wake: (env.NOUS_WAKE ?? "off").trim().toLowerCase() === "on",
     ail: parseAil(env.NOUS_AIL, env.NOUS_AIL_SERVICES, env.NOUS_SPOTIFY_SOLOIST_PORT, env.NOUS_VCR, env.NOUS_CONFIG_DIR?.trim() || join(homedir(), ".config", "nous"), { self: env.NOUS_MAIL_SELF, gog: env.NOUS_GOG_PATH, account: env.NOUS_GOG_ACCOUNT, calendarTz: env.NOUS_CALENDAR_TZ }, { host: env.NOUS_LGTV_HOST, mac: env.NOUS_LGTV_MAC, broadcast: env.NOUS_LGTV_BROADCAST, youtubeKey: env.NOUS_YOUTUBE_API_KEY }),
+    duck: { enabled: (env.NOUS_DUCK ?? "off").trim().toLowerCase() === "on" },
     camera: {
       enabled: (env.NOUS_CAMERA ?? "off").trim().toLowerCase() === "on",
       label: env.NOUS_CAMERA_LABEL?.trim() || "CCB Camera",

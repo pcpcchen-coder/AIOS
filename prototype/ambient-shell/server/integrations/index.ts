@@ -8,6 +8,8 @@ import { GoogleCalendarAdapter } from "./adapters/google-calendar.ts";
 import { LgTvAdapter } from "./adapters/lg-tv.ts";
 import { YouTubeSearch } from "../lgtv/youtube.ts";
 import { WeatherAdapter, type WeatherAdapterOptions } from "./adapters/weather.ts";
+import { DuckAdapter } from "./adapters/duck.ts";
+import type { DuckLink } from "../duck/link.ts";
 import type { IntegrationAdapter } from "./contracts.ts";
 import { IntegrationDispatcher, type AuditEntry } from "./dispatcher.ts";
 import { IntegrationRegistry } from "./registry.ts";
@@ -31,6 +33,8 @@ export interface AdapterDeps {
   home?: HomeBridgePort;
   /** PRO-1：天氣快取與主動提醒設定的地點（核心一定建立；測試可以不給）。 */
   weather?: WeatherAdapterOptions;
+  /** DUCK-1：duck-link hub（NOUS_DUCK=on 時核心才建立）。 */
+  duck?: DuckLink;
 }
 
 /** 已審核的 Adapter（ID → 建立方式，只拿核心設定與既有模組）。回 null＝這次設定下不啟用（不註冊）。 */
@@ -38,6 +42,14 @@ export type AdapterFactory = (config: Config["ail"], log: (line: string) => void
 
 export const KNOWN_ADAPTERS: Record<string, AdapterFactory> = {
   mock: () => new MockAdapter(),
+  // DUCK-1：鴨子的身體 adapter（app.duck.*）。連線由 duck-link hub 持有（鴨子主動連進來）；hub 沒開（NOUS_DUCK 不是 on）時不註冊。
+  duck: (_config, log, deps) => {
+    if (!deps.duck) {
+      log("整合層：duck 需要 NOUS_DUCK=on（duck-link 端點），略過");
+      return null;
+    }
+    return new DuckAdapter(deps.duck);
+  },
   // AIL-2：武陵居家電的 Facade（/api/home/* 改經整合層，行為不變）。中控沒設定時不註冊，/api/home/* 照原本的路徑回 409。
   home: (_config, log, deps) => {
     if (!deps.home?.available) {

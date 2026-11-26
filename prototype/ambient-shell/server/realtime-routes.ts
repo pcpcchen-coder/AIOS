@@ -161,12 +161,24 @@ export interface RealtimeSessionsOptions {
   maxCallMs?: () => number;
   /** 測試用：頁面停止報到多久後結束（預設 ALIVE_TIMEOUT_MS）。 */
   aliveTimeoutMs?: number;
+  /**
+   * DUCK-1：工作階段真的發生的事（決定開始、連上、live 的委派、結束）給核心內部的觀察者（鴨子的 presence）。
+   * 只有通知、沒有回傳值，觀察者丟錯也不影響通話；沒有提供時什麼都不做（行為和加入之前相同）。事件不含逐字稿、音訊或使用者內容。
+   */
+  onSessionEvent?: (event: SessionLifecycleEvent) => void;
   costLog?: {
     record(record: VoiceCostRecord): void;
     /** 改寫同一個 session_id 最後一筆（頁面的 no_voice／usage 晚於核心的結束才到時）。 */
     amend?(record: VoiceCostRecord): void;
   };
 }
+
+/** DUCK-1：見 RealtimeSessionsOptions.onSessionEvent。started＝核心接受了開始的決定（還沒連上，可能永遠不會連上）。 */
+export type SessionLifecycleEvent =
+  | { kind: "started"; sessionId: string; route: RouteId; source: RealtimeStartSource; page: string }
+  | { kind: "connected"; sessionId: string; route: RouteId; page: string }
+  | { kind: "delegation"; sessionId: string; state: "started" | "finished" | "failed" | "unknown" }
+  | { kind: "ended"; sessionId: string; reason: string };
 
 type DistributiveOmit<T, K extends keyof T> = T extends unknown ? Omit<T, K> : never;
 
@@ -421,6 +433,8 @@ export class RealtimeSessions {
     const interaction = (source === "look_to_talk" || source === "wake_word") && !rebuild ? this.issueInteraction(source, page) : null;
     const decision = this.decide(plan, plan.route, clientId, interaction, normalizeLocale(locale), rebuild, { source, wakeId: source === "wake_word" ? wakeId : null, page, app });
     if (source === "wake_word" && !rebuild) this.wakeStarts.push(this.now());
+    // 重建（記憶撤銷後接回同一通）不是新的開始，不通知。
+    if (!rebuild) this.observe({ kind: "started", sessionId: decision.id, route: plan.route, source, page });
     const model = this.options.routes[plan.route]!.describe().model;
     return { ok: true, session_id: decision.id, owner: decision.owner, route: plan.route, model, billing_line: billingLine(plan.route, model), notice: plan.notice, interaction };
   }
@@ -467,7 +481,18 @@ export class RealtimeSessions {
   }
 
   /** 工作階段真的連上：記下互動 ID 屬於哪個工作階段、何時連上。 */
+  /** DUCK-1：通知觀察者；觀察者的錯誤只記 log，不影響通話。 */
+  private observe(event: SessionLifecycleEvent): void {
+    if (!this.options.onSessionEvent) return;
+    try {
+      this.options.onSessionEvent(event);
+    } catch (err) {
+      this.options.log?.(`即時語音：工作階段觀察者發生錯誤（${err instanceof Error ? err.message.slice(0, 120) : "unknown"}）`);
+    }
+  }
+
   private connected(decision: Decision): void {
+    this.observe({ kind: "connected", sessionId: decision.id, route: decision.route, page: decision.page });
     const it = decision.interaction ? this.interactions.get(decision.interaction) : undefined;
     if (it && !it.used) it.session = { id: decision.id, route: decision.route, at: this.now(), locale: decision.locale, wakeId: decision.wakeId };
   }
@@ -909,6 +934,7 @@ export class RealtimeSessions {
   private finish(session: VoiceSession, reason = "ended"): void {
     if (session.closed) return;
     session.closed = true;
+    this.observe({ kind: "ended", sessionId: session.id, reason });
     if (session.capTimer) clearTimeout(session.capTimer);
     if (session.aliveTimer) clearTimeout(session.aliveTimer);
     session.capTimer = session.aliveTimer = null;
@@ -973,6 +999,7 @@ export class RealtimeSessions {
       approval: () => effectiveApproval(session.approval, this.now()),
       emit: (event) => {
         if (session.closed || !session.clientId) return;
+        if (event.kind === "delegation") this.observe({ kind: "delegation", sessionId, state: event.state });
         // 記憶撤銷：先記下這個工作階段（等停播回報、拒絕晚到的 host-result），再送給頁面。
         if (event.kind === "closed" && event.reason === "memory_revoked") {
           this.revoked.set(sessionId, { owner: session.owner, clientId: session.clientId, route: session.route, at: this.now(), report: null, waiters: [], settled: false, accepted: false, rebuilt: false });

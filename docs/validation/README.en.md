@@ -102,6 +102,7 @@ Updated 2026-11-24 (added the capability catalog CAP-1; added CAP-2, the voice c
 | [Smart home H0](smarthome-h0-2026-10-21.en.md) | Queries and a fake controller; later verbal temperature-query result appears in live voice §4 |
 | [Smart home H1](smarthome-h1-2026-10-22.en.md) | Control, idempotency, and an example controller; verbal home light-switching results appear in docs/12 status |
 | [Smart home H1b](smarthome-h1b-2026-10-22.en.md) | AIFA/IR fixtures and an unauthenticated real-controller failure path; real devices remain unverified |
+| [Duck DUCK-1 (duck-link, duck adapter, interaction state)](duck-link-2026-11-26.en.md) | `NOUS_DUCK` (off by default): the core's `/duck-link` WebSocket endpoint, the `duck` adapter (6 tools in stage 1), session events → the duck's interaction state; 122 fixture cases (against a fake duck marked mock) and one local check against the duck side's simulated body; **no real hardware and no real voice**; the steps for trying it in a separate development instance have not been run by anyone |
 
 “Real controller code” does not necessarily mean real devices and accounts. A “real browser” can also use fixtures at account, camera, or audio boundaries. Read each record's full limitations when assessing its evidence.
 

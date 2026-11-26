@@ -74,13 +74,21 @@ describe("static catalog (no configuration needed)", () => {
     expect(staticCatalog().map((e) => e.id)).toContain("app.voice_relay.send_intent");
   });
 
-  it("has 32 integration tools, 9 page tools, 5 hidden; counts are derived, not typed in", () => {
+  it("has 49 integration tools, 9 page tools, 16 hidden; counts are derived, not typed in", () => {
     const entries = staticCatalog();
     const integration = entries.filter((e) => e.kind === "integration");
     expect(integration).toHaveLength(ADAPTER_CATALOGS.reduce((n, a) => n + a.tools.length, 0));
-    expect(integration).toHaveLength(32);
+    expect(integration).toHaveLength(49);
     expect(entries.filter((e) => e.kind === "host").map((e) => e.id)).toEqual([...HOST_TOOL_NAMES]);
-    expect(entries.filter((e) => e.hidden).map((e) => e.id)).toEqual(["app.mock.echo", "app.mock.toggle", "app.home.status", "app.home.control", "app.home.confirm"]);
+    expect(entries.filter((e) => e.hidden).map((e) => e.id)).toEqual([
+      "app.mock.echo",
+      "app.mock.toggle",
+      // DUCK-1：第一階段還沒啟用的鴨子工具（enabled: false）不列在給人看的表。
+      ...["walk", "antennas", "where", "places", "mission_status", "go_to", "find_person", "return_home", "cancel_mission", "follow_me", "wait_here"].map((a) => `app.duck.${a}`),
+      "app.home.status",
+      "app.home.control",
+      "app.home.confirm",
+    ]);
   });
 
   it("page-tool examples are sentences /help/commands already lists for that tool (ASK_THE_AI)", () => {

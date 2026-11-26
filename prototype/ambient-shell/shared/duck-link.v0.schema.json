@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/pcpcchen-coder/Open_Duck_Mini/nous_duck/protocol/schemas/duck-link.v0.schema.json",
+  "title": "duck-link v0 message",
+  "description": "One JSON message on the duck-link WebSocket (text frames, UTF-8, one message per frame). Draft v0: field names may still change; bump protocol_version on any breaking change. See ../README.md.",
+  "type": "object",
+  "required": ["protocol_version", "type", "sent_at_ms"],
+  "properties": {
+    "protocol_version": { "const": "0.1" },
+    "type": { "enum": ["hello", "heartbeat", "command", "ack", "state", "event"] },
+    "sent_at_ms": { "type": "integer", "minimum": 0, "description": "Sender wall clock, Unix epoch milliseconds. Informational; deadlines use the receiver's monotonic clock." }
+  },
+  "oneOf": [
+    { "$ref": "#/$defs/hello" },
+    { "$ref": "#/$defs/heartbeat" },
+    { "$ref": "#/$defs/command" },
+    { "$ref": "#/$defs/ack" },
+    { "$ref": "#/$defs/state" },
+    { "$ref": "#/$defs/event" }
+  ],
+  "$defs": {
+    "hello": {
+      "description": "First message from each side after the WebSocket opens.",
+      "required": ["role", "software"],
+      "properties": {
+        "type": { "const": "hello" },
+        "role": { "enum": ["duck", "nous"] },
+        "software": { "type": "string", "maxLength": 80 },
+        "duck_id": { "type": "string", "pattern": "^[a-z0-9_-]{1,32}$" },
+        "mock": { "type": "boolean", "description": "True when this side is a mock or simulator. Must never be omitted by a mock." },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "gestures": { "type": "array", "items": { "$ref": "#/$defs/name" }, "description": "Duck only: whitelist of gesture names." },
+        "expressions": { "type": "array", "items": { "$ref": "#/$defs/name" }, "description": "Duck only: eye expressions Nous may request." },
+        "sounds": { "type": "array", "items": { "$ref": "#/$defs/name" }, "description": "Duck only: local earcon names." }
+      }
+    },
+    "heartbeat": {
+      "description": "Nous -> duck every 500 ms (connection lease). Duck echoes seq so Nous can measure round trip.",
+      "required": ["seq"],
+      "properties": {
+        "type": { "const": "heartbeat" },
+        "seq": { "type": "integer", "minimum": 0 },
+        "echo_of": { "type": "integer", "minimum": 0, "description": "Duck -> Nous only: seq being echoed." }
+      }
+    },
+    "command": {
+      "description": "Nous -> duck intent. The duck executes with its own timers; Nous never streams joint angles or velocity setpoints.",
+      "required": ["request_id", "action", "ttl_ms"],
+      "properties": {
+        "type": { "const": "command" },
+        "request_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$" },
+        "ttl_ms": { "type": "integer", "minimum": 100, "maximum": 60000, "description": "The duck drops the command if it starts handling it later than this after receipt, and motion commands stop when it expires without renewal." },
+        "action": { "$ref": "#/$defs/action" },
+        "params": { "type": "object" }
+      },
+      "allOf": [
+        { "if": { "properties": { "action": { "const": "walk" } } }, "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/walk_params" } } } },
+        { "if": { "properties": { "action": { "const": "look" } } }, "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/look_params" } } } },
+        { "if": { "properties": { "action": { "const": "track" } } }, "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/track_params" } } } },
+        { "if": { "properties": { "action": { "const": "gesture" } } }, "then": { "required": ["params"], "properties": { "params": { "type": "object", "required": ["name"], "properties": { "name": { "$ref": "#/$defs/name" } }, "additionalProperties": false } } } },
+        { "if": { "properties": { "action": { "const": "express" } } }, "then": { "required": ["params"], "properties": { "params": { "type": "object", "required": ["expression"], "properties": { "expression": { "$ref": "#/$defs/name" }, "duration_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 60 } }, "additionalProperties": false } } } },
+        { "if": { "properties": { "action": { "const": "antennas" } } }, "then": { "required": ["params"], "properties": { "params": { "type": "object", "properties": { "left": { "type": "number", "minimum": -1, "maximum": 1 }, "right": { "type": "number", "minimum": -1, "maximum": 1 }, "pattern": { "$ref": "#/$defs/name" } }, "additionalProperties": false, "minProperties": 1 } } } },
+        { "if": { "properties": { "action": { "const": "sound" } } }, "then": { "required": ["params"], "properties": { "params": { "type": "object", "required": ["name"], "properties": { "name": { "$ref": "#/$defs/name" } }, "additionalProperties": false } } } },
+        { "if": { "properties": { "action": { "const": "presence" } } }, "then": { "required": ["params"], "properties": { "params": { "$ref": "#/$defs/presence_params" } } } },
+        { "if": { "properties": { "action": { "const": "go_to" } } }, "then": { "required": ["params"], "properties": { "params": { "type": "object", "required": ["place"], "properties": { "place": { "$ref": "#/$defs/name" } }, "additionalProperties": false } } } },
+        { "if": { "properties": { "action": { "const": "find_person" } } }, "then": { "properties": { "params": { "type": "object", "properties": { "person": { "$ref": "#/$defs/name" } }, "additionalProperties": false } } } },
+        { "if": { "properties": { "action": { "const": "follow_me" } } }, "then": { "properties": { "params": { "type": "object", "properties": { "target": { "const": "speaker" }, "distance_m": { "type": "number", "minimum": 0.5, "maximum": 3 } }, "additionalProperties": false } } } },
+        { "if": { "properties": { "action": { "const": "wait_here" } } }, "then": { "properties": { "params": { "type": "object", "properties": { "timeout_min": { "type": "number", "exclusiveMinimum": 0, "maximum": 240 } }, "additionalProperties": false } } } },
+        { "if": { "properties": { "action": { "enum": ["cancel_mission", "mission_status"] } } }, "then": { "properties": { "params": { "type": "object", "properties": { "mission_id": { "type": "string", "maxLength": 64 } }, "additionalProperties": false } } } },
+        { "if": { "properties": { "action": { "enum": ["status", "stop", "resume", "where", "places", "return_home"] } } }, "then": { "properties": { "params": { "type": "object", "maxProperties": 0 } } } }
+      ]
+    },
+    "action": {
+      "enum": [
+        "status", "stop", "resume",
+        "walk", "look", "track", "gesture",
+        "express", "antennas", "sound", "presence",
+        "where", "places", "mission_status",
+        "go_to", "find_person", "return_home", "follow_me", "wait_here", "cancel_mission"
+      ]
+    },
+    "walk_params": {
+      "type": "object",
+      "description": "Walk at a bounded velocity for a bounded time; the duck stops by itself. Values beyond the duck's limits are clamped and the applied values are reported in the ack.",
+      "required": ["duration_s"],
+      "properties": {
+        "vx": { "type": "number", "description": "m/s, forward positive" },
+        "vy": { "type": "number", "description": "m/s, left positive" },
+        "yaw_rate": { "type": "number", "description": "rad/s, counter-clockwise positive" },
+        "duration_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 10 }
+      },
+      "additionalProperties": false
+    },
+    "look_params": {
+      "type": "object",
+      "description": "Absolute head target in radians (upstream runtime joint conventions). Omitted joints keep their current target.",
+      "properties": {
+        "neck_pitch": { "type": "number" },
+        "head_pitch": { "type": "number" },
+        "head_yaw": { "type": "number" },
+        "head_roll": { "type": "number" },
+        "duration_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 10, "description": "Time to reach the target; the duck may take longer because of its own speed limits." }
+      },
+      "additionalProperties": false,
+      "minProperties": 1
+    },
+    "track_params": {
+      "type": "object",
+      "description": "Vision- or sound-linked head (and optionally body) following, computed on the duck. 'none' ends tracking.",
+      "required": ["target"],
+      "properties": {
+        "target": { "enum": ["none", "face", "sound"] },
+        "body": { "type": "boolean", "description": "Allow turning the body in place when the head runs out of range. Default false." },
+        "timeout_s": { "type": "number", "exclusiveMinimum": 0, "maximum": 600 }
+      },
+      "additionalProperties": false
+    },
+    "presence_params": {
+      "type": "object",
+      "description": "What the Nous voice session is doing right now, so the duck can act it out (eyes, head, antennas). Driven by real session events only.",
+      "required": ["state"],
+      "properties": {
+        "state": { "enum": ["idle", "wake", "listening", "thinking", "speaking", "working", "error", "sleeping"] },
+        "speech_level": { "type": "number", "minimum": 0, "maximum": 1, "description": "Optional playback loudness envelope while speaking." }
+      },
+      "additionalProperties": false
+    },
+    "ack": {
+      "description": "Duck -> Nous, exactly one per command (duplicates of a request_id are answered with the original ack).",
+      "required": ["request_id", "status"],
+      "properties": {
+        "type": { "const": "ack" },
+        "request_id": { "type": "string" },
+        "status": { "enum": ["accepted", "rejected"] },
+        "reason": { "$ref": "#/$defs/reason" },
+        "detail": { "type": "string", "maxLength": 200 },
+        "applied": { "type": "object", "description": "Values actually applied after clamping (same keys as params)." },
+        "clamped": { "type": "boolean" },
+        "mission_id": { "type": "string", "maxLength": 64 },
+        "data": { "type": "object", "description": "Result of read actions (status, where, places, mission_status)." }
+      },
+      "allOf": [
+        { "if": { "properties": { "status": { "const": "rejected" } } }, "then": { "required": ["reason"] } }
+      ]
+    },
+    "reason": {
+      "enum": [
+        "unsupported", "invalid", "expired", "out_of_range",
+        "estop_latched", "fallen", "not_standing", "paused",
+        "controller_active", "link_degraded", "busy_mission", "no_mission",
+        "unknown_name", "privacy", "hardware_fault", "low_battery", "overheat", "not_localized", "internal"
+      ]
+    },
+    "state": {
+      "description": "Duck -> Nous, at least once per second and after every accepted command.",
+      "required": ["mode", "control_source", "capabilities", "faults"],
+      "properties": {
+        "type": { "const": "state" },
+        "mock": { "type": "boolean" },
+        "mode": { "enum": ["booting", "limp", "holding", "standing", "walking", "paused", "fallen", "estop", "docked", "waiting"] },
+        "control_source": { "enum": ["none", "duck_link", "controller", "console", "mission", "local"] },
+        "capabilities": { "$ref": "#/$defs/capabilities" },
+        "faults": { "type": "array", "items": { "$ref": "#/$defs/name" } },
+        "presence": { "$ref": "#/$defs/presence_params/properties/state" },
+        "expression": { "$ref": "#/$defs/name" },
+        "tracking": { "enum": ["none", "face", "sound"] },
+        "head": {
+          "type": "object",
+          "description": "Read-back joint angles in radians, with the age of the reading.",
+          "properties": {
+            "neck_pitch": { "type": "number" }, "head_pitch": { "type": "number" },
+            "head_yaw": { "type": "number" }, "head_roll": { "type": "number" },
+            "age_ms": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "velocity_cmd": { "type": "object", "properties": { "vx": { "type": "number" }, "vy": { "type": "number" }, "yaw_rate": { "type": "number" }, "remaining_s": { "type": "number" } } },
+        "battery": { "type": "object", "properties": { "voltage_v": { "type": "number" }, "source": { "enum": ["servo_bus", "sensor", "none"] }, "charging": { "type": ["boolean", "null"] } } },
+        "temperature_c": { "type": "object", "properties": { "servo_max": { "type": "number" }, "cpu": { "type": "number" } } },
+        "tilt_deg": { "type": ["number", "null"] },
+        "mission": {
+          "type": ["object", "null"],
+          "properties": {
+            "mission_id": { "type": "string" },
+            "kind": { "enum": ["go_to", "find_person", "return_home", "follow_me"] },
+            "phase": { "$ref": "#/$defs/name" },
+            "progress": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "location": {
+          "type": ["object", "null"],
+          "properties": {
+            "place": { "type": ["string", "null"] },
+            "localized": { "type": "boolean" },
+            "uncertainty_m": { "type": ["number", "null"] },
+            "on_dock": { "type": ["boolean", "null"] }
+          }
+        },
+        "link": { "type": "object", "properties": { "lease_ok": { "type": "boolean" }, "rtt_ms": { "type": ["number", "null"] } } },
+        "loop": { "type": "object", "properties": { "hz": { "type": "number" }, "overruns": { "type": "integer" } } }
+      }
+    },
+    "event": {
+      "description": "Duck -> Nous, something happened. Events are facts observed on the duck; they are never requests.",
+      "required": ["event", "event_id"],
+      "properties": {
+        "type": { "const": "event" },
+        "event_id": { "type": "string", "maxLength": 64 },
+        "event": {
+          "enum": [
+            "fell", "picked_up", "estop", "estop_cleared", "battery_low", "overheat", "motor_error",
+            "link_lost", "link_restored", "controller_takeover",
+            "gesture_done", "walk_done", "tracking_lost", "tracking_acquired",
+            "mission_progress", "mission_done", "mission_failed",
+            "wake_word", "docked", "undocked", "charging_started", "charging_stopped",
+            "privacy_switch", "capability_changed"
+          ]
+        },
+        "request_id": { "type": "string", "description": "Command this event belongs to, if any." },
+        "mission_id": { "type": "string" },
+        "reason": { "$ref": "#/$defs/name" },
+        "data": { "type": "object" }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "description": "Honest hardware and software availability. 'mock' means a simulated stand-in is answering; never report 'available' for hardware that is absent or unverified on the real duck.",
+      "propertyNames": { "enum": ["walk", "head", "antennas", "eyes", "speaker", "microphone", "camera", "tracking_face", "tracking_sound", "navigation", "dock", "imu", "feet", "battery"] },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "enum": ["available", "degraded", "unsupported", "mock"] },
+          "reason": { "type": "string", "maxLength": 120 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "name": { "type": "string", "pattern": "^[a-z0-9_]{1,48}$" }
+  }
+}

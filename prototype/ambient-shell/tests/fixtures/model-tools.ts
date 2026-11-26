@@ -1,3 +1,5 @@
+import { DuckAdapter } from "../../server/integrations/adapters/duck.ts";
+import type { DuckLink } from "../../server/duck/link.ts";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,10 +33,21 @@ function relay(mode: "fake" | "mac"): IntegrationAdapter {
   return adapter;
 }
 
+/** DUCK-1：沒有鴨子連線的假 hub（fixture）。DuckAdapter 的 mock 要看連線的那一端，所以不能用會丟錯的 unused。 */
+const idleDuckLink: DuckLink = {
+  snapshot: () => ({ connected: false, hello: null, state: null, stateAt: null, rttMs: null, connectedAt: null, counters: { connections: 0, rxInvalid: 0, txInvalid: 0, unmatchedAcks: 0, duplicateEvents: 0, commands: 0 } }),
+  sendCommand: async () => ({ kind: "not_sent", why: "not_connected" }),
+  waitFor: async () => "link_lost",
+  onState: () => () => undefined,
+  onEvent: () => () => undefined,
+  onLink: () => () => undefined,
+};
+
 export function modelToolAdapters(relayMode: "fake" | "mac"): IntegrationAdapter[] {
   const home: HomeBridgePort = { available: true, probe: async () => undefined, status: unused as never, control: unused as never, confirm: unused as never };
   return [
     new MockAdapter(),
+    new DuckAdapter(idleDuckLink),
     new HomeAdapter(home),
     new SpotifySoloistAdapter({ port: 19090 }),
     relay(relayMode),
