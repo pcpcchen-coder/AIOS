@@ -8,6 +8,8 @@
 
 2026-11-26 補記（鴨子）：新增「鴨子（Nous Duck，DUCK-1）」一列（分支 `claude/duck-link`，基於 main `c853078`）：`/duck-link` 端點、`duck` adapter 與由工作階段事件驅動的互動狀態，旗標 `NOUS_DUCK` 預設關閉。只有 fixture 測試與對鴨子端模擬身體的本機檢查，沒有實機、沒有真實語音，見[驗證](validation/duck-link-2026-11-26.md)。
 
+2026-11-26 補記（鴨子當語音終端）：「鴨子（Nous Duck，DUCK-1）」一列加上 DUCK-2（分支 `claude/duck-voice-terminal`，基於 main `265cbee`）：鴨子本機的喚醒經 duck-link 讓鴨子終端的頁面（`?terminal=duck`）開始一通 `wake_word` 對話、頁面把聽／想／說回報給核心再給鴨子。伺服器端是 fixture 測試；**頁面端沒有在瀏覽器裡跑過**，沒有實機、沒有真實語音，見[驗證](validation/duck-voice-terminal-2026-11-26.md)。
+
 2026-11-09 補記（查詢結果挑選）：「瀏覽器語音、WebRTC 雙路徑」的即時語音上網查詢加上編號候選、說「第二個」選一則（新工具 `show_search_result`，兩條路徑共用）、重點跟讀亮起與念完後自動收起（設定「查詢結果收起秒數」，預設 8 秒）（分支 `claude/web-search-picker`）；只有單元測試與 SIMULATED 無頭 Chromium 截圖，兩條路徑的真實語音與真實搜尋輸出格式未驗證，見[驗證](validation/web-search-picker-2026-11-09.md)。
 
 2026-11-09 補記（倒數與鈴聲）：「定時器與響鈴」一列加上 ALARM-3（分支 `claude/alarm-countdown`）：到期前 30 秒畫面倒數、最後 10 秒每秒一聲滴、三種鈴聲與響鈴長度可在設定頁選，只有雲端測試與無頭 Chromium，見[驗證](validation/alarm-timer-3-2026-11-09.md)。

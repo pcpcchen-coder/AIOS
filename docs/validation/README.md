@@ -102,6 +102,7 @@
 | [智慧家庭 H1](smarthome-h1-2026-10-22.md) | 控制、冪等與示例中控；家中開關燈口頭結果見 docs/12 狀態 |
 | [智慧家庭 H1b](smarthome-h1b-2026-10-22.md) | AIFA／IR fixture 與未設定認證的真中控失敗路徑；真設備待驗 |
 | [鴨子 DUCK-1（duck-link、duck adapter、互動狀態）](duck-link-2026-11-26.md) | `NOUS_DUCK`（預設關閉）：核心的 `/duck-link` WebSocket 端點、`duck` adapter（第一階段 6 個工具）、工作階段事件 → 鴨子的互動狀態；fixture 測試 122 項（對面是標示 mock 的假鴨子）與一次對鴨子端模擬身體的本機檢查；**沒有實機、沒有真實語音**；另起開發實例的試用步驟沒有人執行過 |
+| [鴨子當語音終端 DUCK-2](duck-voice-terminal-2026-11-26.md) | `NOUS_DUCK`（預設關閉）：鴨子本機的喚醒（duck-link 的 `wake_word`）→ 核心對鴨子終端頁面送 SSE `voice.request` 與一次性權杖 → 頁面以 `wake_word` 開始（不需要 `NOUS_WAKE`，既有的每分鐘 3 次限速照樣適用）；頁面回報語音狀態 → 鴨子有真的「說話中」；fixture 測試 17 項；**頁面端沒有在瀏覽器裡跑過**；沒有實機、沒有真實語音 |
 
 「真實中控程式」不必然有真實設備與帳號；「真瀏覽器」也可能在帳號、相機或音訊邊界使用 fixture。判讀時要讀每份紀錄的完整限制。
 

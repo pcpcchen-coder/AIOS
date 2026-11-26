@@ -21,6 +21,7 @@ import type { CameraPrefsPatch, CameraSettings } from "../shared/sense.ts";
 import { cameraPreviewDisabledReason, describeMenuPrefs } from "../shared/menu-prefs.ts";
 import { DEFAULT_VOICE_PREFS, type VoicePrefs, type VoicePrefsPatch } from "../shared/voice-prefs.ts";
 import { allowedHosts, checkRequest } from "./http-guard.ts";
+import { isDuckReportPhase, type DuckReportPhase } from "../shared/duck-terminal.ts";
 import { ApiKeyRoute, FallbackRequired, RealtimeSessions, RouteStartError, SessionError, type RealtimeRoute, type SessionLifecycleEvent } from "./realtime-routes.ts";
 import type { CodexAuth } from "./codex-auth.ts";
 import {
@@ -208,6 +209,11 @@ export interface AppOptions {
   terminals?: { heartbeat(id: string): void };
   /** DUCK-1：即時語音工作階段的觀察者（鴨子的 presence）。未提供時 RealtimeSessions 不通知任何人。 */
   voiceSessionObserver?: (event: SessionLifecycleEvent) => void;
+  /**
+   * DUCK-2：鴨子當語音終端（NOUS_DUCK=on 才提供）。terminal＝鴨子終端頁面的來源；redeemWake＝核對並用掉核心發的喚醒權杖；
+   * onPhase＝鴨子終端的頁面回報的語音狀態。未提供時：/api/realtime/start 不認 duck_wake、沒有 /api/realtime/phase、settings 沒有 duck。
+   */
+  duck?: { terminal: string; redeemWake(token: unknown, page: string): boolean; onPhase(sessionId: string, phase: DuckReportPhase): void };
   /** DN-3：終端機的螢幕狀態（頁面回報、Pi 的 aios-display 讀）。未提供時兩條路由 404。 */
   terminalDisplay?: { report(id: string, screen: ScreenState): void; requestWindow(id: string, mode: WindowMode): void; view(id: string): { screen: ScreenState; fresh: boolean; window: WindowMode | null } };
   /**
@@ -277,7 +283,7 @@ export interface VoiceSettingsSource {
   update(patch: VoicePrefsPatch): VoicePrefs;
 }
 
-export function createApp(options: AppOptions): Server & { notifySettings(): void; notifyMemoryPresence(): void; connectedSources(): Set<string>; realtimeSessions: RealtimeSessions | null } {
+export function createApp(options: AppOptions): Server & { notifySettings(): void; notifyMemoryPresence(): void; connectedSources(): Set<string>; requestVoice(source: string, duckWake: string): number; realtimeSessions: RealtimeSessions | null } {
   const { store, runner, auth, chat, realtime, webSearch, home, codexAuth } = options;
   /** SSE 串流：client_id → 回應。工具呼叫只送到擁有工作階段的那一條。 */
   const clients = new Map<string, { response: ServerResponse; source: string }>();
@@ -318,6 +324,7 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const voice = options.voice?.view() ?? DEFAULT_VOICE_PREFS;
       return {
         ...options.settings.view(),
+        ...(options.duck && source === options.duck.terminal ? { duck: { terminal: true as const } } : {}),
         ...(live ? { realtime: options.earlySpeechRms !== undefined ? { ...live, early_speech_rms: options.earlySpeechRms } : live } : {}),
         ...(camera ? { camera } : {}),
         ...(camera?.enabled && options.faceTuning ? { face_tuning: options.faceTuning.view() } : {}),
@@ -502,13 +509,17 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const clientId = typeof body.client_id === "string" && CLIENT_ID.test(body.client_id) && clients.has(body.client_id) ? body.client_id : null;
       // source 只決定要不要發互動 ID（ID-02）、問候與限速，不是授權；其他值都當成 user。
       // wake_word（WK-02）只有 NOUS_WAKE=on（options.wake 存在）時才接受，旗標關閉時當成 user（行為和之前相同）。
-      const source = body.source === "look_to_talk" ? "look_to_talk" : body.source === "wake_word" && options.wake ? "wake_word" : "user";
+      // DUCK-2：鴨子終端的頁面帶著核心剛發的一次性權杖（起因是 duck-link 的 wake_word 事件）時，也當成 wake_word——
+      // 喚醒是鴨子偵測的，不需要這個頁面自己開喚醒聆聽（NOUS_WAKE）。權杖不對就和以前一樣當成 user。限速仍在 RealtimeSessions.start。
+      const startPage = pageSource(req.headers["x-nous-terminal"]);
+      const wakeAllowed = body.source === "wake_word" && (!!options.wake || (options.duck !== undefined && body.duck_wake !== undefined && options.duck.redeemWake(body.duck_wake, startPage)));
+      const source = body.source === "look_to_talk" ? "look_to_talk" : wakeAllowed ? "wake_word" : "user";
       const wakeId = source === "wake_word" && typeof body.wake_id === "string" && WAKE_ID.test(body.wake_id) ? body.wake_id : null;
       const locale = normalizeLocale(req.headers["x-nous-locale"]);
       // rebuild：MEM-2 記憶撤銷後頁面自動重建（只走 live、不問候）；只是開始方式，不是授權。
       // RPI-ID：哪個頁面開始的（X-Nous-Terminal），記憶候選與喚醒時窗只看那個頁面；不是授權。
       // app：macOS App 主視窗報的（費用防護：Mac 鎖定只結束這些）；不是授權。
-      const decision = sessions.start(clientId, source, locale, body.rebuild === true, wakeId, pageSource(req.headers["x-nous-terminal"]), body.app === true);
+      const decision = sessions.start(clientId, source, locale, body.rebuild === true, wakeId, startPage, body.app === true);
       return sendJson(res, 200, decision.ok
         ? { ...decision, billing_line: localize(decision.billing_line, locale), notice: decision.notice === null ? null : localize(decision.notice, locale) }
         : { ...decision, message: localize(decision.message, locale) });
@@ -614,6 +625,16 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
       const body = await readJson(req);
       const { sessionId, owner } = sessionAuth(body);
       sessionCall(() => sessions!.alive(sessionId, owner, parseVoiceUsage(body.usage)));
+      return sendJson(res, 200, { ok: true });
+    }
+    if (options.duck && method === "POST" && path === "/api/realtime/phase") {
+      // DUCK-2：鴨子終端的頁面回報語音狀態（聽／想／說），核心轉成鴨子的 presence。只有狀態名稱，沒有內容。
+      // 只接受擁有這通的頁面、而且這通是鴨子終端開始的；其他頁面的回報不理（不是錯誤，只是和鴨子無關）。
+      const body = await readJson(req);
+      const { sessionId, owner } = sessionAuth(body);
+      if (!isDuckReportPhase(body.phase)) throw new HttpError(400, "valid phase is required");
+      if (!sessions!.isOwner(sessionId, owner)) throw new HttpError(403, "not the session owner");
+      if (pageSource(req.headers["x-nous-terminal"]) === options.duck.terminal) options.duck.onPhase(sessionId, body.phase);
       return sendJson(res, 200, { ok: true });
     }
     if (method === "POST" && path === "/api/realtime/end") {
@@ -1060,6 +1081,20 @@ export function createApp(options: AppOptions): Server & { notifySettings(): voi
     realtimeSessions: sessions,
     /** 設定或登入狀態改變時呼叫，推送給所有畫面。 */
     notifySettings: () => notifyAll(),
+    /**
+     * DUCK-2：請某個頁面來源開始一通即時語音（SSE voice.request）。回傳送到幾條串流；0＝那個頁面沒有連著。
+     * 核心只在收到鴨子的 wake_word 事件時呼叫，對象只有鴨子終端。
+     */
+    requestVoice: (source: string, duckWake: string): number => {
+      let sent = 0;
+      for (const client of clients.values()) {
+        if (client.source !== source) continue;
+        const event: ServerEvent = { type: "voice.request", sequence: ++sequence, action: "start", source: "wake_word", duck_wake: duckWake };
+        client.response.write(`data: ${JSON.stringify(event)}\n\n`);
+        sent += 1;
+      }
+      return sent;
+    },
     /** ALARM-1：現在有 SSE 串流的頁面來源（"main" 或終端機識別碼）。 */
     connectedSources: (): Set<string> => new Set([...clients.values()].map((c) => c.source)),
     /** RPI-ID：本次人物世代改變（不含內容）；每個頁面（含 Pi）自己用 status 重讀。Mac 主視窗另有 IPC 通知。 */

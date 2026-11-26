@@ -1,3 +1,4 @@
+import type { DuckReportPhase } from "../shared/duck-terminal.ts";
 import type { WebSearchResult } from "../shared/web-search.ts";
 import type { FaceTuning } from "../shared/face-tuning.ts";
 import { AUDIO_WRITE_PATH, type AudioPrefsPatch } from "../shared/audio-devices.ts";
@@ -143,11 +144,13 @@ export const api = {
   /** 即時語音：開麥克風前先決定路徑（client_id：這個頁面的 SSE 串流）。 */
   /** rebuild：MEM-2 記憶撤銷後自動重建（只走 live、不問候）。 */
   /** WK-02：source 為 look_to_talk 或 wake_word 時才送出；wake_word 另帶這次喚醒的 wake_id（費用紀錄用）。 */
-  realtimeStart: (clientId: string | null, source: VoiceStartSource = "user", locale?: Locale, rebuild = false, wakeId?: string) =>
+  realtimeStart: (clientId: string | null, source: VoiceStartSource = "user", locale?: Locale, rebuild = false, wakeId?: string, duckWake?: string) =>
     call<StartDecision>("POST", "/api/realtime/start", {
       ...(clientId ? { client_id: clientId } : {}),
       ...(source === "look_to_talk" || source === "wake_word" ? { source } : {}),
       ...(source === "wake_word" && wakeId ? { wake_id: wakeId } : {}),
+      // DUCK-2：鴨子喚醒開始的通話帶回核心發的一次性權杖。
+      ...(source === "wake_word" && duckWake ? { duck_wake: duckWake } : {}),
       ...(rebuild ? { rebuild: true } : {}),
       // 費用防護：macOS App 主視窗開始的通話（Mac 鎖定時核心只結束這些）。
       ...((globalThis as { nousDesktop?: unknown }).nousDesktop ? { app: true } : {}),
@@ -193,6 +196,8 @@ export const api = {
   realtimeAlive: (ticket: RealtimeTicket, usage: VoiceUsage | null, signal?: AbortSignal) =>
     call<{ ok: true }>("POST", "/api/realtime/alive", { ...ticket, ...(usage ? { usage } : {}) }, getLocale(), false, signal),
   /** MEM-2：記憶撤銷後停播並核對的證據（只有布林值與毫秒數）。 */
+  /** DUCK-2：鴨子終端的頁面把語音狀態（聽／想／說；只有狀態名稱）回報給核心，核心轉成鴨子的互動狀態。 */
+  realtimePhase: (ticket: RealtimeTicket, phase: DuckReportPhase) => call<{ ok: true }>("POST", "/api/realtime/phase", { ...ticket, phase }),
   /** MEM-3：API key 路徑的頁面在資料通道收到播放結束（沒有內容、沒有時間戳）。 */
   realtimePlayback: (ticket: RealtimeTicket) => call<{ ok: true }>("POST", "/api/realtime/playback", { ...ticket }),
   /** F7：手掌停止（停止回覆）：核心把這一輪還沒回來的工具結果改成不念出（任務照常）。 */

@@ -130,6 +130,8 @@ export interface ChatGPTAccountInfo {
 }
 
 export interface SettingsView {
+  /** DUCK-2：只有鴨子終端的頁面（NOUS_DUCK=on 而且頁面來源等於 NOUS_DUCK_TERMINAL）才有：這個頁面要把語音狀態回報給核心、不啟動自己的喚醒聆聽。 */
+  duck?: { terminal: true };
   schema_version: string;
   provider: ExecutorMode;
   providers: ProviderInfo[];
@@ -214,6 +216,11 @@ export type ServerEvent =
   | { type: "task.deleted"; sequence: number; task_id: string; artifact_id: string | null }
   /** RPI-ID：記憶的本次人物世代改變（換人、暫停、撤銷）。不含內容；頁面再用記憶的 status 讀新狀態。 */
   | { type: "memory.presence_changed"; sequence: number }
+  /**
+   * DUCK-2：核心請這個頁面開始一通即時語音。只送給鴨子終端的頁面（NOUS_DUCK=on 時）；起因是鴨子本機偵測到喚醒詞
+   * （duck-link 的 wake_word 事件）。duck_wake 是核心發的一次性權杖，頁面在 /api/realtime/start 帶回去。
+   */
+  | { type: "voice.request"; sequence: number; action: "start"; source: "wake_word"; duck_wake: string }
   | RealtimeServerEvent;
 
 export const CHATGPT_USAGE_URL = "https://chatgpt.com/settings/usage";
