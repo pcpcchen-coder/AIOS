@@ -310,6 +310,10 @@ export class DuckLinkHub implements DuckLink {
     this.lastRxAt = this.connectedAt;
     this.rttMs = null;
     this.heartbeatSent.clear();
+    // 事件去重只在「同一條連線」內有效。event_id 是鴨子自己編的，鴨子端程式重啟後會從頭編（duckd 是 e_000001 起跳），
+    // 沿用上一條連線的去重表會把重啟後的新事件當成重複丟掉（2026-11-26 Nous Duck 實機遇到）。
+    // 協定目前沒有可以分辨「同一個行程重連」與「重啟」的欄位，所以每次新連線都清空。
+    this.seenEvents.length = 0;
     this.heartbeat = setInterval(() => this.beat(), this.heartbeatMs);
     this.beat();
     this.log(`鴨子已連線：${hello.software}${hello.mock ? "（mock）" : ""}`);
